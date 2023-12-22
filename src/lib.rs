@@ -329,15 +329,13 @@ pub struct Context {
     pub scroll_target: Option<usize>,
     pub number_edit_buf: String,
     pub number_edit: Option<Id>,
-    pub command_list: Vec<Command>,
     pub root_list: Vec<usize>,
     pub container_stack: Vec<usize>,
     pub clip_stack: Vec<Rect>,
     pub id_stack: Vec<Id>,
     pub layout_stack: Vec<Layout>,
-    pub text_stack: String,
-    pub container_pool: Pool<48>,
-    pub containers: [Container; 48],
+    pub text_stack: Vec<char>,
+    pub containers: Vec<Container>,
     pub treenode_pool: Pool<48>,
     pub mouse_pos: Vec2i,
     pub last_mouse_pos: Vec2i,
@@ -369,15 +367,13 @@ impl Default for Context {
             scroll_target: None,
             number_edit_buf: String::default(),
             number_edit: None,
-            command_list: Vec::default(),
             root_list: Vec::default(),
             container_stack: Vec::default(),
             clip_stack: Vec::default(),
             id_stack: Vec::default(),
             layout_stack: Vec::default(),
-            text_stack: String::default(),
-            container_pool: Pool::default(),
-            containers: [Container::default(); 48],
+            text_stack: Vec::default(),
+            containers: Vec::default(),
             treenode_pool: Pool::default(),
             mouse_pos: Vec2i::default(),
             last_mouse_pos: Vec2i::default(),
@@ -407,16 +403,16 @@ struct PoolItem {
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub struct Id(u32);
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Clone)]
 pub struct Container {
-    pub head_idx: Option<usize>,
-    pub tail_idx: Option<usize>,
+    id: Id,
     pub rect: Rect,
     pub body: Rect,
     pub content_size: Vec2i,
     pub scroll: Vec2i,
     pub zindex: i32,
     pub open: bool,
+    pub command_list: Vec<Command>,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -444,9 +440,6 @@ pub struct Layout {
 
 #[derive(Copy, Clone)]
 pub enum Command {
-    Jump {
-        dst_idx: Option<usize>,
-    },
     Clip {
         rect: Rect,
     },
@@ -522,7 +515,7 @@ impl Default for LayoutPosition {
     }
 }
 
-static UNCLIPPED_RECT: Rect = Rect { x: 0, y: 0, w: 0x1000000, h: 0x1000000 };
+static UNCLIPPED_RECT: Rect = Rect { x: 0, y: 0, w: i32::MAX, h: i32::MAX };
 
 impl Default for Style {
     fn default() -> Self {
@@ -639,7 +632,9 @@ impl Context {
         self.next_hover_root = None;
         self.mouse_delta.x = self.mouse_pos.x - self.last_mouse_pos.x;
         self.mouse_delta.y = self.mouse_pos.y - self.last_mouse_pos.y;
-        self.command_list.clear();
+        for c in &mut self.containers {
+            c.command_list.clear();
+        }
         self.frame += 1;
     }
 
@@ -670,37 +665,6 @@ impl Context {
         self.last_mouse_pos = self.mouse_pos;
         let n = self.root_list.len();
         self.root_list.sort_by(|a, b| self.containers[*a].zindex.cmp(&self.containers[*b].zindex));
-
-        for i in 0..n {
-            if i == 0 {
-                // root container!
-                // if this is the first container then make the first command jump to it.
-                // otherwise set the previous container's tail to jump to this one
-
-                let cmd = &mut self.command_list[0];
-                assert!(match cmd {
-                    Command::Jump { .. } => true,
-                    _ => false,
-                });
-                let dst_idx = self.containers[self.root_list[i as usize]].head_idx.unwrap() + 1;
-                *cmd = Command::Jump { dst_idx: Some(dst_idx) };
-                assert!(dst_idx < self.command_list.len());
-            } else {
-                let prev = &self.containers[self.root_list[i - 1]];
-                self.command_list[prev.tail_idx.unwrap()] = Command::Jump {
-                    dst_idx: Some(self.containers[self.root_list[i as usize]].head_idx.unwrap() + 1),
-                };
-            }
-            if i == n - 1 {
-                assert!(self.containers[self.root_list[i as usize]].tail_idx.unwrap() < self.command_list.len());
-                assert!(match self.command_list[self.containers[self.root_list[i as usize]].tail_idx.unwrap()] {
-                    Command::Jump { .. } => true,
-                    _ => false,
-                });
-                self.command_list[self.containers[self.root_list[i as usize]].tail_idx.unwrap()] = Command::Jump { dst_idx: Some(self.command_list.len()) };
-                // the snake eats its tail
-            }
-        }
     }
 
     pub fn set_focus(&mut self, id: Option<Id>) {
@@ -793,7 +757,7 @@ impl Context {
             indent: 0,
         };
         layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.w, body.h);
-        layout.max = vec2(-0x1000000, -0x1000000);
+        layout.max = vec2(-i32::MAX, -i32::MAX);
         self.layout_stack.push(layout);
         self.layout_row(&[0], 0);
     }
@@ -846,21 +810,17 @@ impl Context {
     }
 
     fn get_container_index_intern(&mut self, id: Id, opt: WidgetOption) -> Option<usize> {
-        let idx = self.container_pool.get(id);
-        if idx.is_some() {
-            if self.containers[idx.unwrap()].open || !opt.is_closed() {
-                self.container_pool.update(idx.unwrap(), self.frame);
+        for idx in 0..self.containers.len() {
+            if self.containers[idx].id == id {
+                return Some(idx);
             }
-            return idx;
         }
         if opt.is_closed() {
             return None;
         }
-        let idx = self.container_pool.alloc(id, self.frame);
-        self.containers[idx] = Container::default();
-        self.containers[idx].head_idx = None;
-        self.containers[idx].tail_idx = None;
-        self.containers[idx].open = true;
+
+        let idx = self.containers.len();
+        self.containers.push(Container { id, open: true, ..Default::default() });
         self.bring_to_front(idx);
         Some(idx)
     }
@@ -908,9 +868,9 @@ impl Context {
         self.input_text += text;
     }
 
-    pub fn push_command(&mut self, cmd: Command) -> usize {
-        self.command_list.push(cmd);
-        self.command_list.len() - 1
+    pub fn push_command(&mut self, cmd: Command) {
+        let container = &mut self.containers[*self.container_stack.last().unwrap()];
+        container.command_list.push(cmd);
     }
 
     pub fn push_text(&mut self, str: &str) -> usize {
@@ -919,27 +879,6 @@ impl Context {
             self.text_stack.push(c);
         }
         return str_start;
-    }
-
-    ///
-    /// returns the next command to execute and the next index to use
-    ///
-    pub fn mu_next_command(&mut self, mut cmd_id: usize) -> Option<(Command, usize)> {
-        if cmd_id >= self.command_list.len() {
-            cmd_id = 0
-        }
-
-        while cmd_id != self.command_list.len() {
-            match self.command_list[cmd_id] {
-                Command::Jump { dst_idx } => cmd_id = dst_idx.unwrap(),
-                _ => return Some((self.command_list[cmd_id], cmd_id + 1)),
-            }
-        }
-        None
-    }
-
-    fn push_jump(&mut self, dst_idx: Option<usize>) -> usize {
-        self.push_command(Command::Jump { dst_idx })
     }
 
     pub fn set_clip(&mut self, rect: Rect) {
@@ -1119,7 +1058,8 @@ impl Context {
                     if self.container_stack[len - i - 1] == hover_root {
                         return true;
                     }
-                    if self.containers[self.container_stack[len - i - 1]].head_idx.is_some() {
+                    if self.container_stack[len - i - 1] == 0 {
+                        // top one!
                         break;
                     }
                 }
@@ -1559,7 +1499,7 @@ impl Context {
         self.container_stack.push(cnt);
 
         self.root_list.push(cnt);
-        self.containers[cnt].head_idx = Some(self.push_jump(None));
+
         if rect_overlaps_vec2(self.containers[cnt].rect, self.mouse_pos)
             && (self.next_hover_root.is_none() || self.containers[cnt].zindex > self.containers[self.next_hover_root.unwrap()].zindex)
         {
@@ -1570,8 +1510,6 @@ impl Context {
 
     fn end_root_container(&mut self) {
         let cnt = self.get_current_container();
-        self.containers[cnt].tail_idx = Some(self.push_jump(None));
-        self.command_list[self.containers[cnt].head_idx.unwrap()] = Command::Jump { dst_idx: Some(self.command_list.len()) };
         self.pop_clip_rect();
         self.pop_container();
     }

@@ -5,7 +5,7 @@ use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::video::GLProfile;
 use crate::renderer::Renderer;
-use microui::*;
+use microui_redux::*;
 
 pub fn r_get_char_width(_font: FontId, c: char) -> usize {
     ATLAS[ATLAS_FONT as usize + c as usize].w as usize
@@ -21,7 +21,7 @@ struct State<'a> {
     logbuf: String,
     logbuf_updated: bool,
     submit_buf: String,
-    ctx: microui::Context,
+    ctx: microui_redux::Context,
     checks: [bool; 3],
 }
 
@@ -34,7 +34,7 @@ pub struct LabelColor<'a> {
 
 impl<'a> State<'a> {
     pub fn new() -> Self {
-        let mut ctx = microui::Context::new();
+        let mut ctx = microui_redux::Context::new();
 
         ctx.char_width = Some(r_get_char_width);
         ctx.font_height = Some(r_get_font_height);
@@ -246,6 +246,7 @@ impl<'a> State<'a> {
             let mut scroll = self.ctx.get_current_container_scroll();
             let content_size = self.ctx.get_current_container_content_size();
             self.ctx.layout_row(&[-1], -1);
+            self.ctx.text("Blah");
             self.ctx.text(self.logbuf.as_str());
             if self.logbuf_updated {
                 scroll.y = content_size.y;
@@ -334,7 +335,7 @@ fn main() {
 
     let mut event_pump = sdl_context.event_pump().unwrap();
     let (width, height) = window.size();
-    let mut rd = Renderer::new(&gl, &microui::ATLAS_TEXTURE, width, height);
+    let mut rd = Renderer::new(&gl, &microui_redux::ATLAS_TEXTURE, width, height);
 
     let mut state = State::new();
 
@@ -348,23 +349,23 @@ fn main() {
             color(state.bg[0] as u8, state.bg[1] as u8, state.bg[2] as u8, 255),
         );
 
-        fn map_mouse_button(sdl_mb: sdl2::mouse::MouseButton) -> microui::MouseButton {
+        fn map_mouse_button(sdl_mb: sdl2::mouse::MouseButton) -> microui_redux::MouseButton {
             match sdl_mb {
-                sdl2::mouse::MouseButton::Left => microui::MouseButton::LEFT,
-                sdl2::mouse::MouseButton::Right => microui::MouseButton::RIGHT,
-                sdl2::mouse::MouseButton::Middle => microui::MouseButton::MIDDLE,
-                _ => microui::MouseButton::NONE,
+                sdl2::mouse::MouseButton::Left => microui_redux::MouseButton::LEFT,
+                sdl2::mouse::MouseButton::Right => microui_redux::MouseButton::RIGHT,
+                sdl2::mouse::MouseButton::Middle => microui_redux::MouseButton::MIDDLE,
+                _ => microui_redux::MouseButton::NONE,
             }
         }
 
-        fn map_keymode(sdl_km: sdl2::keyboard::Mod, sdl_kc: Option<sdl2::keyboard::Keycode>) -> microui::KeyMode {
+        fn map_keymode(sdl_km: sdl2::keyboard::Mod, sdl_kc: Option<sdl2::keyboard::Keycode>) -> microui_redux::KeyMode {
             match (sdl_km, sdl_kc) {
-                (sdl2::keyboard::Mod::LALTMOD, _) | (sdl2::keyboard::Mod::RALTMOD, _) => microui::KeyMode::ALT,
-                (sdl2::keyboard::Mod::LCTRLMOD, _) | (sdl2::keyboard::Mod::RCTRLMOD, _) => microui::KeyMode::CTRL,
-                (sdl2::keyboard::Mod::LSHIFTMOD, _) | (sdl2::keyboard::Mod::RSHIFTMOD, _) => microui::KeyMode::SHIFT,
-                (_, Some(sdl2::keyboard::Keycode::Backspace)) => microui::KeyMode::BACKSPACE,
-                (_, Some(sdl2::keyboard::Keycode::Return)) => microui::KeyMode::RETURN,
-                _ => microui::KeyMode::NONE,
+                (sdl2::keyboard::Mod::LALTMOD, _) | (sdl2::keyboard::Mod::RALTMOD, _) => microui_redux::KeyMode::ALT,
+                (sdl2::keyboard::Mod::LCTRLMOD, _) | (sdl2::keyboard::Mod::RCTRLMOD, _) => microui_redux::KeyMode::CTRL,
+                (sdl2::keyboard::Mod::LSHIFTMOD, _) | (sdl2::keyboard::Mod::RSHIFTMOD, _) => microui_redux::KeyMode::SHIFT,
+                (_, Some(sdl2::keyboard::Keycode::Backspace)) => microui_redux::KeyMode::BACKSPACE,
+                (_, Some(sdl2::keyboard::Keycode::Return)) => microui_redux::KeyMode::RETURN,
+                _ => microui_redux::KeyMode::NONE,
             }
         }
 
@@ -400,29 +401,25 @@ fn main() {
 
         state.process_frame();
 
-        let mut cmd_id = 0;
-        loop {
-            match state.ctx.mu_next_command(cmd_id) {
-                Some((command, id)) => {
-                    match command {
-                        Command::Text { str_start, str_len, pos, color, .. } => {
-                            let str = &state.ctx.text_stack[str_start..str_start + str_len];
-                            rd.draw_text(&gl, str, pos, color);
-                        }
-                        Command::Rect { rect, color } => {
-                            rd.draw_rect(&gl, rect, color);
-                        }
-                        Command::Icon { id, rect, color } => {
-                            rd.draw_icon(&gl, id, rect, color);
-                        }
-                        Command::Clip { rect } => {
-                            rd.set_clip_rect(&gl, 800, 600, rect);
-                        }
-                        _ => {}
+        for c_idx in &state.ctx.root_list {
+            let container = &state.ctx.containers[*c_idx];
+            for command in &container.command_list {
+                match command {
+                    Command::Text { str_start, str_len, pos, color, .. } => {
+                        let str = &state.ctx.text_stack[*str_start..*str_start + *str_len];
+                        rd.draw_chars(&gl, str, *pos, *color);
                     }
-                    cmd_id = id;
+                    Command::Rect { rect, color } => {
+                        rd.draw_rect(&gl, *rect, *color);
+                    }
+                    Command::Icon { id, rect, color } => {
+                        rd.draw_icon(&gl, *id, *rect, *color);
+                    }
+                    Command::Clip { rect } => {
+                        rd.set_clip_rect(&gl, 800, 600, *rect);
+                    }
+                    _ => {}
                 }
-                None => break,
             }
         }
 

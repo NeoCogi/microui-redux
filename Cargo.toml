@@ -1,5 +1,5 @@
 [package]
-name = "microui"
+name = "microui-redux"
 authors = ["Wael El Oraiby"]
 version = "0.2.5"
 edition = "2021"
@@ -7,10 +7,10 @@ readme = "README.md"
 license = "BSD-3-Clause"
 description = "MicroUI (immediate mode GUI) library in pure rust"
 repository = "https://github.com/NeoCogi/microui-rs"
-categories = ["no-std", "gui", "rendering"]
+categories = ["gui", "rendering"]
 
 [lib]
-name = "microui"
+name = "microui_redux"
 
 [dependencies]
 bitflags = "2.4.1"

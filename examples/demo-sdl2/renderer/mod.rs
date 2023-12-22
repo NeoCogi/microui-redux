@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-use microui::*;
+use microui_redux::*;
 use glow::*;
 
 const VERTEX_SHADER: &str = "#version 100
@@ -329,7 +329,7 @@ impl Renderer {
         v3.pos.y = dst.y as f32 + dst.h as f32;
 
         // color
-        v0.color = microui::color(color.r, color.g, color.b, color.a);
+        v0.color = microui_redux::color(color.r, color.g, color.b, color.a);
         v1.color = v0.color;
         v2.color = v0.color;
         v3.color = v0.color;
@@ -341,11 +341,11 @@ impl Renderer {
         self.push_rect(gl, rect, ATLAS[ATLAS_WHITE as usize], color);
     }
 
-    pub fn draw_text(&mut self, gl: &glow::Context, text: &str, pos: Vec2i, color: Color) {
+    pub fn draw_chars(&mut self, gl: &glow::Context, text: &[char], pos: Vec2i, color: Color) {
         let mut dst = Rect { x: pos.x, y: pos.y, w: 0, h: 0 };
-        for p in text.chars() {
-            if (p as usize) < 127 {
-                let chr = usize::min(p as usize, 127);
+        for p in text {
+            if (*p as usize) < 127 {
+                let chr = usize::min(*p as usize, 127);
                 let src = ATLAS[ATLAS_FONT as usize + chr];
                 dst.w = src.w;
                 dst.h = src.h;
