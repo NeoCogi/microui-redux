@@ -53,6 +53,8 @@
 extern crate std;
 use std::f32;
 use std::f64;
+use std::fmt::Debug;
+use std::str::FromStr;
 
 mod atlas;
 pub use atlas::*;
@@ -331,7 +333,6 @@ pub struct Context {
     pub number_edit: Option<Id>,
     pub root_list: Vec<usize>,
     pub container_stack: Vec<usize>,
-    pub clip_stack: Vec<Rect>,
     pub id_stack: Vec<Id>,
     pub layout_stack: Vec<Layout>,
     pub text_stack: Vec<char>,
@@ -369,7 +370,6 @@ impl Default for Context {
             number_edit: None,
             root_list: Vec::default(),
             container_stack: Vec::default(),
-            clip_stack: Vec::default(),
             id_stack: Vec::default(),
             layout_stack: Vec::default(),
             text_stack: Vec::default(),
@@ -406,6 +406,7 @@ pub struct Id(u32);
 #[derive(Default, Clone)]
 pub struct Container {
     id: Id,
+    pub name: String,
     pub rect: Rect,
     pub body: Rect,
     pub content_size: Vec2i,
@@ -413,8 +414,11 @@ pub struct Container {
     pub zindex: i32,
     pub open: bool,
     pub command_list: Vec<Command>,
+    pub clip_stack: Vec<Rect>,
+    pub children: Vec<usize>,
 }
 
+impl Container {}
 #[derive(Default, Copy, Clone)]
 pub struct Rect {
     pub x: i32,
@@ -438,7 +442,7 @@ pub struct Layout {
     pub indent: i32,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub enum Command {
     Clip {
         rect: Rect,
@@ -623,7 +627,7 @@ impl Context {
         s
     }
 
-    pub fn begin(&mut self) {
+    pub fn frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
         assert!((self.char_width).is_some() && (self.font_height).is_some());
         self.root_list.clear();
         self.text_stack.clear();
@@ -634,13 +638,15 @@ impl Context {
         self.mouse_delta.y = self.mouse_pos.y - self.last_mouse_pos.y;
         for c in &mut self.containers {
             c.command_list.clear();
+            c.children.clear();
+            assert!(c.clip_stack.len() == 0);
         }
         self.frame += 1;
-    }
 
-    pub fn end(&mut self) {
+        // execute the frame function
+        f(self);
+
         assert_eq!(self.container_stack.len(), 0);
-        assert_eq!(self.clip_stack.len(), 0);
         assert_eq!(self.id_stack.len(), 0);
         assert_eq!(self.layout_stack.len(), 0);
         if !self.scroll_target.is_none() {
@@ -663,7 +669,6 @@ impl Context {
         self.mouse_pressed = MouseButton::NONE;
         self.scroll_delta = vec2(0, 0);
         self.last_mouse_pos = self.mouse_pos;
-        let n = self.root_list.len();
         self.root_list.sort_by(|a, b| self.containers[*a].zindex.cmp(&self.containers[*b].zindex));
     }
 
@@ -720,15 +725,26 @@ impl Context {
 
     pub fn push_clip_rect(&mut self, rect: Rect) {
         let last = self.get_clip_rect();
-        self.clip_stack.push(intersect_rects(rect, last));
+        let container = &mut self.containers[*self.container_stack.last().unwrap()];
+        container.clip_stack.push(intersect_rects(rect, last));
     }
 
     pub fn pop_clip_rect(&mut self) {
-        self.clip_stack.pop();
+        let container = &mut self.containers[*self.container_stack.last().unwrap()];
+        container.clip_stack.pop();
     }
 
     pub fn get_clip_rect(&mut self) -> Rect {
-        *self.clip_stack.last().unwrap()
+        match self.container_stack.last() {
+            Some(idx) => {
+                let container = &mut self.containers[*idx];
+                match container.clip_stack.last() {
+                    Some(r) => *r,
+                    None => UNCLIPPED_RECT,
+                }
+            }
+            None => UNCLIPPED_RECT,
+        }
     }
 
     pub fn check_clip(&mut self, r: Rect) -> Clip {
@@ -809,7 +825,7 @@ impl Context {
         self.containers[*self.container_stack.last().unwrap()].body
     }
 
-    fn get_container_index_intern(&mut self, id: Id, opt: WidgetOption) -> Option<usize> {
+    fn get_container_index_intern(&mut self, id: Id, name: &str, opt: WidgetOption) -> Option<usize> {
         for idx in 0..self.containers.len() {
             if self.containers[idx].id == id {
                 return Some(idx);
@@ -820,14 +836,19 @@ impl Context {
         }
 
         let idx = self.containers.len();
-        self.containers.push(Container { id, open: true, ..Default::default() });
+        self.containers.push(Container {
+            id,
+            name: name.to_string(),
+            open: true,
+            ..Default::default()
+        });
         self.bring_to_front(idx);
         Some(idx)
     }
 
     fn get_container_index(&mut self, name: &str) -> Option<usize> {
         let id = self.get_id_from_str(name);
-        self.get_container_index_intern(id, WidgetOption::NONE)
+        self.get_container_index_intern(id, name, WidgetOption::NONE)
     }
 
     pub fn bring_to_front(&mut self, cnt: usize) {
@@ -1058,8 +1079,7 @@ impl Context {
                     if self.container_stack[len - i - 1] == hover_root {
                         return true;
                     }
-                    if self.container_stack[len - i - 1] == 0 {
-                        // top one!
+                    if self.containers[self.container_stack[len - i - 1]].command_list.len() != 0 {
                         break;
                     }
                 }
@@ -1357,7 +1377,7 @@ impl Context {
         return res;
     }
 
-    fn header(&mut self, label: &str, is_treenode: bool, opt: WidgetOption) -> ResourceState {
+    fn node(&mut self, label: &str, is_treenode: bool, opt: WidgetOption) -> ResourceState {
         let id: Id = self.get_id_from_str(label);
         let idx = self.treenode_pool.get(id);
         self.layout_row(&[-1], 0);
@@ -1394,22 +1414,24 @@ impl Context {
         return if expanded != 0 { ResourceState::ACTIVE } else { ResourceState::NONE };
     }
 
-    pub fn header_ex(&mut self, label: &str, opt: WidgetOption) -> ResourceState {
-        return self.header(label, false, opt);
+    pub fn header<F: FnOnce(&mut Self)>(&mut self, label: &str, opt: WidgetOption, f: F) {
+        if !self.node(label, false, opt).is_none() {
+            f(self);
+        }
     }
 
-    pub fn begin_treenode_ex(&mut self, label: &str, opt: WidgetOption) -> ResourceState {
-        let res = self.header(label, true, opt);
+    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, label: &str, opt: WidgetOption, f: F) {
+        let res = self.node(label, true, opt);
         if res.is_active() && self.last_id.is_some() {
             self.get_layout_mut().indent += self.style.indent;
             self.id_stack.push(self.last_id.unwrap());
         }
-        return res;
-    }
 
-    pub fn end_treenode(&mut self) {
-        self.get_layout_mut().indent -= self.style.indent;
-        self.pop_id();
+        if !res.is_none() {
+            f(self);
+            self.get_layout_mut().indent -= self.style.indent;
+            self.pop_id();
+        }
     }
 
     fn clamp(x: i32, a: i32, b: i32) -> i32 {
@@ -1505,20 +1527,20 @@ impl Context {
         {
             self.next_hover_root = Some(cnt);
         }
-        self.clip_stack.push(UNCLIPPED_RECT);
+        let container = &mut self.containers[*self.container_stack.last().unwrap()];
+        container.clip_stack.push(UNCLIPPED_RECT);
     }
 
     fn end_root_container(&mut self) {
-        let cnt = self.get_current_container();
         self.pop_clip_rect();
         self.pop_container();
     }
 
-    pub fn begin_window_ex(&mut self, title: &str, mut r: Rect, opt: WidgetOption) -> ResourceState {
+    pub fn window<F: FnOnce(&mut Self)>(&mut self, title: &str, mut r: Rect, opt: WidgetOption, f: F) {
         let id = self.get_id_from_str(title);
-        let cnt_id = self.get_container_index_intern(id, opt);
+        let cnt_id = self.get_container_index_intern(id, title, opt);
         if cnt_id.is_none() || !self.containers[cnt_id.unwrap()].open {
-            return ResourceState::NONE;
+            return;
         }
         self.id_stack.push(id);
 
@@ -1588,10 +1610,10 @@ impl Context {
             self.containers[cnt_id.unwrap()].open = false;
         }
         self.push_clip_rect(self.containers[cnt_id.unwrap()].body);
-        return ResourceState::ACTIVE;
-    }
 
-    pub fn end_window(&mut self) {
+        // call the window function
+        f(self);
+
         self.pop_clip_rect();
         self.end_root_container();
     }
@@ -1605,20 +1627,22 @@ impl Context {
         self.bring_to_front(cnt.unwrap());
     }
 
-    pub fn begin_popup(&mut self, name: &str) -> ResourceState {
+    pub fn popup<F: FnOnce(&mut Self)>(&mut self, name: &str, f: F) {
         let opt =
             WidgetOption::POPUP | WidgetOption::AUTO_SIZE | WidgetOption::NO_RESIZE | WidgetOption::NO_SCROLL | WidgetOption::NO_TITLE | WidgetOption::CLOSED;
-        return self.begin_window_ex(name, rect(0, 0, 0, 0), opt);
+        self.window(name, rect(0, 0, 0, 0), opt, f);
     }
 
-    pub fn end_popup(&mut self) {
-        self.end_window();
-    }
-
-    pub fn begin_panel_ex(&mut self, name: &str, opt: WidgetOption) {
+    pub fn panel<F: FnOnce(&mut Self)>(&mut self, name: &str, opt: WidgetOption, f: F) {
         self.push_id_from_str(name);
-        let cnt_id = self.get_container_index_intern(self.last_id.unwrap(), opt);
+
+        // A panel can only exist inside a root container
+        assert!(self.root_list.len() != 0);
+
+        let cnt_id = self.get_container_index_intern(self.last_id.unwrap(), name, opt);
+        self.containers[*self.root_list.last().unwrap()].children.push(cnt_id.unwrap());
         let rect = self.layout_next();
+        let clip_rect = self.containers[cnt_id.unwrap()].body;
         self.containers[cnt_id.unwrap()].rect = rect;
         if !opt.has_no_frame() {
             (self.draw_frame).expect("non-null function pointer")(self, rect, ControlColor::PanelBG);
@@ -1626,10 +1650,12 @@ impl Context {
 
         self.container_stack.push(cnt_id.unwrap());
         self.push_container_body(cnt_id.unwrap(), rect, opt);
-        self.push_clip_rect(self.containers[cnt_id.unwrap()].body);
-    }
 
-    pub fn end_panel(&mut self) {
+        self.push_clip_rect(clip_rect);
+
+        // call the panel function
+        f(self);
+
         self.pop_clip_rect();
         self.pop_container();
     }
