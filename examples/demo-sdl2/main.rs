@@ -314,22 +314,15 @@ fn main() {
 
     let mut event_pump = sdl_context.event_pump().unwrap();
     let (width, height) = window.size();
-    let mut rd = Renderer::new(&gl, &microui_redux::ATLAS_TEXTURE, width, height);
+    let rd = Renderer::new(gl, &microui_redux::ATLAS_TEXTURE, width, height);
 
     let mut state = State::new();
-    let mut ctx = microui_redux::Context::new();
+    let mut ctx = microui_redux::Context::new(Box::new(rd));
 
-    ctx.char_width = Some(r_get_char_width);
-    ctx.font_height = Some(r_get_font_height);
     'running: loop {
         let (width, height) = window.size();
 
-        rd.clear(
-            &gl,
-            width as i32,
-            height as i32,
-            color(state.bg[0] as u8, state.bg[1] as u8, state.bg[2] as u8, 255),
-        );
+        ctx.clear(width as i32, height as i32, color(state.bg[0] as u8, state.bg[1] as u8, state.bg[2] as u8, 255));
 
         fn map_mouse_button(sdl_mb: sdl2::mouse::MouseButton) -> microui_redux::MouseButton {
             match sdl_mb {
@@ -383,35 +376,7 @@ fn main() {
 
         state.process_frame(&mut ctx);
 
-        fn render_container(state: &State, ctx: &mut microui_redux::Context, container_idx: usize, rd: &mut Renderer, gl: &glow::Context) {
-            let container = &ctx.containers[container_idx];
-            for command in &container.command_list {
-                match command {
-                    Command::Text { str_start, str_len, pos, color, .. } => {
-                        let str = &ctx.text_stack[*str_start..*str_start + *str_len];
-                        rd.draw_chars(gl, str, *pos, *color);
-                    }
-                    Command::Rect { rect, color } => {
-                        rd.draw_rect(gl, *rect, *color);
-                    }
-                    Command::Icon { id, rect, color } => {
-                        rd.draw_icon(gl, *id, *rect, *color);
-                    }
-                    Command::Clip { rect } => {
-                        rd.set_clip_rect(gl, 800, 600, *rect);
-                    }
-                    _ => {}
-                }
-            }
-            for child in container.children.clone() {
-                render_container(state, ctx, child, rd, gl);
-            }
-        }
-        for rc in ctx.root_list.clone() {
-            render_container(&state, &mut ctx, rc, &mut rd, &gl);
-        }
-
-        rd.flush(&gl);
+        ctx.flush();
         window.gl_swap_window();
 
         ::std::thread::sleep(::std::time::Duration::new(0, 1_000_000_000u32 / 60));
