@@ -52,14 +52,22 @@
 //
 extern crate std;
 use std::f32;
-use std::f64;
-use std::fmt::Debug;
-use std::str::FromStr;
 
 mod atlas;
 pub use atlas::*;
 
 use bitflags::*;
+
+pub trait AtlasRenderer {
+    fn draw_rect(&mut self, rect: Rect, color: Color);
+    fn draw_chars(&mut self, text: &[char], pos: Vec2i, color: Color);
+    fn draw_icon(&mut self, id: Icon, r: Rect, color: Color);
+    fn set_clip_rect(&mut self, width: i32, height: i32, rect: Rect);
+    fn clear(&mut self, width: i32, height: i32, clr: Color);
+    fn flush(&mut self);
+    fn get_char_width(&self, font: FontId, c: char) -> usize;
+    fn get_font_height(&self, font: FontId) -> usize;
+}
 
 #[derive(Copy, Clone)]
 pub struct Pool<const N: usize> {
@@ -315,9 +323,7 @@ impl KeyMode {
 
 #[repr(C)]
 pub struct Context {
-    pub char_width: Option<fn(FontId, char) -> usize>,
-    pub font_height: Option<fn(FontId) -> usize>,
-    pub draw_frame: Option<fn(&mut Context, Rect, ControlColor) -> ()>,
+    atlas_renderer: Box<dyn AtlasRenderer>,
     pub style: Style,
     pub hover: Option<Id>,
     pub focus: Option<Id>,
@@ -349,12 +355,10 @@ pub struct Context {
     pub input_text: String,
 }
 
-impl Default for Context {
-    fn default() -> Self {
+impl Context {
+    pub fn new(atlas_renderer: Box<dyn AtlasRenderer>) -> Self {
         Self {
-            char_width: None,
-            font_height: None,
-            draw_frame: None,
+            atlas_renderer,
             style: Style::default(),
             hover: None,
             focus: None,
@@ -586,16 +590,6 @@ pub fn rect_overlaps_vec2(r: Rect, p: Vec2i) -> bool {
     p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h
 }
 
-pub fn draw_frame(ctx: &mut Context, rect: Rect, colorid: ControlColor) {
-    ctx.draw_rect(rect, ctx.style.colors[colorid as usize]);
-    if colorid == ControlColor::ScrollBase || colorid == ControlColor::ScrollThumb || colorid == ControlColor::TitleBG {
-        return;
-    }
-    if ctx.style.colors[ControlColor::Border as usize].a != 0 {
-        ctx.draw_box(expand_rect(rect, 1), ctx.style.colors[ControlColor::Border as usize]);
-    }
-}
-
 fn hash_step(h: u32, n: u32) -> u32 {
     (h ^ n).wrapping_mul(16777619 as u32)
 }
@@ -620,15 +614,53 @@ fn hash_bytes(hash_0: &mut Id, s: &[u8]) {
 }
 
 impl Context {
-    pub fn new() -> Self {
-        let mut s = Self::default();
-        s.draw_frame = Some(draw_frame as fn(&mut Context, Rect, ControlColor) -> ());
-        s.style = Style::default();
-        s
+    pub fn clear(&mut self, width: i32, height: i32, clr: Color) {
+        self.atlas_renderer.clear(width, height, clr);
+    }
+
+    fn render_container(&mut self, container_idx: usize) {
+        let container = &self.containers[container_idx];
+        for command in &container.command_list {
+            match command {
+                Command::Text { str_start, str_len, pos, color, .. } => {
+                    let str = &self.text_stack[*str_start..*str_start + *str_len];
+                    self.atlas_renderer.draw_chars(str, *pos, *color);
+                }
+                Command::Rect { rect, color } => {
+                    self.atlas_renderer.draw_rect(*rect, *color);
+                }
+                Command::Icon { id, rect, color } => {
+                    self.atlas_renderer.draw_icon(*id, *rect, *color);
+                }
+                Command::Clip { rect } => {
+                    self.atlas_renderer.set_clip_rect(800, 600, *rect);
+                }
+                _ => {}
+            }
+        }
+        for child in container.children.clone() {
+            self.render_container(child);
+        }
+    }
+
+    pub fn flush(&mut self) {
+        for rc in self.root_list.clone() {
+            self.render_container(rc);
+        }
+        self.atlas_renderer.flush()
+    }
+
+    fn draw_frame(&mut self, rect: Rect, colorid: ControlColor) {
+        self.draw_rect(rect, self.style.colors[colorid as usize]);
+        if colorid == ControlColor::ScrollBase || colorid == ControlColor::ScrollThumb || colorid == ControlColor::TitleBG {
+            return;
+        }
+        if self.style.colors[ControlColor::Border as usize].a != 0 {
+            self.draw_box(expand_rect(rect, 1), self.style.colors[ControlColor::Border as usize]);
+        }
     }
 
     pub fn frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
-        assert!((self.char_width).is_some() && (self.font_height).is_some());
         self.root_list.clear();
         self.text_stack.clear();
         self.scroll_target = None;
@@ -1099,7 +1131,7 @@ impl Context {
         } else if self.hover == Some(id) {
             colorid.hover()
         }
-        (self.draw_frame).expect("non-null function pointer")(self, rect, colorid);
+        self.draw_frame(rect, colorid);
     }
 
     pub fn draw_control_text(&mut self, str: &str, rect: Rect, colorid: ControlColor, opt: WidgetOption) {
@@ -1159,14 +1191,14 @@ impl Context {
                 res = usize::max(res, acc);
                 acc = 0;
             }
-            acc += self.char_width.expect("non-null function pointer")(font, c);
+            acc += self.atlas_renderer.get_char_width(font, c);
         }
         res = usize::max(res, acc);
         res as i32
     }
 
     pub fn get_text_height(&self, font: FontId, text: &str) -> i32 {
-        let font_height = self.font_height.expect("non-null function pointer")(font);
+        let font_height = self.atlas_renderer.get_font_height(font);
         let lc = text.lines().count();
         (lc * font_height) as i32
     }
@@ -1175,7 +1207,7 @@ impl Context {
         let font = self.style.font;
         let color = self.style.colors[ControlColor::Text as usize];
         self.layout_begin_column();
-        let h = self.font_height.expect("non-null function pointer")(font) as i32;
+        let h = self.atlas_renderer.get_font_height(font) as i32;
         self.layout_row(&[-1], h);
         let mut r = self.layout_next();
         for line in text.lines() {
@@ -1398,7 +1430,7 @@ impl Context {
 
         if is_treenode {
             if self.hover == Some(id) {
-                (self.draw_frame).expect("non-null function pointer")(self, r, ControlColor::ButtonHover);
+                self.draw_frame(r, ControlColor::ButtonHover);
             }
         } else {
             self.draw_control_frame(id, r, ControlColor::Button, WidgetOption::NONE);
@@ -1463,7 +1495,7 @@ impl Context {
             }
             self.containers[cnt_id].scroll.y = Self::clamp(self.containers[cnt_id].scroll.y, 0, maxscroll);
 
-            (self.draw_frame).expect("non-null function pointer")(self, base, ControlColor::ScrollBase);
+            self.draw_frame(base, ControlColor::ScrollBase);
             let mut thumb = base;
             thumb.h = if self.style.thumb_size > base.h * body.h / cs.y {
                 self.style.thumb_size
@@ -1471,7 +1503,7 @@ impl Context {
                 base.h * body.h / cs.y
             };
             thumb.y += self.containers[cnt_id].scroll.y * (base.h - thumb.h) / maxscroll;
-            (self.draw_frame).expect("non-null function pointer")(self, thumb, ControlColor::ScrollThumb);
+            self.draw_frame(thumb, ControlColor::ScrollThumb);
             if self.mouse_over(body) {
                 self.scroll_target = Some(cnt_id);
             }
@@ -1490,7 +1522,7 @@ impl Context {
             }
             self.containers[cnt_id].scroll.x = Self::clamp(self.containers[cnt_id].scroll.x, 0, maxscroll_0);
 
-            (self.draw_frame).expect("non-null function pointer")(self, base_0, ControlColor::ScrollBase);
+            self.draw_frame(base_0, ControlColor::ScrollBase);
             let mut thumb_0 = base_0;
             thumb_0.w = if self.style.thumb_size > base_0.w * body.w / cs.x {
                 self.style.thumb_size
@@ -1498,7 +1530,7 @@ impl Context {
                 base_0.w * body.w / cs.x
             };
             thumb_0.x += self.containers[cnt_id].scroll.x * (base_0.w - thumb_0.w) / maxscroll_0;
-            (self.draw_frame).expect("non-null function pointer")(self, thumb_0, ControlColor::ScrollThumb);
+            self.draw_frame(thumb_0, ControlColor::ScrollThumb);
             if self.mouse_over(body) {
                 self.scroll_target = Some(cnt_id);
             }
@@ -1551,12 +1583,12 @@ impl Context {
         let mut body = self.containers[cnt_id.unwrap()].rect;
         r = body;
         if !opt.has_no_frame() {
-            (self.draw_frame).expect("non-null function pointer")(self, r, ControlColor::WindowBG);
+            self.draw_frame(r, ControlColor::WindowBG);
         }
         if !opt.has_no_title() {
             let mut tr: Rect = r;
             tr.h = self.style.title_height;
-            (self.draw_frame).expect("non-null function pointer")(self, tr, ControlColor::TitleBG);
+            self.draw_frame(tr, ControlColor::TitleBG);
 
             // TODO: Is this necessary?
             if !opt.has_no_title() {
@@ -1645,7 +1677,7 @@ impl Context {
         let clip_rect = self.containers[cnt_id.unwrap()].body;
         self.containers[cnt_id.unwrap()].rect = rect;
         if !opt.has_no_frame() {
-            (self.draw_frame).expect("non-null function pointer")(self, rect, ControlColor::PanelBG);
+            self.draw_frame(rect, ControlColor::PanelBG);
         }
 
         self.container_stack.push(cnt_id.unwrap());

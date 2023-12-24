@@ -1,6 +1,6 @@
 [package]
 name = "microui-redux"
-authors = ["Wael El Oraiby"]
+authors = ["Raja Lehtihet", "Wael El Oraiby"]
 version = "0.1.0"
 edition = "2021"
 readme = "README.md"
