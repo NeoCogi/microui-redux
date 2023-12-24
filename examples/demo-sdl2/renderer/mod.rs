@@ -364,14 +364,6 @@ impl Renderer {
         self.push_rect(rect(x, y, src.w, src.h), src, color);
     }
 
-    pub fn get_char_width(&self, _font: FontId, c: char) -> usize {
-        ATLAS[ATLAS_FONT as usize + c as usize].w as usize
-    }
-
-    pub fn get_font_height(&self, _font: FontId) -> usize {
-        18
-    }
-
     pub fn set_clip_rect(&mut self, width: i32, height: i32, rect: Rect) {
         unsafe {
             self.width = width as u32;
@@ -415,10 +407,10 @@ impl AtlasRenderer for Renderer {
         Renderer::flush(self);
     }
 
-    fn get_char_width(&self, font: FontId, c: char) -> usize {
+    fn get_char_width(&self, _font: FontId, c: char) -> usize {
         ATLAS[ATLAS_FONT as usize + c as usize].w as usize
     }
-    fn get_font_height(&self, font: FontId) -> usize {
+    fn get_font_height(&self, _font: FontId) -> usize {
         18
     }
 }
