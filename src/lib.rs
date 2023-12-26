@@ -51,7 +51,7 @@
 // IN THE SOFTWARE.
 //
 extern crate std;
-use std::f32;
+use std::{f32, collections::HashMap, hash::Hash};
 
 mod atlas;
 pub use atlas::*;
@@ -69,49 +69,65 @@ pub trait AtlasRenderer {
     fn get_font_height(&self, font: FontId) -> usize;
 }
 
-#[derive(Copy, Clone)]
-pub struct Pool<const N: usize> {
-    vec: [PoolItem; N],
+#[derive(Clone)]
+struct PoolItem<PO: Clone> {
+    object: PO,
+    frame: usize,
 }
 
-impl<const N: usize> Pool<N> {
-    pub fn alloc(&mut self, id: Id, frame: usize) -> usize {
-        let mut res = None;
-        let mut latest_update = frame;
-        for i in 0..N {
-            if self.vec[i].last_update < latest_update {
-                latest_update = self.vec[i].last_update;
-                res = Some(i);
+#[derive(Clone)]
+pub struct Pool<ID, PO: Clone> {
+    items: HashMap<ID, PoolItem<PO>>,
+    gc_ids: Vec<ID>,
+}
+
+impl<ID: PartialEq + Eq + Hash + Clone, PO: Clone> Pool<ID, PO> {
+    pub fn insert(&mut self, id: ID, object: PO, frame: usize) -> ID {
+        match self.items.get_mut(&id) {
+            Some(v) => v.frame = frame,
+            None => {
+                self.items.insert(id.clone(), PoolItem { object, frame });
+            }
+        }
+        id
+    }
+
+    pub fn get(&self, id: ID) -> Option<&PO> {
+        self.items.get(&id).map(|pi| &pi.object)
+    }
+
+    pub fn get_mut(&mut self, id: ID) -> Option<&mut PO> {
+        self.items.get_mut(&id).map(|po| &mut po.object)
+    }
+
+    pub fn update(&mut self, id: ID, frame: usize) {
+        self.items.get_mut(&id).unwrap().frame = frame
+    }
+
+    pub fn remove(&mut self, id: ID) {
+        self.items.remove(&id);
+    }
+
+    pub fn gc(&mut self, current_frame: usize) {
+        self.gc_ids.clear();
+        for kv in &self.items {
+            if kv.1.frame < current_frame - 2 {
+                self.gc_ids.push(kv.0.clone());
             }
         }
 
-        assert!(res.is_some());
-        self.vec[res.unwrap()].id = id;
-        self.update(res.unwrap(), frame);
-        return res.unwrap();
-    }
-
-    pub fn get(&self, id: Id) -> Option<usize> {
-        for i in 0..N {
-            if self.vec[i].id == id {
-                return Some(i);
-            }
+        for gid in &self.gc_ids {
+            self.items.remove(gid);
         }
-        None
-    }
-
-    pub fn update(&mut self, idx: usize, frame: usize) {
-        self.vec[idx].last_update = frame;
-    }
-
-    pub fn reset(&mut self, idx: usize) {
-        self.vec[idx] = PoolItem::default();
     }
 }
 
-impl<const N: usize> Default for Pool<N> {
+impl<ID, PO: Clone> Default for Pool<ID, PO> {
     fn default() -> Self {
-        Self { vec: [PoolItem::default(); N] }
+        Self {
+            items: HashMap::default(),
+            gc_ids: Vec::default(),
+        }
     }
 }
 
@@ -343,7 +359,7 @@ pub struct Context {
     pub layout_stack: Vec<Layout>,
     pub text_stack: Vec<char>,
     pub containers: Vec<Container>,
-    pub treenode_pool: Pool<48>,
+    pub treenode_pool: Pool<Id, ()>,
     pub mouse_pos: Vec2i,
     pub last_mouse_pos: Vec2i,
     pub mouse_delta: Vec2i,
@@ -398,13 +414,7 @@ pub struct Vec2i {
     pub y: i32,
 }
 
-#[derive(Default, Copy, Clone)]
-struct PoolItem {
-    pub id: Id,
-    pub last_update: usize,
-}
-
-#[derive(Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Id(u32);
 
 #[derive(Default, Clone)]
@@ -702,6 +712,8 @@ impl Context {
         self.scroll_delta = vec2(0, 0);
         self.last_mouse_pos = self.mouse_pos;
         self.root_list.sort_by(|a, b| self.containers[*a].zindex.cmp(&self.containers[*b].zindex));
+
+        self.treenode_pool.gc(self.frame);
     }
 
     pub fn set_focus(&mut self, id: Option<Id>) {
@@ -1209,8 +1221,8 @@ impl Context {
         self.layout_begin_column();
         let h = self.atlas_renderer.get_font_height(font) as i32;
         self.layout_row(&[-1], h);
-        let mut r = self.layout_next();
         for line in text.lines() {
+            let mut r = self.layout_next();
             let mut rx = r.x;
             let words = line.split_inclusive(' ');
             for w in words {
@@ -1224,7 +1236,6 @@ impl Context {
                     rx = r.x;
                 }
             }
-            r = self.layout_next();
         }
         self.layout_end_column();
     }
@@ -1411,21 +1422,22 @@ impl Context {
 
     fn node(&mut self, label: &str, is_treenode: bool, opt: WidgetOption) -> ResourceState {
         let id: Id = self.get_id_from_str(label);
-        let idx = self.treenode_pool.get(id);
         self.layout_row(&[-1], 0);
-        let mut active = idx.is_some() as i32;
-        let expanded = if opt.is_expanded() { (active == 0) as i32 } else { active };
         let mut r = self.layout_next();
         self.update_control(id, r, WidgetOption::NONE);
-        active ^= (self.mouse_pressed.is_left() && self.focus == Some(id)) as i32;
-        if idx.is_some() {
-            if active != 0 {
-                self.treenode_pool.update(idx.unwrap(), self.frame);
+        let state = self.treenode_pool.get(id);
+        let mut active = state.is_some();
+        // clever substitution for if opt.is_expanded() { !active } else { active };
+        let expanded = opt.is_expanded() ^ active;
+        active ^= self.mouse_pressed.is_left() && self.focus == Some(id);
+        if state.is_some() {
+            if active {
+                self.treenode_pool.update(id, self.frame);
             } else {
-                self.treenode_pool.reset(idx.unwrap());
+                self.treenode_pool.remove(id);
             }
-        } else if active != 0 {
-            self.treenode_pool.alloc(id, self.frame);
+        } else if active {
+            self.treenode_pool.insert(id, (), self.frame);
         }
 
         if is_treenode {
@@ -1436,14 +1448,14 @@ impl Context {
             self.draw_control_frame(id, r, ControlColor::Button, WidgetOption::NONE);
         }
         self.draw_icon(
-            if expanded != 0 { Icon::Expanded } else { Icon::Collapsed },
+            if expanded { Icon::Expanded } else { Icon::Collapsed },
             rect(r.x, r.y, r.h, r.h),
             self.style.colors[ControlColor::Text as usize],
         );
         r.x += r.h - self.style.padding;
         r.w -= r.h - self.style.padding;
         self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
-        return if expanded != 0 { ResourceState::ACTIVE } else { ResourceState::NONE };
+        return if expanded { ResourceState::ACTIVE } else { ResourceState::NONE };
     }
 
     pub fn header<F: FnOnce(&mut Self)>(&mut self, label: &str, opt: WidgetOption, f: F) {

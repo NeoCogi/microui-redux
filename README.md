@@ -21,7 +21,7 @@ $ cargo run --example demo-sdl2
 - [x] Containers contain clip stack and command list
 - [x] Move `begin_*`, `end_*` functions to closures
 - [x] Move to AtlasRenderer Trait
-- [ ] Remove `Pool`
+- [x] Remove/Refactor `Pool`
 - [ ] Change layout code
 - [ ] Mechanism to garbage collect/free unused containers/tree nodes
 - [ ] Add Atlasser to the code

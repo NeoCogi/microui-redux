@@ -233,7 +233,7 @@ impl<'a> State<'a> {
                 ctx.text(self.logbuf.as_str());
 
                 if self.logbuf_updated {
-                    scroll.y = content_size.y - 22;
+                    scroll.y = content_size.y;
                     ctx.set_current_container_scroll(&scroll);
                     self.logbuf_updated = false;
                 }
