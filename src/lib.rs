@@ -947,51 +947,21 @@ impl Context {
     }
 
     fn pop_container(&mut self) {
-        let cnt = self.get_current_container_index();
-        let layout = *self.containers[cnt].get_layout();
-        self.containers[cnt].content_size.x = layout.max.x - layout.body.x;
-        self.containers[cnt].content_size.y = layout.max.y - layout.body.y;
-        self.containers[cnt].layout_stack.pop();
+        let layout = *self.top_container().get_layout();
+        self.top_container_mut().content_size.x = layout.max.x - layout.body.x;
+        self.top_container_mut().content_size.y = layout.max.y - layout.body.y;
+        self.top_container_mut().layout_stack.pop();
 
         self.container_stack.pop();
         self.pop_id();
     }
 
-    pub fn get_current_container_index(&self) -> usize {
-        *self.container_stack.last().unwrap()
+    pub fn top_container(&self) -> &Container {
+        &self.containers[*self.container_stack.last().unwrap()]
     }
 
-    pub fn get_current_container(&self) -> &Container {
-        &self.containers[self.get_current_container_index()]
-    }
-
-    pub fn get_current_container_mut(&mut self) -> &mut Container {
-        let idx = self.get_current_container_index();
-        &mut self.containers[idx]
-    }
-
-    pub fn get_current_container_rect(&self) -> Rect {
-        self.containers[*self.container_stack.last().unwrap()].rect
-    }
-
-    pub fn set_current_container_rect(&mut self, rect: &Rect) {
-        self.containers[*self.container_stack.last().unwrap()].rect = *rect;
-    }
-
-    pub fn get_current_container_scroll(&self) -> Vec2i {
-        self.containers[*self.container_stack.last().unwrap()].scroll
-    }
-
-    pub fn set_current_container_scroll(&mut self, scroll: &Vec2i) {
-        self.containers[*self.container_stack.last().unwrap()].scroll = *scroll;
-    }
-
-    pub fn get_current_container_content_size(&self) -> Vec2i {
-        self.containers[*self.container_stack.last().unwrap()].content_size
-    }
-
-    pub fn get_current_container_body(&self) -> Rect {
-        self.containers[*self.container_stack.last().unwrap()].body
+    pub fn top_container_mut(&mut self) -> &mut Container {
+        &mut self.containers[*self.container_stack.last().unwrap()]
     }
 
     fn get_container_index_intern(&mut self, id: Id, name: &str, opt: WidgetOption) -> Option<usize> {
@@ -1235,16 +1205,10 @@ impl Context {
         let font = self.style.font;
         let color = self.style.colors[ControlColor::Text as usize];
         let h = self.atlas_renderer.get_font_height(font) as i32;
-        {
-            let container = self.get_current_container_mut();
-            container.layout_begin_column();
-            container.layout_row(&[-1], h);
-        }
+        self.top_container_mut().layout_begin_column();
+        self.top_container_mut().layout_row(&[-1], h);
         for line in text.lines() {
-            let mut r = {
-                let container = self.get_current_container_mut();
-                container.layout_next()
-            };
+            let mut r = self.top_container_mut().layout_next();
             let mut rx = r.x;
             let words = line.split_inclusive(' ');
             for w in words {
@@ -1254,18 +1218,16 @@ impl Context {
                     self.draw_text(font, w, vec2(rx, r.y), color);
                     rx += tw;
                 } else {
-                    let container = self.get_current_container_mut();
-                    r = container.layout_next();
+                    r = self.top_container_mut().layout_next();
                     rx = r.x;
                 }
             }
         }
-        let container = self.get_current_container_mut();
-        container.layout_end_column();
+        self.top_container_mut().layout_end_column();
     }
 
     pub fn label(&mut self, text: &str) {
-        let layout = self.get_current_container_mut().layout_next();
+        let layout = self.top_container_mut().layout_next();
         self.draw_control_text(text, layout, ControlColor::Text, WidgetOption::NONE);
     }
 
@@ -1276,7 +1238,7 @@ impl Context {
         } else {
             self.get_id_u32(icon as u32)
         };
-        let r: Rect = self.get_current_container_mut().layout_next();
+        let r: Rect = self.top_container_mut().layout_next();
         self.update_control(id, r, opt);
         if self.mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
@@ -1294,7 +1256,7 @@ impl Context {
     pub fn checkbox(&mut self, label: &str, state: &mut bool) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.get_id_from_ptr(state);
-        let mut r: Rect = self.get_current_container_mut().layout_next();
+        let mut r: Rect = self.top_container_mut().layout_next();
         let box_0: Rect = rect(r.x, r.y, r.h, r.h);
         self.update_control(id, r, WidgetOption::NONE);
         if self.mouse_pressed.is_left() && self.focus == Some(id) {
@@ -1380,7 +1342,7 @@ impl Context {
 
     pub fn textbox_ex(&mut self, buf: &mut String, opt: WidgetOption) -> ResourceState {
         let id: Id = self.get_id_from_ptr(buf);
-        let r: Rect = self.get_current_container_mut().layout_next();
+        let r: Rect = self.top_container_mut().layout_next();
         return self.textbox_raw(buf, id, r, opt);
     }
 
@@ -1389,7 +1351,7 @@ impl Context {
         let last = *value;
         let mut v = last;
         let id = self.get_id_from_ptr(value);
-        let base = self.get_current_container_mut().layout_next();
+        let base = self.top_container_mut().layout_next();
         if !self.number_textbox(precision, &mut v, base, id).is_none() {
             return res;
         }
@@ -1425,7 +1387,7 @@ impl Context {
     pub fn number_ex(&mut self, value: &mut Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.get_id_from_ptr(value);
-        let base: Rect = self.get_current_container_mut().layout_next();
+        let base: Rect = self.top_container_mut().layout_next();
         let last: Real = *value;
         if !self.number_textbox(precision, value, base, id).is_none() {
             return res;
@@ -1446,8 +1408,8 @@ impl Context {
 
     fn node(&mut self, label: &str, is_treenode: bool, opt: WidgetOption) -> ResourceState {
         let id: Id = self.get_id_from_str(label);
-        self.get_current_container_mut().layout_row(&[-1], 0);
-        let mut r = self.get_current_container_mut().layout_next();
+        self.top_container_mut().layout_row(&[-1], 0);
+        let mut r = self.top_container_mut().layout_next();
         self.update_control(id, r, WidgetOption::NONE);
         let state = self.treenode_pool.get(id);
         let mut active = state.is_some();
@@ -1491,13 +1453,13 @@ impl Context {
     pub fn treenode<F: FnOnce(&mut Self)>(&mut self, label: &str, opt: WidgetOption, f: F) {
         let res = self.node(label, true, opt);
         if res.is_active() && self.last_id.is_some() {
-            self.get_current_container_mut().get_layout_mut().indent += self.style.indent;
+            self.top_container_mut().get_layout_mut().indent += self.style.indent;
             self.id_stack.push(self.last_id.unwrap());
         }
 
         if !res.is_none() {
             f(self);
-            self.get_current_container_mut().get_layout_mut().indent -= self.style.indent;
+            self.top_container_mut().get_layout_mut().indent -= self.style.indent;
             self.pop_id();
         }
     }
@@ -1583,7 +1545,7 @@ impl Context {
         }
         let padding = -self.style.padding;
         let scroll = self.containers[cnt_idx].scroll;
-        self.get_current_container_mut().push_layout(expand_rect(body, padding), scroll);
+        self.top_container_mut().push_layout(expand_rect(body, padding), scroll);
         self.containers[cnt_idx].body = body;
     }
 
@@ -1671,7 +1633,7 @@ impl Context {
             }
         }
         if opt.is_auto_sizing() {
-            let r_1 = self.get_current_container_mut().get_layout().body;
+            let r_1 = self.top_container_mut().get_layout().body;
             self.containers[cnt_id.unwrap()].rect.w = self.containers[cnt_id.unwrap()].content_size.x + (self.containers[cnt_id.unwrap()].rect.w - r_1.w);
             self.containers[cnt_id.unwrap()].rect.h = self.containers[cnt_id.unwrap()].content_size.y + (self.containers[cnt_id.unwrap()].rect.h - r_1.h);
         }
@@ -1711,7 +1673,7 @@ impl Context {
 
         let cnt_id = self.get_container_index_intern(self.last_id.unwrap(), name, opt);
         self.containers[*self.root_list.last().unwrap()].children.push(cnt_id.unwrap());
-        let rect = self.get_current_container_mut().layout_next();
+        let rect = self.top_container_mut().layout_next();
         let clip_rect = self.containers[cnt_id.unwrap()].body;
         self.containers[cnt_id.unwrap()].rect = rect;
         if !opt.has_no_frame() {

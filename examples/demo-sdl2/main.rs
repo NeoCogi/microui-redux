@@ -107,17 +107,17 @@ impl<'a> State<'a> {
 
     fn test_window(&mut self, ctx: &mut microui_redux::Context) {
         ctx.window("Demo Window", rect(40, 40, 300, 450), WidgetOption::NONE, |ctx| {
-            let mut win = ctx.get_current_container_rect();
+            let mut win = ctx.top_container().rect;
             win.w = if win.w > 240 { win.w } else { 240 };
             win.h = if win.h > 300 { win.h } else { 300 };
 
-            ctx.set_current_container_rect(&win);
+            ctx.top_container_mut().rect = win;
 
             let mut buff = String::new();
 
             ctx.header("Window Info", WidgetOption::NONE, |ctx| {
-                let win_0 = ctx.get_current_container_rect();
-                ctx.get_current_container_mut().layout_row(&[54, -1], 0);
+                let win_0 = ctx.top_container().rect;
+                ctx.top_container_mut().layout_row(&[54, -1], 0);
                 ctx.label("Position:");
 
                 buff.clear();
@@ -132,7 +132,7 @@ impl<'a> State<'a> {
                 ctx.label(buff.as_str());
             });
             ctx.header("Test Buttons", WidgetOption::EXPANDED, |ctx| {
-                ctx.get_current_container_mut().layout_row(&[86, -110, -1], 0);
+                ctx.top_container_mut().layout_row(&[86, -110, -1], 0);
                 ctx.label("Test buttons 1:");
                 if !ctx.button_ex("Button 1", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                     self.write_log("Pressed button 1");
@@ -157,8 +157,8 @@ impl<'a> State<'a> {
                 });
             });
             ctx.header("Tree and Text", WidgetOption::EXPANDED, |ctx| {
-                ctx.get_current_container_mut().layout_row(&[140, -1], 0);
-                ctx.get_current_container_mut().layout_begin_column();
+                ctx.top_container_mut().layout_row(&[140, -1], 0);
+                ctx.top_container_mut().layout_begin_column();
                 ctx.treenode("Test 1", WidgetOption::NONE, |ctx| {
                     ctx.treenode("Test 1a", WidgetOption::NONE, |ctx| {
                         ctx.label("Hello");
@@ -174,7 +174,7 @@ impl<'a> State<'a> {
                     });
                 });
                 ctx.treenode("Test 2", WidgetOption::NONE, |ctx| {
-                    ctx.get_current_container_mut().layout_row(&[54, 54], 0);
+                    ctx.top_container_mut().layout_row(&[54, 54], 0);
                     if !ctx.button_ex("Button 3", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                         self.write_log("Pressed button 3");
                     }
@@ -193,27 +193,27 @@ impl<'a> State<'a> {
                     ctx.checkbox("Checkbox 2", &mut self.checks[1]);
                     ctx.checkbox("Checkbox 3", &mut self.checks[2]);
                 });
-                ctx.get_current_container_mut().layout_end_column();
-                ctx.get_current_container_mut().layout_begin_column();
-                ctx.get_current_container_mut().layout_row(&[-1], 0);
+                ctx.top_container_mut().layout_end_column();
+                ctx.top_container_mut().layout_begin_column();
+                ctx.top_container_mut().layout_row(&[-1], 0);
                 ctx.text(
                     "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla."
                     ,
                 );
-                ctx.get_current_container_mut().layout_end_column();
+                ctx.top_container_mut().layout_end_column();
             });
             ctx.header("Background Color", WidgetOption::EXPANDED, |ctx| {
-                ctx.get_current_container_mut().layout_row(&[-78, -1], 74);
-                ctx.get_current_container_mut().layout_begin_column();
-                ctx.get_current_container_mut().layout_row(&[46, -1], 0);
+                ctx.top_container_mut().layout_row(&[-78, -1], 74);
+                ctx.top_container_mut().layout_begin_column();
+                ctx.top_container_mut().layout_row(&[46, -1], 0);
                 ctx.label("Red:");
                 ctx.slider_ex(&mut self.bg[0], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
                 ctx.label("Green:");
                 ctx.slider_ex(&mut self.bg[1], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
                 ctx.label("Blue:");
                 ctx.slider_ex(&mut self.bg[2], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
-                ctx.get_current_container_mut().layout_end_column();
-                let r: Rect = ctx.get_current_container_mut().layout_next();
+                ctx.top_container_mut().layout_end_column();
+                let r: Rect = ctx.top_container_mut().layout_next();
                 ctx.draw_rect(r, color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255));
                 let mut buff = String::new();
                 buff.push_str(format!("#{:02X}{:02X}{:02X}", self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8).as_str());
@@ -224,22 +224,22 @@ impl<'a> State<'a> {
 
     fn log_window(&mut self, ctx: &mut microui_redux::Context) {
         ctx.window("Log Window", rect(350, 40, 300, 200), WidgetOption::NONE, |ctx| {
-            ctx.get_current_container_mut().layout_row(&[-1], -25);
+            ctx.top_container_mut().layout_row(&[-1], -25);
             ctx.panel("Log Output", WidgetOption::NONE, |ctx| {
-                let mut scroll = ctx.get_current_container_scroll();
-                let content_size = ctx.get_current_container_content_size();
-                ctx.get_current_container_mut().layout_row(&[-1], -1);
+                let mut scroll = ctx.top_container().scroll;
+                let content_size = ctx.top_container().content_size;
+                ctx.top_container_mut().layout_row(&[-1], -1);
 
                 ctx.text(self.logbuf.as_str());
 
                 if self.logbuf_updated {
                     scroll.y = content_size.y;
-                    ctx.set_current_container_scroll(&scroll);
+                    ctx.top_container_mut().scroll = scroll;
                     self.logbuf_updated = false;
                 }
             });
             let mut submitted = false;
-            ctx.get_current_container_mut().layout_row(&[-70, -1], 0);
+            ctx.top_container_mut().layout_row(&[-70, -1], 0);
             if ctx.textbox_ex(&mut self.submit_buf, WidgetOption::NONE).is_submitted() {
                 ctx.set_focus(ctx.last_id);
                 submitted = true;
@@ -265,8 +265,8 @@ impl<'a> State<'a> {
     }
     fn style_window(&mut self, ctx: &mut microui_redux::Context) {
         ctx.window("Style Editor", rect(350, 250, 300, 240), WidgetOption::NONE, |ctx| {
-            let sw = (ctx.get_current_container_body().w as f64 * 0.14) as i32;
-            ctx.get_current_container_mut().layout_row(&[80, sw, sw, sw, sw, -1], 0);
+            let sw = (ctx.top_container().body.w as f64 * 0.14) as i32;
+            ctx.top_container_mut().layout_row(&[80, sw, sw, sw, sw, -1], 0);
             let mut i = 0;
             while self.label_colors[i].label.len() > 0 {
                 ctx.label(self.label_colors[i].label);
@@ -277,7 +277,7 @@ impl<'a> State<'a> {
                     self.uint8_slider(&mut (*color).b, 0, 255, ctx);
                     self.uint8_slider(&mut (*color).a, 0, 255, ctx);
                 }
-                let next_layout = ctx.get_current_container_mut().layout_next();
+                let next_layout = ctx.top_container_mut().layout_next();
                 ctx.draw_rect(next_layout, ctx.style.colors[i]);
                 i += 1;
             }
