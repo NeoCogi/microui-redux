@@ -344,7 +344,6 @@ pub struct Context {
     pub hover: Option<Id>,
     pub focus: Option<Id>,
     pub last_id: Option<Id>,
-    pub last_rect: Rect,
     pub last_zindex: i32,
     pub updated_focus: bool,
     pub frame: usize,
@@ -356,7 +355,6 @@ pub struct Context {
     pub root_list: Vec<usize>,
     pub container_stack: Vec<usize>,
     pub id_stack: Vec<Id>,
-    pub layout_stack: Vec<Layout>,
     pub text_stack: Vec<char>,
     pub containers: Vec<Container>,
     pub treenode_pool: Pool<Id, ()>,
@@ -379,7 +377,6 @@ impl Context {
             hover: None,
             focus: None,
             last_id: None,
-            last_rect: Rect::default(),
             last_zindex: 0,
             updated_focus: false,
             frame: 0,
@@ -391,7 +388,6 @@ impl Context {
             root_list: Vec::default(),
             container_stack: Vec::default(),
             id_stack: Vec::default(),
-            layout_stack: Vec::default(),
             text_stack: Vec::default(),
             containers: Vec::default(),
             treenode_pool: Pool::default(),
@@ -420,6 +416,7 @@ pub struct Id(u32);
 #[derive(Default, Clone)]
 pub struct Container {
     id: Id,
+    pub style: Style,
     pub name: String,
     pub rect: Rect,
     pub body: Rect,
@@ -430,6 +427,9 @@ pub struct Container {
     pub command_list: Vec<Command>,
     pub clip_stack: Vec<Rect>,
     pub children: Vec<usize>,
+
+    pub last_rect: Rect,
+    pub layout_stack: Vec<Layout>,
 }
 
 impl Container {}
@@ -623,6 +623,150 @@ fn hash_bytes(hash_0: &mut Id, s: &[u8]) {
     }
 }
 
+impl Container {
+    fn push_layout(&mut self, body: Rect, scroll: Vec2i) {
+        let mut layout: Layout = Layout {
+            body: Rect { x: 0, y: 0, w: 0, h: 0 },
+            next: Rect { x: 0, y: 0, w: 0, h: 0 },
+            position: Vec2i { x: 0, y: 0 },
+            size: Vec2i { x: 0, y: 0 },
+            max: Vec2i { x: 0, y: 0 },
+            widths: [0; 16],
+            items: 0,
+            item_index: 0,
+            next_row: 0,
+            next_type: LayoutPosition::None,
+            indent: 0,
+        };
+        layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.w, body.h);
+        layout.max = vec2(-i32::MAX, -i32::MAX);
+        self.layout_stack.push(layout);
+        self.layout_row(&[0], 0);
+    }
+
+    fn get_layout(&self) -> &Layout {
+        return self.layout_stack.last().unwrap();
+    }
+
+    fn get_layout_mut(&mut self) -> &mut Layout {
+        return self.layout_stack.last_mut().unwrap();
+    }
+
+    pub fn layout_begin_column(&mut self) {
+        let layout = self.layout_next();
+        self.push_layout(layout, vec2(0, 0));
+    }
+
+    pub fn layout_end_column(&mut self) {
+        let b = self.get_layout().clone();
+        self.layout_stack.pop();
+
+        let a = self.get_layout_mut();
+        a.position.x = if a.position.x > b.position.x + b.body.x - a.body.x {
+            a.position.x
+        } else {
+            b.position.x + b.body.x - a.body.x
+        };
+        a.next_row = if a.next_row > b.next_row + b.body.y - a.body.y {
+            a.next_row
+        } else {
+            b.next_row + b.body.y - a.body.y
+        };
+        a.max.x = i32::max(a.max.x, b.max.x);
+        a.max.y = i32::max(a.max.y, b.max.y);
+    }
+
+    pub fn layout_row_for_layout(layout: &mut Layout, widths: &[i32], height: i32) {
+        layout.items = widths.len();
+        assert!(widths.len() <= 16);
+        for i in 0..widths.len() {
+            layout.widths[i] = widths[i];
+        }
+        layout.position = vec2(layout.indent, layout.next_row);
+        layout.size.y = height;
+        layout.item_index = 0;
+    }
+
+    pub fn layout_row(&mut self, widths: &[i32], height: i32) {
+        let layout = self.get_layout_mut();
+        Self::layout_row_for_layout(layout, widths, height);
+    }
+
+    pub fn layout_width(&mut self, width: i32) {
+        self.get_layout_mut().size.x = width;
+    }
+
+    pub fn layout_height(&mut self, height: i32) {
+        self.get_layout_mut().size.y = height;
+    }
+
+    pub fn layout_set_next(&mut self, r: Rect, position: LayoutPosition) {
+        let layout = self.get_layout_mut();
+        layout.next = r;
+        layout.next_type = position;
+    }
+
+    pub fn layout_next(&mut self) -> Rect {
+        let style_size = self.style.size;
+        let style_padding = self.style.padding;
+        let style_spacing = self.style.spacing;
+
+        let layout = self.get_layout_mut();
+        let mut res: Rect = Rect { x: 0, y: 0, w: 0, h: 0 };
+        if layout.next_type != LayoutPosition::None {
+            let type_0 = layout.next_type;
+            layout.next_type = LayoutPosition::None;
+            res = layout.next;
+            if type_0 == LayoutPosition::Absolute {
+                self.last_rect = res;
+                return self.last_rect;
+            }
+        } else {
+            let litems = layout.items;
+            let lsize_y = layout.size.y;
+            let mut undefined_widths = [0; 16];
+            undefined_widths[0..litems as usize].copy_from_slice(&layout.widths[0..litems as usize]);
+            if layout.item_index == layout.items {
+                Self::layout_row_for_layout(layout, &undefined_widths[0..litems as usize], lsize_y);
+            }
+            res.x = layout.position.x;
+            res.y = layout.position.y;
+            res.w = if layout.items > 0 {
+                layout.widths[layout.item_index as usize]
+            } else {
+                layout.size.x
+            };
+            res.h = layout.size.y;
+
+            if res.w == 0 {
+                res.w = style_size.x + style_padding * 2;
+            }
+            if res.h == 0 {
+                res.h = style_size.y + style_padding * 2;
+            }
+            if res.w < 0 {
+                res.w += layout.body.w - res.x + 1;
+            }
+            if res.h < 0 {
+                res.h += layout.body.h - res.y + 1;
+            }
+            layout.item_index += 1;
+        }
+        layout.position.x += res.w + style_spacing;
+        layout.next_row = if layout.next_row > res.y + res.h + style_spacing {
+            layout.next_row
+        } else {
+            res.y + res.h + style_spacing
+        };
+        res.x += layout.body.x;
+        res.y += layout.body.y;
+        layout.max.x = if layout.max.x > res.x + res.w { layout.max.x } else { res.x + res.w };
+        layout.max.y = if layout.max.y > res.y + res.h { layout.max.y } else { res.y + res.h };
+        self.last_rect = res;
+        return self.last_rect;
+    }
+}
+
 impl Context {
     pub fn clear(&mut self, width: i32, height: i32, clr: Color) {
         self.atlas_renderer.clear(width, height, clr);
@@ -690,7 +834,7 @@ impl Context {
 
         assert_eq!(self.container_stack.len(), 0);
         assert_eq!(self.id_stack.len(), 0);
-        assert_eq!(self.layout_stack.len(), 0);
+        // assert_eq!(self.layout_stack.len(), 0);
         if !self.scroll_target.is_none() {
             self.containers[self.scroll_target.unwrap()].scroll.x += self.scroll_delta.x;
             self.containers[self.scroll_target.unwrap()].scroll.y += self.scroll_delta.y;
@@ -802,47 +946,28 @@ impl Context {
         return Clip::Part;
     }
 
-    fn push_layout(&mut self, body: Rect, scroll: Vec2i) {
-        let mut layout: Layout = Layout {
-            body: Rect { x: 0, y: 0, w: 0, h: 0 },
-            next: Rect { x: 0, y: 0, w: 0, h: 0 },
-            position: Vec2i { x: 0, y: 0 },
-            size: Vec2i { x: 0, y: 0 },
-            max: Vec2i { x: 0, y: 0 },
-            widths: [0; 16],
-            items: 0,
-            item_index: 0,
-            next_row: 0,
-            next_type: LayoutPosition::None,
-            indent: 0,
-        };
-        layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.w, body.h);
-        layout.max = vec2(-i32::MAX, -i32::MAX);
-        self.layout_stack.push(layout);
-        self.layout_row(&[0], 0);
-    }
-
-    fn get_layout(&self) -> &Layout {
-        return self.layout_stack.last().unwrap();
-    }
-
-    fn get_layout_mut(&mut self) -> &mut Layout {
-        return self.layout_stack.last_mut().unwrap();
-    }
-
     fn pop_container(&mut self) {
-        let cnt = self.get_current_container();
-        let layout = *self.get_layout();
+        let cnt = self.get_current_container_index();
+        let layout = *self.containers[cnt].get_layout();
         self.containers[cnt].content_size.x = layout.max.x - layout.body.x;
         self.containers[cnt].content_size.y = layout.max.y - layout.body.y;
+        self.containers[cnt].layout_stack.pop();
 
         self.container_stack.pop();
-        self.layout_stack.pop();
         self.pop_id();
     }
 
-    pub fn get_current_container(&self) -> usize {
+    pub fn get_current_container_index(&self) -> usize {
         *self.container_stack.last().unwrap()
+    }
+
+    pub fn get_current_container(&self) -> &Container {
+        &self.containers[self.get_current_container_index()]
+    }
+
+    pub fn get_current_container_mut(&mut self) -> &mut Container {
+        let idx = self.get_current_container_index();
+        &mut self.containers[idx]
     }
 
     pub fn get_current_container_rect(&self) -> Rect {
@@ -884,6 +1009,7 @@ impl Context {
             id,
             name: name.to_string(),
             open: true,
+            style: self.style.clone(),
             ..Default::default()
         });
         self.bring_to_front(idx);
@@ -1005,116 +1131,6 @@ impl Context {
         }
     }
 
-    pub fn layout_begin_column(&mut self) {
-        let layout = self.layout_next();
-        self.push_layout(layout, vec2(0, 0));
-    }
-
-    pub fn layout_end_column(&mut self) {
-        let b = self.get_layout().clone();
-        self.layout_stack.pop();
-
-        let a = self.get_layout_mut();
-        a.position.x = if a.position.x > b.position.x + b.body.x - a.body.x {
-            a.position.x
-        } else {
-            b.position.x + b.body.x - a.body.x
-        };
-        a.next_row = if a.next_row > b.next_row + b.body.y - a.body.y {
-            a.next_row
-        } else {
-            b.next_row + b.body.y - a.body.y
-        };
-        a.max.x = i32::max(a.max.x, b.max.x);
-        a.max.y = i32::max(a.max.y, b.max.y);
-    }
-
-    pub fn layout_row_for_layout(layout: &mut Layout, widths: &[i32], height: i32) {
-        layout.items = widths.len();
-        assert!(widths.len() <= 16);
-        for i in 0..widths.len() {
-            layout.widths[i] = widths[i];
-        }
-        layout.position = vec2(layout.indent, layout.next_row);
-        layout.size.y = height;
-        layout.item_index = 0;
-    }
-
-    pub fn layout_row(&mut self, widths: &[i32], height: i32) {
-        let layout = self.get_layout_mut();
-        Self::layout_row_for_layout(layout, widths, height);
-    }
-
-    pub fn layout_width(&mut self, width: i32) {
-        self.get_layout_mut().size.x = width;
-    }
-
-    pub fn layout_height(&mut self, height: i32) {
-        self.get_layout_mut().size.y = height;
-    }
-
-    pub fn layout_set_next(&mut self, r: Rect, position: LayoutPosition) {
-        let layout = self.get_layout_mut();
-        layout.next = r;
-        layout.next_type = position;
-    }
-
-    pub fn layout_next(&mut self) -> Rect {
-        let style = self.style;
-        let layout = self.get_layout_mut();
-        let mut res: Rect = Rect { x: 0, y: 0, w: 0, h: 0 };
-        if layout.next_type != LayoutPosition::None {
-            let type_0 = layout.next_type;
-            layout.next_type = LayoutPosition::None;
-            res = layout.next;
-            if type_0 == LayoutPosition::Absolute {
-                self.last_rect = res;
-                return self.last_rect;
-            }
-        } else {
-            let litems = layout.items;
-            let lsize_y = layout.size.y;
-            let mut undefined_widths = [0; 16];
-            undefined_widths[0..litems as usize].copy_from_slice(&layout.widths[0..litems as usize]);
-            if layout.item_index == layout.items {
-                Self::layout_row_for_layout(layout, &undefined_widths[0..litems as usize], lsize_y);
-            }
-            res.x = layout.position.x;
-            res.y = layout.position.y;
-            res.w = if layout.items > 0 {
-                layout.widths[layout.item_index as usize]
-            } else {
-                layout.size.x
-            };
-            res.h = layout.size.y;
-            if res.w == 0 {
-                res.w = style.size.x + style.padding * 2;
-            }
-            if res.h == 0 {
-                res.h = style.size.y + style.padding * 2;
-            }
-            if res.w < 0 {
-                res.w += layout.body.w - res.x + 1;
-            }
-            if res.h < 0 {
-                res.h += layout.body.h - res.y + 1;
-            }
-            layout.item_index += 1;
-        }
-        layout.position.x += res.w + style.spacing;
-        layout.next_row = if layout.next_row > res.y + res.h + style.spacing {
-            layout.next_row
-        } else {
-            res.y + res.h + style.spacing
-        };
-        res.x += layout.body.x;
-        res.y += layout.body.y;
-        layout.max.x = if layout.max.x > res.x + res.w { layout.max.x } else { res.x + res.w };
-        layout.max.y = if layout.max.y > res.y + res.h { layout.max.y } else { res.y + res.h };
-        self.last_rect = res;
-        return self.last_rect;
-    }
-
     fn in_hover_root(&mut self) -> bool {
         match self.hover_root {
             Some(hover_root) => {
@@ -1218,11 +1234,17 @@ impl Context {
     pub fn text(&mut self, text: &str) {
         let font = self.style.font;
         let color = self.style.colors[ControlColor::Text as usize];
-        self.layout_begin_column();
         let h = self.atlas_renderer.get_font_height(font) as i32;
-        self.layout_row(&[-1], h);
+        {
+            let container = self.get_current_container_mut();
+            container.layout_begin_column();
+            container.layout_row(&[-1], h);
+        }
         for line in text.lines() {
-            let mut r = self.layout_next();
+            let mut r = {
+                let container = self.get_current_container_mut();
+                container.layout_next()
+            };
             let mut rx = r.x;
             let words = line.split_inclusive(' ');
             for w in words {
@@ -1232,16 +1254,18 @@ impl Context {
                     self.draw_text(font, w, vec2(rx, r.y), color);
                     rx += tw;
                 } else {
-                    r = self.layout_next();
+                    let container = self.get_current_container_mut();
+                    r = container.layout_next();
                     rx = r.x;
                 }
             }
         }
-        self.layout_end_column();
+        let container = self.get_current_container_mut();
+        container.layout_end_column();
     }
 
     pub fn label(&mut self, text: &str) {
-        let layout = self.layout_next();
+        let layout = self.get_current_container_mut().layout_next();
         self.draw_control_text(text, layout, ControlColor::Text, WidgetOption::NONE);
     }
 
@@ -1252,7 +1276,7 @@ impl Context {
         } else {
             self.get_id_u32(icon as u32)
         };
-        let r: Rect = self.layout_next();
+        let r: Rect = self.get_current_container_mut().layout_next();
         self.update_control(id, r, opt);
         if self.mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
@@ -1270,7 +1294,7 @@ impl Context {
     pub fn checkbox(&mut self, label: &str, state: &mut bool) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.get_id_from_ptr(state);
-        let mut r: Rect = self.layout_next();
+        let mut r: Rect = self.get_current_container_mut().layout_next();
         let box_0: Rect = rect(r.x, r.y, r.h, r.h);
         self.update_control(id, r, WidgetOption::NONE);
         if self.mouse_pressed.is_left() && self.focus == Some(id) {
@@ -1356,7 +1380,7 @@ impl Context {
 
     pub fn textbox_ex(&mut self, buf: &mut String, opt: WidgetOption) -> ResourceState {
         let id: Id = self.get_id_from_ptr(buf);
-        let r: Rect = self.layout_next();
+        let r: Rect = self.get_current_container_mut().layout_next();
         return self.textbox_raw(buf, id, r, opt);
     }
 
@@ -1365,7 +1389,7 @@ impl Context {
         let last = *value;
         let mut v = last;
         let id = self.get_id_from_ptr(value);
-        let base = self.layout_next();
+        let base = self.get_current_container_mut().layout_next();
         if !self.number_textbox(precision, &mut v, base, id).is_none() {
             return res;
         }
@@ -1401,7 +1425,7 @@ impl Context {
     pub fn number_ex(&mut self, value: &mut Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.get_id_from_ptr(value);
-        let base: Rect = self.layout_next();
+        let base: Rect = self.get_current_container_mut().layout_next();
         let last: Real = *value;
         if !self.number_textbox(precision, value, base, id).is_none() {
             return res;
@@ -1422,8 +1446,8 @@ impl Context {
 
     fn node(&mut self, label: &str, is_treenode: bool, opt: WidgetOption) -> ResourceState {
         let id: Id = self.get_id_from_str(label);
-        self.layout_row(&[-1], 0);
-        let mut r = self.layout_next();
+        self.get_current_container_mut().layout_row(&[-1], 0);
+        let mut r = self.get_current_container_mut().layout_next();
         self.update_control(id, r, WidgetOption::NONE);
         let state = self.treenode_pool.get(id);
         let mut active = state.is_some();
@@ -1467,13 +1491,13 @@ impl Context {
     pub fn treenode<F: FnOnce(&mut Self)>(&mut self, label: &str, opt: WidgetOption, f: F) {
         let res = self.node(label, true, opt);
         if res.is_active() && self.last_id.is_some() {
-            self.get_layout_mut().indent += self.style.indent;
+            self.get_current_container_mut().get_layout_mut().indent += self.style.indent;
             self.id_stack.push(self.last_id.unwrap());
         }
 
         if !res.is_none() {
             f(self);
-            self.get_layout_mut().indent -= self.style.indent;
+            self.get_current_container_mut().get_layout_mut().indent -= self.style.indent;
             self.pop_id();
         }
     }
@@ -1557,7 +1581,9 @@ impl Context {
         if !opt.has_no_scroll() {
             self.scrollbars(cnt_idx, &mut body);
         }
-        self.push_layout(expand_rect(body, -self.style.padding), self.containers[cnt_idx].scroll);
+        let padding = -self.style.padding;
+        let scroll = self.containers[cnt_idx].scroll;
+        self.get_current_container_mut().push_layout(expand_rect(body, padding), scroll);
         self.containers[cnt_idx].body = body;
     }
 
@@ -1645,7 +1671,7 @@ impl Context {
             }
         }
         if opt.is_auto_sizing() {
-            let r_1 = self.get_layout().body;
+            let r_1 = self.get_current_container_mut().get_layout().body;
             self.containers[cnt_id.unwrap()].rect.w = self.containers[cnt_id.unwrap()].content_size.x + (self.containers[cnt_id.unwrap()].rect.w - r_1.w);
             self.containers[cnt_id.unwrap()].rect.h = self.containers[cnt_id.unwrap()].content_size.y + (self.containers[cnt_id.unwrap()].rect.h - r_1.h);
         }
@@ -1685,7 +1711,7 @@ impl Context {
 
         let cnt_id = self.get_container_index_intern(self.last_id.unwrap(), name, opt);
         self.containers[*self.root_list.last().unwrap()].children.push(cnt_id.unwrap());
-        let rect = self.layout_next();
+        let rect = self.get_current_container_mut().layout_next();
         let clip_rect = self.containers[cnt_id.unwrap()].body;
         self.containers[cnt_id.unwrap()].rect = rect;
         if !opt.has_no_frame() {
