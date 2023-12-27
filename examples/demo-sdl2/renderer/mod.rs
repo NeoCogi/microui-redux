@@ -385,7 +385,7 @@ impl Renderer {
     }
 }
 
-impl AtlasRenderer for Renderer {
+impl Canvas for Renderer {
     fn draw_rect(&mut self, rect: Rect, color: Color) {
         Renderer::draw_rect(self, rect, color);
     }
@@ -406,7 +406,10 @@ impl AtlasRenderer for Renderer {
     fn flush(&mut self) {
         Renderer::flush(self);
     }
+}
 
+pub struct MyAtlas {}
+impl Atlas for MyAtlas {
     fn get_char_width(&self, _font: FontId, c: char) -> usize {
         ATLAS[ATLAS_FONT as usize + c as usize].w as usize
     }
