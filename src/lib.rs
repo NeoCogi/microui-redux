@@ -51,22 +51,23 @@
 // IN THE SOFTWARE.
 //
 extern crate std;
-use std::{f32, collections::HashMap, hash::Hash};
+use std::{f32, collections::HashMap, hash::Hash, rc::Rc};
 
 mod atlas;
 pub use atlas::*;
 
 use bitflags::*;
-
-pub trait AtlasRenderer {
+pub trait Atlas {
+    fn get_char_width(&self, font: FontId, c: char) -> usize;
+    fn get_font_height(&self, font: FontId) -> usize;
+}
+pub trait Canvas {
     fn draw_rect(&mut self, rect: Rect, color: Color);
     fn draw_chars(&mut self, text: &[char], pos: Vec2i, color: Color);
     fn draw_icon(&mut self, id: Icon, r: Rect, color: Color);
     fn set_clip_rect(&mut self, width: i32, height: i32, rect: Rect);
     fn clear(&mut self, width: i32, height: i32, clr: Color);
     fn flush(&mut self);
-    fn get_char_width(&self, font: FontId, c: char) -> usize;
-    fn get_font_height(&self, font: FontId) -> usize;
 }
 
 #[derive(Clone)]
@@ -339,7 +340,8 @@ impl KeyMode {
 
 #[repr(C)]
 pub struct Context {
-    atlas_renderer: Box<dyn AtlasRenderer>,
+    atlas: Rc<dyn Atlas>,
+    canvas: Box<dyn Canvas>,
     pub style: Style,
     pub hover: Option<Id>,
     pub focus: Option<Id>,
@@ -370,9 +372,10 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn new(atlas_renderer: Box<dyn AtlasRenderer>) -> Self {
+    pub fn new(atlas: Rc<dyn Atlas>, canvas: Box<dyn Canvas>) -> Self {
         Self {
-            atlas_renderer,
+            atlas,
+            canvas,
             style: Style::default(),
             hover: None,
             focus: None,
@@ -413,9 +416,10 @@ pub struct Vec2i {
 #[derive(Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Id(u32);
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Container {
     id: Id,
+    atlas: Rc<dyn Atlas>,
     pub style: Style,
     pub name: String,
     pub rect: Rect,
@@ -769,7 +773,7 @@ impl Container {
 
 impl Context {
     pub fn clear(&mut self, width: i32, height: i32, clr: Color) {
-        self.atlas_renderer.clear(width, height, clr);
+        self.canvas.clear(width, height, clr);
     }
 
     fn render_container(&mut self, container_idx: usize) {
@@ -778,16 +782,16 @@ impl Context {
             match command {
                 Command::Text { str_start, str_len, pos, color, .. } => {
                     let str = &self.text_stack[*str_start..*str_start + *str_len];
-                    self.atlas_renderer.draw_chars(str, *pos, *color);
+                    self.canvas.draw_chars(str, *pos, *color);
                 }
                 Command::Rect { rect, color } => {
-                    self.atlas_renderer.draw_rect(*rect, *color);
+                    self.canvas.draw_rect(*rect, *color);
                 }
                 Command::Icon { id, rect, color } => {
-                    self.atlas_renderer.draw_icon(*id, *rect, *color);
+                    self.canvas.draw_icon(*id, *rect, *color);
                 }
                 Command::Clip { rect } => {
-                    self.atlas_renderer.set_clip_rect(800, 600, *rect);
+                    self.canvas.set_clip_rect(800, 600, *rect);
                 }
                 _ => {}
             }
@@ -801,7 +805,7 @@ impl Context {
         for rc in self.root_list.clone() {
             self.render_container(rc);
         }
-        self.atlas_renderer.flush()
+        self.canvas.flush()
     }
 
     fn draw_frame(&mut self, rect: Rect, colorid: ControlColor) {
@@ -980,7 +984,18 @@ impl Context {
             name: name.to_string(),
             open: true,
             style: self.style.clone(),
-            ..Default::default()
+            atlas: self.atlas.clone(),
+            rect: Rect::default(),
+            body: Rect::default(),
+            content_size: Vec2i::default(),
+            scroll: Vec2i::default(),
+            zindex: 0,
+            command_list: Vec::default(),
+            clip_stack: Vec::default(),
+            children: Vec::default(),
+            is_root: false,
+            last_rect: Rect::default(),
+            layout_stack: Vec::default(),
         });
         self.bring_to_front(idx);
         Some(idx)
@@ -1110,6 +1125,7 @@ impl Context {
                         return true;
                     }
                     if self.containers[self.container_stack[len - i - 1]].is_root {
+                        // panel cannot scroll
                         break;
                     }
                 }
@@ -1189,14 +1205,14 @@ impl Context {
                 res = usize::max(res, acc);
                 acc = 0;
             }
-            acc += self.atlas_renderer.get_char_width(font, c);
+            acc += self.atlas.get_char_width(font, c);
         }
         res = usize::max(res, acc);
         res as i32
     }
 
     pub fn get_text_height(&self, font: FontId, text: &str) -> i32 {
-        let font_height = self.atlas_renderer.get_font_height(font);
+        let font_height = self.atlas.get_font_height(font);
         let lc = text.lines().count();
         (lc * font_height) as i32
     }
@@ -1204,7 +1220,7 @@ impl Context {
     pub fn text(&mut self, text: &str) {
         let font = self.style.font;
         let color = self.style.colors[ControlColor::Text as usize];
-        let h = self.atlas_renderer.get_font_height(font) as i32;
+        let h = self.atlas.get_font_height(font) as i32;
         self.top_container_mut().layout_begin_column();
         self.top_container_mut().layout_row(&[-1], h);
         for line in text.lines() {

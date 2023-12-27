@@ -1,10 +1,12 @@
 extern crate sdl2;
 mod renderer;
 
+use std::rc::Rc;
+
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::video::GLProfile;
-use crate::renderer::Renderer;
+use crate::{renderer::Renderer, renderer::MyAtlas};
 use microui_redux::*;
 
 pub fn r_get_char_width(_font: FontId, c: char) -> usize {
@@ -317,7 +319,7 @@ fn main() {
     let rd = Renderer::new(gl, &microui_redux::ATLAS_TEXTURE, width, height);
 
     let mut state = State::new();
-    let mut ctx = microui_redux::Context::new(Box::new(rd));
+    let mut ctx = microui_redux::Context::new(Rc::new(MyAtlas {}), Box::new(rd));
 
     'running: loop {
         let (width, height) = window.size();
