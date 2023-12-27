@@ -427,13 +427,13 @@ pub struct Container {
     pub command_list: Vec<Command>,
     pub clip_stack: Vec<Rect>,
     pub children: Vec<usize>,
-
+    pub is_root: bool,
     pub last_rect: Rect,
     pub layout_stack: Vec<Layout>,
 }
 
 impl Container {}
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, Debug)]
 pub struct Rect {
     pub x: i32,
     pub y: i32,
@@ -1109,7 +1109,7 @@ impl Context {
                     if self.container_stack[len - i - 1] == hover_root {
                         return true;
                     }
-                    if self.containers[self.container_stack[len - i - 1]].command_list.len() != 0 {
+                    if self.containers[self.container_stack[len - i - 1]].is_root {
                         break;
                     }
                 }
@@ -1545,14 +1545,14 @@ impl Context {
         }
         let padding = -self.style.padding;
         let scroll = self.containers[cnt_idx].scroll;
-        self.top_container_mut().push_layout(expand_rect(body, padding), scroll);
+        self.containers[cnt_idx].push_layout(expand_rect(body, padding), scroll);
         self.containers[cnt_idx].body = body;
     }
 
     fn begin_root_container(&mut self, cnt: usize) {
         self.container_stack.push(cnt);
-
         self.root_list.push(cnt);
+        self.containers[cnt].is_root = true;
 
         if rect_overlaps_vec2(self.containers[cnt].rect, self.mouse_pos)
             && (self.next_hover_root.is_none() || self.containers[cnt].zindex > self.containers[self.next_hover_root.unwrap()].zindex)
@@ -1564,6 +1564,7 @@ impl Context {
     }
 
     fn end_root_container(&mut self) {
+        self.top_container_mut().is_root = false;
         self.pop_clip_rect();
         self.pop_container();
     }
