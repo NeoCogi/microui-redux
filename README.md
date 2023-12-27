@@ -12,7 +12,7 @@ Clone and build the demo (SDL2 & glow) / Tested on linux:
 $ cargo run --example demo-sdl2
 ```
 
-![random](https://github.com/NeoCogi/microui-rs/raw/master/res/microui.png)
+![random](https://github.com/eloraiby/microui-redux/raw/master/res/microui.png)
 
 ## Roadmap
 
@@ -23,7 +23,10 @@ $ cargo run --example demo-sdl2
 - [x] Move to AtlasRenderer Trait
 - [x] Remove/Refactor `Pool`
 - [ ] Change layout code
-- [ ] Mechanism to garbage collect/free unused containers/tree nodes
+- [ ] Treenode as tree
+- [ ] Mechanism to garbage collect/free unused containers/tree nodes (use root lists and mark/sweep?)
 - [ ] Add Atlasser to the code
 - [ ] Image widget
+- [ ] Documentation
+- [ ] Examples
 
