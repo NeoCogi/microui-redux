@@ -198,7 +198,7 @@ impl<'a> State<'a> {
                 ctx.top_container_mut().layout_end_column();
                 ctx.top_container_mut().layout_begin_column();
                 ctx.top_container_mut().layout_row(&[-1], 0);
-                ctx.text(
+                ctx.top_container_mut().text(
                     "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla."
                     ,
                 );
@@ -216,7 +216,7 @@ impl<'a> State<'a> {
                 ctx.slider_ex(&mut self.bg[2], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
                 ctx.top_container_mut().layout_end_column();
                 let r: Rect = ctx.top_container_mut().layout_next();
-                ctx.draw_rect(r, color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255));
+                ctx.top_container_mut().draw_rect(r, color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255));
                 let mut buff = String::new();
                 buff.push_str(format!("#{:02X}{:02X}{:02X}", self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8).as_str());
                 ctx.draw_control_text(buff.as_str(), r, ControlColor::Text, WidgetOption::ALIGN_CENTER);
@@ -232,7 +232,7 @@ impl<'a> State<'a> {
                 let content_size = ctx.top_container().content_size;
                 ctx.top_container_mut().layout_row(&[-1], -1);
 
-                ctx.text(self.logbuf.as_str());
+                ctx.top_container_mut().text(self.logbuf.as_str());
 
                 if self.logbuf_updated {
                     scroll.y = content_size.y;
@@ -269,20 +269,23 @@ impl<'a> State<'a> {
         ctx.window("Style Editor", rect(350, 250, 300, 240), WidgetOption::NONE, |ctx| {
             let sw = (ctx.top_container().body.w as f64 * 0.14) as i32;
             ctx.top_container_mut().layout_row(&[80, sw, sw, sw, sw, -1], 0);
+            let mut style = ctx.get_style();
             let mut i = 0;
             while self.label_colors[i].label.len() > 0 {
                 ctx.label(self.label_colors[i].label);
                 unsafe {
-                    let color = ctx.style.colors.as_mut_ptr().offset(i as isize);
+                    let color = style.colors.as_mut_ptr().offset(i as isize);
                     self.uint8_slider(&mut (*color).r, 0, 255, ctx);
                     self.uint8_slider(&mut (*color).g, 0, 255, ctx);
                     self.uint8_slider(&mut (*color).b, 0, 255, ctx);
                     self.uint8_slider(&mut (*color).a, 0, 255, ctx);
                 }
                 let next_layout = ctx.top_container_mut().layout_next();
-                ctx.draw_rect(next_layout, ctx.style.colors[i]);
+                let color = style.colors[i];
+                ctx.top_container_mut().draw_rect(next_layout, color);
                 i += 1;
             }
+            ctx.set_style(style);
         });
     }
 
@@ -350,26 +353,26 @@ fn main() {
             match event {
                 Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
                 Event::Window { win_event: WindowEvent::Close, .. } => break 'running,
-                Event::MouseMotion { x, y, .. } => ctx.input_mousemove(x, y),
-                Event::MouseWheel { y, .. } => ctx.input_scroll(0, y * -30),
+                Event::MouseMotion { x, y, .. } => ctx.input.mousemove(x, y),
+                Event::MouseWheel { y, .. } => ctx.input.scroll(0, y * -30),
                 Event::MouseButtonDown { x, y, mouse_btn, .. } => {
                     let mb = map_mouse_button(mouse_btn);
-                    ctx.input_mousedown(x, y, mb);
+                    ctx.input.mousedown(x, y, mb);
                 }
                 Event::MouseButtonUp { x, y, mouse_btn, .. } => {
                     let mb = map_mouse_button(mouse_btn);
-                    ctx.input_mouseup(x, y, mb);
+                    ctx.input.mouseup(x, y, mb);
                 }
                 Event::KeyDown { keymod, keycode, .. } => {
                     let km = map_keymode(keymod, keycode);
-                    ctx.input_keydown(km);
+                    ctx.input.keydown(km);
                 }
                 Event::KeyUp { keymod, keycode, .. } => {
                     let km = map_keymode(keymod, keycode);
-                    ctx.input_keyup(km);
+                    ctx.input.keyup(km);
                 }
                 Event::TextInput { text, .. } => {
-                    ctx.input_text(text.as_str());
+                    ctx.input.text(text.as_str());
                 }
 
                 _ => {}
