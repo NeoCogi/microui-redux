@@ -52,6 +52,7 @@
 //
 use microui_redux::*;
 use glow::*;
+use rs_math3d::*;
 
 const VERTEX_SHADER: &str = "#version 100
 uniform highp mat4 uTransform;
@@ -299,11 +300,11 @@ impl Renderer {
         self.verts.push(v3.clone());
     }
 
-    pub fn push_rect(&mut self, dst: Rect, src: Rect, color: Color) {
+    pub fn push_rect(&mut self, dst: Recti, src: Recti, color: Color) {
         let x = src.x as f32 / ATLAS_WIDTH as f32;
         let y = src.y as f32 / ATLAS_HEIGHT as f32;
-        let w = src.w as f32 / ATLAS_WIDTH as f32;
-        let h = src.h as f32 / ATLAS_HEIGHT as f32;
+        let w = src.width as f32 / ATLAS_WIDTH as f32;
+        let h = src.height as f32 / ATLAS_HEIGHT as f32;
 
         let mut v0 = Vertex::default();
         let mut v1 = Vertex::default();
@@ -323,12 +324,12 @@ impl Renderer {
         // position
         v0.pos.x = dst.x as f32;
         v0.pos.y = dst.y as f32;
-        v1.pos.x = dst.x as f32 + dst.w as f32;
+        v1.pos.x = dst.x as f32 + dst.width as f32;
         v1.pos.y = dst.y as f32;
-        v2.pos.x = dst.x as f32 + dst.w as f32;
-        v2.pos.y = dst.y as f32 + dst.h as f32;
+        v2.pos.x = dst.x as f32 + dst.width as f32;
+        v2.pos.y = dst.y as f32 + dst.height as f32;
         v3.pos.x = dst.x as f32;
-        v3.pos.y = dst.y as f32 + dst.h as f32;
+        v3.pos.y = dst.y as f32 + dst.height as f32;
 
         // color
         v0.color = microui_redux::color(color.r, color.g, color.b, color.a);
@@ -339,37 +340,37 @@ impl Renderer {
         self.push_quad_vertices(&v0, &v1, &v2, &v3);
     }
 
-    pub fn draw_rect(&mut self, rect: Rect, color: Color) {
+    pub fn draw_rect(&mut self, rect: Recti, color: Color) {
         self.push_rect(rect, ATLAS[ATLAS_WHITE as usize], color);
     }
 
     pub fn draw_chars(&mut self, text: &[char], pos: Vec2i, color: Color) {
-        let mut dst = Rect { x: pos.x, y: pos.y, w: 0, h: 0 };
+        let mut dst = Recti { x: pos.x, y: pos.y, width: 0, height: 0 };
         for p in text {
             if (*p as usize) < 127 {
                 let chr = usize::min(*p as usize, 127);
                 let src = ATLAS[ATLAS_FONT as usize + chr];
-                dst.w = src.w;
-                dst.h = src.h;
+                dst.width = src.width;
+                dst.height = src.height;
                 self.push_rect(dst, src, color);
-                dst.x += dst.w;
+                dst.x += dst.width;
             }
         }
     }
 
-    pub fn draw_icon(&mut self, id: Icon, r: Rect, color: Color) {
+    pub fn draw_icon(&mut self, id: Icon, r: Recti, color: Color) {
         let src = ATLAS[id as usize];
-        let x = r.x + (r.w - src.w) / 2;
-        let y = r.y + (r.h - src.h) / 2;
-        self.push_rect(rect(x, y, src.w, src.h), src, color);
+        let x = r.x + (r.width - src.width) / 2;
+        let y = r.y + (r.height - src.height) / 2;
+        self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
-    pub fn set_clip_rect(&mut self, width: i32, height: i32, rect: Rect) {
+    pub fn set_clip_rect(&mut self, width: i32, height: i32, rect: Recti) {
         unsafe {
             self.width = width as u32;
             self.height = height as u32;
             self.flush();
-            self.gl.scissor(rect.x, height - (rect.y + rect.h), rect.w, rect.h);
+            self.gl.scissor(rect.x, height - (rect.y + rect.height), rect.width, rect.height);
         }
     }
 
@@ -386,16 +387,16 @@ impl Renderer {
 }
 
 impl Canvas for Renderer {
-    fn draw_rect(&mut self, rect: Rect, color: Color) {
+    fn draw_rect(&mut self, rect: Recti, color: Color) {
         Renderer::draw_rect(self, rect, color);
     }
     fn draw_chars(&mut self, text: &[char], pos: Vec2i, color: Color) {
         Renderer::draw_chars(self, text, pos, color);
     }
-    fn draw_icon(&mut self, id: Icon, r: Rect, color: Color) {
+    fn draw_icon(&mut self, id: Icon, r: Recti, color: Color) {
         Renderer::draw_icon(self, id, r, color);
     }
-    fn set_clip_rect(&mut self, width: i32, height: i32, rect: Rect) {
+    fn set_clip_rect(&mut self, width: i32, height: i32, rect: Recti) {
         Renderer::set_clip_rect(self, width, height, rect);
     }
 
@@ -411,7 +412,7 @@ impl Canvas for Renderer {
 pub struct MyAtlas {}
 impl Atlas for MyAtlas {
     fn get_char_width(&self, _font: FontId, c: char) -> usize {
-        ATLAS[ATLAS_FONT as usize + c as usize].w as usize
+        ATLAS[ATLAS_FONT as usize + c as usize].width as usize
     }
     fn get_font_height(&self, _font: FontId) -> usize {
         18

@@ -14,6 +14,7 @@ name = "microui_redux"
 
 [dependencies]
 bitflags = "2.4.1"
+rs-math3d = "0.9.21"
 
 [dev-dependencies]
 glow = "0.13.0"

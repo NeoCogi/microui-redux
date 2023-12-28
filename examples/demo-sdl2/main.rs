@@ -8,9 +8,10 @@ use sdl2::keyboard::Keycode;
 use sdl2::video::GLProfile;
 use crate::{renderer::Renderer, renderer::MyAtlas};
 use microui_redux::*;
+use rs_math3d::*;
 
 pub fn r_get_char_width(_font: FontId, c: char) -> usize {
-    ATLAS[ATLAS_FONT as usize + c as usize].w as usize
+    ATLAS[ATLAS_FONT as usize + c as usize].width as usize
 }
 
 pub fn r_get_font_height(_font: FontId) -> usize {
@@ -110,8 +111,8 @@ impl<'a> State<'a> {
     fn test_window(&mut self, ctx: &mut microui_redux::Context) {
         ctx.window("Demo Window", rect(40, 40, 300, 450), WidgetOption::NONE, |ctx| {
             let mut win = ctx.top_container().rect;
-            win.w = if win.w > 240 { win.w } else { 240 };
-            win.h = if win.h > 300 { win.h } else { 300 };
+            win.width = if win.width > 240 { win.width } else { 240 };
+            win.height = if win.height > 300 { win.height } else { 300 };
 
             ctx.top_container_mut().rect = win;
 
@@ -129,7 +130,7 @@ impl<'a> State<'a> {
                 buff.clear();
                 ctx.label("Size:");
 
-                buff.push_str(format!("{}, {}", win_0.w, win_0.h).as_str());
+                buff.push_str(format!("{}, {}", win_0.width, win_0.height).as_str());
 
                 ctx.label(buff.as_str());
             });
@@ -215,7 +216,7 @@ impl<'a> State<'a> {
                 ctx.label("Blue:");
                 ctx.slider_ex(&mut self.bg[2], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
                 ctx.top_container_mut().layout_end_column();
-                let r: Rect = ctx.top_container_mut().layout_next();
+                let r: Recti = ctx.top_container_mut().layout_next();
                 ctx.top_container_mut().draw_rect(r, color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255));
                 let mut buff = String::new();
                 buff.push_str(format!("#{:02X}{:02X}{:02X}", self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8).as_str());
@@ -267,7 +268,7 @@ impl<'a> State<'a> {
     }
     fn style_window(&mut self, ctx: &mut microui_redux::Context) {
         ctx.window("Style Editor", rect(350, 250, 300, 240), WidgetOption::NONE, |ctx| {
-            let sw = (ctx.top_container().body.w as f64 * 0.14) as i32;
+            let sw = (ctx.top_container().body.width as f64 * 0.14) as i32;
             ctx.top_container_mut().layout_row(&[80, sw, sw, sw, sw, -1], 0);
             let mut style = ctx.get_style();
             let mut i = 0;

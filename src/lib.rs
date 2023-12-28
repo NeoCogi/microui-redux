@@ -50,8 +50,9 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-extern crate std;
 use std::{f32, collections::HashMap, hash::Hash, rc::Rc};
+
+use rs_math3d::*;
 
 mod atlas;
 pub use atlas::*;
@@ -62,10 +63,10 @@ pub trait Atlas {
     fn get_font_height(&self, font: FontId) -> usize;
 }
 pub trait Canvas {
-    fn draw_rect(&mut self, rect: Rect, color: Color);
+    fn draw_rect(&mut self, rect: Recti, color: Color);
     fn draw_chars(&mut self, text: &[char], pos: Vec2i, color: Color);
-    fn draw_icon(&mut self, id: Icon, r: Rect, color: Color);
-    fn set_clip_rect(&mut self, width: i32, height: i32, rect: Rect);
+    fn draw_icon(&mut self, id: Icon, r: Recti, color: Color);
+    fn set_clip_rect(&mut self, width: i32, height: i32, rect: Recti);
     fn clear(&mut self, width: i32, height: i32, clr: Color);
     fn flush(&mut self);
 }
@@ -465,12 +466,6 @@ impl Context {
     }
 }
 
-#[derive(Default, Copy, Clone)]
-pub struct Vec2i {
-    pub x: i32,
-    pub y: i32,
-}
-
 #[derive(Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Id(u32);
 
@@ -480,34 +475,25 @@ pub struct Container {
     atlas: Rc<dyn Atlas>,
     pub style: Style,
     pub name: String,
-    pub rect: Rect,
-    pub body: Rect,
+    pub rect: Recti,
+    pub body: Recti,
     pub content_size: Vec2i,
     pub scroll: Vec2i,
     pub zindex: i32,
     pub open: bool,
     pub command_list: Vec<Command>,
-    pub clip_stack: Vec<Rect>,
+    pub clip_stack: Vec<Recti>,
     pub children: Vec<usize>,
     pub is_root: bool,
-    pub last_rect: Rect,
+    pub last_rect: Recti,
     pub layout_stack: Vec<Layout>,
     pub text_stack: Vec<char>,
 }
 
-impl Container {}
-#[derive(Default, Copy, Clone, Debug)]
-pub struct Rect {
-    pub x: i32,
-    pub y: i32,
-    pub w: i32,
-    pub h: i32,
-}
-
 #[derive(Default, Copy, Clone)]
 pub struct Layout {
-    pub body: Rect,
-    pub next: Rect,
+    pub body: Recti,
+    pub next: Recti,
     pub position: Vec2i,
     pub size: Vec2i,
     pub max: Vec2i,
@@ -522,10 +508,10 @@ pub struct Layout {
 #[derive(Clone)]
 pub enum Command {
     Clip {
-        rect: Rect,
+        rect: Recti,
     },
-    Rect {
-        rect: Rect,
+    Recti {
+        rect: Recti,
         color: Color,
     },
     Text {
@@ -536,7 +522,7 @@ pub enum Command {
         str_len: usize,
     },
     Icon {
-        rect: Rect,
+        rect: Recti,
         id: Icon,
         color: Color,
     },
@@ -596,7 +582,12 @@ impl Default for LayoutPosition {
     }
 }
 
-static UNCLIPPED_RECT: Rect = Rect { x: 0, y: 0, w: i32::MAX, h: i32::MAX };
+static UNCLIPPED_RECT: Recti = Recti {
+    x: 0,
+    y: 0,
+    width: i32::MAX,
+    height: i32::MAX,
+};
 
 impl Default for Style {
     fn default() -> Self {
@@ -633,23 +624,24 @@ pub fn vec2(x: i32, y: i32) -> Vec2i {
     Vec2i { x, y }
 }
 
-pub fn rect(x: i32, y: i32, w: i32, h: i32) -> Rect {
-    Rect { x, y, w, h }
+pub fn rect(x: i32, y: i32, w: i32, h: i32) -> Recti {
+    Recti { x, y, width: w, height: h }
 }
 
 pub fn color(r: u8, g: u8, b: u8, a: u8) -> Color {
     Color { r, g, b, a }
 }
 
-pub fn expand_rect(r: Rect, n: i32) -> Rect {
-    rect(r.x - n, r.y - n, r.w + n * 2, r.h + n * 2)
+pub fn expand_rect(r: Recti, n: i32) -> Recti {
+    rect(r.x - n, r.y - n, r.width + n * 2, r.height + n * 2)
 }
 
-pub fn intersect_rects(r1: Rect, r2: Rect) -> Rect {
-    let x1 = i32::max(r1.x, r2.x);
-    let y1 = i32::max(r1.y, r2.y);
-    let mut x2 = i32::min(r1.x + r1.w, r2.x + r2.w);
-    let mut y2 = i32::min(r1.y + r1.h, r2.y + r2.h);
+pub fn intersect_rects(r1: Recti, r2: Recti) -> Recti {
+    use std::cmp::{min, max};
+    let x1 = max(r1.x, r2.x);
+    let y1 = max(r1.y, r2.y);
+    let mut x2 = min(r1.x + r1.width, r2.x + r2.width);
+    let mut y2 = min(r1.y + r1.height, r2.y + r2.height);
     if x2 < x1 {
         x2 = x1;
     }
@@ -659,8 +651,8 @@ pub fn intersect_rects(r1: Rect, r2: Rect) -> Rect {
     return rect(x1, y1, x2 - x1, y2 - y1);
 }
 
-pub fn rect_overlaps_vec2(r: Rect, p: Vec2i) -> bool {
-    p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h
+pub fn rect_overlaps_vec2(r: Recti, p: Vec2i) -> bool {
+    p.x >= r.x && p.x < r.x + r.width && p.y >= r.y && p.y < r.y + r.height
 }
 
 fn hash_step(h: u32, n: u32) -> u32 {
@@ -687,10 +679,10 @@ fn hash_bytes(hash_0: &mut Id, s: &[u8]) {
 }
 
 impl Container {
-    fn push_layout(&mut self, body: Rect, scroll: Vec2i) {
+    fn push_layout(&mut self, body: Recti, scroll: Vec2i) {
         let mut layout: Layout = Layout {
-            body: Rect { x: 0, y: 0, w: 0, h: 0 },
-            next: Rect { x: 0, y: 0, w: 0, h: 0 },
+            body: Recti { x: 0, y: 0, width: 0, height: 0 },
+            next: Recti { x: 0, y: 0, width: 0, height: 0 },
             position: Vec2i { x: 0, y: 0 },
             size: Vec2i { x: 0, y: 0 },
             max: Vec2i { x: 0, y: 0 },
@@ -701,7 +693,7 @@ impl Container {
             next_type: LayoutPosition::None,
             indent: 0,
         };
-        layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.w, body.h);
+        layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.width, body.height);
         layout.max = vec2(-i32::MAX, -i32::MAX);
         self.layout_stack.push(layout);
         self.layout_row(&[0], 0);
@@ -721,6 +713,8 @@ impl Container {
     }
 
     pub fn layout_end_column(&mut self) {
+        use std::cmp::{min, max};
+
         let b = self.get_layout().clone();
         self.layout_stack.pop();
 
@@ -735,8 +729,8 @@ impl Container {
         } else {
             b.next_row + b.body.y - a.body.y
         };
-        a.max.x = i32::max(a.max.x, b.max.x);
-        a.max.y = i32::max(a.max.y, b.max.y);
+        a.max.x = max(a.max.x, b.max.x);
+        a.max.y = max(a.max.y, b.max.y);
     }
 
     pub fn layout_row_for_layout(layout: &mut Layout, widths: &[i32], height: i32) {
@@ -763,19 +757,19 @@ impl Container {
         self.get_layout_mut().size.y = height;
     }
 
-    pub fn layout_set_next(&mut self, r: Rect, position: LayoutPosition) {
+    pub fn layout_set_next(&mut self, r: Recti, position: LayoutPosition) {
         let layout = self.get_layout_mut();
         layout.next = r;
         layout.next_type = position;
     }
 
-    pub fn layout_next(&mut self) -> Rect {
+    pub fn layout_next(&mut self) -> Recti {
         let style_size = self.style.size;
         let style_padding = self.style.padding;
         let style_spacing = self.style.spacing;
 
         let layout = self.get_layout_mut();
-        let mut res: Rect = Rect { x: 0, y: 0, w: 0, h: 0 };
+        let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
         if layout.next_type != LayoutPosition::None {
             let type_0 = layout.next_type;
             layout.next_type = LayoutPosition::None;
@@ -794,44 +788,48 @@ impl Container {
             }
             res.x = layout.position.x;
             res.y = layout.position.y;
-            res.w = if layout.items > 0 {
+            res.width = if layout.items > 0 {
                 layout.widths[layout.item_index as usize]
             } else {
                 layout.size.x
             };
-            res.h = layout.size.y;
+            res.height = layout.size.y;
 
-            if res.w == 0 {
-                res.w = style_size.x + style_padding * 2;
+            if res.width == 0 {
+                res.width = style_size.x + style_padding * 2;
             }
-            if res.h == 0 {
-                res.h = style_size.y + style_padding * 2;
+            if res.height == 0 {
+                res.height = style_size.y + style_padding * 2;
             }
-            if res.w < 0 {
-                res.w += layout.body.w - res.x + 1;
+            if res.width < 0 {
+                res.width += layout.body.width - res.x + 1;
             }
-            if res.h < 0 {
-                res.h += layout.body.h - res.y + 1;
+            if res.height < 0 {
+                res.height += layout.body.height - res.y + 1;
             }
             layout.item_index += 1;
         }
-        layout.position.x += res.w + style_spacing;
-        layout.next_row = if layout.next_row > res.y + res.h + style_spacing {
+        layout.position.x += res.width + style_spacing;
+        layout.next_row = if layout.next_row > res.y + res.height + style_spacing {
             layout.next_row
         } else {
-            res.y + res.h + style_spacing
+            res.y + res.height + style_spacing
         };
         res.x += layout.body.x;
         res.y += layout.body.y;
-        layout.max.x = if layout.max.x > res.x + res.w { layout.max.x } else { res.x + res.w };
-        layout.max.y = if layout.max.y > res.y + res.h { layout.max.y } else { res.y + res.h };
+        layout.max.x = if layout.max.x > res.x + res.width { layout.max.x } else { res.x + res.width };
+        layout.max.y = if layout.max.y > res.y + res.height {
+            layout.max.y
+        } else {
+            res.y + res.height
+        };
         self.last_rect = res;
         return self.last_rect;
     }
 }
 
 impl Container {
-    pub fn push_clip_rect(&mut self, rect: Rect) {
+    pub fn push_clip_rect(&mut self, rect: Recti) {
         let last = self.get_clip_rect();
         self.clip_stack.push(intersect_rects(rect, last));
     }
@@ -840,19 +838,19 @@ impl Container {
         self.clip_stack.pop();
     }
 
-    pub fn get_clip_rect(&mut self) -> Rect {
+    pub fn get_clip_rect(&mut self) -> Recti {
         match self.clip_stack.last() {
             Some(r) => *r,
             None => UNCLIPPED_RECT,
         }
     }
 
-    pub fn check_clip(&mut self, r: Rect) -> Clip {
+    pub fn check_clip(&mut self, r: Recti) -> Clip {
         let cr = self.get_clip_rect();
-        if r.x > cr.x + cr.w || r.x + r.w < cr.x || r.y > cr.y + cr.h || r.y + r.h < cr.y {
+        if r.x > cr.x + cr.width || r.x + r.width < cr.x || r.y > cr.y + cr.height || r.y + r.height < cr.y {
             return Clip::All;
         }
-        if r.x >= cr.x && r.x + r.w <= cr.x + cr.w && r.y >= cr.y && r.y + r.h <= cr.y + cr.h {
+        if r.x >= cr.x && r.x + r.width <= cr.x + cr.width && r.y >= cr.y && r.y + r.height <= cr.y + cr.height {
             return Clip::None;
         }
         return Clip::Part;
@@ -870,26 +868,26 @@ impl Container {
         return str_start;
     }
 
-    pub fn set_clip(&mut self, rect: Rect) {
+    pub fn set_clip(&mut self, rect: Recti) {
         self.push_command(Command::Clip { rect });
     }
 
-    pub fn draw_rect(&mut self, mut rect: Rect, color: Color) {
+    pub fn draw_rect(&mut self, mut rect: Recti, color: Color) {
         rect = intersect_rects(rect, self.get_clip_rect());
-        if rect.w > 0 && rect.h > 0 {
-            self.push_command(Command::Rect { rect, color });
+        if rect.width > 0 && rect.height > 0 {
+            self.push_command(Command::Recti { rect, color });
         }
     }
 
-    pub fn draw_box(&mut self, r: Rect, color: Color) {
-        self.draw_rect(rect(r.x + 1, r.y, r.w - 2, 1), color);
-        self.draw_rect(rect(r.x + 1, r.y + r.h - 1, r.w - 2, 1), color);
-        self.draw_rect(rect(r.x, r.y, 1, r.h), color);
-        self.draw_rect(rect(r.x + r.w - 1, r.y, 1, r.h), color);
+    pub fn draw_box(&mut self, r: Recti, color: Color) {
+        self.draw_rect(rect(r.x + 1, r.y, r.width - 2, 1), color);
+        self.draw_rect(rect(r.x + 1, r.y + r.height - 1, r.width - 2, 1), color);
+        self.draw_rect(rect(r.x, r.y, 1, r.height), color);
+        self.draw_rect(rect(r.x + r.width - 1, r.y, 1, r.height), color);
     }
 
     pub fn draw_text(&mut self, font: FontId, str: &str, pos: Vec2i, color: Color) {
-        let rect: Rect = rect(pos.x, pos.y, self.get_text_width(font, str), self.get_text_height(font, str));
+        let rect: Recti = rect(pos.x, pos.y, self.get_text_width(font, str), self.get_text_height(font, str));
         let clipped = self.check_clip(rect);
         match clipped {
             Clip::All => return,
@@ -913,7 +911,7 @@ impl Container {
         }
     }
 
-    pub fn draw_icon(&mut self, id: Icon, rect: Rect, color: Color) {
+    pub fn draw_icon(&mut self, id: Icon, rect: Recti, color: Color) {
         let clipped = self.check_clip(rect);
         match clipped {
             Clip::All => return,
@@ -962,7 +960,7 @@ impl Container {
             for w in words {
                 // TODO: split w when its width > w into many lines
                 let tw = self.get_text_width(font, w);
-                if tw + rx < r.x + r.w {
+                if tw + rx < r.x + r.width {
                     self.draw_text(font, w, vec2(rx, r.y), color);
                     rx += tw;
                 } else {
@@ -974,7 +972,7 @@ impl Container {
         self.layout_end_column();
     }
 
-    fn draw_frame(&mut self, rect: Rect, colorid: ControlColor) {
+    fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
         let color = self.style.colors[colorid as usize];
         self.draw_rect(rect, color);
         if colorid == ControlColor::ScrollBase || colorid == ControlColor::ScrollThumb || colorid == ControlColor::TitleBG {
@@ -1000,7 +998,7 @@ impl Context {
                     let str = &container.text_stack[*str_start..*str_start + *str_len];
                     self.canvas.draw_chars(str, *pos, *color);
                 }
-                Command::Rect { rect, color } => {
+                Command::Recti { rect, color } => {
                     self.canvas.draw_rect(*rect, *color);
                 }
                 Command::Icon { id, rect, color } => {
@@ -1153,8 +1151,8 @@ impl Context {
             open: true,
             style: self.style.clone(),
             atlas: self.atlas.clone(),
-            rect: Rect::default(),
-            body: Rect::default(),
+            rect: Recti::default(),
+            body: Recti::default(),
             content_size: Vec2i::default(),
             scroll: Vec2i::default(),
             zindex: 0,
@@ -1162,7 +1160,7 @@ impl Context {
             clip_stack: Vec::default(),
             children: Vec::default(),
             is_root: false,
-            last_rect: Rect::default(),
+            last_rect: Recti::default(),
             layout_stack: Vec::default(),
             text_stack: Vec::default(),
         });
@@ -1199,7 +1197,7 @@ impl Context {
         }
     }
 
-    pub fn draw_control_frame(&mut self, id: Id, rect: Rect, mut colorid: ControlColor, opt: WidgetOption) {
+    pub fn draw_control_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
         if opt.has_no_frame() {
             return;
         }
@@ -1212,16 +1210,16 @@ impl Context {
         self.top_container_mut().draw_frame(rect, colorid);
     }
 
-    pub fn draw_control_text(&mut self, str: &str, rect: Rect, colorid: ControlColor, opt: WidgetOption) {
+    pub fn draw_control_text(&mut self, str: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let mut pos: Vec2i = Vec2i { x: 0, y: 0 };
         let font = self.style.font;
         let tw = self.top_container().get_text_width(font, str);
         self.top_container_mut().push_clip_rect(rect);
-        pos.y = rect.y + (rect.h - self.top_container().get_text_height(font, str)) / 2;
+        pos.y = rect.y + (rect.height - self.top_container().get_text_height(font, str)) / 2;
         if opt.is_aligned_center() {
-            pos.x = rect.x + (rect.w - tw) / 2;
+            pos.x = rect.x + (rect.width - tw) / 2;
         } else if opt.is_aligned_right() {
-            pos.x = rect.x + rect.w - tw - self.style.padding;
+            pos.x = rect.x + rect.width - tw - self.style.padding;
         } else {
             pos.x = rect.x + self.style.padding;
         }
@@ -1230,12 +1228,12 @@ impl Context {
         self.top_container_mut().pop_clip_rect();
     }
 
-    pub fn mouse_over(&mut self, rect: Rect) -> bool {
+    pub fn mouse_over(&mut self, rect: Recti) -> bool {
         let clip_rect = self.top_container_mut().get_clip_rect();
         rect_overlaps_vec2(rect, self.input.mouse_pos) && rect_overlaps_vec2(clip_rect, self.input.mouse_pos) && self.in_hover_root()
     }
 
-    pub fn update_control(&mut self, id: Id, rect: Rect, opt: WidgetOption) {
+    pub fn update_control(&mut self, id: Id, rect: Recti, opt: WidgetOption) {
         let mouseover = self.mouse_over(rect);
         if self.focus == Some(id) {
             self.updated_focus = true;
@@ -1275,7 +1273,7 @@ impl Context {
         } else {
             self.get_id_u32(icon as u32)
         };
-        let r: Rect = self.top_container_mut().layout_next();
+        let r: Recti = self.top_container_mut().layout_next();
         self.update_control(id, r, opt);
         if self.input.mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
@@ -1294,8 +1292,8 @@ impl Context {
     pub fn checkbox(&mut self, label: &str, state: &mut bool) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.get_id_from_ptr(state);
-        let mut r: Rect = self.top_container_mut().layout_next();
-        let box_0: Rect = rect(r.x, r.y, r.h, r.h);
+        let mut r: Recti = self.top_container_mut().layout_next();
+        let box_0: Recti = rect(r.x, r.y, r.height, r.height);
         self.update_control(id, r, WidgetOption::NONE);
         if self.input.mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::CHANGE;
@@ -1306,12 +1304,12 @@ impl Context {
             let color = self.style.colors[ControlColor::Text as usize];
             self.top_container_mut().draw_icon(Icon::Check, box_0, color);
         }
-        r = rect(r.x + box_0.w, r.y, r.w - box_0.w, r.h);
+        r = rect(r.x + box_0.width, r.y, r.width - box_0.width, r.height);
         self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
         return res;
     }
 
-    pub fn textbox_raw(&mut self, buf: &mut String, id: Id, r: Rect, opt: WidgetOption) -> ResourceState {
+    pub fn textbox_raw(&mut self, buf: &mut String, id: Id, r: Recti, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         self.update_control(id, r, opt | WidgetOption::HOLD_FOCUS);
         if self.focus == Some(id) {
@@ -1339,9 +1337,9 @@ impl Context {
             let font = self.style.font;
             let textw = self.top_container().get_text_width(font, buf.as_str());
             let texth = self.top_container().get_text_height(font, buf.as_str());
-            let ofx = r.w - self.style.padding - textw - 1;
+            let ofx = r.width - self.style.padding - textw - 1;
             let textx = r.x + (if ofx < self.style.padding { ofx } else { self.style.padding });
-            let texty = r.y + (r.h - texth) / 2;
+            let texty = r.y + (r.height - texth) / 2;
             self.top_container_mut().push_clip_rect(r);
             self.top_container_mut().draw_text(font, buf.as_str(), vec2(textx, texty), color);
             self.top_container_mut().draw_rect(rect(textx + textw, texty, 1, texth), color);
@@ -1352,7 +1350,7 @@ impl Context {
         return res;
     }
 
-    fn number_textbox(&mut self, precision: usize, value: &mut Real, r: Rect, id: Id) -> ResourceState {
+    fn number_textbox(&mut self, precision: usize, value: &mut Real, r: Recti, id: Id) -> ResourceState {
         if self.input.mouse_pressed.is_left() && self.input.key_down.is_shift() && self.hover == Some(id) {
             self.number_edit = Some(id);
             self.number_edit_buf.clear();
@@ -1381,7 +1379,7 @@ impl Context {
 
     pub fn textbox_ex(&mut self, buf: &mut String, opt: WidgetOption) -> ResourceState {
         let id: Id = self.get_id_from_ptr(buf);
-        let r: Rect = self.top_container_mut().layout_next();
+        let r: Recti = self.top_container_mut().layout_next();
         return self.textbox_raw(buf, id, r, opt);
     }
 
@@ -1396,7 +1394,7 @@ impl Context {
         }
         self.update_control(id, base, opt);
         if self.focus == Some(id) && (!self.input.mouse_down.is_none() | self.input.mouse_pressed.is_left()) {
-            v = low + (self.input.mouse_pos.x - base.x) as Real * (high - low) / base.w as Real;
+            v = low + (self.input.mouse_pos.x - base.x) as Real * (high - low) / base.width as Real;
             if step != 0. {
                 v = (v + step / 2 as Real) / step * step;
             }
@@ -1414,8 +1412,8 @@ impl Context {
         }
         self.draw_control_frame(id, base, ControlColor::Base, opt);
         let w = self.style.thumb_size;
-        let x = ((v - low) * (base.w - w) as Real / (high - low)) as i32;
-        let thumb = rect(base.x + x, base.y, w, base.h);
+        let x = ((v - low) * (base.width - w) as Real / (high - low)) as i32;
+        let thumb = rect(base.x + x, base.y, w, base.height);
         self.draw_control_frame(id, thumb, ControlColor::Button, opt);
         let mut buff = String::new();
         buff.push_str(format!("{:.*}", precision, value).as_str());
@@ -1426,7 +1424,7 @@ impl Context {
     pub fn number_ex(&mut self, value: &mut Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.get_id_from_ptr(value);
-        let base: Rect = self.top_container_mut().layout_next();
+        let base: Recti = self.top_container_mut().layout_next();
         let last: Real = *value;
         if !self.number_textbox(precision, value, base, id).is_none() {
             return res;
@@ -1473,10 +1471,13 @@ impl Context {
             self.draw_control_frame(id, r, ControlColor::Button, WidgetOption::NONE);
         }
         let color = self.style.colors[ControlColor::Text as usize];
-        self.top_container_mut()
-            .draw_icon(if expanded { Icon::Expanded } else { Icon::Collapsed }, rect(r.x, r.y, r.h, r.h), color);
-        r.x += r.h - self.style.padding;
-        r.w -= r.h - self.style.padding;
+        self.top_container_mut().draw_icon(
+            if expanded { Icon::Expanded } else { Icon::Collapsed },
+            rect(r.x, r.y, r.height, r.height),
+            color,
+        );
+        r.x += r.height - self.style.padding;
+        r.width -= r.height - self.style.padding;
         self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
         return if expanded { ResourceState::ACTIVE } else { ResourceState::NONE };
     }
@@ -1504,42 +1505,43 @@ impl Context {
     }
 
     fn clamp(x: i32, a: i32, b: i32) -> i32 {
-        i32::min(b, i32::max(a, x))
+        use std::cmp::{min, max};
+        min(b, max(a, x))
     }
 
-    fn scrollbars(&mut self, cnt_id: usize, body: &mut Rect) {
+    fn scrollbars(&mut self, cnt_id: usize, body: &mut Recti) {
         let sz = self.style.scrollbar_size;
         let mut cs: Vec2i = self.containers[cnt_id].content_size;
         cs.x += self.style.padding * 2;
         cs.y += self.style.padding * 2;
         self.top_container_mut().push_clip_rect(body.clone());
-        if cs.y > self.containers[cnt_id].body.h {
-            body.w -= sz;
+        if cs.y > self.containers[cnt_id].body.height {
+            body.width -= sz;
         }
-        if cs.x > self.containers[cnt_id].body.w {
-            body.h -= sz;
+        if cs.x > self.containers[cnt_id].body.width {
+            body.height -= sz;
         }
         let body = *body;
-        let maxscroll = cs.y - body.h;
-        if maxscroll > 0 && body.h > 0 {
+        let maxscroll = cs.y - body.height;
+        if maxscroll > 0 && body.height > 0 {
             let id: Id = self.get_id_from_str("!scrollbary");
             let mut base = body;
-            base.x = body.x + body.w;
-            base.w = self.style.scrollbar_size;
+            base.x = body.x + body.width;
+            base.width = self.style.scrollbar_size;
             self.update_control(id, base, WidgetOption::NONE);
             if self.focus == Some(id) && self.input.mouse_down.is_left() {
-                self.containers[cnt_id].scroll.y += self.input.mouse_delta.y * cs.y / base.h;
+                self.containers[cnt_id].scroll.y += self.input.mouse_delta.y * cs.y / base.height;
             }
             self.containers[cnt_id].scroll.y = Self::clamp(self.containers[cnt_id].scroll.y, 0, maxscroll);
 
             self.top_container_mut().draw_frame(base, ControlColor::ScrollBase);
             let mut thumb = base;
-            thumb.h = if self.style.thumb_size > base.h * body.h / cs.y {
+            thumb.height = if self.style.thumb_size > base.height * body.height / cs.y {
                 self.style.thumb_size
             } else {
-                base.h * body.h / cs.y
+                base.height * body.height / cs.y
             };
-            thumb.y += self.containers[cnt_id].scroll.y * (base.h - thumb.h) / maxscroll;
+            thumb.y += self.containers[cnt_id].scroll.y * (base.height - thumb.height) / maxscroll;
             self.top_container_mut().draw_frame(thumb, ControlColor::ScrollThumb);
             if self.mouse_over(body) {
                 self.scroll_target = Some(cnt_id);
@@ -1547,26 +1549,26 @@ impl Context {
         } else {
             self.containers[cnt_id].scroll.y = 0;
         }
-        let maxscroll_0 = cs.x - body.w;
-        if maxscroll_0 > 0 && body.w > 0 {
+        let maxscroll_0 = cs.x - body.width;
+        if maxscroll_0 > 0 && body.width > 0 {
             let id_0: Id = self.get_id_from_str("!scrollbarx");
             let mut base_0 = body;
-            base_0.y = body.y + body.h;
-            base_0.h = self.style.scrollbar_size;
+            base_0.y = body.y + body.height;
+            base_0.height = self.style.scrollbar_size;
             self.update_control(id_0, base_0, WidgetOption::NONE);
             if self.focus == Some(id_0) && self.input.mouse_down.is_left() {
-                self.containers[cnt_id].scroll.x += self.input.mouse_delta.x * cs.x / base_0.w;
+                self.containers[cnt_id].scroll.x += self.input.mouse_delta.x * cs.x / base_0.width;
             }
             self.containers[cnt_id].scroll.x = Self::clamp(self.containers[cnt_id].scroll.x, 0, maxscroll_0);
 
             self.top_container_mut().draw_frame(base_0, ControlColor::ScrollBase);
             let mut thumb_0 = base_0;
-            thumb_0.w = if self.style.thumb_size > base_0.w * body.w / cs.x {
+            thumb_0.width = if self.style.thumb_size > base_0.width * body.width / cs.x {
                 self.style.thumb_size
             } else {
-                base_0.w * body.w / cs.x
+                base_0.width * body.width / cs.x
             };
-            thumb_0.x += self.containers[cnt_id].scroll.x * (base_0.w - thumb_0.w) / maxscroll_0;
+            thumb_0.x += self.containers[cnt_id].scroll.x * (base_0.width - thumb_0.width) / maxscroll_0;
             self.top_container_mut().draw_frame(thumb_0, ControlColor::ScrollThumb);
             if self.mouse_over(body) {
                 self.scroll_target = Some(cnt_id);
@@ -1577,7 +1579,7 @@ impl Context {
         self.top_container_mut().pop_clip_rect();
     }
 
-    fn push_container_body(&mut self, cnt_idx: usize, body: Rect, opt: WidgetOption) {
+    fn push_container_body(&mut self, cnt_idx: usize, body: Recti, opt: WidgetOption) {
         let mut body = body;
         if !opt.has_no_scroll() {
             self.scrollbars(cnt_idx, &mut body);
@@ -1609,7 +1611,7 @@ impl Context {
         self.pop_container();
     }
 
-    pub fn window<F: FnOnce(&mut Self)>(&mut self, title: &str, mut r: Rect, opt: WidgetOption, f: F) {
+    pub fn window<F: FnOnce(&mut Self)>(&mut self, title: &str, mut r: Recti, opt: WidgetOption, f: F) {
         let id = self.get_id_from_str(title);
         let cnt_id = self.get_container_index_intern(id, title, opt);
         if cnt_id.is_none() || !self.containers[cnt_id.unwrap()].open {
@@ -1617,7 +1619,7 @@ impl Context {
         }
         self.id_stack.push(id);
 
-        if self.containers[cnt_id.unwrap()].rect.w == 0 {
+        if self.containers[cnt_id.unwrap()].rect.width == 0 {
             self.containers[cnt_id.unwrap()].rect = r;
         }
         self.begin_root_container(cnt_id.unwrap());
@@ -1627,8 +1629,8 @@ impl Context {
             self.top_container_mut().draw_frame(r, ControlColor::WindowBG);
         }
         if !opt.has_no_title() {
-            let mut tr: Rect = r;
-            tr.h = self.style.title_height;
+            let mut tr: Recti = r;
+            tr.height = self.style.title_height;
             self.top_container_mut().draw_frame(tr, ControlColor::TitleBG);
 
             // TODO: Is this necessary?
@@ -1640,13 +1642,13 @@ impl Context {
                     self.containers[cnt_id.unwrap()].rect.x += self.input.mouse_delta.x;
                     self.containers[cnt_id.unwrap()].rect.y += self.input.mouse_delta.y;
                 }
-                body.y += tr.h;
-                body.h -= tr.h;
+                body.y += tr.height;
+                body.height -= tr.height;
             }
             if !opt.has_no_close() {
                 let id = self.get_id_from_str("!close");
-                let r: Rect = rect(tr.x + tr.w - tr.h, tr.y, tr.h, tr.h);
-                tr.w -= r.w;
+                let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
+                tr.width -= r.width;
                 let color = self.style.colors[ControlColor::TitleText as usize];
                 self.top_container_mut().draw_icon(Icon::Close, r, color);
                 self.update_control(id, r, opt);
@@ -1659,25 +1661,27 @@ impl Context {
         if !opt.is_auto_sizing() {
             let sz = self.style.title_height;
             let id_2 = self.get_id_from_str("!resize");
-            let r_0 = rect(r.x + r.w - sz, r.y + r.h - sz, sz, sz);
+            let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
             self.update_control(id_2, r_0, opt);
             if Some(id_2) == self.focus && self.input.mouse_down.is_left() {
-                self.containers[cnt_id.unwrap()].rect.w = if 96 > self.containers[cnt_id.unwrap()].rect.w + self.input.mouse_delta.x {
+                self.containers[cnt_id.unwrap()].rect.width = if 96 > self.containers[cnt_id.unwrap()].rect.width + self.input.mouse_delta.x {
                     96
                 } else {
-                    self.containers[cnt_id.unwrap()].rect.w + self.input.mouse_delta.x
+                    self.containers[cnt_id.unwrap()].rect.width + self.input.mouse_delta.x
                 };
-                self.containers[cnt_id.unwrap()].rect.h = if 64 > self.containers[cnt_id.unwrap()].rect.h + self.input.mouse_delta.y {
+                self.containers[cnt_id.unwrap()].rect.height = if 64 > self.containers[cnt_id.unwrap()].rect.height + self.input.mouse_delta.y {
                     64
                 } else {
-                    self.containers[cnt_id.unwrap()].rect.h + self.input.mouse_delta.y
+                    self.containers[cnt_id.unwrap()].rect.height + self.input.mouse_delta.y
                 };
             }
         }
         if opt.is_auto_sizing() {
             let r_1 = self.top_container_mut().get_layout().body;
-            self.containers[cnt_id.unwrap()].rect.w = self.containers[cnt_id.unwrap()].content_size.x + (self.containers[cnt_id.unwrap()].rect.w - r_1.w);
-            self.containers[cnt_id.unwrap()].rect.h = self.containers[cnt_id.unwrap()].content_size.y + (self.containers[cnt_id.unwrap()].rect.h - r_1.h);
+            self.containers[cnt_id.unwrap()].rect.width =
+                self.containers[cnt_id.unwrap()].content_size.x + (self.containers[cnt_id.unwrap()].rect.width - r_1.width);
+            self.containers[cnt_id.unwrap()].rect.height =
+                self.containers[cnt_id.unwrap()].content_size.y + (self.containers[cnt_id.unwrap()].rect.height - r_1.height);
         }
 
         if opt.is_popup() && !self.input.mouse_pressed.is_none() && self.hover_root != cnt_id {
