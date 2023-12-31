@@ -581,7 +581,7 @@ pub struct FontId(pub usize);
 #[derive(Copy, Clone)]
 pub struct Style {
     pub font: FontId,
-    pub size: Vec2i,
+    pub default_cell_size: Dimensioni,
     pub padding: i32,
     pub spacing: i32,
     pub indent: i32,
@@ -604,7 +604,7 @@ impl Default for Style {
     fn default() -> Self {
         Self {
             font: FontId(0),
-            size: Vec2i { x: 68, y: 10 },
+            default_cell_size: Dimension { width: 68, height: 10 },
             padding: 5,
             spacing: 4,
             indent: 24,
@@ -767,9 +767,9 @@ impl Container {
     }
 
     pub fn layout_next(&mut self) -> Recti {
-        let style_size = self.style.size;
-        let style_padding = self.style.padding;
-        let style_spacing = self.style.spacing;
+        let dcell_size = self.style.default_cell_size;
+        let padding = self.style.padding;
+        let spacing = self.style.spacing;
 
         let layout = self.get_layout_mut();
         let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
@@ -791,10 +791,10 @@ impl Container {
         res.height = layout.size.y;
 
         if res.width == 0 {
-            res.width = style_size.x + style_padding * 2;
+            res.width = dcell_size.width + padding * 2;
         }
         if res.height == 0 {
-            res.height = style_size.y + style_padding * 2;
+            res.height = dcell_size.height + padding * 2;
         }
         if res.width < 0 {
             res.width += layout.body.width - res.x + 1;
@@ -807,11 +807,11 @@ impl Container {
         ///////////
         // update the next position/row/body/max/...
         ////////
-        layout.position.x += res.width + style_spacing;
-        layout.next_row = if layout.next_row > res.y + res.height + style_spacing {
+        layout.position.x += res.width + spacing;
+        layout.next_row = if layout.next_row > res.y + res.height + spacing {
             layout.next_row
         } else {
-            res.y + res.height + style_spacing
+            res.y + res.height + spacing
         };
         res.x += layout.body.x;
         res.y += layout.body.y;
