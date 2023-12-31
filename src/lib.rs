@@ -495,6 +495,12 @@ impl Context {
 #[derive(Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Id(u32);
 
+#[derive(Clone, Default)]
+struct Row {
+    start: usize,
+    len: usize,
+}
+
 #[derive(Clone)]
 pub struct Container {
     id: Id,
@@ -511,9 +517,12 @@ pub struct Container {
     pub clip_stack: Vec<Recti>,
     pub children: Vec<usize>,
     pub is_root: bool,
+    pub text_stack: Vec<char>,
+
     pub last_rect: Recti,
     pub layout_stack: Vec<Layout>,
-    pub text_stack: Vec<char>,
+    pub layout_row_widths: Vec<i32>,
+    pub layout_row_stack: Vec<Row>,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -1142,8 +1151,11 @@ impl Context {
             children: Vec::default(),
             is_root: false,
             last_rect: Recti::default(),
-            layout_stack: Vec::default(),
             text_stack: Vec::default(),
+
+            layout_stack: Vec::default(),
+            layout_row_stack: Vec::default(),
+            layout_row_widths: Vec::default(),
         });
         self.bring_to_front(idx);
         Some(idx)
