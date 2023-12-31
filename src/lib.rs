@@ -742,12 +742,7 @@ impl Container {
         a.max.y = max(a.max.y, b.max.y);
     }
 
-    pub fn layout_row_for_layout(layout: &mut Layout, widths: &[i32], height: i32) {
-        layout.items = widths.len();
-        assert!(widths.len() <= 16);
-        for i in 0..widths.len() {
-            layout.widths[i] = widths[i];
-        }
+    pub fn layout_row_for_layout(layout: &mut Layout, height: i32) {
         layout.position = vec2(layout.indent, layout.next_row);
         layout.size.y = height;
         layout.item_index = 0;
@@ -755,7 +750,12 @@ impl Container {
 
     pub fn layout_row(&mut self, widths: &[i32], height: i32) {
         let layout = self.get_layout_mut();
-        Self::layout_row_for_layout(layout, widths, height);
+        layout.items = widths.len();
+        assert!(widths.len() <= 16);
+        for i in 0..widths.len() {
+            layout.widths[i] = widths[i];
+        }
+        Self::layout_row_for_layout(layout, height);
     }
 
     pub fn layout_width(&mut self, width: i32) {
@@ -774,13 +774,13 @@ impl Container {
         let layout = self.get_layout_mut();
         let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
 
-        let litems = layout.items;
         let lsize_y = layout.size.y;
-        let mut undefined_widths = [0; 16];
-        undefined_widths[0..litems as usize].copy_from_slice(&layout.widths[0..litems as usize]);
+
+        // next grid line
         if layout.item_index == layout.items {
-            Self::layout_row_for_layout(layout, &undefined_widths[0..litems as usize], lsize_y);
+            Self::layout_row_for_layout(layout, lsize_y);
         }
+
         res.x = layout.position.x;
         res.y = layout.position.y;
         res.width = if layout.items > 0 {
