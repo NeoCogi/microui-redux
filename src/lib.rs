@@ -54,14 +54,40 @@ use std::{f32, collections::HashMap, hash::Hash, rc::Rc};
 
 use rs_math3d::*;
 
+mod layout;
+pub use layout::*;
+
 mod atlas;
 pub use atlas::*;
 
 use bitflags::*;
+use std::cmp::{min, max};
 pub trait Atlas {
     fn get_char_width(&self, font: FontId, c: char) -> usize;
     fn get_font_height(&self, font: FontId) -> usize;
+    fn get_icon_size(&self, icon: Icon) -> Dimensioni;
+
+    fn get_text_size(&self, font: FontId, text: &str) -> Dimensioni {
+        let mut res = 0;
+        let mut acc_x = 0;
+        let mut acc_y = 0;
+        let h = self.get_font_height(font);
+        for c in text.chars() {
+            if acc_y == 0 {
+                acc_y = h
+            }
+            if c == '\n' {
+                res = max(res, acc_x);
+                acc_x = 0;
+                acc_y += h;
+            }
+            acc_x += self.get_char_width(font, c);
+        }
+        res = max(res, acc_x);
+        Dimension::new(res as i32, acc_y as i32)
+    }
 }
+
 pub trait Canvas {
     fn draw_rect(&mut self, rect: Recti, color: Color);
     fn draw_chars(&mut self, text: &[char], pos: Vec2i, color: Color);
@@ -887,7 +913,8 @@ impl Container {
     }
 
     pub fn draw_text(&mut self, font: FontId, str: &str, pos: Vec2i, color: Color) {
-        let rect: Recti = rect(pos.x, pos.y, self.get_text_width(font, str), self.get_text_height(font, str));
+        let tsize = self.atlas.get_text_size(font, str);
+        let rect: Recti = rect(pos.x, pos.y, tsize.width, tsize.height);
         let clipped = self.check_clip(rect);
         match clipped {
             Clip::All => return,
@@ -927,26 +954,6 @@ impl Container {
         }
     }
 
-    pub fn get_text_width(&self, font: FontId, text: &str) -> i32 {
-        let mut res = 0;
-        let mut acc = 0;
-        for c in text.chars() {
-            if c == '\n' {
-                res = usize::max(res, acc);
-                acc = 0;
-            }
-            acc += self.atlas.get_char_width(font, c);
-        }
-        res = usize::max(res, acc);
-        res as i32
-    }
-
-    pub fn get_text_height(&self, font: FontId, text: &str) -> i32 {
-        let font_height = self.atlas.get_font_height(font);
-        let lc = text.lines().count();
-        (lc * font_height) as i32
-    }
-
     pub fn text(&mut self, text: &str) {
         let font = self.style.font;
         let color = self.style.colors[ControlColor::Text as usize];
@@ -959,7 +966,7 @@ impl Container {
             let words = line.split_inclusive(' ');
             for w in words {
                 // TODO: split w when its width > w into many lines
-                let tw = self.get_text_width(font, w);
+                let tw = self.atlas.get_text_size(font, w).width;
                 if tw + rx < r.x + r.width {
                     self.draw_text(font, w, vec2(rx, r.y), color);
                     rx += tw;
@@ -1213,13 +1220,13 @@ impl Context {
     pub fn draw_control_text(&mut self, str: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let mut pos: Vec2i = Vec2i { x: 0, y: 0 };
         let font = self.style.font;
-        let tw = self.top_container().get_text_width(font, str);
+        let tsize = self.atlas.get_text_size(font, str);
         self.top_container_mut().push_clip_rect(rect);
-        pos.y = rect.y + (rect.height - self.top_container().get_text_height(font, str)) / 2;
+        pos.y = rect.y + (rect.height - tsize.height) / 2;
         if opt.is_aligned_center() {
-            pos.x = rect.x + (rect.width - tw) / 2;
+            pos.x = rect.x + (rect.width - tsize.width) / 2;
         } else if opt.is_aligned_right() {
-            pos.x = rect.x + rect.width - tw - self.style.padding;
+            pos.x = rect.x + rect.width - tsize.width - self.style.padding;
         } else {
             pos.x = rect.x + self.style.padding;
         }
@@ -1335,14 +1342,13 @@ impl Context {
         if self.focus == Some(id) {
             let color = self.style.colors[ControlColor::Text as usize];
             let font = self.style.font;
-            let textw = self.top_container().get_text_width(font, buf.as_str());
-            let texth = self.top_container().get_text_height(font, buf.as_str());
-            let ofx = r.width - self.style.padding - textw - 1;
+            let tsize = self.atlas.get_text_size(font, buf.as_str());
+            let ofx = r.width - self.style.padding - tsize.width - 1;
             let textx = r.x + (if ofx < self.style.padding { ofx } else { self.style.padding });
-            let texty = r.y + (r.height - texth) / 2;
+            let texty = r.y + (r.height - tsize.height) / 2;
             self.top_container_mut().push_clip_rect(r);
             self.top_container_mut().draw_text(font, buf.as_str(), vec2(textx, texty), color);
-            self.top_container_mut().draw_rect(rect(textx + textw, texty, 1, texth), color);
+            self.top_container_mut().draw_rect(rect(textx + tsize.width, texty, 1, tsize.height), color);
             self.top_container_mut().pop_clip_rect();
         } else {
             self.draw_control_text(buf.as_str(), r, ControlColor::Text, opt);

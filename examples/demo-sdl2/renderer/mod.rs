@@ -417,4 +417,8 @@ impl Atlas for MyAtlas {
     fn get_font_height(&self, _font: FontId) -> usize {
         18
     }
+
+    fn get_icon_size(&self, icon: Icon) -> Dimensioni {
+        Dimension::new(ATLAS[icon as usize].width, ATLAS[icon as usize].height)
+    }
 }
