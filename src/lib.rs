@@ -527,7 +527,6 @@ pub struct Layout {
     pub items: usize,
     pub item_index: usize,
     pub next_row: i32,
-    pub next_type: LayoutPosition,
     pub indent: i32,
 }
 
@@ -594,20 +593,6 @@ pub struct Style {
 
 pub type Real = f32;
 
-#[derive(PartialEq, Copy, Clone)]
-#[repr(u32)]
-pub enum LayoutPosition {
-    Absolute = 2,
-    Relative = 1,
-    None = 0,
-}
-
-impl Default for LayoutPosition {
-    fn default() -> Self {
-        LayoutPosition::None
-    }
-}
-
 static UNCLIPPED_RECT: Recti = Recti {
     x: 0,
     y: 0,
@@ -663,7 +648,6 @@ pub fn expand_rect(r: Recti, n: i32) -> Recti {
 }
 
 pub fn intersect_rects(r1: Recti, r2: Recti) -> Recti {
-    use std::cmp::{min, max};
     let x1 = max(r1.x, r2.x);
     let y1 = max(r1.y, r2.y);
     let mut x2 = min(r1.x + r1.width, r2.x + r2.width);
@@ -716,7 +700,6 @@ impl Container {
             items: 0,
             item_index: 0,
             next_row: 0,
-            next_type: LayoutPosition::None,
             indent: 0,
         };
         layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.width, body.height);
@@ -739,8 +722,6 @@ impl Container {
     }
 
     pub fn layout_end_column(&mut self) {
-        use std::cmp::{min, max};
-
         let b = self.get_layout().clone();
         self.layout_stack.pop();
 
@@ -755,6 +736,8 @@ impl Container {
         } else {
             b.next_row + b.body.y - a.body.y
         };
+
+        // propagate max to the "current" top of the stack (parent) layout
         a.max.x = max(a.max.x, b.max.x);
         a.max.y = max(a.max.y, b.max.y);
     }
@@ -783,12 +766,6 @@ impl Container {
         self.get_layout_mut().size.y = height;
     }
 
-    pub fn layout_set_next(&mut self, r: Recti, position: LayoutPosition) {
-        let layout = self.get_layout_mut();
-        layout.next = r;
-        layout.next_type = position;
-    }
-
     pub fn layout_next(&mut self) -> Recti {
         let style_size = self.style.size;
         let style_padding = self.style.padding;
@@ -796,45 +773,40 @@ impl Container {
 
         let layout = self.get_layout_mut();
         let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
-        if layout.next_type != LayoutPosition::None {
-            let type_0 = layout.next_type;
-            layout.next_type = LayoutPosition::None;
-            res = layout.next;
-            if type_0 == LayoutPosition::Absolute {
-                self.last_rect = res;
-                return self.last_rect;
-            }
-        } else {
-            let litems = layout.items;
-            let lsize_y = layout.size.y;
-            let mut undefined_widths = [0; 16];
-            undefined_widths[0..litems as usize].copy_from_slice(&layout.widths[0..litems as usize]);
-            if layout.item_index == layout.items {
-                Self::layout_row_for_layout(layout, &undefined_widths[0..litems as usize], lsize_y);
-            }
-            res.x = layout.position.x;
-            res.y = layout.position.y;
-            res.width = if layout.items > 0 {
-                layout.widths[layout.item_index as usize]
-            } else {
-                layout.size.x
-            };
-            res.height = layout.size.y;
 
-            if res.width == 0 {
-                res.width = style_size.x + style_padding * 2;
-            }
-            if res.height == 0 {
-                res.height = style_size.y + style_padding * 2;
-            }
-            if res.width < 0 {
-                res.width += layout.body.width - res.x + 1;
-            }
-            if res.height < 0 {
-                res.height += layout.body.height - res.y + 1;
-            }
-            layout.item_index += 1;
+        let litems = layout.items;
+        let lsize_y = layout.size.y;
+        let mut undefined_widths = [0; 16];
+        undefined_widths[0..litems as usize].copy_from_slice(&layout.widths[0..litems as usize]);
+        if layout.item_index == layout.items {
+            Self::layout_row_for_layout(layout, &undefined_widths[0..litems as usize], lsize_y);
         }
+        res.x = layout.position.x;
+        res.y = layout.position.y;
+        res.width = if layout.items > 0 {
+            layout.widths[layout.item_index as usize]
+        } else {
+            layout.size.x
+        };
+        res.height = layout.size.y;
+
+        if res.width == 0 {
+            res.width = style_size.x + style_padding * 2;
+        }
+        if res.height == 0 {
+            res.height = style_size.y + style_padding * 2;
+        }
+        if res.width < 0 {
+            res.width += layout.body.width - res.x + 1;
+        }
+        if res.height < 0 {
+            res.height += layout.body.height - res.y + 1;
+        }
+        layout.item_index += 1;
+
+        ///////////
+        // update the next position/row/body/max/...
+        ////////
         layout.position.x += res.width + style_spacing;
         layout.next_row = if layout.next_row > res.y + res.height + style_spacing {
             layout.next_row
@@ -960,6 +932,8 @@ impl Container {
         let h = self.atlas.get_font_height(font) as i32;
         self.layout_begin_column();
         self.layout_row(&[-1], h);
+
+        // lines() doesn't count line terminator
         for line in text.lines() {
             let mut r = self.layout_next();
             let mut rx = r.x;
@@ -1511,7 +1485,6 @@ impl Context {
     }
 
     fn clamp(x: i32, a: i32, b: i32) -> i32 {
-        use std::cmp::{min, max};
         min(b, max(a, x))
     }
 

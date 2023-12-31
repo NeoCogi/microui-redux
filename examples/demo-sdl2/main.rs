@@ -1,6 +1,7 @@
 extern crate sdl2;
 mod renderer;
 
+use std::ops::Add;
 use std::rc::Rc;
 
 use sdl2::event::{Event, WindowEvent};
