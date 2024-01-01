@@ -499,6 +499,19 @@ pub struct Id(u32);
 struct Row {
     start: usize,
     len: usize,
+    item_index: usize,
+}
+
+#[derive(Clone, Default)]
+pub struct LayoutManager {
+    pub style: Style,
+    pub last_rect: Recti,
+    pub stack: Vec<Layout>,
+    pub row_widths_stack: Vec<i32>,
+    pub row_stack: Vec<Row>,
+
+    pub current_row_widths: Vec<i32>,
+    pub item_index: usize,
 }
 
 #[derive(Clone)]
@@ -518,11 +531,7 @@ pub struct Container {
     pub children: Vec<usize>,
     pub is_root: bool,
     pub text_stack: Vec<char>,
-
-    pub last_rect: Recti,
-    pub layout_stack: Vec<Layout>,
-    pub layout_row_widths: Vec<i32>,
-    pub layout_row_stack: Vec<Row>,
+    pub layout: LayoutManager,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -697,7 +706,7 @@ fn hash_bytes(hash_0: &mut Id, s: &[u8]) {
     }
 }
 
-impl Container {
+impl LayoutManager {
     fn push_layout(&mut self, body: Recti, scroll: Vec2i) {
         let mut layout: Layout = Layout {
             body: Recti { x: 0, y: 0, width: 0, height: 0 },
@@ -713,28 +722,28 @@ impl Container {
         };
         layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.width, body.height);
         layout.max = vec2(-i32::MAX, -i32::MAX);
-        self.layout_stack.push(layout);
-        self.layout_row(&[0], 0);
+        self.stack.push(layout);
+        self.row(&[0], 0);
     }
 
-    fn get_layout(&self) -> &Layout {
-        return self.layout_stack.last().unwrap();
+    fn top(&self) -> &Layout {
+        return self.stack.last().unwrap();
     }
 
-    fn get_layout_mut(&mut self) -> &mut Layout {
-        return self.layout_stack.last_mut().unwrap();
+    fn top_mut(&mut self) -> &mut Layout {
+        return self.stack.last_mut().unwrap();
     }
 
-    pub fn layout_begin_column(&mut self) {
-        let layout = self.layout_next();
+    pub fn begin_column(&mut self) {
+        let layout = self.next();
         self.push_layout(layout, vec2(0, 0));
     }
 
-    pub fn layout_end_column(&mut self) {
-        let b = self.get_layout().clone();
-        self.layout_stack.pop();
+    pub fn end_column(&mut self) {
+        let b = self.top().clone();
+        self.stack.pop();
 
-        let a = self.get_layout_mut();
+        let a = self.top_mut();
         a.position.x = if a.position.x > b.position.x + b.body.x - a.body.x {
             a.position.x
         } else {
@@ -751,43 +760,43 @@ impl Container {
         a.max.y = max(a.max.y, b.max.y);
     }
 
-    pub fn layout_row_for_layout(layout: &mut Layout, height: i32) {
+    pub fn row_for_layout(layout: &mut Layout, height: i32) {
         layout.position = vec2(layout.indent, layout.next_row);
         layout.size.y = height;
         layout.item_index = 0;
     }
 
-    pub fn layout_row(&mut self, widths: &[i32], height: i32) {
-        let layout = self.get_layout_mut();
+    pub fn row(&mut self, widths: &[i32], height: i32) {
+        let layout = self.top_mut();
         layout.items = widths.len();
         assert!(widths.len() <= 16);
         for i in 0..widths.len() {
             layout.widths[i] = widths[i];
         }
-        Self::layout_row_for_layout(layout, height);
+        Self::row_for_layout(layout, height);
     }
 
-    pub fn layout_width(&mut self, width: i32) {
-        self.get_layout_mut().size.x = width;
+    pub fn set_width(&mut self, width: i32) {
+        self.top_mut().size.x = width;
     }
 
-    pub fn layout_height(&mut self, height: i32) {
-        self.get_layout_mut().size.y = height;
+    pub fn set_height(&mut self, height: i32) {
+        self.top_mut().size.y = height;
     }
 
-    pub fn layout_next(&mut self) -> Recti {
+    pub fn next(&mut self) -> Recti {
         let dcell_size = self.style.default_cell_size;
         let padding = self.style.padding;
         let spacing = self.style.spacing;
 
-        let layout = self.get_layout_mut();
+        let layout = self.top_mut();
         let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
 
         let lsize_y = layout.size.y;
 
         // next grid line
         if layout.item_index == layout.items {
-            Self::layout_row_for_layout(layout, lsize_y);
+            Self::row_for_layout(layout, lsize_y);
         }
 
         res.x = layout.position.x;
@@ -939,12 +948,12 @@ impl Container {
         let font = self.style.font;
         let color = self.style.colors[ControlColor::Text as usize];
         let h = self.atlas.get_font_height(font) as i32;
-        self.layout_begin_column();
-        self.layout_row(&[-1], h);
+        self.layout.begin_column();
+        self.layout.row(&[-1], h);
 
         // lines() doesn't count line terminator
         for line in text.lines() {
-            let mut r = self.layout_next();
+            let mut r = self.layout.next();
             let mut rx = r.x;
             let words = line.split_inclusive(' ');
             for w in words {
@@ -954,12 +963,12 @@ impl Container {
                     self.draw_text(font, w, vec2(rx, r.y), color);
                     rx += tw;
                 } else {
-                    r = self.layout_next();
+                    r = self.layout.next();
                     rx = r.x;
                 }
             }
         }
-        self.layout_end_column();
+        self.layout.end_column();
     }
 
     fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
@@ -1107,10 +1116,10 @@ impl Context {
     }
 
     fn pop_container(&mut self) {
-        let layout = *self.top_container().get_layout();
+        let layout = *self.top_container().layout.top();
         self.top_container_mut().content_size.x = layout.max.x - layout.body.x;
         self.top_container_mut().content_size.y = layout.max.y - layout.body.y;
-        self.top_container_mut().layout_stack.pop();
+        self.top_container_mut().layout.stack.pop();
 
         self.container_stack.pop();
         self.pop_id();
@@ -1150,12 +1159,9 @@ impl Context {
             clip_stack: Vec::default(),
             children: Vec::default(),
             is_root: false,
-            last_rect: Recti::default(),
             text_stack: Vec::default(),
 
-            layout_stack: Vec::default(),
-            layout_row_stack: Vec::default(),
-            layout_row_widths: Vec::default(),
+            layout: LayoutManager::default(),
         });
         self.bring_to_front(idx);
         Some(idx)
@@ -1255,7 +1261,7 @@ impl Context {
     }
 
     pub fn label(&mut self, text: &str) {
-        let layout = self.top_container_mut().layout_next();
+        let layout = self.top_container_mut().layout.next();
         self.draw_control_text(text, layout, ControlColor::Text, WidgetOption::NONE);
     }
 
@@ -1266,7 +1272,7 @@ impl Context {
         } else {
             self.get_id_u32(icon as u32)
         };
-        let r: Recti = self.top_container_mut().layout_next();
+        let r: Recti = self.top_container_mut().layout.next();
         self.update_control(id, r, opt);
         if self.input.mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
@@ -1285,7 +1291,7 @@ impl Context {
     pub fn checkbox(&mut self, label: &str, state: &mut bool) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.get_id_from_ptr(state);
-        let mut r: Recti = self.top_container_mut().layout_next();
+        let mut r: Recti = self.top_container_mut().layout.next();
         let box_0: Recti = rect(r.x, r.y, r.height, r.height);
         self.update_control(id, r, WidgetOption::NONE);
         if self.input.mouse_pressed.is_left() && self.focus == Some(id) {
@@ -1371,7 +1377,7 @@ impl Context {
 
     pub fn textbox_ex(&mut self, buf: &mut String, opt: WidgetOption) -> ResourceState {
         let id: Id = self.get_id_from_ptr(buf);
-        let r: Recti = self.top_container_mut().layout_next();
+        let r: Recti = self.top_container_mut().layout.next();
         return self.textbox_raw(buf, id, r, opt);
     }
 
@@ -1380,7 +1386,7 @@ impl Context {
         let last = *value;
         let mut v = last;
         let id = self.get_id_from_ptr(value);
-        let base = self.top_container_mut().layout_next();
+        let base = self.top_container_mut().layout.next();
         if !self.number_textbox(precision, &mut v, base, id).is_none() {
             return res;
         }
@@ -1416,7 +1422,7 @@ impl Context {
     pub fn number_ex(&mut self, value: &mut Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.get_id_from_ptr(value);
-        let base: Recti = self.top_container_mut().layout_next();
+        let base: Recti = self.top_container_mut().layout.next();
         let last: Real = *value;
         if !self.number_textbox(precision, value, base, id).is_none() {
             return res;
@@ -1437,8 +1443,8 @@ impl Context {
 
     fn node(&mut self, label: &str, is_treenode: bool, opt: WidgetOption) -> ResourceState {
         let id: Id = self.get_id_from_str(label);
-        self.top_container_mut().layout_row(&[-1], 0);
-        let mut r = self.top_container_mut().layout_next();
+        self.top_container_mut().layout.row(&[-1], 0);
+        let mut r = self.top_container_mut().layout.next();
         self.update_control(id, r, WidgetOption::NONE);
         let state = self.treenode_pool.get(id);
         let mut active = state.is_some();
@@ -1484,14 +1490,14 @@ impl Context {
         let res = self.node(label, true, opt);
         if res.is_active() && self.last_id.is_some() {
             let indent = self.style.indent;
-            self.top_container_mut().get_layout_mut().indent += indent;
+            self.top_container_mut().layout.top_mut().indent += indent;
             self.id_stack.push(self.last_id.unwrap());
         }
 
         if !res.is_none() {
             f(self);
             let indent = self.style.indent;
-            self.top_container_mut().get_layout_mut().indent -= indent;
+            self.top_container_mut().layout.top_mut().indent -= indent;
             self.pop_id();
         }
     }
@@ -1578,7 +1584,8 @@ impl Context {
         let style = self.style;
         let padding = -style.padding;
         let scroll = self.containers[cnt_idx].scroll;
-        self.containers[cnt_idx].push_layout(expand_rect(body, padding), scroll);
+        self.containers[cnt_idx].layout.push_layout(expand_rect(body, padding), scroll);
+        self.containers[cnt_idx].layout.style = self.style.clone();
         self.containers[cnt_idx].body = body;
     }
 
@@ -1668,7 +1675,7 @@ impl Context {
             }
         }
         if opt.is_auto_sizing() {
-            let r_1 = self.top_container_mut().get_layout().body;
+            let r_1 = self.top_container_mut().layout.top().body;
             self.containers[cnt_id.unwrap()].rect.width =
                 self.containers[cnt_id.unwrap()].content_size.x + (self.containers[cnt_id.unwrap()].rect.width - r_1.width);
             self.containers[cnt_id.unwrap()].rect.height =
@@ -1711,7 +1718,7 @@ impl Context {
 
         let cnt_id = self.get_container_index_intern(self.last_id.unwrap(), name, opt);
         self.containers[*self.root_list.last().unwrap()].children.push(cnt_id.unwrap());
-        let rect = self.top_container_mut().layout_next();
+        let rect = self.top_container_mut().layout.next();
         let clip_rect = self.containers[cnt_id.unwrap()].body;
         self.containers[cnt_id.unwrap()].rect = rect;
         if !opt.has_no_frame() {
