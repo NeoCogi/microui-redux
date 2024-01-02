@@ -629,24 +629,6 @@ pub fn expand_rect(r: Recti, n: i32) -> Recti {
     rect(r.x - n, r.y - n, r.width + n * 2, r.height + n * 2)
 }
 
-pub fn intersect_rects(r1: Recti, r2: Recti) -> Recti {
-    let x1 = max(r1.x, r2.x);
-    let y1 = max(r1.y, r2.y);
-    let mut x2 = min(r1.x + r1.width, r2.x + r2.width);
-    let mut y2 = min(r1.y + r1.height, r2.y + r2.height);
-    if x2 < x1 {
-        x2 = x1;
-    }
-    if y2 < y1 {
-        y2 = y1;
-    }
-    return rect(x1, y1, x2 - x1, y2 - y1);
-}
-
-pub fn rect_overlaps_vec2(r: Recti, p: Vec2i) -> bool {
-    p.x >= r.x && p.x < r.x + r.width && p.y >= r.y && p.y < r.y + r.height
-}
-
 fn hash_step(h: u32, n: u32) -> u32 {
     (h ^ n).wrapping_mul(16777619 as u32)
 }
@@ -673,7 +655,7 @@ fn hash_bytes(hash_0: &mut Id, s: &[u8]) {
 impl Container {
     pub fn push_clip_rect(&mut self, rect: Recti) {
         let last = self.get_clip_rect();
-        self.clip_stack.push(intersect_rects(rect, last));
+        self.clip_stack.push(rect.intersect(&last).unwrap_or_default());
     }
 
     pub fn pop_clip_rect(&mut self) {
@@ -715,7 +697,7 @@ impl Container {
     }
 
     pub fn draw_rect(&mut self, mut rect: Recti, color: Color) {
-        rect = intersect_rects(rect, self.get_clip_rect());
+        rect = rect.intersect(&self.get_clip_rect()).unwrap_or_default();
         if rect.width > 0 && rect.height > 0 {
             self.push_command(Command::Recti { rect, color });
         }
@@ -847,7 +829,8 @@ impl Context {
         self.canvas.flush()
     }
 
-    pub fn frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
+    #[inline(never)]
+    fn frame_begin(&mut self) {
         self.root_list.clear();
         self.scroll_target = None;
         self.hover_root = self.next_hover_root;
@@ -861,10 +844,10 @@ impl Context {
             c.style = self.style.clone();
         }
         self.frame += 1;
+    }
 
-        // execute the frame function
-        f(self);
-
+    #[inline(never)]
+    fn frame_end(&mut self) {
         assert_eq!(self.container_stack.len(), 0);
         assert_eq!(self.id_stack.len(), 0);
         // assert_eq!(self.layout_stack.len(), 0);
@@ -888,6 +871,15 @@ impl Context {
         self.root_list.sort_by(|a, b| self.containers[*a].zindex.cmp(&self.containers[*b].zindex));
 
         self.treenode_pool.gc(self.frame);
+    }
+
+    pub fn frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
+        self.frame_begin();
+
+        // execute the frame function
+        f(self);
+
+        self.frame_end();
     }
 
     pub fn set_focus(&mut self, id: Option<Id>) {
@@ -959,6 +951,7 @@ impl Context {
         &mut self.containers[*self.container_stack.last().unwrap()]
     }
 
+    #[inline(never)]
     fn get_container_index_intern(&mut self, id: Id, name: &str, opt: WidgetOption) -> Option<usize> {
         for idx in 0..self.containers.len() {
             if self.containers[idx].id == id {
@@ -1035,6 +1028,7 @@ impl Context {
         self.top_container_mut().draw_frame(rect, colorid);
     }
 
+    #[inline(never)]
     pub fn draw_control_text(&mut self, str: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let mut pos: Vec2i = Vec2i { x: 0, y: 0 };
         let font = self.style.font;
@@ -1055,9 +1049,10 @@ impl Context {
 
     pub fn mouse_over(&mut self, rect: Recti) -> bool {
         let clip_rect = self.top_container_mut().get_clip_rect();
-        rect_overlaps_vec2(rect, self.input.mouse_pos) && rect_overlaps_vec2(clip_rect, self.input.mouse_pos) && self.in_hover_root()
+        rect.contains(&self.input.mouse_pos) && clip_rect.contains(&self.input.mouse_pos) && self.in_hover_root()
     }
 
+    #[inline(never)]
     pub fn update_control(&mut self, id: Id, rect: Recti, opt: WidgetOption) {
         let mouseover = self.mouse_over(rect);
         if self.focus == Some(id) {
@@ -1091,6 +1086,7 @@ impl Context {
         self.draw_control_text(text, layout, ControlColor::Text, WidgetOption::NONE);
     }
 
+    #[inline(never)]
     pub fn button_ex(&mut self, label: &str, icon: Icon, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = if label.len() > 0 {
@@ -1114,6 +1110,7 @@ impl Context {
         return res;
     }
 
+    #[inline(never)]
     pub fn checkbox(&mut self, label: &str, state: &mut bool) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.get_id_from_ptr(state);
@@ -1174,6 +1171,7 @@ impl Context {
         return res;
     }
 
+    #[inline(never)]
     fn number_textbox(&mut self, precision: usize, value: &mut Real, r: Recti, id: Id) -> ResourceState {
         if self.input.mouse_pressed.is_left() && self.input.key_down.is_shift() && self.hover == Some(id) {
             self.number_edit = Some(id);
@@ -1207,6 +1205,7 @@ impl Context {
         return self.textbox_raw(buf, id, r, opt);
     }
 
+    #[inline(never)]
     pub fn slider_ex(&mut self, value: &mut Real, low: Real, high: Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let last = *value;
@@ -1267,6 +1266,7 @@ impl Context {
         return res;
     }
 
+    #[inline(never)]
     fn node(&mut self, label: &str, is_treenode: bool, opt: WidgetOption) -> ResourceState {
         let id: Id = self.get_id_from_str(label);
         self.top_container_mut().layout.row(&[-1], 0);
@@ -1332,6 +1332,7 @@ impl Context {
         min(b, max(a, x))
     }
 
+    #[inline(never)]
     fn scrollbars(&mut self, cnt_id: usize, body: &mut Recti) {
         let sz = self.style.scrollbar_size;
         let mut cs: Vec2i = self.containers[cnt_id].content_size;
@@ -1420,7 +1421,7 @@ impl Context {
         self.root_list.push(cnt);
         self.containers[cnt].is_root = true;
 
-        if rect_overlaps_vec2(self.containers[cnt].rect, self.input.mouse_pos)
+        if self.containers[cnt].rect.contains(&self.input.mouse_pos)
             && (self.next_hover_root.is_none() || self.containers[cnt].zindex > self.containers[self.next_hover_root.unwrap()].zindex)
         {
             self.next_hover_root = Some(cnt);
@@ -1435,7 +1436,8 @@ impl Context {
         self.pop_container();
     }
 
-    pub fn window<F: FnOnce(&mut Self)>(&mut self, title: &str, mut r: Recti, opt: WidgetOption, f: F) {
+    #[inline(never)]
+    fn begin_window(&mut self, title: &str, mut r: Recti, opt: WidgetOption) {
         let id = self.get_id_from_str(title);
         let cnt_id = self.get_container_index_intern(id, title, opt);
         if cnt_id.is_none() || !self.containers[cnt_id.unwrap()].open {
@@ -1513,12 +1515,18 @@ impl Context {
         }
         let body = self.top_container().body;
         self.top_container_mut().push_clip_rect(body);
+    }
 
-        // call the window function
-        f(self);
-
+    fn end_window(&mut self) {
         self.top_container_mut().pop_clip_rect();
         self.end_root_container();
+    }
+
+    pub fn window<F: FnOnce(&mut Self)>(&mut self, title: &str, r: Recti, opt: WidgetOption, f: F) {
+        self.begin_window(title, r, opt);
+        // call the window function
+        f(self);
+        self.end_window();
     }
 
     pub fn open_popup(&mut self, name: &str) {
@@ -1536,7 +1544,8 @@ impl Context {
         self.window(name, rect(0, 0, 0, 0), opt, f);
     }
 
-    pub fn panel<F: FnOnce(&mut Self)>(&mut self, name: &str, opt: WidgetOption, f: F) {
+    #[inline(never)]
+    fn begin_panel(&mut self, name: &str, opt: WidgetOption) {
         self.push_id_from_str(name);
 
         // A panel can only exist inside a root container
@@ -1555,12 +1564,19 @@ impl Context {
         self.push_container_body(cnt_id.unwrap(), rect, opt);
 
         self.top_container_mut().push_clip_rect(clip_rect);
+    }
+
+    fn end_panel(&mut self) {
+        self.top_container_mut().pop_clip_rect();
+        self.pop_container();
+    }
+    pub fn panel<F: FnOnce(&mut Self)>(&mut self, name: &str, opt: WidgetOption, f: F) {
+        self.begin_panel(name, opt);
 
         // call the panel function
         f(self);
 
-        self.top_container_mut().pop_clip_rect();
-        self.pop_container();
+        self.end_panel();
     }
 
     pub fn column<F: FnOnce(&mut Self)>(&mut self, f: F) {
