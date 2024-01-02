@@ -503,12 +503,12 @@ struct Row {
 }
 
 #[derive(Clone, Default)]
-pub struct LayoutManager {
+struct LayoutManager {
     pub style: Style,
     pub last_rect: Recti,
     pub stack: Vec<Layout>,
     pub row_widths_stack: Vec<i32>,
-    pub row_stack: Vec<Row>,
+    row_stack: Vec<Row>,
 
     pub current_row_widths: Vec<i32>,
     pub item_index: usize,
@@ -531,7 +531,7 @@ pub struct Container {
     pub children: Vec<usize>,
     pub is_root: bool,
     pub text_stack: Vec<char>,
-    pub layout: LayoutManager,
+    layout: LayoutManager,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -539,11 +539,8 @@ pub struct Layout {
     pub body: Recti,
     pub next: Recti,
     pub position: Vec2i,
-    pub size: Vec2i,
+    pub size: Dimensioni,
     pub max: Vec2i,
-    pub widths: [i32; 16],
-    pub items: usize,
-    pub item_index: usize,
     pub next_row: i32,
     pub indent: i32,
 }
@@ -712,11 +709,8 @@ impl LayoutManager {
             body: Recti { x: 0, y: 0, width: 0, height: 0 },
             next: Recti { x: 0, y: 0, width: 0, height: 0 },
             position: Vec2i { x: 0, y: 0 },
-            size: Vec2i { x: 0, y: 0 },
+            size: Dimension { width: 0, height: 0 },
             max: Vec2i { x: 0, y: 0 },
-            widths: [0; 16],
-            items: 0,
-            item_index: 0,
             next_row: 0,
             indent: 0,
         };
@@ -736,12 +730,31 @@ impl LayoutManager {
 
     pub fn begin_column(&mut self) {
         let layout = self.next();
+
+        let row = Row {
+            start: self.row_stack.len(),
+            len: self.current_row_widths.len(),
+            item_index: self.item_index,
+        };
+        for i in 0..self.current_row_widths.len() {
+            self.row_widths_stack.push(self.current_row_widths[i]);
+        }
+        self.current_row_widths.clear();
+        self.item_index = 0;
+        self.row_stack.push(row);
         self.push_layout(layout, vec2(0, 0));
     }
 
     pub fn end_column(&mut self) {
         let b = self.top().clone();
         self.stack.pop();
+        let row = self.row_stack.pop().unwrap();
+        self.current_row_widths.clear();
+        for i in 0..row.len {
+            self.current_row_widths.push(self.row_widths_stack[i + row.start]);
+        }
+        self.row_widths_stack.shrink_to(self.row_widths_stack.len() - row.len);
+        self.item_index = row.item_index;
 
         let a = self.top_mut();
         a.position.x = if a.position.x > b.position.x + b.body.x - a.body.x {
@@ -760,53 +773,52 @@ impl LayoutManager {
         a.max.y = max(a.max.y, b.max.y);
     }
 
-    pub fn row_for_layout(layout: &mut Layout, height: i32) {
+    fn row_for_layout(&mut self, height: i32) {
+        let layout = self.top_mut();
         layout.position = vec2(layout.indent, layout.next_row);
-        layout.size.y = height;
-        layout.item_index = 0;
+        layout.size.height = height;
+        self.item_index = 0;
     }
 
     pub fn row(&mut self, widths: &[i32], height: i32) {
-        let layout = self.top_mut();
-        layout.items = widths.len();
-        assert!(widths.len() <= 16);
+        self.current_row_widths.clear();
         for i in 0..widths.len() {
-            layout.widths[i] = widths[i];
+            self.current_row_widths.push(widths[i]);
         }
-        Self::row_for_layout(layout, height);
+        self.row_for_layout(height);
     }
 
     pub fn set_width(&mut self, width: i32) {
-        self.top_mut().size.x = width;
+        self.top_mut().size.width = width;
     }
 
     pub fn set_height(&mut self, height: i32) {
-        self.top_mut().size.y = height;
+        self.top_mut().size.height = height;
     }
 
     pub fn next(&mut self) -> Recti {
         let dcell_size = self.style.default_cell_size;
         let padding = self.style.padding;
         let spacing = self.style.spacing;
+        let row_cells_count = self.current_row_widths.len();
 
-        let layout = self.top_mut();
         let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
 
-        let lsize_y = layout.size.y;
+        let lsize_y = self.top().size.height;
 
         // next grid line
-        if layout.item_index == layout.items {
-            Self::row_for_layout(layout, lsize_y);
+        if self.item_index == row_cells_count {
+            self.row_for_layout(lsize_y);
         }
 
-        res.x = layout.position.x;
-        res.y = layout.position.y;
-        res.width = if layout.items > 0 {
-            layout.widths[layout.item_index as usize]
+        res.x = self.top().position.x;
+        res.y = self.top().position.y;
+        res.width = if self.current_row_widths.len() > 0 {
+            self.current_row_widths[self.item_index]
         } else {
-            layout.size.x
+            self.top().size.width
         };
-        res.height = layout.size.y;
+        res.height = self.top().size.height;
 
         if res.width == 0 {
             res.width = dcell_size.width + padding * 2;
@@ -815,30 +827,31 @@ impl LayoutManager {
             res.height = dcell_size.height + padding * 2;
         }
         if res.width < 0 {
-            res.width += layout.body.width - res.x + 1;
+            res.width += self.top().body.width - res.x + 1;
         }
         if res.height < 0 {
-            res.height += layout.body.height - res.y + 1;
+            res.height += self.top().body.height - res.y + 1;
         }
-        layout.item_index += 1;
+
+        // ensure it will never exceeds
+        if self.item_index < row_cells_count {
+            self.item_index += 1;
+        }
 
         ///////////
         // update the next position/row/body/max/...
         ////////
-        layout.position.x += res.width + spacing;
-        layout.next_row = if layout.next_row > res.y + res.height + spacing {
-            layout.next_row
+        self.top_mut().position.x += res.width + spacing;
+        self.top_mut().next_row = if self.top().next_row > res.y + res.height + spacing {
+            self.top().next_row
         } else {
             res.y + res.height + spacing
         };
-        res.x += layout.body.x;
-        res.y += layout.body.y;
-        layout.max.x = if layout.max.x > res.x + res.width { layout.max.x } else { res.x + res.width };
-        layout.max.y = if layout.max.y > res.y + res.height {
-            layout.max.y
-        } else {
-            res.y + res.height
-        };
+
+        res.x += self.top().body.x;
+        res.y += self.top().body.y;
+        self.top_mut().max.x = max(self.top().max.x, res.x + res.width);
+        self.top_mut().max.y = max(self.top().max.y, res.y + res.height);
         self.last_rect = res;
         return self.last_rect;
     }
@@ -1735,6 +1748,20 @@ impl Context {
 
         self.top_container_mut().pop_clip_rect();
         self.pop_container();
+    }
+
+    pub fn column<F: FnOnce(&mut Self)>(&mut self, f: F) {
+        self.top_container_mut().layout.begin_column();
+        f(self);
+        self.top_container_mut().layout.end_column();
+    }
+
+    pub fn set_row_widths_height(&mut self, widths: &[i32], height: i32) {
+        self.top_container_mut().layout.row(widths, height);
+    }
+
+    pub fn next_cell(&mut self) -> Recti {
+        self.top_container_mut().layout.next()
     }
 
     pub fn set_style(&mut self, style: Style) {
