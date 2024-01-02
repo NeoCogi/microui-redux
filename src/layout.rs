@@ -27,90 +27,211 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
-
+// -----------------------------------------------------------------------------
+// Ported to rust from https://github.com/rxi/microui/ and the original license
+//
+// Copyright (c) 2020 rxi
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
+//
 use super::*;
 
-bitflags! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    pub struct LayoutFlags: u32 {
-        const NONE = 0x00000000;
-        const FILL = 0x00000001;
-    }
+#[derive(Clone, Default)]
+struct Row {
+    start: usize,
+    len: usize,
+    item_index: usize,
 }
 
-#[derive(Copy, Clone)]
-pub enum HorizontalAlignment {
-    LeftToRight,
-    RightToLeft,
-}
-
-#[derive(Copy, Clone)]
-pub enum VerticalAlignment {
-    TopDown,
-    BottomUp,
-}
-
-#[derive(Copy, Clone)]
-pub enum LayoutDirection {
-    Horizontal(HorizontalAlignment),
-    Vertical(VerticalAlignment),
-}
-
-#[derive(Clone)]
+#[derive(Default, Copy, Clone)]
 pub struct Layout {
-    pub direction: LayoutDirection,
-    pub free_space: Recti,
-    pub max: Dimensioni,
+    pub body: Recti,
+    pub next: Recti,
+    pub position: Vec2i,
+    pub size: Dimensioni,
+    pub max: Vec2i,
+    pub next_row: i32,
+    pub indent: i32,
 }
 
-impl Layout {
-    pub fn next(&mut self, desired_rect: Dimensioni, flags: LayoutFlags) -> Option<Recti> {
-        let remaining_height = self.free_space.height;
-        let remaining_width = self.free_space.width;
+#[derive(Clone, Default)]
+pub(crate) struct LayoutManager {
+    pub style: Style,
+    pub last_rect: Recti,
+    pub stack: Vec<Layout>,
+    pub row_widths_stack: Vec<i32>,
+    row_stack: Vec<Row>,
 
-        let (x, width, inc_x, dec_width, y, height, inc_y, dec_height) = match self.direction {
-            LayoutDirection::Horizontal(dir) => {
-                let desired_width = if flags.intersects(LayoutFlags::FILL) {
-                    remaining_width
-                } else {
-                    desired_rect.width
-                };
-                let max_allowed_width = min(desired_width, remaining_width);
-                self.max.width += desired_width;
+    pub current_row_widths: Vec<i32>,
+    pub item_index: usize,
+}
 
-                let (x, inc_x, dec_width) = match dir {
-                    HorizontalAlignment::LeftToRight => (self.free_space.x, max_allowed_width, max_allowed_width),
-                    HorizontalAlignment::RightToLeft => (self.free_space.x + (remaining_width - max_allowed_width), 0, max_allowed_width),
-                };
-                (x, max_allowed_width, inc_x, dec_width, self.free_space.y, self.free_space.height, 0, 0)
-            }
-            LayoutDirection::Vertical(dir) => {
-                let desired_height = if flags.intersects(LayoutFlags::FILL) {
-                    remaining_height
-                } else {
-                    desired_rect.height
-                };
-                let max_allowed_height = min(desired_height, remaining_height);
-                self.max.height += desired_height;
+impl LayoutManager {
+    pub fn push_layout(&mut self, body: Recti, scroll: Vec2i) {
+        let mut layout: Layout = Layout {
+            body: Recti { x: 0, y: 0, width: 0, height: 0 },
+            next: Recti { x: 0, y: 0, width: 0, height: 0 },
+            position: Vec2i { x: 0, y: 0 },
+            size: Dimension { width: 0, height: 0 },
+            max: Vec2i { x: 0, y: 0 },
+            next_row: 0,
+            indent: 0,
+        };
+        layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.width, body.height);
+        layout.max = vec2(-i32::MAX, -i32::MAX);
+        self.stack.push(layout);
+        self.row(&[0], 0);
+    }
 
-                let (y, inc_y, dec_height) = match dir {
-                    VerticalAlignment::TopDown => (self.free_space.y, max_allowed_height, max_allowed_height),
-                    VerticalAlignment::BottomUp => (self.free_space.y + (remaining_height - max_allowed_height), 0, max_allowed_height),
-                };
+    pub fn top(&self) -> &Layout {
+        return self.stack.last().unwrap();
+    }
 
-                (self.free_space.x, self.free_space.width, 0, 0, y, max_allowed_height, inc_y, dec_height)
-            }
+    pub fn top_mut(&mut self) -> &mut Layout {
+        return self.stack.last_mut().unwrap();
+    }
+
+    pub fn begin_column(&mut self) {
+        let layout = self.next();
+
+        let row = Row {
+            start: self.row_stack.len(),
+            len: self.current_row_widths.len(),
+            item_index: self.item_index,
+        };
+        for i in 0..self.current_row_widths.len() {
+            self.row_widths_stack.push(self.current_row_widths[i]);
+        }
+        self.current_row_widths.clear();
+        self.item_index = 0;
+        self.row_stack.push(row);
+        self.push_layout(layout, vec2(0, 0));
+    }
+
+    pub fn end_column(&mut self) {
+        let b = self.top().clone();
+        self.stack.pop();
+        let row = self.row_stack.pop().unwrap();
+        self.current_row_widths.clear();
+        for i in 0..row.len {
+            self.current_row_widths.push(self.row_widths_stack[i + row.start]);
+        }
+        self.row_widths_stack.shrink_to(self.row_widths_stack.len() - row.len);
+        self.item_index = row.item_index;
+
+        let a = self.top_mut();
+        a.position.x = if a.position.x > b.position.x + b.body.x - a.body.x {
+            a.position.x
+        } else {
+            b.position.x + b.body.x - a.body.x
+        };
+        a.next_row = if a.next_row > b.next_row + b.body.y - a.body.y {
+            a.next_row
+        } else {
+            b.next_row + b.body.y - a.body.y
         };
 
-        // bail if we don't have enough space
-        if self.free_space.width <= 0 || self.free_space.height <= 0 {
-            return None;
+        // propagate max to the "current" top of the stack (parent) layout
+        a.max.x = max(a.max.x, b.max.x);
+        a.max.y = max(a.max.y, b.max.y);
+    }
+
+    fn row_for_layout(&mut self, height: i32) {
+        let layout = self.top_mut();
+        layout.position = vec2(layout.indent, layout.next_row);
+        layout.size.height = height;
+        self.item_index = 0;
+    }
+
+    pub fn row(&mut self, widths: &[i32], height: i32) {
+        self.current_row_widths.clear();
+        for i in 0..widths.len() {
+            self.current_row_widths.push(widths[i]);
+        }
+        self.row_for_layout(height);
+    }
+
+    pub fn set_width(&mut self, width: i32) {
+        self.top_mut().size.width = width;
+    }
+
+    pub fn set_height(&mut self, height: i32) {
+        self.top_mut().size.height = height;
+    }
+
+    pub fn next(&mut self) -> Recti {
+        let dcell_size = self.style.default_cell_size;
+        let padding = self.style.padding;
+        let spacing = self.style.spacing;
+        let row_cells_count = self.current_row_widths.len();
+
+        let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
+
+        let lsize_y = self.top().size.height;
+
+        // next grid line
+        if self.item_index == row_cells_count {
+            self.row_for_layout(lsize_y);
         }
 
-        self.free_space.x += inc_x;
-        self.free_space.width -= dec_width;
-        self.free_space.y += inc_y;
-        self.free_space.height -= dec_height;
-        Some(Recti::new(x, y, width, height))
+        res.x = self.top().position.x;
+        res.y = self.top().position.y;
+        res.width = if self.current_row_widths.len() > 0 {
+            self.current_row_widths[self.item_index]
+        } else {
+            self.top().size.width
+        };
+        res.height = self.top().size.height;
+
+        if res.width == 0 {
+            res.width = dcell_size.width + padding * 2;
+        }
+        if res.height == 0 {
+            res.height = dcell_size.height + padding * 2;
+        }
+        if res.width < 0 {
+            res.width += self.top().body.width - res.x + 1;
+        }
+        if res.height < 0 {
+            res.height += self.top().body.height - res.y + 1;
+        }
+
+        // ensure it will never exceeds
+        if self.item_index < row_cells_count {
+            self.item_index += 1;
+        }
+
+        ///////////
+        // update the next position/row/body/max/...
+        ////////
+        self.top_mut().position.x += res.width + spacing;
+        self.top_mut().next_row = if self.top().next_row > res.y + res.height + spacing {
+            self.top().next_row
+        } else {
+            res.y + res.height + spacing
+        };
+
+        res.x += self.top().body.x;
+        res.y += self.top().body.y;
+        self.top_mut().max.x = max(self.top().max.x, res.x + res.width);
+        self.top_mut().max.y = max(self.top().max.y, res.y + res.height);
+        self.last_rect = res;
+        return self.last_rect;
     }
 }
