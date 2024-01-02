@@ -1,4 +1,5 @@
 extern crate sdl2;
+mod atlas;
 mod renderer;
 
 use std::rc::Rc;
@@ -278,6 +279,32 @@ impl<'a> State<'a> {
                 ctx.top_container_mut().draw_rect(next_layout, color);
                 i += 1;
             }
+            ctx.set_row_widths_height(&[80, sw], 0);
+            ctx.label("padding");
+            let mut tmp = style.padding as u8;
+            self.uint8_slider(&mut tmp, 0, 16, ctx);
+            style.padding = tmp as i32;
+
+            ctx.label("spacing");
+            let mut tmp = style.spacing as u8;
+            self.uint8_slider(&mut tmp, 0, 16, ctx);
+            style.spacing = tmp as i32;
+
+            ctx.label("title height");
+            let mut tmp = style.title_height as u8;
+            self.uint8_slider(&mut tmp, 0, 128, ctx);
+            style.title_height = tmp as i32;
+
+            ctx.label("thumb size");
+            let mut tmp = style.thumb_size as u8;
+            self.uint8_slider(&mut tmp, 0, 128, ctx);
+            style.thumb_size = tmp as i32;
+
+            ctx.label("scroll size");
+            let mut tmp = style.scrollbar_size as u8;
+            self.uint8_slider(&mut tmp, 0, 128, ctx);
+            style.scrollbar_size = tmp as i32;
+
             ctx.set_style(style);
         });
     }
@@ -312,7 +339,7 @@ fn main() {
 
     let mut event_pump = sdl_context.event_pump().unwrap();
     let (width, height) = window.size();
-    let rd = Renderer::new(gl, &microui_redux::ATLAS_TEXTURE, width, height);
+    let rd = Renderer::new(gl, &atlas::ATLAS_TEXTURE, width, height);
 
     let mut state = State::new();
     let mut ctx = microui_redux::Context::new(Rc::new(MyAtlas {}), Box::new(rd));
