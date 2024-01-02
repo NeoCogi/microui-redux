@@ -53,6 +53,7 @@
 use microui_redux::*;
 use glow::*;
 use rs_math3d::*;
+use crate::atlas::*;
 
 const VERTEX_SHADER: &str = "#version 100
 uniform highp mat4 uTransform;

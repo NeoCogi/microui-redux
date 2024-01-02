@@ -57,9 +57,6 @@ use rs_math3d::*;
 mod layout;
 pub use layout::*;
 
-mod atlas;
-pub use atlas::*;
-
 use bitflags::*;
 use std::cmp::{min, max};
 pub trait Atlas {
