@@ -22,9 +22,10 @@ $ cargo run --example demo-sdl2
 - [x] Move `begin_*`, `end_*` functions to closures
 - [x] Move to AtlasRenderer Trait
 - [x] Remove/Refactor `Pool`
-- [ ] Change layout code
+- [x] Change layout code
 - [ ] Treenode as tree
 - [ ] Mechanism to garbage collect/free unused containers/tree nodes (use root lists and mark/sweep?)
+- [ ] Software based textured rectangle clipping
 - [ ] Add Atlasser to the code
 - [ ] Image widget
 - [ ] Documentation
