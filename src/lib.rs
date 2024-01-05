@@ -54,6 +54,9 @@ use std::{f32, collections::HashMap, hash::Hash, rc::Rc};
 
 use rs_math3d::*;
 
+mod tree_pool;
+use tree_pool::*;
+
 mod layout;
 pub use layout::*;
 
@@ -92,68 +95,6 @@ pub trait Canvas {
     fn set_clip_rect(&mut self, width: i32, height: i32, rect: Recti);
     fn clear(&mut self, width: i32, height: i32, clr: Color);
     fn flush(&mut self);
-}
-
-#[derive(Clone)]
-struct PoolItem<PO: Clone> {
-    object: PO,
-    frame: usize,
-}
-
-#[derive(Clone)]
-pub struct Pool<ID, PO: Clone> {
-    items: HashMap<ID, PoolItem<PO>>,
-    gc_ids: Vec<ID>,
-}
-
-impl<ID: PartialEq + Eq + Hash + Clone, PO: Clone> Pool<ID, PO> {
-    pub fn insert(&mut self, id: ID, object: PO, frame: usize) -> ID {
-        match self.items.get_mut(&id) {
-            Some(v) => v.frame = frame,
-            None => {
-                self.items.insert(id.clone(), PoolItem { object, frame });
-            }
-        }
-        id
-    }
-
-    pub fn get(&self, id: ID) -> Option<&PO> {
-        self.items.get(&id).map(|pi| &pi.object)
-    }
-
-    pub fn get_mut(&mut self, id: ID) -> Option<&mut PO> {
-        self.items.get_mut(&id).map(|po| &mut po.object)
-    }
-
-    pub fn update(&mut self, id: ID, frame: usize) {
-        self.items.get_mut(&id).unwrap().frame = frame
-    }
-
-    pub fn remove(&mut self, id: ID) {
-        self.items.remove(&id);
-    }
-
-    pub fn gc(&mut self, current_frame: usize) {
-        self.gc_ids.clear();
-        for kv in &self.items {
-            if kv.1.frame < current_frame - 2 {
-                self.gc_ids.push(kv.0.clone());
-            }
-        }
-
-        for gid in &self.gc_ids {
-            self.items.remove(gid);
-        }
-    }
-}
-
-impl<ID, PO: Clone> Default for Pool<ID, PO> {
-    fn default() -> Self {
-        Self {
-            items: HashMap::default(),
-            gc_ids: Vec::default(),
-        }
-    }
 }
 
 #[derive(PartialEq, Copy, Clone)]
@@ -458,7 +399,6 @@ pub struct Context {
     container_stack: Vec<usize>,
     id_stack: Vec<Id>,
     containers: Vec<Container>,
-    treenode_pool: Pool<Id, ()>,
     pub input: Input,
 }
 
@@ -483,13 +423,12 @@ impl Context {
             container_stack: Vec::default(),
             id_stack: Vec::default(),
             containers: Vec::default(),
-            treenode_pool: Pool::default(),
             input: Input::default(),
         }
     }
 }
 
-#[derive(Default, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Default, Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Id(u32);
 
 #[derive(Clone)]
@@ -509,6 +448,7 @@ pub struct Container {
     pub children: Vec<usize>,
     pub is_root: bool,
     pub text_stack: Vec<char>,
+    treenode_pool: Pool<Id, ()>,
     layout: LayoutManager,
 }
 
@@ -850,7 +790,7 @@ impl Context {
     fn frame_end(&mut self) {
         assert_eq!(self.container_stack.len(), 0);
         assert_eq!(self.id_stack.len(), 0);
-        // assert_eq!(self.layout_stack.len(), 0);
+
         if !self.scroll_target.is_none() {
             self.containers[self.scroll_target.unwrap()].scroll.x += self.input.scroll_delta.x;
             self.containers[self.scroll_target.unwrap()].scroll.y += self.input.scroll_delta.y;
@@ -869,8 +809,9 @@ impl Context {
 
         self.input.epilogue();
         self.root_list.sort_by(|a, b| self.containers[*a].zindex.cmp(&self.containers[*b].zindex));
-
-        self.treenode_pool.gc(self.frame);
+        for c in &mut self.containers {
+            c.treenode_pool.gc(self.frame);
+        }
     }
 
     pub fn frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
@@ -979,6 +920,7 @@ impl Context {
             children: Vec::default(),
             is_root: false,
             text_stack: Vec::default(),
+            treenode_pool: Pool::default(),
 
             layout: LayoutManager::default(),
         });
@@ -1269,22 +1211,23 @@ impl Context {
     #[inline(never)]
     fn node(&mut self, label: &str, is_treenode: bool, opt: WidgetOption) -> ResourceState {
         let id: Id = self.get_id_from_str(label);
+        let frame = self.frame;
         self.top_container_mut().layout.row(&[-1], 0);
         let mut r = self.top_container_mut().layout.next();
         self.update_control(id, r, WidgetOption::NONE);
-        let state = self.treenode_pool.get(id);
-        let mut active = state.is_some();
+        let orig_state = self.top_container_mut().treenode_pool.get(id).is_some();
+        let mut active = orig_state;
         // clever substitution for if opt.is_expanded() { !active } else { active };
         let expanded = opt.is_expanded() ^ active;
         active ^= self.input.mouse_pressed.is_left() && self.focus == Some(id);
-        if state.is_some() {
+        if orig_state {
             if active {
-                self.treenode_pool.update(id, self.frame);
+                self.top_container_mut().treenode_pool.update(id, frame);
             } else {
-                self.treenode_pool.remove(id);
+                self.top_container_mut().treenode_pool.remove(id);
             }
         } else if active {
-            self.treenode_pool.insert(id, (), self.frame);
+            self.top_container_mut().treenode_pool.insert(id, (), frame);
         }
 
         if is_treenode {
@@ -1437,11 +1380,12 @@ impl Context {
     }
 
     #[inline(never)]
-    fn begin_window(&mut self, title: &str, mut r: Recti, opt: WidgetOption) {
+    #[must_use]
+    fn begin_window(&mut self, title: &str, mut r: Recti, opt: WidgetOption) -> bool {
         let id = self.get_id_from_str(title);
         let cnt_id = self.get_container_index_intern(id, title, opt);
         if cnt_id.is_none() || !self.containers[cnt_id.unwrap()].open {
-            return;
+            return false;
         }
         self.id_stack.push(id);
 
@@ -1515,6 +1459,7 @@ impl Context {
         }
         let body = self.top_container().body;
         self.top_container_mut().push_clip_rect(body);
+        true
     }
 
     fn end_window(&mut self) {
@@ -1523,10 +1468,11 @@ impl Context {
     }
 
     pub fn window<F: FnOnce(&mut Self)>(&mut self, title: &str, r: Recti, opt: WidgetOption, f: F) {
-        self.begin_window(title, r, opt);
-        // call the window function
-        f(self);
-        self.end_window();
+        // call the window function if the window is open
+        if self.begin_window(title, r, opt) {
+            f(self);
+            self.end_window();
+        }
     }
 
     pub fn open_popup(&mut self, name: &str) {
@@ -1541,7 +1487,7 @@ impl Context {
     pub fn popup<F: FnOnce(&mut Self)>(&mut self, name: &str, f: F) {
         let opt =
             WidgetOption::POPUP | WidgetOption::AUTO_SIZE | WidgetOption::NO_RESIZE | WidgetOption::NO_SCROLL | WidgetOption::NO_TITLE | WidgetOption::CLOSED;
-        self.window(name, rect(0, 0, 0, 0), opt, f);
+        let _ = self.window(name, rect(0, 0, 0, 0), opt, f);
     }
 
     #[inline(never)]
