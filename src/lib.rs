@@ -54,9 +54,6 @@ use std::{f32, collections::HashMap, hash::Hash, rc::Rc};
 
 use rs_math3d::*;
 
-mod tree_pool;
-use tree_pool::*;
-
 mod layout;
 pub use layout::*;
 
@@ -197,6 +194,28 @@ bitflags! {
         const ALIGN_RIGHT = 2;
         const ALIGN_CENTER = 1;
         const NONE = 0;
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum NodeState {
+    Expanded,
+    Closed,
+}
+
+impl NodeState {
+    pub fn is_expanded(&self) -> bool {
+        match self {
+            Self::Expanded => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_closed(&self) -> bool {
+        match self {
+            Self::Closed => true,
+            _ => false,
+        }
     }
 }
 
@@ -448,7 +467,6 @@ pub struct Container {
     pub children: Vec<usize>,
     pub is_root: bool,
     pub text_stack: Vec<char>,
-    treenode_pool: Pool<Id, ()>,
     layout: LayoutManager,
 }
 
@@ -809,9 +827,6 @@ impl Context {
 
         self.input.epilogue();
         self.root_list.sort_by(|a, b| self.containers[*a].zindex.cmp(&self.containers[*b].zindex));
-        for c in &mut self.containers {
-            c.treenode_pool.gc(self.frame);
-        }
     }
 
     pub fn frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
@@ -920,7 +935,6 @@ impl Context {
             children: Vec::default(),
             is_root: false,
             text_stack: Vec::default(),
-            treenode_pool: Pool::default(),
 
             layout: LayoutManager::default(),
         });
@@ -1209,26 +1223,14 @@ impl Context {
     }
 
     #[inline(never)]
-    fn node(&mut self, label: &str, is_treenode: bool, opt: WidgetOption) -> ResourceState {
+    fn node(&mut self, label: &str, is_treenode: bool, state: NodeState) -> NodeState {
         let id: Id = self.get_id_from_str(label);
-        let frame = self.frame;
         self.top_container_mut().layout.row(&[-1], 0);
         let mut r = self.top_container_mut().layout.next();
         self.update_control(id, r, WidgetOption::NONE);
-        let orig_state = self.top_container_mut().treenode_pool.get(id).is_some();
-        let mut active = orig_state;
-        // clever substitution for if opt.is_expanded() { !active } else { active };
-        let expanded = opt.is_expanded() ^ active;
-        active ^= self.input.mouse_pressed.is_left() && self.focus == Some(id);
-        if orig_state {
-            if active {
-                self.top_container_mut().treenode_pool.update(id, frame);
-            } else {
-                self.top_container_mut().treenode_pool.remove(id);
-            }
-        } else if active {
-            self.top_container_mut().treenode_pool.insert(id, (), frame);
-        }
+
+        let expanded = state.is_expanded();
+        let active = expanded ^ (self.input.mouse_pressed.is_left() && self.focus == Some(id));
 
         if is_treenode {
             if self.hover == Some(id) {
@@ -1246,29 +1248,35 @@ impl Context {
         r.x += r.height - self.style.padding;
         r.width -= r.height - self.style.padding;
         self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
-        return if expanded { ResourceState::ACTIVE } else { ResourceState::NONE };
+        return if active { NodeState::Expanded } else { NodeState::Closed };
     }
 
-    pub fn header<F: FnOnce(&mut Self)>(&mut self, label: &str, opt: WidgetOption, f: F) {
-        if !self.node(label, false, opt).is_none() {
+    #[must_use]
+    pub fn header<F: FnOnce(&mut Self)>(&mut self, label: &str, state: NodeState, f: F) -> NodeState {
+        let new_state = self.node(label, false, state);
+        if new_state.is_expanded() {
             f(self);
         }
+        new_state
     }
 
-    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, label: &str, opt: WidgetOption, f: F) {
-        let res = self.node(label, true, opt);
-        if res.is_active() && self.last_id.is_some() {
+    #[must_use]
+    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, label: &str, state: NodeState, f: F) -> NodeState {
+        let res = self.node(label, true, state);
+        if res.is_expanded() && self.last_id.is_some() {
             let indent = self.style.indent;
             self.top_container_mut().layout.top_mut().indent += indent;
             self.id_stack.push(self.last_id.unwrap());
         }
 
-        if !res.is_none() {
+        if res.is_expanded() {
             f(self);
             let indent = self.style.indent;
             self.top_container_mut().layout.top_mut().indent -= indent;
             self.pop_id();
         }
+
+        res
     }
 
     fn clamp(x: i32, a: i32, b: i32) -> i32 {

@@ -18,6 +18,16 @@ struct State<'a> {
     logbuf_updated: bool,
     submit_buf: String,
     checks: [bool; 3],
+
+    window_header: NodeState,
+    test_buttons_header: NodeState,
+    background_header: NodeState,
+    tree_and_text_header: NodeState,
+    test1_tn: NodeState,
+    test1a_tn: NodeState,
+    test1b_tn: NodeState,
+    test2_tn: NodeState,
+    test3_tn: NodeState,
 }
 
 #[derive(Copy, Clone)]
@@ -88,6 +98,17 @@ impl<'a> State<'a> {
             logbuf_updated: false,
             submit_buf: String::new(),
             checks: [false, true, false],
+
+            window_header: NodeState::Closed,
+            test_buttons_header: NodeState::Expanded,
+            tree_and_text_header: NodeState::Expanded,
+            background_header: NodeState::Expanded,
+
+            test1_tn: NodeState::Closed,
+            test1a_tn: NodeState::Closed,
+            test1b_tn: NodeState::Closed,
+            test2_tn: NodeState::Closed,
+            test3_tn: NodeState::Closed,
         }
     }
 
@@ -111,7 +132,7 @@ impl<'a> State<'a> {
 
             let mut buff = String::new();
 
-            ctx.header("Window Info", WidgetOption::NONE, |ctx| {
+            self.window_header = ctx.header("Window Info", self.window_header, |ctx| {
                 let win_0 = ctx.top_container().rect;
                 ctx.set_row_widths_height(&[54, -1], 0);
                 ctx.label("Position:");
@@ -127,7 +148,7 @@ impl<'a> State<'a> {
 
                 ctx.label(buff.as_str());
             });
-            ctx.header("Test Buttons", WidgetOption::EXPANDED, |ctx| {
+            self.test_buttons_header = ctx.header("Test Buttons", self.test_buttons_header, |ctx| {
                 ctx.set_row_widths_height(&[86, -110, -1], 0);
                 ctx.label("Test buttons 1:");
                 if !ctx.button_ex("Button 1", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
@@ -152,15 +173,15 @@ impl<'a> State<'a> {
                     }
                 });
             });
-            ctx.header("Tree and Text", WidgetOption::EXPANDED, |ctx| {
+            self.tree_and_text_header = ctx.header("Tree and Text", self.tree_and_text_header, |ctx| {
                 ctx.set_row_widths_height(&[140, -1], 0);
                 ctx.column(|ctx| {
-                    ctx.treenode("Test 1", WidgetOption::NONE, |ctx| {
-                        ctx.treenode("Test 1a", WidgetOption::NONE, |ctx| {
+                    self.test1_tn = ctx.treenode("Test 1", self.test1_tn, |ctx| {
+                        self.test1a_tn = ctx.treenode("Test 1a", self.test1a_tn, |ctx| {
                             ctx.label("Hello");
                             ctx.label("world");
                         });
-                        ctx.treenode("Test 1b", WidgetOption::NONE, |ctx| {
+                        self.test1b_tn = ctx.treenode("Test 1b", self.test1b_tn, |ctx| {
                             if !ctx.button_ex("Button 1", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                                 self.write_log("Pressed button 1");
                             }
@@ -169,7 +190,7 @@ impl<'a> State<'a> {
                             }
                         });
                     });
-                    ctx.treenode("Test 2", WidgetOption::NONE, |ctx| {
+                    self.test2_tn =ctx.treenode("Test 2", self.test2_tn, |ctx| {
                         ctx.set_row_widths_height(&[54, 54], 0);
                         if !ctx.button_ex("Button 3", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                             self.write_log("Pressed button 3");
@@ -184,7 +205,7 @@ impl<'a> State<'a> {
                             self.write_log("Pressed button 6");
                         }
                     });
-                    ctx.treenode("Test 3", WidgetOption::NONE, |ctx| {
+                    self.test3_tn = ctx.treenode("Test 3", self.test3_tn, |ctx| {
                         ctx.checkbox("Checkbox 1", &mut self.checks[0]);
                         ctx.checkbox("Checkbox 2", &mut self.checks[1]);
                         ctx.checkbox("Checkbox 3", &mut self.checks[2]);
@@ -198,7 +219,7 @@ impl<'a> State<'a> {
                     );
                 });
             });
-            ctx.header("Background Color", WidgetOption::EXPANDED, |ctx| {
+            self.background_header = ctx.header("Background Color", self.background_header, |ctx| {
                 ctx.set_row_widths_height(&[-78, -1], 74);
                 ctx.column(|ctx| {
                 ctx.set_row_widths_height(&[46, -1], 0);

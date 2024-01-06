@@ -23,8 +23,8 @@ $ cargo run --example demo-sdl2
 - [x] Move to AtlasRenderer Trait
 - [x] Remove/Refactor `Pool`
 - [x] Change layout code
-- [ ] Treenode as tree
-- [ ] Mechanism to garbage collect/free unused containers/tree nodes (use root lists and mark/sweep?)
+- [x] Treenode as tree
+- [ ] Mechanism to garbage collect/free unused containers (use root lists and mark/sweep?)
 - [ ] Software based textured rectangle clipping
 - [ ] Add Atlasser to the code
 - [ ] Image widget
