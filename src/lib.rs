@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-use std::{f32, collections::HashMap, hash::Hash, rc::Rc};
+use std::{f32, hash::Hash, rc::Rc};
 
 use rs_math3d::*;
 
@@ -180,7 +180,6 @@ impl ResourceState {
 bitflags! {
     #[derive(Copy, Clone)]
     pub struct WidgetOption : u32 {
-        const EXPANDED = 4096;
         const CLOSED = 2048;
         const POPUP= 1024;
         const AUTO_SIZE = 512;
@@ -220,9 +219,6 @@ impl NodeState {
 }
 
 impl WidgetOption {
-    pub fn is_expanded(&self) -> bool {
-        self.intersects(WidgetOption::EXPANDED)
-    }
     pub fn is_closed(&self) -> bool {
         self.intersects(WidgetOption::CLOSED)
     }
