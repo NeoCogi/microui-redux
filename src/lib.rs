@@ -887,9 +887,10 @@ impl Context {
 
     fn pop_container(&mut self) {
         let layout = *self.top_container().layout.top();
-        self.top_container_mut().content_size.x = layout.max.x - layout.body.x;
-        self.top_container_mut().content_size.y = layout.max.y - layout.body.y;
-        self.top_container_mut().layout.stack.pop();
+        let container = self.top_container_mut();
+        container.content_size.x = layout.max.x - layout.body.x;
+        container.content_size.y = layout.max.y - layout.body.y;
+        container.layout.stack.pop();
 
         self.container_stack.pop();
         self.pop_id();
@@ -985,18 +986,21 @@ impl Context {
         let mut pos: Vec2i = Vec2i { x: 0, y: 0 };
         let font = self.style.font;
         let tsize = self.atlas.get_text_size(font, str);
-        self.top_container_mut().push_clip_rect(rect);
+        let padding = self.style.padding;
+        let color = self.style.colors[colorid as usize];
+
+        let container = self.top_container_mut();
+        container.push_clip_rect(rect);
         pos.y = rect.y + (rect.height - tsize.height) / 2;
         if opt.is_aligned_center() {
             pos.x = rect.x + (rect.width - tsize.width) / 2;
         } else if opt.is_aligned_right() {
-            pos.x = rect.x + rect.width - tsize.width - self.style.padding;
+            pos.x = rect.x + rect.width - tsize.width - padding;
         } else {
-            pos.x = rect.x + self.style.padding;
+            pos.x = rect.x + padding;
         }
-        let color = self.style.colors[colorid as usize];
-        self.top_container_mut().draw_text(font, str, pos, color);
-        self.top_container_mut().pop_clip_rect();
+        container.draw_text(font, str, pos, color);
+        container.pop_clip_rect();
     }
 
     pub fn mouse_over(&mut self, rect: Recti) -> bool {
@@ -1113,10 +1117,11 @@ impl Context {
             let ofx = r.width - self.style.padding - tsize.width - 1;
             let textx = r.x + (if ofx < self.style.padding { ofx } else { self.style.padding });
             let texty = r.y + (r.height - tsize.height) / 2;
-            self.top_container_mut().push_clip_rect(r);
-            self.top_container_mut().draw_text(font, buf.as_str(), vec2(textx, texty), color);
-            self.top_container_mut().draw_rect(rect(textx + tsize.width, texty, 1, tsize.height), color);
-            self.top_container_mut().pop_clip_rect();
+            let container = self.top_container_mut();
+            container.push_clip_rect(r);
+            container.draw_text(font, buf.as_str(), vec2(textx, texty), color);
+            container.draw_rect(rect(textx + tsize.width, texty, 1, tsize.height), color);
+            container.pop_clip_rect();
         } else {
             self.draw_control_text(buf.as_str(), r, ControlColor::Text, opt);
         }
