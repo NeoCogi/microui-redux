@@ -55,8 +55,10 @@ use std::{f32, hash::Hash, rc::Rc};
 use rs_math3d::*;
 
 mod container;
+mod idmngr;
 mod layout;
 
+pub use idmngr::*;
 pub use layout::*;
 pub use container::*;
 
@@ -404,7 +406,6 @@ pub struct Context {
     style: Style,
     hover: Option<Id>,
     focus: Option<Id>,
-    pub last_id: Option<Id>,
     last_zindex: i32,
     updated_focus: bool,
     frame: usize,
@@ -415,8 +416,8 @@ pub struct Context {
     number_edit: Option<Id>,
     root_list: Vec<usize>,
     container_stack: Vec<usize>,
-    id_stack: Vec<Id>,
     containers: Vec<Container>,
+    pub idmngr: IdManager,
     pub input: Input,
 }
 
@@ -428,7 +429,6 @@ impl Context {
             style: Style::default(),
             hover: None,
             focus: None,
-            last_id: None,
             last_zindex: 0,
             updated_focus: false,
             frame: 0,
@@ -439,15 +439,12 @@ impl Context {
             number_edit: None,
             root_list: Vec::default(),
             container_stack: Vec::default(),
-            id_stack: Vec::default(),
+            idmngr: IdManager::new(),
             containers: Vec::default(),
             input: Input::default(),
         }
     }
 }
-
-#[derive(Default, Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub struct Id(u32);
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
@@ -536,29 +533,6 @@ pub fn expand_rect(r: Recti, n: i32) -> Recti {
     rect(r.x - n, r.y - n, r.width + n * 2, r.height + n * 2)
 }
 
-fn hash_step(h: u32, n: u32) -> u32 {
-    (h ^ n).wrapping_mul(16777619 as u32)
-}
-
-fn hash_u32(hash_0: &mut Id, orig_id: u32) {
-    let bytes = orig_id.to_be_bytes();
-    for b in bytes {
-        *hash_0 = Id(hash_step(hash_0.0, b as u32));
-    }
-}
-
-fn hash_str(hash_0: &mut Id, s: &str) {
-    for c in s.chars() {
-        *hash_0 = Id(hash_step(hash_0.0, c as u32));
-    }
-}
-
-fn hash_bytes(hash_0: &mut Id, s: &[u8]) {
-    for c in s {
-        *hash_0 = Id(hash_step(hash_0.0, *c as u32));
-    }
-}
-
 impl Context {
     pub fn clear(&mut self, width: i32, height: i32, clr: Color) {
         self.canvas.clear(width, height, clr);
@@ -616,7 +590,7 @@ impl Context {
     #[inline(never)]
     fn frame_end(&mut self) {
         assert_eq!(self.container_stack.len(), 0);
-        assert_eq!(self.id_stack.len(), 0);
+        assert_eq!(self.idmngr.len(), 0);
 
         if !self.scroll_target.is_none() {
             self.containers[self.scroll_target.unwrap()].scroll.x += self.input.scroll_delta.x;
@@ -652,52 +626,6 @@ impl Context {
         self.updated_focus = true;
     }
 
-    pub fn get_id_u32(&mut self, orig_id: u32) -> Id {
-        let mut res: Id = match self.id_stack.last() {
-            Some(id) => *id,
-            None => Id(2166136261),
-        };
-        hash_u32(&mut res, orig_id);
-        self.last_id = Some(res);
-        return res;
-    }
-
-    pub fn get_id_from_ptr<T: ?Sized>(&mut self, orig_id: &T) -> Id {
-        let mut res: Id = match self.id_stack.last() {
-            Some(id) => *id,
-            None => Id(2166136261),
-        };
-        let ptr = orig_id as *const T as *const u8 as usize;
-        let bytes = ptr.to_le_bytes();
-        hash_bytes(&mut res, &bytes);
-        self.last_id = Some(res);
-        return res;
-    }
-
-    pub fn get_id_from_str(&mut self, s: &str) -> Id {
-        let mut res: Id = match self.id_stack.last() {
-            Some(id) => *id,
-            None => Id(2166136261),
-        };
-        hash_str(&mut res, s);
-        self.last_id = Some(res);
-        return res;
-    }
-
-    pub fn push_id_from_ptr<T>(&mut self, orig_id: &T) {
-        let id = self.get_id_from_ptr(orig_id);
-        self.id_stack.push(id);
-    }
-
-    pub fn push_id_from_str(&mut self, s: &str) {
-        let id = self.get_id_from_str(s);
-        self.id_stack.push(id);
-    }
-
-    pub fn pop_id(&mut self) {
-        self.id_stack.pop();
-    }
-
     fn pop_container(&mut self) {
         let layout = *self.top_container().layout.top();
         let container = self.top_container_mut();
@@ -706,7 +634,7 @@ impl Context {
         container.layout.stack.pop();
 
         self.container_stack.pop();
-        self.pop_id();
+        self.idmngr.pop_id();
     }
 
     pub fn top_container(&self) -> &Container {
@@ -753,7 +681,7 @@ impl Context {
     }
 
     fn get_container_index(&mut self, name: &str) -> Option<usize> {
-        let id = self.get_id_from_str(name);
+        let id = self.idmngr.get_id_from_str(name);
         self.get_container_index_intern(id, name, WidgetOption::NONE)
     }
 
@@ -859,9 +787,9 @@ impl Context {
     pub fn button_ex(&mut self, label: &str, icon: Icon, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = if label.len() > 0 {
-            self.get_id_from_str(label)
+            self.idmngr.get_id_from_str(label)
         } else {
-            self.get_id_u32(icon as u32)
+            self.idmngr.get_id_u32(icon as u32)
         };
         let r: Recti = self.top_container_mut().layout.next();
         self.update_control(id, r, opt);
@@ -882,7 +810,7 @@ impl Context {
     #[inline(never)]
     pub fn checkbox(&mut self, label: &str, state: &mut bool) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = self.get_id_from_ptr(state);
+        let id: Id = self.idmngr.get_id_from_ptr(state);
         let mut r: Recti = self.top_container_mut().layout.next();
         let box_0: Recti = rect(r.x, r.y, r.height, r.height);
         self.update_control(id, r, WidgetOption::NONE);
@@ -970,7 +898,7 @@ impl Context {
     }
 
     pub fn textbox_ex(&mut self, buf: &mut String, opt: WidgetOption) -> ResourceState {
-        let id: Id = self.get_id_from_ptr(buf);
+        let id: Id = self.idmngr.get_id_from_ptr(buf);
         let r: Recti = self.top_container_mut().layout.next();
         return self.textbox_raw(buf, id, r, opt);
     }
@@ -980,7 +908,7 @@ impl Context {
         let mut res = ResourceState::NONE;
         let last = *value;
         let mut v = last;
-        let id = self.get_id_from_ptr(value);
+        let id = self.idmngr.get_id_from_ptr(value);
         let base = self.top_container_mut().layout.next();
         if !self.number_textbox(precision, &mut v, base, id).is_none() {
             return res;
@@ -1016,7 +944,7 @@ impl Context {
 
     pub fn number_ex(&mut self, value: &mut Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = self.get_id_from_ptr(value);
+        let id: Id = self.idmngr.get_id_from_ptr(value);
         let base: Recti = self.top_container_mut().layout.next();
         let last: Real = *value;
         if !self.number_textbox(precision, value, base, id).is_none() {
@@ -1038,7 +966,7 @@ impl Context {
 
     #[inline(never)]
     fn node(&mut self, label: &str, is_treenode: bool, state: NodeState) -> NodeState {
-        let id: Id = self.get_id_from_str(label);
+        let id: Id = self.idmngr.get_id_from_str(label);
         self.top_container_mut().layout.row(&[-1], 0);
         let mut r = self.top_container_mut().layout.next();
         self.update_control(id, r, WidgetOption::NONE);
@@ -1077,17 +1005,17 @@ impl Context {
     #[must_use]
     pub fn treenode<F: FnOnce(&mut Self)>(&mut self, label: &str, state: NodeState, f: F) -> NodeState {
         let res = self.node(label, true, state);
-        if res.is_expanded() && self.last_id.is_some() {
+        if res.is_expanded() && self.idmngr.last_id().is_some() {
             let indent = self.style.indent;
             self.top_container_mut().layout.top_mut().indent += indent;
-            self.id_stack.push(self.last_id.unwrap());
+            self.idmngr.push_id(self.idmngr.last_id().unwrap());
         }
 
         if res.is_expanded() {
             f(self);
             let indent = self.style.indent;
             self.top_container_mut().layout.top_mut().indent -= indent;
-            self.pop_id();
+            self.idmngr.pop_id();
         }
 
         res
@@ -1113,7 +1041,7 @@ impl Context {
         let body = *body;
         let maxscroll = cs.y - body.height;
         if maxscroll > 0 && body.height > 0 {
-            let id: Id = self.get_id_from_str("!scrollbary");
+            let id: Id = self.idmngr.get_id_from_str("!scrollbary");
             let mut base = body;
             base.x = body.x + body.width;
             base.width = self.style.scrollbar_size;
@@ -1140,7 +1068,7 @@ impl Context {
         }
         let maxscroll_0 = cs.x - body.width;
         if maxscroll_0 > 0 && body.width > 0 {
-            let id_0: Id = self.get_id_from_str("!scrollbarx");
+            let id_0: Id = self.idmngr.get_id_from_str("!scrollbarx");
             let mut base_0 = body;
             base_0.y = body.y + body.height;
             base_0.height = self.style.scrollbar_size;
@@ -1204,12 +1132,12 @@ impl Context {
     #[inline(never)]
     #[must_use]
     fn begin_window(&mut self, title: &str, mut r: Recti, opt: WidgetOption) -> bool {
-        let id = self.get_id_from_str(title);
+        let id = self.idmngr.get_id_from_str(title);
         let cnt_id = self.get_container_index_intern(id, title, opt);
         if cnt_id.is_none() || !self.containers[cnt_id.unwrap()].open {
             return false;
         }
-        self.id_stack.push(id);
+        self.idmngr.push_id(id);
 
         if self.containers[cnt_id.unwrap()].rect.width == 0 {
             self.containers[cnt_id.unwrap()].rect = r;
@@ -1227,7 +1155,7 @@ impl Context {
 
             // TODO: Is this necessary?
             if !opt.has_no_title() {
-                let id = self.get_id_from_str("!title");
+                let id = self.idmngr.get_id_from_str("!title");
                 self.update_control(id, tr, opt);
                 self.draw_control_text(title, tr, ControlColor::TitleText, opt);
                 if Some(id) == self.focus && self.input.mouse_down.is_left() {
@@ -1238,7 +1166,7 @@ impl Context {
                 body.height -= tr.height;
             }
             if !opt.has_no_close() {
-                let id = self.get_id_from_str("!close");
+                let id = self.idmngr.get_id_from_str("!close");
                 let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
                 tr.width -= r.width;
                 let color = self.style.colors[ControlColor::TitleText as usize];
@@ -1252,7 +1180,7 @@ impl Context {
         self.push_container_body(cnt_id.unwrap(), body, opt);
         if !opt.is_auto_sizing() {
             let sz = self.style.title_height;
-            let id_2 = self.get_id_from_str("!resize");
+            let id_2 = self.idmngr.get_id_from_str("!resize");
             let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
             self.update_control(id_2, r_0, opt);
             if Some(id_2) == self.focus && self.input.mouse_down.is_left() {
@@ -1314,12 +1242,12 @@ impl Context {
 
     #[inline(never)]
     fn begin_panel(&mut self, name: &str, opt: WidgetOption) {
-        self.push_id_from_str(name);
+        self.idmngr.push_id_from_str(name);
 
         // A panel can only exist inside a root container
         assert!(self.root_list.len() != 0);
 
-        let cnt_id = self.get_container_index_intern(self.last_id.unwrap(), name, opt);
+        let cnt_id = self.get_container_index_intern(self.idmngr.last_id().unwrap(), name, opt);
         self.containers[*self.root_list.last().unwrap()].children.push(cnt_id.unwrap());
         let rect = self.top_container_mut().layout.next();
         let clip_rect = self.containers[cnt_id.unwrap()].body;

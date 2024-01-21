@@ -258,7 +258,7 @@ impl<'a> State<'a> {
             let mut submitted = false;
             ctx.set_row_widths_height(&[-70, -1], 0);
             if ctx.textbox_ex(&mut self.submit_buf, WidgetOption::NONE).is_submitted() {
-                ctx.set_focus(ctx.last_id);
+                ctx.set_focus(ctx.idmngr.last_id());
                 submitted = true;
             }
             if !ctx.button_ex("Submit", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
@@ -274,10 +274,10 @@ impl<'a> State<'a> {
     }
     fn uint8_slider(&mut self, value: &mut u8, low: i32, high: i32, ctx: &mut microui_redux::Context) -> ResourceState {
         let mut tmp = *value as f32;
-        ctx.push_id_from_ptr(value);
+        ctx.idmngr.push_id_from_ptr(value);
         let res = ctx.slider_ex(&mut tmp, low as Real, high as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
         *value = tmp as u8;
-        ctx.pop_id();
+        ctx.idmngr.pop_id();
         return res;
     }
     fn style_window(&mut self, ctx: &mut microui_redux::Context) {
