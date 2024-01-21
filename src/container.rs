@@ -1,3 +1,9 @@
+use std::{
+    cell::{RefCell, Ref},
+    ops::Deref,
+    marker::PhantomData,
+};
+
 //
 // Copyright 2022-Present (c) Raja Lehtihet & Wael El Oraiby
 //
@@ -241,3 +247,5 @@ impl Container {
         }
     }
 }
+
+pub type ContainerHandle = Rc<RefCell<Container>>;
