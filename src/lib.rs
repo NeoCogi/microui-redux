@@ -744,14 +744,15 @@ impl Context {
         container.pop_clip_rect();
     }
 
-    pub fn mouse_over(&mut self, rect: Recti) -> bool {
+    pub fn mouse_over(&mut self, rect: Recti, in_hover_root: bool) -> bool {
         let clip_rect = self.top_container_mut().get_clip_rect();
-        rect.contains(&self.input.mouse_pos) && clip_rect.contains(&self.input.mouse_pos) && self.in_hover_root()
+        rect.contains(&self.input.mouse_pos) && clip_rect.contains(&self.input.mouse_pos) && in_hover_root
     }
 
     #[inline(never)]
     pub fn update_control(&mut self, id: Id, rect: Recti, opt: WidgetOption) {
-        let mouseover = self.mouse_over(rect);
+        let in_hover_root = self.in_hover_root();
+        let mouseover = self.mouse_over(rect, in_hover_root);
         if self.focus == Some(id) {
             self.updated_focus = true;
         }
@@ -1060,7 +1061,8 @@ impl Context {
             };
             thumb.y += self.containers[cnt_id].scroll.y * (base.height - thumb.height) / maxscroll;
             self.top_container_mut().draw_frame(thumb, ControlColor::ScrollThumb);
-            if self.mouse_over(body) {
+            let in_hover_root = self.in_hover_root();
+            if self.mouse_over(body, in_hover_root) {
                 self.scroll_target = Some(cnt_id);
             }
         } else {
@@ -1087,7 +1089,8 @@ impl Context {
             };
             thumb_0.x += self.containers[cnt_id].scroll.x * (base_0.width - thumb_0.width) / maxscroll_0;
             self.top_container_mut().draw_frame(thumb_0, ControlColor::ScrollThumb);
-            if self.mouse_over(body) {
+            let in_hover_root = self.in_hover_root();
+            if self.mouse_over(body, in_hover_root) {
                 self.scroll_target = Some(cnt_id);
             }
         } else {
