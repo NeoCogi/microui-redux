@@ -1,9 +1,3 @@
-use std::{
-    cell::{RefCell, Ref},
-    ops::Deref,
-    marker::PhantomData,
-};
-
 //
 // Copyright 2022-Present (c) Raja Lehtihet & Wael El Oraiby
 //
@@ -57,6 +51,7 @@ use std::{
 // IN THE SOFTWARE.
 //
 use super::*;
+use std::cell::RefCell;
 
 #[derive(Clone)]
 pub enum Command {
