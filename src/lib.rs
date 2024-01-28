@@ -569,6 +569,11 @@ impl Context {
         self.scroll_target = None;
         self.hover_root = self.next_hover_root;
         self.next_hover_root = None;
+        match self.hover_root {
+            Some(id) => self.containers[id].in_hover_root = true,
+            _ => (),
+        }
+
         self.input.borrow_mut().prelude();
         for c in &mut self.containers {
             c.command_list.clear();
