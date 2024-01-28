@@ -590,11 +590,6 @@ impl Context {
         assert_eq!(self.container_stack.len(), 0);
         assert_eq!(self.idmngr.len(), 0);
 
-        if !self.scroll_target.is_none() {
-            self.containers[self.scroll_target.unwrap()].scroll.x += self.input.borrow().scroll_delta.x;
-            self.containers[self.scroll_target.unwrap()].scroll.y += self.input.borrow().scroll_delta.y;
-        }
-
         for i in 0..self.containers.len() {
             self.containers[i].finish();
         }
@@ -760,6 +755,41 @@ impl Context {
             f(self.top_container_mut());
             self.end_window();
         }
+    }
+
+    #[inline(never)]
+    fn begin_panel(&mut self, name: &str, opt: WidgetOption) {
+        self.idmngr.push_id_from_str(name);
+
+        // A panel can only exist inside a root container
+        assert!(self.root_list.len() != 0);
+
+        let cnt_id = self.get_container_index_intern(self.idmngr.last_id().unwrap(), name, opt);
+        self.containers[*self.root_list.last().unwrap()].children.push(cnt_id.unwrap());
+        let rect = self.top_container_mut().layout.next();
+        let clip_rect = self.containers[cnt_id.unwrap()].body;
+        self.containers[cnt_id.unwrap()].rect = rect;
+        if !opt.has_no_frame() {
+            self.top_container_mut().draw_frame(rect, ControlColor::PanelBG);
+        }
+
+        self.container_stack.push(cnt_id.unwrap());
+        self.top_container_mut().push_container_body(rect, opt);
+        self.top_container_mut().push_clip_rect(clip_rect);
+    }
+
+    fn end_panel(&mut self) {
+        self.top_container_mut().pop_clip_rect();
+        self.pop_container();
+    }
+
+    pub fn panel<F: FnOnce(&mut Self)>(&mut self, name: &str, opt: WidgetOption, f: F) {
+        self.begin_panel(name, opt);
+
+        // call the panel function
+        f(self);
+
+        self.end_panel();
     }
 
     pub fn open_popup(&mut self, name: &str) {

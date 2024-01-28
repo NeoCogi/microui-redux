@@ -393,9 +393,7 @@ impl Container {
     }
 
     #[inline(never)]
-    pub(crate) fn scrollbars(&mut self, body: &mut Recti) -> Option<Id> {
-        let mut scroll_target = None;
-
+    fn scrollbars(&mut self, body: &mut Recti) {
         let sz = self.style.scrollbar_size;
         let mut cs: Vec2i = self.content_size;
         cs.x += self.style.padding * 2;
@@ -418,7 +416,6 @@ impl Container {
             if self.focus == Some(id) && self.input.borrow().mouse_down.is_left() {
                 self.scroll.y += self.input.borrow().mouse_delta.y * cs.y / base.height;
             }
-            self.scroll.y = Self::clamp(self.scroll.y, 0, maxscroll);
 
             self.draw_frame(base, ControlColor::ScrollBase);
             let mut thumb = base;
@@ -431,8 +428,10 @@ impl Container {
             self.draw_frame(thumb, ControlColor::ScrollThumb);
             let in_hover_root = self.in_hover_root;
             if self.mouse_over(body, in_hover_root) {
-                scroll_target = Some(self.id);
+                // TODO: doesn't solve the issue where we have a panel inside a panel
+                self.scroll.y += self.input.borrow().scroll_delta.y;
             }
+            self.scroll.y = Self::clamp(self.scroll.y, 0, maxscroll);
         } else {
             self.scroll.y = 0;
         }
@@ -446,7 +445,6 @@ impl Container {
             if self.focus == Some(id_0) && self.input.borrow().mouse_down.is_left() {
                 self.scroll.x += self.input.borrow().mouse_delta.x * cs.x / base_0.width;
             }
-            self.scroll.x = Self::clamp(self.scroll.x, 0, maxscroll_0);
 
             self.draw_frame(base_0, ControlColor::ScrollBase);
             let mut thumb_0 = base_0;
@@ -459,13 +457,13 @@ impl Container {
             self.draw_frame(thumb_0, ControlColor::ScrollThumb);
             let in_hover_root = self.in_hover_root;
             if self.mouse_over(body, in_hover_root) {
-                scroll_target = Some(self.id);
+                self.scroll.x += self.input.borrow().scroll_delta.x;
             }
+            self.scroll.x = Self::clamp(self.scroll.x, 0, maxscroll_0);
         } else {
             self.scroll.x = 0;
         }
         self.pop_clip_rect();
-        return scroll_target;
     }
 
     pub fn push_container_body(&mut self, body: Recti, opt: WidgetOption) {
@@ -555,41 +553,6 @@ impl Container {
     pub fn set_row_widths_height(&mut self, widths: &[i32], height: i32) {
         self.layout.row(widths, height);
     }
-
-    // #[inline(never)]
-    // fn begin_panel(&mut self, name: &str, opt: WidgetOption) {
-    //     self.idmngr.push_id_from_str(name);
-
-    //     // A panel can only exist inside a root container
-    //     assert!(self.root_list.len() != 0);
-
-    //     let cnt_id = self.get_container_index_intern(self.idmngr.last_id().unwrap(), name, opt);
-    //     self.containers[*self.root_list.last().unwrap()].children.push(cnt_id.unwrap());
-    //     let rect = self.top_container_mut().layout.next();
-    //     let clip_rect = self.containers[cnt_id.unwrap()].body;
-    //     self.containers[cnt_id.unwrap()].rect = rect;
-    //     if !opt.has_no_frame() {
-    //         self.top_container_mut().draw_frame(rect, ControlColor::PanelBG);
-    //     }
-
-    //     self.container_stack.push(cnt_id.unwrap());
-    //     self.top_container_mut().push_container_body(rect, opt);
-    //     self.top_container_mut().push_clip_rect(clip_rect);
-    // }
-
-    // fn end_panel(&mut self) {
-    //     self.top_container_mut().pop_clip_rect();
-    //     self.pop_container();
-    // }
-
-    // pub fn panel<F: FnOnce(&mut Self)>(&mut self, name: &str, opt: WidgetOption, f: F) {
-    //     self.begin_panel(name, opt);
-
-    //     // call the panel function
-    //     f(self);
-
-    //     self.end_panel();
-    // }
 
     pub fn column<F: FnOnce(&mut Self)>(&mut self, f: F) {
         self.layout.begin_column();
