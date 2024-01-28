@@ -54,6 +54,7 @@
 #[derive(Default, Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Id(u32);
 
+#[derive(Clone)]
 pub struct IdManager {
     last_id: Option<Id>,
     id_stack: Vec<Id>,

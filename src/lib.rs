@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-use std::{f32, hash::Hash, rc::Rc};
+use std::{cell::RefCell, f32, hash::Hash, rc::Rc};
 
 use rs_math3d::*;
 
@@ -404,21 +404,18 @@ pub struct Context {
     atlas: Rc<dyn Atlas>,
     canvas: Box<dyn Canvas>,
     style: Style,
-    hover: Option<Id>,
-    focus: Option<Id>,
+
     last_zindex: i32,
-    updated_focus: bool,
     frame: usize,
     hover_root: Option<usize>,
     next_hover_root: Option<usize>,
     scroll_target: Option<usize>,
-    number_edit_buf: String,
-    number_edit: Option<Id>,
+
     root_list: Vec<usize>,
     container_stack: Vec<usize>,
     containers: Vec<Container>,
     pub idmngr: IdManager,
-    pub input: Input,
+    pub input: Rc<RefCell<Input>>,
 }
 
 impl Context {
@@ -427,21 +424,17 @@ impl Context {
             atlas,
             canvas,
             style: Style::default(),
-            hover: None,
-            focus: None,
             last_zindex: 0,
-            updated_focus: false,
             frame: 0,
             hover_root: None,
             next_hover_root: None,
             scroll_target: None,
-            number_edit_buf: String::default(),
-            number_edit: None,
+
             root_list: Vec::default(),
             container_stack: Vec::default(),
             idmngr: IdManager::new(),
             containers: Vec::default(),
-            input: Input::default(),
+            input: Rc::new(RefCell::new(Input::default())),
         }
     }
 }
@@ -576,7 +569,7 @@ impl Context {
         self.scroll_target = None;
         self.hover_root = self.next_hover_root;
         self.next_hover_root = None;
-        self.input.prelude();
+        self.input.borrow_mut().prelude();
         for c in &mut self.containers {
             c.command_list.clear();
             c.children.clear();
@@ -593,14 +586,15 @@ impl Context {
         assert_eq!(self.idmngr.len(), 0);
 
         if !self.scroll_target.is_none() {
-            self.containers[self.scroll_target.unwrap()].scroll.x += self.input.scroll_delta.x;
-            self.containers[self.scroll_target.unwrap()].scroll.y += self.input.scroll_delta.y;
+            self.containers[self.scroll_target.unwrap()].scroll.x += self.input.borrow().scroll_delta.x;
+            self.containers[self.scroll_target.unwrap()].scroll.y += self.input.borrow().scroll_delta.y;
         }
-        if !self.updated_focus {
-            self.focus = None;
+
+        for i in 0..self.containers.len() {
+            self.containers[i].finish();
         }
-        self.updated_focus = false;
-        if !self.input.mouse_pressed.is_none()
+
+        if !self.input.borrow().mouse_pressed.is_none()
             && !self.next_hover_root.is_none()
             && self.containers[self.next_hover_root.unwrap()].zindex < self.last_zindex
             && self.containers[self.next_hover_root.unwrap()].zindex >= 0
@@ -608,7 +602,7 @@ impl Context {
             self.bring_to_front(self.next_hover_root.unwrap());
         }
 
-        self.input.epilogue();
+        self.input.borrow_mut().epilogue();
         self.root_list.sort_by(|a, b| self.containers[*a].zindex.cmp(&self.containers[*b].zindex));
     }
 
@@ -619,11 +613,6 @@ impl Context {
         f(self);
 
         self.frame_end();
-    }
-
-    pub fn set_focus(&mut self, id: Option<Id>) {
-        self.focus = id;
-        self.updated_focus = true;
     }
 
     fn pop_container(&mut self) {
@@ -673,8 +662,15 @@ impl Context {
             children: Vec::default(),
             is_root: false,
             text_stack: Vec::default(),
-
+            hover: None,
+            focus: None,
+            updated_focus: false,
             layout: LayoutManager::default(),
+            idmngr: IdManager::new(),
+            number_edit_buf: String::default(),
+            number_edit: None,
+            in_hover_root: false,
+            input: self.input.clone(),
         });
         self.bring_to_front(idx);
         Some(idx)
@@ -709,415 +705,12 @@ impl Context {
         }
     }
 
-    pub fn draw_control_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
-        if opt.has_no_frame() {
-            return;
-        }
-
-        if self.focus == Some(id) {
-            colorid.focus()
-        } else if self.hover == Some(id) {
-            colorid.hover()
-        }
-        self.top_container_mut().draw_frame(rect, colorid);
-    }
-
-    #[inline(never)]
-    pub fn draw_control_text(&mut self, str: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let mut pos: Vec2i = Vec2i { x: 0, y: 0 };
-        let font = self.style.font;
-        let tsize = self.atlas.get_text_size(font, str);
-        let padding = self.style.padding;
-        let color = self.style.colors[colorid as usize];
-
-        let container = self.top_container_mut();
-        container.push_clip_rect(rect);
-        pos.y = rect.y + (rect.height - tsize.height) / 2;
-        if opt.is_aligned_center() {
-            pos.x = rect.x + (rect.width - tsize.width) / 2;
-        } else if opt.is_aligned_right() {
-            pos.x = rect.x + rect.width - tsize.width - padding;
-        } else {
-            pos.x = rect.x + padding;
-        }
-        container.draw_text(font, str, pos, color);
-        container.pop_clip_rect();
-    }
-
-    pub fn mouse_over(&mut self, rect: Recti, in_hover_root: bool) -> bool {
-        let clip_rect = self.top_container_mut().get_clip_rect();
-        rect.contains(&self.input.mouse_pos) && clip_rect.contains(&self.input.mouse_pos) && in_hover_root
-    }
-
-    #[inline(never)]
-    pub fn update_control(&mut self, id: Id, rect: Recti, opt: WidgetOption) {
-        let in_hover_root = self.in_hover_root();
-        let mouseover = self.mouse_over(rect, in_hover_root);
-        if self.focus == Some(id) {
-            self.updated_focus = true;
-        }
-        if opt.is_not_interactive() {
-            return;
-        }
-        if mouseover && self.input.mouse_down.is_none() {
-            self.hover = Some(id);
-        }
-        if self.focus == Some(id) {
-            if !self.input.mouse_pressed.is_none() && !mouseover {
-                self.set_focus(None);
-            }
-            if self.input.mouse_down.is_none() && !opt.is_holding_focus() {
-                self.set_focus(None);
-            }
-        }
-        if self.hover == Some(id) {
-            if !self.input.mouse_pressed.is_none() {
-                self.set_focus(Some(id));
-            } else if !mouseover {
-                self.hover = None;
-            }
-        }
-    }
-
-    pub fn label(&mut self, text: &str) {
-        let layout = self.top_container_mut().layout.next();
-        self.draw_control_text(text, layout, ControlColor::Text, WidgetOption::NONE);
-    }
-
-    #[inline(never)]
-    pub fn button_ex(&mut self, label: &str, icon: Icon, opt: WidgetOption) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let id: Id = if label.len() > 0 {
-            self.idmngr.get_id_from_str(label)
-        } else {
-            self.idmngr.get_id_u32(icon as u32)
-        };
-        let r: Recti = self.top_container_mut().layout.next();
-        self.update_control(id, r, opt);
-        if self.input.mouse_pressed.is_left() && self.focus == Some(id) {
-            res |= ResourceState::SUBMIT;
-        }
-        self.draw_control_frame(id, r, ControlColor::Button, opt);
-        if label.len() > 0 {
-            self.draw_control_text(label, r, ControlColor::Text, opt);
-        }
-        if icon != Icon::None {
-            let color = self.style.colors[ControlColor::Text as usize];
-            self.top_container_mut().draw_icon(icon, r, color);
-        }
-        return res;
-    }
-
-    #[inline(never)]
-    pub fn checkbox(&mut self, label: &str, state: &mut bool) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let id: Id = self.idmngr.get_id_from_ptr(state);
-        let mut r: Recti = self.top_container_mut().layout.next();
-        let box_0: Recti = rect(r.x, r.y, r.height, r.height);
-        self.update_control(id, r, WidgetOption::NONE);
-        if self.input.mouse_pressed.is_left() && self.focus == Some(id) {
-            res |= ResourceState::CHANGE;
-            *state = *state == false;
-        }
-        self.draw_control_frame(id, box_0, ControlColor::Base, WidgetOption::NONE);
-        if *state {
-            let color = self.style.colors[ControlColor::Text as usize];
-            self.top_container_mut().draw_icon(Icon::Check, box_0, color);
-        }
-        r = rect(r.x + box_0.width, r.y, r.width - box_0.width, r.height);
-        self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
-        return res;
-    }
-
-    pub fn textbox_raw(&mut self, buf: &mut String, id: Id, r: Recti, opt: WidgetOption) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        self.update_control(id, r, opt | WidgetOption::HOLD_FOCUS);
-        if self.focus == Some(id) {
-            let mut len = buf.len();
-
-            if self.input.input_text.len() > 0 {
-                buf.push_str(self.input.input_text.as_str());
-                len += self.input.input_text.len() as usize;
-                res |= ResourceState::CHANGE
-            }
-
-            if self.input.key_pressed.is_backspace() && len > 0 {
-                // skip utf-8 continuation bytes
-                buf.pop();
-                res |= ResourceState::CHANGE
-            }
-            if self.input.key_pressed.is_return() {
-                self.set_focus(None);
-                res |= ResourceState::SUBMIT;
-            }
-        }
-        self.draw_control_frame(id, r, ControlColor::Base, opt);
-        if self.focus == Some(id) {
-            let color = self.style.colors[ControlColor::Text as usize];
-            let font = self.style.font;
-            let tsize = self.atlas.get_text_size(font, buf.as_str());
-            let ofx = r.width - self.style.padding - tsize.width - 1;
-            let textx = r.x + (if ofx < self.style.padding { ofx } else { self.style.padding });
-            let texty = r.y + (r.height - tsize.height) / 2;
-            let container = self.top_container_mut();
-            container.push_clip_rect(r);
-            container.draw_text(font, buf.as_str(), vec2(textx, texty), color);
-            container.draw_rect(rect(textx + tsize.width, texty, 1, tsize.height), color);
-            container.pop_clip_rect();
-        } else {
-            self.draw_control_text(buf.as_str(), r, ControlColor::Text, opt);
-        }
-        return res;
-    }
-
-    #[inline(never)]
-    fn number_textbox(&mut self, precision: usize, value: &mut Real, r: Recti, id: Id) -> ResourceState {
-        if self.input.mouse_pressed.is_left() && self.input.key_down.is_shift() && self.hover == Some(id) {
-            self.number_edit = Some(id);
-            self.number_edit_buf.clear();
-            self.number_edit_buf.push_str(format!("{:.*}", precision, value).as_str());
-        }
-
-        if self.number_edit == Some(id) {
-            let mut temp = self.number_edit_buf.clone();
-            let res: ResourceState = self.textbox_raw(&mut temp, id, r, WidgetOption::NONE);
-            self.number_edit_buf = temp;
-            if res.is_submitted() || self.focus != Some(id) {
-                match self.number_edit_buf.parse::<f32>() {
-                    Ok(v) => {
-                        *value = v as Real;
-                        self.number_edit = None;
-                    }
-                    _ => (),
-                }
-                self.number_edit = None;
-            } else {
-                return ResourceState::ACTIVE;
-            }
-        }
-        return ResourceState::NONE;
-    }
-
-    pub fn textbox_ex(&mut self, buf: &mut String, opt: WidgetOption) -> ResourceState {
-        let id: Id = self.idmngr.get_id_from_ptr(buf);
-        let r: Recti = self.top_container_mut().layout.next();
-        return self.textbox_raw(buf, id, r, opt);
-    }
-
-    #[inline(never)]
-    pub fn slider_ex(&mut self, value: &mut Real, low: Real, high: Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let last = *value;
-        let mut v = last;
-        let id = self.idmngr.get_id_from_ptr(value);
-        let base = self.top_container_mut().layout.next();
-        if !self.number_textbox(precision, &mut v, base, id).is_none() {
-            return res;
-        }
-        self.update_control(id, base, opt);
-        if self.focus == Some(id) && (!self.input.mouse_down.is_none() | self.input.mouse_pressed.is_left()) {
-            v = low + (self.input.mouse_pos.x - base.x) as Real * (high - low) / base.width as Real;
-            if step != 0. {
-                v = (v + step / 2 as Real) / step * step;
-            }
-        }
-        v = if high < (if low > v { low } else { v }) {
-            high
-        } else if low > v {
-            low
-        } else {
-            v
-        };
-        *value = v;
-        if last != v {
-            res |= ResourceState::CHANGE;
-        }
-        self.draw_control_frame(id, base, ControlColor::Base, opt);
-        let w = self.style.thumb_size;
-        let x = ((v - low) * (base.width - w) as Real / (high - low)) as i32;
-        let thumb = rect(base.x + x, base.y, w, base.height);
-        self.draw_control_frame(id, thumb, ControlColor::Button, opt);
-        let mut buff = String::new();
-        buff.push_str(format!("{:.*}", precision, value).as_str());
-        self.draw_control_text(buff.as_str(), base, ControlColor::Text, opt);
-        return res;
-    }
-
-    pub fn number_ex(&mut self, value: &mut Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let id: Id = self.idmngr.get_id_from_ptr(value);
-        let base: Recti = self.top_container_mut().layout.next();
-        let last: Real = *value;
-        if !self.number_textbox(precision, value, base, id).is_none() {
-            return res;
-        }
-        self.update_control(id, base, opt);
-        if self.focus == Some(id) && self.input.mouse_down.is_left() {
-            *value += self.input.mouse_delta.x as Real * step;
-        }
-        if *value != last {
-            res |= ResourceState::CHANGE;
-        }
-        self.draw_control_frame(id, base, ControlColor::Base, opt);
-        let mut buff = String::new();
-        buff.push_str(format!("{:.*}", precision, value).as_str());
-        self.draw_control_text(buff.as_str(), base, ControlColor::Text, opt);
-        return res;
-    }
-
-    #[inline(never)]
-    fn node(&mut self, label: &str, is_treenode: bool, state: NodeState) -> NodeState {
-        let id: Id = self.idmngr.get_id_from_str(label);
-        self.top_container_mut().layout.row(&[-1], 0);
-        let mut r = self.top_container_mut().layout.next();
-        self.update_control(id, r, WidgetOption::NONE);
-
-        let expanded = state.is_expanded();
-        let active = expanded ^ (self.input.mouse_pressed.is_left() && self.focus == Some(id));
-
-        if is_treenode {
-            if self.hover == Some(id) {
-                self.top_container_mut().draw_frame(r, ControlColor::ButtonHover);
-            }
-        } else {
-            self.draw_control_frame(id, r, ControlColor::Button, WidgetOption::NONE);
-        }
-        let color = self.style.colors[ControlColor::Text as usize];
-        self.top_container_mut().draw_icon(
-            if expanded { Icon::Expanded } else { Icon::Collapsed },
-            rect(r.x, r.y, r.height, r.height),
-            color,
-        );
-        r.x += r.height - self.style.padding;
-        r.width -= r.height - self.style.padding;
-        self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
-        return if active { NodeState::Expanded } else { NodeState::Closed };
-    }
-
-    #[must_use]
-    pub fn header<F: FnOnce(&mut Self)>(&mut self, label: &str, state: NodeState, f: F) -> NodeState {
-        let new_state = self.node(label, false, state);
-        if new_state.is_expanded() {
-            f(self);
-        }
-        new_state
-    }
-
-    #[must_use]
-    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, label: &str, state: NodeState, f: F) -> NodeState {
-        let res = self.node(label, true, state);
-        if res.is_expanded() && self.idmngr.last_id().is_some() {
-            let indent = self.style.indent;
-            self.top_container_mut().layout.top_mut().indent += indent;
-            self.idmngr.push_id(self.idmngr.last_id().unwrap());
-        }
-
-        if res.is_expanded() {
-            f(self);
-            let indent = self.style.indent;
-            self.top_container_mut().layout.top_mut().indent -= indent;
-            self.idmngr.pop_id();
-        }
-
-        res
-    }
-
-    fn clamp(x: i32, a: i32, b: i32) -> i32 {
-        min(b, max(a, x))
-    }
-
-    #[inline(never)]
-    fn scrollbars(&mut self, cnt_id: usize, body: &mut Recti) {
-        let sz = self.style.scrollbar_size;
-        let mut cs: Vec2i = self.containers[cnt_id].content_size;
-        cs.x += self.style.padding * 2;
-        cs.y += self.style.padding * 2;
-        self.top_container_mut().push_clip_rect(body.clone());
-        if cs.y > self.containers[cnt_id].body.height {
-            body.width -= sz;
-        }
-        if cs.x > self.containers[cnt_id].body.width {
-            body.height -= sz;
-        }
-        let body = *body;
-        let maxscroll = cs.y - body.height;
-        if maxscroll > 0 && body.height > 0 {
-            let id: Id = self.idmngr.get_id_from_str("!scrollbary");
-            let mut base = body;
-            base.x = body.x + body.width;
-            base.width = self.style.scrollbar_size;
-            self.update_control(id, base, WidgetOption::NONE);
-            if self.focus == Some(id) && self.input.mouse_down.is_left() {
-                self.containers[cnt_id].scroll.y += self.input.mouse_delta.y * cs.y / base.height;
-            }
-            self.containers[cnt_id].scroll.y = Self::clamp(self.containers[cnt_id].scroll.y, 0, maxscroll);
-
-            self.top_container_mut().draw_frame(base, ControlColor::ScrollBase);
-            let mut thumb = base;
-            thumb.height = if self.style.thumb_size > base.height * body.height / cs.y {
-                self.style.thumb_size
-            } else {
-                base.height * body.height / cs.y
-            };
-            thumb.y += self.containers[cnt_id].scroll.y * (base.height - thumb.height) / maxscroll;
-            self.top_container_mut().draw_frame(thumb, ControlColor::ScrollThumb);
-            let in_hover_root = self.in_hover_root();
-            if self.mouse_over(body, in_hover_root) {
-                self.scroll_target = Some(cnt_id);
-            }
-        } else {
-            self.containers[cnt_id].scroll.y = 0;
-        }
-        let maxscroll_0 = cs.x - body.width;
-        if maxscroll_0 > 0 && body.width > 0 {
-            let id_0: Id = self.idmngr.get_id_from_str("!scrollbarx");
-            let mut base_0 = body;
-            base_0.y = body.y + body.height;
-            base_0.height = self.style.scrollbar_size;
-            self.update_control(id_0, base_0, WidgetOption::NONE);
-            if self.focus == Some(id_0) && self.input.mouse_down.is_left() {
-                self.containers[cnt_id].scroll.x += self.input.mouse_delta.x * cs.x / base_0.width;
-            }
-            self.containers[cnt_id].scroll.x = Self::clamp(self.containers[cnt_id].scroll.x, 0, maxscroll_0);
-
-            self.top_container_mut().draw_frame(base_0, ControlColor::ScrollBase);
-            let mut thumb_0 = base_0;
-            thumb_0.width = if self.style.thumb_size > base_0.width * body.width / cs.x {
-                self.style.thumb_size
-            } else {
-                base_0.width * body.width / cs.x
-            };
-            thumb_0.x += self.containers[cnt_id].scroll.x * (base_0.width - thumb_0.width) / maxscroll_0;
-            self.top_container_mut().draw_frame(thumb_0, ControlColor::ScrollThumb);
-            let in_hover_root = self.in_hover_root();
-            if self.mouse_over(body, in_hover_root) {
-                self.scroll_target = Some(cnt_id);
-            }
-        } else {
-            self.containers[cnt_id].scroll.x = 0;
-        }
-        self.top_container_mut().pop_clip_rect();
-    }
-
-    fn push_container_body(&mut self, cnt_idx: usize, body: Recti, opt: WidgetOption) {
-        let mut body = body;
-        if !opt.has_no_scroll() {
-            self.scrollbars(cnt_idx, &mut body);
-        }
-        let style = self.style;
-        let padding = -style.padding;
-        let scroll = self.containers[cnt_idx].scroll;
-        self.containers[cnt_idx].layout.push_layout(expand_rect(body, padding), scroll);
-        self.containers[cnt_idx].layout.style = self.style.clone();
-        self.containers[cnt_idx].body = body;
-    }
-
     fn begin_root_container(&mut self, cnt: usize) {
         self.container_stack.push(cnt);
         self.root_list.push(cnt);
         self.containers[cnt].is_root = true;
 
-        if self.containers[cnt].rect.contains(&self.input.mouse_pos)
+        if self.containers[cnt].rect.contains(&self.input.borrow().mouse_pos)
             && (self.next_hover_root.is_none() || self.containers[cnt].zindex > self.containers[self.next_hover_root.unwrap()].zindex)
         {
             self.next_hover_root = Some(cnt);
@@ -1146,84 +739,20 @@ impl Context {
             self.containers[cnt_id.unwrap()].rect = r;
         }
         self.begin_root_container(cnt_id.unwrap());
-        let mut body = self.containers[cnt_id.unwrap()].rect;
-        r = body;
-        if !opt.has_no_frame() {
-            self.top_container_mut().draw_frame(r, ControlColor::WindowBG);
-        }
-        if !opt.has_no_title() {
-            let mut tr: Recti = r;
-            tr.height = self.style.title_height;
-            self.top_container_mut().draw_frame(tr, ControlColor::TitleBG);
+        self.containers[cnt_id.unwrap()].begin_window(title, opt);
 
-            // TODO: Is this necessary?
-            if !opt.has_no_title() {
-                let id = self.idmngr.get_id_from_str("!title");
-                self.update_control(id, tr, opt);
-                self.draw_control_text(title, tr, ControlColor::TitleText, opt);
-                if Some(id) == self.focus && self.input.mouse_down.is_left() {
-                    self.containers[cnt_id.unwrap()].rect.x += self.input.mouse_delta.x;
-                    self.containers[cnt_id.unwrap()].rect.y += self.input.mouse_delta.y;
-                }
-                body.y += tr.height;
-                body.height -= tr.height;
-            }
-            if !opt.has_no_close() {
-                let id = self.idmngr.get_id_from_str("!close");
-                let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
-                tr.width -= r.width;
-                let color = self.style.colors[ControlColor::TitleText as usize];
-                self.top_container_mut().draw_icon(Icon::Close, r, color);
-                self.update_control(id, r, opt);
-                if self.input.mouse_pressed.is_left() && Some(id) == self.focus {
-                    self.containers[cnt_id.unwrap()].open = false;
-                }
-            }
-        }
-        self.push_container_body(cnt_id.unwrap(), body, opt);
-        if !opt.is_auto_sizing() {
-            let sz = self.style.title_height;
-            let id_2 = self.idmngr.get_id_from_str("!resize");
-            let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
-            self.update_control(id_2, r_0, opt);
-            if Some(id_2) == self.focus && self.input.mouse_down.is_left() {
-                self.containers[cnt_id.unwrap()].rect.width = if 96 > self.containers[cnt_id.unwrap()].rect.width + self.input.mouse_delta.x {
-                    96
-                } else {
-                    self.containers[cnt_id.unwrap()].rect.width + self.input.mouse_delta.x
-                };
-                self.containers[cnt_id.unwrap()].rect.height = if 64 > self.containers[cnt_id.unwrap()].rect.height + self.input.mouse_delta.y {
-                    64
-                } else {
-                    self.containers[cnt_id.unwrap()].rect.height + self.input.mouse_delta.y
-                };
-            }
-        }
-        if opt.is_auto_sizing() {
-            let r_1 = self.top_container_mut().layout.top().body;
-            self.containers[cnt_id.unwrap()].rect.width =
-                self.containers[cnt_id.unwrap()].content_size.x + (self.containers[cnt_id.unwrap()].rect.width - r_1.width);
-            self.containers[cnt_id.unwrap()].rect.height =
-                self.containers[cnt_id.unwrap()].content_size.y + (self.containers[cnt_id.unwrap()].rect.height - r_1.height);
-        }
-
-        if opt.is_popup() && !self.input.mouse_pressed.is_none() && self.hover_root != cnt_id {
-            self.containers[cnt_id.unwrap()].open = false;
-        }
-        let body = self.top_container().body;
-        self.top_container_mut().push_clip_rect(body);
         true
     }
 
     fn end_window(&mut self) {
-        self.top_container_mut().pop_clip_rect();
+        self.top_container_mut().end_window();
         self.end_root_container();
     }
 
-    pub fn window<F: FnOnce(&mut Self)>(&mut self, title: &str, r: Recti, opt: WidgetOption, f: F) {
+    pub fn window<F: FnOnce(&mut Container)>(&mut self, title: &str, r: Recti, opt: WidgetOption, f: F) {
         // call the window function if the window is open
         if self.begin_window(title, r, opt) {
-            f(self);
+            f(self.top_container_mut());
             self.end_window();
         }
     }
@@ -1232,71 +761,14 @@ impl Context {
         let cnt = self.get_container_index(name);
         self.next_hover_root = cnt;
         self.hover_root = self.next_hover_root;
-        self.containers[cnt.unwrap()].rect = rect(self.input.mouse_pos.x, self.input.mouse_pos.y, 1, 1);
+        self.containers[cnt.unwrap()].rect = rect(self.input.borrow().mouse_pos.x, self.input.borrow().mouse_pos.y, 1, 1);
         self.containers[cnt.unwrap()].open = true;
         self.bring_to_front(cnt.unwrap());
     }
 
-    pub fn popup<F: FnOnce(&mut Self)>(&mut self, name: &str, f: F) {
+    pub fn popup<F: FnOnce(&mut Container)>(&mut self, name: &str, f: F) {
         let opt =
             WidgetOption::POPUP | WidgetOption::AUTO_SIZE | WidgetOption::NO_RESIZE | WidgetOption::NO_SCROLL | WidgetOption::NO_TITLE | WidgetOption::CLOSED;
         let _ = self.window(name, rect(0, 0, 0, 0), opt, f);
-    }
-
-    #[inline(never)]
-    fn begin_panel(&mut self, name: &str, opt: WidgetOption) {
-        self.idmngr.push_id_from_str(name);
-
-        // A panel can only exist inside a root container
-        assert!(self.root_list.len() != 0);
-
-        let cnt_id = self.get_container_index_intern(self.idmngr.last_id().unwrap(), name, opt);
-        self.containers[*self.root_list.last().unwrap()].children.push(cnt_id.unwrap());
-        let rect = self.top_container_mut().layout.next();
-        let clip_rect = self.containers[cnt_id.unwrap()].body;
-        self.containers[cnt_id.unwrap()].rect = rect;
-        if !opt.has_no_frame() {
-            self.top_container_mut().draw_frame(rect, ControlColor::PanelBG);
-        }
-
-        self.container_stack.push(cnt_id.unwrap());
-        self.push_container_body(cnt_id.unwrap(), rect, opt);
-
-        self.top_container_mut().push_clip_rect(clip_rect);
-    }
-
-    fn end_panel(&mut self) {
-        self.top_container_mut().pop_clip_rect();
-        self.pop_container();
-    }
-    pub fn panel<F: FnOnce(&mut Self)>(&mut self, name: &str, opt: WidgetOption, f: F) {
-        self.begin_panel(name, opt);
-
-        // call the panel function
-        f(self);
-
-        self.end_panel();
-    }
-
-    pub fn column<F: FnOnce(&mut Self)>(&mut self, f: F) {
-        self.top_container_mut().layout.begin_column();
-        f(self);
-        self.top_container_mut().layout.end_column();
-    }
-
-    pub fn set_row_widths_height(&mut self, widths: &[i32], height: i32) {
-        self.top_container_mut().layout.row(widths, height);
-    }
-
-    pub fn next_cell(&mut self) -> Recti {
-        self.top_container_mut().layout.next()
-    }
-
-    pub fn set_style(&mut self, style: Style) {
-        self.style = style;
-    }
-
-    pub fn get_style(&self) -> Style {
-        self.style.clone()
     }
 }
