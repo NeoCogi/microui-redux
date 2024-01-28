@@ -101,6 +101,14 @@ pub struct Container {
     pub is_root: bool,
     pub text_stack: Vec<char>,
     pub(crate) layout: LayoutManager,
+    pub hover: Option<Id>,
+    pub focus: Option<Id>,
+    pub updated_focus: bool,
+    pub idmngr: IdManager,
+    pub input: Rc<RefCell<Input>>,
+    pub in_hover_root: bool,
+    pub number_edit_buf: String,
+    pub number_edit: Option<Id>,
 }
 
 impl Container {
@@ -145,6 +153,11 @@ impl Container {
 
     pub fn set_clip(&mut self, rect: Recti) {
         self.push_command(Command::Clip { rect });
+    }
+
+    pub fn set_focus(&mut self, id: Option<Id>) {
+        self.focus = id;
+        self.updated_focus = true;
     }
 
     pub fn draw_rect(&mut self, mut rect: Recti, color: Color) {
@@ -240,6 +253,546 @@ impl Container {
         if border_color.a != 0 {
             self.draw_box(expand_rect(rect, 1), border_color);
         }
+    }
+
+    pub fn draw_control_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
+        if opt.has_no_frame() {
+            return;
+        }
+
+        if self.focus == Some(id) {
+            colorid.focus()
+        } else if self.hover == Some(id) {
+            colorid.hover()
+        }
+        self.draw_frame(rect, colorid);
+    }
+
+    #[inline(never)]
+    pub fn draw_control_text(&mut self, str: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        let mut pos: Vec2i = Vec2i { x: 0, y: 0 };
+        let font = self.style.font;
+        let tsize = self.atlas.get_text_size(font, str);
+        let padding = self.style.padding;
+        let color = self.style.colors[colorid as usize];
+
+        self.push_clip_rect(rect);
+        pos.y = rect.y + (rect.height - tsize.height) / 2;
+        if opt.is_aligned_center() {
+            pos.x = rect.x + (rect.width - tsize.width) / 2;
+        } else if opt.is_aligned_right() {
+            pos.x = rect.x + rect.width - tsize.width - padding;
+        } else {
+            pos.x = rect.x + padding;
+        }
+        self.draw_text(font, str, pos, color);
+        self.pop_clip_rect();
+    }
+
+    pub fn mouse_over(&mut self, rect: Recti, in_hover_root: bool) -> bool {
+        let clip_rect = self.get_clip_rect();
+        rect.contains(&self.input.borrow().mouse_pos) && clip_rect.contains(&self.input.borrow().mouse_pos) && in_hover_root
+    }
+
+    #[inline(never)]
+    pub fn update_control(&mut self, id: Id, rect: Recti, opt: WidgetOption) {
+        let in_hover_root = self.in_hover_root;
+        let mouseover = self.mouse_over(rect, in_hover_root);
+        if self.focus == Some(id) {
+            self.updated_focus = true;
+        }
+        if opt.is_not_interactive() {
+            return;
+        }
+        if mouseover && self.input.borrow().mouse_down.is_none() {
+            self.hover = Some(id);
+        }
+        if self.focus == Some(id) {
+            if !self.input.borrow().mouse_pressed.is_none() && !mouseover {
+                self.set_focus(None);
+            }
+            if self.input.borrow().mouse_down.is_none() && !opt.is_holding_focus() {
+                self.set_focus(None);
+            }
+        }
+        if self.hover == Some(id) {
+            if !self.input.borrow().mouse_pressed.is_none() {
+                self.set_focus(Some(id));
+            } else if !mouseover {
+                self.hover = None;
+            }
+        }
+    }
+
+    pub fn finish(&mut self) {
+        if !self.updated_focus {
+            self.focus = None;
+        }
+        self.updated_focus = false;
+    }
+
+    #[inline(never)]
+    fn node(&mut self, label: &str, is_treenode: bool, state: NodeState) -> NodeState {
+        let id: Id = self.idmngr.get_id_from_str(label);
+        self.layout.row(&[-1], 0);
+        let mut r = self.layout.next();
+        self.update_control(id, r, WidgetOption::NONE);
+
+        let expanded = state.is_expanded();
+        let active = expanded ^ (self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id));
+
+        if is_treenode {
+            if self.hover == Some(id) {
+                self.draw_frame(r, ControlColor::ButtonHover);
+            }
+        } else {
+            self.draw_control_frame(id, r, ControlColor::Button, WidgetOption::NONE);
+        }
+        let color = self.style.colors[ControlColor::Text as usize];
+        self.draw_icon(
+            if expanded { Icon::Expanded } else { Icon::Collapsed },
+            rect(r.x, r.y, r.height, r.height),
+            color,
+        );
+        r.x += r.height - self.style.padding;
+        r.width -= r.height - self.style.padding;
+        self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
+        return if active { NodeState::Expanded } else { NodeState::Closed };
+    }
+
+    #[must_use]
+    pub fn header<F: FnOnce(&mut Self)>(&mut self, label: &str, state: NodeState, f: F) -> NodeState {
+        let new_state = self.node(label, false, state);
+        if new_state.is_expanded() {
+            f(self);
+        }
+        new_state
+    }
+
+    #[must_use]
+    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, label: &str, state: NodeState, f: F) -> NodeState {
+        let res = self.node(label, true, state);
+        if res.is_expanded() && self.idmngr.last_id().is_some() {
+            let indent = self.style.indent;
+            self.layout.top_mut().indent += indent;
+            self.idmngr.push_id(self.idmngr.last_id().unwrap());
+        }
+
+        if res.is_expanded() {
+            f(self);
+            let indent = self.style.indent;
+            self.layout.top_mut().indent -= indent;
+            self.idmngr.pop_id();
+        }
+
+        res
+    }
+
+    fn clamp(x: i32, a: i32, b: i32) -> i32 {
+        min(b, max(a, x))
+    }
+
+    #[inline(never)]
+    pub(crate) fn scrollbars(&mut self, body: &mut Recti) -> Option<Id> {
+        let mut scroll_target = None;
+
+        let sz = self.style.scrollbar_size;
+        let mut cs: Vec2i = self.content_size;
+        cs.x += self.style.padding * 2;
+        cs.y += self.style.padding * 2;
+        self.push_clip_rect(body.clone());
+        if cs.y > self.body.height {
+            body.width -= sz;
+        }
+        if cs.x > self.body.width {
+            body.height -= sz;
+        }
+        let body = *body;
+        let maxscroll = cs.y - body.height;
+        if maxscroll > 0 && body.height > 0 {
+            let id: Id = self.idmngr.get_id_from_str("!scrollbary");
+            let mut base = body;
+            base.x = body.x + body.width;
+            base.width = self.style.scrollbar_size;
+            self.update_control(id, base, WidgetOption::NONE);
+            if self.focus == Some(id) && self.input.borrow().mouse_down.is_left() {
+                self.scroll.y += self.input.borrow().mouse_delta.y * cs.y / base.height;
+            }
+            self.scroll.y = Self::clamp(self.scroll.y, 0, maxscroll);
+
+            self.draw_frame(base, ControlColor::ScrollBase);
+            let mut thumb = base;
+            thumb.height = if self.style.thumb_size > base.height * body.height / cs.y {
+                self.style.thumb_size
+            } else {
+                base.height * body.height / cs.y
+            };
+            thumb.y += self.scroll.y * (base.height - thumb.height) / maxscroll;
+            self.draw_frame(thumb, ControlColor::ScrollThumb);
+            let in_hover_root = self.in_hover_root;
+            if self.mouse_over(body, in_hover_root) {
+                scroll_target = Some(self.id);
+            }
+        } else {
+            self.scroll.y = 0;
+        }
+        let maxscroll_0 = cs.x - body.width;
+        if maxscroll_0 > 0 && body.width > 0 {
+            let id_0: Id = self.idmngr.get_id_from_str("!scrollbarx");
+            let mut base_0 = body;
+            base_0.y = body.y + body.height;
+            base_0.height = self.style.scrollbar_size;
+            self.update_control(id_0, base_0, WidgetOption::NONE);
+            if self.focus == Some(id_0) && self.input.borrow().mouse_down.is_left() {
+                self.scroll.x += self.input.borrow().mouse_delta.x * cs.x / base_0.width;
+            }
+            self.scroll.x = Self::clamp(self.scroll.x, 0, maxscroll_0);
+
+            self.draw_frame(base_0, ControlColor::ScrollBase);
+            let mut thumb_0 = base_0;
+            thumb_0.width = if self.style.thumb_size > base_0.width * body.width / cs.x {
+                self.style.thumb_size
+            } else {
+                base_0.width * body.width / cs.x
+            };
+            thumb_0.x += self.scroll.x * (base_0.width - thumb_0.width) / maxscroll_0;
+            self.draw_frame(thumb_0, ControlColor::ScrollThumb);
+            let in_hover_root = self.in_hover_root;
+            if self.mouse_over(body, in_hover_root) {
+                scroll_target = Some(self.id);
+            }
+        } else {
+            self.scroll.x = 0;
+        }
+        self.pop_clip_rect();
+        return scroll_target;
+    }
+
+    pub fn push_container_body(&mut self, body: Recti, opt: WidgetOption) {
+        let mut body = body;
+        if !opt.has_no_scroll() {
+            self.scrollbars(&mut body);
+        }
+        let style = self.style;
+        let padding = -style.padding;
+        let scroll = self.scroll;
+        self.layout.push_layout(expand_rect(body, padding), scroll);
+        self.layout.style = self.style.clone();
+        self.body = body;
+    }
+
+    pub(crate) fn begin_window(&mut self, title: &str, opt: WidgetOption) {
+        let mut body = self.rect;
+        let r = body;
+        if !opt.has_no_frame() {
+            self.draw_frame(r, ControlColor::WindowBG);
+        }
+        if !opt.has_no_title() {
+            let mut tr: Recti = r;
+            tr.height = self.style.title_height;
+            self.draw_frame(tr, ControlColor::TitleBG);
+
+            // TODO: Is this necessary?
+            if !opt.has_no_title() {
+                let id = self.idmngr.get_id_from_str("!title");
+                self.update_control(id, tr, opt);
+                self.draw_control_text(title, tr, ControlColor::TitleText, opt);
+                if Some(id) == self.focus && self.input.borrow().mouse_down.is_left() {
+                    self.rect.x += self.input.borrow().mouse_delta.x;
+                    self.rect.y += self.input.borrow().mouse_delta.y;
+                }
+                body.y += tr.height;
+                body.height -= tr.height;
+            }
+            if !opt.has_no_close() {
+                let id = self.idmngr.get_id_from_str("!close");
+                let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
+                tr.width -= r.width;
+                let color = self.style.colors[ControlColor::TitleText as usize];
+                self.draw_icon(Icon::Close, r, color);
+                self.update_control(id, r, opt);
+                if self.input.borrow().mouse_pressed.is_left() && Some(id) == self.focus {
+                    self.open = false;
+                }
+            }
+        }
+        self.push_container_body(body, opt);
+        if !opt.is_auto_sizing() {
+            let sz = self.style.title_height;
+            let id_2 = self.idmngr.get_id_from_str("!resize");
+            let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
+            self.update_control(id_2, r_0, opt);
+            if Some(id_2) == self.focus && self.input.borrow().mouse_down.is_left() {
+                self.rect.width = if 96 > self.rect.width + self.input.borrow().mouse_delta.x {
+                    96
+                } else {
+                    self.rect.width + self.input.borrow().mouse_delta.x
+                };
+                self.rect.height = if 64 > self.rect.height + self.input.borrow().mouse_delta.y {
+                    64
+                } else {
+                    self.rect.height + self.input.borrow().mouse_delta.y
+                };
+            }
+        }
+        if opt.is_auto_sizing() {
+            let r_1 = self.layout.top().body;
+            self.rect.width = self.content_size.x + (self.rect.width - r_1.width);
+            self.rect.height = self.content_size.y + (self.rect.height - r_1.height);
+        }
+
+        if opt.is_popup() && !self.input.borrow().mouse_pressed.is_none() && !self.in_hover_root {
+            self.open = false;
+        }
+        let body = self.body;
+        self.push_clip_rect(body);
+    }
+
+    pub(crate) fn end_window(&mut self) {
+        self.pop_clip_rect();
+    }
+
+    pub fn set_row_widths_height(&mut self, widths: &[i32], height: i32) {
+        self.layout.row(widths, height);
+    }
+
+    // #[inline(never)]
+    // fn begin_panel(&mut self, name: &str, opt: WidgetOption) {
+    //     self.idmngr.push_id_from_str(name);
+
+    //     // A panel can only exist inside a root container
+    //     assert!(self.root_list.len() != 0);
+
+    //     let cnt_id = self.get_container_index_intern(self.idmngr.last_id().unwrap(), name, opt);
+    //     self.containers[*self.root_list.last().unwrap()].children.push(cnt_id.unwrap());
+    //     let rect = self.top_container_mut().layout.next();
+    //     let clip_rect = self.containers[cnt_id.unwrap()].body;
+    //     self.containers[cnt_id.unwrap()].rect = rect;
+    //     if !opt.has_no_frame() {
+    //         self.top_container_mut().draw_frame(rect, ControlColor::PanelBG);
+    //     }
+
+    //     self.container_stack.push(cnt_id.unwrap());
+    //     self.top_container_mut().push_container_body(rect, opt);
+    //     self.top_container_mut().push_clip_rect(clip_rect);
+    // }
+
+    // fn end_panel(&mut self) {
+    //     self.top_container_mut().pop_clip_rect();
+    //     self.pop_container();
+    // }
+
+    // pub fn panel<F: FnOnce(&mut Self)>(&mut self, name: &str, opt: WidgetOption, f: F) {
+    //     self.begin_panel(name, opt);
+
+    //     // call the panel function
+    //     f(self);
+
+    //     self.end_panel();
+    // }
+
+    pub fn column<F: FnOnce(&mut Self)>(&mut self, f: F) {
+        self.layout.begin_column();
+        f(self);
+        self.layout.end_column();
+    }
+
+    pub fn next_cell(&mut self) -> Recti {
+        self.layout.next()
+    }
+
+    pub fn set_style(&mut self, style: Style) {
+        self.style = style;
+    }
+
+    pub fn get_style(&self) -> Style {
+        self.style.clone()
+    }
+
+    pub fn label(&mut self, text: &str) {
+        let layout = self.layout.next();
+        self.draw_control_text(text, layout, ControlColor::Text, WidgetOption::NONE);
+    }
+
+    #[inline(never)]
+    pub fn button_ex(&mut self, label: &str, icon: Icon, opt: WidgetOption) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let id: Id = if label.len() > 0 {
+            self.idmngr.get_id_from_str(label)
+        } else {
+            self.idmngr.get_id_u32(icon as u32)
+        };
+        let r: Recti = self.layout.next();
+        self.update_control(id, r, opt);
+        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
+            res |= ResourceState::SUBMIT;
+        }
+        self.draw_control_frame(id, r, ControlColor::Button, opt);
+        if label.len() > 0 {
+            self.draw_control_text(label, r, ControlColor::Text, opt);
+        }
+        if icon != Icon::None {
+            let color = self.style.colors[ControlColor::Text as usize];
+            self.draw_icon(icon, r, color);
+        }
+        return res;
+    }
+
+    #[inline(never)]
+    pub fn checkbox(&mut self, label: &str, state: &mut bool) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let id: Id = self.idmngr.get_id_from_ptr(state);
+        let mut r: Recti = self.layout.next();
+        let box_0: Recti = rect(r.x, r.y, r.height, r.height);
+        self.update_control(id, r, WidgetOption::NONE);
+        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
+            res |= ResourceState::CHANGE;
+            *state = *state == false;
+        }
+        self.draw_control_frame(id, box_0, ControlColor::Base, WidgetOption::NONE);
+        if *state {
+            let color = self.style.colors[ControlColor::Text as usize];
+            self.draw_icon(Icon::Check, box_0, color);
+        }
+        r = rect(r.x + box_0.width, r.y, r.width - box_0.width, r.height);
+        self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
+        return res;
+    }
+
+    pub fn textbox_raw(&mut self, buf: &mut String, id: Id, r: Recti, opt: WidgetOption) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        self.update_control(id, r, opt | WidgetOption::HOLD_FOCUS);
+        if self.focus == Some(id) {
+            let mut len = buf.len();
+
+            if self.input.borrow().input_text.len() > 0 {
+                buf.push_str(self.input.borrow().input_text.as_str());
+                len += self.input.borrow().input_text.len() as usize;
+                res |= ResourceState::CHANGE
+            }
+
+            if self.input.borrow().key_pressed.is_backspace() && len > 0 {
+                // skip utf-8 continuation bytes
+                buf.pop();
+                res |= ResourceState::CHANGE
+            }
+            if self.input.borrow().key_pressed.is_return() {
+                self.set_focus(None);
+                res |= ResourceState::SUBMIT;
+            }
+        }
+        self.draw_control_frame(id, r, ControlColor::Base, opt);
+        if self.focus == Some(id) {
+            let color = self.style.colors[ControlColor::Text as usize];
+            let font = self.style.font;
+            let tsize = self.atlas.get_text_size(font, buf.as_str());
+            let ofx = r.width - self.style.padding - tsize.width - 1;
+            let textx = r.x + (if ofx < self.style.padding { ofx } else { self.style.padding });
+            let texty = r.y + (r.height - tsize.height) / 2;
+
+            self.push_clip_rect(r);
+            self.draw_text(font, buf.as_str(), vec2(textx, texty), color);
+            self.draw_rect(rect(textx + tsize.width, texty, 1, tsize.height), color);
+            self.pop_clip_rect();
+        } else {
+            self.draw_control_text(buf.as_str(), r, ControlColor::Text, opt);
+        }
+        return res;
+    }
+
+    #[inline(never)]
+    fn number_textbox(&mut self, precision: usize, value: &mut Real, r: Recti, id: Id) -> ResourceState {
+        if self.input.borrow().mouse_pressed.is_left() && self.input.borrow().key_down.is_shift() && self.hover == Some(id) {
+            self.number_edit = Some(id);
+            self.number_edit_buf.clear();
+            self.number_edit_buf.push_str(format!("{:.*}", precision, value).as_str());
+        }
+
+        if self.number_edit == Some(id) {
+            let mut temp = self.number_edit_buf.clone();
+            let res: ResourceState = self.textbox_raw(&mut temp, id, r, WidgetOption::NONE);
+            self.number_edit_buf = temp;
+            if res.is_submitted() || self.focus != Some(id) {
+                match self.number_edit_buf.parse::<f32>() {
+                    Ok(v) => {
+                        *value = v as Real;
+                        self.number_edit = None;
+                    }
+                    _ => (),
+                }
+                self.number_edit = None;
+            } else {
+                return ResourceState::ACTIVE;
+            }
+        }
+        return ResourceState::NONE;
+    }
+
+    pub fn textbox_ex(&mut self, buf: &mut String, opt: WidgetOption) -> ResourceState {
+        let id: Id = self.idmngr.get_id_from_ptr(buf);
+        let r: Recti = self.layout.next();
+        return self.textbox_raw(buf, id, r, opt);
+    }
+
+    #[inline(never)]
+    pub fn slider_ex(&mut self, value: &mut Real, low: Real, high: Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let last = *value;
+        let mut v = last;
+        let id = self.idmngr.get_id_from_ptr(value);
+        let base = self.layout.next();
+        if !self.number_textbox(precision, &mut v, base, id).is_none() {
+            return res;
+        }
+        self.update_control(id, base, opt);
+        if self.focus == Some(id) && (!self.input.borrow().mouse_down.is_none() | self.input.borrow().mouse_pressed.is_left()) {
+            v = low + (self.input.borrow().mouse_pos.x - base.x) as Real * (high - low) / base.width as Real;
+            if step != 0. {
+                v = (v + step / 2 as Real) / step * step;
+            }
+        }
+        v = if high < (if low > v { low } else { v }) {
+            high
+        } else if low > v {
+            low
+        } else {
+            v
+        };
+        *value = v;
+        if last != v {
+            res |= ResourceState::CHANGE;
+        }
+        self.draw_control_frame(id, base, ControlColor::Base, opt);
+        let w = self.style.thumb_size;
+        let x = ((v - low) * (base.width - w) as Real / (high - low)) as i32;
+        let thumb = rect(base.x + x, base.y, w, base.height);
+        self.draw_control_frame(id, thumb, ControlColor::Button, opt);
+        let mut buff = String::new();
+        buff.push_str(format!("{:.*}", precision, value).as_str());
+        self.draw_control_text(buff.as_str(), base, ControlColor::Text, opt);
+        return res;
+    }
+
+    pub fn number_ex(&mut self, value: &mut Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let id: Id = self.idmngr.get_id_from_ptr(value);
+        let base: Recti = self.layout.next();
+        let last: Real = *value;
+        if !self.number_textbox(precision, value, base, id).is_none() {
+            return res;
+        }
+        self.update_control(id, base, opt);
+        if self.focus == Some(id) && self.input.borrow().mouse_down.is_left() {
+            *value += self.input.borrow().mouse_delta.x as Real * step;
+        }
+        if *value != last {
+            res |= ResourceState::CHANGE;
+        }
+        self.draw_control_frame(id, base, ControlColor::Base, opt);
+        let mut buff = String::new();
+        buff.push_str(format!("{:.*}", precision, value).as_str());
+        self.draw_control_text(buff.as_str(), base, ControlColor::Text, opt);
+        return res;
     }
 }
 

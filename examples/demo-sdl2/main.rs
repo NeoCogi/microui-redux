@@ -123,145 +123,145 @@ impl<'a> State<'a> {
     }
 
     fn test_window(&mut self, ctx: &mut microui_redux::Context) {
-        ctx.window("Demo Window", rect(40, 40, 300, 450), WidgetOption::NONE, |ctx| {
-            let mut win = ctx.top_container().rect;
+        ctx.window("Demo Window", rect(40, 40, 300, 450), WidgetOption::NONE, |container| {
+            let mut win = container.rect;
             win.width = if win.width > 240 { win.width } else { 240 };
             win.height = if win.height > 300 { win.height } else { 300 };
 
-            ctx.top_container_mut().rect = win;
+            container.rect = win;
 
             let mut buff = String::new();
 
-            self.window_header = ctx.header("Window Info", self.window_header, |ctx| {
-                let win_0 = ctx.top_container().rect;
-                ctx.set_row_widths_height(&[54, -1], 0);
-                ctx.label("Position:");
+            self.window_header = container.header("Window Info", self.window_header, |container| {
+                let win_0 = container.rect;
+                container.set_row_widths_height(&[54, -1], 0);
+                container.label("Position:");
 
                 buff.clear();
                 buff.push_str(format!("{}, {}", win_0.x, win_0.y).as_str());
 
-                ctx.label(buff.as_str());
+                container.label(buff.as_str());
                 buff.clear();
-                ctx.label("Size:");
+                container.label("Size:");
 
                 buff.push_str(format!("{}, {}", win_0.width, win_0.height).as_str());
 
-                ctx.label(buff.as_str());
+                container.label(buff.as_str());
             });
-            self.test_buttons_header = ctx.header("Test Buttons", self.test_buttons_header, |ctx| {
-                ctx.set_row_widths_height(&[86, -110, -1], 0);
-                ctx.label("Test buttons 1:");
-                if !ctx.button_ex("Button 1", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+            self.test_buttons_header = container.header("Test Buttons", self.test_buttons_header, |container| {
+                container.set_row_widths_height(&[86, -110, -1], 0);
+                container.label("Test buttons 1:");
+                if !container.button_ex("Button 1", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                     self.write_log("Pressed button 1");
                 }
-                if !ctx.button_ex("Button 2", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                if !container.button_ex("Button 2", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                     self.write_log("Pressed button 2");
                 }
-                ctx.label("Test buttons 2:");
-                if !ctx.button_ex("Button 3", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                container.label("Test buttons 2:");
+                if !container.button_ex("Button 3", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                     self.write_log("Pressed button 3");
                 }
-                if !ctx.button_ex("Popup", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
-                    ctx.open_popup("Test Popup");
-                }
-                ctx.popup("Test Popup", |ctx| {
-                    if !ctx.button_ex("Hello", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
-                        self.write_log("Hello")
-                    }
-                    if !ctx.button_ex("World", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
-                        self.write_log("World")
-                    }
-                });
+                // if !container.button_ex("Popup", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                //     ctx.open_popup("Test Popup");
+                // }
+                // container.popup("Test Popup", |ctx| {
+                //     if !ctx.button_ex("Hello", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                //         self.write_log("Hello")
+                //     }
+                //     if !ctx.button_ex("World", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                //         self.write_log("World")
+                //     }
+                // });
             });
-            self.tree_and_text_header = ctx.header("Tree and Text", self.tree_and_text_header, |ctx| {
-                ctx.set_row_widths_height(&[140, -1], 0);
-                ctx.column(|ctx| {
-                    self.test1_tn = ctx.treenode("Test 1", self.test1_tn, |ctx| {
-                        self.test1a_tn = ctx.treenode("Test 1a", self.test1a_tn, |ctx| {
-                            ctx.label("Hello");
-                            ctx.label("world");
+            self.tree_and_text_header = container.header("Tree and Text", self.tree_and_text_header, |container| {
+                container.set_row_widths_height(&[140, -1], 0);
+                container.column(|container| {
+                    self.test1_tn = container.treenode("Test 1", self.test1_tn, |container| {
+                        self.test1a_tn = container.treenode("Test 1a", self.test1a_tn, |container| {
+                            container.label("Hello");
+                            container.label("world");
                         });
-                        self.test1b_tn = ctx.treenode("Test 1b", self.test1b_tn, |ctx| {
-                            if !ctx.button_ex("Button 1", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                        self.test1b_tn = container.treenode("Test 1b", self.test1b_tn, |container| {
+                            if !container.button_ex("Button 1", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                                 self.write_log("Pressed button 1");
                             }
-                            if !ctx.button_ex("Button 2", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                            if !container.button_ex("Button 2", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                                 self.write_log("Pressed button 2");
                             }
                         });
                     });
-                    self.test2_tn =ctx.treenode("Test 2", self.test2_tn, |ctx| {
-                        ctx.set_row_widths_height(&[54, 54], 0);
-                        if !ctx.button_ex("Button 3", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                    self.test2_tn =container.treenode("Test 2", self.test2_tn, |container| {
+                        container.set_row_widths_height(&[54, 54], 0);
+                        if !container.button_ex("Button 3", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                             self.write_log("Pressed button 3");
                         }
-                        if !ctx.button_ex("Button 4", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if !container.button_ex("Button 4", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                             self.write_log("Pressed button 4");
                         }
-                        if !ctx.button_ex("Button 5", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if !container.button_ex("Button 5", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                             self.write_log("Pressed button 5");
                         }
-                        if !ctx.button_ex("Button 6", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if !container.button_ex("Button 6", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                             self.write_log("Pressed button 6");
                         }
                     });
-                    self.test3_tn = ctx.treenode("Test 3", self.test3_tn, |ctx| {
-                        ctx.checkbox("Checkbox 1", &mut self.checks[0]);
-                        ctx.checkbox("Checkbox 2", &mut self.checks[1]);
-                        ctx.checkbox("Checkbox 3", &mut self.checks[2]);
+                    self.test3_tn = container.treenode("Test 3", self.test3_tn, |container| {
+                        container.checkbox("Checkbox 1", &mut self.checks[0]);
+                        container.checkbox("Checkbox 2", &mut self.checks[1]);
+                        container.checkbox("Checkbox 3", &mut self.checks[2]);
                     });
                 });
-                ctx.column(|ctx| {
-                    ctx.set_row_widths_height(&[-1], 0);
-                    ctx.top_container_mut().text(
+                container.column(|container| {
+                    container.set_row_widths_height(&[-1], 0);
+                    container.text(
                         "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla."
                         ,
                     );
                 });
             });
-            self.background_header = ctx.header("Background Color", self.background_header, |ctx| {
-                ctx.set_row_widths_height(&[-78, -1], 74);
-                ctx.column(|ctx| {
-                ctx.set_row_widths_height(&[46, -1], 0);
-                ctx.label("Red:");
-                ctx.slider_ex(&mut self.bg[0], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
-                ctx.label("Green:");
-                ctx.slider_ex(&mut self.bg[1], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
-                ctx.label("Blue:");
-                ctx.slider_ex(&mut self.bg[2], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
-            });
-                let r: Recti = ctx.next_cell();
-                ctx.top_container_mut().draw_rect(r, color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255));
+            self.background_header = container.header("Background Color", self.background_header, |container| {
+                container.set_row_widths_height(&[-78, -1], 74);
+                container.column(|container| {
+                    container.set_row_widths_height(&[46, -1], 0);
+                    container.label("Red:");
+                    container.slider_ex(&mut self.bg[0], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                    container.label("Green:");
+                    container.slider_ex(&mut self.bg[1], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                    container.label("Blue:");
+                    container.slider_ex(&mut self.bg[2], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                });
+                let r: Recti = container.next_cell();
+                container.draw_rect(r, color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255));
                 let mut buff = String::new();
                 buff.push_str(format!("#{:02X}{:02X}{:02X}", self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8).as_str());
-                ctx.draw_control_text(buff.as_str(), r, ControlColor::Text, WidgetOption::ALIGN_CENTER);
+                container.draw_control_text(buff.as_str(), r, ControlColor::Text, WidgetOption::ALIGN_CENTER);
             });
         });
     }
 
     fn log_window(&mut self, ctx: &mut microui_redux::Context) {
-        ctx.window("Log Window", rect(350, 40, 300, 200), WidgetOption::NONE, |ctx| {
-            ctx.set_row_widths_height(&[-1], -25);
-            ctx.panel("Log Output", WidgetOption::NONE, |ctx| {
-                let mut scroll = ctx.top_container().scroll;
-                let content_size = ctx.top_container().content_size;
-                ctx.set_row_widths_height(&[-1], -1);
+        ctx.window("Log Window", rect(350, 40, 300, 200), WidgetOption::NONE, |container| {
+            // container.set_row_widths_height(&[-1], -25);
+            // container.panel("Log Output", WidgetOption::NONE, |ctx| {
+            //     let mut scroll = container.scroll;
+            //     let content_size = container.content_size;
+            //     container.set_row_widths_height(&[-1], -1);
 
-                ctx.top_container_mut().text(self.logbuf.as_str());
+            //     ctx.top_container_mut().text(self.logbuf.as_str());
 
-                if self.logbuf_updated {
-                    scroll.y = content_size.y;
-                    ctx.top_container_mut().scroll = scroll;
-                    self.logbuf_updated = false;
-                }
-            });
+            //     if self.logbuf_updated {
+            //         scroll.y = content_size.y;
+            //         ctx.top_container_mut().scroll = scroll;
+            //         self.logbuf_updated = false;
+            //     }
+            // });
             let mut submitted = false;
-            ctx.set_row_widths_height(&[-70, -1], 0);
-            if ctx.textbox_ex(&mut self.submit_buf, WidgetOption::NONE).is_submitted() {
-                ctx.set_focus(ctx.idmngr.last_id());
+            container.set_row_widths_height(&[-70, -1], 0);
+            if container.textbox_ex(&mut self.submit_buf, WidgetOption::NONE).is_submitted() {
+                container.set_focus(container.idmngr.last_id());
                 submitted = true;
             }
-            if !ctx.button_ex("Submit", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+            if !container.button_ex("Submit", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                 submitted = true;
             }
             if submitted {
@@ -272,7 +272,7 @@ impl<'a> State<'a> {
             }
         });
     }
-    fn uint8_slider(&mut self, value: &mut u8, low: i32, high: i32, ctx: &mut microui_redux::Context) -> ResourceState {
+    fn uint8_slider(&mut self, value: &mut u8, low: i32, high: i32, ctx: &mut microui_redux::Container) -> ResourceState {
         let mut tmp = *value as f32;
         ctx.idmngr.push_id_from_ptr(value);
         let res = ctx.slider_ex(&mut tmp, low as Real, high as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
@@ -281,52 +281,52 @@ impl<'a> State<'a> {
         return res;
     }
     fn style_window(&mut self, ctx: &mut microui_redux::Context) {
-        ctx.window("Style Editor", rect(350, 250, 300, 240), WidgetOption::NONE, |ctx| {
-            let sw = (ctx.top_container().body.width as f64 * 0.14) as i32;
-            ctx.set_row_widths_height(&[80, sw, sw, sw, sw, -1], 0);
-            let mut style = ctx.get_style();
+        ctx.window("Style Editor", rect(350, 250, 300, 240), WidgetOption::NONE, |container| {
+            let sw = (container.body.width as f64 * 0.14) as i32;
+            container.set_row_widths_height(&[80, sw, sw, sw, sw, -1], 0);
+            let mut style = container.get_style();
             let mut i = 0;
             while self.label_colors[i].label.len() > 0 {
-                ctx.label(self.label_colors[i].label);
+                container.label(self.label_colors[i].label);
                 unsafe {
                     let color = style.colors.as_mut_ptr().offset(i as isize);
-                    self.uint8_slider(&mut (*color).r, 0, 255, ctx);
-                    self.uint8_slider(&mut (*color).g, 0, 255, ctx);
-                    self.uint8_slider(&mut (*color).b, 0, 255, ctx);
-                    self.uint8_slider(&mut (*color).a, 0, 255, ctx);
+                    self.uint8_slider(&mut (*color).r, 0, 255, container);
+                    self.uint8_slider(&mut (*color).g, 0, 255, container);
+                    self.uint8_slider(&mut (*color).b, 0, 255, container);
+                    self.uint8_slider(&mut (*color).a, 0, 255, container);
                 }
-                let next_layout = ctx.next_cell();
+                let next_layout = container.next_cell();
                 let color = style.colors[i];
-                ctx.top_container_mut().draw_rect(next_layout, color);
+                container.draw_rect(next_layout, color);
                 i += 1;
             }
-            ctx.set_row_widths_height(&[80, sw], 0);
-            ctx.label("padding");
+            container.set_row_widths_height(&[80, sw], 0);
+            container.label("padding");
             let mut tmp = style.padding as u8;
-            self.uint8_slider(&mut tmp, 0, 16, ctx);
+            self.uint8_slider(&mut tmp, 0, 16, container);
             style.padding = tmp as i32;
 
-            ctx.label("spacing");
+            container.label("spacing");
             let mut tmp = style.spacing as u8;
-            self.uint8_slider(&mut tmp, 0, 16, ctx);
+            self.uint8_slider(&mut tmp, 0, 16, container);
             style.spacing = tmp as i32;
 
-            ctx.label("title height");
+            container.label("title height");
             let mut tmp = style.title_height as u8;
-            self.uint8_slider(&mut tmp, 0, 128, ctx);
+            self.uint8_slider(&mut tmp, 0, 128, container);
             style.title_height = tmp as i32;
 
-            ctx.label("thumb size");
+            container.label("thumb size");
             let mut tmp = style.thumb_size as u8;
-            self.uint8_slider(&mut tmp, 0, 128, ctx);
+            self.uint8_slider(&mut tmp, 0, 128, container);
             style.thumb_size = tmp as i32;
 
-            ctx.label("scroll size");
+            container.label("scroll size");
             let mut tmp = style.scrollbar_size as u8;
-            self.uint8_slider(&mut tmp, 0, 128, ctx);
+            self.uint8_slider(&mut tmp, 0, 128, container);
             style.scrollbar_size = tmp as i32;
 
-            ctx.set_style(style);
+            container.set_style(style);
         });
     }
 
@@ -394,26 +394,26 @@ fn main() {
             match event {
                 Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
                 Event::Window { win_event: WindowEvent::Close, .. } => break 'running,
-                Event::MouseMotion { x, y, .. } => ctx.input.mousemove(x, y),
-                Event::MouseWheel { y, .. } => ctx.input.scroll(0, y * -30),
+                Event::MouseMotion { x, y, .. } => ctx.input.borrow_mut().mousemove(x, y),
+                Event::MouseWheel { y, .. } => ctx.input.borrow_mut().scroll(0, y * -30),
                 Event::MouseButtonDown { x, y, mouse_btn, .. } => {
                     let mb = map_mouse_button(mouse_btn);
-                    ctx.input.mousedown(x, y, mb);
+                    ctx.input.borrow_mut().mousedown(x, y, mb);
                 }
                 Event::MouseButtonUp { x, y, mouse_btn, .. } => {
                     let mb = map_mouse_button(mouse_btn);
-                    ctx.input.mouseup(x, y, mb);
+                    ctx.input.borrow_mut().mouseup(x, y, mb);
                 }
                 Event::KeyDown { keymod, keycode, .. } => {
                     let km = map_keymode(keymod, keycode);
-                    ctx.input.keydown(km);
+                    ctx.input.borrow_mut().keydown(km);
                 }
                 Event::KeyUp { keymod, keycode, .. } => {
                     let km = map_keymode(keymod, keycode);
-                    ctx.input.keyup(km);
+                    ctx.input.borrow_mut().keyup(km);
                 }
                 Event::TextInput { text, .. } => {
-                    ctx.input.text(text.as_str());
+                    ctx.input.borrow_mut().text(text.as_str());
                 }
 
                 _ => {}
