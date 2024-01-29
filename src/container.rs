@@ -642,7 +642,7 @@ impl Container {
 
     #[inline(never)]
     fn begin_panel(&mut self, name: &str, opt: WidgetOption) -> usize {
-        self.idmngr.push_id_from_str(name);
+        self.idmngr.get_id_from_str(name);
 
         let panel_id = self.get_panel_id(self.idmngr.last_id().unwrap(), name, opt);
 
@@ -662,7 +662,6 @@ impl Container {
     fn end_panel(&mut self, panel_id: usize) {
         self.panels[panel_id].pop_clip_rect();
         self.pop_panel(panel_id);
-        self.idmngr.pop_id()
     }
 
     pub fn panel<F: FnOnce(&mut Self)>(&mut self, name: &str, opt: WidgetOption, f: F) {
