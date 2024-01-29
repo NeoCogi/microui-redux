@@ -635,9 +635,6 @@ impl Container {
         container.content_size.x = layout.max.x - layout.body.x;
         container.content_size.y = layout.max.y - layout.body.y;
         container.layout.stack.pop();
-
-        //self.container_stack.pop();
-        //self.idmngr.pop_id();
     }
 
     #[inline(never)]
@@ -653,7 +650,7 @@ impl Container {
             self.draw_frame(rect, ControlColor::PanelBG);
         }
 
-        //self.container_stack.push(cnt_id.unwrap());
+        self.panels[panel_id].in_hover_root = self.in_hover_root;
         self.panels[panel_id].push_container_body(rect, opt);
         self.panels[panel_id].push_clip_rect(clip_rect);
         panel_id
