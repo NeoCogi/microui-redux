@@ -51,7 +51,7 @@
 // IN THE SOFTWARE.
 //
 use super::*;
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::HashMap};
 
 #[derive(Clone)]
 pub enum Command {
@@ -97,7 +97,6 @@ pub struct Container {
     pub open: bool,
     pub command_list: Vec<Command>,
     pub clip_stack: Vec<Recti>,
-    pub children: Vec<usize>,
     pub is_root: bool,
     pub text_stack: Vec<char>,
     pub(crate) layout: LayoutManager,
@@ -109,9 +108,49 @@ pub struct Container {
     pub in_hover_root: bool,
     pub number_edit_buf: String,
     pub number_edit: Option<Id>,
+    pub panels: Vec<Container>,
+    pub panel_map: HashMap<Id, usize>,
+    pub active_panels: Vec<usize>,
 }
 
 impl Container {
+    pub(crate) fn prepare(&mut self, style: &Style) {
+        self.active_panels.clear();
+        self.command_list.clear();
+        assert!(self.clip_stack.len() == 0);
+        self.text_stack.clear();
+        self.style = style.clone();
+
+        for p in &mut self.panels {
+            p.prepare(style);
+        }
+    }
+
+    pub(crate) fn render(&self, canvas: &mut dyn Canvas) {
+        for command in &self.command_list {
+            match command {
+                Command::Text { str_start, str_len, pos, color, .. } => {
+                    let str = &self.text_stack[*str_start..*str_start + *str_len];
+                    canvas.draw_chars(str, *pos, *color);
+                }
+                Command::Recti { rect, color } => {
+                    canvas.draw_rect(*rect, *color);
+                }
+                Command::Icon { id, rect, color } => {
+                    canvas.draw_icon(*id, *rect, *color);
+                }
+                Command::Clip { rect } => {
+                    canvas.set_clip_rect(800, 600, *rect);
+                }
+                _ => {}
+            }
+        }
+
+        for ap in &self.active_panels {
+            self.panels[*ap].render(canvas)
+        }
+    }
+
     pub fn push_clip_rect(&mut self, rect: Recti) {
         let last = self.get_clip_rect();
         self.clip_stack.push(rect.intersect(&last).unwrap_or_default());
@@ -548,6 +587,91 @@ impl Container {
 
     pub(crate) fn end_window(&mut self) {
         self.pop_clip_rect();
+    }
+
+    fn get_panel_id(&mut self, id: Id, name: &str, opt: WidgetOption) -> usize {
+        let idx = if self.panel_map.contains_key(&id) {
+            self.panel_map[&id]
+        } else {
+            let idx = self.panels.len();
+            self.panels.push(Container {
+                id,
+                name: name.to_string(),
+                open: true,
+                style: self.style.clone(),
+                atlas: self.atlas.clone(),
+                rect: Recti::default(),
+                body: Recti::default(),
+                content_size: Vec2i::default(),
+                scroll: Vec2i::default(),
+                zindex: 0,
+                command_list: Vec::default(),
+                clip_stack: Vec::default(),
+                is_root: false,
+                text_stack: Vec::default(),
+                hover: None,
+                focus: None,
+                updated_focus: false,
+                layout: LayoutManager::default(),
+                idmngr: IdManager::new(),
+                number_edit_buf: String::default(),
+                number_edit: None,
+                in_hover_root: false,
+                input: self.input.clone(),
+                panel_map: Default::default(),
+                panels: Default::default(),
+                active_panels: Default::default(),
+            });
+            self.panel_map.insert(id, idx);
+            idx
+        };
+        self.active_panels.push(idx);
+        idx
+    }
+
+    fn pop_panel(&mut self, panel_id: usize) {
+        let layout = *self.panels[panel_id].layout.top();
+        let container = &mut self.panels[panel_id];
+        container.content_size.x = layout.max.x - layout.body.x;
+        container.content_size.y = layout.max.y - layout.body.y;
+        container.layout.stack.pop();
+
+        //self.container_stack.pop();
+        //self.idmngr.pop_id();
+    }
+
+    #[inline(never)]
+    fn begin_panel(&mut self, name: &str, opt: WidgetOption) -> usize {
+        self.idmngr.push_id_from_str(name);
+
+        let panel_id = self.get_panel_id(self.idmngr.last_id().unwrap(), name, opt);
+
+        let rect = self.layout.next();
+        let clip_rect = self.panels[panel_id].body;
+        self.panels[panel_id].rect = rect;
+        if !opt.has_no_frame() {
+            self.draw_frame(rect, ControlColor::PanelBG);
+        }
+
+        //self.container_stack.push(cnt_id.unwrap());
+        self.panels[panel_id].push_container_body(rect, opt);
+        self.panels[panel_id].push_clip_rect(clip_rect);
+        panel_id
+    }
+
+    fn end_panel(&mut self, panel_id: usize) {
+        self.panels[panel_id].pop_clip_rect();
+        self.pop_panel(panel_id);
+        self.idmngr.pop_id()
+    }
+
+    pub fn panel<F: FnOnce(&mut Self)>(&mut self, name: &str, opt: WidgetOption, f: F) {
+        let panel_id = self.begin_panel(name, opt);
+
+        // call the panel function
+        f(&mut self.panels[panel_id]);
+
+        self.end_panel(panel_id);
     }
 
     pub fn set_row_widths_height(&mut self, widths: &[i32], height: i32) {

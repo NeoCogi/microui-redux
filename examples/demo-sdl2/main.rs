@@ -241,20 +241,20 @@ impl<'a> State<'a> {
 
     fn log_window(&mut self, ctx: &mut microui_redux::Context) {
         ctx.window("Log Window", rect(350, 40, 300, 200), WidgetOption::NONE, |container| {
-            // container.set_row_widths_height(&[-1], -25);
-            // container.panel("Log Output", WidgetOption::NONE, |ctx| {
-            //     let mut scroll = container.scroll;
-            //     let content_size = container.content_size;
-            //     container.set_row_widths_height(&[-1], -1);
+            container.set_row_widths_height(&[-1], -25);
+            container.panel("Log Output", WidgetOption::NONE, |container| {
+                let mut scroll = container.scroll;
+                let content_size = container.content_size;
+                container.set_row_widths_height(&[-1], -1);
 
-            //     ctx.top_container_mut().text(self.logbuf.as_str());
+                container.text(self.logbuf.as_str());
 
-            //     if self.logbuf_updated {
-            //         scroll.y = content_size.y;
-            //         ctx.top_container_mut().scroll = scroll;
-            //         self.logbuf_updated = false;
-            //     }
-            // });
+                if self.logbuf_updated {
+                    scroll.y = content_size.y;
+                    container.scroll = scroll;
+                    self.logbuf_updated = false;
+                }
+            });
             let mut submitted = false;
             container.set_row_widths_height(&[-70, -1], 0);
             if container.textbox_ex(&mut self.submit_buf, WidgetOption::NONE).is_submitted() {
