@@ -531,34 +531,9 @@ impl Context {
         self.canvas.clear(width, height, clr);
     }
 
-    fn render_container(&mut self, container_idx: usize) {
-        let container = &self.containers[container_idx];
-        for command in &container.command_list {
-            match command {
-                Command::Text { str_start, str_len, pos, color, .. } => {
-                    let str = &container.text_stack[*str_start..*str_start + *str_len];
-                    self.canvas.draw_chars(str, *pos, *color);
-                }
-                Command::Recti { rect, color } => {
-                    self.canvas.draw_rect(*rect, *color);
-                }
-                Command::Icon { id, rect, color } => {
-                    self.canvas.draw_icon(*id, *rect, *color);
-                }
-                Command::Clip { rect } => {
-                    self.canvas.set_clip_rect(800, 600, *rect);
-                }
-                _ => {}
-            }
-        }
-        for child in container.children.clone() {
-            self.render_container(child);
-        }
-    }
-
     pub fn flush(&mut self) {
         for rc in self.root_list.clone() {
-            self.render_container(rc);
+            self.containers[rc].render(self.canvas.as_mut());
         }
         self.canvas.flush()
     }
@@ -576,11 +551,7 @@ impl Context {
 
         self.input.borrow_mut().prelude();
         for c in &mut self.containers {
-            c.command_list.clear();
-            c.children.clear();
-            assert!(c.clip_stack.len() == 0);
-            c.text_stack.clear();
-            c.style = self.style.clone();
+            c.prepare(&self.style);
         }
         self.frame += 1;
     }
@@ -659,7 +630,6 @@ impl Context {
             zindex: 0,
             command_list: Vec::default(),
             clip_stack: Vec::default(),
-            children: Vec::default(),
             is_root: false,
             text_stack: Vec::default(),
             hover: None,
@@ -671,6 +641,9 @@ impl Context {
             number_edit: None,
             in_hover_root: false,
             input: self.input.clone(),
+            panel_map: Default::default(),
+            panels: Default::default(),
+            active_panels: Default::default(),
         });
         self.bring_to_front(idx);
         Some(idx)
@@ -727,7 +700,7 @@ impl Context {
 
     #[inline(never)]
     #[must_use]
-    fn begin_window(&mut self, title: &str, mut r: Recti, opt: WidgetOption) -> bool {
+    fn begin_window(&mut self, title: &str, r: Recti, opt: WidgetOption) -> bool {
         let id = self.idmngr.get_id_from_str(title);
         let cnt_id = self.get_container_index_intern(id, title, opt);
         if cnt_id.is_none() || !self.containers[cnt_id.unwrap()].open {
@@ -755,41 +728,6 @@ impl Context {
             f(self.top_container_mut());
             self.end_window();
         }
-    }
-
-    #[inline(never)]
-    fn begin_panel(&mut self, name: &str, opt: WidgetOption) {
-        self.idmngr.push_id_from_str(name);
-
-        // A panel can only exist inside a root container
-        assert!(self.root_list.len() != 0);
-
-        let cnt_id = self.get_container_index_intern(self.idmngr.last_id().unwrap(), name, opt);
-        self.containers[*self.root_list.last().unwrap()].children.push(cnt_id.unwrap());
-        let rect = self.top_container_mut().layout.next();
-        let clip_rect = self.containers[cnt_id.unwrap()].body;
-        self.containers[cnt_id.unwrap()].rect = rect;
-        if !opt.has_no_frame() {
-            self.top_container_mut().draw_frame(rect, ControlColor::PanelBG);
-        }
-
-        self.container_stack.push(cnt_id.unwrap());
-        self.top_container_mut().push_container_body(rect, opt);
-        self.top_container_mut().push_clip_rect(clip_rect);
-    }
-
-    fn end_panel(&mut self) {
-        self.top_container_mut().pop_clip_rect();
-        self.pop_container();
-    }
-
-    pub fn panel<F: FnOnce(&mut Self)>(&mut self, name: &str, opt: WidgetOption, f: F) {
-        self.begin_panel(name, opt);
-
-        // call the panel function
-        f(self);
-
-        self.end_panel();
     }
 
     pub fn open_popup(&mut self, name: &str) {
