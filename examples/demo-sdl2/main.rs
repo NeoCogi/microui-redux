@@ -18,6 +18,7 @@ struct State<'a> {
     logbuf_updated: bool,
     submit_buf: String,
     checks: [bool; 3],
+    style: Style,
 
     window_header: NodeState,
     test_buttons_header: NodeState,
@@ -40,6 +41,7 @@ pub struct LabelColor<'a> {
 impl<'a> State<'a> {
     pub fn new() -> Self {
         Self {
+            style: Style::default(),
             label_colors: [
                 LabelColor { label: "text", idx: ControlColor::Text },
                 LabelColor {
@@ -284,50 +286,48 @@ impl<'a> State<'a> {
         ctx.window("Style Editor", rect(350, 250, 300, 240), WidgetOption::NONE, |container| {
             let sw = (container.body.width as f64 * 0.14) as i32;
             container.set_row_widths_height(&[80, sw, sw, sw, sw, -1], 0);
-            let mut style = container.get_style();
             let mut i = 0;
             while self.label_colors[i].label.len() > 0 {
                 container.label(self.label_colors[i].label);
                 unsafe {
-                    let color = style.colors.as_mut_ptr().offset(i as isize);
+                    let color = self.style.colors.as_mut_ptr().offset(i as isize);
                     self.uint8_slider(&mut (*color).r, 0, 255, container);
                     self.uint8_slider(&mut (*color).g, 0, 255, container);
                     self.uint8_slider(&mut (*color).b, 0, 255, container);
                     self.uint8_slider(&mut (*color).a, 0, 255, container);
                 }
                 let next_layout = container.next_cell();
-                let color = style.colors[i];
+                let color = self.style.colors[i];
                 container.draw_rect(next_layout, color);
                 i += 1;
             }
             container.set_row_widths_height(&[80, sw], 0);
             container.label("padding");
-            let mut tmp = style.padding as u8;
+            let mut tmp = self.style.padding as u8;
             self.uint8_slider(&mut tmp, 0, 16, container);
-            style.padding = tmp as i32;
+            self.style.padding = tmp as i32;
 
             container.label("spacing");
-            let mut tmp = style.spacing as u8;
+            let mut tmp = self.style.spacing as u8;
             self.uint8_slider(&mut tmp, 0, 16, container);
-            style.spacing = tmp as i32;
+            self.style.spacing = tmp as i32;
 
             container.label("title height");
-            let mut tmp = style.title_height as u8;
+            let mut tmp = self.style.title_height as u8;
             self.uint8_slider(&mut tmp, 0, 128, container);
-            style.title_height = tmp as i32;
+            self.style.title_height = tmp as i32;
 
             container.label("thumb size");
-            let mut tmp = style.thumb_size as u8;
+            let mut tmp = self.style.thumb_size as u8;
             self.uint8_slider(&mut tmp, 0, 128, container);
-            style.thumb_size = tmp as i32;
+            self.style.thumb_size = tmp as i32;
 
             container.label("scroll size");
-            let mut tmp = style.scrollbar_size as u8;
+            let mut tmp = self.style.scrollbar_size as u8;
             self.uint8_slider(&mut tmp, 0, 128, container);
-            style.scrollbar_size = tmp as i32;
-
-            container.set_style(style);
+            self.style.scrollbar_size = tmp as i32;
         });
+        ctx.propagate_style(&self.style);
     }
 
     fn process_frame(&mut self, ctx: &mut microui_redux::Context) {

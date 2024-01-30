@@ -551,7 +551,7 @@ impl Context {
 
         self.input.borrow_mut().prelude();
         for c in &mut self.containers {
-            c.prepare(&self.style);
+            c.prepare();
         }
         self.frame += 1;
     }
@@ -743,5 +743,11 @@ impl Context {
         let opt =
             WidgetOption::POPUP | WidgetOption::AUTO_SIZE | WidgetOption::NO_RESIZE | WidgetOption::NO_SCROLL | WidgetOption::NO_TITLE | WidgetOption::CLOSED;
         let _ = self.window(name, rect(0, 0, 0, 0), opt, f);
+    }
+
+    pub fn propagate_style(&mut self, style: &Style) {
+        for c in &mut self.containers {
+            c.propagate_style(style)
+        }
     }
 }
