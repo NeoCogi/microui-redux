@@ -114,15 +114,14 @@ pub struct Container {
 }
 
 impl Container {
-    pub(crate) fn prepare(&mut self, style: &Style) {
+    pub(crate) fn prepare(&mut self) {
         self.active_panels.clear();
         self.command_list.clear();
         assert!(self.clip_stack.len() == 0);
         self.text_stack.clear();
-        self.style = style.clone();
 
         for p in &mut self.panels {
-            p.prepare(style);
+            p.prepare();
         }
     }
 
@@ -686,6 +685,13 @@ impl Container {
 
     pub fn set_style(&mut self, style: Style) {
         self.style = style;
+    }
+
+    pub fn propagate_style(&mut self, style: &Style) {
+        self.style = style.clone();
+        for c in &mut self.panels {
+            c.propagate_style(style)
+        }
     }
 
     pub fn get_style(&self) -> Style {
