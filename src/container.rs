@@ -83,6 +83,36 @@ impl Default for Command {
     }
 }
 
+#[derive(Clone, Default)]
+struct Directory {
+    containers: Vec<Container>,
+    map: HashMap<Id, usize>,
+    active: Vec<usize>,
+}
+
+impl Directory {
+    fn get_or_create_id(&mut self, id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>) -> usize {
+        let idx = if self.map.contains_key(&id) {
+            self.map[&id]
+        } else {
+            let idx = self.containers.len();
+            self.containers.push(Container::new(id, name, atlas, style, input));
+            self.map.insert(id, idx);
+            idx
+        };
+        self.active.push(idx);
+        idx
+    }
+
+    fn prepare(&mut self) {
+        self.active.clear();
+
+        for c in &mut self.containers {
+            c.prepare();
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Container {
     pub(crate) id: Id,
@@ -108,23 +138,48 @@ pub struct Container {
     pub in_hover_root: bool,
     pub number_edit_buf: String,
     pub number_edit: Option<Id>,
-    pub panels: Vec<Container>,
-    pub panel_map: HashMap<Id, usize>,
-    pub active_panels: Vec<usize>,
+
+    pub panels: Directory,
 }
 
 impl Container {
-    pub(crate) fn prepare(&mut self) {
-        self.active_panels.clear();
-        self.command_list.clear();
-        assert!(self.clip_stack.len() == 0);
-        self.text_stack.clear();
-
-        for p in &mut self.panels {
-            p.prepare();
+    pub(crate) fn new(id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>) -> Self {
+        Self {
+            id,
+            name: name.to_string(),
+            open: true,
+            style: style.clone(),
+            atlas: atlas,
+            rect: Recti::default(),
+            body: Recti::default(),
+            content_size: Vec2i::default(),
+            scroll: Vec2i::default(),
+            zindex: 0,
+            command_list: Vec::default(),
+            clip_stack: Vec::default(),
+            is_root: false,
+            text_stack: Vec::default(),
+            hover: None,
+            focus: None,
+            updated_focus: false,
+            layout: LayoutManager::default(),
+            idmngr: IdManager::new(),
+            number_edit_buf: String::default(),
+            number_edit: None,
+            in_hover_root: false,
+            input: input,
+            panels: Default::default(),
         }
     }
 
+    pub(crate) fn prepare(&mut self) {
+        self.panels.prepare();
+        self.command_list.clear();
+        assert!(self.clip_stack.len() == 0);
+        self.text_stack.clear();
+    }
+
+    #[inline(never)]
     pub(crate) fn render(&self, canvas: &mut dyn Canvas) {
         for command in &self.command_list {
             match command {
@@ -145,8 +200,8 @@ impl Container {
             }
         }
 
-        for ap in &self.active_panels {
-            self.panels[*ap].render(canvas)
+        for ap in &self.panels.active {
+            self.panels.containers[*ap].render(canvas)
         }
     }
 
@@ -254,6 +309,7 @@ impl Container {
         }
     }
 
+    #[inline(never)]
     pub fn text(&mut self, text: &str) {
         let font = self.style.font;
         let color = self.style.colors[ControlColor::Text as usize];
@@ -517,6 +573,7 @@ impl Container {
         self.body = body;
     }
 
+    #[inline(never)]
     pub(crate) fn begin_window(&mut self, title: &str, opt: WidgetOption) {
         let mut body = self.rect;
         let r = body;
@@ -588,49 +645,9 @@ impl Container {
         self.pop_clip_rect();
     }
 
-    fn get_panel_id(&mut self, id: Id, name: &str, opt: WidgetOption) -> usize {
-        let idx = if self.panel_map.contains_key(&id) {
-            self.panel_map[&id]
-        } else {
-            let idx = self.panels.len();
-            self.panels.push(Container {
-                id,
-                name: name.to_string(),
-                open: true,
-                style: self.style.clone(),
-                atlas: self.atlas.clone(),
-                rect: Recti::default(),
-                body: Recti::default(),
-                content_size: Vec2i::default(),
-                scroll: Vec2i::default(),
-                zindex: 0,
-                command_list: Vec::default(),
-                clip_stack: Vec::default(),
-                is_root: false,
-                text_stack: Vec::default(),
-                hover: None,
-                focus: None,
-                updated_focus: false,
-                layout: LayoutManager::default(),
-                idmngr: IdManager::new(),
-                number_edit_buf: String::default(),
-                number_edit: None,
-                in_hover_root: false,
-                input: self.input.clone(),
-                panel_map: Default::default(),
-                panels: Default::default(),
-                active_panels: Default::default(),
-            });
-            self.panel_map.insert(id, idx);
-            idx
-        };
-        self.active_panels.push(idx);
-        idx
-    }
-
     fn pop_panel(&mut self, panel_id: usize) {
-        let layout = *self.panels[panel_id].layout.top();
-        let container = &mut self.panels[panel_id];
+        let layout = *self.panels.containers[panel_id].layout.top();
+        let container = &mut self.panels.containers[panel_id];
         container.content_size.x = layout.max.x - layout.body.x;
         container.content_size.y = layout.max.y - layout.body.y;
         container.layout.stack.pop();
@@ -640,23 +657,25 @@ impl Container {
     fn begin_panel(&mut self, name: &str, opt: WidgetOption) -> usize {
         self.idmngr.get_id_from_str(name);
 
-        let panel_id = self.get_panel_id(self.idmngr.last_id().unwrap(), name, opt);
+        let panel_id = self
+            .panels
+            .get_or_create_id(self.idmngr.last_id().unwrap(), name, self.atlas.clone(), &self.style, self.input.clone());
 
         let rect = self.layout.next();
-        let clip_rect = self.panels[panel_id].body;
-        self.panels[panel_id].rect = rect;
+        let clip_rect = self.panels.containers[panel_id].body;
+        self.panels.containers[panel_id].rect = rect;
         if !opt.has_no_frame() {
             self.draw_frame(rect, ControlColor::PanelBG);
         }
 
-        self.panels[panel_id].in_hover_root = self.in_hover_root;
-        self.panels[panel_id].push_container_body(rect, opt);
-        self.panels[panel_id].push_clip_rect(clip_rect);
+        self.panels.containers[panel_id].in_hover_root = self.in_hover_root;
+        self.panels.containers[panel_id].push_container_body(rect, opt);
+        self.panels.containers[panel_id].push_clip_rect(clip_rect);
         panel_id
     }
 
     fn end_panel(&mut self, panel_id: usize) {
-        self.panels[panel_id].pop_clip_rect();
+        self.panels.containers[panel_id].pop_clip_rect();
         self.pop_panel(panel_id);
     }
 
@@ -664,7 +683,7 @@ impl Container {
         let panel_id = self.begin_panel(name, opt);
 
         // call the panel function
-        f(&mut self.panels[panel_id]);
+        f(&mut self.panels.containers[panel_id]);
 
         self.end_panel(panel_id);
     }
@@ -689,7 +708,7 @@ impl Container {
 
     pub fn propagate_style(&mut self, style: &Style) {
         self.style = style.clone();
-        for c in &mut self.panels {
+        for c in &mut self.panels.containers {
             c.propagate_style(style)
         }
     }
@@ -748,6 +767,7 @@ impl Container {
         return res;
     }
 
+    #[inline(never)]
     pub fn textbox_raw(&mut self, buf: &mut String, id: Id, r: Recti, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         self.update_control(id, r, opt | WidgetOption::HOLD_FOCUS);
@@ -862,6 +882,7 @@ impl Container {
         return res;
     }
 
+    #[inline(never)]
     pub fn number_ex(&mut self, value: &mut Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.idmngr.get_id_from_ptr(value);

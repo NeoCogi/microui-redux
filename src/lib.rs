@@ -617,34 +617,8 @@ impl Context {
         }
 
         let idx = self.containers.len();
-        self.containers.push(Container {
-            id,
-            name: name.to_string(),
-            open: true,
-            style: self.style.clone(),
-            atlas: self.atlas.clone(),
-            rect: Recti::default(),
-            body: Recti::default(),
-            content_size: Vec2i::default(),
-            scroll: Vec2i::default(),
-            zindex: 0,
-            command_list: Vec::default(),
-            clip_stack: Vec::default(),
-            is_root: false,
-            text_stack: Vec::default(),
-            hover: None,
-            focus: None,
-            updated_focus: false,
-            layout: LayoutManager::default(),
-            idmngr: IdManager::new(),
-            number_edit_buf: String::default(),
-            number_edit: None,
-            in_hover_root: false,
-            input: self.input.clone(),
-            panel_map: Default::default(),
-            panels: Default::default(),
-            active_panels: Default::default(),
-        });
+        self.containers
+            .push(Container::new(id, name, self.atlas.clone(), &self.style, self.input.clone()));
         self.bring_to_front(idx);
         Some(idx)
     }
