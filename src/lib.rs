@@ -633,25 +633,6 @@ impl Context {
         self.containers[cnt].zindex = self.last_zindex;
     }
 
-    fn in_hover_root(&mut self) -> bool {
-        match self.hover_root {
-            Some(hover_root) => {
-                let len = self.container_stack.len();
-                for i in 0..len {
-                    if self.container_stack[len - i - 1] == hover_root {
-                        return true;
-                    }
-                    if self.containers[self.container_stack[len - i - 1]].is_root {
-                        // panel cannot scroll
-                        break;
-                    }
-                }
-                false
-            }
-            None => false,
-        }
-    }
-
     fn begin_root_container(&mut self, cnt: usize) {
         self.container_stack.push(cnt);
         self.root_list.push(cnt);
