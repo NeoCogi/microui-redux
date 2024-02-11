@@ -29,6 +29,7 @@ struct State<'a> {
     test1b_tn: NodeState,
     test2_tn: NodeState,
     test3_tn: NodeState,
+    open_popup: bool,
 }
 
 #[derive(Copy, Clone)]
@@ -111,6 +112,7 @@ impl<'a> State<'a> {
             test1b_tn: NodeState::Closed,
             test2_tn: NodeState::Closed,
             test3_tn: NodeState::Closed,
+            open_popup: false,
         }
     }
 
@@ -163,17 +165,9 @@ impl<'a> State<'a> {
                 if !container.button_ex("Button 3", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                     self.write_log("Pressed button 3");
                 }
-                // if !container.button_ex("Popup", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
-                //     ctx.open_popup("Test Popup");
-                // }
-                // container.popup("Test Popup", |ctx| {
-                //     if !ctx.button_ex("Hello", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
-                //         self.write_log("Hello")
-                //     }
-                //     if !ctx.button_ex("World", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
-                //         self.write_log("World")
-                //     }
-                // });
+                if !container.button_ex("Popup", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                     self.open_popup = true;
+                }
             });
             self.tree_and_text_header = container.header("Tree and Text", self.tree_and_text_header, |container| {
                 container.set_row_widths_height(&[140, -1], 0);
@@ -238,6 +232,19 @@ impl<'a> State<'a> {
                 buff.push_str(format!("#{:02X}{:02X}{:02X}", self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8).as_str());
                 container.draw_control_text(buff.as_str(), r, ControlColor::Text, WidgetOption::ALIGN_CENTER);
             });
+        });
+
+        if self.open_popup {
+            ctx.open_popup("Test Popup");
+            self.open_popup = !self.open_popup;
+        }
+        ctx.popup("Test Popup", |ctx| {
+            if !ctx.button_ex("Hello", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                self.write_log("Hello")
+            }
+            if !ctx.button_ex("World", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                self.write_log("World")
+            }
         });
     }
 
