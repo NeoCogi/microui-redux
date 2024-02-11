@@ -544,6 +544,9 @@ impl Context {
         self.scroll_target = None;
         self.hover_root = self.next_hover_root;
         self.next_hover_root = None;
+        for i in 0..self.containers.len() {
+            self.containers[i].in_hover_root = false;
+        }
         match self.hover_root {
             Some(id) => self.containers[id].in_hover_root = true,
             _ => (),
@@ -636,7 +639,6 @@ impl Context {
     fn begin_root_container(&mut self, cnt: usize) {
         self.container_stack.push(cnt);
         self.root_list.push(cnt);
-        self.containers[cnt].is_root = true;
 
         if self.containers[cnt].rect.contains(&self.input.borrow().mouse_pos)
             && (self.next_hover_root.is_none() || self.containers[cnt].zindex > self.containers[self.next_hover_root.unwrap()].zindex)
@@ -648,7 +650,6 @@ impl Context {
     }
 
     fn end_root_container(&mut self) {
-        self.top_container_mut().is_root = false;
         self.top_container_mut().pop_clip_rect();
         self.pop_container();
     }
