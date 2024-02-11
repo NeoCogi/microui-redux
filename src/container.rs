@@ -138,7 +138,8 @@ pub struct Container {
     pub number_edit_buf: String,
     pub number_edit: Option<Id>,
 
-    pub panels: Directory,
+    panels: Directory,
+    overlays: Directory,
 }
 
 impl Container {
@@ -166,7 +167,9 @@ impl Container {
             number_edit: None,
             in_hover_root: false,
             input: input,
+
             panels: Default::default(),
+            overlays: Default::default(),
         }
     }
 

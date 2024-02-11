@@ -266,7 +266,7 @@ impl WidgetOption {
 }
 
 bitflags! {
-    #[derive(Copy, Clone)]
+    #[derive(Copy, Clone, Debug)]
     pub struct MouseButton : u32 {
         const MIDDLE = 4;
         const RIGHT = 2;
@@ -291,7 +291,7 @@ impl MouseButton {
 }
 
 bitflags! {
-    #[derive(Copy, Clone)]
+    #[derive(Copy, Clone, Debug)]
     pub struct KeyMode : u32 {
         const RETURN = 16;
         const BACKSPACE = 8;
@@ -323,7 +323,7 @@ impl KeyMode {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Input {
     mouse_pos: Vec2i,
     last_mouse_pos: Vec2i,
@@ -589,17 +589,6 @@ impl Context {
         self.frame_end();
     }
 
-    fn pop_container(&mut self) {
-        let layout = *self.top_container().layout.top();
-        let container = self.top_container_mut();
-        container.content_size.x = layout.max.x - layout.body.x;
-        container.content_size.y = layout.max.y - layout.body.y;
-        container.layout.stack.pop();
-
-        self.container_stack.pop();
-        self.idmngr.pop_id();
-    }
-
     pub fn top_container(&self) -> &Container {
         &self.containers[*self.container_stack.last().unwrap()]
     }
@@ -636,6 +625,7 @@ impl Context {
         self.containers[cnt].zindex = self.last_zindex;
     }
 
+    #[inline(never)]
     fn begin_root_container(&mut self, cnt: usize) {
         self.container_stack.push(cnt);
         self.root_list.push(cnt);
@@ -649,9 +639,17 @@ impl Context {
         container.clip_stack.push(UNCLIPPED_RECT);
     }
 
+    #[inline(never)]
     fn end_root_container(&mut self) {
         self.top_container_mut().pop_clip_rect();
-        self.pop_container();
+
+        let layout = *self.top_container().layout.top();
+        let container = self.top_container_mut();
+        container.content_size.x = layout.max.x - layout.body.x;
+        container.content_size.y = layout.max.y - layout.body.y;
+        container.layout.stack.pop();
+
+        self.container_stack.pop();
     }
 
     #[inline(never)]
@@ -662,13 +660,13 @@ impl Context {
         if cnt_id.is_none() || !self.containers[cnt_id.unwrap()].open {
             return false;
         }
-        self.idmngr.push_id(id);
 
-        if self.containers[cnt_id.unwrap()].rect.width == 0 {
-            self.containers[cnt_id.unwrap()].rect = r;
+        let cnt_id = cnt_id.unwrap();
+        if self.containers[cnt_id].rect.width == 0 {
+            self.containers[cnt_id].rect = r;
         }
-        self.begin_root_container(cnt_id.unwrap());
-        self.containers[cnt_id.unwrap()].begin_window(title, opt);
+        self.begin_root_container(cnt_id);
+        self.containers[cnt_id].begin_window(title, opt);
 
         true
     }
@@ -692,13 +690,14 @@ impl Context {
         self.hover_root = self.next_hover_root;
         self.containers[cnt.unwrap()].rect = rect(self.input.borrow().mouse_pos.x, self.input.borrow().mouse_pos.y, 1, 1);
         self.containers[cnt.unwrap()].open = true;
+        self.containers[cnt.unwrap()].in_hover_root = true;
         self.bring_to_front(cnt.unwrap());
     }
 
     pub fn popup<F: FnOnce(&mut Container)>(&mut self, name: &str, f: F) {
         let opt =
             WidgetOption::POPUP | WidgetOption::AUTO_SIZE | WidgetOption::NO_RESIZE | WidgetOption::NO_SCROLL | WidgetOption::NO_TITLE | WidgetOption::CLOSED;
-        let _ = self.window(name, rect(0, 0, 0, 0), opt, f);
+        self.window(name, rect(0, 0, 0, 0), opt, f);
     }
 
     pub fn propagate_style(&mut self, style: &Style) {
