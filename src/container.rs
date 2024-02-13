@@ -906,5 +906,3 @@ impl Container {
         return res;
     }
 }
-
-pub type ContainerHandle = Rc<RefCell<Container>>;
