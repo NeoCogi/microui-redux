@@ -57,10 +57,12 @@ use rs_math3d::*;
 mod container;
 mod idmngr;
 mod layout;
+mod window;
 
 pub use idmngr::*;
 pub use layout::*;
 pub use container::*;
+pub use window::*;
 
 use bitflags::*;
 use std::cmp::{min, max};
