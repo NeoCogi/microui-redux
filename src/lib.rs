@@ -414,7 +414,6 @@ pub struct Context {
     scroll_target: Option<usize>,
 
     root_list: Vec<usize>,
-    container_stack: Vec<usize>,
     containers: Vec<Container>,
     pub idmngr: IdManager,
     pub input: Rc<RefCell<Input>>,
@@ -433,7 +432,6 @@ impl Context {
             scroll_target: None,
 
             root_list: Vec::default(),
-            container_stack: Vec::default(),
             idmngr: IdManager::new(),
             containers: Vec::default(),
             input: Rc::new(RefCell::new(Input::default())),
@@ -563,7 +561,6 @@ impl Context {
 
     #[inline(never)]
     fn frame_end(&mut self) {
-        assert_eq!(self.container_stack.len(), 0);
         assert_eq!(self.idmngr.len(), 0);
 
         for i in 0..self.containers.len() {
@@ -589,14 +586,6 @@ impl Context {
         f(self);
 
         self.frame_end();
-    }
-
-    pub fn top_container(&self) -> &Container {
-        &self.containers[*self.container_stack.last().unwrap()]
-    }
-
-    pub fn top_container_mut(&mut self) -> &mut Container {
-        &mut self.containers[*self.container_stack.last().unwrap()]
     }
 
     #[inline(never)]
@@ -629,7 +618,6 @@ impl Context {
 
     #[inline(never)]
     fn begin_root_container(&mut self, cnt: usize) {
-        self.container_stack.push(cnt);
         self.root_list.push(cnt);
 
         if self.containers[cnt].rect.contains(&self.input.borrow().mouse_pos)
@@ -637,30 +625,28 @@ impl Context {
         {
             self.next_hover_root = Some(cnt);
         }
-        let container = &mut self.containers[*self.container_stack.last().unwrap()];
+        let container = &mut self.containers[*self.root_list.last().unwrap()];
         container.clip_stack.push(UNCLIPPED_RECT);
     }
 
     #[inline(never)]
-    fn end_root_container(&mut self) {
-        self.top_container_mut().pop_clip_rect();
+    fn end_root_container(&mut self, cnt_id: usize) {
+        let container = &mut self.containers[cnt_id];
+        container.pop_clip_rect();
 
-        let layout = *self.top_container().layout.top();
-        let container = self.top_container_mut();
+        let layout = *container.layout.top();
         container.content_size.x = layout.max.x - layout.body.x;
         container.content_size.y = layout.max.y - layout.body.y;
         container.layout.stack.pop();
-
-        self.container_stack.pop();
     }
 
     #[inline(never)]
     #[must_use]
-    fn begin_window(&mut self, title: &str, r: Recti, opt: WidgetOption) -> bool {
+    fn begin_window(&mut self, title: &str, r: Recti, opt: WidgetOption) -> (usize, bool) {
         let id = self.idmngr.get_id_from_str(title);
         let cnt_id = self.get_container_index_intern(id, title, opt);
         if cnt_id.is_none() || !self.containers[cnt_id.unwrap()].open {
-            return false;
+            return (0, false);
         }
 
         let cnt_id = cnt_id.unwrap();
@@ -670,19 +656,20 @@ impl Context {
         self.begin_root_container(cnt_id);
         self.containers[cnt_id].begin_window(title, opt);
 
-        true
+        (cnt_id, true)
     }
 
-    fn end_window(&mut self) {
-        self.top_container_mut().end_window();
-        self.end_root_container();
+    fn end_window(&mut self, cnt_id: usize) {
+        self.containers[cnt_id].end_window();
+        self.end_root_container(cnt_id);
     }
 
     pub fn window<F: FnOnce(&mut Container)>(&mut self, title: &str, r: Recti, opt: WidgetOption, f: F) {
         // call the window function if the window is open
-        if self.begin_window(title, r, opt) {
-            f(self.top_container_mut());
-            self.end_window();
+        let (cnt_id, open) = self.begin_window(title, r, opt);
+        if open {
+            f(&mut self.containers[cnt_id]);
+            self.end_window(cnt_id);
         }
     }
 
