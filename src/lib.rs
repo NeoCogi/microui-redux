@@ -655,7 +655,7 @@ impl Context {
         self.next_hover_root = Some(window.clone());
         self.hover_root = self.next_hover_root.clone();
         window.inner_mut().main.rect = rect(self.input.borrow().mouse_pos.x, self.input.borrow().mouse_pos.y, 1, 1);
-        window.inner_mut().main.open = true;
+        window.inner_mut().activity = Activity::Open;
         window.inner_mut().main.in_hover_root = true;
         self.bring_to_front(window);
     }
