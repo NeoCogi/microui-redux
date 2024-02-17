@@ -385,7 +385,7 @@ fn main() {
     state.demo_window = Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450)));
     state.log_window = Some(ctx.new_window("Log Window", rect(350, 40, 300, 200)));
     state.style_window = Some(ctx.new_window("Style Editor", rect(350, 250, 300, 240)));
-    state.popup_window = Some(ctx.new_window("Test Popup", Rect::new(0, 0, 0, 0)));
+    state.popup_window = Some(ctx.new_popup("Test Popup"));
 
     'running: loop {
         let (width, height) = window.size();

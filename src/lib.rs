@@ -187,8 +187,6 @@ impl ResourceState {
 bitflags! {
     #[derive(Copy, Clone)]
     pub struct WidgetOption : u32 {
-        const CLOSED = 2048;
-        const POPUP= 1024;
         const AUTO_SIZE = 512;
         const HOLD_FOCUS = 256;
         const NO_TITLE = 128;
@@ -226,12 +224,6 @@ impl NodeState {
 }
 
 impl WidgetOption {
-    pub fn is_closed(&self) -> bool {
-        self.intersects(WidgetOption::CLOSED)
-    }
-    pub fn is_popup(&self) -> bool {
-        self.intersects(WidgetOption::POPUP)
-    }
     pub fn is_auto_sizing(&self) -> bool {
         self.intersects(WidgetOption::AUTO_SIZE)
     }
@@ -593,7 +585,12 @@ impl Context {
 
     pub fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
         let id = self.idmngr.get_id_from_str(name);
-        WindowHandle::new(id, name, self.atlas.clone(), &self.style, self.input.clone(), initial_rect)
+        WindowHandle::window(id, name, self.atlas.clone(), &self.style, self.input.clone(), initial_rect)
+    }
+
+    pub fn new_popup(&mut self, name: &str) -> WindowHandle {
+        let id = self.idmngr.get_id_from_str(name);
+        WindowHandle::popup(id, name, self.atlas.clone(), &self.style, self.input.clone())
     }
 
     pub fn bring_to_front(&mut self, window: &mut WindowHandle) {
@@ -662,8 +659,7 @@ impl Context {
     }
 
     pub fn popup<F: FnOnce(&mut Container)>(&mut self, window: &mut WindowHandle, f: F) {
-        let opt =
-            WidgetOption::POPUP | WidgetOption::AUTO_SIZE | WidgetOption::NO_RESIZE | WidgetOption::NO_SCROLL | WidgetOption::NO_TITLE | WidgetOption::CLOSED;
+        let opt = WidgetOption::AUTO_SIZE | WidgetOption::NO_RESIZE | WidgetOption::NO_SCROLL | WidgetOption::NO_TITLE;
         self.window(window, opt, f);
     }
 
