@@ -50,6 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+use std::cell::{Ref, RefMut};
 use super::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -67,11 +68,8 @@ pub(crate) enum Type {
 #[derive(Clone)]
 pub(crate) struct Window {
     activity: Activity,
-    main: Container,
+    pub(crate) main: Container,
 }
-
-#[derive(Clone)]
-pub struct WindowHandle(Rc<RefCell<Window>>);
 
 impl Window {
     pub fn window(id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
@@ -79,5 +77,53 @@ impl Window {
         main.rect = initial_rect;
 
         Self { activity: Activity::Open, main }
+    }
+}
+
+#[derive(Clone)]
+pub struct WindowHandle(Rc<RefCell<Window>>);
+
+impl WindowHandle {
+    pub(crate) fn new(id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+        Self(Rc::new(RefCell::new(Window::window(id, name, atlas, style, input, initial_rect))))
+    }
+
+    pub fn is_open(&self) -> bool {
+        match self.0.borrow().activity {
+            Activity::Open => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Window> {
+        self.0.borrow_mut()
+    }
+
+    pub(crate) fn inner<'a>(&'a mut self) -> Ref<'a, Window> {
+        self.0.borrow()
+    }
+
+    pub(crate) fn prepare(&mut self) {
+        self.inner_mut().main.prepare()
+    }
+
+    pub(crate) fn render(&self, canvas: &mut dyn Canvas) {
+        self.0.borrow().main.render(canvas)
+    }
+
+    pub(crate) fn finish(&mut self) {
+        self.inner_mut().main.finish()
+    }
+
+    pub(crate) fn zindex(&self) -> i32 {
+        self.0.borrow().main.zindex
+    }
+
+    pub(crate) fn begin_window(&mut self, opt: WidgetOption) {
+        self.0.borrow_mut().main.begin_window(opt)
+    }
+
+    pub(crate) fn end_window(&mut self) {
+        self.inner_mut().main.end_window()
     }
 }
