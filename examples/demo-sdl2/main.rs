@@ -20,6 +20,11 @@ struct State<'a> {
     checks: [bool; 3],
     style: Style,
 
+    demo_window: Option<WindowHandle>,
+    style_window: Option<WindowHandle>,
+    log_window: Option<WindowHandle>,
+    popup_window: Option<WindowHandle>,
+
     window_header: NodeState,
     test_buttons_header: NodeState,
     background_header: NodeState,
@@ -102,6 +107,11 @@ impl<'a> State<'a> {
             submit_buf: String::new(),
             checks: [false, true, false],
 
+            demo_window: None,
+            style_window: None,
+            log_window: None,
+            popup_window: None,
+
             window_header: NodeState::Closed,
             test_buttons_header: NodeState::Expanded,
             tree_and_text_header: NodeState::Expanded,
@@ -127,7 +137,7 @@ impl<'a> State<'a> {
     }
 
     fn test_window(&mut self, ctx: &mut microui_redux::Context) {
-        ctx.window("Demo Window", rect(40, 40, 300, 450), WidgetOption::NONE, |container| {
+        ctx.window(&mut self.demo_window.as_mut().unwrap().clone(), WidgetOption::NONE, |container| {
             let mut win = container.rect;
             win.width = if win.width > 240 { win.width } else { 240 };
             win.height = if win.height > 300 { win.height } else { 300 };
@@ -235,10 +245,10 @@ impl<'a> State<'a> {
         });
 
         if self.open_popup {
-            ctx.open_popup("Test Popup");
+            ctx.open_popup(self.popup_window.as_mut().unwrap());
             self.open_popup = !self.open_popup;
         }
-        ctx.popup("Test Popup", |ctx| {
+        ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), |ctx| {
             if !ctx.button_ex("Hello", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
                 self.write_log("Hello")
             }
@@ -249,7 +259,7 @@ impl<'a> State<'a> {
     }
 
     fn log_window(&mut self, ctx: &mut microui_redux::Context) {
-        ctx.window("Log Window", rect(350, 40, 300, 200), WidgetOption::NONE, |container| {
+        ctx.window(&mut self.log_window.as_mut().unwrap().clone(), WidgetOption::NONE, |container| {
             container.set_row_widths_height(&[-1], -25);
             container.panel("Log Output", WidgetOption::NONE, |container| {
                 let mut scroll = container.scroll;
@@ -290,7 +300,7 @@ impl<'a> State<'a> {
         return res;
     }
     fn style_window(&mut self, ctx: &mut microui_redux::Context) {
-        ctx.window("Style Editor", rect(350, 250, 300, 240), WidgetOption::NONE, |container| {
+        ctx.window(&mut self.style_window.as_mut().unwrap().clone(), WidgetOption::NONE, |container| {
             let sw = (container.body.width as f64 * 0.14) as i32;
             container.set_row_widths_height(&[80, sw, sw, sw, sw, -1], 0);
             let mut i = 0;
@@ -371,6 +381,11 @@ fn main() {
 
     let mut state = State::new();
     let mut ctx = microui_redux::Context::new(Rc::new(MyAtlas {}), Box::new(rd));
+
+    state.demo_window = Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450)));
+    state.log_window = Some(ctx.new_window("Log Window", rect(350, 40, 300, 200)));
+    state.style_window = Some(ctx.new_window("Style Editor", rect(350, 250, 300, 240)));
+    state.popup_window = Some(ctx.new_window("Test Popup", Rect::new(0, 0, 0, 0)));
 
     'running: loop {
         let (width, height) = window.size();

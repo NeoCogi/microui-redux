@@ -575,7 +575,7 @@ impl Container {
     }
 
     #[inline(never)]
-    pub(crate) fn begin_window(&mut self, title: &str, opt: WidgetOption) {
+    pub(crate) fn begin_window(&mut self, opt: WidgetOption) {
         let mut body = self.rect;
         let r = body;
         if !opt.has_no_frame() {
@@ -590,7 +590,12 @@ impl Container {
             if !opt.has_no_title() {
                 let id = self.idmngr.get_id_from_str("!title");
                 self.update_control(id, tr, opt);
-                self.draw_control_text(title, tr, ControlColor::TitleText, opt);
+                self.draw_control_text(
+                    &self.name.clone(), /* TODO: cloning the string is expensive, go to a different approach */
+                    tr,
+                    ControlColor::TitleText,
+                    opt,
+                );
                 if Some(id) == self.focus && self.input.borrow().mouse_down.is_left() {
                     self.rect.x += self.input.borrow().mouse_delta.x;
                     self.rect.y += self.input.borrow().mouse_delta.y;

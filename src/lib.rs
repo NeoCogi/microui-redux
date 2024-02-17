@@ -402,43 +402,6 @@ impl Input {
     }
 }
 
-pub struct Context {
-    atlas: Rc<dyn Atlas>,
-    canvas: Box<dyn Canvas>,
-    style: Style,
-
-    last_zindex: i32,
-    frame: usize,
-    hover_root: Option<usize>,
-    next_hover_root: Option<usize>,
-    scroll_target: Option<usize>,
-
-    root_list: Vec<usize>,
-    containers: Vec<Container>,
-    pub idmngr: IdManager,
-    pub input: Rc<RefCell<Input>>,
-}
-
-impl Context {
-    pub fn new(atlas: Rc<dyn Atlas>, canvas: Box<dyn Canvas>) -> Self {
-        Self {
-            atlas,
-            canvas,
-            style: Style::default(),
-            last_zindex: 0,
-            frame: 0,
-            hover_root: None,
-            next_hover_root: None,
-            scroll_target: None,
-
-            root_list: Vec::default(),
-            idmngr: IdManager::new(),
-            containers: Vec::default(),
-            input: Rc::new(RefCell::new(Input::default())),
-        }
-    }
-}
-
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
 pub struct Color {
@@ -526,57 +489,97 @@ pub fn expand_rect(r: Recti, n: i32) -> Recti {
     rect(r.x - n, r.y - n, r.width + n * 2, r.height + n * 2)
 }
 
+pub struct Context {
+    atlas: Rc<dyn Atlas>,
+    canvas: Box<dyn Canvas>,
+    style: Rc<Style>,
+
+    last_zindex: i32,
+    frame: usize,
+    hover_root: Option<WindowHandle>,
+    next_hover_root: Option<WindowHandle>,
+    scroll_target: Option<WindowHandle>,
+
+    root_list: Vec<WindowHandle>,
+
+    pub idmngr: IdManager,
+    pub input: Rc<RefCell<Input>>,
+}
+
+impl Context {
+    pub fn new(atlas: Rc<dyn Atlas>, canvas: Box<dyn Canvas>) -> Self {
+        Self {
+            atlas,
+            canvas,
+            style: Rc::new(Style::default()),
+            last_zindex: 0,
+            frame: 0,
+            hover_root: None,
+            next_hover_root: None,
+            scroll_target: None,
+
+            root_list: Vec::default(),
+            idmngr: IdManager::new(),
+
+            input: Rc::new(RefCell::new(Input::default())),
+        }
+    }
+}
+
 impl Context {
     pub fn clear(&mut self, width: i32, height: i32, clr: Color) {
         self.canvas.clear(width, height, clr);
     }
 
     pub fn flush(&mut self) {
-        for rc in self.root_list.clone() {
-            self.containers[rc].render(self.canvas.as_mut());
+        for r in &self.root_list {
+            r.render(self.canvas.as_mut());
         }
         self.canvas.flush()
     }
 
     #[inline(never)]
     fn frame_begin(&mut self) {
-        self.root_list.clear();
         self.scroll_target = None;
-        self.hover_root = self.next_hover_root;
-        self.next_hover_root = None;
-        for i in 0..self.containers.len() {
-            self.containers[i].in_hover_root = false;
-        }
-        match self.hover_root {
-            Some(id) => self.containers[id].in_hover_root = true,
-            _ => (),
-        }
-
         self.input.borrow_mut().prelude();
-        for c in &mut self.containers {
-            c.prepare();
+        for r in &mut self.root_list {
+            r.prepare();
         }
         self.frame += 1;
+        self.root_list.clear();
     }
 
     #[inline(never)]
     fn frame_end(&mut self) {
         assert_eq!(self.idmngr.len(), 0);
 
-        for i in 0..self.containers.len() {
-            self.containers[i].finish();
+        for r in &mut self.root_list {
+            r.finish();
         }
 
-        if !self.input.borrow().mouse_pressed.is_none()
-            && !self.next_hover_root.is_none()
-            && self.containers[self.next_hover_root.unwrap()].zindex < self.last_zindex
-            && self.containers[self.next_hover_root.unwrap()].zindex >= 0
-        {
-            self.bring_to_front(self.next_hover_root.unwrap());
+        let mouse_pressed = self.input.borrow().mouse_pressed;
+        match (mouse_pressed.is_none(), &self.next_hover_root) {
+            (false, Some(next_hover_root)) if next_hover_root.zindex() < self.last_zindex && next_hover_root.zindex() >= 0 => {
+                self.bring_to_front(&mut next_hover_root.clone());
+            }
+            _ => (),
         }
 
         self.input.borrow_mut().epilogue();
-        self.root_list.sort_by(|a, b| self.containers[*a].zindex.cmp(&self.containers[*b].zindex));
+
+        // prepare the next frame
+        self.hover_root = self.next_hover_root.clone();
+        self.next_hover_root = None;
+        for r in &mut self.root_list {
+            r.inner_mut().main.in_hover_root = false;
+        }
+        match &mut self.hover_root {
+            Some(window) => window.inner_mut().main.in_hover_root = true,
+            _ => (),
+        }
+
+        // sort all windows
+        self.root_list.sort_by(|a, b| a.zindex().cmp(&b.zindex()));
     }
 
     pub fn frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
@@ -588,50 +591,32 @@ impl Context {
         self.frame_end();
     }
 
-    #[inline(never)]
-    fn get_container_index_intern(&mut self, id: Id, name: &str, opt: WidgetOption) -> Option<usize> {
-        for idx in 0..self.containers.len() {
-            if self.containers[idx].id == id {
-                return Some(idx);
-            }
-        }
-        if opt.is_closed() {
-            return None;
-        }
-
-        let idx = self.containers.len();
-        self.containers
-            .push(Container::new(id, name, self.atlas.clone(), &self.style, self.input.clone()));
-        self.bring_to_front(idx);
-        Some(idx)
-    }
-
-    fn get_container_index(&mut self, name: &str) -> Option<usize> {
+    pub fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
         let id = self.idmngr.get_id_from_str(name);
-        self.get_container_index_intern(id, name, WidgetOption::NONE)
+        WindowHandle::new(id, name, self.atlas.clone(), &self.style, self.input.clone(), initial_rect)
     }
 
-    pub fn bring_to_front(&mut self, cnt: usize) {
+    pub fn bring_to_front(&mut self, window: &mut WindowHandle) {
         self.last_zindex += 1;
-        self.containers[cnt].zindex = self.last_zindex;
+        window.inner_mut().main.zindex = self.last_zindex;
     }
 
     #[inline(never)]
-    fn begin_root_container(&mut self, cnt: usize) {
-        self.root_list.push(cnt);
+    fn begin_root_container(&mut self, window: &mut WindowHandle) {
+        self.root_list.push(window.clone());
 
-        if self.containers[cnt].rect.contains(&self.input.borrow().mouse_pos)
-            && (self.next_hover_root.is_none() || self.containers[cnt].zindex > self.containers[self.next_hover_root.unwrap()].zindex)
+        if window.inner().main.rect.contains(&self.input.borrow().mouse_pos)
+            && (self.next_hover_root.is_none() || window.zindex() > self.next_hover_root.as_ref().unwrap().zindex())
         {
-            self.next_hover_root = Some(cnt);
+            self.next_hover_root = Some(window.clone());
         }
-        let container = &mut self.containers[*self.root_list.last().unwrap()];
+        let container = &mut window.inner_mut().main;
         container.clip_stack.push(UNCLIPPED_RECT);
     }
 
     #[inline(never)]
-    fn end_root_container(&mut self, cnt_id: usize) {
-        let container = &mut self.containers[cnt_id];
+    fn end_root_container(&mut self, window: &mut WindowHandle) {
+        let container = &mut window.inner_mut().main;
         container.pop_clip_rect();
 
         let layout = *container.layout.top();
@@ -642,56 +627,46 @@ impl Context {
 
     #[inline(never)]
     #[must_use]
-    fn begin_window(&mut self, title: &str, r: Recti, opt: WidgetOption) -> (usize, bool) {
-        let id = self.idmngr.get_id_from_str(title);
-        let cnt_id = self.get_container_index_intern(id, title, opt);
-        if cnt_id.is_none() || !self.containers[cnt_id.unwrap()].open {
-            return (0, false);
+    fn begin_window(&mut self, window: &mut WindowHandle, opt: WidgetOption) -> bool {
+        if !window.is_open() {
+            return false;
         }
 
-        let cnt_id = cnt_id.unwrap();
-        if self.containers[cnt_id].rect.width == 0 {
-            self.containers[cnt_id].rect = r;
-        }
-        self.begin_root_container(cnt_id);
-        self.containers[cnt_id].begin_window(title, opt);
+        self.begin_root_container(window);
+        window.begin_window(opt);
 
-        (cnt_id, true)
+        true
     }
 
-    fn end_window(&mut self, cnt_id: usize) {
-        self.containers[cnt_id].end_window();
-        self.end_root_container(cnt_id);
+    fn end_window(&mut self, window: &mut WindowHandle) {
+        window.end_window();
+        self.end_root_container(window);
     }
 
-    pub fn window<F: FnOnce(&mut Container)>(&mut self, title: &str, r: Recti, opt: WidgetOption, f: F) {
+    pub fn window<F: FnOnce(&mut Container)>(&mut self, window: &mut WindowHandle, opt: WidgetOption, f: F) {
         // call the window function if the window is open
-        let (cnt_id, open) = self.begin_window(title, r, opt);
-        if open {
-            f(&mut self.containers[cnt_id]);
-            self.end_window(cnt_id);
+        if self.begin_window(window, opt) {
+            f(&mut window.inner_mut().main);
+            self.end_window(window);
         }
     }
 
-    pub fn open_popup(&mut self, name: &str) {
-        let cnt = self.get_container_index(name);
-        self.next_hover_root = cnt;
-        self.hover_root = self.next_hover_root;
-        self.containers[cnt.unwrap()].rect = rect(self.input.borrow().mouse_pos.x, self.input.borrow().mouse_pos.y, 1, 1);
-        self.containers[cnt.unwrap()].open = true;
-        self.containers[cnt.unwrap()].in_hover_root = true;
-        self.bring_to_front(cnt.unwrap());
+    pub fn open_popup(&mut self, window: &mut WindowHandle) {
+        self.next_hover_root = Some(window.clone());
+        self.hover_root = self.next_hover_root.clone();
+        window.inner_mut().main.rect = rect(self.input.borrow().mouse_pos.x, self.input.borrow().mouse_pos.y, 1, 1);
+        window.inner_mut().main.open = true;
+        window.inner_mut().main.in_hover_root = true;
+        self.bring_to_front(window);
     }
 
-    pub fn popup<F: FnOnce(&mut Container)>(&mut self, name: &str, f: F) {
+    pub fn popup<F: FnOnce(&mut Container)>(&mut self, window: &mut WindowHandle, f: F) {
         let opt =
             WidgetOption::POPUP | WidgetOption::AUTO_SIZE | WidgetOption::NO_RESIZE | WidgetOption::NO_SCROLL | WidgetOption::NO_TITLE | WidgetOption::CLOSED;
-        self.window(name, rect(0, 0, 0, 0), opt, f);
+        self.window(window, opt, f);
     }
 
     pub fn propagate_style(&mut self, style: &Style) {
-        for c in &mut self.containers {
-            c.propagate_style(style)
-        }
+        self.style = Rc::new(style.clone())
     }
 }
