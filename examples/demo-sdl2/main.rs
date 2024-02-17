@@ -344,7 +344,7 @@ impl<'a> State<'a> {
             self.uint8_slider(&mut tmp, 0, 128, container);
             self.style.scrollbar_size = tmp as i32;
         });
-        ctx.propagate_style(&self.style);
+        ctx.set_style(&self.style);
     }
 
     fn process_frame(&mut self, ctx: &mut microui_redux::Context) {

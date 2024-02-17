@@ -633,13 +633,6 @@ impl Container {
         self.style = style;
     }
 
-    pub fn propagate_style(&mut self, style: &Style) {
-        self.style = style.clone();
-        for c in &mut self.panels.containers {
-            c.propagate_style(style)
-        }
-    }
-
     pub fn get_style(&self) -> Style {
         self.style.clone()
     }
