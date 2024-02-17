@@ -67,6 +67,7 @@ pub(crate) enum Type {
 
 #[derive(Clone)]
 pub(crate) struct Window {
+    pub(crate) ty: Type,
     pub(crate) activity: Activity,
     pub(crate) main: Container,
 }
@@ -76,11 +77,34 @@ impl Window {
         let mut main = Container::new(id, name, atlas, style, input);
         main.rect = initial_rect;
 
-        Self { activity: Activity::Open, main }
+        Self {
+            ty: Type::Window,
+            activity: Activity::Open,
+            main,
+        }
+    }
+
+    pub fn popup(id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+        let mut main = Container::new(id, name, atlas, style, input);
+        main.rect = initial_rect;
+
+        Self {
+            ty: Type::Popup,
+            activity: Activity::Closed,
+            main,
+        }
+    }
+
+    pub fn is_popup(&self) -> bool {
+        match self.ty {
+            Type::Popup => true,
+            _ => false,
+        }
     }
 
     #[inline(never)]
     fn begin_window(&mut self, opt: WidgetOption) {
+        let is_popup = self.is_popup();
         let container = &mut self.main;
         let mut body = container.rect;
         let r = body;
@@ -146,7 +170,7 @@ impl Window {
             container.rect.height = container.content_size.y + (container.rect.height - r_1.height);
         }
 
-        if opt.is_popup() && !container.input.borrow().mouse_pressed.is_none() && !container.in_hover_root {
+        if is_popup && !container.input.borrow().mouse_pressed.is_none() && !container.in_hover_root {
             self.activity = Activity::Closed;
         }
         let body = container.body;
@@ -163,8 +187,12 @@ impl Window {
 pub struct WindowHandle(Rc<RefCell<Window>>);
 
 impl WindowHandle {
-    pub(crate) fn new(id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+    pub(crate) fn window(id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         Self(Rc::new(RefCell::new(Window::window(id, name, atlas, style, input, initial_rect))))
+    }
+
+    pub(crate) fn popup(id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>) -> Self {
+        Self(Rc::new(RefCell::new(Window::popup(id, name, atlas, style, input, Recti::new(0, 0, 0, 0)))))
     }
 
     pub fn is_open(&self) -> bool {
