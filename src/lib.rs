@@ -492,7 +492,7 @@ pub fn expand_rect(r: Recti, n: i32) -> Recti {
 pub struct Context {
     atlas: Rc<dyn Atlas>,
     canvas: Box<dyn Canvas>,
-    style: Rc<Style>,
+    style: Style,
 
     last_zindex: i32,
     frame: usize,
@@ -511,7 +511,7 @@ impl Context {
         Self {
             atlas,
             canvas,
-            style: Rc::new(Style::default()),
+            style: Style::default(),
             last_zindex: 0,
             frame: 0,
             hover_root: None,
@@ -646,6 +646,7 @@ impl Context {
     pub fn window<F: FnOnce(&mut Container)>(&mut self, window: &mut WindowHandle, opt: WidgetOption, f: F) {
         // call the window function if the window is open
         if self.begin_window(window, opt) {
+            window.inner_mut().main.style = self.style.clone();
             f(&mut window.inner_mut().main);
             self.end_window(window);
         }
@@ -666,7 +667,7 @@ impl Context {
         self.window(window, opt, f);
     }
 
-    pub fn propagate_style(&mut self, style: &Style) {
-        self.style = Rc::new(style.clone())
+    pub fn set_style(&mut self, style: &Style) {
+        self.style = style.clone()
     }
 }
