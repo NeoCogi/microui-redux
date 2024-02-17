@@ -67,7 +67,7 @@ pub(crate) enum Type {
 
 #[derive(Clone)]
 pub(crate) struct Window {
-    activity: Activity,
+    pub(crate) activity: Activity,
     pub(crate) main: Container,
 }
 
@@ -77,6 +77,85 @@ impl Window {
         main.rect = initial_rect;
 
         Self { activity: Activity::Open, main }
+    }
+
+    #[inline(never)]
+    fn begin_window(&mut self, opt: WidgetOption) {
+        let container = &mut self.main;
+        let mut body = container.rect;
+        let r = body;
+        if !opt.has_no_frame() {
+            container.draw_frame(r, ControlColor::WindowBG);
+        }
+        if !opt.has_no_title() {
+            let mut tr: Recti = r;
+            tr.height = container.style.title_height;
+            container.draw_frame(tr, ControlColor::TitleBG);
+
+            // TODO: Is this necessary?
+            if !opt.has_no_title() {
+                let id = container.idmngr.get_id_from_str("!title");
+                container.update_control(id, tr, opt);
+                container.draw_control_text(
+                    &container.name.clone(), /* TODO: cloning the string is expensive, go to a different approach */
+                    tr,
+                    ControlColor::TitleText,
+                    opt,
+                );
+                if Some(id) == container.focus && container.input.borrow().mouse_down.is_left() {
+                    container.rect.x += container.input.borrow().mouse_delta.x;
+                    container.rect.y += container.input.borrow().mouse_delta.y;
+                }
+                body.y += tr.height;
+                body.height -= tr.height;
+            }
+            if !opt.has_no_close() {
+                let id = container.idmngr.get_id_from_str("!close");
+                let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
+                tr.width -= r.width;
+                let color = container.style.colors[ControlColor::TitleText as usize];
+                container.draw_icon(Icon::Close, r, color);
+                container.update_control(id, r, opt);
+                if container.input.borrow().mouse_pressed.is_left() && Some(id) == container.focus {
+                    self.activity = Activity::Closed;
+                }
+            }
+        }
+        container.push_container_body(body, opt);
+        if !opt.is_auto_sizing() {
+            let sz = container.style.title_height;
+            let id_2 = container.idmngr.get_id_from_str("!resize");
+            let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
+            container.update_control(id_2, r_0, opt);
+            if Some(id_2) == container.focus && container.input.borrow().mouse_down.is_left() {
+                container.rect.width = if 96 > container.rect.width + container.input.borrow().mouse_delta.x {
+                    96
+                } else {
+                    container.rect.width + container.input.borrow().mouse_delta.x
+                };
+                container.rect.height = if 64 > container.rect.height + container.input.borrow().mouse_delta.y {
+                    64
+                } else {
+                    container.rect.height + container.input.borrow().mouse_delta.y
+                };
+            }
+        }
+        if opt.is_auto_sizing() {
+            let r_1 = container.layout.top().body;
+            container.rect.width = container.content_size.x + (container.rect.width - r_1.width);
+            container.rect.height = container.content_size.y + (container.rect.height - r_1.height);
+        }
+
+        if opt.is_popup() && !container.input.borrow().mouse_pressed.is_none() && !container.in_hover_root {
+            self.activity = Activity::Closed;
+        }
+        let body = container.body;
+        container.push_clip_rect(body);
+    }
+
+    fn end_window(&mut self) {
+        let container = &mut self.main;
+        container.pop_clip_rect();
     }
 }
 
@@ -120,10 +199,10 @@ impl WindowHandle {
     }
 
     pub(crate) fn begin_window(&mut self, opt: WidgetOption) {
-        self.0.borrow_mut().main.begin_window(opt)
+        self.0.borrow_mut().begin_window(opt)
     }
 
     pub(crate) fn end_window(&mut self) {
-        self.inner_mut().main.end_window()
+        self.inner_mut().end_window()
     }
 }

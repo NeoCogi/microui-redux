@@ -124,7 +124,6 @@ pub struct Container {
     pub content_size: Vec2i,
     pub scroll: Vec2i,
     pub zindex: i32,
-    pub open: bool,
     pub command_list: Vec<Command>,
     pub clip_stack: Vec<Recti>,
     pub text_stack: Vec<char>,
@@ -147,7 +146,6 @@ impl Container {
         Self {
             id,
             name: name.to_string(),
-            open: true,
             style: style.clone(),
             atlas: atlas,
             rect: Recti::default(),
@@ -572,83 +570,6 @@ impl Container {
         self.layout.push_layout(expand_rect(body, padding), scroll);
         self.layout.style = self.style.clone();
         self.body = body;
-    }
-
-    #[inline(never)]
-    pub(crate) fn begin_window(&mut self, opt: WidgetOption) {
-        let mut body = self.rect;
-        let r = body;
-        if !opt.has_no_frame() {
-            self.draw_frame(r, ControlColor::WindowBG);
-        }
-        if !opt.has_no_title() {
-            let mut tr: Recti = r;
-            tr.height = self.style.title_height;
-            self.draw_frame(tr, ControlColor::TitleBG);
-
-            // TODO: Is this necessary?
-            if !opt.has_no_title() {
-                let id = self.idmngr.get_id_from_str("!title");
-                self.update_control(id, tr, opt);
-                self.draw_control_text(
-                    &self.name.clone(), /* TODO: cloning the string is expensive, go to a different approach */
-                    tr,
-                    ControlColor::TitleText,
-                    opt,
-                );
-                if Some(id) == self.focus && self.input.borrow().mouse_down.is_left() {
-                    self.rect.x += self.input.borrow().mouse_delta.x;
-                    self.rect.y += self.input.borrow().mouse_delta.y;
-                }
-                body.y += tr.height;
-                body.height -= tr.height;
-            }
-            if !opt.has_no_close() {
-                let id = self.idmngr.get_id_from_str("!close");
-                let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
-                tr.width -= r.width;
-                let color = self.style.colors[ControlColor::TitleText as usize];
-                self.draw_icon(Icon::Close, r, color);
-                self.update_control(id, r, opt);
-                if self.input.borrow().mouse_pressed.is_left() && Some(id) == self.focus {
-                    self.open = false;
-                }
-            }
-        }
-        self.push_container_body(body, opt);
-        if !opt.is_auto_sizing() {
-            let sz = self.style.title_height;
-            let id_2 = self.idmngr.get_id_from_str("!resize");
-            let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
-            self.update_control(id_2, r_0, opt);
-            if Some(id_2) == self.focus && self.input.borrow().mouse_down.is_left() {
-                self.rect.width = if 96 > self.rect.width + self.input.borrow().mouse_delta.x {
-                    96
-                } else {
-                    self.rect.width + self.input.borrow().mouse_delta.x
-                };
-                self.rect.height = if 64 > self.rect.height + self.input.borrow().mouse_delta.y {
-                    64
-                } else {
-                    self.rect.height + self.input.borrow().mouse_delta.y
-                };
-            }
-        }
-        if opt.is_auto_sizing() {
-            let r_1 = self.layout.top().body;
-            self.rect.width = self.content_size.x + (self.rect.width - r_1.width);
-            self.rect.height = self.content_size.y + (self.rect.height - r_1.height);
-        }
-
-        if opt.is_popup() && !self.input.borrow().mouse_pressed.is_none() && !self.in_hover_root {
-            self.open = false;
-        }
-        let body = self.body;
-        self.push_clip_rect(body);
-    }
-
-    pub(crate) fn end_window(&mut self) {
-        self.pop_clip_rect();
     }
 
     fn pop_panel(&mut self, panel_id: usize) {
