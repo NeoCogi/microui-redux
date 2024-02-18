@@ -50,7 +50,12 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-use std::{cell::RefCell, f32, hash::Hash, rc::Rc};
+use std::{
+    cell::{Ref, RefCell, RefMut},
+    f32,
+    hash::Hash,
+    rc::Rc,
+};
 
 use rs_math3d::*;
 
@@ -481,6 +486,27 @@ pub fn expand_rect(r: Recti, n: i32) -> Recti {
     rect(r.x - n, r.y - n, r.width + n * 2, r.height + n * 2)
 }
 
+#[derive(Clone)]
+pub struct ContainerHandle(Rc<RefCell<Container>>);
+
+impl ContainerHandle {
+    pub(crate) fn new(container: Container) -> Self {
+        Self(Rc::new(RefCell::new(container)))
+    }
+
+    pub(crate) fn render(&self, canvas: &mut dyn Canvas) {
+        self.0.borrow().render(canvas)
+    }
+
+    pub fn inner<'a>(&'a self) -> Ref<'a, Container> {
+        self.0.borrow()
+    }
+
+    pub fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Container> {
+        self.0.borrow_mut()
+    }
+}
+
 pub struct Context {
     atlas: Rc<dyn Atlas>,
     canvas: Box<dyn Canvas>,
@@ -591,6 +617,11 @@ impl Context {
     pub fn new_popup(&mut self, name: &str) -> WindowHandle {
         let id = self.idmngr.get_id_from_str(name);
         WindowHandle::popup(id, name, self.atlas.clone(), &self.style, self.input.clone())
+    }
+
+    pub fn new_panel(&mut self, name: &str) -> ContainerHandle {
+        let id = self.idmngr.get_id_from_str(name);
+        ContainerHandle::new(Container::new(id, name, self.atlas.clone(), &self.style, self.input.clone()))
     }
 
     pub fn bring_to_front(&mut self, window: &mut WindowHandle) {
