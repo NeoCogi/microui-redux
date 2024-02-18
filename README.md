@@ -24,10 +24,12 @@ $ cargo run --example demo-sdl2
 - [x] Remove/Refactor `Pool`
 - [x] Change layout code
 - [x] Treenode as tree
-- [ ] Mechanism to garbage collect/free unused containers (use root lists and mark/sweep?)
+- [x] Manage windows lifetime & ownership outside of context (use root windows)
+- [ ] Manage containers lifetime & ownership outside of contaienrs
 - [ ] Software based textured rectangle clipping
 - [ ] Add Atlasser to the code
 - [ ] Image widget
+- [ ] Pass-Through rendering command (for 3D viewports)
 - [ ] Documentation
 - [ ] Examples
 
