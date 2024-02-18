@@ -25,7 +25,7 @@ $ cargo run --example demo-sdl2
 - [x] Change layout code
 - [x] Treenode as tree
 - [x] Manage windows lifetime & ownership outside of context (use root windows)
-- [ ] Manage containers lifetime & ownership outside of contaienrs
+- [x] Manage containers lifetime & ownership outside of contaienrs
 - [ ] Software based textured rectangle clipping
 - [ ] Add Atlasser to the code
 - [ ] Image widget

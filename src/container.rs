@@ -83,36 +83,6 @@ impl Default for Command {
     }
 }
 
-#[derive(Clone, Default)]
-struct Directory {
-    containers: Vec<Container>,
-    map: HashMap<Id, usize>,
-    active: Vec<usize>,
-}
-
-impl Directory {
-    fn get_or_create_id(&mut self, id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>) -> usize {
-        let idx = if self.map.contains_key(&id) {
-            self.map[&id]
-        } else {
-            let idx = self.containers.len();
-            self.containers.push(Container::new(id, name, atlas, style, input));
-            self.map.insert(id, idx);
-            idx
-        };
-        self.active.push(idx);
-        idx
-    }
-
-    fn prepare(&mut self) {
-        self.active.clear();
-
-        for c in &mut self.containers {
-            c.prepare();
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct Container {
     pub(crate) id: Id,
@@ -137,8 +107,7 @@ pub struct Container {
     pub number_edit_buf: String,
     pub number_edit: Option<Id>,
 
-    panels: Directory,
-    overlays: Directory,
+    panels: Vec<ContainerHandle>,
 }
 
 impl Container {
@@ -167,15 +136,14 @@ impl Container {
             input: input,
 
             panels: Default::default(),
-            overlays: Default::default(),
         }
     }
 
     pub(crate) fn prepare(&mut self) {
-        self.panels.prepare();
         self.command_list.clear();
         assert!(self.clip_stack.len() == 0);
         self.text_stack.clear();
+        self.panels.clear();
     }
 
     #[inline(never)]
@@ -199,8 +167,8 @@ impl Container {
             }
         }
 
-        for ap in &self.panels.active {
-            self.panels.containers[*ap].render(canvas)
+        for ap in &self.panels {
+            ap.render(canvas)
         }
     }
 
@@ -572,47 +540,44 @@ impl Container {
         self.body = body;
     }
 
-    fn pop_panel(&mut self, panel_id: usize) {
-        let layout = *self.panels.containers[panel_id].layout.top();
-        let container = &mut self.panels.containers[panel_id];
+    fn pop_panel(&mut self, panel: &mut ContainerHandle) {
+        let layout = *panel.inner().layout.top();
+        let container = &mut panel.inner_mut();
         container.content_size.x = layout.max.x - layout.body.x;
         container.content_size.y = layout.max.y - layout.body.y;
         container.layout.stack.pop();
     }
 
     #[inline(never)]
-    fn begin_panel(&mut self, name: &str, opt: WidgetOption) -> usize {
-        self.idmngr.get_id_from_str(name);
-
-        let panel_id = self
-            .panels
-            .get_or_create_id(self.idmngr.last_id().unwrap(), name, self.atlas.clone(), &self.style, self.input.clone());
-
+    fn begin_panel(&mut self, panel: &mut ContainerHandle, opt: WidgetOption) {
         let rect = self.layout.next();
-        let clip_rect = self.panels.containers[panel_id].body;
-        self.panels.containers[panel_id].rect = rect;
+        let clip_rect = panel.inner().body;
+        let container = &mut panel.inner_mut();
+        container.prepare();
+
+        container.rect = rect;
         if !opt.has_no_frame() {
             self.draw_frame(rect, ControlColor::PanelBG);
         }
 
-        self.panels.containers[panel_id].in_hover_root = self.in_hover_root;
-        self.panels.containers[panel_id].push_container_body(rect, opt);
-        self.panels.containers[panel_id].push_clip_rect(clip_rect);
-        panel_id
+        container.in_hover_root = self.in_hover_root;
+        container.push_container_body(rect, opt);
+        container.push_clip_rect(clip_rect);
     }
 
-    fn end_panel(&mut self, panel_id: usize) {
-        self.panels.containers[panel_id].pop_clip_rect();
-        self.pop_panel(panel_id);
+    fn end_panel(&mut self, panel: &mut ContainerHandle) {
+        panel.inner_mut().pop_clip_rect();
+        self.pop_panel(panel);
+        self.panels.push(panel.clone())
     }
 
-    pub fn panel<F: FnOnce(&mut Self)>(&mut self, name: &str, opt: WidgetOption, f: F) {
-        let panel_id = self.begin_panel(name, opt);
+    pub fn panel<F: FnOnce(&mut ContainerHandle)>(&mut self, panel: &mut ContainerHandle, opt: WidgetOption, f: F) {
+        self.begin_panel(panel, opt);
 
         // call the panel function
-        f(&mut self.panels.containers[panel_id]);
+        f(panel);
 
-        self.end_panel(panel_id);
+        self.end_panel(panel);
     }
 
     pub fn set_row_widths_height(&mut self, widths: &[i32], height: i32) {
