@@ -214,7 +214,7 @@ impl WindowHandle {
         self.inner_mut().main.prepare()
     }
 
-    pub(crate) fn render(&self, canvas: &mut dyn Canvas) {
+    pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
         self.0.borrow().main.render(canvas)
     }
 

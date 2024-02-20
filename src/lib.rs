@@ -59,17 +59,17 @@ use std::{
 
 use rs_math3d::*;
 
+mod canvas;
 mod container;
 mod idmngr;
 mod layout;
-mod utils;
 mod window;
 
 pub use idmngr::*;
 pub use layout::*;
 pub use container::*;
 pub use window::*;
-pub use utils::*;
+pub use canvas::*;
 
 use bitflags::*;
 use std::cmp::{min, max};
@@ -77,6 +77,11 @@ pub trait Atlas {
     fn get_char_width(&self, font: FontId, c: char) -> usize;
     fn get_font_height(&self, font: FontId) -> usize;
     fn get_icon_size(&self, icon: Icon) -> Dimensioni;
+    fn get_icon_rect(&self, icon: Icon) -> Recti;
+    fn get_char_rect(&self, font: FontId, c: char) -> Recti;
+    fn get_white_rect(&self) -> Recti;
+
+    fn get_texture_dimension(&self) -> Dimensioni;
 
     fn get_text_size(&self, font: FontId, text: &str) -> Dimensioni {
         let mut res = 0;
@@ -99,12 +104,9 @@ pub trait Atlas {
     }
 }
 
-pub trait Canvas {
-    fn draw_rect(&mut self, rect: Recti, color: Color);
-    fn draw_chars(&mut self, text: &[char], pos: Vec2i, color: Color);
-    fn draw_icon(&mut self, id: Icon, r: Recti, color: Color);
-    fn set_clip_rect(&mut self, width: i32, height: i32, rect: Recti);
+pub trait Renderer {
     fn clear(&mut self, width: i32, height: i32, clr: Color);
+    fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex);
     fn flush(&mut self);
 }
 
@@ -496,7 +498,7 @@ impl ContainerHandle {
         Self(Rc::new(RefCell::new(container)))
     }
 
-    pub(crate) fn render(&self, canvas: &mut dyn Canvas) {
+    pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
         self.0.borrow().render(canvas)
     }
 
@@ -509,9 +511,9 @@ impl ContainerHandle {
     }
 }
 
-pub struct Context {
+pub struct Context<R: Renderer> {
     atlas: Rc<dyn Atlas>,
-    canvas: Box<dyn Canvas>,
+    canvas: Canvas<R>,
     style: Style,
 
     last_zindex: i32,
@@ -526,11 +528,11 @@ pub struct Context {
     pub input: Rc<RefCell<Input>>,
 }
 
-impl Context {
-    pub fn new(atlas: Rc<dyn Atlas>, canvas: Box<dyn Canvas>) -> Self {
+impl<R: Renderer> Context<R> {
+    pub fn new(atlas: Rc<dyn Atlas>, renderer: R, dim: Dimensioni) -> Self {
         Self {
-            atlas,
-            canvas,
+            atlas: atlas.clone(),
+            canvas: Canvas::from(renderer, atlas, dim),
             style: Style::default(),
             last_zindex: 0,
             frame: 0,
@@ -546,14 +548,14 @@ impl Context {
     }
 }
 
-impl Context {
+impl<R: Renderer> Context<R> {
     pub fn clear(&mut self, width: i32, height: i32, clr: Color) {
         self.canvas.clear(width, height, clr);
     }
 
     pub fn flush(&mut self) {
         for r in &self.root_list {
-            r.render(self.canvas.as_mut());
+            r.render(&mut self.canvas);
         }
         self.canvas.flush()
     }

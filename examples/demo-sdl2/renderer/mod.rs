@@ -80,21 +80,6 @@ void main()
     gl_FragColor = vec4(vVertexColor.rgb, col.a * vVertexColor.a);
 }";
 
-#[derive(Default, Copy, Clone)]
-#[repr(C)]
-pub struct Vec2f {
-    x: f32,
-    y: f32,
-}
-
-#[derive(Default, Copy, Clone)]
-#[repr(C)]
-struct Vertex {
-    pos: Vec2f,
-    tex: Vec2f,
-    color: Color,
-}
-
 pub fn ortho4(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> [f32; 16] {
     let width = right - left;
     let height = top - bottom;
@@ -108,7 +93,7 @@ pub fn ortho4(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32)
     [r00, 0.0, 0.0, 0.0, 0.0, r11, 0.0, 0.0, 0.0, 0.0, r22, 0.0, r03, r13, r23, 1.0]
 }
 
-pub struct Renderer {
+pub struct GLRenderer {
     gl: glow::Context,
     verts: Vec<Vertex>,
     indices: Vec<u16>,
@@ -124,7 +109,7 @@ pub struct Renderer {
     clip: Recti,
 }
 
-impl Renderer {
+impl GLRenderer {
     fn create_program(gl: &mut glow::Context, vertex_shader_source: &str, fragment_shader_source: &str) -> NativeProgram {
         unsafe {
             let program = gl.create_program().expect("Cannot create program");
@@ -203,8 +188,10 @@ impl Renderer {
             }
         }
     }
+}
 
-    pub fn flush(&mut self) {
+impl Renderer for GLRenderer {
+    fn flush(&mut self) {
         if self.verts.len() == 0 || self.indices.len() == 0 {
             return;
         }
@@ -303,83 +290,7 @@ impl Renderer {
         self.verts.push(v3.clone());
     }
 
-    pub fn push_rect(&mut self, dst: Recti, src: Recti, color: Color) {
-        match clip_rect(dst, src, self.clip) {
-            Some((dst, src)) => {
-                let x = src.x as f32 / ATLAS_WIDTH as f32;
-                let y = src.y as f32 / ATLAS_HEIGHT as f32;
-                let w = src.width as f32 / ATLAS_WIDTH as f32;
-                let h = src.height as f32 / ATLAS_HEIGHT as f32;
-
-                let mut v0 = Vertex::default();
-                let mut v1 = Vertex::default();
-                let mut v2 = Vertex::default();
-                let mut v3 = Vertex::default();
-
-                // tex coordinates
-                v0.tex.x = x;
-                v0.tex.y = y;
-                v1.tex.x = x + w;
-                v1.tex.y = y;
-                v2.tex.x = x + w;
-                v2.tex.y = y + h;
-                v3.tex.x = x;
-                v3.tex.y = y + h;
-
-                // position
-                v0.pos.x = dst.x as f32;
-                v0.pos.y = dst.y as f32;
-                v1.pos.x = dst.x as f32 + dst.width as f32;
-                v1.pos.y = dst.y as f32;
-                v2.pos.x = dst.x as f32 + dst.width as f32;
-                v2.pos.y = dst.y as f32 + dst.height as f32;
-                v3.pos.x = dst.x as f32;
-                v3.pos.y = dst.y as f32 + dst.height as f32;
-
-                // color
-                v0.color = microui_redux::color(color.r, color.g, color.b, color.a);
-                v1.color = v0.color;
-                v2.color = v0.color;
-                v3.color = v0.color;
-
-                self.push_quad_vertices(&v0, &v1, &v2, &v3);
-            }
-            None => (),
-        }
-    }
-
-    pub fn draw_rect(&mut self, rect: Recti, color: Color) {
-        self.push_rect(rect, ATLAS[ATLAS_WHITE as usize], color);
-    }
-
-    pub fn draw_chars(&mut self, text: &[char], pos: Vec2i, color: Color) {
-        let mut dst = Recti { x: pos.x, y: pos.y, width: 0, height: 0 };
-        for p in text {
-            if (*p as usize) < 127 {
-                let chr = usize::min(*p as usize, 127);
-                let src = ATLAS[ATLAS_FONT as usize + chr];
-                dst.width = src.width;
-                dst.height = src.height;
-                self.push_rect(dst, src, color);
-                dst.x += dst.width;
-            }
-        }
-    }
-
-    pub fn draw_icon(&mut self, id: Icon, r: Recti, color: Color) {
-        let src = ATLAS[id as usize];
-        let x = r.x + (r.width - src.width) / 2;
-        let y = r.y + (r.height - src.height) / 2;
-        self.push_rect(rect(x, y, src.width, src.height), src, color);
-    }
-
-    pub fn set_clip_rect(&mut self, width: i32, height: i32, rect: Recti) {
-        self.width = width as u32;
-        self.height = height as u32;
-        self.clip = rect;
-    }
-
-    pub fn clear(&mut self, width: i32, height: i32, clr: Color) {
+    fn clear(&mut self, width: i32, height: i32, clr: Color) {
         unsafe {
             self.width = width as u32;
             self.height = height as u32;
@@ -388,29 +299,6 @@ impl Renderer {
                 .clear_color(clr.r as f32 / 255.0, clr.g as f32 / 255.0, clr.b as f32 / 255.0, clr.a as f32 / 255.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
-    }
-}
-
-impl Canvas for Renderer {
-    fn draw_rect(&mut self, rect: Recti, color: Color) {
-        Renderer::draw_rect(self, rect, color);
-    }
-    fn draw_chars(&mut self, text: &[char], pos: Vec2i, color: Color) {
-        Renderer::draw_chars(self, text, pos, color);
-    }
-    fn draw_icon(&mut self, id: Icon, r: Recti, color: Color) {
-        Renderer::draw_icon(self, id, r, color);
-    }
-    fn set_clip_rect(&mut self, width: i32, height: i32, rect: Recti) {
-        Renderer::set_clip_rect(self, width, height, rect);
-    }
-
-    fn clear(&mut self, width: i32, height: i32, clr: Color) {
-        Renderer::clear(self, width, height, clr);
-    }
-
-    fn flush(&mut self) {
-        Renderer::flush(self);
     }
 }
 
@@ -425,5 +313,19 @@ impl Atlas for MyAtlas {
 
     fn get_icon_size(&self, icon: Icon) -> Dimensioni {
         Dimension::new(ATLAS[icon as usize].width, ATLAS[icon as usize].height)
+    }
+
+    fn get_icon_rect(&self, icon: Icon) -> Recti {
+        ATLAS[icon as usize]
+    }
+    fn get_char_rect(&self, font: FontId, c: char) -> Recti {
+        ATLAS[ATLAS_FONT as usize + c as usize]
+    }
+    fn get_white_rect(&self) -> Recti {
+        ATLAS[ATLAS_WHITE as usize]
+    }
+
+    fn get_texture_dimension(&self) -> Dimensioni {
+        Dimensioni::new(ATLAS_WIDTH as _, ATLAS_HEIGHT as _)
     }
 }

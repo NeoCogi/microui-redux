@@ -7,9 +7,11 @@ use std::rc::Rc;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::video::GLProfile;
-use crate::{renderer::Renderer, renderer::MyAtlas};
+use crate::{renderer::GLRenderer, renderer::MyAtlas};
 use microui_redux::*;
 use rs_math3d::*;
+
+type Context = microui_redux::Context<GLRenderer>;
 
 struct State<'a> {
     label_colors: [LabelColor<'a>; 15],
@@ -138,7 +140,7 @@ impl<'a> State<'a> {
         self.logbuf_updated = true;
     }
 
-    fn test_window(&mut self, ctx: &mut microui_redux::Context) {
+    fn test_window(&mut self, ctx: &mut Context) {
         ctx.window(&mut self.demo_window.as_mut().unwrap().clone(), WidgetOption::NONE, |container| {
             let mut win = container.rect;
             win.width = if win.width > 240 { win.width } else { 240 };
@@ -260,7 +262,7 @@ impl<'a> State<'a> {
         });
     }
 
-    fn log_window(&mut self, ctx: &mut microui_redux::Context) {
+    fn log_window(&mut self, ctx: &mut Context) {
         ctx.window(&mut self.log_window.as_mut().unwrap().clone(), WidgetOption::NONE, |container| {
             container.set_row_widths_height(&[-1], -25);
             container.panel(self.log_output.as_mut().unwrap(), WidgetOption::NONE, |container_handle| {
@@ -302,7 +304,7 @@ impl<'a> State<'a> {
         ctx.idmngr.pop_id();
         return res;
     }
-    fn style_window(&mut self, ctx: &mut microui_redux::Context) {
+    fn style_window(&mut self, ctx: &mut Context) {
         ctx.window(&mut self.style_window.as_mut().unwrap().clone(), WidgetOption::NONE, |container| {
             let sw = (container.body.width as f64 * 0.14) as i32;
             container.set_row_widths_height(&[80, sw, sw, sw, sw, -1], 0);
@@ -350,7 +352,7 @@ impl<'a> State<'a> {
         ctx.set_style(&self.style);
     }
 
-    fn process_frame(&mut self, ctx: &mut microui_redux::Context) {
+    fn process_frame(&mut self, ctx: &mut Context) {
         ctx.frame(|ctx| {
             self.style_window(ctx);
             self.log_window(ctx);
@@ -380,10 +382,10 @@ fn main() {
 
     let mut event_pump = sdl_context.event_pump().unwrap();
     let (width, height) = window.size();
-    let rd = Renderer::new(gl, &atlas::ATLAS_TEXTURE, width, height);
+    let rd = GLRenderer::new(gl, &atlas::ATLAS_TEXTURE, width, height);
 
     let mut state = State::new();
-    let mut ctx = microui_redux::Context::new(Rc::new(MyAtlas {}), Box::new(rd));
+    let mut ctx = microui_redux::Context::new(Rc::new(MyAtlas {}), rd, Dimensioni::new(width as _, height as _));
 
     state.demo_window = Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450)));
     state.log_window = Some(ctx.new_window("Log Window", rect(350, 40, 300, 200)));

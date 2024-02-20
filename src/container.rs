@@ -147,12 +147,12 @@ impl Container {
     }
 
     #[inline(never)]
-    pub(crate) fn render(&self, canvas: &mut dyn Canvas) {
+    pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
         for command in &self.command_list {
             match command {
-                Command::Text { str_start, str_len, pos, color, .. } => {
+                Command::Text { str_start, str_len, pos, color, font } => {
                     let str = &self.text_stack[*str_start..*str_start + *str_len];
-                    canvas.draw_chars(str, *pos, *color);
+                    canvas.draw_chars(*font, str, *pos, *color);
                 }
                 Command::Recti { rect, color } => {
                     canvas.draw_rect(*rect, *color);
@@ -161,7 +161,7 @@ impl Container {
                     canvas.draw_icon(*id, *rect, *color);
                 }
                 Command::Clip { rect } => {
-                    canvas.set_clip_rect(800, 600, *rect);
+                    canvas.set_clip_rect(*rect);
                 }
                 _ => {}
             }
