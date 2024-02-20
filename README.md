@@ -26,7 +26,7 @@ $ cargo run --example demo-sdl2
 - [x] Treenode as tree
 - [x] Manage windows lifetime & ownership outside of context (use root windows)
 - [x] Manage containers lifetime & ownership outside of contaienrs
-- [ ] Software based textured rectangle clipping
+- [x] Software based textured rectangle clipping
 - [ ] Add Atlasser to the code
 - [ ] Image widget
 - [ ] Pass-Through rendering command (for 3D viewports)
