@@ -148,9 +148,11 @@ impl<R: Renderer> Canvas<R> {
                 let advance = self.atlas.get_char_advance(font, chr);
                 dst.width = src.width;
                 dst.height = src.height;
+                let xx = dst.x;
+                dst.x += offset.x;
                 dst.y = pos.y - offset.y - src.height + (fh as i32);
                 self.push_rect(dst, src, color);
-                dst.x += advance.x;
+                dst.x = xx + advance.x;
             }
         }
     }
