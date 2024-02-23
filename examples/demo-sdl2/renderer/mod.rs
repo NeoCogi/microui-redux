@@ -53,7 +53,6 @@
 use microui_redux::*;
 use glow::*;
 use rs_math3d::*;
-use crate::atlas::*;
 
 const VERTEX_SHADER: &str = "#version 100
 uniform highp mat4 uTransform;
@@ -143,7 +142,7 @@ impl GLRenderer {
         }
     }
 
-    pub fn new(mut gl: glow::Context, atlas_texture: &[u8], width: u32, height: u32) -> Self {
+    pub fn new(mut gl: glow::Context, atlas_width: usize, atlas_height: usize, atlas_texture: &[u8], width: u32, height: u32) -> Self {
         assert_eq!(core::mem::size_of::<Vertex>(), 20);
         unsafe {
             // init texture
@@ -155,8 +154,8 @@ impl GLRenderer {
                 glow::TEXTURE_2D,
                 0,
                 glow::ALPHA as i32,
-                ATLAS_WIDTH as i32,
-                ATLAS_HEIGHT as i32,
+                atlas_width as i32,
+                atlas_height as i32,
                 0,
                 glow::ALPHA,
                 glow::UNSIGNED_BYTE,
@@ -299,33 +298,5 @@ impl Renderer for GLRenderer {
                 .clear_color(clr.r as f32 / 255.0, clr.g as f32 / 255.0, clr.b as f32 / 255.0, clr.a as f32 / 255.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
-    }
-}
-
-pub struct MyAtlas {}
-impl Atlas for MyAtlas {
-    fn get_char_width(&self, _font: FontId, c: char) -> usize {
-        ATLAS[ATLAS_FONT as usize + c as usize].width as usize
-    }
-    fn get_font_height(&self, _font: FontId) -> usize {
-        18
-    }
-
-    fn get_icon_size(&self, icon: Icon) -> Dimensioni {
-        Dimension::new(ATLAS[icon as usize].width, ATLAS[icon as usize].height)
-    }
-
-    fn get_icon_rect(&self, icon: Icon) -> Recti {
-        ATLAS[icon as usize]
-    }
-    fn get_char_rect(&self, font: FontId, c: char) -> Recti {
-        ATLAS[ATLAS_FONT as usize + c as usize]
-    }
-    fn get_white_rect(&self) -> Recti {
-        ATLAS[ATLAS_WHITE as usize]
-    }
-
-    fn get_texture_dimension(&self) -> Dimensioni {
-        Dimensioni::new(ATLAS_WIDTH as _, ATLAS_HEIGHT as _)
     }
 }

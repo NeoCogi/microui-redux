@@ -73,7 +73,7 @@ pub(crate) struct Window {
 }
 
 impl Window {
-    pub fn window(id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+    pub fn window(id: Id, name: &str, atlas: Rc<Atlas>, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(id, name, atlas, style, input);
         main.rect = initial_rect;
 
@@ -84,7 +84,7 @@ impl Window {
         }
     }
 
-    pub fn popup(id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+    pub fn popup(id: Id, name: &str, atlas: Rc<Atlas>, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(id, name, atlas, style, input);
         main.rect = initial_rect;
 
@@ -138,7 +138,7 @@ impl Window {
                 let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
                 tr.width -= r.width;
                 let color = container.style.colors[ControlColor::TitleText as usize];
-                container.draw_icon(Icon::Close, r, color);
+                container.draw_icon(CLOSE_ICON, r, color);
                 container.update_control(id, r, opt);
                 if container.input.borrow().mouse_pressed.is_left() && Some(id) == container.focus {
                     self.activity = Activity::Closed;
@@ -187,11 +187,11 @@ impl Window {
 pub struct WindowHandle(Rc<RefCell<Window>>);
 
 impl WindowHandle {
-    pub(crate) fn window(id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+    pub(crate) fn window(id: Id, name: &str, atlas: Rc<Atlas>, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         Self(Rc::new(RefCell::new(Window::window(id, name, atlas, style, input, initial_rect))))
     }
 
-    pub(crate) fn popup(id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>) -> Self {
+    pub(crate) fn popup(id: Id, name: &str, atlas: Rc<Atlas>, style: &Style, input: Rc<RefCell<Input>>) -> Self {
         Self(Rc::new(RefCell::new(Window::popup(id, name, atlas, style, input, Recti::new(0, 0, 0, 0)))))
     }
 
