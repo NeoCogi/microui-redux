@@ -39,12 +39,12 @@ pub struct Vertex {
 
 pub struct Canvas<R: Renderer> {
     renderer: R,
-    atlas: Rc<dyn Atlas>,
+    atlas: Rc<Atlas>,
     clip: Recti,
 }
 
 impl<R: Renderer> Canvas<R> {
-    pub fn from(renderer: R, atlas: Rc<dyn Atlas>, dim: Dimensioni) -> Self {
+    pub fn from(renderer: R, atlas: Rc<Atlas>, dim: Dimensioni) -> Self {
         Self {
             renderer,
             atlas,
@@ -134,24 +134,28 @@ impl<R: Renderer> Canvas<R> {
     }
 
     pub fn draw_rect(&mut self, rect: Recti, color: Color) {
-        self.push_rect(rect, self.atlas.get_white_rect(), color);
+        self.push_rect(rect, self.atlas.get_icon_rect(WHITE_ICON), color);
     }
 
     pub fn draw_chars(&mut self, font: FontId, text: &[char], pos: Vec2i, color: Color) {
         let mut dst = Recti { x: pos.x, y: pos.y, width: 0, height: 0 };
+        let fh = self.atlas.get_font_height(font);
         for p in text {
             if (*p as usize) < 127 {
                 let chr = *p;
                 let src = self.atlas.get_char_rect(font, chr);
+                let offset = self.atlas.get_char_offset(font, chr);
+                let advance = self.atlas.get_char_advance(font, chr);
                 dst.width = src.width;
                 dst.height = src.height;
+                dst.y = pos.y - offset.y - src.height + (fh as i32);
                 self.push_rect(dst, src, color);
-                dst.x += dst.width;
+                dst.x += advance.x;
             }
         }
     }
 
-    pub fn draw_icon(&mut self, id: Icon, r: Recti, color: Color) {
+    pub fn draw_icon(&mut self, id: IconId, r: Recti, color: Color) {
         let src = self.atlas.get_icon_rect(id);
         let x = r.x + (r.width - src.width) / 2;
         let y = r.y + (r.height - src.height) / 2;

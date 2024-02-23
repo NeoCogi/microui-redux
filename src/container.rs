@@ -71,7 +71,7 @@ pub enum Command {
     },
     Icon {
         rect: Recti,
-        id: Icon,
+        id: IconId,
         color: Color,
     },
     None,
@@ -86,7 +86,7 @@ impl Default for Command {
 #[derive(Clone)]
 pub struct Container {
     pub(crate) id: Id,
-    pub(crate) atlas: Rc<dyn Atlas>,
+    pub(crate) atlas: Rc<Atlas>,
     pub style: Style,
     pub name: String,
     pub rect: Recti,
@@ -111,7 +111,7 @@ pub struct Container {
 }
 
 impl Container {
-    pub(crate) fn new(id: Id, name: &str, atlas: Rc<dyn Atlas>, style: &Style, input: Rc<RefCell<Input>>) -> Self {
+    pub(crate) fn new(id: Id, name: &str, atlas: Rc<Atlas>, style: &Style, input: Rc<RefCell<Input>>) -> Self {
         Self {
             id,
             name: name.to_string(),
@@ -260,7 +260,7 @@ impl Container {
         }
     }
 
-    pub fn draw_icon(&mut self, id: Icon, rect: Recti, color: Color) {
+    pub fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
         let clipped = self.check_clip(rect);
         match clipped {
             Clip::All => return,
@@ -410,11 +410,7 @@ impl Container {
             self.draw_control_frame(id, r, ControlColor::Button, WidgetOption::NONE);
         }
         let color = self.style.colors[ControlColor::Text as usize];
-        self.draw_icon(
-            if expanded { Icon::Expanded } else { Icon::Collapsed },
-            rect(r.x, r.y, r.height, r.height),
-            color,
-        );
+        self.draw_icon(if expanded { EXPAND_ICON } else { COLLAPSE_ICON }, rect(r.x, r.y, r.height, r.height), color);
         r.x += r.height - self.style.padding;
         r.width -= r.height - self.style.padding;
         self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
@@ -608,12 +604,12 @@ impl Container {
     }
 
     #[inline(never)]
-    pub fn button_ex(&mut self, label: &str, icon: Icon, opt: WidgetOption) -> ResourceState {
+    pub fn button_ex(&mut self, label: &str, icon: Option<IconId>, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = if label.len() > 0 {
             self.idmngr.get_id_from_str(label)
         } else {
-            self.idmngr.get_id_u32(icon as u32)
+            self.idmngr.get_id_u32(icon.unwrap().into())
         };
         let r: Recti = self.layout.next();
         self.update_control(id, r, opt);
@@ -624,9 +620,12 @@ impl Container {
         if label.len() > 0 {
             self.draw_control_text(label, r, ControlColor::Text, opt);
         }
-        if icon != Icon::None {
-            let color = self.style.colors[ControlColor::Text as usize];
-            self.draw_icon(icon, r, color);
+        match icon {
+            Some(icon) => {
+                let color = self.style.colors[ControlColor::Text as usize];
+                self.draw_icon(icon, r, color);
+            }
+            _ => (),
         }
         return res;
     }
@@ -645,7 +644,7 @@ impl Container {
         self.draw_control_frame(id, box_0, ControlColor::Base, WidgetOption::NONE);
         if *state {
             let color = self.style.colors[ControlColor::Text as usize];
-            self.draw_icon(Icon::Check, box_0, color);
+            self.draw_icon(CHECK_ICON, box_0, color);
         }
         r = rect(r.x + box_0.width, r.y, r.width - box_0.width, r.height);
         self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);

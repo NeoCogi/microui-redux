@@ -59,12 +59,14 @@ use std::{
 
 use rs_math3d::*;
 
+mod atlas;
 mod canvas;
 mod container;
 mod idmngr;
 mod layout;
 mod window;
 
+pub use atlas::*;
 pub use idmngr::*;
 pub use layout::*;
 pub use container::*;
@@ -73,36 +75,6 @@ pub use canvas::*;
 
 use bitflags::*;
 use std::cmp::{min, max};
-pub trait Atlas {
-    fn get_char_width(&self, font: FontId, c: char) -> usize;
-    fn get_font_height(&self, font: FontId) -> usize;
-    fn get_icon_size(&self, icon: Icon) -> Dimensioni;
-    fn get_icon_rect(&self, icon: Icon) -> Recti;
-    fn get_char_rect(&self, font: FontId, c: char) -> Recti;
-    fn get_white_rect(&self) -> Recti;
-
-    fn get_texture_dimension(&self) -> Dimensioni;
-
-    fn get_text_size(&self, font: FontId, text: &str) -> Dimensioni {
-        let mut res = 0;
-        let mut acc_x = 0;
-        let mut acc_y = 0;
-        let h = self.get_font_height(font);
-        for c in text.chars() {
-            if acc_y == 0 {
-                acc_y = h
-            }
-            if c == '\n' {
-                res = max(res, acc_x);
-                acc_x = 0;
-                acc_y += h;
-            }
-            acc_x += self.get_char_width(font, c);
-        }
-        res = max(res, acc_x);
-        Dimension::new(res as i32, acc_y as i32)
-    }
-}
 
 pub trait Renderer {
     fn clear(&mut self, width: i32, height: i32, clr: Color);
@@ -156,17 +128,6 @@ impl ControlColor {
             _ => *self,
         }
     }
-}
-
-#[derive(PartialEq, Copy, Clone)]
-#[repr(u32)]
-pub enum Icon {
-    Max = 5,
-    Expanded = 4,
-    Collapsed = 3,
-    Check = 2,
-    Close = 1,
-    None = 0,
 }
 
 bitflags! {
@@ -419,9 +380,6 @@ pub trait Font {
 }
 
 #[derive(Copy, Clone)]
-pub struct FontId(pub usize);
-
-#[derive(Copy, Clone)]
 pub struct Style {
     pub font: FontId,
     pub default_cell_size: Dimensioni,
@@ -446,7 +404,7 @@ static UNCLIPPED_RECT: Recti = Recti {
 impl Default for Style {
     fn default() -> Self {
         Self {
-            font: FontId(0),
+            font: FontId::default(),
             default_cell_size: Dimension { width: 68, height: 10 },
             padding: 5,
             spacing: 4,
@@ -512,7 +470,7 @@ impl ContainerHandle {
 }
 
 pub struct Context<R: Renderer> {
-    atlas: Rc<dyn Atlas>,
+    atlas: Rc<Atlas>,
     canvas: Canvas<R>,
     style: Style,
 
@@ -529,7 +487,7 @@ pub struct Context<R: Renderer> {
 }
 
 impl<R: Renderer> Context<R> {
-    pub fn new(atlas: Rc<dyn Atlas>, renderer: R, dim: Dimensioni) -> Self {
+    pub fn new(atlas: Rc<Atlas>, renderer: R, dim: Dimensioni) -> Self {
         Self {
             atlas: atlas.clone(),
             canvas: Canvas::from(renderer, atlas, dim),

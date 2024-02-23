@@ -1,5 +1,4 @@
 extern crate sdl2;
-mod atlas;
 mod renderer;
 
 use std::rc::Rc;
@@ -7,7 +6,7 @@ use std::rc::Rc;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::video::GLProfile;
-use crate::{renderer::GLRenderer, renderer::MyAtlas};
+use crate::renderer::GLRenderer;
 use microui_redux::*;
 use rs_math3d::*;
 
@@ -169,17 +168,17 @@ impl<'a> State<'a> {
             self.test_buttons_header = container.header("Test Buttons", self.test_buttons_header, |container| {
                 container.set_row_widths_height(&[86, -110, -1], 0);
                 container.label("Test buttons 1:");
-                if !container.button_ex("Button 1", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
                     self.write_log("Pressed button 1");
                 }
-                if !container.button_ex("Button 2", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                if !container.button_ex("Button 2", None, WidgetOption::ALIGN_CENTER).is_none() {
                     self.write_log("Pressed button 2");
                 }
                 container.label("Test buttons 2:");
-                if !container.button_ex("Button 3", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
                     self.write_log("Pressed button 3");
                 }
-                if !container.button_ex("Popup", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                if !container.button_ex("Popup", None, WidgetOption::ALIGN_CENTER).is_none() {
                      self.open_popup = true;
                 }
             });
@@ -192,26 +191,26 @@ impl<'a> State<'a> {
                             container.label("world");
                         });
                         self.test1b_tn = container.treenode("Test 1b", self.test1b_tn, |container| {
-                            if !container.button_ex("Button 1", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                            if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
                                 self.write_log("Pressed button 1");
                             }
-                            if !container.button_ex("Button 2", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                            if !container.button_ex("Button 2", None, WidgetOption::ALIGN_CENTER).is_none() {
                                 self.write_log("Pressed button 2");
                             }
                         });
                     });
                     self.test2_tn =container.treenode("Test 2", self.test2_tn, |container| {
                         container.set_row_widths_height(&[54, 54], 0);
-                        if !container.button_ex("Button 3", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
                             self.write_log("Pressed button 3");
                         }
-                        if !container.button_ex("Button 4", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if !container.button_ex("Button 4", None, WidgetOption::ALIGN_CENTER).is_none() {
                             self.write_log("Pressed button 4");
                         }
-                        if !container.button_ex("Button 5", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if !container.button_ex("Button 5", None, WidgetOption::ALIGN_CENTER).is_none() {
                             self.write_log("Pressed button 5");
                         }
-                        if !container.button_ex("Button 6", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if !container.button_ex("Button 6", None, WidgetOption::ALIGN_CENTER).is_none() {
                             self.write_log("Pressed button 6");
                         }
                     });
@@ -253,10 +252,10 @@ impl<'a> State<'a> {
             self.open_popup = !self.open_popup;
         }
         ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), |ctx| {
-            if !ctx.button_ex("Hello", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+            if !ctx.button_ex("Hello", None, WidgetOption::ALIGN_CENTER).is_none() {
                 self.write_log("Hello")
             }
-            if !ctx.button_ex("World", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+            if !ctx.button_ex("World", None, WidgetOption::ALIGN_CENTER).is_none() {
                 self.write_log("World")
             }
         });
@@ -285,7 +284,7 @@ impl<'a> State<'a> {
                 container.set_focus(container.idmngr.last_id());
                 submitted = true;
             }
-            if !container.button_ex("Submit", Icon::None, WidgetOption::ALIGN_CENTER).is_none() {
+            if !container.button_ex("Submit", None, WidgetOption::ALIGN_CENTER).is_none() {
                 submitted = true;
             }
             if submitted {
@@ -361,6 +360,20 @@ impl<'a> State<'a> {
     }
 }
 
+fn atlas_config() -> Config {
+    Config {
+        texture_height: 256,
+        texture_width: 256,
+        white_icon: String::from("assets/WHITE.png"),
+        close_icon: String::from("assets/CLOSE.png"),
+        expand_icon: String::from("assets/EXPAND_DOWN.png"),
+        collapse_icon: String::from("assets/COLLAPSE_UP.png"),
+        check_icon: String::from("assets/CHECK.png"),
+        default_font: String::from("assets/NORMAL.ttf"),
+        default_font_size: 13,
+    }
+}
+
 fn main() {
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
@@ -382,10 +395,11 @@ fn main() {
 
     let mut event_pump = sdl_context.event_pump().unwrap();
     let (width, height) = window.size();
-    let rd = GLRenderer::new(gl, &atlas::ATLAS_TEXTURE, width, height);
+    let atlas = Rc::new(Atlas::from_config(&atlas_config()).unwrap());
+    let rd = GLRenderer::new(gl, atlas.width, atlas.height, &atlas.pixels, width, height);
 
     let mut state = State::new();
-    let mut ctx = microui_redux::Context::new(Rc::new(MyAtlas {}), rd, Dimensioni::new(width as _, height as _));
+    let mut ctx = microui_redux::Context::new(atlas, rd, Dimensioni::new(width as _, height as _));
 
     state.demo_window = Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450)));
     state.log_window = Some(ctx.new_window("Log Window", rect(350, 40, 300, 200)));
