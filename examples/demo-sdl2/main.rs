@@ -370,7 +370,7 @@ fn atlas_config() -> Config {
         collapse_icon: String::from("assets/COLLAPSE_UP.png"),
         check_icon: String::from("assets/CHECK.png"),
         default_font: String::from("assets/NORMAL.ttf"),
-        default_font_size: 13,
+        default_font_size: 12,
     }
 }
 

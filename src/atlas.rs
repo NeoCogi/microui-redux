@@ -45,7 +45,7 @@ use std::fs::*;
 use super::*;
 
 #[derive(Debug, Clone)]
-struct CharEntry {
+pub struct CharEntry {
     pub offset: Vec2i,
     pub advance: Vec2i,
     pub rect: Recti, // coordinates in the atlas
@@ -106,8 +106,8 @@ pub struct Atlas {
     pub width: usize,
     pub height: usize,
     pub pixels: Vec<u8>,
-    pub fonts: Vec<(String, Font)>,
-    pub icons: Vec<(String, Icon)>,
+    fonts: Vec<(String, Font)>,
+    icons: Vec<(String, Icon)>,
 
     packer: Packer,
 }
@@ -202,8 +202,8 @@ impl Atlas {
         Ok(())
     }
 
-    pub fn get_char_width(&self, font: FontId, c: char) -> usize {
-        self.fonts[font.0].1.entries[&c].rect.width as _
+    pub fn get_char_entry(&self, font: FontId, c: char) -> CharEntry {
+        self.fonts[font.0].1.entries[&c].clone()
     }
 
     pub fn get_font_height(&self, font: FontId) -> usize {
@@ -219,18 +219,6 @@ impl Atlas {
         self.icons[icon.0].1.rect
     }
 
-    pub fn get_char_rect(&self, font: FontId, c: char) -> Recti {
-        self.fonts[font.0].1.entries[&c].rect
-    }
-
-    pub fn get_char_offset(&self, font: FontId, c: char) -> Vec2i {
-        self.fonts[font.0].1.entries[&c].offset
-    }
-
-    pub fn get_char_advance(&self, font: FontId, c: char) -> Vec2i {
-        self.fonts[font.0].1.entries[&c].advance
-    }
-
     pub fn get_texture_dimension(&self) -> Dimensioni {
         Dimension::new(self.width as _, self.height as _)
     }
@@ -241,7 +229,7 @@ impl Atlas {
         let mut acc_y = 0;
         let h = self.get_font_height(font);
         for c in text.chars() {
-            let advance = self.get_char_advance(font, c);
+            let entry = self.get_char_entry(font, c);
 
             if acc_y == 0 {
                 acc_y = h
@@ -251,7 +239,7 @@ impl Atlas {
                 acc_x = 0;
                 acc_y += h;
             }
-            acc_x += advance.x;
+            acc_x += entry.advance.x;
         }
         res = max(res, acc_x);
         Dimension::new(res as i32, acc_y as i32)

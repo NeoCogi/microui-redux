@@ -52,6 +52,7 @@ impl<R: Renderer> Canvas<R> {
         }
     }
 
+    #[inline(never)]
     pub fn clip_rect(dst_r: Recti, src_r: Recti, clip_r: Recti) -> Option<(Recti, Recti)> {
         match dst_r.intersect(&clip_r) {
             Some(rect) if rect.width == dst_r.width && rect.height == dst_r.height => Some((dst_r, src_r)),
@@ -87,6 +88,7 @@ impl<R: Renderer> Canvas<R> {
         }
     }
 
+    #[inline(never)]
     pub fn push_rect(&mut self, dst: Recti, src: Recti, color: Color) {
         let atlas_dim = self.atlas.get_texture_dimension();
         match Self::clip_rect(dst, src, self.clip) {
@@ -137,22 +139,21 @@ impl<R: Renderer> Canvas<R> {
         self.push_rect(rect, self.atlas.get_icon_rect(WHITE_ICON), color);
     }
 
+    #[inline(never)]
     pub fn draw_chars(&mut self, font: FontId, text: &[char], pos: Vec2i, color: Color) {
         let mut dst = Recti { x: pos.x, y: pos.y, width: 0, height: 0 };
         let fh = self.atlas.get_font_height(font);
         for p in text {
             if (*p as usize) < 127 {
                 let chr = *p;
-                let src = self.atlas.get_char_rect(font, chr);
-                let offset = self.atlas.get_char_offset(font, chr);
-                let advance = self.atlas.get_char_advance(font, chr);
-                dst.width = src.width;
-                dst.height = src.height;
-                let xx = dst.x;
-                dst.x += offset.x;
-                dst.y = pos.y - offset.y - src.height + (fh as i32);
-                self.push_rect(dst, src, color);
-                dst.x = xx + advance.x;
+                let src = self.atlas.get_char_entry(font, chr);
+                dst.width = src.rect.width;
+                dst.height = src.rect.height;
+                let tmp_x = dst.x;
+                dst.x += src.offset.x;
+                dst.y = pos.y - src.offset.y - src.rect.height + (fh as i32);
+                self.push_rect(dst, src.rect, color);
+                dst.x = tmp_x + src.advance.x;
             }
         }
     }
