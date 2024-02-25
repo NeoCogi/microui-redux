@@ -55,25 +55,10 @@ use std::{cell::RefCell, collections::HashMap};
 
 #[derive(Clone)]
 pub enum Command {
-    Clip {
-        rect: Recti,
-    },
-    Recti {
-        rect: Recti,
-        color: Color,
-    },
-    Text {
-        font: FontId,
-        pos: Vec2i,
-        color: Color,
-        str_start: usize,
-        str_len: usize,
-    },
-    Icon {
-        rect: Recti,
-        id: IconId,
-        color: Color,
-    },
+    Clip { rect: Recti },
+    Recti { rect: Recti, color: Color },
+    Text { font: FontId, pos: Vec2i, color: Color, text: String },
+    Icon { rect: Recti, id: IconId, color: Color },
     None,
 }
 
@@ -96,7 +81,6 @@ pub struct Container {
     pub zindex: i32,
     pub command_list: Vec<Command>,
     pub clip_stack: Vec<Recti>,
-    pub text_stack: Vec<char>,
     pub(crate) layout: LayoutManager,
     pub hover: Option<Id>,
     pub focus: Option<Id>,
@@ -124,7 +108,6 @@ impl Container {
             zindex: 0,
             command_list: Vec::default(),
             clip_stack: Vec::default(),
-            text_stack: Vec::default(),
             hover: None,
             focus: None,
             updated_focus: false,
@@ -142,7 +125,6 @@ impl Container {
     pub(crate) fn prepare(&mut self) {
         self.command_list.clear();
         assert!(self.clip_stack.len() == 0);
-        self.text_stack.clear();
         self.panels.clear();
     }
 
@@ -150,9 +132,8 @@ impl Container {
     pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
         for command in &self.command_list {
             match command {
-                Command::Text { str_start, str_len, pos, color, font } => {
-                    let str = &self.text_stack[*str_start..*str_start + *str_len];
-                    canvas.draw_chars(*font, str, *pos, *color);
+                Command::Text { text, pos, color, font } => {
+                    canvas.draw_chars(*font, text, *pos, *color);
                 }
                 Command::Recti { rect, color } => {
                     canvas.draw_rect(*rect, *color);
@@ -203,14 +184,6 @@ impl Container {
         self.command_list.push(cmd);
     }
 
-    pub fn push_text(&mut self, str: &str) -> usize {
-        let str_start = self.text_stack.len();
-        for c in str.chars() {
-            self.text_stack.push(c);
-        }
-        return str_start;
-    }
-
     pub fn set_clip(&mut self, rect: Recti) {
         self.push_command(Command::Clip { rect });
     }
@@ -247,10 +220,8 @@ impl Container {
             _ => (),
         }
 
-        let str_start = self.push_text(str);
         self.push_command(Command::Text {
-            str_start,
-            str_len: str.len(),
+            text: String::from(str),
             pos,
             color,
             font,

@@ -37,7 +37,6 @@ use std::fmt::{Debug, Formatter};
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Read;
-use std::io::Write;
 use std::path::*;
 use std::io::{Result, BufWriter};
 use std::fs::*;
@@ -223,26 +222,40 @@ impl Atlas {
         Dimension::new(self.width as _, self.height as _)
     }
 
-    pub fn get_text_size(&self, font: FontId, text: &str) -> Dimensioni {
-        let mut res = 0;
+    pub fn draw_string<DrawFunction: FnMut(char, Vec2i, Recti, Recti)>(&self, font: FontId, text: &str, mut f: DrawFunction) {
+        let mut dst = Recti { x: 0, y: 0, width: 0, height: 0 };
+        let fh = self.get_font_height(font) as i32;
         let mut acc_x = 0;
         let mut acc_y = 0;
-        let h = self.get_font_height(font);
-        for c in text.chars() {
-            let entry = self.get_char_entry(font, c);
+        for chr in text.chars() {
+            let src = self.get_char_entry(font, chr);
 
+            // string could be empty
             if acc_y == 0 {
-                acc_y = h
+                acc_y = fh
             }
-            if c == '\n' {
-                res = max(res, acc_x);
+
+            if chr == '\n' {
                 acc_x = 0;
-                acc_y += h;
+                acc_y += fh;
             }
-            acc_x += entry.advance.x;
+
+            dst.width = src.rect.width;
+            dst.height = src.rect.height;
+            dst.x = acc_x + src.offset.x;
+            dst.y = acc_y - src.offset.y - src.rect.height;
+            f(chr, src.advance, dst, src.rect);
+            acc_x += src.advance.x;
         }
-        res = max(res, acc_x);
-        Dimension::new(res as i32, acc_y as i32)
+    }
+
+    pub fn get_text_size(&self, font: FontId, text: &str) -> Dimensioni {
+        let mut res = Dimensioni::new(0, 0);
+        self.draw_string(font, text, |_, advance, dst, _| {
+            res.width = max(res.width, dst.x + max(advance.x, dst.width));
+            res.height = max(res.height, dst.y + dst.height);
+        });
+        res
     }
 }
 
