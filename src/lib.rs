@@ -347,7 +347,9 @@ impl Input {
     }
 
     pub fn text(&mut self, text: &str) {
-        self.input_text += text;
+        for c in text.chars() {
+            self.input_text.push(c);
+        }
     }
 
     fn prelude(&mut self) {

@@ -140,22 +140,12 @@ impl<R: Renderer> Canvas<R> {
     }
 
     #[inline(never)]
-    pub fn draw_chars(&mut self, font: FontId, text: &[char], pos: Vec2i, color: Color) {
-        let mut dst = Recti { x: pos.x, y: pos.y, width: 0, height: 0 };
-        let fh = self.atlas.get_font_height(font);
-        for p in text {
-            if (*p as usize) < 127 {
-                let chr = *p;
-                let src = self.atlas.get_char_entry(font, chr);
-                dst.width = src.rect.width;
-                dst.height = src.rect.height;
-                let tmp_x = dst.x;
-                dst.x += src.offset.x;
-                dst.y = pos.y - src.offset.y - src.rect.height + (fh as i32);
-                self.push_rect(dst, src.rect, color);
-                dst.x = tmp_x + src.advance.x;
-            }
-        }
+    pub fn draw_chars(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
+        let atlas = self.atlas.clone();
+        atlas.draw_string(font, text, |_, _, dst, src| {
+            let dst = Rect::new(pos.x + dst.x, pos.y + dst.y, dst.width, dst.height);
+            self.push_rect(dst, src, color)
+        });
     }
 
     pub fn draw_icon(&mut self, id: IconId, r: Recti, color: Color) {
