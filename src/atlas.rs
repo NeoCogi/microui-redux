@@ -102,9 +102,9 @@ pub struct Config {
 }
 
 pub struct Atlas {
-    pub width: usize,
-    pub height: usize,
-    pub pixels: Vec<u8>,
+    width: usize,
+    height: usize,
+    pixels: Vec<u8>,
     fonts: Vec<(String, Font)>,
     icons: Vec<(String, Icon)>,
 
@@ -118,6 +118,15 @@ pub const COLLAPSE_ICON: IconId = IconId(3);
 pub const CHECK_ICON: IconId = IconId(4);
 
 impl Atlas {
+    pub fn width(&self) -> usize {
+        self.width
+    }
+    pub fn height(&self) -> usize {
+        self.height
+    }
+    pub fn pixels(&self) -> &Vec<u8> {
+        &self.pixels
+    }
     pub fn from_config(config: &Config) -> Result<Self> {
         let rp_config = rect_packer::Config {
             width: config.texture_width as _,

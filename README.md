@@ -28,8 +28,15 @@ $ cargo run --example demo-sdl2
 - [x] Manage containers lifetime & ownership outside of contaienrs
 - [x] Software based textured rectangle clipping
 - [ ] Add Atlasser to the code
+    - [x] Runtime atlasser
+        - [x] Icon
+        - [x] Font (Hash Table)
+    - [ ] Separate Atlas Builder from the Atlas
 - [ ] Image widget
 - [ ] Pass-Through rendering command (for 3D viewports)
+- [ ] Features
+    - [ ] AtlasBuilder standalone
+    - [ ] Png image loader
 - [ ] Documentation
 - [ ] Examples
 
