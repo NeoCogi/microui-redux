@@ -360,8 +360,8 @@ impl<'a> State<'a> {
     }
 }
 
-fn atlas_config() -> Config {
-    Config {
+fn atlas_config() -> builder::Config {
+    builder::Config {
         texture_height: 256,
         texture_width: 256,
         white_icon: String::from("assets/WHITE.png"),
@@ -395,7 +395,7 @@ fn main() {
 
     let mut event_pump = sdl_context.event_pump().unwrap();
     let (width, height) = window.size();
-    let atlas = Rc::new(Atlas::from_config(&atlas_config()).unwrap());
+    let atlas = Rc::new(builder::Builder::from_config(&atlas_config()).unwrap().to_atlas());
     let rd = GLRenderer::new(gl, atlas.width(), atlas.height(), atlas.pixels(), width, height);
 
     let mut state = State::new();
@@ -405,7 +405,7 @@ fn main() {
     state.log_window = Some(ctx.new_window("Log Window", rect(350, 40, 300, 200)));
     state.style_window = Some(ctx.new_window("Style Editor", rect(350, 250, 300, 240)));
     state.popup_window = Some(ctx.new_popup("Test Popup"));
-    state.log_output = Some(ctx.new_panel("Log Output"));
+    state.log_output = Some(ctx.new_panel("Log Outputman, "));
 
     'running: loop {
         let (width, height) = window.size();
