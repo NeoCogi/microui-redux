@@ -14,15 +14,15 @@ name = "microui_redux"
 
 [features]
 default = ["builder"]
-builder = ["dep:fontdue", "dep:rect_packer", "dep:png"]
+builder = ["dep:fontdue", "dep:png"]
 save-to-rust = []
 
 [dependencies]
 fontdue = { version = "0.8.0", optional = true }
 bitflags = "2.4.1"
 rs-math3d = "0.9.21"
-rect_packer = { version = "0.2.1", optional = true }
 png = { version = "0.17.11", optional = true }
+rand = "0.8.5"
 
 [dev-dependencies]
 glow = "0.13.0"

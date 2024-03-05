@@ -64,6 +64,7 @@ mod canvas;
 mod container;
 mod idmngr;
 mod layout;
+mod rect_packer;
 mod window;
 
 pub use atlas::*;
@@ -72,6 +73,7 @@ pub use layout::*;
 pub use container::*;
 pub use window::*;
 pub use canvas::*;
+pub use rect_packer::*;
 
 use bitflags::*;
 use std::cmp::{min, max};
