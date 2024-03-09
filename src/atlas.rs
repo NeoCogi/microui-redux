@@ -93,7 +93,7 @@ struct Icon {
 struct Atlas {
     width: usize,
     height: usize,
-    pixels: Vec<u8>,
+    pixels: Vec<Color4b>,
     fonts: Vec<(String, Font)>,
     icons: Vec<(String, Icon)>,
 }
@@ -142,7 +142,7 @@ pub mod builder {
             let atlas = Atlas {
                 width: config.texture_width,
                 height: config.texture_height,
-                pixels: vec![0; config.texture_height * config.texture_width],
+                pixels: vec![Color4b::default(); config.texture_height * config.texture_width],
                 fonts: Vec::new(),
                 icons: Vec::new(),
             };
@@ -177,7 +177,11 @@ pub mod builder {
                 // Rasterize and get the layout metrics for the letter at font size.
                 let ch = i as u8 as char;
                 let (metrics, bitmap) = font.rasterize(ch, size as f32);
-                let rect = self.add_tile(metrics.width as _, metrics.height as _, bitmap.as_slice())?;
+                let rect = self.add_tile(
+                    metrics.width as _,
+                    metrics.height as _,
+                    bitmap.iter().map(|c| color4b(0xFF, 0xFF, 0xFF, *c)).collect::<Vec<Color4b>>().as_slice(),
+                )?;
                 let ce = CharEntry {
                     offset: Vec2i::new(metrics.xmin, metrics.ymin),
                     advance: Vec2i::new(metrics.advance_width as _, metrics.advance_height as _),
@@ -209,10 +213,10 @@ pub mod builder {
 
             let mut writer = encoder.write_header()?;
 
-            writer.write_image_data(atlas.pixels.as_slice())?;
+            writer.write_image_data(atlas.pixels.iter().map(|c| [c.x, c.y, c.z, c.w]).flatten().collect::<Vec<u8>>().as_slice())?;
             Ok(())
         }
-        fn load_icon(path: &str) -> Result<(usize, usize, Vec<u8>)> {
+        fn load_icon(path: &str) -> Result<(usize, usize, Vec<Color4b>)> {
             let mut decoder = png::Decoder::new(File::open(path)?);
             decoder.set_transformations(png::Transformations::normalize_to_color8());
             let mut reader = decoder.read_info().unwrap();
@@ -229,7 +233,7 @@ pub mod builder {
                 ColorType::Rgba => 4,
             };
 
-            let mut pixels = vec![0u8; (info.width * info.height) as usize];
+            let mut pixels = vec![Color4b::default(); (info.width * info.height) as usize];
             let line_size = info.line_size;
             for y in 0..info.height {
                 let line = &img_data[(y as usize * line_size)..((y as usize + 1) * line_size)];
@@ -237,11 +241,27 @@ pub mod builder {
                 for x in 0..info.width {
                     let xx = (x * pixel_size) as usize;
                     let color = match info.color_type {
-                        ColorType::Grayscale => line[xx],
-                        ColorType::GrayscaleAlpha => line[xx + 1],
+                        ColorType::Grayscale => {
+                            let a = line[xx];
+                            color4b(0xFF, 0xFF, 0xFF, a)
+                        }
+                        ColorType::GrayscaleAlpha => {
+                            let c = line[xx];
+                            let a = line[xx + 1];
+                            color4b(c, c, c, a)
+                        }
                         ColorType::Indexed => todo!(),
-                        ColorType::Rgb => ((line[xx] as u32 + line[xx + 1] as u32 + line[xx + 2] as u32) / 3) as u8,
-                        ColorType::Rgba => line[xx + 3],
+                        ColorType::Rgb => {
+                            let c = ((line[xx] as u32 + line[xx + 1] as u32 + line[xx + 2] as u32) / 3) as u8;
+                            color4b(c, c, c, c)
+                        }
+                        ColorType::Rgba => {
+                            let r = line[xx];
+                            let g = line[xx + 1];
+                            let b = line[xx + 2];
+                            let a = line[xx + 3];
+                            color4b(r, g, b, a)
+                        }
                     };
                     pixels[(x + y * info.width) as usize] = color;
                 }
@@ -250,7 +270,7 @@ pub mod builder {
             Ok((info.width as _, info.height as _, pixels))
         }
 
-        fn add_tile(&mut self, width: usize, height: usize, pixels: &[u8]) -> Result<Recti> {
+        fn add_tile(&mut self, width: usize, height: usize, pixels: &[Color4b]) -> Result<Recti> {
             let rect = self.packer.pack(width as _, height as _, false);
             match rect {
                 Some(r) => {
@@ -308,7 +328,7 @@ pub struct FontEntry<'a> {
 pub struct AtlasSource<'a> {
     pub width: usize,
     pub height: usize,
-    pub pixels: &'a [u8],
+    pub pixels: &'a [Color4b],
     pub icons: &'a [(&'a str, Recti)],
     pub fonts: &'a [(&'a str, FontEntry<'a>)],
 }
@@ -332,7 +352,7 @@ impl AtlasHandler {
                 (name.to_string(), font)
             })
             .collect();
-        let pixels: Vec<u8> = source.pixels.iter().map(|p| *p).collect();
+        let pixels: Vec<Color4b> = source.pixels.iter().map(|p| *p).collect();
         Self(Rc::new(RefCell::new(Atlas {
             width: source.width,
             height: source.height,
@@ -404,7 +424,7 @@ impl AtlasHandler {
     pub fn height(&self) -> usize {
         self.0.borrow().height
     }
-    pub fn pixels(&self) -> Vec<u8> {
+    pub fn pixels(&self) -> Vec<Color4b> {
         self.0.borrow().pixels.clone()
     }
     pub fn get_char_entry(&self, font: FontId, c: char) -> CharEntry {

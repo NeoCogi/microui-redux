@@ -75,8 +75,8 @@ varying lowp vec4 vVertexColor;
 uniform sampler2D uTexture;
 void main()
 {
-    lowp vec4 col = texture2D(uTexture, vTexCoord).aaaa;
-    gl_FragColor = vec4(vVertexColor.rgb, col.a * vVertexColor.a);
+    lowp vec4 col = texture2D(uTexture, vTexCoord);
+    gl_FragColor = col * vVertexColor;
 }";
 
 pub fn ortho4(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> [f32; 16] {
@@ -142,7 +142,7 @@ impl GLRenderer {
         }
     }
 
-    pub fn new(mut gl: glow::Context, atlas_width: usize, atlas_height: usize, atlas_texture: &[u8], width: u32, height: u32) -> Self {
+    pub fn new(mut gl: glow::Context, atlas_width: usize, atlas_height: usize, atlas_texture: &[Color4b], width: u32, height: u32) -> Self {
         assert_eq!(core::mem::size_of::<Vertex>(), 20);
         unsafe {
             // init texture
@@ -153,13 +153,13 @@ impl GLRenderer {
             gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
-                glow::ALPHA as i32,
+                glow::RGBA as i32,
                 atlas_width as i32,
                 atlas_height as i32,
                 0,
-                glow::ALPHA,
+                glow::RGBA,
                 glow::UNSIGNED_BYTE,
-                Some(&atlas_texture),
+                Some(&atlas_texture.iter().map(|c| [c.x, c.y, c.z, c.w]).flatten().collect::<Vec<u8>>()),
             );
             debug_assert!(gl.get_error() == 0);
             gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
