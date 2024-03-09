@@ -366,9 +366,9 @@ impl AtlasHandler {
     pub fn to_rust_files(&self, atlas_name: &str, path: &str) {
         let mut font_meta = String::new();
         font_meta.push_str(format!("pub const {} : AtlasSource = AtlasSource {{\n", atlas_name).as_str());
-        font_meta.push_str(format!("width: {}, height: {},\n", self.width, self.height).as_str());
+        font_meta.push_str(format!("width: {}, height: {},\n", self.width(), self.height()).as_str());
         let mut icons = String::from_str("&[\n").unwrap();
-        for (i, r) in &self.icons {
+        for (i, r) in &self.0.borrow().icons {
             icons.push_str(
                 format!(
                     "(\"{}\", Rect {{ x: {}, y: {}, width: {}, height: {} }}),",
@@ -379,7 +379,7 @@ impl AtlasHandler {
         }
         icons.push_str("]");
         let mut fonts = String::from_str("&[\n").unwrap();
-        for (n, f) in &self.fonts {
+        for (n, f) in &self.0.borrow().fonts {
             let mut char_entries = String::from_str("&[\n").unwrap();
             for (ch, entry) in &f.entries {
                 let str = match ch {
@@ -408,8 +408,8 @@ impl AtlasHandler {
         font_meta.push_str(format!("icons: {},\n", icons).as_str());
         font_meta.push_str(format!("fonts: {},\n", fonts).as_str());
         let mut pixels = String::from_str("&[\n").unwrap();
-        for p in &self.pixels {
-            pixels.push_str(format!("0x{:02x},", p).as_str());
+        for p in &self.0.borrow().pixels {
+            pixels.push_str(format!("Color {{ x: 0x{:02x}, y: 0x{:02x}, z: 0x{:02x}, w: 0x{:02x} }},", p.x, p.y, p.z, p.w).as_str());
         }
         pixels.push_str("]\n");
         font_meta.push_str(format!("pixels: {},\n", pixels).as_str());
