@@ -395,8 +395,8 @@ fn main() {
 
     let mut event_pump = sdl_context.event_pump().unwrap();
     let (width, height) = window.size();
-    let atlas = Rc::new(builder::Builder::from_config(&atlas_config()).unwrap().to_atlas());
-    let rd = GLRenderer::new(gl, atlas.width(), atlas.height(), atlas.pixels(), width, height);
+    let atlas = builder::Builder::from_config(&atlas_config()).unwrap().to_atlas();
+    let rd = GLRenderer::new(gl, atlas.width(), atlas.height(), &atlas.pixels(), width, height);
 
     let mut state = State::new();
     let mut ctx = microui_redux::Context::new(atlas, rd, Dimensioni::new(width as _, height as _));

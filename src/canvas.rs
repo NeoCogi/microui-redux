@@ -39,12 +39,12 @@ pub struct Vertex {
 
 pub struct Canvas<R: Renderer> {
     renderer: R,
-    atlas: Rc<Atlas>,
+    atlas: AtlasHandler,
     clip: Recti,
 }
 
 impl<R: Renderer> Canvas<R> {
-    pub fn from(renderer: R, atlas: Rc<Atlas>, dim: Dimensioni) -> Self {
+    pub fn from(renderer: R, atlas: AtlasHandler, dim: Dimensioni) -> Self {
         Self {
             renderer,
             atlas,

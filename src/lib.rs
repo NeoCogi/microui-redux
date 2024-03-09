@@ -474,7 +474,7 @@ impl ContainerHandle {
 }
 
 pub struct Context<R: Renderer> {
-    atlas: Rc<Atlas>,
+    atlas: AtlasHandler,
     canvas: Canvas<R>,
     style: Style,
 
@@ -491,7 +491,7 @@ pub struct Context<R: Renderer> {
 }
 
 impl<R: Renderer> Context<R> {
-    pub fn new(atlas: Rc<Atlas>, renderer: R, dim: Dimensioni) -> Self {
+    pub fn new(atlas: AtlasHandler, renderer: R, dim: Dimensioni) -> Self {
         Self {
             atlas: atlas.clone(),
             canvas: Canvas::from(renderer, atlas, dim),

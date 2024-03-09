@@ -90,13 +90,16 @@ struct Icon {
     rect: Recti,
 }
 
-pub struct Atlas {
+struct Atlas {
     width: usize,
     height: usize,
     pixels: Vec<u8>,
     fonts: Vec<(String, Font)>,
     icons: Vec<(String, Icon)>,
 }
+
+#[derive(Clone)]
+pub struct AtlasHandler(Rc<RefCell<Atlas>>);
 
 pub const WHITE_ICON: IconId = IconId(0);
 pub const CLOSE_ICON: IconId = IconId(1);
@@ -291,8 +294,8 @@ pub mod builder {
             Self::strip_extension(&Self::strip_path_to_file(path))
         }
 
-        pub fn to_atlas(self) -> Atlas {
-            self.atlas
+        pub fn to_atlas(self) -> AtlasHandler {
+            AtlasHandler(Rc::new(RefCell::new(self.atlas)))
         }
     }
 }
@@ -310,7 +313,7 @@ pub struct AtlasSource<'a> {
     pub fonts: &'a [(&'a str, FontEntry<'a>)],
 }
 
-impl Atlas {
+impl AtlasHandler {
     pub fn from<'a>(source: &AtlasSource<'a>) -> Self {
         let icons: Vec<(String, Icon)> = source
             .icons
@@ -330,13 +333,13 @@ impl Atlas {
             })
             .collect();
         let pixels: Vec<u8> = source.pixels.iter().map(|p| *p).collect();
-        Self {
+        Self(Rc::new(RefCell::new(Atlas {
             width: source.width,
             height: source.height,
             icons,
             fonts,
             pixels,
-        }
+        })))
     }
 
     #[cfg(feature = "save-to-rust")]
@@ -396,33 +399,33 @@ impl Atlas {
     }
 
     pub fn width(&self) -> usize {
-        self.width
+        self.0.borrow().width
     }
     pub fn height(&self) -> usize {
-        self.height
+        self.0.borrow().height
     }
-    pub fn pixels(&self) -> &Vec<u8> {
-        &self.pixels
+    pub fn pixels(&self) -> Vec<u8> {
+        self.0.borrow().pixels.clone()
     }
     pub fn get_char_entry(&self, font: FontId, c: char) -> CharEntry {
-        self.fonts[font.0].1.entries[&c].clone()
+        self.0.borrow().fonts[font.0].1.entries[&c].clone()
     }
 
     pub fn get_font_height(&self, font: FontId) -> usize {
-        self.fonts[font.0].1.line_size
+        self.0.borrow().fonts[font.0].1.line_size
     }
 
     pub fn get_icon_size(&self, icon: IconId) -> Dimensioni {
-        let r = self.icons[icon.0].1.rect;
+        let r = self.0.borrow().icons[icon.0].1.rect;
         Dimensioni::new(r.width, r.height)
     }
 
     pub fn get_icon_rect(&self, icon: IconId) -> Recti {
-        self.icons[icon.0].1.rect
+        self.0.borrow().icons[icon.0].1.rect
     }
 
     pub fn get_texture_dimension(&self) -> Dimensioni {
-        Dimension::new(self.width as _, self.height as _)
+        Dimension::new(self.0.borrow().width as _, self.0.borrow().height as _)
     }
 
     pub fn draw_string<DrawFunction: FnMut(char, Vec2i, Recti, Recti)>(&self, font: FontId, text: &str, mut f: DrawFunction) {
