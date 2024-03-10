@@ -73,8 +73,8 @@ pub(crate) struct Window {
 }
 
 impl Window {
-    pub fn window(id: Id, name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
-        let mut main = Container::new(id, name, atlas, style, input);
+    pub fn window(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+        let mut main = Container::new(name, atlas, style, input);
         main.rect = initial_rect;
 
         Self {
@@ -84,8 +84,8 @@ impl Window {
         }
     }
 
-    pub fn popup(id: Id, name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
-        let mut main = Container::new(id, name, atlas, style, input);
+    pub fn popup(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+        let mut main = Container::new(name, atlas, style, input);
         main.rect = initial_rect;
 
         Self {
@@ -187,12 +187,12 @@ impl Window {
 pub struct WindowHandle(Rc<RefCell<Window>>);
 
 impl WindowHandle {
-    pub(crate) fn window(id: Id, name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
-        Self(Rc::new(RefCell::new(Window::window(id, name, atlas, style, input, initial_rect))))
+    pub(crate) fn window(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+        Self(Rc::new(RefCell::new(Window::window(name, atlas, style, input, initial_rect))))
     }
 
-    pub(crate) fn popup(id: Id, name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>) -> Self {
-        Self(Rc::new(RefCell::new(Window::popup(id, name, atlas, style, input, Recti::new(0, 0, 0, 0)))))
+    pub(crate) fn popup(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>) -> Self {
+        Self(Rc::new(RefCell::new(Window::popup(name, atlas, style, input, Recti::new(0, 0, 0, 0)))))
     }
 
     pub fn is_open(&self) -> bool {
