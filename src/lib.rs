@@ -485,7 +485,6 @@ pub struct Context<R: Renderer> {
 
     root_list: Vec<WindowHandle>,
 
-    pub idmngr: IdManager,
     pub input: Rc<RefCell<Input>>,
 }
 
@@ -502,7 +501,6 @@ impl<R: Renderer> Context<R> {
             scroll_target: None,
 
             root_list: Vec::default(),
-            idmngr: IdManager::new(),
 
             input: Rc::new(RefCell::new(Input::default())),
         }
@@ -534,8 +532,6 @@ impl<R: Renderer> Context<R> {
 
     #[inline(never)]
     fn frame_end(&mut self) {
-        assert_eq!(self.idmngr.len(), 0);
-
         for r in &mut self.root_list {
             r.finish();
         }
@@ -575,20 +571,17 @@ impl<R: Renderer> Context<R> {
     }
 
     pub fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
-        let id = self.idmngr.get_id_from_str(name);
-        let mut window = WindowHandle::window(id, name, self.atlas.clone(), &self.style, self.input.clone(), initial_rect);
+        let mut window = WindowHandle::window(name, self.atlas.clone(), &self.style, self.input.clone(), initial_rect);
         self.bring_to_front(&mut window);
         window
     }
 
     pub fn new_popup(&mut self, name: &str) -> WindowHandle {
-        let id = self.idmngr.get_id_from_str(name);
-        WindowHandle::popup(id, name, self.atlas.clone(), &self.style, self.input.clone())
+        WindowHandle::popup(name, self.atlas.clone(), &self.style, self.input.clone())
     }
 
     pub fn new_panel(&mut self, name: &str) -> ContainerHandle {
-        let id = self.idmngr.get_id_from_str(name);
-        ContainerHandle::new(Container::new(id, name, self.atlas.clone(), &self.style, self.input.clone()))
+        ContainerHandle::new(Container::new(name, self.atlas.clone(), &self.style, self.input.clone()))
     }
 
     pub fn bring_to_front(&mut self, window: &mut WindowHandle) {
