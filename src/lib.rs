@@ -576,7 +576,9 @@ impl<R: Renderer> Context<R> {
 
     pub fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
         let id = self.idmngr.get_id_from_str(name);
-        WindowHandle::window(id, name, self.atlas.clone(), &self.style, self.input.clone(), initial_rect)
+        let mut window = WindowHandle::window(id, name, self.atlas.clone(), &self.style, self.input.clone(), initial_rect);
+        self.bring_to_front(&mut window);
+        window
     }
 
     pub fn new_popup(&mut self, name: &str) -> WindowHandle {

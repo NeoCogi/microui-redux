@@ -206,7 +206,7 @@ impl WindowHandle {
         self.0.borrow_mut()
     }
 
-    pub(crate) fn inner<'a>(&'a mut self) -> Ref<'a, Window> {
+    pub(crate) fn inner<'a>(&'a self) -> Ref<'a, Window> {
         self.0.borrow()
     }
 
