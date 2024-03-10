@@ -13,7 +13,7 @@ categories = ["gui", "rendering"]
 name = "microui_redux"
 
 [features]
-default = ["builder"]
+default = ["builder", "save-to-rust"]
 builder = ["dep:fontdue", "dep:png"]
 save-to-rust = []
 
@@ -27,3 +27,6 @@ rand = "0.8.5"
 [dev-dependencies]
 glow = "0.13.0"
 sdl2 = "0.36.0"
+
+# [profile.dev]
+# overflow-checks = false

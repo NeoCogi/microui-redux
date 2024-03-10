@@ -28,10 +28,6 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-use fontdue::*;
-use png::BitDepth;
-use png::ColorType;
-use rect_packer::*;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::io::Error;
@@ -79,6 +75,9 @@ pub struct FontId(usize);
 #[derive(Default, Copy, Clone)]
 pub struct IconId(usize);
 
+#[derive(Default, Copy, Clone)]
+pub struct SlotId(usize);
+
 impl Into<u32> for IconId {
     fn into(self) -> u32 {
         self.0 as _
@@ -96,10 +95,12 @@ struct Atlas {
     pixels: Vec<Color4b>,
     fonts: Vec<(String, Font)>,
     icons: Vec<(String, Icon)>,
+    slots: Vec<Recti>,
+    last_update_id: usize,
 }
 
 #[derive(Clone)]
-pub struct AtlasHandler(Rc<RefCell<Atlas>>);
+pub struct AtlasHandle(Rc<RefCell<Atlas>>);
 
 pub const WHITE_ICON: IconId = IconId(0);
 pub const CLOSE_ICON: IconId = IconId(1);
@@ -110,6 +111,10 @@ pub const CHECK_ICON: IconId = IconId(4);
 #[cfg(feature = "builder")]
 pub mod builder {
     use super::*;
+    use fontdue::*;
+    use png::BitDepth;
+    use png::ColorType;
+    use rect_packer::*;
 
     pub struct Builder {
         packer: Packer,
@@ -117,7 +122,7 @@ pub mod builder {
     }
 
     #[derive(Clone)]
-    pub struct Config {
+    pub struct Config<'a> {
         pub texture_width: usize,
         pub texture_height: usize,
         pub white_icon: String,
@@ -127,10 +132,11 @@ pub mod builder {
         pub check_icon: String,
         pub default_font: String,
         pub default_font_size: usize,
+        pub slots: &'a [Dimensioni],
     }
 
     impl Builder {
-        pub fn from_config(config: &Config) -> Result<Builder> {
+        pub fn from_config<'a>(config: &'a Config) -> Result<Builder> {
             let rp_config = rect_packer::Config {
                 width: config.texture_width as _,
                 height: config.texture_height as _,
@@ -145,6 +151,8 @@ pub mod builder {
                 pixels: vec![Color4b::default(); config.texture_height * config.texture_width],
                 fonts: Vec::new(),
                 icons: Vec::new(),
+                slots: Vec::new(),
+                last_update_id: 0,
             };
 
             let mut builder = Builder { atlas, packer: Packer::new(rp_config) };
@@ -155,6 +163,10 @@ pub mod builder {
             builder.add_icon(&config.collapse_icon)?;
             builder.add_icon(&config.check_icon)?;
             builder.add_font(&config.default_font, config.default_font_size)?;
+
+            for slot in config.slots {
+                builder.add_slot(*slot)?;
+            }
 
             Ok(builder)
         }
@@ -202,20 +214,31 @@ pub mod builder {
             Ok(FontId(id))
         }
 
-        pub fn save_png_image(atlas: &Atlas, path: &str) -> Result<()> {
+        pub fn save_png_image(atlas: AtlasHandle, path: &str) -> Result<()> {
             // png writer
             let file = File::create(path)?;
             let ref mut w = BufWriter::new(file);
 
-            let mut encoder = png::Encoder::new(w, atlas.width as _, atlas.height as _); // Width is 2 pixels and height is 1.
-            encoder.set_color(png::ColorType::Grayscale);
+            let mut encoder = png::Encoder::new(w, atlas.width() as _, atlas.height() as _); // Width is 2 pixels and height is 1.
+            encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
 
             let mut writer = encoder.write_header()?;
 
-            writer.write_image_data(atlas.pixels.iter().map(|c| [c.x, c.y, c.z, c.w]).flatten().collect::<Vec<u8>>().as_slice())?;
+            writer.write_image_data(
+                atlas
+                    .0
+                    .borrow()
+                    .pixels
+                    .iter()
+                    .map(|c| [c.x, c.y, c.z, c.w])
+                    .flatten()
+                    .collect::<Vec<u8>>()
+                    .as_slice(),
+            )?;
             Ok(())
         }
+
         fn load_icon(path: &str) -> Result<(usize, usize, Vec<Color4b>)> {
             let mut decoder = png::Decoder::new(File::open(path)?);
             decoder.set_transformations(png::Transformations::normalize_to_color8());
@@ -270,6 +293,23 @@ pub mod builder {
             Ok((info.width as _, info.height as _, pixels))
         }
 
+        fn add_slot(&mut self, slot: Dimensioni) -> Result<Recti> {
+            let rect = self.packer.pack(slot.width, slot.height, false);
+            match rect {
+                Some(r) => {
+                    self.atlas.slots.push(r);
+                    Ok(r)
+                }
+                None => {
+                    let error = format!(
+                        "Bitmap size of {}x{} is not enough to hold the atlas, please resize",
+                        self.atlas.width, self.atlas.height
+                    );
+                    Err(Error::new(ErrorKind::Other, error))
+                }
+            }
+        }
+
         fn add_tile(&mut self, width: usize, height: usize, pixels: &[Color4b]) -> Result<Recti> {
             let rect = self.packer.pack(width as _, height as _, false);
             match rect {
@@ -314,8 +354,8 @@ pub mod builder {
             Self::strip_extension(&Self::strip_path_to_file(path))
         }
 
-        pub fn to_atlas(self) -> AtlasHandler {
-            AtlasHandler(Rc::new(RefCell::new(self.atlas)))
+        pub fn to_atlas(self) -> AtlasHandle {
+            AtlasHandle(Rc::new(RefCell::new(self.atlas)))
         }
     }
 }
@@ -331,9 +371,10 @@ pub struct AtlasSource<'a> {
     pub pixels: &'a [Color4b],
     pub icons: &'a [(&'a str, Recti)],
     pub fonts: &'a [(&'a str, FontEntry<'a>)],
+    pub slots: &'a [Recti],
 }
 
-impl AtlasHandler {
+impl AtlasHandle {
     pub fn from<'a>(source: &AtlasSource<'a>) -> Self {
         let icons: Vec<(String, Icon)> = source
             .icons
@@ -352,20 +393,24 @@ impl AtlasHandler {
                 (name.to_string(), font)
             })
             .collect();
+        let slots: Vec<Recti> = source.slots.iter().map(|p| *p).collect();
         let pixels: Vec<Color4b> = source.pixels.iter().map(|p| *p).collect();
+
         Self(Rc::new(RefCell::new(Atlas {
             width: source.width,
             height: source.height,
             icons,
             fonts,
+            slots,
             pixels,
+            last_update_id: 0,
         })))
     }
 
     #[cfg(feature = "save-to-rust")]
-    pub fn to_rust_files(&self, atlas_name: &str, path: &str) {
+    pub fn to_rust_files(&self, atlas_name: &str, path: &str) -> Result<()> {
         let mut font_meta = String::new();
-        font_meta.push_str(format!("pub const {} : AtlasSource = AtlasSource {{\n", atlas_name).as_str());
+        font_meta.push_str(format!("use microui_redux::*; pub const {} : AtlasSource = AtlasSource {{\n", atlas_name).as_str());
         font_meta.push_str(format!("width: {}, height: {},\n", self.width(), self.height()).as_str());
         let mut icons = String::from_str("&[\n").unwrap();
         for (i, r) in &self.0.borrow().icons {
@@ -378,6 +423,11 @@ impl AtlasHandler {
             );
         }
         icons.push_str("]");
+        let mut slots = String::from_str("&[\n").unwrap();
+        for r in &self.0.borrow().slots {
+            slots.push_str(format!("Rect {{ x: {}, y: {}, width: {}, height: {} }},", r.x, r.y, r.width, r.height,).as_str());
+        }
+        slots.push_str("]");
         let mut fonts = String::from_str("&[\n").unwrap();
         for (n, f) in &self.0.borrow().fonts {
             let mut char_entries = String::from_str("&[\n").unwrap();
@@ -407,15 +457,17 @@ impl AtlasHandler {
         fonts.push_str("]");
         font_meta.push_str(format!("icons: {},\n", icons).as_str());
         font_meta.push_str(format!("fonts: {},\n", fonts).as_str());
+        font_meta.push_str(format!("slots: {},\n", slots).as_str());
+
         let mut pixels = String::from_str("&[\n").unwrap();
         for p in &self.0.borrow().pixels {
-            pixels.push_str(format!("Color {{ x: 0x{:02x}, y: 0x{:02x}, z: 0x{:02x}, w: 0x{:02x} }},", p.x, p.y, p.z, p.w).as_str());
+            pixels.push_str(format!("Color4b {{ x: 0x{:02x}, y: 0x{:02x}, z: 0x{:02x}, w: 0x{:02x} }},", p.x, p.y, p.z, p.w).as_str());
         }
         pixels.push_str("]\n");
         font_meta.push_str(format!("pixels: {},\n", pixels).as_str());
         font_meta.push_str("};");
         let mut f = File::create(path).unwrap();
-        write!(f, "{}", font_meta);
+        write!(f, "{}", font_meta)
     }
 
     pub fn width(&self) -> usize {
@@ -427,6 +479,19 @@ impl AtlasHandler {
     pub fn pixels(&self) -> Vec<Color4b> {
         self.0.borrow().pixels.clone()
     }
+
+    pub fn clone_icon_table(&self) -> Vec<(String, IconId)> {
+        self.0.borrow().icons.iter().enumerate().map(|(i, icon)| (icon.0.clone(), IconId(i))).collect()
+    }
+
+    pub fn clone_font_table(&self) -> Vec<(String, FontId)> {
+        self.0.borrow().fonts.iter().enumerate().map(|(i, font)| (font.0.clone(), FontId(i))).collect()
+    }
+
+    pub fn clone_slot_table(&self) -> Vec<SlotId> {
+        self.0.borrow().slots.iter().enumerate().map(|(i, _)| SlotId(i)).collect()
+    }
+
     pub fn get_char_entry(&self, font: FontId, c: char) -> CharEntry {
         self.0.borrow().fonts[font.0].1.entries[&c].clone()
     }
@@ -442,6 +507,11 @@ impl AtlasHandler {
 
     pub fn get_icon_rect(&self, icon: IconId) -> Recti {
         self.0.borrow().icons[icon.0].1.rect
+    }
+
+    pub fn get_slot_size(&self, slot: SlotId) -> Dimensioni {
+        let r = self.0.borrow().slots[slot.0];
+        Dimension::new(r.width, r.height)
     }
 
     pub fn get_texture_dimension(&self) -> Dimensioni {
@@ -482,5 +552,20 @@ impl AtlasHandler {
             res.height = max(res.height, dst.y + dst.height);
         });
         res
+    }
+
+    pub fn render_slot<F: Fn(usize, usize) -> Color4b>(&mut self, slot: SlotId, f: F) {
+        let slot_rect = self.0.borrow().slots[slot.0];
+        let width = self.width();
+        {
+            let pixels = &mut self.0.borrow_mut().pixels;
+            for y in slot_rect.y..slot_rect.y + slot_rect.height {
+                for x in slot_rect.x..slot_rect.x + slot_rect.width {
+                    pixels[(x + y * (width as i32)) as usize] = f(x as _, y as _)
+                }
+            }
+        }
+        let last_update = self.0.borrow().last_update_id;
+        self.0.borrow_mut().last_update_id = last_update.wrapping_add(1);
     }
 }

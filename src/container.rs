@@ -51,7 +51,7 @@
 // IN THE SOFTWARE.
 //
 use super::*;
-use std::{cell::RefCell, collections::HashMap};
+use std::cell::RefCell;
 
 #[derive(Clone)]
 pub enum Command {
@@ -71,7 +71,7 @@ impl Default for Command {
 #[derive(Clone)]
 pub struct Container {
     pub(crate) id: Id,
-    pub(crate) atlas: AtlasHandler,
+    pub(crate) atlas: AtlasHandle,
     pub style: Style,
     pub name: String,
     pub rect: Recti,
@@ -95,7 +95,7 @@ pub struct Container {
 }
 
 impl Container {
-    pub(crate) fn new(id: Id, name: &str, atlas: AtlasHandler, style: &Style, input: Rc<RefCell<Input>>) -> Self {
+    pub(crate) fn new(id: Id, name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>) -> Self {
         Self {
             id,
             name: name.to_string(),
