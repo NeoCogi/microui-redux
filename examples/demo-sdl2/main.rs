@@ -360,7 +360,7 @@ impl<'a> State<'a> {
     }
 }
 
-fn atlas_config() -> builder::Config {
+fn atlas_config(slots: &Vec<Dimensioni>) -> builder::Config {
     builder::Config {
         texture_height: 256,
         texture_width: 256,
@@ -371,6 +371,7 @@ fn atlas_config() -> builder::Config {
         check_icon: String::from("assets/CHECK.png"),
         default_font: String::from("assets/NORMAL.ttf"),
         default_font_size: 12,
+        slots,
     }
 }
 
@@ -395,7 +396,13 @@ fn main() {
 
     let mut event_pump = sdl_context.event_pump().unwrap();
     let (width, height) = window.size();
-    let atlas = builder::Builder::from_config(&atlas_config()).unwrap().to_atlas();
+    let slots = vec![Dimensioni::new(64, 64), Dimensioni::new(24, 32), Dimensioni::new(64, 24)];
+    let mut atlas = builder::Builder::from_config(&atlas_config(&slots)).unwrap().to_atlas();
+    let slots = atlas.clone_slot_table();
+    atlas.render_slot(slots[0], |_x, _y| color4b(0xFF, 0, 0, 0xFF));
+    atlas.render_slot(slots[1], |_x, _y| color4b(0, 0xFF, 0, 0xFF));
+    atlas.render_slot(slots[2], |_x, _y| color4b(0, 0, 0xFF, 0xFF));
+    builder::Builder::save_png_image(atlas.clone(), "atlas.png").unwrap();
     let rd = GLRenderer::new(gl, atlas.width(), atlas.height(), &atlas.pixels(), width, height);
 
     let mut state = State::new();

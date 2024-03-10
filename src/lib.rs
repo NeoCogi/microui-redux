@@ -57,8 +57,6 @@ use std::{
     rc::Rc,
 };
 
-use rs_math3d::*;
-
 mod atlas;
 mod canvas;
 mod container;
@@ -74,6 +72,7 @@ pub use container::*;
 pub use window::*;
 pub use canvas::*;
 pub use rect_packer::*;
+pub use rs_math3d::*;
 
 use bitflags::*;
 use std::cmp::{min, max};
@@ -474,7 +473,7 @@ impl ContainerHandle {
 }
 
 pub struct Context<R: Renderer> {
-    atlas: AtlasHandler,
+    atlas: AtlasHandle,
     canvas: Canvas<R>,
     style: Style,
 
@@ -491,7 +490,7 @@ pub struct Context<R: Renderer> {
 }
 
 impl<R: Renderer> Context<R> {
-    pub fn new(atlas: AtlasHandler, renderer: R, dim: Dimensioni) -> Self {
+    pub fn new(atlas: AtlasHandle, renderer: R, dim: Dimensioni) -> Self {
         Self {
             atlas: atlas.clone(),
             canvas: Canvas::from(renderer, atlas, dim),
