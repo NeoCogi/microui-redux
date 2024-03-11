@@ -13,6 +13,7 @@ use rs_math3d::*;
 type Context = microui_redux::Context<GLRenderer>;
 
 struct State<'a> {
+    slots: Vec<SlotId>,
     label_colors: [LabelColor<'a>; 15],
     bg: [Real; 3],
     logbuf: String,
@@ -31,6 +32,7 @@ struct State<'a> {
     test_buttons_header: NodeState,
     background_header: NodeState,
     tree_and_text_header: NodeState,
+    slot_header: NodeState,
     test1_tn: NodeState,
     test1a_tn: NodeState,
     test1b_tn: NodeState,
@@ -47,8 +49,9 @@ pub struct LabelColor<'a> {
 }
 
 impl<'a> State<'a> {
-    pub fn new() -> Self {
+    pub fn new(slots: Vec<SlotId>) -> Self {
         Self {
+            slots,
             style: Style::default(),
             label_colors: [
                 LabelColor { label: "text", idx: ControlColor::Text },
@@ -119,6 +122,7 @@ impl<'a> State<'a> {
             test_buttons_header: NodeState::Expanded,
             tree_and_text_header: NodeState::Expanded,
             background_header: NodeState::Expanded,
+            slot_header: NodeState::Expanded,
 
             test1_tn: NodeState::Closed,
             test1a_tn: NodeState::Closed,
@@ -244,6 +248,14 @@ impl<'a> State<'a> {
                 let mut buff = String::new();
                 buff.push_str(format!("#{:02X}{:02X}{:02X}", self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8).as_str());
                 container.draw_control_text(buff.as_str(), r, ControlColor::Text, WidgetOption::ALIGN_CENTER);
+            });
+
+            self.slot_header = container.header("Slots", self.slot_header, |container| {
+                container.set_row_widths_height(&[-1], 67);
+                container.button_ex2("Slot 1", Some(self.slots[0].clone()), WidgetOption::NONE);
+                container.button_ex2("Slot 2", Some(self.slots[1].clone()), WidgetOption::NONE);
+                container.button_ex2("Slot 3", Some(self.slots[2].clone()), WidgetOption::NONE);
+
             });
         });
 
@@ -405,7 +417,7 @@ fn main() {
     builder::Builder::save_png_image(atlas.clone(), "atlas.png").unwrap();
     let rd = GLRenderer::new(gl, atlas.width(), atlas.height(), &atlas.pixels(), width, height);
 
-    let mut state = State::new();
+    let mut state = State::new(slots);
     let mut ctx = microui_redux::Context::new(atlas, rd, Dimensioni::new(width as _, height as _));
 
     state.demo_window = Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450)));

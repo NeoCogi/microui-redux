@@ -155,6 +155,13 @@ impl<R: Renderer> Canvas<R> {
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
+    pub fn draw_slot(&mut self, id: SlotId, r: Recti, color: Color) {
+        let src = self.atlas.get_slot_rect(id);
+        let x = r.x + (r.width - src.width) / 2;
+        let y = r.y + (r.height - src.height) / 2;
+        self.push_rect(rect(x, y, src.width, src.height), src, color);
+    }
+
     pub fn set_clip_rect(&mut self, rect: Recti) {
         self.clip = rect;
     }

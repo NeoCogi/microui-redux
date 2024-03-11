@@ -84,6 +84,12 @@ impl Into<u32> for IconId {
     }
 }
 
+impl Into<u32> for SlotId {
+    fn into(self) -> u32 {
+        self.0 as _
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Icon {
     rect: Recti,
@@ -505,13 +511,17 @@ impl AtlasHandle {
         Dimensioni::new(r.width, r.height)
     }
 
-    pub fn get_icon_rect(&self, icon: IconId) -> Recti {
+    pub(crate) fn get_icon_rect(&self, icon: IconId) -> Recti {
         self.0.borrow().icons[icon.0].1.rect
     }
 
     pub fn get_slot_size(&self, slot: SlotId) -> Dimensioni {
         let r = self.0.borrow().slots[slot.0];
         Dimension::new(r.width, r.height)
+    }
+
+    pub(crate) fn get_slot_rect(&self, slot: SlotId) -> Recti {
+        self.0.borrow().slots[slot.0]
     }
 
     pub fn get_texture_dimension(&self) -> Dimensioni {
