@@ -59,6 +59,7 @@ pub enum Command {
     Recti { rect: Recti, color: Color },
     Text { font: FontId, pos: Vec2i, color: Color, text: String },
     Icon { rect: Recti, id: IconId, color: Color },
+    Slot { rect: Recti, id: SlotId, color: Color },
     None,
 }
 
@@ -141,6 +142,9 @@ impl Container {
                 }
                 Command::Clip { rect } => {
                     canvas.set_clip_rect(*rect);
+                }
+                Command::Slot { rect, id, color } => {
+                    canvas.draw_slot(*id, *rect, *color);
                 }
                 _ => {}
             }
@@ -240,6 +244,22 @@ impl Container {
             _ => (),
         }
         self.push_command(Command::Icon { id, rect, color });
+        if clipped != Clip::None {
+            self.set_clip(UNCLIPPED_RECT);
+        }
+    }
+
+    pub fn draw_slot(&mut self, id: SlotId, rect: Recti, color: Color) {
+        let clipped = self.check_clip(rect);
+        match clipped {
+            Clip::All => return,
+            Clip::Part => {
+                let clip = self.get_clip_rect();
+                self.set_clip(clip)
+            }
+            _ => (),
+        }
+        self.push_command(Command::Slot { id, rect, color });
         if clipped != Clip::None {
             self.set_clip(UNCLIPPED_RECT);
         }
@@ -593,6 +613,33 @@ impl Container {
             Some(icon) => {
                 let color = self.style.colors[ControlColor::Text as usize];
                 self.draw_icon(icon, r, color);
+            }
+            _ => (),
+        }
+        return res;
+    }
+
+    #[inline(never)]
+    pub fn button_ex2(&mut self, label: &str, slot: Option<SlotId>, opt: WidgetOption) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let id: Id = if label.len() > 0 {
+            self.idmngr.get_id_from_str(label)
+        } else {
+            self.idmngr.get_id_u32(slot.unwrap().into())
+        };
+        let r: Recti = self.layout.next();
+        self.update_control(id, r, opt);
+        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
+            res |= ResourceState::SUBMIT;
+        }
+        self.draw_control_frame(id, r, ControlColor::Button, opt);
+        if label.len() > 0 {
+            self.draw_control_text(label, r, ControlColor::Text, opt);
+        }
+        match slot {
+            Some(slot) => {
+                let color = self.style.colors[ControlColor::Text as usize];
+                self.draw_slot(slot, r, color);
             }
             _ => (),
         }
