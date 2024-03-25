@@ -15,6 +15,7 @@ name = "microui_redux"
 [features]
 default = ["builder", "save-to-rust"]
 builder = ["dep:fontdue", "dep:png"]
+png_source = ["dep:png"]
 save-to-rust = []
 
 [dependencies]
