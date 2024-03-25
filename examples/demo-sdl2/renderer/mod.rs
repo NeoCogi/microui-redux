@@ -106,6 +106,9 @@ pub struct GLRenderer {
     width: u32,
     height: u32,
     clip: Recti,
+
+    atlas: AtlasHandle,
+    last_update_id: usize,
 }
 
 impl GLRenderer {
@@ -142,7 +145,29 @@ impl GLRenderer {
         }
     }
 
-    pub fn new(mut gl: glow::Context, atlas_width: usize, atlas_height: usize, atlas_texture: &[Color4b], width: u32, height: u32) -> Self {
+    fn update_atlas(&mut self) {
+        if self.last_update_id != self.atlas.get_last_update_id() {
+            unsafe {
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(self.tex_o));
+                debug_assert!(self.gl.get_error() == 0);
+                self.gl.tex_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    glow::RGBA as i32,
+                    self.atlas.width() as i32,
+                    self.atlas.height() as i32,
+                    0,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    Some(&self.atlas.pixels().iter().map(|c| [c.x, c.y, c.z, c.w]).flatten().collect::<Vec<u8>>()),
+                );
+                debug_assert!(self.gl.get_error() == 0);
+            }
+            self.last_update_id = self.atlas.get_last_update_id()
+        }
+    }
+
+    pub fn new(mut gl: glow::Context, atlas: AtlasHandle, width: u32, height: u32) -> Self {
         assert_eq!(core::mem::size_of::<Vertex>(), 20);
         unsafe {
             // init texture
@@ -154,12 +179,12 @@ impl GLRenderer {
                 glow::TEXTURE_2D,
                 0,
                 glow::RGBA as i32,
-                atlas_width as i32,
-                atlas_height as i32,
+                atlas.width() as i32,
+                atlas.height() as i32,
                 0,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
-                Some(&atlas_texture.iter().map(|c| [c.x, c.y, c.z, c.w]).flatten().collect::<Vec<u8>>()),
+                Some(&atlas.pixels().iter().map(|c| [c.x, c.y, c.z, c.w]).flatten().collect::<Vec<u8>>()),
             );
             debug_assert!(gl.get_error() == 0);
             gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
@@ -184,13 +209,20 @@ impl GLRenderer {
                 width,
                 height,
                 clip: Recti::new(0, 0, width as _, height as _),
+                atlas,
+                last_update_id: usize::MAX,
             }
         }
     }
 }
 
 impl Renderer for GLRenderer {
+    fn get_atlas(&self) -> AtlasHandle {
+        self.atlas.clone()
+    }
+
     fn flush(&mut self) {
+        self.update_atlas();
         if self.verts.len() == 0 || self.indices.len() == 0 {
             return;
         }
@@ -287,6 +319,11 @@ impl Renderer for GLRenderer {
         self.verts.push(v1.clone());
         self.verts.push(v2.clone());
         self.verts.push(v3.clone());
+
+        // This is needed so that the update happens immediately (not the most optimized way)
+        if self.last_update_id != self.atlas.get_last_update_id() {
+            self.flush()
+        }
     }
 
     fn clear(&mut self, width: i32, height: i32, clr: Color) {

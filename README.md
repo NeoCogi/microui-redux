@@ -35,7 +35,7 @@ $ cargo run --example demo-sdl2
     - [x] Builder feature
     - [x] Save Atlas to rust
     - [x] Atlas loader from const rust
-- [ ] Image widget
+- [x] Image widget
 - [ ] Pass-Through rendering command (for 3D viewports)
 - [ ] Documentation
 - [ ] Examples

@@ -55,11 +55,35 @@ use std::cell::RefCell;
 
 #[derive(Clone)]
 pub enum Command {
-    Clip { rect: Recti },
-    Recti { rect: Recti, color: Color },
-    Text { font: FontId, pos: Vec2i, color: Color, text: String },
-    Icon { rect: Recti, id: IconId, color: Color },
-    Slot { rect: Recti, id: SlotId, color: Color },
+    Clip {
+        rect: Recti,
+    },
+    Recti {
+        rect: Recti,
+        color: Color,
+    },
+    Text {
+        font: FontId,
+        pos: Vec2i,
+        color: Color,
+        text: String,
+    },
+    Icon {
+        rect: Recti,
+        id: IconId,
+        color: Color,
+    },
+    Slot {
+        rect: Recti,
+        id: SlotId,
+        color: Color,
+    },
+    SlotRedraw {
+        rect: Recti,
+        id: SlotId,
+        color: Color,
+        payload: Rc<dyn Fn(usize, usize) -> Color4b>,
+    },
     None,
 }
 
@@ -146,7 +170,10 @@ impl Container {
                 Command::Slot { rect, id, color } => {
                     canvas.draw_slot(*id, *rect, *color);
                 }
-                _ => {}
+                Command::SlotRedraw { rect, id, color, payload } => {
+                    canvas.draw_slot_with_function(*id, *rect, *color, payload.clone());
+                }
+                Command::None => (),
             }
         }
 
@@ -260,6 +287,22 @@ impl Container {
             _ => (),
         }
         self.push_command(Command::Slot { id, rect, color });
+        if clipped != Clip::None {
+            self.set_clip(UNCLIPPED_RECT);
+        }
+    }
+
+    pub fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
+        let clipped = self.check_clip(rect);
+        match clipped {
+            Clip::All => return,
+            Clip::Part => {
+                let clip = self.get_clip_rect();
+                self.set_clip(clip)
+            }
+            _ => (),
+        }
+        self.push_command(Command::SlotRedraw { id, rect, color, payload: f });
         if clipped != Clip::None {
             self.set_clip(UNCLIPPED_RECT);
         }
@@ -640,6 +683,33 @@ impl Container {
             Some(slot) => {
                 let color = self.style.colors[ControlColor::Text as usize];
                 self.draw_slot(slot, r, color);
+            }
+            _ => (),
+        }
+        return res;
+    }
+
+    #[inline(never)]
+    pub fn button_ex3(&mut self, label: &str, slot: Option<SlotId>, opt: WidgetOption, f: Rc<dyn Fn(usize, usize) -> Color4b>) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let id: Id = if label.len() > 0 {
+            self.idmngr.get_id_from_str(label)
+        } else {
+            self.idmngr.get_id_u32(slot.unwrap().into())
+        };
+        let r: Recti = self.layout.next();
+        self.update_control(id, r, opt);
+        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
+            res |= ResourceState::SUBMIT;
+        }
+        self.draw_control_frame(id, r, ControlColor::Button, opt);
+        if label.len() > 0 {
+            self.draw_control_text(label, r, ControlColor::Text, opt);
+        }
+        match slot {
+            Some(slot) => {
+                let color = self.style.colors[ControlColor::Text as usize];
+                self.draw_slot_with_function(slot, r, color, f);
             }
             _ => (),
         }
