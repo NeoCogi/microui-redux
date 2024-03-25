@@ -38,6 +38,9 @@ use std::path::*;
 use std::io::{Result, BufWriter};
 use std::fs::*;
 use std::str::FromStr;
+use png::BitDepth;
+use png::ColorType;
+use std::io::Cursor;
 
 use super::*;
 
@@ -114,12 +117,68 @@ pub const EXPAND_ICON: IconId = IconId(2);
 pub const COLLAPSE_ICON: IconId = IconId(3);
 pub const CHECK_ICON: IconId = IconId(4);
 
+pub fn load_image_bytes(bytes: &[u8]) -> Result<(usize, usize, Vec<Color4b>)> {
+    let mut cursor = Cursor::new(bytes);
+    let mut decoder = png::Decoder::new(&mut cursor);
+    decoder.set_transformations(png::Transformations::normalize_to_color8());
+    let mut reader = decoder.read_info().unwrap();
+    let mut img_data = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut img_data)?;
+
+    assert_eq!(info.bit_depth, BitDepth::Eight);
+
+    let pixel_size = match info.color_type {
+        ColorType::Grayscale => 1,
+        ColorType::GrayscaleAlpha => 2,
+        ColorType::Indexed => 1,
+        ColorType::Rgb => 3,
+        ColorType::Rgba => 4,
+    };
+
+    let mut pixels = vec![Color4b::default(); (info.width * info.height) as usize];
+    let line_size = info.line_size;
+    for y in 0..info.height {
+        let line = &img_data[(y as usize * line_size)..((y as usize + 1) * line_size)];
+
+        for x in 0..info.width {
+            let xx = (x * pixel_size) as usize;
+            let color = match info.color_type {
+                ColorType::Grayscale => {
+                    let a = line[xx];
+                    color4b(0xFF, 0xFF, 0xFF, a)
+                }
+                ColorType::GrayscaleAlpha => {
+                    let c = line[xx];
+                    let a = line[xx + 1];
+                    color4b(c, c, c, a)
+                }
+                ColorType::Indexed => todo!(),
+                ColorType::Rgb => {
+                    let c = ((line[xx] as u32 + line[xx + 1] as u32 + line[xx + 2] as u32) / 3) as u8;
+                    color4b(c, c, c, c)
+                }
+                ColorType::Rgba => {
+                    let r = line[xx];
+                    let g = line[xx + 1];
+                    let b = line[xx + 2];
+                    let a = line[xx + 3];
+                    color4b(r, g, b, a)
+                }
+            };
+            pixels[(x + y * info.width) as usize] = color;
+        }
+    }
+
+    Ok((info.width as _, info.height as _, pixels))
+}
+
 #[cfg(feature = "builder")]
 pub mod builder {
+    use std::io::Seek;
+
     use super::*;
     use fontdue::*;
-    use png::BitDepth;
-    use png::ColorType;
+
     use rect_packer::*;
 
     pub struct Builder {
@@ -220,83 +279,47 @@ pub mod builder {
             Ok(FontId(id))
         }
 
+        pub fn png_image_bytes(atlas: AtlasHandle) -> Result<Vec<u8>> {
+            let mut w: Vec<u8> = Vec::new();
+            let mut cursor = Cursor::new(Vec::new());
+            {
+                let mut encoder = png::Encoder::new(&mut cursor, atlas.width() as _, atlas.height() as _); // Width is 2 pixels and height is 1.
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+
+                let mut writer = encoder.write_header()?;
+
+                writer.write_image_data(
+                    atlas
+                        .0
+                        .borrow()
+                        .pixels
+                        .iter()
+                        .map(|c| [c.x, c.y, c.z, c.w])
+                        .flatten()
+                        .collect::<Vec<u8>>()
+                        .as_slice(),
+                )?;
+            }
+            cursor.seek(std::io::SeekFrom::Start(0))?;
+            cursor.read_to_end(&mut w)?;
+            Ok(w)
+        }
+
         pub fn save_png_image(atlas: AtlasHandle, path: &str) -> Result<()> {
             // png writer
             let file = File::create(path)?;
             let ref mut w = BufWriter::new(file);
-
-            let mut encoder = png::Encoder::new(w, atlas.width() as _, atlas.height() as _); // Width is 2 pixels and height is 1.
-            encoder.set_color(png::ColorType::Rgba);
-            encoder.set_depth(png::BitDepth::Eight);
-
-            let mut writer = encoder.write_header()?;
-
-            writer.write_image_data(
-                atlas
-                    .0
-                    .borrow()
-                    .pixels
-                    .iter()
-                    .map(|c| [c.x, c.y, c.z, c.w])
-                    .flatten()
-                    .collect::<Vec<u8>>()
-                    .as_slice(),
-            )?;
+            let bytes = Self::png_image_bytes(atlas)?;
+            w.write_all(bytes.as_slice())?;
             Ok(())
         }
 
         fn load_icon(path: &str) -> Result<(usize, usize, Vec<Color4b>)> {
-            let mut decoder = png::Decoder::new(File::open(path)?);
-            decoder.set_transformations(png::Transformations::normalize_to_color8());
-            let mut reader = decoder.read_info().unwrap();
-            let mut img_data = vec![0; reader.output_buffer_size()];
-            let info = reader.next_frame(&mut img_data)?;
-
-            assert_eq!(info.bit_depth, BitDepth::Eight);
-
-            let pixel_size = match info.color_type {
-                ColorType::Grayscale => 1,
-                ColorType::GrayscaleAlpha => 2,
-                ColorType::Indexed => 1,
-                ColorType::Rgb => 3,
-                ColorType::Rgba => 4,
-            };
-
-            let mut pixels = vec![Color4b::default(); (info.width * info.height) as usize];
-            let line_size = info.line_size;
-            for y in 0..info.height {
-                let line = &img_data[(y as usize * line_size)..((y as usize + 1) * line_size)];
-
-                for x in 0..info.width {
-                    let xx = (x * pixel_size) as usize;
-                    let color = match info.color_type {
-                        ColorType::Grayscale => {
-                            let a = line[xx];
-                            color4b(0xFF, 0xFF, 0xFF, a)
-                        }
-                        ColorType::GrayscaleAlpha => {
-                            let c = line[xx];
-                            let a = line[xx + 1];
-                            color4b(c, c, c, a)
-                        }
-                        ColorType::Indexed => todo!(),
-                        ColorType::Rgb => {
-                            let c = ((line[xx] as u32 + line[xx + 1] as u32 + line[xx + 2] as u32) / 3) as u8;
-                            color4b(c, c, c, c)
-                        }
-                        ColorType::Rgba => {
-                            let r = line[xx];
-                            let g = line[xx + 1];
-                            let b = line[xx + 2];
-                            let a = line[xx + 3];
-                            color4b(r, g, b, a)
-                        }
-                    };
-                    pixels[(x + y * info.width) as usize] = color;
-                }
-            }
-
-            Ok((info.width as _, info.height as _, pixels))
+            let mut f = File::open(path)?;
+            let mut bytes = Vec::new();
+            f.read_to_end(&mut bytes)?;
+            load_image_bytes(bytes.as_slice())
         }
 
         fn add_slot(&mut self, slot: Dimensioni) -> Result<Recti> {
@@ -371,12 +394,20 @@ pub struct FontEntry<'a> {
     pub font_size: usize,                 // font size in pixels
     pub entries: &'a [(char, CharEntry)], // all printable chars [32-127]
 }
+
+pub enum SourceFormat {
+    Raw,
+    #[cfg(feature = "png_source")]
+    Png,
+}
+
 pub struct AtlasSource<'a> {
     pub width: usize,
     pub height: usize,
-    pub pixels: &'a [Color4b],
+    pub pixels: &'a [u8],
     pub icons: &'a [(&'a str, Recti)],
     pub fonts: &'a [(&'a str, FontEntry<'a>)],
+    pub format: SourceFormat,
     pub slots: &'a [Recti],
 }
 
@@ -400,7 +431,22 @@ impl AtlasHandle {
             })
             .collect();
         let slots: Vec<Recti> = source.slots.iter().map(|p| *p).collect();
-        let pixels: Vec<Color4b> = source.pixels.iter().map(|p| *p).collect();
+        let pixels = match source.format {
+            SourceFormat::Raw => {
+                let mut v = Vec::new();
+                for i in 0..source.pixels.len() / 4 {
+                    v.push(color4b(
+                        source.pixels[i * 4],
+                        source.pixels[i * 4 + 1],
+                        source.pixels[i * 4 + 2],
+                        source.pixels[i * 4 + 3],
+                    ));
+                }
+                v
+            }
+            #[cfg(feature = "png_source")]
+            SourceFormat::Png => load_image_bytes(source.pixels).unwrap().2,
+        };
 
         Self(Rc::new(RefCell::new(Atlas {
             width: source.width,
@@ -414,7 +460,7 @@ impl AtlasHandle {
     }
 
     #[cfg(feature = "save-to-rust")]
-    pub fn to_rust_files(&self, atlas_name: &str, path: &str) -> Result<()> {
+    pub fn to_rust_files(&self, atlas_name: &str, format: SourceFormat, path: &str) -> Result<()> {
         let mut font_meta = String::new();
         font_meta.push_str(format!("use microui_redux::*; pub const {} : AtlasSource = AtlasSource {{\n", atlas_name).as_str());
         font_meta.push_str(format!("width: {}, height: {},\n", self.width(), self.height()).as_str());
@@ -464,12 +510,21 @@ impl AtlasHandle {
         font_meta.push_str(format!("icons: {},\n", icons).as_str());
         font_meta.push_str(format!("fonts: {},\n", fonts).as_str());
         font_meta.push_str(format!("slots: {},\n", slots).as_str());
+        let (source_pixels, source_format) = match format {
+            SourceFormat::Raw => (
+                self.0.borrow().pixels.iter().map(|p| [p.x, p.y, p.z, p.w]).flatten().collect::<Vec<_>>(),
+                "SourceFormat::Raw",
+            ),
+            #[cfg(feature = "png_source")]
+            SourceFormat::Png => (builder::Builder::png_image_bytes(self.clone()).unwrap(), "SourceFormat::Png"),
+        };
 
         let mut pixels = String::from_str("&[\n").unwrap();
-        for p in &self.0.borrow().pixels {
-            pixels.push_str(format!("Color4b {{ x: 0x{:02x}, y: 0x{:02x}, z: 0x{:02x}, w: 0x{:02x} }},", p.x, p.y, p.z, p.w).as_str());
+        for p in source_pixels {
+            pixels.push_str(format!("0x{:02x},", p).as_str());
         }
         pixels.push_str("]\n");
+        font_meta.push_str(format!("format: {},\n", source_format).as_str());
         font_meta.push_str(format!("pixels: {},\n", pixels).as_str());
         font_meta.push_str("};");
         let mut f = File::create(path).unwrap();
