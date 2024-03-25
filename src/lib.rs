@@ -78,6 +78,7 @@ use bitflags::*;
 use std::cmp::{min, max};
 
 pub trait Renderer {
+    fn get_atlas(&self) -> AtlasHandle;
     fn clear(&mut self, width: i32, height: i32, clr: Color);
     fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex);
     fn flush(&mut self);
@@ -473,7 +474,6 @@ impl ContainerHandle {
 }
 
 pub struct Context<R: Renderer> {
-    atlas: AtlasHandle,
     canvas: Canvas<R>,
     style: Style,
 
@@ -489,10 +489,9 @@ pub struct Context<R: Renderer> {
 }
 
 impl<R: Renderer> Context<R> {
-    pub fn new(atlas: AtlasHandle, renderer: R, dim: Dimensioni) -> Self {
+    pub fn new(renderer: R, dim: Dimensioni) -> Self {
         Self {
-            atlas: atlas.clone(),
-            canvas: Canvas::from(renderer, atlas, dim),
+            canvas: Canvas::from(renderer, dim),
             style: Style::default(),
             last_zindex: 0,
             frame: 0,
@@ -571,17 +570,17 @@ impl<R: Renderer> Context<R> {
     }
 
     pub fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
-        let mut window = WindowHandle::window(name, self.atlas.clone(), &self.style, self.input.clone(), initial_rect);
+        let mut window = WindowHandle::window(name, self.canvas.get_atlas(), &self.style, self.input.clone(), initial_rect);
         self.bring_to_front(&mut window);
         window
     }
 
     pub fn new_popup(&mut self, name: &str) -> WindowHandle {
-        WindowHandle::popup(name, self.atlas.clone(), &self.style, self.input.clone())
+        WindowHandle::popup(name, self.canvas.get_atlas(), &self.style, self.input.clone())
     }
 
     pub fn new_panel(&mut self, name: &str) -> ContainerHandle {
-        ContainerHandle::new(Container::new(name, self.atlas.clone(), &self.style, self.input.clone()))
+        ContainerHandle::new(Container::new(name, self.canvas.get_atlas(), &self.style, self.input.clone()))
     }
 
     pub fn bring_to_front(&mut self, window: &mut WindowHandle) {

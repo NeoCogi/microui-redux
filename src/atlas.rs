@@ -564,7 +564,7 @@ impl AtlasHandle {
         res
     }
 
-    pub fn render_slot<F: Fn(usize, usize) -> Color4b>(&mut self, slot: SlotId, f: F) {
+    pub fn render_slot(&mut self, slot: SlotId, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
         let slot_rect = self.0.borrow().slots[slot.0];
         let width = self.width();
         {
@@ -577,5 +577,9 @@ impl AtlasHandle {
         }
         let last_update = self.0.borrow().last_update_id;
         self.0.borrow_mut().last_update_id = last_update.wrapping_add(1);
+    }
+
+    pub fn get_last_update_id(&self) -> usize {
+        self.0.borrow().last_update_id
     }
 }

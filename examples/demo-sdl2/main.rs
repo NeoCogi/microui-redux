@@ -1,18 +1,23 @@
 extern crate sdl2;
 mod renderer;
 
+use std::cell::{Ref, RefCell};
 use std::rc::Rc;
+use std::sync::RwLock;
 
+use rand::rngs::ThreadRng;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::video::GLProfile;
 use crate::renderer::GLRenderer;
 use microui_redux::*;
 use rs_math3d::*;
+use rand::*;
 
 type Context = microui_redux::Context<GLRenderer>;
 
 struct State<'a> {
+    rng: Rc<RefCell<ThreadRng>>,
     slots: Vec<SlotId>,
     label_colors: [LabelColor<'a>; 15],
     bg: [Real; 3],
@@ -51,6 +56,7 @@ pub struct LabelColor<'a> {
 impl<'a> State<'a> {
     pub fn new(slots: Vec<SlotId>) -> Self {
         Self {
+            rng: Rc::new(RefCell::new(thread_rng())),
             slots,
             style: Style::default(),
             label_colors: [
@@ -253,8 +259,16 @@ impl<'a> State<'a> {
             self.slot_header = container.header("Slots", self.slot_header, |container| {
                 container.set_row_widths_height(&[-1], 67);
                 container.button_ex2("Slot 1", Some(self.slots[0].clone()), WidgetOption::NONE);
-                container.button_ex2("Slot 2", Some(self.slots[1].clone()), WidgetOption::NONE);
+                container.button_ex3("Slot 2 - Green", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(|x, y| {
+                    color4b(0x00, 0xFF, 0x00, 0xFF)
+                }));
                 container.button_ex2("Slot 3", Some(self.slots[2].clone()), WidgetOption::NONE);
+                let rng = self.rng.clone();
+                container.button_ex3("Slot 2 - Random", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(move |x, y| {
+                    let mut rm = rng.borrow_mut();
+                    color4b(rm.gen(), rm.gen(), rm.gen(), rm.gen())
+                }));
+
 
             });
         });
@@ -411,14 +425,14 @@ fn main() {
     let slots = vec![Dimensioni::new(64, 64), Dimensioni::new(24, 32), Dimensioni::new(64, 24)];
     let mut atlas = builder::Builder::from_config(&atlas_config(&slots)).unwrap().to_atlas();
     let slots = atlas.clone_slot_table();
-    atlas.render_slot(slots[0], |_x, _y| color4b(0xFF, 0, 0, 0xFF));
-    atlas.render_slot(slots[1], |_x, _y| color4b(0, 0xFF, 0, 0xFF));
-    atlas.render_slot(slots[2], |_x, _y| color4b(0, 0, 0xFF, 0xFF));
+    atlas.render_slot(slots[0], Rc::new(|_x, _y| color4b(0xFF, 0, 0, 0xFF)));
+    atlas.render_slot(slots[1], Rc::new(|_x, _y| color4b(0, 0xFF, 0, 0xFF)));
+    atlas.render_slot(slots[2], Rc::new(|_x, _y| color4b(0, 0, 0xFF, 0xFF)));
     builder::Builder::save_png_image(atlas.clone(), "atlas.png").unwrap();
-    let rd = GLRenderer::new(gl, atlas.width(), atlas.height(), &atlas.pixels(), width, height);
+    let rd = GLRenderer::new(gl, atlas, width, height);
 
     let mut state = State::new(slots);
-    let mut ctx = microui_redux::Context::new(atlas, rd, Dimensioni::new(width as _, height as _));
+    let mut ctx = microui_redux::Context::new(rd, Dimensioni::new(width as _, height as _));
 
     state.demo_window = Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450)));
     state.log_window = Some(ctx.new_window("Log Window", rect(350, 40, 300, 200)));

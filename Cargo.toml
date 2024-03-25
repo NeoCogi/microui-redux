@@ -27,6 +27,7 @@ rand = "0.8.5"
 [dev-dependencies]
 glow = "0.13.0"
 sdl2 = "0.36.0"
+rand = "0.8.5"
 
 # [profile.dev]
 # overflow-checks = false

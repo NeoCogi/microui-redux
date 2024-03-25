@@ -1,3 +1,5 @@
+use std::borrow::BorrowMut;
+
 //
 // Copyright 2022-Present (c) Raja Lehtihet & Wael El Oraiby
 //
@@ -39,17 +41,19 @@ pub struct Vertex {
 
 pub struct Canvas<R: Renderer> {
     renderer: R,
-    atlas: AtlasHandle,
     clip: Recti,
 }
 
 impl<R: Renderer> Canvas<R> {
-    pub fn from(renderer: R, atlas: AtlasHandle, dim: Dimensioni) -> Self {
+    pub fn from(renderer: R, dim: Dimensioni) -> Self {
         Self {
             renderer,
-            atlas,
             clip: Recti::new(0, 0, dim.width, dim.height),
         }
+    }
+
+    pub fn get_atlas(&self) -> AtlasHandle {
+        self.renderer.get_atlas()
     }
 
     #[inline(never)]
@@ -90,7 +94,7 @@ impl<R: Renderer> Canvas<R> {
 
     #[inline(never)]
     pub fn push_rect(&mut self, dst: Recti, src: Recti, color: Color) {
-        let atlas_dim = self.atlas.get_texture_dimension();
+        let atlas_dim = self.renderer.get_atlas().get_texture_dimension();
         match Self::clip_rect(dst, src, self.clip) {
             Some((dst, src)) => {
                 let x = src.x as f32 / atlas_dim.width as f32;
@@ -136,12 +140,12 @@ impl<R: Renderer> Canvas<R> {
     }
 
     pub fn draw_rect(&mut self, rect: Recti, color: Color) {
-        self.push_rect(rect, self.atlas.get_icon_rect(WHITE_ICON), color);
+        self.push_rect(rect, self.renderer.get_atlas().get_icon_rect(WHITE_ICON), color);
     }
 
     #[inline(never)]
     pub fn draw_chars(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
-        let atlas = self.atlas.clone();
+        let atlas = self.renderer.get_atlas();
         atlas.draw_string(font, text, |_, _, dst, src| {
             let dst = Rect::new(pos.x + dst.x, pos.y + dst.y, dst.width, dst.height);
             self.push_rect(dst, src, color)
@@ -149,14 +153,22 @@ impl<R: Renderer> Canvas<R> {
     }
 
     pub fn draw_icon(&mut self, id: IconId, r: Recti, color: Color) {
-        let src = self.atlas.get_icon_rect(id);
+        let src = self.renderer.get_atlas().get_icon_rect(id);
         let x = r.x + (r.width - src.width) / 2;
         let y = r.y + (r.height - src.height) / 2;
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
     pub fn draw_slot(&mut self, id: SlotId, r: Recti, color: Color) {
-        let src = self.atlas.get_slot_rect(id);
+        let src = self.renderer.get_atlas().get_slot_rect(id);
+        let x = r.x + (r.width - src.width) / 2;
+        let y = r.y + (r.height - src.height) / 2;
+        self.push_rect(rect(x, y, src.width, src.height), src, color);
+    }
+
+    pub fn draw_slot_with_function(&mut self, id: SlotId, r: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
+        let src = self.renderer.get_atlas().get_slot_rect(id);
+        self.renderer.get_atlas().borrow_mut().render_slot(id, payload);
         let x = r.x + (r.width - src.width) / 2;
         let y = r.y + (r.height - src.height) / 2;
         self.push_rect(rect(x, y, src.width, src.height), src, color);
