@@ -216,7 +216,8 @@ impl GLRenderer {
     }
 }
 
-impl Renderer for GLRenderer {
+impl Renderer<()> for GLRenderer {
+    fn command(&mut self, _pr: &()) {}
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }

@@ -54,7 +54,7 @@ use super::*;
 use std::cell::RefCell;
 
 #[derive(Clone)]
-pub enum Command {
+pub enum Command<PR> {
     Clip {
         rect: Recti,
     },
@@ -84,17 +84,18 @@ pub enum Command {
         color: Color,
         payload: Rc<dyn Fn(usize, usize) -> Color4b>,
     },
+    PassThrough(PR),
     None,
 }
 
-impl Default for Command {
+impl<PR> Default for Command<PR> {
     fn default() -> Self {
         Command::None
     }
 }
 
 #[derive(Clone)]
-pub struct Container {
+pub struct Container<PR> {
     pub(crate) atlas: AtlasHandle,
     pub style: Style,
     pub name: String,
@@ -103,7 +104,7 @@ pub struct Container {
     pub content_size: Vec2i,
     pub scroll: Vec2i,
     pub zindex: i32,
-    pub command_list: Vec<Command>,
+    pub command_list: Vec<Command<PR>>,
     pub clip_stack: Vec<Recti>,
     pub(crate) layout: LayoutManager,
     pub hover: Option<Id>,
@@ -115,10 +116,10 @@ pub struct Container {
     pub number_edit_buf: String,
     pub number_edit: Option<Id>,
 
-    panels: Vec<ContainerHandle>,
+    panels: Vec<ContainerHandle<PR>>,
 }
 
-impl Container {
+impl<PR: Clone> Container<PR> {
     pub(crate) fn new(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>) -> Self {
         Self {
             name: name.to_string(),
@@ -152,7 +153,7 @@ impl Container {
     }
 
     #[inline(never)]
-    pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
+    pub(crate) fn render<R: Renderer<PR>>(&self, canvas: &mut Canvas<PR, R>) {
         for command in &self.command_list {
             match command {
                 Command::Text { text, pos, color, font } => {
@@ -173,6 +174,7 @@ impl Container {
                 Command::SlotRedraw { rect, id, color, payload } => {
                     canvas.draw_slot_with_function(*id, *rect, *color, payload.clone());
                 }
+                Command::PassThrough(pr) => canvas.pass_through(pr),
                 Command::None => (),
             }
         }
@@ -209,7 +211,7 @@ impl Container {
         return Clip::Part;
     }
 
-    pub fn push_command(&mut self, cmd: Command) {
+    pub fn push_command(&mut self, cmd: Command<PR>) {
         self.command_list.push(cmd);
     }
 
@@ -568,7 +570,7 @@ impl Container {
         self.body = body;
     }
 
-    fn pop_panel(&mut self, panel: &mut ContainerHandle) {
+    fn pop_panel(&mut self, panel: &mut ContainerHandle<PR>) {
         let layout = *panel.inner().layout.top();
         let container = &mut panel.inner_mut();
         container.content_size.x = layout.max.x - layout.body.x;
@@ -577,7 +579,7 @@ impl Container {
     }
 
     #[inline(never)]
-    fn begin_panel(&mut self, panel: &mut ContainerHandle, opt: WidgetOption) {
+    fn begin_panel(&mut self, panel: &mut ContainerHandle<PR>, opt: WidgetOption) {
         let rect = self.layout.next();
         let clip_rect = panel.inner().body;
         let container = &mut panel.inner_mut();
@@ -593,13 +595,13 @@ impl Container {
         container.push_clip_rect(clip_rect);
     }
 
-    fn end_panel(&mut self, panel: &mut ContainerHandle) {
+    fn end_panel(&mut self, panel: &mut ContainerHandle<PR>) {
         panel.inner_mut().pop_clip_rect();
         self.pop_panel(panel);
         self.panels.push(panel.clone())
     }
 
-    pub fn panel<F: FnOnce(&mut ContainerHandle)>(&mut self, panel: &mut ContainerHandle, opt: WidgetOption, f: F) {
+    pub fn panel<F: FnOnce(&mut ContainerHandle<PR>)>(&mut self, panel: &mut ContainerHandle<PR>, opt: WidgetOption, f: F) {
         self.begin_panel(panel, opt);
 
         // call the panel function
