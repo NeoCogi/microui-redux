@@ -14,7 +14,7 @@ use microui_redux::*;
 use rs_math3d::*;
 use rand::*;
 
-type Context = microui_redux::Context<GLRenderer>;
+type Context = microui_redux::Context<(), GLRenderer>;
 
 struct State<'a> {
     rng: Rc<RefCell<ThreadRng>>,
@@ -27,11 +27,11 @@ struct State<'a> {
     checks: [bool; 3],
     style: Style,
 
-    demo_window: Option<WindowHandle>,
-    style_window: Option<WindowHandle>,
-    log_window: Option<WindowHandle>,
-    popup_window: Option<WindowHandle>,
-    log_output: Option<ContainerHandle>,
+    demo_window: Option<WindowHandle<()>>,
+    style_window: Option<WindowHandle<()>>,
+    log_window: Option<WindowHandle<()>>,
+    popup_window: Option<WindowHandle<()>>,
+    log_output: Option<ContainerHandle<()>>,
 
     window_header: NodeState,
     test_buttons_header: NodeState,
@@ -321,7 +321,7 @@ impl<'a> State<'a> {
             }
         });
     }
-    fn uint8_slider(&mut self, value: &mut u8, low: i32, high: i32, ctx: &mut microui_redux::Container) -> ResourceState {
+    fn uint8_slider(&mut self, value: &mut u8, low: i32, high: i32, ctx: &mut microui_redux::Container<()>) -> ResourceState {
         let mut tmp = *value as f32;
         ctx.idmngr.push_id_from_ptr(value);
         let res = ctx.slider_ex(&mut tmp, low as Real, high as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);

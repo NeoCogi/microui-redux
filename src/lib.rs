@@ -77,11 +77,12 @@ pub use rs_math3d::*;
 use bitflags::*;
 use std::cmp::{min, max};
 
-pub trait Renderer {
+pub trait Renderer<PR> {
     fn get_atlas(&self) -> AtlasHandle;
     fn clear(&mut self, width: i32, height: i32, clr: Color);
     fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex);
     fn flush(&mut self);
+    fn command(&mut self, pr: &PR);
 }
 
 #[derive(PartialEq, Copy, Clone)]
@@ -453,42 +454,42 @@ pub fn expand_rect(r: Recti, n: i32) -> Recti {
 }
 
 #[derive(Clone)]
-pub struct ContainerHandle(Rc<RefCell<Container>>);
+pub struct ContainerHandle<PR>(Rc<RefCell<Container<PR>>>);
 
-impl ContainerHandle {
-    pub(crate) fn new(container: Container) -> Self {
+impl<PR: Clone> ContainerHandle<PR> {
+    pub(crate) fn new(container: Container<PR>) -> Self {
         Self(Rc::new(RefCell::new(container)))
     }
 
-    pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
+    pub(crate) fn render<R: Renderer<PR>>(&self, canvas: &mut Canvas<PR, R>) {
         self.0.borrow().render(canvas)
     }
 
-    pub fn inner<'a>(&'a self) -> Ref<'a, Container> {
+    pub fn inner<'a>(&'a self) -> Ref<'a, Container<PR>> {
         self.0.borrow()
     }
 
-    pub fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Container> {
+    pub fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Container<PR>> {
         self.0.borrow_mut()
     }
 }
 
-pub struct Context<R: Renderer> {
-    canvas: Canvas<R>,
+pub struct Context<PR, R: Renderer<PR>> {
+    canvas: Canvas<PR, R>,
     style: Style,
 
     last_zindex: i32,
     frame: usize,
-    hover_root: Option<WindowHandle>,
-    next_hover_root: Option<WindowHandle>,
-    scroll_target: Option<WindowHandle>,
+    hover_root: Option<WindowHandle<PR>>,
+    next_hover_root: Option<WindowHandle<PR>>,
+    scroll_target: Option<WindowHandle<PR>>,
 
-    root_list: Vec<WindowHandle>,
+    root_list: Vec<WindowHandle<PR>>,
 
     pub input: Rc<RefCell<Input>>,
 }
 
-impl<R: Renderer> Context<R> {
+impl<PR, R: Renderer<PR>> Context<PR, R> {
     pub fn new(renderer: R, dim: Dimensioni) -> Self {
         Self {
             canvas: Canvas::from(renderer, dim),
@@ -506,7 +507,7 @@ impl<R: Renderer> Context<R> {
     }
 }
 
-impl<R: Renderer> Context<R> {
+impl<PR: Clone, R: Renderer<PR>> Context<PR, R> {
     pub fn clear(&mut self, width: i32, height: i32, clr: Color) {
         self.canvas.clear(width, height, clr);
     }
@@ -569,27 +570,27 @@ impl<R: Renderer> Context<R> {
         self.frame_end();
     }
 
-    pub fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
+    pub fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle<PR> {
         let mut window = WindowHandle::window(name, self.canvas.get_atlas(), &self.style, self.input.clone(), initial_rect);
         self.bring_to_front(&mut window);
         window
     }
 
-    pub fn new_popup(&mut self, name: &str) -> WindowHandle {
+    pub fn new_popup(&mut self, name: &str) -> WindowHandle<PR> {
         WindowHandle::popup(name, self.canvas.get_atlas(), &self.style, self.input.clone())
     }
 
-    pub fn new_panel(&mut self, name: &str) -> ContainerHandle {
+    pub fn new_panel(&mut self, name: &str) -> ContainerHandle<PR> {
         ContainerHandle::new(Container::new(name, self.canvas.get_atlas(), &self.style, self.input.clone()))
     }
 
-    pub fn bring_to_front(&mut self, window: &mut WindowHandle) {
+    pub fn bring_to_front(&mut self, window: &mut WindowHandle<PR>) {
         self.last_zindex += 1;
         window.inner_mut().main.zindex = self.last_zindex;
     }
 
     #[inline(never)]
-    fn begin_root_container(&mut self, window: &mut WindowHandle) {
+    fn begin_root_container(&mut self, window: &mut WindowHandle<PR>) {
         self.root_list.push(window.clone());
 
         if window.inner().main.rect.contains(&self.input.borrow().mouse_pos)
@@ -602,7 +603,7 @@ impl<R: Renderer> Context<R> {
     }
 
     #[inline(never)]
-    fn end_root_container(&mut self, window: &mut WindowHandle) {
+    fn end_root_container(&mut self, window: &mut WindowHandle<PR>) {
         let container = &mut window.inner_mut().main;
         container.pop_clip_rect();
 
@@ -614,7 +615,7 @@ impl<R: Renderer> Context<R> {
 
     #[inline(never)]
     #[must_use]
-    fn begin_window(&mut self, window: &mut WindowHandle, opt: WidgetOption) -> bool {
+    fn begin_window(&mut self, window: &mut WindowHandle<PR>, opt: WidgetOption) -> bool {
         if !window.is_open() {
             return false;
         }
@@ -625,12 +626,12 @@ impl<R: Renderer> Context<R> {
         true
     }
 
-    fn end_window(&mut self, window: &mut WindowHandle) {
+    fn end_window(&mut self, window: &mut WindowHandle<PR>) {
         window.end_window();
         self.end_root_container(window);
     }
 
-    pub fn window<F: FnOnce(&mut Container)>(&mut self, window: &mut WindowHandle, opt: WidgetOption, f: F) {
+    pub fn window<F: FnOnce(&mut Container<PR>)>(&mut self, window: &mut WindowHandle<PR>, opt: WidgetOption, f: F) {
         // call the window function if the window is open
         if self.begin_window(window, opt) {
             window.inner_mut().main.style = self.style.clone();
@@ -639,7 +640,7 @@ impl<R: Renderer> Context<R> {
         }
     }
 
-    pub fn open_popup(&mut self, window: &mut WindowHandle) {
+    pub fn open_popup(&mut self, window: &mut WindowHandle<PR>) {
         self.next_hover_root = Some(window.clone());
         self.hover_root = self.next_hover_root.clone();
         window.inner_mut().main.rect = rect(self.input.borrow().mouse_pos.x, self.input.borrow().mouse_pos.y, 1, 1);
@@ -648,7 +649,7 @@ impl<R: Renderer> Context<R> {
         self.bring_to_front(window);
     }
 
-    pub fn popup<F: FnOnce(&mut Container)>(&mut self, window: &mut WindowHandle, f: F) {
+    pub fn popup<F: FnOnce(&mut Container<PR>)>(&mut self, window: &mut WindowHandle<PR>, f: F) {
         let opt = WidgetOption::AUTO_SIZE | WidgetOption::NO_RESIZE | WidgetOption::NO_SCROLL | WidgetOption::NO_TITLE;
         self.window(window, opt, f);
     }

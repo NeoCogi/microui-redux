@@ -1,4 +1,4 @@
-use std::borrow::BorrowMut;
+use std::{borrow::BorrowMut, default, marker::PhantomData};
 
 //
 // Copyright 2022-Present (c) Raja Lehtihet & Wael El Oraiby
@@ -39,16 +39,18 @@ pub struct Vertex {
     color: Color4b,
 }
 
-pub struct Canvas<R: Renderer> {
+pub struct Canvas<PR, R: Renderer<PR>> {
     renderer: R,
     clip: Recti,
+    _pd: PhantomData<PR>,
 }
 
-impl<R: Renderer> Canvas<R> {
+impl<PR, R: Renderer<PR>> Canvas<PR, R> {
     pub fn from(renderer: R, dim: Dimensioni) -> Self {
         Self {
             renderer,
             clip: Recti::new(0, 0, dim.width, dim.height),
+            _pd: Default::default(),
         }
     }
 
@@ -184,5 +186,9 @@ impl<R: Renderer> Canvas<R> {
 
     pub fn flush(&mut self) {
         self.renderer.flush()
+    }
+
+    pub fn pass_through(&mut self, pr: &PR) {
+        self.renderer.command(pr);
     }
 }
