@@ -52,7 +52,6 @@
 //
 use microui_redux::*;
 use glow::*;
-use rs_math3d::*;
 
 const VERTEX_SHADER: &str = "#version 100
 uniform highp mat4 uTransform;
@@ -79,19 +78,6 @@ void main()
     gl_FragColor = col * vVertexColor;
 }";
 
-pub fn ortho4(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> [f32; 16] {
-    let width = right - left;
-    let height = top - bottom;
-    let depth = far - near;
-    let r00 = 2.0 / width;
-    let r11 = 2.0 / height;
-    let r22 = -2.0 / depth;
-    let r03 = -(right + left) / width;
-    let r13 = -(top + bottom) / height;
-    let r23 = -(far + near) / depth;
-    [r00, 0.0, 0.0, 0.0, 0.0, r11, 0.0, 0.0, 0.0, 0.0, r22, 0.0, r03, r13, r23, 1.0]
-}
-
 pub struct GLRenderer {
     gl: glow::Context,
     verts: Vec<Vertex>,
@@ -105,7 +91,6 @@ pub struct GLRenderer {
 
     width: u32,
     height: u32,
-    clip: Recti,
 
     atlas: AtlasHandle,
     last_update_id: usize,
@@ -208,7 +193,6 @@ impl GLRenderer {
 
                 width,
                 height,
-                clip: Recti::new(0, 0, width as _, height as _),
                 atlas,
                 last_update_id: usize::MAX,
             }
@@ -256,8 +240,9 @@ impl Renderer<()> for GLRenderer {
 
             // set the viewport
             let viewport = self.gl.get_uniform_location(self.program, "uTransform").unwrap();
-            let tm = ortho4(0.0, self.width as f32, self.height as f32, 0.0, -1.0, 1.0);
-            self.gl.uniform_matrix_4_f32_slice(Some(&viewport), false, &tm);
+            let tm = ortho4(0.0, self.width as f32, self.height as f32, 0.0, -1.0, 1.0).col.as_ptr() as *const _ as *const f32;
+            let slice = std::slice::from_raw_parts(tm, 16);
+            self.gl.uniform_matrix_4_f32_slice(Some(&viewport), false, &slice);
             debug_assert_eq!(self.gl.get_error(), 0);
 
             // set the vertex buffer
