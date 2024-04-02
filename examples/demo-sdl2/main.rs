@@ -1,5 +1,6 @@
 extern crate sdl2;
-mod renderer;
+#[path = "../common/mod.rs"]
+mod common;
 
 use std::cell::{Ref, RefCell};
 use std::rc::Rc;
@@ -9,7 +10,7 @@ use rand::rngs::ThreadRng;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::video::GLProfile;
-use crate::renderer::GLRenderer;
+use crate::common::GLRenderer;
 use microui_redux::*;
 use rs_math3d::*;
 use rand::*;
