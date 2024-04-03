@@ -1,10 +1,9 @@
 extern crate sdl2;
-#[path = "../common/mod.rs"]
+#[path = "./common/mod.rs"]
 mod common;
 
-use std::cell::{Ref, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::RwLock;
 
 use rand::rngs::ThreadRng;
 use sdl2::event::{Event, WindowEvent};
@@ -12,7 +11,6 @@ use sdl2::keyboard::Keycode;
 use sdl2::video::GLProfile;
 use crate::common::GLRenderer;
 use microui_redux::*;
-use rs_math3d::*;
 use rand::*;
 
 type Context = microui_redux::Context<(), GLRenderer>;
@@ -260,12 +258,12 @@ impl<'a> State<'a> {
             self.slot_header = container.header("Slots", self.slot_header, |container| {
                 container.set_row_widths_height(&[-1], 67);
                 container.button_ex2("Slot 1", Some(self.slots[0].clone()), WidgetOption::NONE);
-                container.button_ex3("Slot 2 - Green", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(|x, y| {
+                container.button_ex3("Slot 2 - Green", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(|_x, _y| {
                     color4b(0x00, 0xFF, 0x00, 0xFF)
                 }));
                 container.button_ex2("Slot 3", Some(self.slots[2].clone()), WidgetOption::NONE);
                 let rng = self.rng.clone();
-                container.button_ex3("Slot 2 - Random", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(move |x, y| {
+                container.button_ex3("Slot 2 - Random", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(move |_x, _y| {
                     let mut rm = rng.borrow_mut();
                     color4b(rm.gen(), rm.gen(), rm.gen(), rm.gen())
                 }));
