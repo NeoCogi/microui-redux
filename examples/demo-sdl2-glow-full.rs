@@ -9,7 +9,7 @@ use rand::rngs::ThreadRng;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::video::GLProfile;
-use crate::common::GLRenderer;
+use common::{atlas_config, GLRenderer};
 use microui_redux::*;
 use rand::*;
 
@@ -382,21 +382,6 @@ impl<'a> State<'a> {
             self.log_window(ctx);
             self.test_window(ctx);
         })
-    }
-}
-
-fn atlas_config(slots: &Vec<Dimensioni>) -> builder::Config {
-    builder::Config {
-        texture_height: 256,
-        texture_width: 256,
-        white_icon: String::from("assets/WHITE.png"),
-        close_icon: String::from("assets/CLOSE.png"),
-        expand_icon: String::from("assets/EXPAND_DOWN.png"),
-        collapse_icon: String::from("assets/COLLAPSE_UP.png"),
-        check_icon: String::from("assets/CHECK.png"),
-        default_font: String::from("assets/NORMAL.ttf"),
-        default_font_size: 12,
-        slots,
     }
 }
 
