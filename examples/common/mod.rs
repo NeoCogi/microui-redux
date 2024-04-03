@@ -323,3 +323,18 @@ impl Renderer<()> for GLRenderer {
         }
     }
 }
+
+pub fn atlas_config(slots: &Vec<Dimensioni>) -> builder::Config {
+    builder::Config {
+        texture_height: 256,
+        texture_width: 256,
+        white_icon: String::from("assets/WHITE.png"),
+        close_icon: String::from("assets/CLOSE.png"),
+        expand_icon: String::from("assets/EXPAND_DOWN.png"),
+        collapse_icon: String::from("assets/COLLAPSE_UP.png"),
+        check_icon: String::from("assets/CHECK.png"),
+        default_font: String::from("assets/NORMAL.ttf"),
+        default_font_size: 12,
+        slots,
+    }
+}
