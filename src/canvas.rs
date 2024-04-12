@@ -1,5 +1,3 @@
-use std::{borrow::BorrowMut, default, marker::PhantomData};
-
 //
 // Copyright 2022-Present (c) Raja Lehtihet & Wael El Oraiby
 //
@@ -30,6 +28,7 @@ use std::{borrow::BorrowMut, default, marker::PhantomData};
 // POSSIBILITY OF SUCH DAMAGE.
 //
 use super::*;
+use std::{borrow::BorrowMut, marker::PhantomData};
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]

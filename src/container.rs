@@ -444,7 +444,7 @@ impl<PR: Clone> Container<PR> {
             self.draw_control_frame(id, r, ControlColor::Button, WidgetOption::NONE);
         }
         let color = self.style.colors[ControlColor::Text as usize];
-        self.draw_icon(if expanded { EXPAND_ICON } else { COLLAPSE_ICON }, rect(r.x, r.y, r.height, r.height), color);
+        self.draw_icon(if expanded { COLLAPSE_ICON } else { EXPAND_ICON }, rect(r.x, r.y, r.height, r.height), color);
         r.x += r.height - self.style.padding;
         r.width -= r.height - self.style.padding;
         self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
