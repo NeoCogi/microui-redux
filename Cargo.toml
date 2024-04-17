@@ -1,11 +1,11 @@
 [package]
 name = "microui-redux"
 authors = ["Raja Lehtihet", "Wael El Oraiby"]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 readme = "README.md"
 license = "BSD-3-Clause"
-description = "MicroUI (immediate mode GUI) library in pure rust"
+description = "Idiomatic Rust MicroUI (immediate mode GUI) library port"
 repository = "https://github.com/eloraiby/microui-redux"
 categories = ["gui", "rendering"]
 

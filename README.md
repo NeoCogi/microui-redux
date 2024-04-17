@@ -1,18 +1,18 @@
-# Rxi's Microui Port to Rust
+# Rxi's Microui Port to Idiomatic Rust
 [![Crate](https://img.shields.io/crates/v/microui-redux.svg)](https://crates.io/crates/microui-redux)
 
-This a port of Rxi's MicroUI to Rust language. 
+This a port of Rxi's MicroUI to Rust language.
 We tried to keep the usage pattern as close to the original as possible, but also as idiomatic to Rust as possible. In contrast with ![microui-rs](https://github.com/neocogi/microui-rs), this version uses the standard library to give us more flexibity and switch to closures for all container related operations (Window, Panel, Columns, ...).
 
-We used C2Rust to create the initial code and iterated > 60 times to get it to where it is now. Few bugs are lingering (Lost to translation!), be advised!
+Originally, we used C2Rust to create the initial code and iterated > 60 times to make microui-rs. This builds on top of that by much more!
 
 ## Demo
 Clone and build the demo (SDL2 & glow) / Tested on linux:
 ```
-$ cargo run --example demo-sdl2
+$ cargo run --example demo-sdl2-glow-full
 ```
 
-![random](https://github.com/eloraiby/microui-redux/raw/master/res/microui.png)
+![random](https://github.com/NeoCogi/microui-redux/raw/master/res/microui.png)
 
 ## Roadmap
 
