@@ -66,7 +66,7 @@ varying highp vec2 vTexCoord;
 varying lowp vec4 vVertexColor;
 void main()
 {
-    vVertexColor = vertexColor;
+    vVertexColor = vertexColor / 255.0;
     vTexCoord = vertexTexCoord;
     highp vec4 pos = vec4(vertexPosition.x, vertexPosition.y, 0.0, 1.0);
     gl_Position = uTransform * pos;
@@ -188,26 +188,22 @@ impl MQRenderer {
                 VertexAttribute::new("vertexColor", VertexFormat::Byte4),
             ],
             program,
-            PipelineParams::default(), // PipelineParams {
-                                       //     cull_face: CullFace::Nothing,
-                                       //     front_face_order: FrontFaceOrder::CounterClockwise,
-                                       //     depth_test: Comparison::Never,
-                                       //     depth_write: false,
-                                       //     depth_write_offset: None,
-                                       //     color_blend: Some(BlendState::new(
-                                       //         Equation::Add,
-                                       //         BlendFactor::Value(BlendValue::SourceAlpha),
-                                       //         BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
-                                       //     )),
-                                       //     alpha_blend: Some(BlendState::new(
-                                       //         Equation::Add,
-                                       //         BlendFactor::Value(BlendValue::SourceAlpha),
-                                       //         BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
-                                       //     )),
-                                       //     stencil_test: None,
-                                       //     color_write: (true, true, true, true),
-                                       //     primitive_type: PrimitiveType::Triangles,
-                                       // },
+            PipelineParams {
+                cull_face: CullFace::Nothing,
+                front_face_order: FrontFaceOrder::CounterClockwise,
+                depth_test: Comparison::Never,
+                depth_write: false,
+                depth_write_offset: None,
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                alpha_blend: Some(BlendState::new(Equation::Add, BlendFactor::Zero, BlendFactor::One)),
+                stencil_test: None,
+                color_write: (true, true, true, true),
+                primitive_type: PrimitiveType::Triangles,
+            },
         );
         Self {
             ctx,
@@ -243,6 +239,8 @@ impl Renderer<()> for MQRenderer {
 
         let ortho = ortho4(0.0, self.width as f32, self.height as f32, 0.0, -1.0, 1.0);
 
+        self.ctx.buffer_update(self.vbo, BufferSource::slice(&self.verts));
+        self.ctx.buffer_update(self.ibo, BufferSource::slice(&self.indices));
         self.ctx.apply_viewport(0, 0, self.width as i32, self.height as i32);
         self.ctx.apply_pipeline(&self.pipeline);
         self.ctx.apply_bindings(&self.bindings);
