@@ -97,8 +97,13 @@ impl<S> EventHandler for Application<S> {
     }
 
     fn key_down_event(&mut self, keycode: miniquad::KeyCode, keymod: miniquad::KeyMods, _repeat: bool) {
-        let km = map_keymode(keymod, keycode);
-        self.ctx.input.borrow_mut().keydown(km);
+        match keycode {
+            miniquad::KeyCode::Escape => miniquad::window::order_quit(),
+            keycode => {
+                let km = map_keymode(keymod, keycode);
+                self.ctx.input.borrow_mut().keydown(km);
+            }
+        }
     }
 
     fn key_up_event(&mut self, keycode: miniquad::KeyCode, keymod: miniquad::KeyMods) {
