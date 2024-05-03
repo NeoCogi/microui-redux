@@ -51,7 +51,7 @@
 // IN THE SOFTWARE.
 //
 use microui_redux::*;
-use miniquad::{conf, window, EventHandler, PassAction, RenderingBackend};
+use miniquad::{conf, window, EventHandler, RenderingBackend};
 
 use super::*;
 
@@ -114,7 +114,7 @@ impl<S> EventHandler for Application<S> {
         self.ctx.input.borrow_mut().mousemove(x as _, y as _);
     }
 
-    fn mouse_wheel_event(&mut self, x: f32, y: f32) {
+    fn mouse_wheel_event(&mut self, _x: f32, y: f32) {
         self.ctx.input.borrow_mut().scroll(0, (y * -30.0) as _);
     }
 

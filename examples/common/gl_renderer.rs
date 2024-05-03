@@ -27,29 +27,6 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
-// -----------------------------------------------------------------------------
-// Ported to rust from https://github.com/rxi/microui/ and the original license
-//
-// Copyright (c) 2020 rxi
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to
-// deal in the Software without restriction, including without limitation the
-// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-// sell copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-// IN THE SOFTWARE.
-//
 
 use microui_redux::*;
 use miniquad::*;
@@ -144,14 +121,17 @@ impl MQRenderer {
             BufferType::VertexBuffer,
             BufferUsage::Dynamic,
             BufferSource::Empty {
-                size: vertex_size * 65536,
+                size: vertex_size * MAX_VERTEX_COUNT,
                 element_size: vertex_size,
             },
         );
         let ibo = ctx.new_buffer(
             BufferType::IndexBuffer,
             BufferUsage::Dynamic,
-            BufferSource::Empty { size: 2 * 65536, element_size: 2 },
+            BufferSource::Empty {
+                size: 2 * MAX_INDEX_COUNT,
+                element_size: 2,
+            },
         );
 
         let shader = ShaderSource::Glsl {
@@ -252,7 +232,7 @@ impl Renderer<()> for MQRenderer {
     }
 
     fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) {
-        if self.verts.len() + 4 >= 65536 || self.indices.len() + 6 >= 65536 {
+        if self.verts.len() + 4 >= MAX_VERTEX_COUNT || self.indices.len() + 6 >= MAX_INDEX_COUNT {
             self.flush();
         }
 
