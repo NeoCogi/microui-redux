@@ -51,123 +51,105 @@
 // IN THE SOFTWARE.
 //
 use microui_redux::*;
-
-use sdl2::{Sdl, VideoSubsystem};
-use sdl2::event::{Event, WindowEvent};
-use sdl2::keyboard::Keycode;
-use sdl2::video::{GLContext, GLProfile, Window};
+use miniquad::{conf, window, EventHandler, PassAction, RenderingBackend};
 
 use super::*;
 
-type MicroUI = microui_redux::Context<(), GLRenderer>;
-pub struct Application<S> {
-    state: S,
-    sdl_ctx: Sdl,
-    _sdl_vid: VideoSubsystem,
-    gl_ctx: GLContext,
-    window: Window,
+type MicroUI = microui_redux::Context<(), MQRenderer>;
+struct Application<S> {
+    state: Box<S>,
     ctx: MicroUI,
+    update: Box<dyn FnMut(&mut MicroUI, &mut Box<S>)>,
 }
 
-impl<S> Application<S> {
-    pub fn new<F: FnOnce(&mut MicroUI) -> S>(atlas: AtlasHandle, init_state: F) -> Result<Self, String> {
-        let sdl_ctx = sdl2::init().unwrap();
-        let video = sdl_ctx.video().unwrap();
+fn map_mouse_button(mb: miniquad::MouseButton) -> microui_redux::MouseButton {
+    match mb {
+        miniquad::MouseButton::Left => microui_redux::MouseButton::LEFT,
+        miniquad::MouseButton::Right => microui_redux::MouseButton::RIGHT,
+        miniquad::MouseButton::Middle => microui_redux::MouseButton::MIDDLE,
+        _ => microui_redux::MouseButton::NONE,
+    }
+}
 
-        let gl_attr = video.gl_attr();
-        gl_attr.set_context_profile(GLProfile::GLES);
-        gl_attr.set_context_version(3, 0);
+fn map_keymode(km: miniquad::KeyMods, kc: miniquad::KeyCode) -> microui_redux::KeyMode {
+    match (km, kc) {
+        (_, miniquad::KeyCode::LeftAlt) | (_, miniquad::KeyCode::RightAlt) => microui_redux::KeyMode::ALT,
+        (_, miniquad::KeyCode::LeftControl) | (_, miniquad::KeyCode::RightControl) => microui_redux::KeyMode::CTRL,
+        (_, miniquad::KeyCode::LeftShift) | (_, miniquad::KeyCode::RightShift) => microui_redux::KeyMode::SHIFT,
+        (_, miniquad::KeyCode::Backspace) => microui_redux::KeyMode::BACKSPACE,
+        (_, miniquad::KeyCode::Enter) => microui_redux::KeyMode::RETURN,
+        _ => microui_redux::KeyMode::NONE,
+    }
+}
 
-        let window = video.window("Window", 800, 600).opengl().build().unwrap();
+impl<S> EventHandler for Application<S> {
+    fn update(&mut self) {}
 
-        // Unlike the other example above, nobody created a context for your window, so you need to create one.
+    fn draw(&mut self) {
+        let (width, height) = (conf::Conf::default().window_width, conf::Conf::default().window_height);
 
-        // save the gl context from SDL as well, otherwise, it will be dropped and the gl context is lost
-        let gl_ctx = window.gl_create_context().unwrap();
-        let gl = unsafe { glow::Context::from_loader_function(|s| video.gl_get_proc_address(s) as *const _) };
+        self.ctx.begin(width, height, color(0x7F, 0x7F, 0x7F, 0xFF));
+        (self.update)(&mut self.ctx, &mut self.state);
 
-        debug_assert_eq!(gl_attr.context_profile(), GLProfile::GLES);
-        debug_assert_eq!(gl_attr.context_version(), (3, 0));
+        self.ctx.end();
 
-        let (width, height) = window.size();
-
-        let rd = GLRenderer::new(gl, atlas, width, height);
-
-        let mut ctx = microui_redux::Context::new(rd, Dimensioni::new(width as _, height as _));
-        Ok(Self {
-            state: init_state(&mut ctx),
-            sdl_ctx,
-            _sdl_vid: video,
-            gl_ctx,
-            window,
-            ctx,
-        })
+        ::std::thread::sleep(::std::time::Duration::new(0, 1_000_000_000u32 / 60));
     }
 
-    pub fn event_loop<F: Fn(&mut MicroUI, &mut S)>(&mut self, f: F) {
-        self.window.gl_make_current(&self.gl_ctx).unwrap();
-
-        let mut event_pump = self.sdl_ctx.event_pump().unwrap();
-        'running: loop {
-            let (width, height) = self.window.size();
-
-            self.ctx.clear(width as i32, height as i32, color(0x7F, 0x7F, 0x7F, 255));
-
-            fn map_mouse_button(sdl_mb: sdl2::mouse::MouseButton) -> microui_redux::MouseButton {
-                match sdl_mb {
-                    sdl2::mouse::MouseButton::Left => microui_redux::MouseButton::LEFT,
-                    sdl2::mouse::MouseButton::Right => microui_redux::MouseButton::RIGHT,
-                    sdl2::mouse::MouseButton::Middle => microui_redux::MouseButton::MIDDLE,
-                    _ => microui_redux::MouseButton::NONE,
-                }
-            }
-
-            fn map_keymode(sdl_km: sdl2::keyboard::Mod, sdl_kc: Option<sdl2::keyboard::Keycode>) -> microui_redux::KeyMode {
-                match (sdl_km, sdl_kc) {
-                    (sdl2::keyboard::Mod::LALTMOD, _) | (sdl2::keyboard::Mod::RALTMOD, _) => microui_redux::KeyMode::ALT,
-                    (sdl2::keyboard::Mod::LCTRLMOD, _) | (sdl2::keyboard::Mod::RCTRLMOD, _) => microui_redux::KeyMode::CTRL,
-                    (sdl2::keyboard::Mod::LSHIFTMOD, _) | (sdl2::keyboard::Mod::RSHIFTMOD, _) => microui_redux::KeyMode::SHIFT,
-                    (_, Some(sdl2::keyboard::Keycode::Backspace)) => microui_redux::KeyMode::BACKSPACE,
-                    (_, Some(sdl2::keyboard::Keycode::Return)) => microui_redux::KeyMode::RETURN,
-                    _ => microui_redux::KeyMode::NONE,
-                }
-            }
-
-            for event in event_pump.poll_iter() {
-                match event {
-                    Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
-                    Event::Window { win_event: WindowEvent::Close, .. } => break 'running,
-                    Event::MouseMotion { x, y, .. } => self.ctx.input.borrow_mut().mousemove(x, y),
-                    Event::MouseWheel { y, .. } => self.ctx.input.borrow_mut().scroll(0, y * -30),
-                    Event::MouseButtonDown { x, y, mouse_btn, .. } => {
-                        let mb = map_mouse_button(mouse_btn);
-                        self.ctx.input.borrow_mut().mousedown(x, y, mb);
-                    }
-                    Event::MouseButtonUp { x, y, mouse_btn, .. } => {
-                        let mb = map_mouse_button(mouse_btn);
-                        self.ctx.input.borrow_mut().mouseup(x, y, mb);
-                    }
-                    Event::KeyDown { keymod, keycode, .. } => {
-                        let km = map_keymode(keymod, keycode);
-                        self.ctx.input.borrow_mut().keydown(km);
-                    }
-                    Event::KeyUp { keymod, keycode, .. } => {
-                        let km = map_keymode(keymod, keycode);
-                        self.ctx.input.borrow_mut().keyup(km);
-                    }
-                    Event::TextInput { text, .. } => {
-                        self.ctx.input.borrow_mut().text(text.as_str());
-                    }
-
-                    _ => {}
-                }
-            }
-
-            f(&mut self.ctx, &mut self.state);
-            self.ctx.flush();
-            self.window.gl_swap_window();
-
-            ::std::thread::sleep(::std::time::Duration::new(0, 1_000_000_000u32 / 60));
-        }
+    fn key_down_event(&mut self, keycode: miniquad::KeyCode, keymod: miniquad::KeyMods, _repeat: bool) {
+        let km = map_keymode(keymod, keycode);
+        self.ctx.input.borrow_mut().keydown(km);
     }
+
+    fn key_up_event(&mut self, keycode: miniquad::KeyCode, keymod: miniquad::KeyMods) {
+        let km = map_keymode(keymod, keycode);
+        self.ctx.input.borrow_mut().keyup(km);
+    }
+
+    fn char_event(&mut self, character: char, _keymods: miniquad::KeyMods, _repeat: bool) {
+        self.ctx.input.borrow_mut().text(&character.to_string());
+    }
+
+    fn mouse_motion_event(&mut self, x: f32, y: f32) {
+        self.ctx.input.borrow_mut().mousemove(x as _, y as _);
+    }
+
+    fn mouse_wheel_event(&mut self, x: f32, y: f32) {
+        self.ctx.input.borrow_mut().scroll(0, (y * -30.0) as _);
+    }
+
+    fn mouse_button_down_event(&mut self, button: miniquad::MouseButton, x: f32, y: f32) {
+        let mb = map_mouse_button(button);
+        self.ctx.input.borrow_mut().mousedown(x as _, y as _, mb);
+    }
+
+    fn mouse_button_up_event(&mut self, button: miniquad::MouseButton, x: f32, y: f32) {
+        let mb = map_mouse_button(button);
+        self.ctx.input.borrow_mut().mouseup(x as _, y as _, mb);
+    }
+}
+pub fn start<S: 'static, I: FnOnce(&mut MicroUI) -> S + 'static, U: FnMut(&mut MicroUI, &mut Box<S>) + 'static>(
+    atlas: AtlasHandle,
+    init_state: I,
+    mut update_function: U,
+) {
+    let mut conf = conf::Conf::default();
+    let metal = std::env::args().nth(1).as_deref() == Some("metal");
+    conf.platform.apple_gfx_api = if metal { conf::AppleGfxApi::Metal } else { conf::AppleGfxApi::OpenGl };
+    let width = conf.window_width;
+    let height = conf.window_height;
+
+    miniquad::start(conf, move || {
+        let ctx: Box<dyn RenderingBackend> = window::new_rendering_backend();
+
+        let rd = MQRenderer::new(ctx, atlas, width as _, height as _);
+        let mut mui = microui_redux::Context::new(rd, Dimensioni::new(width as _, height as _));
+        let application = Application {
+            update: Box::new(move |ctx, state| update_function(ctx, state)),
+            state: Box::new(init_state(&mut mui)),
+            ctx: mui,
+        };
+
+        Box::new(application)
+    });
 }

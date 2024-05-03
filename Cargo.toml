@@ -26,8 +26,7 @@ png = { version = "0.17.11", optional = true }
 rand = "0.8.5"
 
 [dev-dependencies]
-glow = "0.13.0"
-sdl2 = "0.36.0"
+miniquad = { git = "https://github.com/eloraiby/miniquad" }
 rand = "0.8.5"
 
 # [profile.dev]

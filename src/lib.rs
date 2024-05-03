@@ -79,9 +79,10 @@ use std::cmp::{min, max};
 
 pub trait Renderer<PR> {
     fn get_atlas(&self) -> AtlasHandle;
-    fn clear(&mut self, width: i32, height: i32, clr: Color);
+    fn begin(&mut self, width: i32, height: i32, clr: Color);
     fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex);
     fn flush(&mut self);
+    fn end(&mut self);
     fn command(&mut self, pr: &PR);
 }
 
@@ -508,15 +509,15 @@ impl<PR, R: Renderer<PR>> Context<PR, R> {
 }
 
 impl<PR: Clone, R: Renderer<PR>> Context<PR, R> {
-    pub fn clear(&mut self, width: i32, height: i32, clr: Color) {
-        self.canvas.clear(width, height, clr);
+    pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
+        self.canvas.begin(width, height, clr);
     }
 
-    pub fn flush(&mut self) {
+    pub fn end(&mut self) {
         for r in &self.root_list {
             r.render(&mut self.canvas);
         }
-        self.canvas.flush()
+        self.canvas.end()
     }
 
     #[inline(never)]
