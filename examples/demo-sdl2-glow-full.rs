@@ -1,4 +1,3 @@
-extern crate sdl2;
 #[path = "./common/mod.rs"]
 mod common;
 
@@ -6,15 +5,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use rand::rngs::ThreadRng;
-use sdl2::event::{Event, WindowEvent};
-use sdl2::keyboard::Keycode;
-use sdl2::video::GLProfile;
-use common::{atlas_config, GLRenderer};
+use common::{atlas_config, start, MQRenderer};
 use microui_redux::*;
 use rand::*;
-use crate::common::Application;
 
-type Context = microui_redux::Context<(), GLRenderer>;
+type Context = microui_redux::Context<(), MQRenderer>;
 
 struct State<'a> {
     rng: Rc<RefCell<ThreadRng>>,
@@ -395,19 +390,20 @@ fn main() {
     atlas.render_slot(slots[2], Rc::new(|_x, _y| color4b(0, 0, 0xFF, 0xFF)));
     builder::Builder::save_png_image(atlas.clone(), "atlas.png").unwrap();
 
-    let mut fw = Application::new(atlas, |ctx| {
-        let mut state = State::new(slots);
+    start(
+        atlas,
+        |ctx| {
+            let mut state = State::new(slots);
 
-        state.demo_window = Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450)));
-        state.log_window = Some(ctx.new_window("Log Window", rect(350, 40, 300, 200)));
-        state.style_window = Some(ctx.new_window("Style Editor", rect(350, 250, 300, 240)));
-        state.popup_window = Some(ctx.new_popup("Test Popup"));
-        state.log_output = Some(ctx.new_panel("Log Outputman, "));
-        state
-    })
-    .unwrap();
-
-    fw.event_loop(|ctx, state| {
-        state.process_frame(ctx);
-    });
+            state.demo_window = Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450)));
+            state.log_window = Some(ctx.new_window("Log Window", rect(350, 40, 300, 200)));
+            state.style_window = Some(ctx.new_window("Style Editor", rect(350, 250, 300, 240)));
+            state.popup_window = Some(ctx.new_popup("Test Popup"));
+            state.log_output = Some(ctx.new_panel("Log Outputman, "));
+            state
+        },
+        |ctx, state| {
+            state.process_frame(ctx);
+        },
+    );
 }
