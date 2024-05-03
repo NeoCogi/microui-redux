@@ -179,12 +179,12 @@ impl<PR, R: Renderer<PR>> Canvas<PR, R> {
         self.clip = rect;
     }
 
-    pub fn clear(&mut self, width: i32, height: i32, clr: Color) {
-        self.renderer.clear(width, height, clr);
+    pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
+        self.renderer.begin(width, height, clr);
     }
 
-    pub fn flush(&mut self) {
-        self.renderer.flush()
+    pub fn end(&mut self) {
+        self.renderer.end()
     }
 
     pub fn pass_through(&mut self, pr: &PR) {
