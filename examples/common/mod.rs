@@ -55,8 +55,8 @@ use microui_redux::*;
 mod application;
 pub use application::*;
 
-mod gl_renderer;
-pub use gl_renderer::*;
+mod quad_renderer;
+pub use quad_renderer::*;
 
 pub fn atlas_config(slots: &Vec<Dimensioni>) -> builder::Config {
     builder::Config {
