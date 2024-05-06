@@ -84,7 +84,7 @@ impl Drop for MQRenderer {
         self.ctx.delete_buffer(self.vbo);
         self.ctx.delete_buffer(self.ibo);
         self.ctx.delete_texture(self.tex_o);
-        self.ctx.delete_program(self.program);
+        self.ctx.delete_shader(self.program);
     }
 }
 
