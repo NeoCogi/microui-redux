@@ -66,13 +66,13 @@ pub(crate) enum Type {
 }
 
 #[derive(Clone)]
-pub(crate) struct Window<PR> {
+pub(crate) struct Window {
     pub(crate) ty: Type,
     pub(crate) activity: Activity,
-    pub(crate) main: Container<PR>,
+    pub(crate) main: Container,
 }
 
-impl<PR: Clone> Window<PR> {
+impl Window {
     pub fn window(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.rect = initial_rect;
@@ -184,9 +184,9 @@ impl<PR: Clone> Window<PR> {
 }
 
 #[derive(Clone)]
-pub struct WindowHandle<PR>(Rc<RefCell<Window<PR>>>);
+pub struct WindowHandle(Rc<RefCell<Window>>);
 
-impl<PR: Clone> WindowHandle<PR> {
+impl WindowHandle {
     pub(crate) fn window(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         Self(Rc::new(RefCell::new(Window::window(name, atlas, style, input, initial_rect))))
     }
@@ -202,11 +202,11 @@ impl<PR: Clone> WindowHandle<PR> {
         }
     }
 
-    pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Window<PR>> {
+    pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Window> {
         self.0.borrow_mut()
     }
 
-    pub(crate) fn inner<'a>(&'a self) -> Ref<'a, Window<PR>> {
+    pub(crate) fn inner<'a>(&'a self) -> Ref<'a, Window> {
         self.0.borrow()
     }
 
@@ -214,7 +214,7 @@ impl<PR: Clone> WindowHandle<PR> {
         self.inner_mut().main.prepare()
     }
 
-    pub(crate) fn render<R: Renderer<PR>>(&self, canvas: &mut Canvas<PR, R>) {
+    pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
         self.0.borrow().main.render(canvas)
     }
 

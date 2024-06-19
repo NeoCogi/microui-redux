@@ -205,8 +205,7 @@ impl MQRenderer {
     }
 }
 
-impl Renderer<()> for MQRenderer {
-    fn command(&mut self, _pr: &()) {}
+impl Renderer for MQRenderer {
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }

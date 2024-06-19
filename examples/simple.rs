@@ -5,8 +5,9 @@ use common::{atlas_config, start};
 use microui_redux::*;
 
 struct State {
-    window: WindowHandle<()>,
+    window: WindowHandle,
 }
+
 fn main() {
     let slots = vec![Dimensioni::new(64, 64), Dimensioni::new(24, 32), Dimensioni::new(64, 24)];
     let atlas = builder::Builder::from_config(&atlas_config(&slots)).unwrap().to_atlas();
