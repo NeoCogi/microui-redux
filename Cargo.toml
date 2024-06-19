@@ -35,7 +35,7 @@ opt-level = "z"
 panic = "abort"
 lto = "fat"
 codegen-units = 1
-debug = "none"
+debug = "full"
 
 [profile.release]
 overflow-checks = false
