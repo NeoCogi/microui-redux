@@ -50,8 +50,6 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-use std::rc::Rc;
-use std::sync::RwLock;
 use microui_redux::*;
 use miniquad::{conf, window, EventHandler, RenderingBackend};
 
@@ -151,7 +149,7 @@ pub fn start<S: 'static, I: FnOnce(&mut MicroUI) -> S + 'static, U: FnMut(&mut M
     miniquad::start(conf, move || {
         let ctx: Box<dyn RenderingBackend> = window::new_rendering_backend();
 
-        let rd = Rc::new(RwLock::new(MQRenderer::new(ctx, atlas, width as _, height as _)));
+        let rd = RendererHandle::new(MQRenderer::new(ctx, atlas, width as _, height as _));
         let mut mui = microui_redux::Context::new(rd, Dimensioni::new(width as _, height as _));
         let application = Application {
             update: Box::new(move |ctx, state| update_function(ctx, state)),

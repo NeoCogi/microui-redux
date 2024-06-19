@@ -86,6 +86,23 @@ pub trait Renderer {
     fn end(&mut self);
 }
 
+#[derive(Clone)]
+pub struct RendererHandle<R: Renderer> {
+    handle: Rc<RwLock<R>>,
+}
+
+impl<R: Renderer> RendererHandle<R> {
+    pub fn new(renderer: R) -> Self {
+        Self { handle: Rc::new(RwLock::new(renderer)) }
+    }
+    fn get_atlas(&self) -> AtlasHandle { self.handle.read().unwrap().get_atlas() }
+    fn begin(&mut self, width: i32, height: i32, clr: Color) { self.handle.write().unwrap().begin(width, height, clr) }
+    fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) { self.handle.write().unwrap().push_quad_vertices(v0, v1, v2, v3) }
+    fn flush(&mut self) { self.handle.write().unwrap().flush() }
+    fn end(&mut self) { self.handle.write().unwrap().end() }
+}
+
+
 #[derive(PartialEq, Copy, Clone)]
 #[repr(u32)]
 pub enum Clip {
@@ -491,7 +508,7 @@ pub struct Context<R: Renderer> {
 }
 
 impl<R: Renderer> Context<R> {
-    pub fn new(renderer: Rc<RwLock<R>>, dim: Dimensioni) -> Self {
+    pub fn new(renderer: RendererHandle<R>, dim: Dimensioni) -> Self {
         Self {
             canvas: Canvas::from(renderer, dim),
             style: Style::default(),

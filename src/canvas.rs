@@ -29,7 +29,6 @@
 //
 use super::*;
 use std::{borrow::BorrowMut};
-use std::sync::RwLock;
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
@@ -40,12 +39,12 @@ pub struct Vertex {
 }
 
 pub struct Canvas<R: Renderer> {
-    renderer: Rc<RwLock<R>>,
+    renderer: RendererHandle<R>,
     clip: Recti,
 }
 
 impl<R: Renderer> Canvas<R> {
-    pub fn from(renderer: Rc<RwLock<R>>, dim: Dimensioni) -> Self {
+    pub fn from(renderer: RendererHandle<R>, dim: Dimensioni) -> Self {
         Self {
             renderer,
             clip: Recti::new(0, 0, dim.width, dim.height),
@@ -53,7 +52,7 @@ impl<R: Renderer> Canvas<R> {
     }
 
     pub fn get_atlas(&self) -> AtlasHandle {
-        self.renderer.read().unwrap().get_atlas()
+        self.renderer.get_atlas()
     }
 
     #[inline(never)]
@@ -94,8 +93,8 @@ impl<R: Renderer> Canvas<R> {
 
     #[inline(never)]
     pub fn push_rect(&mut self, dst: Recti, src: Recti, color: Color) {
-        let atlas_dim = self.renderer.read().unwrap().get_atlas().get_texture_dimension();
-        let mut renderer = self.renderer.write().unwrap();
+        let atlas_dim = self.renderer.get_atlas().get_texture_dimension();
+
         match Self::clip_rect(dst, src, self.clip) {
             Some((dst, src)) => {
                 let x = src.x as f32 / atlas_dim.width as f32;
@@ -134,20 +133,20 @@ impl<R: Renderer> Canvas<R> {
                 v2.color = v0.color;
                 v3.color = v0.color;
 
-                renderer.push_quad_vertices(&v0, &v1, &v2, &v3);
+                self.renderer.push_quad_vertices(&v0, &v1, &v2, &v3);
             }
             None => (),
         }
     }
 
     pub fn draw_rect(&mut self, rect: Recti, color: Color) {
-        let icon_rect = self.renderer.read().unwrap().get_atlas().get_icon_rect(WHITE_ICON);
+        let icon_rect = self.renderer.get_atlas().get_icon_rect(WHITE_ICON);
         self.push_rect(rect, icon_rect, color);
     }
 
     #[inline(never)]
     pub fn draw_chars(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
-        let atlas = self.renderer.read().unwrap().get_atlas();
+        let atlas = self.renderer.get_atlas();
         atlas.draw_string(font, text, |_, _, dst, src| {
             let dst = Rect::new(pos.x + dst.x, pos.y + dst.y, dst.width, dst.height);
             self.push_rect(dst, src, color)
@@ -155,22 +154,22 @@ impl<R: Renderer> Canvas<R> {
     }
 
     pub fn draw_icon(&mut self, id: IconId, r: Recti, color: Color) {
-        let src = self.renderer.read().unwrap().get_atlas().get_icon_rect(id);
+        let src = self.renderer.get_atlas().get_icon_rect(id);
         let x = r.x + (r.width - src.width) / 2;
         let y = r.y + (r.height - src.height) / 2;
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
     pub fn draw_slot(&mut self, id: SlotId, r: Recti, color: Color) {
-        let src = self.renderer.read().unwrap().get_atlas().get_slot_rect(id);
+        let src = self.renderer.get_atlas().get_slot_rect(id);
         let x = r.x + (r.width - src.width) / 2;
         let y = r.y + (r.height - src.height) / 2;
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
     pub fn draw_slot_with_function(&mut self, id: SlotId, r: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        let src = self.renderer.read().unwrap().get_atlas().get_slot_rect(id);
-        self.renderer.write().unwrap().get_atlas().borrow_mut().render_slot(id, payload);
+        let src = self.renderer.get_atlas().get_slot_rect(id);
+        self.renderer.get_atlas().borrow_mut().render_slot(id, payload);
         let x = r.x + (r.width - src.width) / 2;
         let y = r.y + (r.height - src.height) / 2;
         self.push_rect(rect(x, y, src.width, src.height), src, color);
@@ -181,10 +180,10 @@ impl<R: Renderer> Canvas<R> {
     }
 
     pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
-        self.renderer.write().unwrap().begin(width, height, clr);
+        self.renderer.begin(width, height, clr);
     }
 
     pub fn end(&mut self) {
-        self.renderer.write().unwrap().end()
+        self.renderer.end()
     }
 }
