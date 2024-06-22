@@ -471,13 +471,13 @@ impl AtlasHandle {
                     "(\"{}\", Rect {{ x: {}, y: {}, width: {}, height: {} }}),",
                     i, r.rect.x, r.rect.y, r.rect.width, r.rect.height,
                 )
-                .as_str(),
+                    .as_str(),
             );
         }
         icons.push_str("]");
         let mut slots = String::from_str("&[\n").unwrap();
         for r in &self.0.borrow().slots {
-            slots.push_str(format!("Rect {{ x: {}, y: {}, width: {}, height: {} }},", r.x, r.y, r.width, r.height,).as_str());
+            slots.push_str(format!("Rect {{ x: {}, y: {}, width: {}, height: {} }},", r.x, r.y, r.width, r.height, ).as_str());
         }
         slots.push_str("]");
         let mut fonts = String::from_str("&[\n").unwrap();
@@ -494,7 +494,7 @@ impl AtlasHandle {
                         "('{}', CharEntry {{ offset: Vec2i {{ x: {}, y:{} }}, advance: Vec2i {{ x:{}, y: {} }}, rect: Recti {{x: {}, y: {}, width: {}, height: {} }}, }}),\n",
                         str, entry.offset.x, entry.offset.y, entry.advance.x, entry.advance.y, entry.rect.x, entry.rect.y, entry.rect.width, entry.rect.height,
                     )
-                    .as_str(),
+                        .as_str(),
                 );
             }
             char_entries.push_str("]\n");
@@ -503,7 +503,7 @@ impl AtlasHandle {
                     "(\"{}\", FontEntry {{ line_size: {}, font_size: {}, entries: {} }}),\n",
                     n, f.line_size, f.font_size, char_entries
                 )
-                .as_str(),
+                    .as_str(),
             );
         }
         fonts.push_str("]");
@@ -553,8 +553,8 @@ impl AtlasHandle {
         self.0.borrow().slots.iter().enumerate().map(|(i, _)| SlotId(i)).collect()
     }
 
-    pub fn get_char_entry(&self, font: FontId, c: char) -> CharEntry {
-        self.0.borrow().fonts[font.0].1.entries[&c].clone()
+    pub fn get_char_entry(&self, font: FontId, c: char) -> Option<CharEntry> {
+        self.0.borrow().fonts[font.0].1.entries.get(&c).map(|x| x.clone())
     }
 
     pub fn get_font_height(&self, font: FontId) -> usize {
@@ -589,24 +589,27 @@ impl AtlasHandle {
         let mut acc_x = 0;
         let mut acc_y = 0;
         for chr in text.chars() {
-            let src = self.get_char_entry(font, chr);
-
+            
             // string could be empty
             if acc_y == 0 {
                 acc_y = fh
             }
 
-            if chr == '\n' {
+            if chr == '\n' || chr == '\r' {
                 acc_x = 0;
                 acc_y += fh;
+            } else {
+                let src = match self.get_char_entry(font, chr) {
+                    Some(ce) => ce,
+                    None => self.get_char_entry(font, '_').unwrap()
+                };
+                dst.width = src.rect.width;
+                dst.height = src.rect.height;
+                dst.x = acc_x + src.offset.x;
+                dst.y = acc_y - src.offset.y - src.rect.height;
+                f(chr, src.advance, dst, src.rect);
+                acc_x += src.advance.x;
             }
-
-            dst.width = src.rect.width;
-            dst.height = src.rect.height;
-            dst.x = acc_x + src.offset.x;
-            dst.y = acc_y - src.offset.y - src.rect.height;
-            f(chr, src.advance, dst, src.rect);
-            acc_x += src.advance.x;
         }
     }
 

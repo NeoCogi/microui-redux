@@ -52,7 +52,7 @@ impl<R: Renderer> Canvas<R> {
     }
 
     pub fn get_atlas(&self) -> AtlasHandle {
-        self.renderer.get_atlas()
+        self.renderer.scope(|r| r.get_atlas())
     }
 
     #[inline(never)]
@@ -93,60 +93,63 @@ impl<R: Renderer> Canvas<R> {
 
     #[inline(never)]
     pub fn push_rect(&mut self, dst: Recti, src: Recti, color: Color) {
-        let atlas_dim = self.renderer.get_atlas().get_texture_dimension();
+        let atlas_dim = self.renderer.scope(|r| r.get_atlas()).get_texture_dimension();
 
-        match Self::clip_rect(dst, src, self.clip) {
-            Some((dst, src)) => {
-                let x = src.x as f32 / atlas_dim.width as f32;
-                let y = src.y as f32 / atlas_dim.height as f32;
-                let w = src.width as f32 / atlas_dim.width as f32;
-                let h = src.height as f32 / atlas_dim.height as f32;
+        let clip = self.clip;
+        self.renderer.scope_mut(move |r| {
+            match Self::clip_rect(dst, src, clip) {
+                Some((dst, src)) => {
+                    let x = src.x as f32 / atlas_dim.width as f32;
+                    let y = src.y as f32 / atlas_dim.height as f32;
+                    let w = src.width as f32 / atlas_dim.width as f32;
+                    let h = src.height as f32 / atlas_dim.height as f32;
 
-                let mut v0 = Vertex::default();
-                let mut v1 = Vertex::default();
-                let mut v2 = Vertex::default();
-                let mut v3 = Vertex::default();
+                    let mut v0 = Vertex::default();
+                    let mut v1 = Vertex::default();
+                    let mut v2 = Vertex::default();
+                    let mut v3 = Vertex::default();
 
-                // tex coordinates
-                v0.tex.x = x;
-                v0.tex.y = y;
-                v1.tex.x = x + w;
-                v1.tex.y = y;
-                v2.tex.x = x + w;
-                v2.tex.y = y + h;
-                v3.tex.x = x;
-                v3.tex.y = y + h;
+                    // tex coordinates
+                    v0.tex.x = x;
+                    v0.tex.y = y;
+                    v1.tex.x = x + w;
+                    v1.tex.y = y;
+                    v2.tex.x = x + w;
+                    v2.tex.y = y + h;
+                    v3.tex.x = x;
+                    v3.tex.y = y + h;
 
-                // position
-                v0.pos.x = dst.x as f32;
-                v0.pos.y = dst.y as f32;
-                v1.pos.x = dst.x as f32 + dst.width as f32;
-                v1.pos.y = dst.y as f32;
-                v2.pos.x = dst.x as f32 + dst.width as f32;
-                v2.pos.y = dst.y as f32 + dst.height as f32;
-                v3.pos.x = dst.x as f32;
-                v3.pos.y = dst.y as f32 + dst.height as f32;
+                    // position
+                    v0.pos.x = dst.x as f32;
+                    v0.pos.y = dst.y as f32;
+                    v1.pos.x = dst.x as f32 + dst.width as f32;
+                    v1.pos.y = dst.y as f32;
+                    v2.pos.x = dst.x as f32 + dst.width as f32;
+                    v2.pos.y = dst.y as f32 + dst.height as f32;
+                    v3.pos.x = dst.x as f32;
+                    v3.pos.y = dst.y as f32 + dst.height as f32;
 
-                // color
-                v0.color = color4b(color.r, color.g, color.b, color.a);
-                v1.color = v0.color;
-                v2.color = v0.color;
-                v3.color = v0.color;
+                    // color
+                    v0.color = color4b(color.r, color.g, color.b, color.a);
+                    v1.color = v0.color;
+                    v2.color = v0.color;
+                    v3.color = v0.color;
 
-                self.renderer.push_quad_vertices(&v0, &v1, &v2, &v3);
+                    r.push_quad_vertices(&v0, &v1, &v2, &v3);
+                }
+                None => (),
             }
-            None => (),
-        }
+        })
     }
 
     pub fn draw_rect(&mut self, rect: Recti, color: Color) {
-        let icon_rect = self.renderer.get_atlas().get_icon_rect(WHITE_ICON);
+        let icon_rect = self.renderer.scope(|r| r.get_atlas()).get_icon_rect(WHITE_ICON);
         self.push_rect(rect, icon_rect, color);
     }
 
     #[inline(never)]
     pub fn draw_chars(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
-        let atlas = self.renderer.get_atlas();
+        let atlas = self.renderer.scope(|r| r.get_atlas());
         atlas.draw_string(font, text, |_, _, dst, src| {
             let dst = Rect::new(pos.x + dst.x, pos.y + dst.y, dst.width, dst.height);
             self.push_rect(dst, src, color)
@@ -154,22 +157,23 @@ impl<R: Renderer> Canvas<R> {
     }
 
     pub fn draw_icon(&mut self, id: IconId, r: Recti, color: Color) {
-        let src = self.renderer.get_atlas().get_icon_rect(id);
+        let src = self.renderer.scope(|r| r.get_atlas()).get_icon_rect(id);
         let x = r.x + (r.width - src.width) / 2;
         let y = r.y + (r.height - src.height) / 2;
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
     pub fn draw_slot(&mut self, id: SlotId, r: Recti, color: Color) {
-        let src = self.renderer.get_atlas().get_slot_rect(id);
+        let src = self.renderer.scope(|r| r.get_atlas()).get_slot_rect(id);
         let x = r.x + (r.width - src.width) / 2;
         let y = r.y + (r.height - src.height) / 2;
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
     pub fn draw_slot_with_function(&mut self, id: SlotId, r: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        let src = self.renderer.get_atlas().get_slot_rect(id);
-        self.renderer.get_atlas().borrow_mut().render_slot(id, payload);
+        let src = self.renderer.scope(|r| r.get_atlas()).get_slot_rect(id);
+        let pl = payload.clone();
+        self.renderer.scope_mut(move |r| r.get_atlas().borrow_mut().render_slot(id, pl.clone()));
         let x = r.x + (r.width - src.width) / 2;
         let y = r.y + (r.height - src.height) / 2;
         self.push_rect(rect(x, y, src.width, src.height), src, color);
@@ -180,10 +184,10 @@ impl<R: Renderer> Canvas<R> {
     }
 
     pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
-        self.renderer.begin(width, height, clr);
+        self.renderer.scope_mut(|r| r.begin(width, height, clr));
     }
 
     pub fn end(&mut self) {
-        self.renderer.end()
+        self.renderer.scope_mut(|r| r.end())
     }
 }

@@ -26,12 +26,12 @@ png = { version = "0.17.11", optional = true }
 rand = "0.8.5"
 
 [dev-dependencies]
-miniquad = "0.4.2"
+miniquad = { git = "https://github.com/not-fl3/miniquad" }
 rand = "0.8.5"
 
 [profile.dev]
 overflow-checks = false
-opt-level = "z"
+opt-level = 0
 panic = "abort"
 lto = "fat"
 codegen-units = 1
