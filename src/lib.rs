@@ -95,11 +95,14 @@ impl<R: Renderer> RendererHandle<R> {
     pub fn new(renderer: R) -> Self {
         Self { handle: Rc::new(RwLock::new(renderer)) }
     }
-    fn get_atlas(&self) -> AtlasHandle { self.handle.read().unwrap().get_atlas() }
-    fn begin(&mut self, width: i32, height: i32, clr: Color) { self.handle.write().unwrap().begin(width, height, clr) }
-    fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) { self.handle.write().unwrap().push_quad_vertices(v0, v1, v2, v3) }
-    fn flush(&mut self) { self.handle.write().unwrap().flush() }
-    fn end(&mut self) { self.handle.write().unwrap().end() }
+
+    pub fn scope<Res, F: Fn(&R) -> Res>(&self, f: F) -> Res {
+        f(&mut self.handle.read().unwrap())
+    }
+
+    pub fn scope_mut<Res, F: Fn(&mut R) -> Res>(&mut self, f: F) -> Res {
+        f(&mut self.handle.write().unwrap())
+    }
 }
 
 
