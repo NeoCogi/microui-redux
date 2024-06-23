@@ -34,22 +34,22 @@ use miniquad::*;
 const MAX_VERTEX_COUNT: usize = 65536;
 const MAX_INDEX_COUNT: usize = 65536;
 
-const VERTEX_SHADER: &str = "#version 100
+const VERTEX_SHADER: &str = "#version 150
 uniform highp mat4 uTransform;
 attribute highp vec2 vertexPosition;
 attribute highp vec2 vertexTexCoord;
-attribute lowp vec4 vertexColor;
+attribute lowp uvec4 vertexColor;
 varying highp vec2 vTexCoord;
 varying lowp vec4 vVertexColor;
 void main()
 {
-    vVertexColor = vertexColor / 255.0;
+    vVertexColor = vec4(vertexColor) / 255.0;
     vTexCoord = vertexTexCoord;
     highp vec4 pos = vec4(vertexPosition.x, vertexPosition.y, 0.0, 1.0);
     gl_Position = uTransform * pos;
 }";
 
-const FRAGMENT_SHADER: &str = "#version 100
+const FRAGMENT_SHADER: &str = "#version 150
 varying highp vec2 vTexCoord;
 varying lowp vec4 vVertexColor;
 uniform sampler2D uTexture;
