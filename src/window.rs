@@ -50,36 +50,47 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-use std::cell::{Ref, RefMut};
 use super::*;
+use std::cell::{Ref, RefMut};
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum Activity {
+pub enum WindowState {
     Open,
     Closed,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Type {
+    Dialog,
     Window,
     Popup,
 }
 
-#[derive(Clone)]
 pub(crate) struct Window {
     pub(crate) ty: Type,
-    pub(crate) activity: Activity,
+    pub(crate) win_state: WindowState,
     pub(crate) main: Container,
 }
 
 impl Window {
+    pub fn dialog(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+        let mut main = Container::new(name, atlas, style, input);
+        main.rect = initial_rect;
+
+        Self {
+            ty: Type::Dialog,
+            win_state: WindowState::Closed,
+            main,
+        }
+    }
+
     pub fn window(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.rect = initial_rect;
 
         Self {
             ty: Type::Window,
-            activity: Activity::Open,
+            win_state: WindowState::Open,
             main,
         }
     }
@@ -90,7 +101,7 @@ impl Window {
 
         Self {
             ty: Type::Popup,
-            activity: Activity::Closed,
+            win_state: WindowState::Closed,
             main,
         }
     }
@@ -103,7 +114,7 @@ impl Window {
     }
 
     #[inline(never)]
-    fn begin_window(&mut self, opt: WidgetOption) {
+    fn begin_window(&mut self, opt: ContainerOption) {
         let is_popup = self.is_popup();
         let container = &mut self.main;
         let mut body = container.rect;
@@ -119,12 +130,12 @@ impl Window {
             // TODO: Is this necessary?
             if !opt.has_no_title() {
                 let id = container.idmngr.get_id_from_str("!title");
-                container.update_control(id, tr, opt);
+                container.update_control(id, tr, WidgetOption::NONE);
                 container.draw_control_text(
                     &container.name.clone(), /* TODO: cloning the string is expensive, go to a different approach */
                     tr,
                     ControlColor::TitleText,
-                    opt,
+                    WidgetOption::NONE,
                 );
                 if Some(id) == container.focus && container.input.borrow().mouse_down.is_left() {
                     container.rect.x += container.input.borrow().mouse_delta.x;
@@ -139,9 +150,9 @@ impl Window {
                 tr.width -= r.width;
                 let color = container.style.colors[ControlColor::TitleText as usize];
                 container.draw_icon(CLOSE_ICON, r, color);
-                container.update_control(id, r, opt);
+                container.update_control(id, r, WidgetOption::NONE);
                 if container.input.borrow().mouse_pressed.is_left() && Some(id) == container.focus {
-                    self.activity = Activity::Closed;
+                    self.win_state = WindowState::Closed;
                 }
             }
         }
@@ -150,7 +161,7 @@ impl Window {
             let sz = container.style.title_height;
             let id_2 = container.idmngr.get_id_from_str("!resize");
             let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
-            container.update_control(id_2, r_0, opt);
+            container.update_control(id_2, r_0, WidgetOption::NONE);
             if Some(id_2) == container.focus && container.input.borrow().mouse_down.is_left() {
                 container.rect.width = if 96 > container.rect.width + container.input.borrow().mouse_delta.x {
                     96
@@ -171,7 +182,7 @@ impl Window {
         }
 
         if is_popup && !container.input.borrow().mouse_pressed.is_none() && !container.in_hover_root {
-            self.activity = Activity::Closed;
+            self.win_state = WindowState::Closed;
         }
         let body = container.body;
         container.push_clip_rect(body);
@@ -191,13 +202,17 @@ impl WindowHandle {
         Self(Rc::new(RefCell::new(Window::window(name, atlas, style, input, initial_rect))))
     }
 
+    pub(crate) fn dialog(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+        Self(Rc::new(RefCell::new(Window::dialog(name, atlas, style, input, initial_rect))))
+    }
+
     pub(crate) fn popup(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>) -> Self {
         Self(Rc::new(RefCell::new(Window::popup(name, atlas, style, input, Recti::new(0, 0, 0, 0)))))
     }
 
     pub fn is_open(&self) -> bool {
-        match self.0.borrow().activity {
-            Activity::Open => true,
+        match self.0.borrow().win_state {
+            WindowState::Open => true,
             _ => false,
         }
     }
@@ -214,8 +229,8 @@ impl WindowHandle {
         self.inner_mut().main.prepare()
     }
 
-    pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
-        self.0.borrow().main.render(canvas)
+    pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
+        self.0.borrow_mut().main.render(canvas)
     }
 
     pub(crate) fn finish(&mut self) {
@@ -226,7 +241,7 @@ impl WindowHandle {
         self.0.borrow().main.zindex
     }
 
-    pub(crate) fn begin_window(&mut self, opt: WidgetOption) {
+    pub(crate) fn begin_window(&mut self, opt: ContainerOption) {
         self.0.borrow_mut().begin_window(opt)
     }
 

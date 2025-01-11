@@ -53,7 +53,12 @@
 use super::*;
 use std::cell::RefCell;
 
-#[derive(Clone)]
+pub struct CustomRenderArgs {
+    pub content_area: Rect<i32>,
+    pub view: Rect<i32>, // clipped area
+    pub mouse_event: MouseEvent,
+}
+
 pub enum Command {
     Clip {
         rect: Recti,
@@ -84,6 +89,7 @@ pub enum Command {
         color: Color,
         payload: Rc<dyn Fn(usize, usize) -> Color4b>,
     },
+    CustomRender(CustomRenderArgs, Box<dyn FnMut(Dimensioni, &CustomRenderArgs)>),
     None,
 }
 
@@ -93,7 +99,6 @@ impl Default for Command {
     }
 }
 
-#[derive(Clone)]
 pub struct Container {
     pub(crate) atlas: AtlasHandle,
     pub style: Style,
@@ -145,6 +150,13 @@ impl Container {
         }
     }
 
+    pub(crate) fn reset(&mut self) {
+        self.hover = None;
+        self.focus = None;
+        self.updated_focus = false;
+        self.in_hover_root = false;
+    }
+
     pub(crate) fn prepare(&mut self) {
         self.command_list.clear();
         assert!(self.clip_stack.len() == 0);
@@ -152,32 +164,36 @@ impl Container {
     }
 
     #[inline(never)]
-    pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
-        for command in &self.command_list {
+    pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
+        for command in self.command_list.drain(0..) {
             match command {
                 Command::Text { text, pos, color, font } => {
-                    canvas.draw_chars(*font, text, *pos, *color);
+                    canvas.draw_chars(font, &text, pos, color);
                 }
                 Command::Recti { rect, color } => {
-                    canvas.draw_rect(*rect, *color);
+                    canvas.draw_rect(rect, color);
                 }
                 Command::Icon { id, rect, color } => {
-                    canvas.draw_icon(*id, *rect, *color);
+                    canvas.draw_icon(id, rect, color);
                 }
                 Command::Clip { rect } => {
-                    canvas.set_clip_rect(*rect);
+                    canvas.set_clip_rect(rect);
                 }
                 Command::Slot { rect, id, color } => {
-                    canvas.draw_slot(*id, *rect, *color);
+                    canvas.draw_slot(id, rect, color);
                 }
                 Command::SlotRedraw { rect, id, color, payload } => {
-                    canvas.draw_slot_with_function(*id, *rect, *color, payload.clone());
+                    canvas.draw_slot_with_function(id, rect, color, payload.clone());
+                }
+                Command::CustomRender(cra, mut f) => {
+                    canvas.end();
+                    (*f)(canvas.current_dimension(), &cra);
                 }
                 Command::None => (),
             }
         }
 
-        for ap in &self.panels {
+        for ap in &mut self.panels {
             ap.render(canvas)
         }
     }
@@ -348,7 +364,16 @@ impl Container {
         }
     }
 
-    pub fn draw_control_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
+    pub fn draw_widget_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, _opt: WidgetOption) {
+        if self.focus == Some(id) {
+            colorid.focus()
+        } else if self.hover == Some(id) {
+            colorid.hover()
+        }
+        self.draw_frame(rect, colorid);
+    }
+
+    pub fn draw_container_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, opt: ContainerOption) {
         if opt.has_no_frame() {
             return;
         }
@@ -392,6 +417,7 @@ impl Container {
         let in_hover_root = self.in_hover_root;
         let mouseover = self.mouse_over(rect, in_hover_root);
         if self.focus == Some(id) {
+            // is this the same ID of the focused widget? by default set it to true unless otherwise
             self.updated_focus = true;
         }
         if opt.is_not_interactive() {
@@ -439,7 +465,7 @@ impl Container {
                 self.draw_frame(r, ControlColor::ButtonHover);
             }
         } else {
-            self.draw_control_frame(id, r, ControlColor::Button, WidgetOption::NONE);
+            self.draw_widget_frame(id, r, ControlColor::Button, WidgetOption::NONE);
         }
         let color = self.style.colors[ControlColor::Text as usize];
         self.draw_icon(if expanded { COLLAPSE_ICON } else { EXPAND_ICON }, rect(r.x, r.y, r.height, r.height), color);
@@ -555,7 +581,7 @@ impl Container {
         self.pop_clip_rect();
     }
 
-    pub fn push_container_body(&mut self, body: Recti, opt: WidgetOption) {
+    pub fn push_container_body(&mut self, body: Recti, opt: ContainerOption) {
         let mut body = body;
         if !opt.has_no_scroll() {
             self.scrollbars(&mut body);
@@ -577,7 +603,7 @@ impl Container {
     }
 
     #[inline(never)]
-    fn begin_panel(&mut self, panel: &mut ContainerHandle, opt: WidgetOption) {
+    fn begin_panel(&mut self, panel: &mut ContainerHandle, opt: ContainerOption) {
         let rect = self.layout.next();
         let clip_rect = panel.inner().body;
         let container = &mut panel.inner_mut();
@@ -599,7 +625,7 @@ impl Container {
         self.panels.push(panel.clone())
     }
 
-    pub fn panel<F: FnOnce(&mut ContainerHandle)>(&mut self, panel: &mut ContainerHandle, opt: WidgetOption, f: F) {
+    pub fn panel<F: FnOnce(&mut ContainerHandle)>(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, f: F) {
         self.begin_panel(panel, opt);
 
         // call the panel function
@@ -648,7 +674,7 @@ impl Container {
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
-        self.draw_control_frame(id, r, ControlColor::Button, opt);
+        self.draw_widget_frame(id, r, ControlColor::Button, opt);
         if label.len() > 0 {
             self.draw_control_text(label, r, ControlColor::Text, opt);
         }
@@ -675,7 +701,7 @@ impl Container {
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
-        self.draw_control_frame(id, r, ControlColor::Button, opt);
+        self.draw_widget_frame(id, r, ControlColor::Button, opt);
         if label.len() > 0 {
             self.draw_control_text(label, r, ControlColor::Text, opt);
         }
@@ -702,7 +728,7 @@ impl Container {
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
-        self.draw_control_frame(id, r, ControlColor::Button, opt);
+        self.draw_widget_frame(id, r, ControlColor::Button, opt);
         if label.len() > 0 {
             self.draw_control_text(label, r, ControlColor::Text, opt);
         }
@@ -727,7 +753,7 @@ impl Container {
             res |= ResourceState::CHANGE;
             *state = *state == false;
         }
-        self.draw_control_frame(id, box_0, ControlColor::Base, WidgetOption::NONE);
+        self.draw_widget_frame(id, box_0, ControlColor::Base, WidgetOption::NONE);
         if *state {
             let color = self.style.colors[ControlColor::Text as usize];
             self.draw_icon(CHECK_ICON, box_0, color);
@@ -735,6 +761,39 @@ impl Container {
         r = rect(r.x + box_0.width, r.y, r.width - box_0.width, r.height);
         self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
         return res;
+    }
+
+    #[inline(never)]
+    fn input_to_mouse_event(&self, id: Id, rect: &Recti) -> MouseEvent {
+        let input = self.input.borrow();
+        let orig = Vec2i::new(rect.x, rect.y);
+
+        let prev_pos = input.last_mouse_pos - orig;
+        let curr_pos = input.mouse_pos - orig;
+        if self.focus == Some(id) && input.mouse_down.is_left() {
+            return MouseEvent::Drag { prev_pos, curr_pos };
+        }
+
+        if self.hover == Some(id) {
+            return MouseEvent::Move(curr_pos);
+        }
+        MouseEvent::None
+    }
+
+    #[inline(never)]
+    pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, name: &str, opt: WidgetOption, f: F) {
+        let id: Id = self.idmngr.get_id_from_str(name);
+        let rect: Recti = self.layout.next();
+        self.update_control(id, rect, opt);
+
+        let mouse_event = self.input_to_mouse_event(id, &rect);
+
+        let cra = CustomRenderArgs {
+            content_area: rect,
+            view: self.get_clip_rect(),
+            mouse_event,
+        };
+        self.command_list.push(Command::CustomRender(cra, Box::new(f)));
     }
 
     #[inline(never)]
@@ -760,7 +819,7 @@ impl Container {
                 res |= ResourceState::SUBMIT;
             }
         }
-        self.draw_control_frame(id, r, ControlColor::Base, opt);
+        self.draw_widget_frame(id, r, ControlColor::Base, opt);
         if self.focus == Some(id) {
             let color = self.style.colors[ControlColor::Text as usize];
             let font = self.style.font;
@@ -841,11 +900,11 @@ impl Container {
         if last != v {
             res |= ResourceState::CHANGE;
         }
-        self.draw_control_frame(id, base, ControlColor::Base, opt);
+        self.draw_widget_frame(id, base, ControlColor::Base, opt);
         let w = self.style.thumb_size;
         let x = ((v - low) * (base.width - w) as Real / (high - low)) as i32;
         let thumb = rect(base.x + x, base.y, w, base.height);
-        self.draw_control_frame(id, thumb, ControlColor::Button, opt);
+        self.draw_widget_frame(id, thumb, ControlColor::Button, opt);
         let mut buff = String::new();
         buff.push_str(format!("{:.*}", precision, value).as_str());
         self.draw_control_text(buff.as_str(), base, ControlColor::Text, opt);
@@ -868,7 +927,7 @@ impl Container {
         if *value != last {
             res |= ResourceState::CHANGE;
         }
-        self.draw_control_frame(id, base, ControlColor::Base, opt);
+        self.draw_widget_frame(id, base, ControlColor::Base, opt);
         let mut buff = String::new();
         buff.push_str(format!("{:.*}", precision, value).as_str());
         self.draw_control_text(buff.as_str(), base, ControlColor::Text, opt);
