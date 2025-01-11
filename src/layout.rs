@@ -85,15 +85,33 @@ pub(crate) struct LayoutManager {
 impl LayoutManager {
     pub fn push_layout(&mut self, body: Recti, scroll: Vec2i) {
         let mut layout: Layout = Layout {
-            body: Recti { x: 0, y: 0, width: 0, height: 0 },
-            next: Recti { x: 0, y: 0, width: 0, height: 0 },
+            body: Recti {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            },
+            next: Recti {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            },
             position: Vec2i { x: 0, y: 0 },
-            size: Dimension { width: 0, height: 0 },
+            size: Dimension {
+                width: 0,
+                height: 0,
+            },
             max: Vec2i { x: 0, y: 0 },
             next_row: 0,
             indent: 0,
         };
-        layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.width, body.height);
+        layout.body = rect(
+            body.x - scroll.x,
+            body.y - scroll.y,
+            body.width,
+            body.height,
+        );
         layout.max = vec2(-i32::MAX, -i32::MAX);
         self.stack.push(layout);
         self.row(&[0], 0);
@@ -130,9 +148,11 @@ impl LayoutManager {
         let row = self.row_stack.pop().unwrap();
         self.current_row_widths.clear();
         for i in 0..row.len {
-            self.current_row_widths.push(self.row_widths_stack[i + row.start]);
+            self.current_row_widths
+                .push(self.row_widths_stack[i + row.start]);
         }
-        self.row_widths_stack.shrink_to(self.row_widths_stack.len() - row.len);
+        self.row_widths_stack
+            .shrink_to(self.row_widths_stack.len() - row.len);
         self.item_index = row.item_index;
 
         let a = self.top_mut();
@@ -181,7 +201,12 @@ impl LayoutManager {
         let spacing = self.style.spacing;
         let row_cells_count = self.current_row_widths.len();
 
-        let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
+        let mut res: Recti = Recti {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        };
 
         let lsize_y = self.top().size.height;
 

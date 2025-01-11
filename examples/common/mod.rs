@@ -52,23 +52,11 @@
 //
 use microui_redux::*;
 
-mod application;
-pub use application::*;
+pub mod application;
+pub mod glow_common;
+pub mod glow_renderer;
 
-mod quad_renderer;
-pub use quad_renderer::*;
-
-pub fn atlas_config(slots: &Vec<Dimensioni>) -> builder::Config {
-    builder::Config {
-        texture_height: 256,
-        texture_width: 256,
-        white_icon: String::from("assets/WHITE.png"),
-        close_icon: String::from("assets/CLOSE.png"),
-        expand_icon: String::from("assets/PLUS.png"),
-        collapse_icon: String::from("assets/MINUS.png"),
-        check_icon: String::from("assets/CHECK.png"),
-        default_font: String::from("assets/NORMAL.ttf"),
-        default_font_size: 12,
-        slots,
-    }
-}
+pub mod camera;
+pub mod obj_loader;
+pub mod polymesh;
+pub mod view3d;

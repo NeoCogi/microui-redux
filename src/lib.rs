@@ -55,6 +55,7 @@ use std::{
     f32,
     hash::Hash,
     rc::Rc,
+    sync::Arc,
 };
 
 mod atlas;
@@ -66,17 +67,34 @@ mod rect_packer;
 mod window;
 
 pub use atlas::*;
+pub use canvas::*;
+pub use container::*;
 pub use idmngr::*;
 pub use layout::*;
-pub use container::*;
-pub use window::*;
-pub use canvas::*;
 pub use rect_packer::*;
 pub use rs_math3d::*;
+pub use window::*;
 
 use bitflags::*;
-use std::cmp::{min, max};
+use std::cmp::{max, min};
 use std::sync::RwLock;
+
+#[derive(Debug, Copy, Clone)]
+pub enum ButtonState {
+    None,
+    Pressed(f32),
+    Released,
+    Scroll(f32),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum MouseEvent {
+    None,
+    Click(Vec2i),
+    Drag { prev_pos: Vec2i, curr_pos: Vec2i },
+    Move(Vec2i),
+    Scroll(f32),
+}
 
 pub trait Renderer {
     fn get_atlas(&self) -> AtlasHandle;
@@ -86,25 +104,30 @@ pub trait Renderer {
     fn end(&mut self);
 }
 
-#[derive(Clone)]
 pub struct RendererHandle<R: Renderer> {
-    handle: Rc<RwLock<R>>,
+    handle: Arc<RwLock<R>>,
+}
+
+// seems there's a bug in #[derive(Clone)] as it's unable to induce that Arc is sufficient
+impl<R: Renderer> Clone for RendererHandle<R> {
+    fn clone(&self) -> Self {
+        Self { handle: self.handle.clone() }
+    }
 }
 
 impl<R: Renderer> RendererHandle<R> {
     pub fn new(renderer: R) -> Self {
-        Self { handle: Rc::new(RwLock::new(renderer)) }
+        Self { handle: Arc::new(RwLock::new(renderer)) }
     }
 
     pub fn scope<Res, F: Fn(&R) -> Res>(&self, f: F) -> Res {
         f(&mut self.handle.read().unwrap())
     }
 
-    pub fn scope_mut<Res, F: Fn(&mut R) -> Res>(&mut self, f: F) -> Res {
+    pub fn scope_mut<Res, F: FnMut(&mut R) -> Res>(&mut self, mut f: F) -> Res {
         f(&mut self.handle.write().unwrap())
     }
 }
-
 
 #[derive(PartialEq, Copy, Clone)]
 #[repr(u32)]
@@ -179,15 +202,22 @@ impl ResourceState {
 }
 
 bitflags! {
-    #[derive(Copy, Clone)]
-    pub struct WidgetOption : u32 {
+        #[derive(Copy, Clone)]
+    pub struct ContainerOption : u32 {
         const AUTO_SIZE = 512;
-        const HOLD_FOCUS = 256;
         const NO_TITLE = 128;
         const NO_CLOSE = 64;
         const NO_SCROLL = 32;
         const NO_RESIZE = 16;
         const NO_FRAME = 8;
+        const NO_INTERACT = 4;
+        const NONE = 0;
+    }
+
+    #[derive(Copy, Clone)]
+    pub struct WidgetOption : u32 {
+        const HOLD_FOCUS = 256;
+        const NO_SCROLL = 32;
         const NO_INTERACT = 4;
         const ALIGN_RIGHT = 2;
         const ALIGN_CENTER = 1;
@@ -217,28 +247,40 @@ impl NodeState {
     }
 }
 
-impl WidgetOption {
+impl ContainerOption {
     pub fn is_auto_sizing(&self) -> bool {
-        self.intersects(WidgetOption::AUTO_SIZE)
+        self.intersects(Self::AUTO_SIZE)
     }
+
+    pub fn has_no_title(&self) -> bool {
+        self.intersects(Self::NO_TITLE)
+    }
+
+    pub fn has_no_close(&self) -> bool {
+        self.intersects(Self::NO_CLOSE)
+    }
+
+    pub fn has_no_scroll(&self) -> bool {
+        self.intersects(Self::NO_SCROLL)
+    }
+
+    pub fn is_fixed(&self) -> bool {
+        self.intersects(Self::NO_RESIZE)
+    }
+    pub fn has_no_frame(&self) -> bool {
+        self.intersects(Self::NO_FRAME)
+    }
+}
+
+impl WidgetOption {
     pub fn is_holding_focus(&self) -> bool {
         self.intersects(WidgetOption::HOLD_FOCUS)
     }
-    pub fn has_no_title(&self) -> bool {
-        self.intersects(WidgetOption::NO_TITLE)
-    }
-    pub fn has_no_close(&self) -> bool {
-        self.intersects(WidgetOption::NO_CLOSE)
-    }
+
     pub fn has_no_scroll(&self) -> bool {
         self.intersects(WidgetOption::NO_SCROLL)
     }
-    pub fn is_fixed(&self) -> bool {
-        self.intersects(WidgetOption::NO_RESIZE)
-    }
-    pub fn has_no_frame(&self) -> bool {
-        self.intersects(WidgetOption::NO_FRAME)
-    }
+
     pub fn is_not_interactive(&self) -> bool {
         self.intersects(WidgetOption::NO_INTERACT)
     }
@@ -317,6 +359,7 @@ pub struct Input {
     last_mouse_pos: Vec2i,
     mouse_delta: Vec2i,
     scroll_delta: Vec2i,
+    rel_mouse_pos: Vec2i,
     mouse_down: MouseButton,
     mouse_pressed: MouseButton,
     key_down: KeyMode,
@@ -330,6 +373,7 @@ impl Default for Input {
             mouse_pos: Vec2i::default(),
             last_mouse_pos: Vec2i::default(),
             mouse_delta: Vec2i::default(),
+            rel_mouse_pos: Vec2i::default(),
             scroll_delta: Vec2i::default(),
             mouse_down: MouseButton::NONE,
             mouse_pressed: MouseButton::NONE,
@@ -341,8 +385,16 @@ impl Default for Input {
 }
 
 impl Input {
+    pub fn rel_mouse_pos(&self) -> Vec2i {
+        self.rel_mouse_pos
+    }
+
     pub fn mousemove(&mut self, x: i32, y: i32) {
         self.mouse_pos = vec2(x, y);
+    }
+
+    pub fn get_mouse_buttons(&self) -> MouseButton {
+        self.mouse_down
     }
 
     pub fn mousedown(&mut self, x: i32, y: i32, btn: MouseButton) {
@@ -482,8 +534,8 @@ impl ContainerHandle {
         Self(Rc::new(RefCell::new(container)))
     }
 
-    pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
-        self.0.borrow().render(canvas)
+    pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
+        self.0.borrow_mut().render(canvas)
     }
 
     pub fn inner<'a>(&'a self) -> Ref<'a, Container> {
@@ -534,7 +586,7 @@ impl<R: Renderer> Context<R> {
     }
 
     pub fn end(&mut self) {
-        for r in &self.root_list {
+        for r in &mut self.root_list {
             r.render(&mut self.canvas);
         }
         self.canvas.end()
@@ -597,6 +649,10 @@ impl<R: Renderer> Context<R> {
         window
     }
 
+    pub fn new_dialog(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
+        WindowHandle::dialog(name, self.canvas.get_atlas(), &self.style, self.input.clone(), initial_rect)
+    }
+
     pub fn new_popup(&mut self, name: &str) -> WindowHandle {
         WindowHandle::popup(name, self.canvas.get_atlas(), &self.style, self.input.clone())
     }
@@ -636,7 +692,7 @@ impl<R: Renderer> Context<R> {
 
     #[inline(never)]
     #[must_use]
-    fn begin_window(&mut self, window: &mut WindowHandle, opt: WidgetOption) -> bool {
+    fn begin_window(&mut self, window: &mut WindowHandle, opt: ContainerOption) -> bool {
         if !window.is_open() {
             return false;
         }
@@ -652,12 +708,35 @@ impl<R: Renderer> Context<R> {
         self.end_root_container(window);
     }
 
-    pub fn window<F: FnOnce(&mut Container)>(&mut self, window: &mut WindowHandle, opt: WidgetOption, f: F) {
+    pub fn window<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, opt: ContainerOption, f: F) {
         // call the window function if the window is open
         if self.begin_window(window, opt) {
             window.inner_mut().main.style = self.style.clone();
-            f(&mut window.inner_mut().main);
+            let state = f(&mut window.inner_mut().main);
             self.end_window(window);
+            if window.is_open() {
+                window.inner_mut().win_state = state;
+            }
+
+            // in case the window needs to be reopened, reset all states
+            if !window.is_open() {
+                window.inner_mut().main.reset();
+            }
+        }
+    }
+
+    pub fn open_dialog(&mut self, window: &mut WindowHandle) {
+        window.inner_mut().win_state = WindowState::Open;
+    }
+
+    pub fn dialog<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, opt: ContainerOption, f: F) {
+        if window.is_open() {
+            self.next_hover_root = Some(window.clone());
+            self.hover_root = self.next_hover_root.clone();
+            window.inner_mut().main.in_hover_root = true;
+            self.bring_to_front(window);
+
+            self.window(window, opt, f);
         }
     }
 
@@ -665,17 +744,21 @@ impl<R: Renderer> Context<R> {
         self.next_hover_root = Some(window.clone());
         self.hover_root = self.next_hover_root.clone();
         window.inner_mut().main.rect = rect(self.input.borrow().mouse_pos.x, self.input.borrow().mouse_pos.y, 1, 1);
-        window.inner_mut().activity = Activity::Open;
+        window.inner_mut().win_state = WindowState::Open;
         window.inner_mut().main.in_hover_root = true;
         self.bring_to_front(window);
     }
 
-    pub fn popup<F: FnOnce(&mut Container)>(&mut self, window: &mut WindowHandle, f: F) {
-        let opt = WidgetOption::AUTO_SIZE | WidgetOption::NO_RESIZE | WidgetOption::NO_SCROLL | WidgetOption::NO_TITLE;
+    pub fn popup<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, f: F) {
+        let opt = ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_SCROLL | ContainerOption::NO_TITLE;
         self.window(window, opt, f);
     }
 
     pub fn set_style(&mut self, style: &Style) {
         self.style = style.clone()
+    }
+
+    pub fn canvas(&self) -> &Canvas<R> {
+        &self.canvas
     }
 }

@@ -26,8 +26,8 @@ png = { version = "0.17.11", optional = true }
 rand = "0.8.5"
 
 [dev-dependencies]
-miniquad = { git = "https://github.com/not-fl3/miniquad" }
-rand = "0.8.5"
+sdl2 = "0.37"
+glow = "0.16"
 
 [profile.dev]
 overflow-checks = false
