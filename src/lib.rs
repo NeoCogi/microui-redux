@@ -61,6 +61,7 @@ use std::{
 mod atlas;
 mod canvas;
 mod container;
+mod file_dialog;
 mod idmngr;
 mod layout;
 mod rect_packer;
@@ -74,6 +75,7 @@ pub use layout::*;
 pub use rect_packer::*;
 pub use rs_math3d::*;
 pub use window::*;
+pub use file_dialog::*;
 
 use bitflags::*;
 use std::cmp::{max, min};

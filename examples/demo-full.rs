@@ -118,7 +118,7 @@ struct State<'a> {
     log_output: Option<ContainerHandle>,
     triangle_window: Option<WindowHandle>,
     suzane_window: Option<WindowHandle>,
-    dialog_window: Option<WindowHandle>,
+    dialog_window: Option<FileDialogState>,
 
     window_header: NodeState,
     test_buttons_header: NodeState,
@@ -758,19 +758,14 @@ impl<'a> State<'a> {
 
     fn dialog(&mut self, ctx: &mut Context<GLRenderer>) {
         if self.open_dialog {
-            ctx.open_dialog(self.dialog_window.as_mut().unwrap());
+            self.dialog_window.as_mut().unwrap().open(ctx);
             self.open_dialog = !self.open_dialog;
             self.write_log("Open dialog!");
         }
 
-        ctx.dialog(&mut self.dialog_window.as_mut().unwrap().clone(), ContainerOption::NONE, |cont| {
-            if cont.button_ex("Close", None, WidgetOption::NONE).is_submitted() {
-                self.write_log("Closed dialog");
-                return WindowState::Closed;
-            }
-            WindowState::Open
-        });
+        self.dialog_window.as_mut().unwrap().eval(ctx);
     }
+
     fn process_frame(&mut self, ctx: &mut Context<GLRenderer>) {
         ctx.frame(|ctx| {
             self.style_window(ctx);
@@ -809,7 +804,7 @@ fn main() {
         state.log_output = Some(ctx.new_panel("Log Outputman, "));
         state.triangle_window = Some(ctx.new_window("Triangle Window", rect(200, 100, 200, 200)));
         state.suzane_window = Some(ctx.new_window("Suzane Window", rect(220, 220, 300, 300)));
-        state.dialog_window = Some(ctx.new_dialog("Dialog", rect(200, 200, 300, 300)));
+        state.dialog_window = Some(FileDialogState::new(ctx));
 
         state
     })

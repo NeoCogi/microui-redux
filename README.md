@@ -38,6 +38,15 @@ $ cargo run --example demo-sdl2-glow-full
 - [x] Image widget
 - [x] Png Atlas source
 - [x] Pass-Through rendering command (for 3D viewports)
-- [ ] API/Examples loop/iterations
+- [ ] Custom Rendering widget
+    - [x] Mouse input event
+    - [ ] Keyboard event
+    - [ ] Text event
+    - [x] Rendering
+- [x] Dialog support
+- [x] File dialog
+- [x] API/Examples loop/iterations
+    - [x] Simple example
+    - [x] Full api use example (3d/dialog/..)
 - [ ] Documentation
 
