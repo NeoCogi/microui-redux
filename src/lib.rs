@@ -687,8 +687,10 @@ impl<R: Renderer> Context<R> {
         container.pop_clip_rect();
 
         let layout = *container.layout.top();
-        container.content_size.x = layout.max.x - layout.body.x;
-        container.content_size.y = layout.max.y - layout.body.y;
+        match layout.max {
+            None => (),
+            Some(lm) => container.content_size = Vec2i::new(lm.x - layout.body.x, lm.y - layout.body.y),
+        }
         container.layout.stack.pop();
     }
 

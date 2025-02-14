@@ -248,4 +248,9 @@ impl WindowHandle {
     pub(crate) fn end_window(&mut self) {
         self.inner_mut().end_window()
     }
+
+    pub fn set_size(&mut self, size: &Dimensioni) {
+        self.inner_mut().main.rect.width = size.width;
+        self.inner_mut().main.rect.height = size.height;
+    }
 }

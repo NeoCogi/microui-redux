@@ -65,7 +65,7 @@ pub struct Layout {
     pub next: Recti,
     pub position: Vec2i,
     pub size: Dimensioni,
-    pub max: Vec2i,
+    pub max: Option<Vec2i>,
     pub next_row: i32,
     pub indent: i32,
 }
@@ -85,34 +85,16 @@ pub(crate) struct LayoutManager {
 impl LayoutManager {
     pub fn push_layout(&mut self, body: Recti, scroll: Vec2i) {
         let mut layout: Layout = Layout {
-            body: Recti {
-                x: 0,
-                y: 0,
-                width: 0,
-                height: 0,
-            },
-            next: Recti {
-                x: 0,
-                y: 0,
-                width: 0,
-                height: 0,
-            },
+            body: Recti { x: 0, y: 0, width: 0, height: 0 },
+            next: Recti { x: 0, y: 0, width: 0, height: 0 },
             position: Vec2i { x: 0, y: 0 },
-            size: Dimension {
-                width: 0,
-                height: 0,
-            },
-            max: Vec2i { x: 0, y: 0 },
+            size: Dimension { width: 0, height: 0 },
+            max: None,
             next_row: 0,
             indent: 0,
         };
-        layout.body = rect(
-            body.x - scroll.x,
-            body.y - scroll.y,
-            body.width,
-            body.height,
-        );
-        layout.max = vec2(-i32::MAX, -i32::MAX);
+        layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.width, body.height);
+        //layout.max = vec2(-i32::MAX, -i32::MAX);
         self.stack.push(layout);
         self.row(&[0], 0);
     }
@@ -148,11 +130,9 @@ impl LayoutManager {
         let row = self.row_stack.pop().unwrap();
         self.current_row_widths.clear();
         for i in 0..row.len {
-            self.current_row_widths
-                .push(self.row_widths_stack[i + row.start]);
+            self.current_row_widths.push(self.row_widths_stack[i + row.start]);
         }
-        self.row_widths_stack
-            .shrink_to(self.row_widths_stack.len() - row.len);
+        self.row_widths_stack.shrink_to(self.row_widths_stack.len() - row.len);
         self.item_index = row.item_index;
 
         let a = self.top_mut();
@@ -168,8 +148,14 @@ impl LayoutManager {
         };
 
         // propagate max to the "current" top of the stack (parent) layout
-        a.max.x = max(a.max.x, b.max.x);
-        a.max.y = max(a.max.y, b.max.y);
+        match (&mut a.max, &b.max) {
+            (None, None) => (),
+            (Some(_), None) => (),
+            (None, Some(m)) => a.max = Some(*m),
+            (Some(am), Some(bm)) => {
+                a.max = Some(Vec2i::new(max(am.x, bm.x), max(am.y, bm.y)));
+            }
+        }
     }
 
     fn row_for_layout(&mut self, height: i32) {
@@ -201,12 +187,7 @@ impl LayoutManager {
         let spacing = self.style.spacing;
         let row_cells_count = self.current_row_widths.len();
 
-        let mut res: Recti = Recti {
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-        };
+        let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
 
         let lsize_y = self.top().size.height;
 
@@ -254,8 +235,11 @@ impl LayoutManager {
 
         res.x += self.top().body.x;
         res.y += self.top().body.y;
-        self.top_mut().max.x = max(self.top().max.x, res.x + res.width);
-        self.top_mut().max.y = max(self.top().max.y, res.y + res.height);
+
+        match self.top_mut().max {
+            None => self.top_mut().max = Some(Vec2i::new(res.x + res.width, res.y + res.height)),
+            Some(am) => self.top_mut().max = Some(Vec2i::new(max(am.x, res.x + res.width), max(am.y, res.y + res.height))),
+        }
         self.last_rect = res;
         return self.last_rect;
     }
