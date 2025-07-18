@@ -1,9 +1,9 @@
 #[path = "./common/mod.rs"]
 mod common;
 
-use common::glow_application::GlowApplication;
 use common::*;
 use microui_redux::*;
+use common::vulkan_application::VulkanApplication;
 
 struct State {
     window: WindowHandle,
@@ -11,8 +11,8 @@ struct State {
 
 fn main() {
     let slots = vec![Dimensioni::new(64, 64), Dimensioni::new(24, 32), Dimensioni::new(64, 24)];
-    let atlas = builder::Builder::from_config(&application::atlas_config(&slots)).unwrap().to_atlas();
-    let mut fw = GlowApplication::new(atlas.clone(), move |gl, ctx| State {
+    let atlas = builder::Builder::from_config(&common::application::atlas_config(&slots)).unwrap().to_atlas();
+    let mut fw = VulkanApplication::new(atlas.clone(), move |ctx| State {
         window: ctx.new_window("Hello Window", rect(40, 40, 300, 450)),
     })
     .unwrap();

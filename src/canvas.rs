@@ -35,12 +35,12 @@ use std::borrow::BorrowMut;
 pub struct Vertex {
     pos: Vec2f,
     tex: Vec2f,
-    color: Color4b,
+    color: [f32; 4],
 }
 
 pub struct Canvas<R: Renderer> {
     current_dim: Dimensioni,
-    renderer: RendererHandle<R>,
+    pub(crate) renderer: RendererHandle<R>,
     clip: Recti,
 }
 
@@ -60,9 +60,7 @@ impl<R: Renderer> Canvas<R> {
     #[inline(never)]
     pub fn clip_rect(dst_r: Recti, src_r: Recti, clip_r: Recti) -> Option<(Recti, Recti)> {
         match dst_r.intersect(&clip_r) {
-            Some(rect) if rect.width == dst_r.width && rect.height == dst_r.height => {
-                Some((dst_r, src_r))
-            }
+            Some(rect) if rect.width == dst_r.width && rect.height == dst_r.height => Some((dst_r, src_r)),
             Some(rect) if rect.width != 0 && rect.height != 0 => {
                 let dx = dst_r.x as f32;
                 let dy = dst_r.y as f32;
@@ -97,10 +95,7 @@ impl<R: Renderer> Canvas<R> {
 
     #[inline(never)]
     pub fn push_rect(&mut self, dst: Recti, src: Recti, color: Color) {
-        let atlas_dim = self
-            .renderer
-            .scope(|r| r.get_atlas())
-            .get_texture_dimension();
+        let atlas_dim = self.renderer.scope(|r| r.get_atlas()).get_texture_dimension();
 
         let clip = self.clip;
         self.renderer.scope_mut(move |r| {
@@ -137,10 +132,11 @@ impl<R: Renderer> Canvas<R> {
                     v3.pos.y = dst.y as f32 + dst.height as f32;
 
                     // color
-                    v0.color = color4b(color.r, color.g, color.b, color.a);
-                    v1.color = v0.color;
-                    v2.color = v0.color;
-                    v3.color = v0.color;
+                    let c = [color.r as f32 / 255.0, color.g as f32 / 255.0, color.b as f32 / 255.0, color.a as f32 / 255.0];
+                    v0.color = c;
+                    v1.color = c;
+                    v2.color = c;
+                    v3.color = c;
 
                     r.push_quad_vertices(&v0, &v1, &v2, &v3);
                 }
@@ -150,10 +146,7 @@ impl<R: Renderer> Canvas<R> {
     }
 
     pub fn draw_rect(&mut self, rect: Recti, color: Color) {
-        let icon_rect = self
-            .renderer
-            .scope(|r| r.get_atlas())
-            .get_icon_rect(WHITE_ICON);
+        let icon_rect = self.renderer.scope(|r| r.get_atlas()).get_icon_rect(WHITE_ICON);
         self.push_rect(rect, icon_rect, color);
     }
 
@@ -180,17 +173,10 @@ impl<R: Renderer> Canvas<R> {
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
-    pub fn draw_slot_with_function(
-        &mut self,
-        id: SlotId,
-        r: Recti,
-        color: Color,
-        payload: Rc<dyn Fn(usize, usize) -> Color4b>,
-    ) {
+    pub fn draw_slot_with_function(&mut self, id: SlotId, r: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
         let src = self.renderer.scope(|r| r.get_atlas()).get_slot_rect(id);
         let pl = payload.clone();
-        self.renderer
-            .scope_mut(move |r| r.get_atlas().borrow_mut().render_slot(id, pl.clone()));
+        self.renderer.scope_mut(move |r| r.get_atlas().borrow_mut().render_slot(id, pl.clone()));
         let x = r.x + (r.width - src.width) / 2;
         let y = r.y + (r.height - src.height) / 2;
         self.push_rect(rect(x, y, src.width, src.height), src, color);
@@ -203,8 +189,7 @@ impl<R: Renderer> Canvas<R> {
     pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
         self.current_dim = Dimensioni::new(width, height);
         self.set_clip_rect(Rect::new(0, 0, width, height));
-        self.renderer
-            .scope_mut(move |r| r.begin(width, height, clr));
+        self.renderer.scope_mut(move |r| r.begin(width, height, clr));
     }
 
     pub fn end(&mut self) {
@@ -213,5 +198,12 @@ impl<R: Renderer> Canvas<R> {
 
     pub fn current_dimension(&self) -> Dimensioni {
         self.current_dim
+    }
+
+    pub fn renderer_scope_mut<F, T>(&mut self, f: F) -> T
+    where
+        F: FnMut(&mut R) -> T,
+    {
+        self.renderer.scope_mut(f)
     }
 }

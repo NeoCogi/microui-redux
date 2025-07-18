@@ -24,6 +24,9 @@ bitflags = "2.4.1"
 rs-math3d = "0.9.23"
 png = { version = "0.17.11", optional = true }
 rand = "0.8.5"
+ash = "0.37"
+vk-mem = "0.3"
+bytemuck = "1.23.1"
 
 [dev-dependencies]
 sdl2 = "0.37"

@@ -138,7 +138,7 @@ impl GLRenderer {
     }
 
     pub fn new(gl: Arc<glow::Context>, atlas: AtlasHandle, width: u32, height: u32) -> Self {
-        assert_eq!(core::mem::size_of::<Vertex>(), 20);
+        assert_eq!(core::mem::size_of::<Vertex>(), 32);
         unsafe {
             // init texture
             let tex_o = gl.create_texture().unwrap();
@@ -259,9 +259,9 @@ impl Renderer for GLRenderer {
             gl.enable_vertex_attrib_array(col_attrib_id);
             debug_assert!(gl.get_error() == 0);
 
-            gl.vertex_attrib_pointer_f32(pos_attrib_id, 2, glow::FLOAT, false, 20, 0);
-            gl.vertex_attrib_pointer_f32(tex_attrib_id, 2, glow::FLOAT, false, 20, 8);
-            gl.vertex_attrib_pointer_f32(col_attrib_id, 4, glow::UNSIGNED_BYTE, true, 20, 16);
+            gl.vertex_attrib_pointer_f32(pos_attrib_id, 2, glow::FLOAT, false, 32, 0);
+            gl.vertex_attrib_pointer_f32(tex_attrib_id, 2, glow::FLOAT, false, 32, 8);
+            gl.vertex_attrib_pointer_f32(col_attrib_id, 4, glow::FLOAT, false, 32, 16);
             debug_assert!(gl.get_error() == 0);
 
             gl.draw_elements(glow::TRIANGLES, self.indices.len() as i32, glow::UNSIGNED_SHORT, 0);

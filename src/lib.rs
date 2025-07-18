@@ -765,4 +765,11 @@ impl<R: Renderer> Context<R> {
     pub fn canvas(&self) -> &Canvas<R> {
         &self.canvas
     }
+
+    pub fn renderer_scope_mut<F, T>(&mut self, f: F) -> T
+    where
+        F: FnMut(&mut R) -> T,
+    {
+        self.canvas.renderer_scope_mut(f)
+    }
 }

@@ -53,8 +53,11 @@
 use microui_redux::*;
 
 pub mod application;
+pub mod glow_application;
 pub mod glow_common;
 pub mod glow_renderer;
+pub mod vulkan_application;
+pub mod vulkan_renderer;
 
 pub mod camera;
 pub mod obj_loader;
