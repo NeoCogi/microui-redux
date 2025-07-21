@@ -11,7 +11,7 @@ use glow::{
 };
 use microui_redux::*;
 use obj_loader::Obj;
-use polymesh::{PolyMesh, PolyMeshRenderer};
+use polymesh::PolyMesh;
 use view3d::View3D;
 
 use std::cell::RefCell;
@@ -24,7 +24,7 @@ use microui_redux::WindowHandle;
 use rand::rngs::ThreadRng;
 use rand::*;
 
-pub use glow_common::*;
+pub use glow_renderer::{create_program, get_active_program_attributes, get_active_program_uniforms};
 
 pub use glow_renderer::*;
 
@@ -745,7 +745,7 @@ impl<'a> State<'a> {
 
                             let pvm = suzane.view_3d.pvm();
                             let view = suzane.view_3d.view_matrix();
-                            renderer.render(gl, &pvm, &view, &suzane.mesh);
+                            renderer.render(gl, &pvm, &view, &(&suzane.mesh));
                         },
                         _ => {
                             println!("unable to hold the lock on the polymesh")
