@@ -52,11 +52,62 @@
 //
 use super::*;
 
+/// Describes how a layout dimension should be resolved.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SizePolicy {
+    Auto,
+    Fixed(i32),
+    Remainder(i32),
+}
+
+impl SizePolicy {
+    fn from_raw(value: i32) -> Self {
+        if value > 0 {
+            SizePolicy::Fixed(value)
+        } else if value == 0 {
+            SizePolicy::Auto
+        } else {
+            let margin = (-value - 1).max(0);
+            SizePolicy::Remainder(margin)
+        }
+    }
+
+    fn to_raw(self) -> i32 {
+        match self {
+            SizePolicy::Auto => 0,
+            SizePolicy::Fixed(value) => value,
+            SizePolicy::Remainder(margin) => -(margin + 1),
+        }
+    }
+
+    fn resolve(self, default_size: i32, available_space: i32) -> i32 {
+        let resolved = match self {
+            SizePolicy::Auto => default_size,
+            SizePolicy::Fixed(value) => value,
+            SizePolicy::Remainder(margin) => available_space.saturating_sub(margin),
+        };
+        resolved.max(0)
+    }
+}
+
+impl Default for SizePolicy {
+    fn default() -> Self {
+        SizePolicy::Auto
+    }
+}
+
+impl From<i32> for SizePolicy {
+    fn from(value: i32) -> Self {
+        SizePolicy::from_raw(value)
+    }
+}
+
 #[derive(Clone, Default)]
 struct Row {
     start: usize,
     len: usize,
     item_index: usize,
+    height: SizePolicy,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -75,10 +126,11 @@ pub(crate) struct LayoutManager {
     pub style: Style,
     pub last_rect: Recti,
     pub stack: Vec<Layout>,
-    pub row_widths_stack: Vec<i32>,
+    pub row_widths_stack: Vec<SizePolicy>,
     row_stack: Vec<Row>,
 
-    pub current_row_widths: Vec<i32>,
+    pub current_row_widths: Vec<SizePolicy>,
+    current_row_height: SizePolicy,
     pub item_index: usize,
 }
 
@@ -100,11 +152,11 @@ impl LayoutManager {
     }
 
     pub fn top(&self) -> &Layout {
-        return self.stack.last().unwrap();
+        self.stack.last().expect("Layout stack should never be empty when accessed")
     }
 
     pub fn top_mut(&mut self) -> &mut Layout {
-        return self.stack.last_mut().unwrap();
+        self.stack.last_mut().expect("Layout stack should never be empty when accessed")
     }
 
     pub fn begin_column(&mut self) {
@@ -114,9 +166,10 @@ impl LayoutManager {
             start: self.row_stack.len(),
             len: self.current_row_widths.len(),
             item_index: self.item_index,
+            height: self.current_row_height,
         };
-        for i in 0..self.current_row_widths.len() {
-            self.row_widths_stack.push(self.current_row_widths[i]);
+        for width in &self.current_row_widths {
+            self.row_widths_stack.push(*width);
         }
         self.current_row_widths.clear();
         self.item_index = 0;
@@ -127,12 +180,17 @@ impl LayoutManager {
     pub fn end_column(&mut self) {
         let b = self.top().clone();
         self.stack.pop();
-        let row = self.row_stack.pop().unwrap();
+        let row = self.row_stack.pop().expect("Row stack should not be empty");
         self.current_row_widths.clear();
         for i in 0..row.len {
-            self.current_row_widths.push(self.row_widths_stack[i + row.start]);
+            let index = i.saturating_add(row.start);
+            if let Some(width) = self.row_widths_stack.get(index) {
+                self.current_row_widths.push(*width);
+            }
         }
-        self.row_widths_stack.shrink_to(self.row_widths_stack.len() - row.len);
+        let new_len = self.row_widths_stack.len().saturating_sub(row.len);
+        self.row_widths_stack.shrink_to(new_len);
+        self.current_row_height = row.height;
         self.item_index = row.item_index;
 
         let a = self.top_mut();
@@ -158,19 +216,31 @@ impl LayoutManager {
         }
     }
 
-    fn row_for_layout(&mut self, height: i32) {
+    fn row_for_layout(&mut self, height: SizePolicy) {
+        self.current_row_height = height;
         let layout = self.top_mut();
         layout.position = vec2(layout.indent, layout.next_row);
-        layout.size.height = height;
+        layout.size.height = height.to_raw();
         self.item_index = 0;
     }
 
     pub fn row(&mut self, widths: &[i32], height: i32) {
         self.current_row_widths.clear();
-        for i in 0..widths.len() {
-            self.current_row_widths.push(widths[i]);
+        for &width in widths {
+            self.current_row_widths.push(SizePolicy::from_raw(width));
         }
-        self.row_for_layout(height);
+        let height_policy = SizePolicy::from_raw(height);
+        self.row_for_layout(height_policy);
+    }
+
+    fn resolve_horizontal(&self, cursor_x: i32, policy: SizePolicy, default_width: i32) -> i32 {
+        let available_width = self.top().body.width.saturating_sub(cursor_x);
+        policy.resolve(default_width, available_width)
+    }
+
+    fn resolve_vertical(&self, cursor_y: i32, policy: SizePolicy, default_height: i32) -> i32 {
+        let available_height = self.top().body.height.saturating_sub(cursor_y);
+        policy.resolve(default_height, available_height)
     }
 
     pub fn set_width(&mut self, width: i32) {
@@ -178,45 +248,41 @@ impl LayoutManager {
     }
 
     pub fn set_height(&mut self, height: i32) {
-        self.top_mut().size.height = height;
+        let policy = SizePolicy::from_raw(height);
+        self.top_mut().size.height = policy.to_raw();
+        self.current_row_height = policy;
     }
 
     pub fn next(&mut self) -> Recti {
         let dcell_size = self.style.default_cell_size;
         let padding = self.style.padding;
         let spacing = self.style.spacing;
+        let default_width = dcell_size.width + padding * 2;
+        let default_height = dcell_size.height + padding * 2;
         let row_cells_count = self.current_row_widths.len();
 
         let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
 
-        let lsize_y = self.top().size.height;
-
         // next grid line
         if self.item_index == row_cells_count {
-            self.row_for_layout(lsize_y);
+            let height_policy = self.current_row_height;
+            self.row_for_layout(height_policy);
         }
 
         res.x = self.top().position.x;
         res.y = self.top().position.y;
-        res.width = if self.current_row_widths.len() > 0 {
-            self.current_row_widths[self.item_index]
-        } else {
-            self.top().size.width
-        };
-        res.height = self.top().size.height;
 
-        if res.width == 0 {
-            res.width = dcell_size.width + padding * 2;
-        }
-        if res.height == 0 {
-            res.height = dcell_size.height + padding * 2;
-        }
-        if res.width < 0 {
-            res.width += self.top().body.width - res.x + 1;
-        }
-        if res.height < 0 {
-            res.height += self.top().body.height - res.y + 1;
-        }
+        let width_policy = if row_cells_count > 0 {
+            self.current_row_widths
+                .get(self.item_index)
+                .copied()
+                .unwrap_or_else(|| SizePolicy::from_raw(self.top().size.width))
+        } else {
+            SizePolicy::from_raw(self.top().size.width)
+        };
+
+        res.width = self.resolve_horizontal(res.x, width_policy, default_width);
+        res.height = self.resolve_vertical(res.y, self.current_row_height, default_height);
 
         // ensure it will never exceeds
         if self.item_index < row_cells_count {
@@ -226,7 +292,7 @@ impl LayoutManager {
         ///////////
         // update the next position/row/body/max/...
         ////////
-        self.top_mut().position.x += res.width + spacing;
+        self.top_mut().position.x = self.top().position.x.saturating_add(res.width).saturating_add(spacing);
         self.top_mut().next_row = if self.top().next_row > res.y + res.height + spacing {
             self.top().next_row
         } else {
