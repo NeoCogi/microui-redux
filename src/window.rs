@@ -131,12 +131,8 @@ impl Window {
             if !opt.has_no_title() {
                 let id = container.idmngr.get_id_from_str("!title");
                 container.update_control(id, tr, WidgetOption::NONE);
-                container.draw_control_text(
-                    &container.name.clone(), /* TODO: cloning the string is expensive, go to a different approach */
-                    tr,
-                    ControlColor::TitleText,
-                    WidgetOption::NONE,
-                );
+                let name = container.name.clone(); // Necessary due to borrow checker limitations
+                container.draw_control_text(&name, tr, ControlColor::TitleText, WidgetOption::NONE);
                 if Some(id) == container.focus && container.input.borrow().mouse_down.is_left() {
                     container.rect.x += container.input.borrow().mouse_delta.x;
                     container.rect.y += container.input.borrow().mouse_delta.y;

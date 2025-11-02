@@ -602,8 +602,10 @@ impl PolyMeshRenderer {
             if self.indices.len() + (vertex_count - 2) * 2 > self.max_index_count || self.vertices.len() + vertex_count > self.max_vertex_count {
                 unsafe {
                     // update the vertex buffer
-                    let vertices_u8: &[u8] =
-                        core::slice::from_raw_parts(self.vertices.as_ptr() as *const u8, self.vertices.len() * core::mem::size_of::<PolymeshRenderVertex>());
+                    let vertices_u8: &[u8] = core::slice::from_raw_parts(
+                        self.vertices.as_ptr() as *const u8,
+                        self.vertices.len() * core::mem::size_of::<PolymeshRenderVertex>(),
+                    );
                     gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_u8, glow::DYNAMIC_DRAW);
                     debug_assert!(gl.get_error() == 0);
 
@@ -641,7 +643,10 @@ impl PolyMeshRenderer {
         if self.indices.len() > 0 {
             unsafe {
                 // update the vertex buffer
-                let vertices_u8: &[u8] = core::slice::from_raw_parts(self.vertices.as_ptr() as *const u8, self.vertices.len() * core::mem::size_of::<PolymeshRenderVertex>());
+                let vertices_u8: &[u8] = core::slice::from_raw_parts(
+                    self.vertices.as_ptr() as *const u8,
+                    self.vertices.len() * core::mem::size_of::<PolymeshRenderVertex>(),
+                );
                 gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_u8, glow::DYNAMIC_DRAW);
                 debug_assert!(gl.get_error() == 0);
                 gl.vertex_attrib_pointer_f32(pos_attr, 3, glow::FLOAT, false, core::mem::size_of::<PolymeshRenderVertex>() as i32, 0);
@@ -714,8 +719,10 @@ impl PolyMeshRenderer {
             if self.indices.len() + (vertex_count - 2) * 2 > self.max_index_count || self.vertices.len() + vertex_count > self.max_vertex_count {
                 unsafe {
                     // update the vertex buffer
-                    let vertices_u8: &[u8] =
-                        core::slice::from_raw_parts(self.vertices.as_ptr() as *const u8, self.vertices.len() * core::mem::size_of::<PolymeshRenderVertex>());
+                    let vertices_u8: &[u8] = core::slice::from_raw_parts(
+                        self.vertices.as_ptr() as *const u8,
+                        self.vertices.len() * core::mem::size_of::<PolymeshRenderVertex>(),
+                    );
                     gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_u8, glow::DYNAMIC_DRAW);
                     debug_assert!(gl.get_error() == 0);
 
@@ -758,7 +765,10 @@ impl PolyMeshRenderer {
         if self.indices.len() > 0 {
             unsafe {
                 // update the vertex buffer
-                let vertices_u8: &[u8] = core::slice::from_raw_parts(self.vertices.as_ptr() as *const u8, self.vertices.len() * core::mem::size_of::<PolymeshRenderVertex>());
+                let vertices_u8: &[u8] = core::slice::from_raw_parts(
+                    self.vertices.as_ptr() as *const u8,
+                    self.vertices.len() * core::mem::size_of::<PolymeshRenderVertex>(),
+                );
                 gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_u8, glow::DYNAMIC_DRAW);
                 debug_assert!(gl.get_error() == 0);
 

@@ -51,13 +51,16 @@ impl FileDialogState {
         folders.clear();
         files.clear();
         folders.push(p.to_string_lossy().to_string() + "/..");
-        for entry in std::fs::read_dir(p).unwrap() {
-            let e = entry.unwrap();
-            let path = e.path();
-            if path.is_dir() {
-                folders.push(path.to_str().unwrap().to_string());
-            } else {
-                files.push(e.file_name().to_str().unwrap().to_string())
+        if let Ok(read_dir) = std::fs::read_dir(p) {
+            for entry in read_dir {
+                if let Ok(e) = entry {
+                    let path = e.path();
+                    if path.is_dir() {
+                        folders.push(path.to_string_lossy().to_string());
+                    } else {
+                        files.push(e.file_name().to_string_lossy().to_string())
+                    }
+                }
             }
         }
     }
@@ -65,7 +68,10 @@ impl FileDialogState {
     pub fn new<R: Renderer>(ctx: &mut Context<R>) -> Self {
         let mut folders = Vec::new();
         let mut files = Vec::new();
-        let current_working_directory = std::env::current_dir().unwrap().clone().to_string_lossy().to_string();
+        let current_working_directory = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .to_string_lossy()
+            .to_string();
         Self::list_folders_files(Path::new(&current_working_directory), &mut folders, &mut files);
         Self {
             current_working_directory,
@@ -99,9 +105,9 @@ impl FileDialogState {
                     container.set_row_widths_height(&[-1], 0);
                     let mut refresh = false;
                     for f in &self.folders {
-                        let path = f.split("/").last();
+                        let path = f.split("/").last().unwrap_or(f);
 
-                        if container.button_ex(path.unwrap(), None, WidgetOption::NONE).is_submitted() {
+                        if container.button_ex(path, None, WidgetOption::NONE).is_submitted() {
                             self.current_working_directory = f.to_string();
                             refresh = true;
                         }

@@ -123,7 +123,9 @@ pub fn load_image_bytes(bytes: &[u8]) -> Result<(usize, usize, Vec<Color4b>)> {
     let mut cursor = Cursor::new(bytes);
     let mut decoder = png::Decoder::new(&mut cursor);
     decoder.set_transformations(png::Transformations::normalize_to_color8());
-    let mut reader = decoder.read_info().unwrap();
+    let mut reader = decoder
+        .read_info()
+        .map_err(|e| Error::new(ErrorKind::Other, format!("PNG decode error: {}", e)))?;
     let mut img_data = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut img_data)?;
 
@@ -156,8 +158,7 @@ pub fn load_image_bytes(bytes: &[u8]) -> Result<(usize, usize, Vec<Color4b>)> {
                 }
                 ColorType::Indexed => todo!(),
                 ColorType::Rgb => {
-                    let c =
-                        ((line[xx] as u32 + line[xx + 1] as u32 + line[xx + 2] as u32) / 3) as u8;
+                    let c = ((line[xx] as u32 + line[xx + 1] as u32 + line[xx + 2] as u32) / 3) as u8;
                     color4b(c, c, c, c)
                 }
                 ColorType::Rgba => {
@@ -223,10 +224,7 @@ pub mod builder {
                 last_update_id: 0,
             };
 
-            let mut builder = Builder {
-                atlas,
-                packer: Packer::new(rp_config),
-            };
+            let mut builder = Builder { atlas, packer: Packer::new(rp_config) };
 
             builder.add_icon(&config.white_icon)?;
             builder.add_icon(&config.close_icon)?;
@@ -247,9 +245,7 @@ pub mod builder {
             let rect = self.add_tile(width, height, pixels.as_slice())?;
             let id = self.atlas.icons.len();
             let icon = Icon { rect };
-            self.atlas
-                .icons
-                .push((Self::format_path(&path), icon.clone()));
+            self.atlas.icons.push((Self::format_path(&path), icon.clone()));
             Ok(IconId(id))
         }
 
@@ -265,11 +261,7 @@ pub mod builder {
                 let rect = self.add_tile(
                     metrics.width as _,
                     metrics.height as _,
-                    bitmap
-                        .iter()
-                        .map(|c| color4b(0xFF, 0xFF, 0xFF, *c))
-                        .collect::<Vec<Color4b>>()
-                        .as_slice(),
+                    bitmap.iter().map(|c| color4b(0xFF, 0xFF, 0xFF, *c)).collect::<Vec<Color4b>>().as_slice(),
                 )?;
                 let ce = CharEntry {
                     offset: Vec2i::new(metrics.xmin, metrics.ymin),
@@ -287,9 +279,7 @@ pub mod builder {
                 font_size: size,
                 entries,
             };
-            self.atlas
-                .fonts
-                .push((Self::format_path(path), font.clone()));
+            self.atlas.fonts.push((Self::format_path(path), font.clone()));
             Ok(FontId(id))
         }
 
@@ -297,8 +287,7 @@ pub mod builder {
             let mut w: Vec<u8> = Vec::new();
             let mut cursor = Cursor::new(Vec::new());
             {
-                let mut encoder =
-                    png::Encoder::new(&mut cursor, atlas.width() as _, atlas.height() as _); // Width is 2 pixels and height is 1.
+                let mut encoder = png::Encoder::new(&mut cursor, atlas.width() as _, atlas.height() as _); // Width is 2 pixels and height is 1.
                 encoder.set_color(png::ColorType::Rgba);
                 encoder.set_depth(png::BitDepth::Eight);
 
@@ -360,10 +349,7 @@ pub mod builder {
                 Some(r) => {
                     for y in 0..height {
                         for x in 0..width {
-                            self.atlas.pixels[(r.x
-                                + x as i32
-                                + (r.y + y as i32) * self.atlas.width as i32)
-                                as usize] = pixels[x + y * width];
+                            self.atlas.pixels[(r.x + x as i32 + (r.y + y as i32) * self.atlas.width as i32) as usize] = pixels[x + y * width];
                         }
                     }
                     Ok(Recti::new(r.x, r.y, r.width, r.height))
@@ -381,21 +367,23 @@ pub mod builder {
 
         fn load_font(path: &str) -> Result<fontdue::Font> {
             let mut data = Vec::new();
-            File::open(path).unwrap().read_to_end(&mut data).unwrap();
+            File::open(path)
+                .map_err(|e| Error::new(ErrorKind::Other, format!("Cannot open font file '{}': {}", path, e)))?
+                .read_to_end(&mut data)
+                .map_err(|e| Error::new(ErrorKind::Other, format!("Cannot read font file '{}': {}", path, e)))?;
 
-            let font = fontdue::Font::from_bytes(data, FontSettings::default())
-                .map_err(|error| Error::new(ErrorKind::Other, format!("{}", error)))?;
+            let font = fontdue::Font::from_bytes(data, FontSettings::default()).map_err(|error| Error::new(ErrorKind::Other, format!("{}", error)))?;
             Ok(font)
         }
 
         fn strip_path_to_file(path: &str) -> String {
             let p = Path::new(path);
-            p.file_name().unwrap().to_str().unwrap().to_string()
+            p.file_name().and_then(|n| n.to_str()).unwrap_or(path).to_string()
         }
 
         fn strip_extension(path: &str) -> String {
             let p = Path::new(path);
-            p.with_extension("").to_str().unwrap().to_string()
+            p.with_extension("").to_str().unwrap_or(path).to_string()
         }
 
         fn format_path(path: &str) -> String {
@@ -444,11 +432,7 @@ impl AtlasHandle {
                 let font = Font {
                     line_size: f.line_size,
                     font_size: f.font_size,
-                    entries: f
-                        .entries
-                        .iter()
-                        .map(|(ch, e)| (ch.clone(), e.clone()))
-                        .collect(),
+                    entries: f.entries.iter().map(|(ch, e)| (ch.clone(), e.clone())).collect(),
                 };
                 (name.to_string(), font)
             })
@@ -485,15 +469,8 @@ impl AtlasHandle {
     #[cfg(feature = "save-to-rust")]
     pub fn to_rust_files(&self, atlas_name: &str, format: SourceFormat, path: &str) -> Result<()> {
         let mut font_meta = String::new();
-        font_meta.push_str(
-            format!(
-                "use microui_redux::*; pub const {} : AtlasSource = AtlasSource {{\n",
-                atlas_name
-            )
-            .as_str(),
-        );
-        font_meta
-            .push_str(format!("width: {}, height: {},\n", self.width(), self.height()).as_str());
+        font_meta.push_str(format!("use microui_redux::*; pub const {} : AtlasSource = AtlasSource {{\n", atlas_name).as_str());
+        font_meta.push_str(format!("width: {}, height: {},\n", self.width(), self.height()).as_str());
         let mut icons = String::from_str("&[\n").unwrap();
         for (i, r) in &self.0.borrow().icons {
             icons.push_str(
@@ -507,13 +484,7 @@ impl AtlasHandle {
         icons.push_str("]");
         let mut slots = String::from_str("&[\n").unwrap();
         for r in &self.0.borrow().slots {
-            slots.push_str(
-                format!(
-                    "Rect {{ x: {}, y: {}, width: {}, height: {} }},",
-                    r.x, r.y, r.width, r.height,
-                )
-                .as_str(),
-            );
+            slots.push_str(format!("Rect {{ x: {}, y: {}, width: {}, height: {} }},", r.x, r.y, r.width, r.height,).as_str());
         }
         slots.push_str("]");
         let mut fonts = String::from_str("&[\n").unwrap();
@@ -548,20 +519,11 @@ impl AtlasHandle {
         font_meta.push_str(format!("slots: {},\n", slots).as_str());
         let (source_pixels, source_format) = match format {
             SourceFormat::Raw => (
-                self.0
-                    .borrow()
-                    .pixels
-                    .iter()
-                    .map(|p| [p.x, p.y, p.z, p.w])
-                    .flatten()
-                    .collect::<Vec<_>>(),
+                self.0.borrow().pixels.iter().map(|p| [p.x, p.y, p.z, p.w]).flatten().collect::<Vec<_>>(),
                 "SourceFormat::Raw",
             ),
             #[cfg(feature = "png_source")]
-            SourceFormat::Png => (
-                builder::Builder::png_image_bytes(self.clone()).unwrap(),
-                "SourceFormat::Png",
-            ),
+            SourceFormat::Png => (builder::Builder::png_image_bytes(self.clone()).unwrap(), "SourceFormat::Png"),
         };
 
         let mut pixels = String::from_str("&[\n").unwrap();
@@ -592,41 +554,19 @@ impl AtlasHandle {
     }
 
     pub fn clone_icon_table(&self) -> Vec<(String, IconId)> {
-        self.0
-            .borrow()
-            .icons
-            .iter()
-            .enumerate()
-            .map(|(i, icon)| (icon.0.clone(), IconId(i)))
-            .collect()
+        self.0.borrow().icons.iter().enumerate().map(|(i, icon)| (icon.0.clone(), IconId(i))).collect()
     }
 
     pub fn clone_font_table(&self) -> Vec<(String, FontId)> {
-        self.0
-            .borrow()
-            .fonts
-            .iter()
-            .enumerate()
-            .map(|(i, font)| (font.0.clone(), FontId(i)))
-            .collect()
+        self.0.borrow().fonts.iter().enumerate().map(|(i, font)| (font.0.clone(), FontId(i))).collect()
     }
 
     pub fn clone_slot_table(&self) -> Vec<SlotId> {
-        self.0
-            .borrow()
-            .slots
-            .iter()
-            .enumerate()
-            .map(|(i, _)| SlotId(i))
-            .collect()
+        self.0.borrow().slots.iter().enumerate().map(|(i, _)| SlotId(i)).collect()
     }
 
     pub fn get_char_entry(&self, font: FontId, c: char) -> Option<CharEntry> {
-        self.0.borrow().fonts[font.0]
-            .1
-            .entries
-            .get(&c)
-            .map(|x| x.clone())
+        self.0.borrow().fonts[font.0].1.entries.get(&c).map(|x| x.clone())
     }
 
     pub fn get_font_height(&self, font: FontId) -> usize {
@@ -655,18 +595,8 @@ impl AtlasHandle {
         Dimension::new(self.0.borrow().width as _, self.0.borrow().height as _)
     }
 
-    pub fn draw_string<DrawFunction: FnMut(char, Vec2i, Recti, Recti)>(
-        &self,
-        font: FontId,
-        text: &str,
-        mut f: DrawFunction,
-    ) {
-        let mut dst = Recti {
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-        };
+    pub fn draw_string<DrawFunction: FnMut(char, Vec2i, Recti, Recti)>(&self, font: FontId, text: &str, mut f: DrawFunction) {
+        let mut dst = Recti { x: 0, y: 0, width: 0, height: 0 };
         let fh = self.get_font_height(font) as i32;
         let mut acc_x = 0;
         let mut acc_y = 0;
@@ -680,10 +610,11 @@ impl AtlasHandle {
                 acc_x = 0;
                 acc_y += fh;
             } else {
-                let src = match self.get_char_entry(font, chr) {
-                    Some(ce) => ce,
-                    None => self.get_char_entry(font, '_').unwrap(),
-                };
+                let src = self.get_char_entry(font, chr).or_else(|| self.get_char_entry(font, '_')).unwrap_or(CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 8, 8),
+                });
                 dst.width = src.rect.width;
                 dst.height = src.rect.height;
                 dst.x = acc_x + src.offset.x;
@@ -704,13 +635,22 @@ impl AtlasHandle {
     }
 
     pub fn render_slot(&mut self, slot: SlotId, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        let slot_rect = self.0.borrow().slots[slot.0];
+        let slot_rect = match self.0.borrow().slots.get(slot.0) {
+            Some(rect) => *rect,
+            None => return,
+        };
         let width = self.width();
+        let height = self.height();
         {
             let pixels = &mut self.0.borrow_mut().pixels;
-            for y in slot_rect.y..slot_rect.y + slot_rect.height {
-                for x in slot_rect.x..slot_rect.x + slot_rect.width {
-                    pixels[(x + y * (width as i32)) as usize] = f(x as _, y as _)
+            let max_y = (slot_rect.y + slot_rect.height).min(height as i32);
+            let max_x = (slot_rect.x + slot_rect.width).min(width as i32);
+            for y in slot_rect.y.max(0)..max_y {
+                for x in slot_rect.x.max(0)..max_x {
+                    let index = (x + y * (width as i32)) as usize;
+                    if index < pixels.len() {
+                        pixels[index] = f(x as _, y as _)
+                    }
                 }
             }
         }

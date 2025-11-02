@@ -167,9 +167,15 @@ impl<'a> PolygonIterator<'a> {
 }
 
 impl glow_renderer::PolymeshVertex for &PolyVertex {
-    fn pos(&self) -> usize { self.pos }
-    fn normal(&self) -> usize { self.normal }
-    fn tex(&self) -> usize { self.tex }
+    fn pos(&self) -> usize {
+        self.pos
+    }
+    fn normal(&self) -> usize {
+        self.normal
+    }
+    fn tex(&self) -> usize {
+        self.tex
+    }
 }
 
 impl<'a> glow_renderer::PolymeshPolygon for PolygonIterator<'a> {
@@ -186,15 +192,15 @@ impl<'a> PolymeshTrait for &'a PolyMesh {
     fn polys(&self) -> Self::PolyIter {
         PolyMeshIterator { mesh: *self, poly_id: 0 }
     }
-    
+
     fn get_vertex_position(&self, index: usize) -> Vec3f {
         self.v_positions[index].position
     }
-    
+
     fn get_vertex_normal(&self, index: usize) -> Vec3f {
         self.v_normals[index]
     }
-    
+
     fn get_vertex_uv(&self, index: usize) -> Vec2f {
         if self.v_tex.len() > index {
             self.v_tex[index]
@@ -221,4 +227,3 @@ impl<'a> Iterator for PolyMeshIterator<'a> {
         }
     }
 }
-
