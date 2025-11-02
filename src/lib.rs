@@ -123,11 +123,25 @@ impl<R: Renderer> RendererHandle<R> {
     }
 
     pub fn scope<Res, F: Fn(&R) -> Res>(&self, f: F) -> Res {
-        f(&mut self.handle.read().unwrap())
+        match self.handle.read() {
+            Ok(guard) => f(&*guard),
+            Err(poisoned) => {
+                // Handle poisoned lock by using the data anyway
+                // This is safe because we're just reading
+                f(&*poisoned.into_inner())
+            }
+        }
     }
 
     pub fn scope_mut<Res, F: FnMut(&mut R) -> Res>(&mut self, mut f: F) -> Res {
-        f(&mut self.handle.write().unwrap())
+        match self.handle.write() {
+            Ok(mut guard) => f(&mut *guard),
+            Err(poisoned) => {
+                // Handle poisoned lock by using the data anyway
+                // Clear the poison and continue
+                f(&mut *poisoned.into_inner())
+            }
+        }
     }
 }
 

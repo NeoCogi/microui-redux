@@ -93,10 +93,7 @@ pub trait RectTrait {
 
     /// Check if `other` rectangle is completely inside `self`.
     fn contains_rect(&self, other: &Self) -> bool {
-        self.left() <= other.left()
-            && self.right() >= other.right()
-            && self.top() <= other.top()
-            && self.bottom() >= other.bottom()
+        self.left() <= other.left() && self.right() >= other.right() && self.top() <= other.top() && self.bottom() >= other.bottom()
     }
 
     /// Check if given pixel is inside this rectangle.
@@ -137,14 +134,8 @@ pub struct Packer {
 impl Packer {
     /// Create new empty `Packer` with the provided parameters.
     pub fn new(config: Config) -> Packer {
-        let width = std::cmp::max(
-            0,
-            config.width + config.rectangle_padding - 2 * config.border_padding,
-        );
-        let height = std::cmp::max(
-            0,
-            config.height + config.rectangle_padding - 2 * config.border_padding,
-        );
+        let width = std::cmp::max(0, config.width + config.rectangle_padding - 2 * config.border_padding);
+        let height = std::cmp::max(0, config.height + config.rectangle_padding - 2 * config.border_padding);
 
         Packer {
             config: config,
@@ -167,11 +158,10 @@ impl Packer {
             return None;
         }
 
-        if let Some(mut rect) = self.packer.pack(
-            width + self.config.rectangle_padding,
-            height + self.config.rectangle_padding,
-            allow_rotation,
-        ) {
+        if let Some(mut rect) = self
+            .packer
+            .pack(width + self.config.rectangle_padding, height + self.config.rectangle_padding, allow_rotation)
+        {
             rect.width -= self.config.rectangle_padding;
             rect.height -= self.config.rectangle_padding;
             rect.x += self.config.border_padding;
@@ -185,11 +175,8 @@ impl Packer {
 
     /// Check if rectangle with the specified size can be added.
     pub fn can_pack(&self, width: i32, height: i32, allow_rotation: bool) -> bool {
-        self.packer.can_pack(
-            width + self.config.rectangle_padding,
-            height + self.config.rectangle_padding,
-            allow_rotation,
-        )
+        self.packer
+            .can_pack(width + self.config.rectangle_padding, height + self.config.rectangle_padding, allow_rotation)
     }
 }
 
@@ -223,11 +210,7 @@ impl DensePacker {
         let width = std::cmp::max(0, width);
         let height = std::cmp::max(0, height);
 
-        let skylines = vec![Skyline {
-            left: 0,
-            y: 0,
-            width: width,
-        }];
+        let skylines = vec![Skyline { left: 0, y: 0, width: width }];
 
         DensePacker {
             width: width,
@@ -253,11 +236,7 @@ impl DensePacker {
         // Add a new skyline to fill the gap
         // The new skyline starts where the furthest one ends
         let left = self.skylines.last().unwrap().right();
-        self.skylines.push(Skyline {
-            left: left,
-            y: 0,
-            width: width - left,
-        });
+        self.skylines.push(Skyline { left: left, y: 0, width: width - left });
     }
 
     /// Pack new rectangle. Returns position of the newly added rectangle. If there is not enough space returns `None`.
@@ -323,9 +302,7 @@ impl DensePacker {
 
             if allow_rotation {
                 if let Some(r) = self.can_put(i, h, w) {
-                    if r.bottom() < bottom
-                        || (r.bottom() == bottom && self.skylines[i].width < width)
-                    {
+                    if r.bottom() < bottom || (r.bottom() == bottom && self.skylines[i].width < width) {
                         bottom = r.bottom();
                         width = self.skylines[i].width;
                         index = Some(i);

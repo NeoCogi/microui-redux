@@ -60,9 +60,7 @@ impl<R: Renderer> Canvas<R> {
     #[inline(never)]
     pub fn clip_rect(dst_r: Recti, src_r: Recti, clip_r: Recti) -> Option<(Recti, Recti)> {
         match dst_r.intersect(&clip_r) {
-            Some(rect) if rect.width == dst_r.width && rect.height == dst_r.height => {
-                Some((dst_r, src_r))
-            }
+            Some(rect) if rect.width == dst_r.width && rect.height == dst_r.height => Some((dst_r, src_r)),
             Some(rect) if rect.width != 0 && rect.height != 0 => {
                 let dx = dst_r.x as f32;
                 let dy = dst_r.y as f32;
@@ -97,10 +95,7 @@ impl<R: Renderer> Canvas<R> {
 
     #[inline(never)]
     pub fn push_rect(&mut self, dst: Recti, src: Recti, color: Color) {
-        let atlas_dim = self
-            .renderer
-            .scope(|r| r.get_atlas())
-            .get_texture_dimension();
+        let atlas_dim = self.renderer.scope(|r| r.get_atlas()).get_texture_dimension();
 
         let clip = self.clip;
         self.renderer.scope_mut(move |r| {
@@ -150,10 +145,7 @@ impl<R: Renderer> Canvas<R> {
     }
 
     pub fn draw_rect(&mut self, rect: Recti, color: Color) {
-        let icon_rect = self
-            .renderer
-            .scope(|r| r.get_atlas())
-            .get_icon_rect(WHITE_ICON);
+        let icon_rect = self.renderer.scope(|r| r.get_atlas()).get_icon_rect(WHITE_ICON);
         self.push_rect(rect, icon_rect, color);
     }
 
@@ -180,17 +172,10 @@ impl<R: Renderer> Canvas<R> {
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
-    pub fn draw_slot_with_function(
-        &mut self,
-        id: SlotId,
-        r: Recti,
-        color: Color,
-        payload: Rc<dyn Fn(usize, usize) -> Color4b>,
-    ) {
+    pub fn draw_slot_with_function(&mut self, id: SlotId, r: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
         let src = self.renderer.scope(|r| r.get_atlas()).get_slot_rect(id);
         let pl = payload.clone();
-        self.renderer
-            .scope_mut(move |r| r.get_atlas().borrow_mut().render_slot(id, pl.clone()));
+        self.renderer.scope_mut(move |r| r.get_atlas().borrow_mut().render_slot(id, pl.clone()));
         let x = r.x + (r.width - src.width) / 2;
         let y = r.y + (r.height - src.height) / 2;
         self.push_rect(rect(x, y, src.width, src.height), src, color);
@@ -203,8 +188,7 @@ impl<R: Renderer> Canvas<R> {
     pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
         self.current_dim = Dimensioni::new(width, height);
         self.set_clip_rect(Rect::new(0, 0, width, height));
-        self.renderer
-            .scope_mut(move |r| r.begin(width, height, clr));
+        self.renderer.scope_mut(move |r| r.begin(width, height, clr));
     }
 
     pub fn end(&mut self) {

@@ -6,9 +6,7 @@ use common::*;
 
 use application::*;
 use camera::Camera;
-use glow::{
-    HasContext, NativeBuffer, NativeProgram, UniformLocation, COLOR_BUFFER_BIT, DEPTH_BUFFER_BIT,
-};
+use glow::{HasContext, NativeBuffer, NativeProgram, UniformLocation, COLOR_BUFFER_BIT, DEPTH_BUFFER_BIT};
 use microui_redux::*;
 use obj_loader::Obj;
 use polymesh::PolyMesh;
@@ -37,30 +35,15 @@ pub struct TriVertex {
 const TRI_VERTS: [TriVertex; 3] = [
     TriVertex {
         pos: Vec2f { x: 0.0, y: -1.0 },
-        color: Color4b {
-            x: 0xff,
-            y: 0x00,
-            z: 0x00,
-            w: 0xff,
-        },
+        color: Color4b { x: 0xff, y: 0x00, z: 0x00, w: 0xff },
     },
     TriVertex {
         pos: Vec2f { x: -1.0, y: 1.0 },
-        color: Color4b {
-            x: 0x00,
-            y: 0xff,
-            z: 0x00,
-            w: 0xff,
-        },
+        color: Color4b { x: 0x00, y: 0xff, z: 0x00, w: 0xff },
     },
     TriVertex {
         pos: Vec2f { x: 1.0, y: 1.0 },
-        color: Color4b {
-            x: 0x00,
-            y: 0x00,
-            z: 0xff,
-            w: 0xff,
-        },
+        color: Color4b { x: 0x00, y: 0x00, z: 0xff, w: 0xff },
     },
 ];
 
@@ -149,10 +132,7 @@ const MAX_POLYMESH_TRIS: usize = 65536;
 
 impl<'a> State<'a> {
     pub fn new(gl: Arc<glow::Context>, slots: Vec<SlotId>) -> Self {
-        let pm_renderer = Arc::new(RwLock::new(PolyMeshRenderer::create(
-            &gl,
-            MAX_POLYMESH_TRIS,
-        )));
+        let pm_renderer = Arc::new(RwLock::new(PolyMeshRenderer::create(&gl, MAX_POLYMESH_TRIS)));
 
         let program = create_program(&gl, VERTEX_SHADER, FRAGMENT_SHADER).unwrap();
         let attrs = get_active_program_attributes(&gl, program)
@@ -163,11 +143,7 @@ impl<'a> State<'a> {
 
         let unis = get_active_program_uniforms(&gl, program)
             .iter()
-            .map(|u| {
-                (u.name.clone(), unsafe {
-                    gl.get_uniform_location(program, &u.name).unwrap()
-                })
-            })
+            .map(|u| (u.name.clone(), unsafe { gl.get_uniform_location(program, &u.name).unwrap() }))
             .collect::<HashMap<_, _>>();
         let td = TriangleRenderData {
             program,
@@ -187,10 +163,7 @@ impl<'a> State<'a> {
             slots,
             style: Style::default(),
             label_colors: [
-                LabelColor {
-                    label: "text",
-                    idx: ControlColor::Text,
-                },
+                LabelColor { label: "text", idx: ControlColor::Text },
                 LabelColor {
                     label: "border:",
                     idx: ControlColor::Border,
@@ -223,10 +196,7 @@ impl<'a> State<'a> {
                     label: "buttonfocus:",
                     idx: ControlColor::ButtonFocus,
                 },
-                LabelColor {
-                    label: "base:",
-                    idx: ControlColor::Base,
-                },
+                LabelColor { label: "base:", idx: ControlColor::Base },
                 LabelColor {
                     label: "basehover:",
                     idx: ControlColor::BaseHover,
@@ -243,10 +213,7 @@ impl<'a> State<'a> {
                     label: "scrollthumb:",
                     idx: ControlColor::ScrollThumb,
                 },
-                LabelColor {
-                    label: "",
-                    idx: ControlColor::Text,
-                },
+                LabelColor { label: "", idx: ControlColor::Text },
             ],
             bg: [90.0, 95.0, 100.0],
             logbuf: String::new(),
@@ -447,16 +414,10 @@ impl<'a> State<'a> {
         }
 
         ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), |ctx| {
-            if !ctx
-                .button_ex("Hello", None, WidgetOption::ALIGN_CENTER)
-                .is_none()
-            {
+            if !ctx.button_ex("Hello", None, WidgetOption::ALIGN_CENTER).is_none() {
                 self.write_log("Hello")
             }
-            if !ctx
-                .button_ex("World", None, WidgetOption::ALIGN_CENTER)
-                .is_none()
-            {
+            if !ctx.button_ex("World", None, WidgetOption::ALIGN_CENTER).is_none() {
                 self.write_log("World")
             }
             WindowState::Open
@@ -466,240 +427,185 @@ impl<'a> State<'a> {
     }
 
     fn log_window(&mut self, ctx: &mut Context<GLRenderer>) {
-        ctx.window(
-            &mut self.log_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            |container| {
-                container.set_row_widths_height(&[-1], -25);
-                container.panel(
-                    self.log_output.as_mut().unwrap(),
-                    ContainerOption::NONE,
-                    |container_handle| {
-                        let container = &mut container_handle.inner_mut();
-                        let mut scroll = container.scroll;
-                        let content_size = container.content_size;
-                        container.set_row_widths_height(&[-1], -1);
+        ctx.window(&mut self.log_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
+            container.set_row_widths_height(&[-1], -25);
+            container.panel(self.log_output.as_mut().unwrap(), ContainerOption::NONE, |container_handle| {
+                let container = &mut container_handle.inner_mut();
+                let mut scroll = container.scroll;
+                let content_size = container.content_size;
+                container.set_row_widths_height(&[-1], -1);
 
-                        container.text(self.logbuf.as_str());
+                container.text(self.logbuf.as_str());
 
-                        if self.logbuf_updated {
-                            scroll.y = content_size.y;
-                            container.scroll = scroll;
-                            self.logbuf_updated = false;
-                        }
-                    },
-                );
-                let mut submitted = false;
-                container.set_row_widths_height(&[-70, -1], 0);
-                if container
-                    .textbox_ex(&mut self.submit_buf, WidgetOption::NONE)
-                    .is_submitted()
-                {
-                    container.set_focus(container.idmngr.last_id());
-                    submitted = true;
+                if self.logbuf_updated {
+                    scroll.y = content_size.y;
+                    container.scroll = scroll;
+                    self.logbuf_updated = false;
                 }
-                if !container
-                    .button_ex("Submit", None, WidgetOption::ALIGN_CENTER)
-                    .is_none()
-                {
-                    submitted = true;
-                }
-                if submitted {
-                    let mut buf = String::new();
-                    buf.push_str(self.submit_buf.as_str());
-                    self.write_log(buf.as_str());
-                    self.submit_buf.clear();
-                }
-                WindowState::Open
-            },
-        );
+            });
+            let mut submitted = false;
+            container.set_row_widths_height(&[-70, -1], 0);
+            if container.textbox_ex(&mut self.submit_buf, WidgetOption::NONE).is_submitted() {
+                container.set_focus(container.idmngr.last_id());
+                submitted = true;
+            }
+            if !container.button_ex("Submit", None, WidgetOption::ALIGN_CENTER).is_none() {
+                submitted = true;
+            }
+            if submitted {
+                let mut buf = String::new();
+                buf.push_str(self.submit_buf.as_str());
+                self.write_log(buf.as_str());
+                self.submit_buf.clear();
+            }
+            WindowState::Open
+        });
     }
 
     fn triangle_window(&mut self, ctx: &mut Context<GLRenderer>) {
         let gl = self.gl.clone();
         let tdi = self.triangle_data.clone();
 
-        ctx.window(
-            &mut self.triangle_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            |container| {
-                container.set_row_widths_height(&[-1], -1);
-                container.custom_render_widget("Triangle", WidgetOption::NONE, move |dim, cra| {
-                    let gl = &gl;
+        ctx.window(&mut self.triangle_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
+            container.set_row_widths_height(&[-1], -1);
+            container.custom_render_widget("Triangle", WidgetOption::NONE, move |dim, cra| {
+                let gl = &gl;
 
-                    match tdi.try_read() {
-                        Ok(td) => unsafe {
-                            gl.viewport(
-                                cra.content_area.x,
-                                dim.height - cra.content_area.y - cra.content_area.height,
-                                cra.content_area.width,
-                                cra.content_area.height,
-                            );
-                            gl.scissor(
-                                cra.content_area.x,
-                                dim.height - cra.content_area.y - cra.content_area.height,
-                                cra.content_area.width,
-                                cra.content_area.height,
-                            );
-                            gl.clear_color(0.5, 0.5, 0.5, 1.0);
-                            gl.clear(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT);
+                match tdi.try_read() {
+                    Ok(td) => unsafe {
+                        gl.viewport(
+                            cra.content_area.x,
+                            dim.height - cra.content_area.y - cra.content_area.height,
+                            cra.content_area.width,
+                            cra.content_area.height,
+                        );
+                        gl.scissor(
+                            cra.content_area.x,
+                            dim.height - cra.content_area.y - cra.content_area.height,
+                            cra.content_area.width,
+                            cra.content_area.height,
+                        );
+                        gl.clear_color(0.5, 0.5, 0.5, 1.0);
+                        gl.clear(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT);
 
-                            gl.disable(glow::BLEND);
-                            debug_assert!(gl.get_error() == 0);
-                            gl.disable(glow::CULL_FACE);
-                            debug_assert!(gl.get_error() == 0);
-                            gl.enable(glow::DEPTH_TEST);
-                            debug_assert!(gl.get_error() == 0);
-                            gl.enable(glow::SCISSOR_TEST);
-                            debug_assert!(gl.get_error() == 0);
+                        gl.disable(glow::BLEND);
+                        debug_assert!(gl.get_error() == 0);
+                        gl.disable(glow::CULL_FACE);
+                        debug_assert!(gl.get_error() == 0);
+                        gl.enable(glow::DEPTH_TEST);
+                        debug_assert!(gl.get_error() == 0);
+                        gl.enable(glow::SCISSOR_TEST);
+                        debug_assert!(gl.get_error() == 0);
 
-                            gl.bind_buffer(glow::ARRAY_BUFFER, Some(td.vb));
-                            debug_assert!(gl.get_error() == 0);
+                        gl.bind_buffer(glow::ARRAY_BUFFER, Some(td.vb));
+                        debug_assert!(gl.get_error() == 0);
 
-                            // update the vertex buffer
-                            let vertices_u8: &[u8] = core::slice::from_raw_parts(
-                                TRI_VERTS.as_ptr() as *const u8,
-                                TRI_VERTS.len() * core::mem::size_of::<TriVertex>(),
-                            );
-                            gl.buffer_data_u8_slice(
-                                glow::ARRAY_BUFFER,
-                                vertices_u8,
-                                glow::DYNAMIC_DRAW,
-                            );
-                            debug_assert!(gl.get_error() == 0);
+                        // update the vertex buffer
+                        let vertices_u8: &[u8] =
+                            core::slice::from_raw_parts(TRI_VERTS.as_ptr() as *const u8, TRI_VERTS.len() * core::mem::size_of::<TriVertex>());
+                        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_u8, glow::DYNAMIC_DRAW);
+                        debug_assert!(gl.get_error() == 0);
 
-                            gl.use_program(Some(td.program));
+                        gl.use_program(Some(td.program));
 
-                            gl.enable_vertex_attrib_array(td.pos_attr);
-                            gl.enable_vertex_attrib_array(td.color_attr);
-                            debug_assert!(gl.get_error() == 0);
+                        gl.enable_vertex_attrib_array(td.pos_attr);
+                        gl.enable_vertex_attrib_array(td.color_attr);
+                        debug_assert!(gl.get_error() == 0);
 
-                            gl.vertex_attrib_pointer_f32(
-                                td.pos_attr,
-                                2,
-                                glow::FLOAT,
-                                false,
-                                core::mem::size_of::<TriVertex>() as i32,
-                                0,
-                            );
-                            gl.vertex_attrib_pointer_f32(
-                                td.color_attr,
-                                4,
-                                glow::UNSIGNED_BYTE,
-                                true,
-                                core::mem::size_of::<TriVertex>() as i32,
-                                8,
-                            );
-                            debug_assert!(gl.get_error() == 0);
+                        gl.vertex_attrib_pointer_f32(td.pos_attr, 2, glow::FLOAT, false, core::mem::size_of::<TriVertex>() as i32, 0);
+                        gl.vertex_attrib_pointer_f32(td.color_attr, 4, glow::UNSIGNED_BYTE, true, core::mem::size_of::<TriVertex>() as i32, 8);
+                        debug_assert!(gl.get_error() == 0);
 
-                            let tm_ptr = td.tm.col.as_ptr() as *const _ as *const f32;
-                            let slice = std::slice::from_raw_parts(tm_ptr, 16);
-                            gl.uniform_matrix_4_f32_slice(Some(&td.tm_uni), false, &slice);
-                            debug_assert_eq!(gl.get_error(), 0);
+                        let tm_ptr = td.tm.col.as_ptr() as *const _ as *const f32;
+                        let slice = std::slice::from_raw_parts(tm_ptr, 16);
+                        gl.uniform_matrix_4_f32_slice(Some(&td.tm_uni), false, &slice);
+                        debug_assert_eq!(gl.get_error(), 0);
 
-                            gl.draw_arrays(glow::TRIANGLES, 0, 3);
-                            debug_assert!(gl.get_error() == 0);
+                        gl.draw_arrays(glow::TRIANGLES, 0, 3);
+                        debug_assert!(gl.get_error() == 0);
 
-                            gl.disable_vertex_attrib_array(td.pos_attr);
-                            gl.disable_vertex_attrib_array(td.color_attr);
-                            debug_assert!(gl.get_error() == 0);
-                            gl.use_program(None);
-                            debug_assert!(gl.get_error() == 0);
-                        },
-                        _ => println!("unable to read"),
+                        gl.disable_vertex_attrib_array(td.pos_attr);
+                        gl.disable_vertex_attrib_array(td.color_attr);
+                        debug_assert!(gl.get_error() == 0);
+                        gl.use_program(None);
+                        debug_assert!(gl.get_error() == 0);
+                    },
+                    _ => println!("unable to read"),
+                }
+
+                match tdi.try_write() {
+                    Ok(mut td) => {
+                        td.angle += 0.01;
+                        td.tm = rotation_from_axis_angle(&Vec3f::new(0.0, 0.0, 1.0), td.angle);
                     }
-
-                    match tdi.try_write() {
-                        Ok(mut td) => {
-                            td.angle += 0.01;
-                            td.tm = rotation_from_axis_angle(&Vec3f::new(0.0, 0.0, 1.0), td.angle);
+                    _ => {
+                        if tdi.is_poisoned() {
+                            println!("poisoned!");
+                            tdi.clear_poison();
                         }
-                        _ => {
-                            if tdi.is_poisoned() {
-                                println!("poisoned!");
-                                tdi.clear_poison();
-                            }
-                            println!("failed to get lock")
-                        }
+                        println!("failed to get lock")
                     }
-                });
-                WindowState::Open
-            },
-        );
+                }
+            });
+            WindowState::Open
+        });
     }
 
-    fn uint8_slider(
-        &mut self,
-        value: &mut u8,
-        low: i32,
-        high: i32,
-        ctx: &mut Container,
-    ) -> ResourceState {
+    fn uint8_slider(&mut self, value: &mut u8, low: i32, high: i32, ctx: &mut Container) -> ResourceState {
         let mut tmp = *value as f32;
         ctx.idmngr.push_id_from_ptr(value);
-        let res = ctx.slider_ex(
-            &mut tmp,
-            low as Real,
-            high as Real,
-            0 as Real,
-            0,
-            WidgetOption::ALIGN_CENTER,
-        );
+        let res = ctx.slider_ex(&mut tmp, low as Real, high as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
         *value = tmp as u8;
         ctx.idmngr.pop_id();
         return res;
     }
 
     fn style_window(&mut self, ctx: &mut Context<GLRenderer>) {
-        ctx.window(
-            &mut self.style_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            |container| {
-                let sw = (container.body.width as f64 * 0.14) as i32;
-                container.set_row_widths_height(&[80, sw, sw, sw, sw, -1], 0);
-                let mut i = 0;
-                while self.label_colors[i].label.len() > 0 {
-                    container.label(self.label_colors[i].label);
-                    unsafe {
-                        let color = self.style.colors.as_mut_ptr().offset(i as isize);
-                        self.uint8_slider(&mut (*color).r, 0, 255, container);
-                        self.uint8_slider(&mut (*color).g, 0, 255, container);
-                        self.uint8_slider(&mut (*color).b, 0, 255, container);
-                        self.uint8_slider(&mut (*color).a, 0, 255, container);
-                    }
-                    let next_layout = container.next_cell();
-                    let color = self.style.colors[i];
-                    container.draw_rect(next_layout, color);
-                    i += 1;
+        ctx.window(&mut self.style_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
+            let sw = (container.body.width as f64 * 0.14) as i32;
+            container.set_row_widths_height(&[80, sw, sw, sw, sw, -1], 0);
+            let mut i = 0;
+            while self.label_colors[i].label.len() > 0 {
+                container.label(self.label_colors[i].label);
+                unsafe {
+                    let color = self.style.colors.as_mut_ptr().offset(i as isize);
+                    self.uint8_slider(&mut (*color).r, 0, 255, container);
+                    self.uint8_slider(&mut (*color).g, 0, 255, container);
+                    self.uint8_slider(&mut (*color).b, 0, 255, container);
+                    self.uint8_slider(&mut (*color).a, 0, 255, container);
                 }
-                container.set_row_widths_height(&[80, sw], 0);
-                container.label("padding");
-                let mut tmp = self.style.padding as u8;
-                self.uint8_slider(&mut tmp, 0, 16, container);
-                self.style.padding = tmp as i32;
+                let next_layout = container.next_cell();
+                let color = self.style.colors[i];
+                container.draw_rect(next_layout, color);
+                i += 1;
+            }
+            container.set_row_widths_height(&[80, sw], 0);
+            container.label("padding");
+            let mut tmp = self.style.padding as u8;
+            self.uint8_slider(&mut tmp, 0, 16, container);
+            self.style.padding = tmp as i32;
 
-                container.label("spacing");
-                let mut tmp = self.style.spacing as u8;
-                self.uint8_slider(&mut tmp, 0, 16, container);
-                self.style.spacing = tmp as i32;
+            container.label("spacing");
+            let mut tmp = self.style.spacing as u8;
+            self.uint8_slider(&mut tmp, 0, 16, container);
+            self.style.spacing = tmp as i32;
 
-                container.label("title height");
-                let mut tmp = self.style.title_height as u8;
-                self.uint8_slider(&mut tmp, 0, 128, container);
-                self.style.title_height = tmp as i32;
+            container.label("title height");
+            let mut tmp = self.style.title_height as u8;
+            self.uint8_slider(&mut tmp, 0, 128, container);
+            self.style.title_height = tmp as i32;
 
-                container.label("thumb size");
-                let mut tmp = self.style.thumb_size as u8;
-                self.uint8_slider(&mut tmp, 0, 128, container);
-                self.style.thumb_size = tmp as i32;
+            container.label("thumb size");
+            let mut tmp = self.style.thumb_size as u8;
+            self.uint8_slider(&mut tmp, 0, 128, container);
+            self.style.thumb_size = tmp as i32;
 
-                container.label("scroll size");
-                let mut tmp = self.style.scrollbar_size as u8;
-                self.uint8_slider(&mut tmp, 0, 128, container);
-                self.style.scrollbar_size = tmp as i32;
-                WindowState::Open
-            },
-        );
+            container.label("scroll size");
+            let mut tmp = self.style.scrollbar_size as u8;
+            self.uint8_slider(&mut tmp, 0, 128, container);
+            self.style.scrollbar_size = tmp as i32;
+            WindowState::Open
+        });
         ctx.set_style(&self.style);
     }
 
@@ -708,52 +614,46 @@ impl<'a> State<'a> {
         let renderer = self.pm_renderer.clone();
         let suzane = self.suzane_data.clone();
 
-        ctx.window(
-            &mut self.suzane_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            |container| {
-                container.set_row_widths_height(&[-1], -1);
-                container.custom_render_widget("Suzane", WidgetOption::NONE, move |dim, cra| {
-                    let gl = &gl;
-                    let mut suzane = suzane.write().unwrap();
-                    suzane.view_3d.set_dimension(Dimensioni::new(
-                        cra.content_area.width,
-                        cra.content_area.height,
-                    ));
+        ctx.window(&mut self.suzane_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
+            container.set_row_widths_height(&[-1], -1);
+            container.custom_render_widget("Suzane", WidgetOption::NONE, move |dim, cra| {
+                let gl = &gl;
+                let mut suzane = suzane.write().unwrap();
+                suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
 
-                    // if !cra.input.get_mouse_buttons().is_none() {
-                    //     println!("Mouse Pressed: {:?}", cra.input.rel_mouse_pos());
-                    // }
-                    suzane.view_3d.update(cra.mouse_event);
+                // if !cra.input.get_mouse_buttons().is_none() {
+                //     println!("Mouse Pressed: {:?}", cra.input.rel_mouse_pos());
+                // }
+                suzane.view_3d.update(cra.mouse_event);
 
-                    match renderer.try_write() {
-                        Ok(mut renderer) => unsafe {
-                            gl.viewport(
-                                cra.content_area.x,
-                                dim.height - cra.content_area.y - cra.content_area.height,
-                                cra.content_area.width,
-                                cra.content_area.height,
-                            );
-                            gl.scissor(
-                                cra.content_area.x,
-                                dim.height - cra.content_area.y - cra.content_area.height,
-                                cra.content_area.width,
-                                cra.content_area.height,
-                            );
-                            gl.clear_color(0.5, 0.5, 0.5, 1.0);
-                            gl.clear(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT);
+                match renderer.try_write() {
+                    Ok(mut renderer) => unsafe {
+                        gl.viewport(
+                            cra.content_area.x,
+                            dim.height - cra.content_area.y - cra.content_area.height,
+                            cra.content_area.width,
+                            cra.content_area.height,
+                        );
+                        gl.scissor(
+                            cra.content_area.x,
+                            dim.height - cra.content_area.y - cra.content_area.height,
+                            cra.content_area.width,
+                            cra.content_area.height,
+                        );
+                        gl.clear_color(0.5, 0.5, 0.5, 1.0);
+                        gl.clear(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT);
 
-                            let pvm = suzane.view_3d.pvm();
-                            let view = suzane.view_3d.view_matrix();
-                            renderer.render(gl, &pvm, &view, &(&suzane.mesh));
-                        },
-                        _ => {
-                            println!("unable to hold the lock on the polymesh")
-                        }
+                        let pvm = suzane.view_3d.pvm();
+                        let view = suzane.view_3d.view_matrix();
+                        renderer.render(gl, &pvm, &view, &(&suzane.mesh));
+                    },
+                    _ => {
+                        println!("unable to hold the lock on the polymesh")
                     }
-                });
-            WindowState::Open},
-        );
+                }
+            });
+            WindowState::Open
+        });
     }
 
     fn dialog(&mut self, ctx: &mut Context<GLRenderer>) {
@@ -779,14 +679,8 @@ impl<'a> State<'a> {
 
 const SUZANE: &[u8; 63204] = include_bytes!("../assets/suzane.obj");
 fn main() {
-    let slots_orig = vec![
-        Dimensioni::new(64, 64),
-        Dimensioni::new(24, 32),
-        Dimensioni::new(64, 24),
-    ];
-    let mut atlas = builder::Builder::from_config(&atlas_config(&slots_orig))
-        .unwrap()
-        .to_atlas();
+    let slots_orig = vec![Dimensioni::new(64, 64), Dimensioni::new(24, 32), Dimensioni::new(64, 24)];
+    let mut atlas = builder::Builder::from_config(&atlas_config(&slots_orig)).unwrap().to_atlas();
     let slots = atlas.clone_slot_table();
     atlas.render_slot(slots[0], Rc::new(|_x, _y| color4b(0xFF, 0, 0, 0xFF)));
     atlas.render_slot(slots[1], Rc::new(|_x, _y| color4b(0, 0xFF, 0, 0xFF)));

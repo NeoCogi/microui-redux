@@ -160,15 +160,7 @@ impl Camera {
         }
     }
 
-    pub fn new(
-        target: Vec3f,
-        distance: f32,
-        rotation: Quatf,
-        fov: f32,
-        aspect: f32,
-        near: f32,
-        far: f32,
-    ) -> Self {
+    pub fn new(target: Vec3f, distance: f32, rotation: Quatf, fov: f32, aspect: f32, near: f32, far: f32) -> Self {
         let pos = Vec3f::new(0.0, 0.0, 1.0);
         let up = Vec3f::new(0.0, 1.0, 0.0);
 
