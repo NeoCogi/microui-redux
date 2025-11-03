@@ -55,9 +55,9 @@ use super::*;
 /// Describes how a layout dimension should be resolved.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SizePolicy {
-    Auto,
-    Fixed(i32),
-    Remainder(i32),
+    Auto,           // Example: `0` width -> fall back to style default (e.g. 84px button slot)
+    Fixed(i32),     // Example: `Fixed(120)` -> the cell is always 120px wide
+    Remainder(i32), // Example: `Remainder(0)` fills leftovers; `Remainder(9)` keeps 9px margin
 }
 
 impl SizePolicy {
