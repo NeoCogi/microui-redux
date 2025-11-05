@@ -54,32 +54,13 @@ use super::*;
 
 /// Describes how a layout dimension should be resolved.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum SizePolicy {
+pub enum SizePolicy {
     Auto,           // Example: `0` width -> fall back to style default (e.g. 84px button slot)
     Fixed(i32),     // Example: `Fixed(120)` -> the cell is always 120px wide
     Remainder(i32), // Example: `Remainder(0)` fills leftovers; `Remainder(9)` keeps 9px margin
 }
 
 impl SizePolicy {
-    fn from_raw(value: i32) -> Self {
-        if value > 0 {
-            SizePolicy::Fixed(value)
-        } else if value == 0 {
-            SizePolicy::Auto
-        } else {
-            let margin = (-value - 1).max(0);
-            SizePolicy::Remainder(margin)
-        }
-    }
-
-    fn to_raw(self) -> i32 {
-        match self {
-            SizePolicy::Auto => 0,
-            SizePolicy::Fixed(value) => value,
-            SizePolicy::Remainder(margin) => -(margin + 1),
-        }
-    }
-
     fn resolve(self, default_size: i32, available_space: i32) -> i32 {
         let resolved = match self {
             SizePolicy::Auto => default_size,
@@ -93,12 +74,6 @@ impl SizePolicy {
 impl Default for SizePolicy {
     fn default() -> Self {
         SizePolicy::Auto
-    }
-}
-
-impl From<i32> for SizePolicy {
-    fn from(value: i32) -> Self {
-        SizePolicy::from_raw(value)
     }
 }
 
@@ -148,7 +123,7 @@ impl LayoutManager {
         layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.width, body.height);
         //layout.max = vec2(-i32::MAX, -i32::MAX);
         self.stack.push(layout);
-        self.row(&[0], 0);
+        self.row(&[SizePolicy::Auto], SizePolicy::Auto);
     }
 
     pub fn top(&self) -> &Layout {
@@ -220,17 +195,13 @@ impl LayoutManager {
         self.current_row_height = height;
         let layout = self.top_mut();
         layout.position = vec2(layout.indent, layout.next_row);
-        layout.size.height = height.to_raw();
         self.item_index = 0;
     }
 
-    pub fn row(&mut self, widths: &[i32], height: i32) {
+    pub fn row(&mut self, widths: &[SizePolicy], height: SizePolicy) {
         self.current_row_widths.clear();
-        for &width in widths {
-            self.current_row_widths.push(SizePolicy::from_raw(width));
-        }
-        let height_policy = SizePolicy::from_raw(height);
-        self.row_for_layout(height_policy);
+        self.current_row_widths.extend_from_slice(widths);
+        self.row_for_layout(height);
     }
 
     fn resolve_horizontal(&self, cursor_x: i32, policy: SizePolicy, default_width: i32) -> i32 {
@@ -241,16 +212,6 @@ impl LayoutManager {
     fn resolve_vertical(&self, cursor_y: i32, policy: SizePolicy, default_height: i32) -> i32 {
         let available_height = self.top().body.height.saturating_sub(cursor_y);
         policy.resolve(default_height, available_height)
-    }
-
-    pub fn set_width(&mut self, width: i32) {
-        self.top_mut().size.width = width;
-    }
-
-    pub fn set_height(&mut self, height: i32) {
-        let policy = SizePolicy::from_raw(height);
-        self.top_mut().size.height = policy.to_raw();
-        self.current_row_height = policy;
     }
 
     pub fn next(&mut self) -> Recti {
@@ -273,12 +234,9 @@ impl LayoutManager {
         res.y = self.top().position.y;
 
         let width_policy = if row_cells_count > 0 {
-            self.current_row_widths
-                .get(self.item_index)
-                .copied()
-                .unwrap_or_else(|| SizePolicy::from_raw(self.top().size.width))
+            self.current_row_widths.get(self.item_index).copied().unwrap_or(SizePolicy::Auto)
         } else {
-            SizePolicy::from_raw(self.top().size.width)
+            SizePolicy::Auto
         };
 
         res.width = self.resolve_horizontal(res.x, width_policy, default_width);

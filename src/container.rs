@@ -330,7 +330,7 @@ impl Container {
         let color = self.style.colors[ControlColor::Text as usize];
         let h = self.atlas.get_font_height(font) as i32;
         self.layout.begin_column();
-        self.layout.row(&[-1], h);
+        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(h));
 
         // lines() doesn't count line terminator
         for line in text.lines() {
@@ -453,7 +453,7 @@ impl Container {
     #[inline(never)]
     fn node(&mut self, label: &str, is_treenode: bool, state: NodeState) -> NodeState {
         let id: Id = self.idmngr.get_id_from_str(label);
-        self.layout.row(&[-1], 0);
+        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let mut r = self.layout.next();
         self.update_control(id, r, WidgetOption::NONE);
 
@@ -638,7 +638,7 @@ impl Container {
         self.end_panel(panel);
     }
 
-    pub fn set_row_widths_height(&mut self, widths: &[i32], height: i32) {
+    pub fn set_row_widths_height(&mut self, widths: &[SizePolicy], height: SizePolicy) {
         self.layout.row(widths, height);
     }
 
