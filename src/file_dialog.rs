@@ -93,16 +93,22 @@ impl FileDialogState {
         ctx.dialog(&mut self.win, ContainerOption::NONE, |cont| {
             let content_size = cont.content_size;
             let half_width = content_size.x / 2;
-            cont.set_row_widths_height(&[-1], 0);
+            cont.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
             cont.label(&self.current_working_directory);
             cont.textbox_ex(&mut self.tmp_file_name, WidgetOption::NONE);
-            cont.set_row_widths_height(&[-half_width, -1], -25);
+            let left_column = if half_width > 0 {
+                SizePolicy::Remainder(half_width - 1)
+            } else {
+                SizePolicy::Auto
+            };
+            let top_row_widths = [left_column, SizePolicy::Remainder(0)];
+            cont.set_row_widths_height(&top_row_widths, SizePolicy::Remainder(24));
             cont.column(|container| {
-                container.set_row_widths_height(&[-1], -1);
+                container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0));
                 container.panel(&mut self.folder_panel, ContainerOption::NONE, |container_handle| {
                     let container = &mut container_handle.inner_mut();
 
-                    container.set_row_widths_height(&[-1], 0);
+                    container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
                     let mut refresh = false;
                     for f in &self.folders {
                         let path = f.split("/").last().unwrap_or(f);
@@ -118,11 +124,11 @@ impl FileDialogState {
                 });
             });
             cont.column(|container| {
-                container.set_row_widths_height(&[-1], -1);
+                container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0));
                 container.panel(&mut self.file_panel, ContainerOption::NONE, |container_handle| {
                     let container = &mut container_handle.inner_mut();
 
-                    container.set_row_widths_height(&[-1], 0);
+                    container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
                     if self.files.len() != 0 {
                         for f in &self.files {
                             if container.button_ex(f, None, WidgetOption::NONE).is_submitted() {
@@ -134,7 +140,8 @@ impl FileDialogState {
                     }
                 });
             });
-            cont.set_row_widths_height(&[-half_width, -1], -1);
+            let bottom_row_widths = [left_column, SizePolicy::Remainder(0)];
+            cont.set_row_widths_height(&bottom_row_widths, SizePolicy::Remainder(0));
             if cont.button_ex("Ok", None, WidgetOption::NONE).is_submitted() {
                 if self.tmp_file_name != "" {
                     self.file_name = Some(self.tmp_file_name.clone())

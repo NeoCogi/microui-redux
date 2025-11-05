@@ -286,7 +286,8 @@ impl<'a> State<'a> {
 
             self.window_header = container.header("Window Info", self.window_header, |container| {
                 let win_0 = container.rect;
-                container.set_row_widths_height(&[54, -1], 0);
+                let row_widths = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
+                container.set_row_widths_height(&row_widths, SizePolicy::Auto);
                 container.label("Position:");
 
                 buff.clear();
@@ -301,7 +302,8 @@ impl<'a> State<'a> {
                 container.label(buff.as_str());
             });
             self.test_buttons_header = container.header("Test Buttons", self.test_buttons_header, |container| {
-                container.set_row_widths_height(&[86, -110, -1], 0);
+                let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
+                container.set_row_widths_height(&button_widths, SizePolicy::Auto);
                 container.label("Test buttons 1:");
                 if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
                     self.write_log("Pressed button 1");
@@ -324,10 +326,10 @@ impl<'a> State<'a> {
                 if !container.button_ex("Dialog", None, WidgetOption::ALIGN_CENTER).is_none() {
                      self.open_dialog = true;
                 }
-    
             });
             self.tree_and_text_header = container.header("Tree and Text", self.tree_and_text_header, |container| {
-                container.set_row_widths_height(&[140, -1], 0);
+                let widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
+                container.set_row_widths_height(&widths, SizePolicy::Auto);
                 container.column(|container| {
                     self.test1_tn = container.treenode("Test 1", self.test1_tn, |container| {
                         self.test1a_tn = container.treenode("Test 1a", self.test1a_tn, |container| {
@@ -344,7 +346,8 @@ impl<'a> State<'a> {
                         });
                     });
                     self.test2_tn =container.treenode("Test 2", self.test2_tn, |container| {
-                        container.set_row_widths_height(&[54, 54], 0);
+                        let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
+                        container.set_row_widths_height(&tree_button_widths, SizePolicy::Auto);
                         if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
                             self.write_log("Pressed button 3");
                         }
@@ -365,7 +368,7 @@ impl<'a> State<'a> {
                     });
                 });
                 container.column(|container| {
-                    container.set_row_widths_height(&[-1], 0);
+                    container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
                     container.text(
                         "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla."
                         ,
@@ -373,9 +376,11 @@ impl<'a> State<'a> {
                 });
             });
             self.background_header = container.header("Background Color", self.background_header, |container| {
-                container.set_row_widths_height(&[-78, -1], 74);
+                let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
+                container.set_row_widths_height(&background_widths, SizePolicy::Fixed(74));
                 container.column(|container| {
-                    container.set_row_widths_height(&[46, -1], 0);
+                    let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
+                    container.set_row_widths_height(&slider_row, SizePolicy::Auto);
                     container.label("Red:");
                     container.slider_ex(&mut self.bg[0], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
                     container.label("Green:");
@@ -391,7 +396,7 @@ impl<'a> State<'a> {
             });
 
             self.slot_header = container.header("Slots", self.slot_header, |container| {
-                container.set_row_widths_height(&[-1], 67);
+                container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67));
                 container.button_ex2("Slot 1", Some(self.slots[0].clone()), WidgetOption::NONE);
                 container.button_ex3("Slot 2 - Green", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(|_x, _y| {
                     color4b(0x00, 0xFF, 0x00, 0xFF)
@@ -428,12 +433,12 @@ impl<'a> State<'a> {
 
     fn log_window(&mut self, ctx: &mut Context<GLRenderer>) {
         ctx.window(&mut self.log_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
-            container.set_row_widths_height(&[-1], -25);
+            container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(24));
             container.panel(self.log_output.as_mut().unwrap(), ContainerOption::NONE, |container_handle| {
                 let container = &mut container_handle.inner_mut();
                 let mut scroll = container.scroll;
                 let content_size = container.content_size;
-                container.set_row_widths_height(&[-1], -1);
+                container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0));
 
                 container.text(self.logbuf.as_str());
 
@@ -444,7 +449,8 @@ impl<'a> State<'a> {
                 }
             });
             let mut submitted = false;
-            container.set_row_widths_height(&[-70, -1], 0);
+            let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
+            container.set_row_widths_height(&submit_row, SizePolicy::Auto);
             if container.textbox_ex(&mut self.submit_buf, WidgetOption::NONE).is_submitted() {
                 container.set_focus(container.idmngr.last_id());
                 submitted = true;
@@ -467,7 +473,7 @@ impl<'a> State<'a> {
         let tdi = self.triangle_data.clone();
 
         ctx.window(&mut self.triangle_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
-            container.set_row_widths_height(&[-1], -1);
+            container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0));
             container.custom_render_widget("Triangle", WidgetOption::NONE, move |dim, cra| {
                 let gl = &gl;
 
@@ -563,7 +569,15 @@ impl<'a> State<'a> {
     fn style_window(&mut self, ctx: &mut Context<GLRenderer>) {
         ctx.window(&mut self.style_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
             let sw = (container.body.width as f64 * 0.14) as i32;
-            container.set_row_widths_height(&[80, sw, sw, sw, sw, -1], 0);
+            let color_row = [
+                SizePolicy::Fixed(80),
+                SizePolicy::Fixed(sw),
+                SizePolicy::Fixed(sw),
+                SizePolicy::Fixed(sw),
+                SizePolicy::Fixed(sw),
+                SizePolicy::Remainder(0),
+            ];
+            container.set_row_widths_height(&color_row, SizePolicy::Auto);
             let mut i = 0;
             while self.label_colors[i].label.len() > 0 {
                 container.label(self.label_colors[i].label);
@@ -579,7 +593,8 @@ impl<'a> State<'a> {
                 container.draw_rect(next_layout, color);
                 i += 1;
             }
-            container.set_row_widths_height(&[80, sw], 0);
+            let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Fixed(sw)];
+            container.set_row_widths_height(&metrics_row, SizePolicy::Auto);
             container.label("padding");
             let mut tmp = self.style.padding as u8;
             self.uint8_slider(&mut tmp, 0, 16, container);
@@ -615,7 +630,7 @@ impl<'a> State<'a> {
         let suzane = self.suzane_data.clone();
 
         ctx.window(&mut self.suzane_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
-            container.set_row_widths_height(&[-1], -1);
+            container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0));
             container.custom_render_widget("Suzane", WidgetOption::NONE, move |dim, cra| {
                 let gl = &gl;
                 let mut suzane = suzane.write().unwrap();
