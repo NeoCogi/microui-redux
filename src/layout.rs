@@ -154,12 +154,14 @@ impl LayoutManager {
             item_index: self.item_index,
             height: self.current_row_height,
         };
+        // backup the parent row's width policies so we can restore them in end_column()
         for width in &self.current_row_widths {
             self.row_widths_stack.push(*width);
         }
         self.current_row_widths.clear();
         self.item_index = 0;
         self.row_stack.push(row);
+        // consume the current cell and treat it as a nested layout scope
         self.push_layout(layout, vec2(0, 0));
     }
 
@@ -167,6 +169,7 @@ impl LayoutManager {
         let b = self.top().clone();
         self.stack.pop();
         let row = self.row_stack.pop().expect("Row stack should not be empty");
+        // restore the parent row configuration that was active before begin_column()
         self.current_row_widths.clear();
         for i in 0..row.len {
             // index = i + row.start
@@ -236,7 +239,7 @@ impl LayoutManager {
 
         let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
 
-        // next grid line
+        // start a new row if the previous span was fully consumed
         if self.item_index == row_cells_count {
             let height_policy = self.current_row_height;
             self.row_for_layout(height_policy);
@@ -272,6 +275,7 @@ impl LayoutManager {
         res.x += self.top().body.x;
         res.y += self.top().body.y;
 
+        // track the furthest extent reached so far for content-size computation
         match self.top_mut().max {
             None => self.top_mut().max = Some(Vec2i::new(res.x + res.width, res.y + res.height)),
             Some(am) => self.top_mut().max = Some(Vec2i::new(max(am.x, res.x + res.width), max(am.y, res.y + res.height))),
