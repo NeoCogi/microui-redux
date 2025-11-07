@@ -78,14 +78,14 @@ impl Default for SizePolicy {
 }
 
 #[derive(Clone, Default)]
-pub struct SpanState {
+pub(crate) struct SpanState {
     widths: Vec<SizePolicy>,
     height: SizePolicy,
     item_index: usize,
 }
 
 #[derive(Clone)]
-pub enum LayoutDirection {
+pub(crate) enum LayoutDirection {
     Row(SpanState),
     Column(SpanState),
 }
@@ -111,7 +111,7 @@ impl LayoutDirection {
 }
 
 #[derive(Clone, Default)]
-pub struct Layout {
+pub(crate) struct Layout {
     pub body: Recti,
     pub next: Recti,
     pub position: Vec2i,
@@ -218,12 +218,16 @@ impl LayoutManager {
     }
 
     fn resolve_horizontal(&self, cursor_x: i32, policy: SizePolicy, default_width: i32) -> i32 {
+        // Amount of horizontal space left in the current scope after the cursor.
         let available_width = self.top().body.width.saturating_sub(cursor_x);
+        // Let the policy (Auto/Fixed/Remainder) clamp that space to a final width.
         policy.resolve(default_width, available_width)
     }
 
     fn resolve_vertical(&self, cursor_y: i32, policy: SizePolicy, default_height: i32) -> i32 {
+        // Amount of vertical space left in the current scope after the cursor.
         let available_height = self.top().body.height.saturating_sub(cursor_y);
+        // Let the policy decide how tall this cell should be within the remaining room.
         policy.resolve(default_height, available_height)
     }
 
@@ -241,11 +245,13 @@ impl LayoutManager {
             (row_len, state.item_index, state.height)
         };
 
-        // start a new row if the previous span was fully consumed
+        // If we've consumed all cells for this span, reset the row cursor so we start a new row.
         if current_index == row_len {
             self.row_for_layout(height_policy);
         }
 
+        // Determine the width policy for the current cell. This needs to run *after* the
+        // potential row reset so the first cell in a new row picks up the configured width.
         let width_policy = {
             let layout = self.top();
             let state = layout.direction.row_state();
@@ -258,15 +264,18 @@ impl LayoutManager {
 
         let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
 
+        // Snapshot the current cursor; this is the top-left corner of the cell before sizing.
         {
             let layout = self.top();
             res.x = layout.position.x;
             res.y = layout.position.y;
         }
 
+        // Resolve the actual width/height using the active policies and remaining space.
         res.width = self.resolve_horizontal(res.x, width_policy, default_width);
         res.height = self.resolve_vertical(res.y, height_policy, default_height);
 
+        // Advance the span index so the next call fetches the next column.
         {
             let layout = self.top_mut();
             let state = layout.direction.row_state_mut();
@@ -275,6 +284,8 @@ impl LayoutManager {
             }
         }
 
+        // Move the horizontal cursor to the end of this cell plus spacing, and update
+        // `next_row` to track the tallest cell seen so far (so we know where to drop down).
         {
             let layout = self.top_mut();
             layout.position.x = layout.position.x.saturating_add(res.width).saturating_add(spacing);
@@ -285,9 +296,11 @@ impl LayoutManager {
             };
         }
 
+        // Convert from local coordinates (relative to the layout scope) to absolute coordinates.
         res.x += self.top().body.x;
         res.y += self.top().body.y;
 
+        // Track the maximum extent reached so scrolling/auto-sizing can use it later.
         {
             let layout = self.top_mut();
             match layout.max {
