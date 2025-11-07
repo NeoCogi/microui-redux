@@ -172,7 +172,7 @@ impl Window {
             }
         }
         if opt.is_auto_sizing() {
-            let r_1 = container.layout.top().body;
+            let r_1 = container.layout.current_body();
             container.rect.width = container.content_size.x + (container.rect.width - r_1.width);
             container.rect.height = container.content_size.y + (container.rect.height - r_1.height);
         }

@@ -489,14 +489,14 @@ impl Container {
         let res = self.node(label, true, state);
         if res.is_expanded() && self.idmngr.last_id().is_some() {
             let indent = self.style.indent;
-            self.layout.top_mut().indent += indent;
+            self.layout.adjust_indent(indent);
             self.idmngr.push_id(self.idmngr.last_id().unwrap());
         }
 
         if res.is_expanded() {
             f(self);
             let indent = self.style.indent;
-            self.layout.top_mut().indent -= indent;
+            self.layout.adjust_indent(-indent);
             self.idmngr.pop_id();
         }
 
@@ -595,15 +595,16 @@ impl Container {
     }
 
     fn pop_panel(&mut self, panel: &mut ContainerHandle) {
-        let layout = panel.inner().layout.top().clone();
+        let layout_body = panel.inner().layout.current_body();
+        let layout_max = panel.inner().layout.current_max();
         let container = &mut panel.inner_mut();
 
-        match layout.max {
+        match layout_max {
             None => (),
-            Some(lm) => container.content_size = Vec2i::new(lm.x - layout.body.x, lm.y - layout.body.y),
+            Some(lm) => container.content_size = Vec2i::new(lm.x - layout_body.x, lm.y - layout_body.y),
         }
 
-        container.layout.stack.pop();
+        container.layout.pop_scope();
     }
 
     #[inline(never)]
