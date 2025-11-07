@@ -111,22 +111,20 @@ impl LayoutDirection {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct Layout {
-    pub body: Recti,
-    pub next: Recti,
-    pub position: Vec2i,
-    pub size: Dimensioni,
-    pub max: Option<Vec2i>,
-    pub next_row: i32,
-    pub indent: i32,
-    pub direction: LayoutDirection,
+struct Layout {
+    body: Recti,
+    position: Vec2i,
+    max: Option<Vec2i>,
+    next_row: i32,
+    indent: i32,
+    direction: LayoutDirection,
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct LayoutManager {
     pub style: Style,
     pub last_rect: Recti,
-    pub stack: Vec<Layout>,
+    stack: Vec<Layout>,
 }
 
 impl LayoutManager {
@@ -137,11 +135,9 @@ impl LayoutManager {
     }
 
     fn push_layout(&mut self, body: Recti, scroll: Vec2i) {
-        let mut layout: Layout = Layout {
+        let mut layout = Layout {
             body: Recti { x: 0, y: 0, width: 0, height: 0 },
-            next: Recti { x: 0, y: 0, width: 0, height: 0 },
             position: Vec2i { x: 0, y: 0 },
-            size: Dimension { width: 0, height: 0 },
             max: None,
             next_row: 0,
             indent: 0,
@@ -153,12 +149,28 @@ impl LayoutManager {
         self.row(&[SizePolicy::Auto], SizePolicy::Auto);
     }
 
-    pub fn top(&self) -> &Layout {
+    fn top(&self) -> &Layout {
         self.stack.last().expect("Layout stack should never be empty when accessed")
     }
 
-    pub fn top_mut(&mut self) -> &mut Layout {
+    fn top_mut(&mut self) -> &mut Layout {
         self.stack.last_mut().expect("Layout stack should never be empty when accessed")
+    }
+
+    pub fn current_body(&self) -> Recti {
+        self.top().body
+    }
+
+    pub fn current_max(&self) -> Option<Vec2i> {
+        self.top().max
+    }
+
+    pub fn pop_scope(&mut self) {
+        self.stack.pop();
+    }
+
+    pub fn adjust_indent(&mut self, delta: i32) {
+        self.top_mut().indent += delta;
     }
 
     pub fn begin_column(&mut self) {

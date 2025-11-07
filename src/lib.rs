@@ -702,12 +702,12 @@ impl<R: Renderer> Context<R> {
         let container = &mut window.inner_mut().main;
         container.pop_clip_rect();
 
-        let layout = container.layout.top().clone();
-        match layout.max {
+        let layout_body = container.layout.current_body();
+        match container.layout.current_max() {
             None => (),
-            Some(lm) => container.content_size = Vec2i::new(lm.x - layout.body.x, lm.y - layout.body.y),
+            Some(lm) => container.content_size = Vec2i::new(lm.x - layout_body.x, lm.y - layout_body.y),
         }
-        container.layout.stack.pop();
+        container.layout.pop_scope();
     }
 
     #[inline(never)]
