@@ -595,7 +595,7 @@ impl Container {
     }
 
     fn pop_panel(&mut self, panel: &mut ContainerHandle) {
-        let layout = *panel.inner().layout.top();
+        let layout = panel.inner().layout.top().clone();
         let container = &mut panel.inner_mut();
 
         match layout.max {
