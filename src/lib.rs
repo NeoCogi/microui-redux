@@ -71,11 +71,13 @@ pub use atlas::*;
 pub use canvas::*;
 pub use container::*;
 pub use idmngr::*;
-pub use layout::*;
+pub use layout::SizePolicy;
 pub use rect_packer::*;
 pub use rs_math3d::*;
 pub use window::*;
 pub use file_dialog::*;
+
+use layout::LayoutManager;
 
 use bitflags::*;
 use std::cmp::{max, min};
