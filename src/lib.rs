@@ -700,7 +700,7 @@ impl<R: Renderer> Context<R> {
         let container = &mut window.inner_mut().main;
         container.pop_clip_rect();
 
-        let layout = *container.layout.top();
+        let layout = container.layout.top().clone();
         match layout.max {
             None => (),
             Some(lm) => container.content_size = Vec2i::new(lm.x - layout.body.x, lm.y - layout.body.y),

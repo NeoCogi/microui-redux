@@ -78,14 +78,39 @@ impl Default for SizePolicy {
 }
 
 #[derive(Clone, Default)]
-struct Row {
-    start: usize,
-    len: usize,
-    item_index: usize,
+pub struct SpanState {
+    widths: Vec<SizePolicy>,
     height: SizePolicy,
+    item_index: usize,
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Clone)]
+pub enum LayoutDirection {
+    Row(SpanState),
+    Column(SpanState),
+}
+
+impl Default for LayoutDirection {
+    fn default() -> Self {
+        LayoutDirection::Row(SpanState::default())
+    }
+}
+
+impl LayoutDirection {
+    fn row_state(&self) -> &SpanState {
+        match self {
+            LayoutDirection::Row(state) | LayoutDirection::Column(state) => state,
+        }
+    }
+
+    fn row_state_mut(&mut self) -> &mut SpanState {
+        match self {
+            LayoutDirection::Row(state) | LayoutDirection::Column(state) => state,
+        }
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct Layout {
     pub body: Recti,
     pub next: Recti,
@@ -94,6 +119,7 @@ pub struct Layout {
     pub max: Option<Vec2i>,
     pub next_row: i32,
     pub indent: i32,
+    pub direction: LayoutDirection,
 }
 
 #[derive(Clone, Default)]
@@ -101,22 +127,11 @@ pub(crate) struct LayoutManager {
     pub style: Style,
     pub last_rect: Recti,
     pub stack: Vec<Layout>,
-    pub row_widths_stack: Vec<SizePolicy>,
-    row_stack: Vec<Row>,
-
-    pub current_row_widths: Vec<SizePolicy>,
-    current_row_height: SizePolicy,
-    pub item_index: usize,
 }
 
 impl LayoutManager {
     pub fn reset(&mut self, body: Recti, scroll: Vec2i) {
         self.stack.clear();
-        self.row_widths_stack.clear();
-        self.row_stack.clear();
-        self.current_row_widths.clear();
-        self.current_row_height = SizePolicy::Auto;
-        self.item_index = 0;
         self.last_rect = Recti::default();
         self.push_layout(body, scroll);
     }
@@ -130,6 +145,7 @@ impl LayoutManager {
             max: None,
             next_row: 0,
             indent: 0,
+            direction: LayoutDirection::default(),
         };
         layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.width, body.height);
 
@@ -146,77 +162,59 @@ impl LayoutManager {
     }
 
     pub fn begin_column(&mut self) {
-        let layout = self.next();
-
-        let row = Row {
-            start: self.row_stack.len(),
-            len: self.current_row_widths.len(),
-            item_index: self.item_index,
-            height: self.current_row_height,
-        };
-        // backup the parent row's width policies so we can restore them in end_column()
-        for width in &self.current_row_widths {
-            self.row_widths_stack.push(*width);
+        let layout_rect = self.next();
+        self.push_layout(layout_rect, vec2(0, 0));
+        if let Some(top) = self.stack.last_mut() {
+            top.direction = LayoutDirection::Column(SpanState::default());
         }
-        self.current_row_widths.clear();
-        self.item_index = 0;
-        self.row_stack.push(row);
-        // consume the current cell and treat it as a nested layout scope
-        self.push_layout(layout, vec2(0, 0));
+        self.row(&[SizePolicy::Auto], SizePolicy::Auto);
     }
 
     pub fn end_column(&mut self) {
-        let b = self.top().clone();
-        self.stack.pop();
-        let row = self.row_stack.pop().expect("Row stack should not be empty");
-        // restore the parent row configuration that was active before begin_column()
-        self.current_row_widths.clear();
-        for i in 0..row.len {
-            // index = i + row.start
-            let index = i.saturating_add(row.start);
-            if let Some(width) = self.row_widths_stack.get(index) {
-                self.current_row_widths.push(*width);
-            }
-        }
-        let new_len = self.row_widths_stack.len().saturating_sub(row.len);
-        self.row_widths_stack.shrink_to(new_len);
-        self.current_row_height = row.height;
-        self.item_index = row.item_index;
+        let finished = self.stack.pop().expect("cannot end column without an active child layout");
+        let parent = self.top_mut();
 
-        let a = self.top_mut();
-        a.position.x = if a.position.x > b.position.x + b.body.x - a.body.x {
-            a.position.x
+        parent.position.x = if parent.position.x > finished.position.x + finished.body.x - parent.body.x {
+            parent.position.x
         } else {
-            b.position.x + b.body.x - a.body.x
+            finished.position.x + finished.body.x - parent.body.x
         };
-        a.next_row = if a.next_row > b.next_row + b.body.y - a.body.y {
-            a.next_row
+        parent.next_row = if parent.next_row > finished.next_row + finished.body.y - parent.body.y {
+            parent.next_row
         } else {
-            b.next_row + b.body.y - a.body.y
+            finished.next_row + finished.body.y - parent.body.y
         };
 
-        // propagate max to the "current" top of the stack (parent) layout
-        match (&mut a.max, &b.max) {
+        match (&mut parent.max, finished.max) {
             (None, None) => (),
             (Some(_), None) => (),
-            (None, Some(m)) => a.max = Some(*m),
+            (None, Some(m)) => parent.max = Some(m),
             (Some(am), Some(bm)) => {
-                a.max = Some(Vec2i::new(max(am.x, bm.x), max(am.y, bm.y)));
+                parent.max = Some(Vec2i::new(max(am.x, bm.x), max(am.y, bm.y)));
             }
         }
     }
 
     fn row_for_layout(&mut self, height: SizePolicy) {
-        self.current_row_height = height;
         let layout = self.top_mut();
+        {
+            let state = layout.direction.row_state_mut();
+            state.height = height;
+            state.item_index = 0;
+        }
         layout.position = vec2(layout.indent, layout.next_row);
-        self.item_index = 0;
     }
 
     pub fn row(&mut self, widths: &[SizePolicy], height: SizePolicy) {
-        self.current_row_widths.clear();
-        self.current_row_widths.extend_from_slice(widths);
-        self.row_for_layout(height);
+        let layout = self.top_mut();
+        {
+            let state = layout.direction.row_state_mut();
+            state.widths.clear();
+            state.widths.extend_from_slice(widths);
+            state.height = height;
+            state.item_index = 0;
+        }
+        layout.position = vec2(layout.indent, layout.next_row);
     }
 
     fn resolve_horizontal(&self, cursor_x: i32, policy: SizePolicy, default_width: i32) -> i32 {
@@ -235,52 +233,70 @@ impl LayoutManager {
         let spacing = self.style.spacing;
         let default_width = dcell_size.width + padding * 2;
         let default_height = dcell_size.height + padding * 2;
-        let row_cells_count = self.current_row_widths.len();
 
-        let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
+        let (row_len, current_index, height_policy) = {
+            let layout = self.top();
+            let state = layout.direction.row_state();
+            let row_len = state.widths.len();
+            (row_len, state.item_index, state.height)
+        };
 
         // start a new row if the previous span was fully consumed
-        if self.item_index == row_cells_count {
-            let height_policy = self.current_row_height;
+        if current_index == row_len {
             self.row_for_layout(height_policy);
         }
 
-        res.x = self.top().position.x;
-        res.y = self.top().position.y;
-
-        let width_policy = if row_cells_count > 0 {
-            self.current_row_widths.get(self.item_index).copied().unwrap_or(SizePolicy::Auto)
-        } else {
-            SizePolicy::Auto
+        let width_policy = {
+            let layout = self.top();
+            let state = layout.direction.row_state();
+            if state.widths.is_empty() {
+                SizePolicy::Auto
+            } else {
+                state.widths.get(state.item_index).copied().unwrap_or(SizePolicy::Auto)
+            }
         };
 
-        res.width = self.resolve_horizontal(res.x, width_policy, default_width);
-        res.height = self.resolve_vertical(res.y, self.current_row_height, default_height);
+        let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
 
-        // ensure it will never exceeds
-        if self.item_index < row_cells_count {
-            self.item_index += 1;
+        {
+            let layout = self.top();
+            res.x = layout.position.x;
+            res.y = layout.position.y;
         }
 
-        ///////////
-        // update the next position/row/body/max/...
-        ////////
-        self.top_mut().position.x = self.top().position.x.saturating_add(res.width).saturating_add(spacing);
-        self.top_mut().next_row = if self.top().next_row > res.y + res.height + spacing {
-            self.top().next_row
-        } else {
-            res.y + res.height + spacing
-        };
+        res.width = self.resolve_horizontal(res.x, width_policy, default_width);
+        res.height = self.resolve_vertical(res.y, height_policy, default_height);
+
+        {
+            let layout = self.top_mut();
+            let state = layout.direction.row_state_mut();
+            if state.item_index < state.widths.len() {
+                state.item_index += 1;
+            }
+        }
+
+        {
+            let layout = self.top_mut();
+            layout.position.x = layout.position.x.saturating_add(res.width).saturating_add(spacing);
+            layout.next_row = if layout.next_row > res.y + res.height + spacing {
+                layout.next_row
+            } else {
+                res.y + res.height + spacing
+            };
+        }
 
         res.x += self.top().body.x;
         res.y += self.top().body.y;
 
-        // track the furthest extent reached so far for content-size computation
-        match self.top_mut().max {
-            None => self.top_mut().max = Some(Vec2i::new(res.x + res.width, res.y + res.height)),
-            Some(am) => self.top_mut().max = Some(Vec2i::new(max(am.x, res.x + res.width), max(am.y, res.y + res.height))),
+        {
+            let layout = self.top_mut();
+            match layout.max {
+                None => layout.max = Some(Vec2i::new(res.x + res.width, res.y + res.height)),
+                Some(am) => layout.max = Some(Vec2i::new(max(am.x, res.x + res.width), max(am.y, res.y + res.height))),
+            }
         }
+
         self.last_rect = res;
-        return self.last_rect;
+        self.last_rect
     }
 }
