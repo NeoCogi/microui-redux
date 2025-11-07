@@ -589,7 +589,7 @@ impl Container {
         let style = self.style;
         let padding = -style.padding;
         let scroll = self.scroll;
-        self.layout.push_layout(expand_rect(body, padding), scroll);
+        self.layout.reset(expand_rect(body, padding), scroll);
         self.layout.style = self.style.clone();
         self.body = body;
     }

@@ -110,7 +110,18 @@ pub(crate) struct LayoutManager {
 }
 
 impl LayoutManager {
-    pub fn push_layout(&mut self, body: Recti, scroll: Vec2i) {
+    pub fn reset(&mut self, body: Recti, scroll: Vec2i) {
+        self.stack.clear();
+        self.row_widths_stack.clear();
+        self.row_stack.clear();
+        self.current_row_widths.clear();
+        self.current_row_height = SizePolicy::Auto;
+        self.item_index = 0;
+        self.last_rect = Recti::default();
+        self.push_layout(body, scroll);
+    }
+
+    fn push_layout(&mut self, body: Recti, scroll: Vec2i) {
         let mut layout: Layout = Layout {
             body: Recti { x: 0, y: 0, width: 0, height: 0 },
             next: Recti { x: 0, y: 0, width: 0, height: 0 },
@@ -121,7 +132,7 @@ impl LayoutManager {
             indent: 0,
         };
         layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.width, body.height);
-        //layout.max = vec2(-i32::MAX, -i32::MAX);
+
         self.stack.push(layout);
         self.row(&[SizePolicy::Auto], SizePolicy::Auto);
     }
@@ -158,6 +169,7 @@ impl LayoutManager {
         let row = self.row_stack.pop().expect("Row stack should not be empty");
         self.current_row_widths.clear();
         for i in 0..row.len {
+            // index = i + row.start
             let index = i.saturating_add(row.start);
             if let Some(width) = self.row_widths_stack.get(index) {
                 self.current_row_widths.push(*width);
