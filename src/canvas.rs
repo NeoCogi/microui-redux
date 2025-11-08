@@ -32,12 +32,14 @@ use std::{borrow::BorrowMut, collections::HashMap};
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
+/// Vertex submitted by the UI.
 pub struct Vertex {
     pos: Vec2f,
     tex: Vec2f,
     color: Color4b,
 }
 
+/// High-level drawing helper that batches draw commands for a renderer.
 pub struct Canvas<R: Renderer> {
     current_dim: Dimensioni,
     renderer: RendererHandle<R>,
@@ -53,6 +55,7 @@ struct TextureInfo {
 }
 
 impl<R: Renderer> Canvas<R> {
+    /// Creates a canvas around the provided renderer handle.
     pub fn from(renderer: RendererHandle<R>, dim: Dimensioni) -> Self {
         Self {
             current_dim: dim,
@@ -63,11 +66,13 @@ impl<R: Renderer> Canvas<R> {
         }
     }
 
+    /// Returns the atlas associated with the renderer.
     pub fn get_atlas(&self) -> AtlasHandle {
         self.renderer.scope(|r| r.get_atlas())
     }
 
     #[inline(never)]
+    /// Computes the clipped destination/source rectangles for rendering.
     pub fn clip_rect(dst_r: Recti, src_r: Recti, clip_r: Recti) -> Option<(Recti, Recti)> {
         match dst_r.intersect(&clip_r) {
             Some(rect) if rect.width == dst_r.width && rect.height == dst_r.height => Some((dst_r, src_r)),
@@ -104,6 +109,7 @@ impl<R: Renderer> Canvas<R> {
     }
 
     #[inline(never)]
+    /// Pushes a textured quad referencing the atlas to the renderer.
     pub fn push_rect(&mut self, dst: Recti, src: Recti, color: Color) {
         let atlas_dim = self.renderer.scope(|r| r.get_atlas()).get_texture_dimension();
 
@@ -154,12 +160,14 @@ impl<R: Renderer> Canvas<R> {
         })
     }
 
+    /// Draws a solid colored rectangle.
     pub fn draw_rect(&mut self, rect: Recti, color: Color) {
         let icon_rect = self.renderer.scope(|r| r.get_atlas()).get_icon_rect(WHITE_ICON);
         self.push_rect(rect, icon_rect, color);
     }
 
     #[inline(never)]
+    /// Draws UTF-8 text using the supplied font.
     pub fn draw_chars(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
         let atlas = self.renderer.scope(|r| r.get_atlas());
         atlas.draw_string(font, text, |_, _, dst, src| {
@@ -168,6 +176,7 @@ impl<R: Renderer> Canvas<R> {
         });
     }
 
+    /// Draws an icon centered inside the provided rectangle.
     pub fn draw_icon(&mut self, id: IconId, r: Recti, color: Color) {
         let src = self.renderer.scope(|r| r.get_atlas()).get_icon_rect(id);
         let x = r.x + (r.width - src.width) / 2;
@@ -175,6 +184,7 @@ impl<R: Renderer> Canvas<R> {
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
+    /// Draws an atlas slot centered inside the provided rectangle.
     pub fn draw_slot(&mut self, id: SlotId, r: Recti, color: Color) {
         let src = self.renderer.scope(|r| r.get_atlas()).get_slot_rect(id);
         let x = r.x + (r.width - src.width) / 2;
@@ -182,6 +192,7 @@ impl<R: Renderer> Canvas<R> {
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
+    /// Renders a slot with the callback before drawing it.
     pub fn draw_slot_with_function(&mut self, id: SlotId, r: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
         let src = self.renderer.scope(|r| r.get_atlas()).get_slot_rect(id);
         let pl = payload.clone();
@@ -191,24 +202,29 @@ impl<R: Renderer> Canvas<R> {
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
+    /// Sets the clip rectangle used for subsequent draw calls.
     pub fn set_clip_rect(&mut self, rect: Recti) {
         self.clip = rect;
     }
 
+    /// Begins a new drawing pass and resets the clip rectangle.
     pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
         self.current_dim = Dimensioni::new(width, height);
         self.set_clip_rect(Rect::new(0, 0, width, height));
         self.renderer.scope_mut(move |r| r.begin(width, height, clr));
     }
 
+    /// Ends the current drawing pass.
     pub fn end(&mut self) {
         self.renderer.scope_mut(|r| r.end())
     }
 
+    /// Returns the last viewport dimensions passed to [`Canvas::begin`].
     pub fn current_dimension(&self) -> Dimensioni {
         self.current_dim
     }
 
+    /// Uploads raw RGBA pixels as a renderer-owned texture.
     pub fn load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId {
         let id = TextureId(self.next_texture_id);
         self.next_texture_id += 1;
@@ -217,12 +233,14 @@ impl<R: Renderer> Canvas<R> {
         id
     }
 
+    /// Destroys a texture allocated via [`Canvas::load_texture_rgba`].
     pub fn free_texture(&mut self, id: TextureId) {
         if self.textures.remove(&id).is_some() {
             self.renderer.scope_mut(|r| r.destroy_texture(id));
         }
     }
 
+    /// Draws either an atlas slot or an external texture inside `rect`.
     pub fn draw_image(&mut self, image: Image, rect: Recti, color: Color) {
         match image {
             Image::Slot(slot) => self.draw_slot(slot, rect, color),

@@ -54,10 +54,14 @@ use super::*;
 
 /// Describes how a layout dimension should be resolved.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// Size policy used by rows and columns when resolving cells.
 pub enum SizePolicy {
-    Auto,           // Example: `0` width -> fall back to style default (e.g. 84px button slot)
-    Fixed(i32),     // Example: `Fixed(120)` -> the cell is always 120px wide
-    Remainder(i32), // Example: `Remainder(0)` fills leftovers; `Remainder(9)` keeps 9px margin
+    /// Uses the default cell size defined by the style.
+    Auto,
+    /// Reserves a fixed number of pixels.
+    Fixed(i32),
+    /// Consumes the remaining space with an optional margin.
+    Remainder(i32),
 }
 
 impl SizePolicy {

@@ -47,9 +47,13 @@ use std::str::FromStr;
 use super::*;
 
 #[derive(Debug, Clone)]
+/// Metrics and atlas coordinates for a glyph.
 pub struct CharEntry {
+    /// Pixel offset relative to the draw origin.
     pub offset: Vec2i,
+    /// Horizontal advance after drawing this glyph.
     pub advance: Vec2i,
+    /// Rectangle inside the atlas texture.
     pub rect: Recti, // coordinates in the atlas
 }
 
@@ -75,12 +79,15 @@ impl Debug for Font {
 }
 
 #[derive(Default, Copy, Clone)]
+/// Handle referencing a font stored in the atlas.
 pub struct FontId(usize);
 
 #[derive(Default, Copy, Clone)]
+/// Handle referencing a bitmap icon stored in the atlas.
 pub struct IconId(usize);
 
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
+/// Handle referencing an arbitrary image slot stored in the atlas.
 pub struct SlotId(usize);
 
 impl Into<u32> for IconId {
@@ -111,14 +118,21 @@ struct Atlas {
 }
 
 #[derive(Clone)]
+/// Shared handle exposing read/write access to the atlas.
 pub struct AtlasHandle(Rc<RefCell<Atlas>>);
 
+/// Identifier of the solid white icon baked into the default atlas.
 pub const WHITE_ICON: IconId = IconId(0);
+/// Identifier of the close icon baked into the default atlas.
 pub const CLOSE_ICON: IconId = IconId(1);
+/// Identifier of the expand icon baked into the default atlas.
 pub const EXPAND_ICON: IconId = IconId(2);
+/// Identifier of the collapse icon baked into the default atlas.
 pub const COLLAPSE_ICON: IconId = IconId(3);
+/// Identifier of the checkbox icon baked into the default atlas.
 pub const CHECK_ICON: IconId = IconId(4);
 
+/// Decodes raw PNG bytes into 32-bit pixels and dimensions.
 pub fn load_image_bytes(bytes: &[u8]) -> Result<(usize, usize, Vec<Color4b>)> {
     let mut cursor = Cursor::new(bytes);
     let mut decoder = png::Decoder::new(&mut cursor);
@@ -177,6 +191,7 @@ pub fn load_image_bytes(bytes: &[u8]) -> Result<(usize, usize, Vec<Color4b>)> {
 }
 
 #[cfg(feature = "builder")]
+/// Helpers for constructing atlas textures at build time.
 pub mod builder {
     use std::io::Seek;
 
@@ -185,26 +200,39 @@ pub mod builder {
 
     use rect_packer::*;
 
+    /// Incrementally constructs an atlas by packing fonts, icons, and slots.
     pub struct Builder {
         packer: Packer,
         atlas: Atlas,
     }
 
     #[derive(Clone)]
+    /// Configuration for constructing an atlas from disk assets.
     pub struct Config<'a> {
+        /// Width of the atlas texture in pixels.
         pub texture_width: usize,
+        /// Height of the atlas texture in pixels.
         pub texture_height: usize,
+        /// Path to the solid white icon.
         pub white_icon: String,
+        /// Path to the close icon.
         pub close_icon: String,
+        /// Path to the expand icon.
         pub expand_icon: String,
+        /// Path to the collapse icon.
         pub collapse_icon: String,
+        /// Path to the checkbox icon.
         pub check_icon: String,
+        /// Path to the default font file.
         pub default_font: String,
+        /// Size of the default font.
         pub default_font_size: usize,
+        /// Dimensions of additional slots to reserve in the atlas.
         pub slots: &'a [Dimensioni],
     }
 
     impl Builder {
+        /// Creates a builder using the provided configuration and assets.
         pub fn from_config<'a>(config: &'a Config) -> Result<Builder> {
             let rp_config = rect_packer::Config {
                 width: config.texture_width as _,
@@ -240,6 +268,7 @@ pub mod builder {
             Ok(builder)
         }
 
+        /// Adds an icon from the given image path and returns its [`IconId`].
         pub fn add_icon(&mut self, path: &str) -> Result<IconId> {
             let (width, height, pixels) = Self::load_icon(path)?;
             let rect = self.add_tile(width, height, pixels.as_slice())?;
@@ -249,6 +278,7 @@ pub mod builder {
             Ok(IconId(id))
         }
 
+        /// Adds a font at the requested size and returns its [`FontId`].
         pub fn add_font(&mut self, path: &str, size: usize) -> Result<FontId> {
             let font = Self::load_font(path)?;
             let mut entries = HashMap::new();
@@ -283,6 +313,7 @@ pub mod builder {
             Ok(FontId(id))
         }
 
+        /// Serializes the atlas texture into PNG bytes.
         pub fn png_image_bytes(atlas: AtlasHandle) -> Result<Vec<u8>> {
             let mut w: Vec<u8> = Vec::new();
             let mut cursor = Cursor::new(Vec::new());
@@ -310,6 +341,7 @@ pub mod builder {
             Ok(w)
         }
 
+        /// Writes the atlas texture to disk as a PNG.
         pub fn save_png_image(atlas: AtlasHandle, path: &str) -> Result<()> {
             // png writer
             let file = File::create(path)?;
@@ -390,35 +422,52 @@ pub mod builder {
             Self::strip_extension(&Self::strip_path_to_file(path))
         }
 
+        /// Consumes the builder and returns an [`AtlasHandle`].
         pub fn to_atlas(self) -> AtlasHandle {
             AtlasHandle(Rc::new(RefCell::new(self.atlas)))
         }
     }
 }
 
+/// Describes a font baked into an [`AtlasSource`].
 pub struct FontEntry<'a> {
-    pub line_size: usize,                 // line size
-    pub font_size: usize,                 // font size in pixels
+    /// Distance between baselines in pixels.
+    pub line_size: usize, // line size
+    /// Requested pixel size.
+    pub font_size: usize, // font size in pixels
+    /// Glyph metadata table.
     pub entries: &'a [(char, CharEntry)], // all printable chars [32-127]
 }
 
+/// Encodes how atlas pixel data is stored.
 pub enum SourceFormat {
+    /// Raw RGBA byte array.
     Raw,
     #[cfg(feature = "png_source")]
+    /// PNG-formatted byte array.
     Png,
 }
 
+/// Serializable representation of an atlas that can be shipped with the binary.
 pub struct AtlasSource<'a> {
+    /// Width of the atlas texture.
     pub width: usize,
+    /// Height of the atlas texture.
     pub height: usize,
+    /// Pixel data matching [`AtlasSource::format`].
     pub pixels: &'a [u8],
+    /// Icon lookup table.
     pub icons: &'a [(&'a str, Recti)],
+    /// Fonts baked into the atlas.
     pub fonts: &'a [(&'a str, FontEntry<'a>)],
+    /// Encoding of [`AtlasSource::pixels`].
     pub format: SourceFormat,
+    /// Slot rectangles reserved in the atlas.
     pub slots: &'a [Recti],
 }
 
 impl AtlasHandle {
+    /// Reconstructs an atlas from a serialized [`AtlasSource`].
     pub fn from<'a>(source: &AtlasSource<'a>) -> Self {
         let icons: Vec<(String, Icon)> = source
             .icons
@@ -467,6 +516,7 @@ impl AtlasHandle {
     }
 
     #[cfg(feature = "save-to-rust")]
+    /// Serializes the atlas into Rust source files for reuse at build time.
     pub fn to_rust_files(&self, atlas_name: &str, format: SourceFormat, path: &str) -> Result<()> {
         let mut font_meta = String::new();
         font_meta.push_str(format!("use microui_redux::*; pub const {} : AtlasSource = AtlasSource {{\n", atlas_name).as_str());
@@ -538,63 +588,78 @@ impl AtlasHandle {
         write!(f, "{}", font_meta)
     }
 
+    /// Returns the atlas texture width in pixels.
     pub fn width(&self) -> usize {
         self.0.borrow().width
     }
+    /// Returns the atlas texture height in pixels.
     pub fn height(&self) -> usize {
         self.0.borrow().height
     }
+    /// Returns a clone of the atlas pixel data.
     pub fn pixels_clone(&self) -> Vec<Color4b> {
         self.0.borrow().pixels.clone()
     }
 
+    /// Executes a closure with shared access to the atlas pixels.
     pub fn apply_pixels<F: FnMut(usize, usize, &Vec<Color4b>)>(&self, mut f: F) {
         let s = self.0.borrow();
         f(s.width, s.height, &s.pixels);
     }
 
+    /// Returns a mapping from icon names to their identifiers.
     pub fn clone_icon_table(&self) -> Vec<(String, IconId)> {
         self.0.borrow().icons.iter().enumerate().map(|(i, icon)| (icon.0.clone(), IconId(i))).collect()
     }
 
+    /// Returns a mapping from font names to their identifiers.
     pub fn clone_font_table(&self) -> Vec<(String, FontId)> {
         self.0.borrow().fonts.iter().enumerate().map(|(i, font)| (font.0.clone(), FontId(i))).collect()
     }
 
+    /// Returns a list of available slot identifiers.
     pub fn clone_slot_table(&self) -> Vec<SlotId> {
         self.0.borrow().slots.iter().enumerate().map(|(i, _)| SlotId(i)).collect()
     }
 
+    /// Returns glyph metrics for the specified character, if available.
     pub fn get_char_entry(&self, font: FontId, c: char) -> Option<CharEntry> {
         self.0.borrow().fonts[font.0].1.entries.get(&c).map(|x| x.clone())
     }
 
+    /// Returns the line height for the specified font.
     pub fn get_font_height(&self, font: FontId) -> usize {
         self.0.borrow().fonts[font.0].1.line_size
     }
 
+    /// Returns the dimensions of an icon.
     pub fn get_icon_size(&self, icon: IconId) -> Dimensioni {
         let r = self.0.borrow().icons[icon.0].1.rect;
         Dimensioni::new(r.width, r.height)
     }
 
+    /// Returns the atlas rectangle storing an icon.
     pub(crate) fn get_icon_rect(&self, icon: IconId) -> Recti {
         self.0.borrow().icons[icon.0].1.rect
     }
 
+    /// Returns the dimensions of a slot.
     pub fn get_slot_size(&self, slot: SlotId) -> Dimensioni {
         let r = self.0.borrow().slots[slot.0];
         Dimension::new(r.width, r.height)
     }
 
+    /// Returns the atlas rectangle storing a slot.
     pub(crate) fn get_slot_rect(&self, slot: SlotId) -> Recti {
         self.0.borrow().slots[slot.0]
     }
 
+    /// Returns the atlas texture dimensions.
     pub fn get_texture_dimension(&self) -> Dimensioni {
         Dimension::new(self.0.borrow().width as _, self.0.borrow().height as _)
     }
 
+    /// Walks each glyph in the string and invokes the closure with draw information.
     pub fn draw_string<DrawFunction: FnMut(char, Vec2i, Recti, Recti)>(&self, font: FontId, text: &str, mut f: DrawFunction) {
         let mut dst = Recti { x: 0, y: 0, width: 0, height: 0 };
         let fh = self.get_font_height(font) as i32;
@@ -625,6 +690,7 @@ impl AtlasHandle {
         }
     }
 
+    /// Measures the bounding box of the provided text.
     pub fn get_text_size(&self, font: FontId, text: &str) -> Dimensioni {
         let mut res = Dimensioni::new(0, 0);
         self.draw_string(font, text, |_, advance, dst, _| {
@@ -634,6 +700,7 @@ impl AtlasHandle {
         res
     }
 
+    /// Renders into a slot using the provided callback and bumps the update counter.
     pub fn render_slot(&mut self, slot: SlotId, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
         let slot_rect = match self.0.borrow().slots.get(slot.0) {
             Some(rect) => *rect,
@@ -658,6 +725,7 @@ impl AtlasHandle {
         self.0.borrow_mut().last_update_id = last_update.wrapping_add(1);
     }
 
+    /// Returns a monotonically increasing value that changes whenever slot pixels are modified.
     pub fn get_last_update_id(&self) -> usize {
         self.0.borrow().last_update_id
     }

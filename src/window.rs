@@ -54,8 +54,11 @@ use super::*;
 use std::cell::{Ref, RefMut};
 
 #[derive(Clone, Copy, Debug)]
+/// Indicates whether a window should be rendered this frame.
 pub enum WindowState {
+    /// Window is visible and will receive input.
     Open,
+    /// Window is hidden.
     Closed,
 }
 
@@ -73,6 +76,7 @@ pub(crate) struct Window {
 }
 
 impl Window {
+    /// Creates a dialog window that starts closed.
     pub fn dialog(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.rect = initial_rect;
@@ -84,6 +88,7 @@ impl Window {
         }
     }
 
+    /// Creates a standard window that starts open.
     pub fn window(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.rect = initial_rect;
@@ -95,6 +100,7 @@ impl Window {
         }
     }
 
+    /// Creates a popup window that starts closed.
     pub fn popup(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.rect = initial_rect;
@@ -106,6 +112,7 @@ impl Window {
         }
     }
 
+    /// Returns `true` if this handle manages a popup window.
     pub fn is_popup(&self) -> bool {
         match self.ty {
             Type::Popup => true,
@@ -191,6 +198,7 @@ impl Window {
 }
 
 #[derive(Clone)]
+/// Reference-counted handle to the internal window object.
 pub struct WindowHandle(Rc<RefCell<Window>>);
 
 impl WindowHandle {
@@ -206,6 +214,7 @@ impl WindowHandle {
         Self(Rc::new(RefCell::new(Window::popup(name, atlas, style, input, Recti::new(0, 0, 0, 0)))))
     }
 
+    /// Returns `true` if the window's state is `Open`.
     pub fn is_open(&self) -> bool {
         match self.0.borrow().win_state {
             WindowState::Open => true,
@@ -245,6 +254,7 @@ impl WindowHandle {
         self.inner_mut().end_window()
     }
 
+    /// Resizes the underlying window rectangle.
     pub fn set_size(&mut self, size: &Dimensioni) {
         self.inner_mut().main.rect.width = size.width;
         self.inner_mut().main.rect.height = size.height;

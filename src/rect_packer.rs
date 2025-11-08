@@ -69,12 +69,18 @@ pub struct Config {
     pub rectangle_padding: i32,
 }
 
+/// Simplified rectangle interface required by the packer implementations.
 pub trait RectTrait {
+    /// Returns the top edge (minimum y).
     fn top(&self) -> i32;
+    /// Returns the bottom edge (exclusive).
     fn bottom(&self) -> i32;
+    /// Returns the left edge (minimum x).
     fn left(&self) -> i32;
+    /// Returns the right edge (exclusive).
     fn right(&self) -> i32;
 
+    /// Returns the area of the rectangle.
     fn area(&self) -> i32 {
         (self.bottom() - self.top()) * (self.right() - self.left())
     }

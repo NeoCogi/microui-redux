@@ -52,27 +52,33 @@
 //
 
 #[derive(Default, Copy, Clone, Eq, PartialEq, Hash, Debug)]
+/// Numeric identifier assigned to widgets and containers.
 pub struct Id(u32);
 
 #[derive(Clone)]
+/// Hierarchical ID generator modeled after the original microui implementation.
 pub struct IdManager {
     last_id: Option<Id>,
     id_stack: Vec<Id>,
 }
 
 impl IdManager {
+    /// Creates a fresh ID manager.
     pub fn new() -> Self {
         Self { last_id: None, id_stack: Vec::new() }
     }
 
+    /// Returns the depth of the ID stack.
     pub fn len(&self) -> usize {
         self.id_stack.len()
     }
 
+    /// Returns the most recently generated ID.
     pub fn last_id(&self) -> Option<Id> {
         self.last_id
     }
 
+    /// Pushes a specific ID on the stack to namespace future IDs.
     pub fn push_id(&mut self, id: Id) {
         self.id_stack.push(id)
     }
@@ -99,6 +105,7 @@ impl IdManager {
             *hash_0 = Id(Self::hash_step(hash_0.0, *c as u32));
         }
     }
+    /// Hashes a `u32` into a deterministic ID that respects the current stack.
     pub fn get_id_u32(&mut self, orig_id: u32) -> Id {
         let mut res: Id = match self.id_stack.last() {
             Some(id) => *id,
@@ -109,6 +116,7 @@ impl IdManager {
         return res;
     }
 
+    /// Hashes an object's pointer address into an ID.
     pub fn get_id_from_ptr<T: ?Sized>(&mut self, orig_id: &T) -> Id {
         let mut res: Id = match self.id_stack.last() {
             Some(id) => *id,
@@ -121,6 +129,7 @@ impl IdManager {
         return res;
     }
 
+    /// Hashes a string label into an ID.
     pub fn get_id_from_str(&mut self, s: &str) -> Id {
         let mut res: Id = match self.id_stack.last() {
             Some(id) => *id,
@@ -131,16 +140,19 @@ impl IdManager {
         return res;
     }
 
+    /// Pushes a pointer-derived ID on the stack.
     pub fn push_id_from_ptr<T>(&mut self, orig_id: &T) {
         let id = self.get_id_from_ptr(orig_id);
         self.id_stack.push(id);
     }
 
+    /// Pushes a string-derived ID on the stack.
     pub fn push_id_from_str(&mut self, s: &str) {
         let id = self.get_id_from_str(s);
         self.id_stack.push(id);
     }
 
+    /// Pops the most recent ID namespace from the stack.
     pub fn pop_id(&mut self) {
         self.id_stack.pop();
     }

@@ -53,46 +53,79 @@
 use super::*;
 use std::cell::RefCell;
 
+/// Arguments forwarded to custom rendering callbacks.
 pub struct CustomRenderArgs {
+    /// Rectangle describing the widget's content area.
     pub content_area: Rect<i32>,
+    /// Final clipped region that is visible.
     pub view: Rect<i32>, // clipped area
+    /// Latest mouse interaction affecting the widget.
     pub mouse_event: MouseEvent,
+    /// Currently active modifier keys.
     pub key_mods: KeyMode,
+    /// Currently active navigation keys.
     pub key_codes: KeyCode,
+    /// Text input collected while the widget was focused.
     pub text_input: String,
 }
 
+/// Draw commands recorded during container traversal.
 pub enum Command {
+    /// Pushes or pops a clip rectangle.
     Clip {
+        /// Rect to clip against.
         rect: Recti,
     },
+    /// Draws a solid rectangle.
     Recti {
+        /// Target rectangle.
         rect: Recti,
+        /// Fill color.
         color: Color,
     },
+    /// Draws text.
     Text {
+        /// Font to use.
         font: FontId,
+        /// Top-left text position.
         pos: Vec2i,
+        /// Text color.
         color: Color,
+        /// UTF-8 string to render.
         text: String,
     },
+    /// Draws an icon from the atlas.
     Icon {
+        /// Target rectangle.
         rect: Recti,
+        /// Icon identifier.
         id: IconId,
+        /// Tint color.
         color: Color,
     },
+    /// Draws an arbitrary image (slot or texture).
     Image {
+        /// Target rectangle.
         rect: Recti,
+        /// Image identifier.
         image: Image,
+        /// Tint color.
         color: Color,
     },
+    /// Re-renders a slot before drawing it.
     SlotRedraw {
+        /// Target rectangle.
         rect: Recti,
+        /// Slot to update.
         id: SlotId,
+        /// Tint color.
         color: Color,
+        /// Callback generating pixels.
         payload: Rc<dyn Fn(usize, usize) -> Color4b>,
     },
+    /// Invokes a user callback for custom rendering.
     CustomRender(CustomRenderArgs, Box<dyn FnMut(Dimensioni, &CustomRenderArgs)>),
+    /// Sentinel used when no command is enqueued.
     None,
 }
 
@@ -102,25 +135,43 @@ impl Default for Command {
     }
 }
 
+/// Core UI building block that records commands and hosts layouts.
 pub struct Container {
     pub(crate) atlas: AtlasHandle,
+    /// Style used when drawing widgets in the container.
     pub style: Style,
+    /// Identifier used for generating child IDs.
     pub name: String,
+    /// Outer rectangle including frame and title.
     pub rect: Recti,
+    /// Inner rectangle excluding frame/title.
     pub body: Recti,
+    /// Size of the content region based on layout traversal.
     pub content_size: Vec2i,
+    /// Accumulated scroll offset.
     pub scroll: Vec2i,
+    /// Z-index used to order overlapping windows.
     pub zindex: i32,
+    /// Recorded draw commands for this frame.
     pub command_list: Vec<Command>,
+    /// Stack of clip rectangles applied while drawing.
     pub clip_stack: Vec<Recti>,
     pub(crate) layout: LayoutManager,
+    /// ID of the widget currently hovered, if any.
     pub hover: Option<Id>,
+    /// ID of the widget currently focused, if any.
     pub focus: Option<Id>,
+    /// Tracks whether focus changed this frame.
     pub updated_focus: bool,
+    /// ID allocator used for widgets.
     pub idmngr: IdManager,
+    /// Shared access to the input state.
     pub input: Rc<RefCell<Input>>,
+    /// Whether this container is the current hover root.
     pub in_hover_root: bool,
+    /// Buffer used when editing number widgets.
     pub number_edit_buf: String,
+    /// ID of the number widget currently in edit mode, if any.
     pub number_edit: Option<Id>,
 
     panels: Vec<ContainerHandle>,
@@ -201,15 +252,18 @@ impl Container {
         }
     }
 
+    /// Pushes a new clip rectangle combined with the previous clip.
     pub fn push_clip_rect(&mut self, rect: Recti) {
         let last = self.get_clip_rect();
         self.clip_stack.push(rect.intersect(&last).unwrap_or_default());
     }
 
+    /// Restores the previous clip rectangle from the stack.
     pub fn pop_clip_rect(&mut self) {
         self.clip_stack.pop();
     }
 
+    /// Returns the active clip rectangle, or an unclipped rect when the stack is empty.
     pub fn get_clip_rect(&mut self) -> Recti {
         match self.clip_stack.last() {
             Some(r) => *r,
@@ -217,6 +271,7 @@ impl Container {
         }
     }
 
+    /// Determines whether `r` is fully visible, partially visible, or completely clipped.
     pub fn check_clip(&mut self, r: Recti) -> Clip {
         let cr = self.get_clip_rect();
         if r.x > cr.x + cr.width || r.x + r.width < cr.x || r.y > cr.y + cr.height || r.y + r.height < cr.y {
@@ -228,19 +283,23 @@ impl Container {
         return Clip::Part;
     }
 
+    /// Enqueues a draw command to be consumed during rendering.
     pub fn push_command(&mut self, cmd: Command) {
         self.command_list.push(cmd);
     }
 
+    /// Adjusts the current clip rectangle.
     pub fn set_clip(&mut self, rect: Recti) {
         self.push_command(Command::Clip { rect });
     }
 
+    /// Manually updates which widget owns focus.
     pub fn set_focus(&mut self, id: Option<Id>) {
         self.focus = id;
         self.updated_focus = true;
     }
 
+    /// Records a filled rectangle draw command.
     pub fn draw_rect(&mut self, mut rect: Recti, color: Color) {
         rect = rect.intersect(&self.get_clip_rect()).unwrap_or_default();
         if rect.width > 0 && rect.height > 0 {
@@ -248,6 +307,7 @@ impl Container {
         }
     }
 
+    /// Records a rectangle outline.
     pub fn draw_box(&mut self, r: Recti, color: Color) {
         self.draw_rect(rect(r.x + 1, r.y, r.width - 2, 1), color);
         self.draw_rect(rect(r.x + 1, r.y + r.height - 1, r.width - 2, 1), color);
@@ -255,6 +315,7 @@ impl Container {
         self.draw_rect(rect(r.x + r.width - 1, r.y, 1, r.height), color);
     }
 
+    /// Records a text draw command.
     pub fn draw_text(&mut self, font: FontId, str: &str, pos: Vec2i, color: Color) {
         let tsize = self.atlas.get_text_size(font, str);
         let rect: Recti = rect(pos.x, pos.y, tsize.width, tsize.height);
@@ -279,6 +340,7 @@ impl Container {
         }
     }
 
+    /// Records an icon draw command.
     pub fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
         let clipped = self.check_clip(rect);
         match clipped {
@@ -295,10 +357,12 @@ impl Container {
         }
     }
 
+    /// Records a slot draw command.
     pub fn draw_slot(&mut self, id: SlotId, rect: Recti, color: Color) {
         self.push_image(Image::Slot(id), rect, color);
     }
 
+    /// Records a slot redraw that uses a callback to fill pixels.
     pub fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
         let clipped = self.check_clip(rect);
         match clipped {
@@ -316,6 +380,7 @@ impl Container {
     }
 
     #[inline(never)]
+    /// Draws multi-line text within the container using automatic wrapping.
     pub fn text(&mut self, text: &str) {
         let font = self.style.font;
         let color = self.style.colors[ControlColor::Text as usize];
@@ -343,6 +408,7 @@ impl Container {
         self.layout.end_column();
     }
 
+    /// Draws a frame and optional border using the specified color.
     pub fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
         let color = self.style.colors[colorid as usize];
         self.draw_rect(rect, color);
@@ -355,6 +421,7 @@ impl Container {
         }
     }
 
+    /// Draws a widget background, applying hover/focus accents when needed.
     pub fn draw_widget_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, _opt: WidgetOption) {
         if self.focus == Some(id) {
             colorid.focus()
@@ -364,6 +431,7 @@ impl Container {
         self.draw_frame(rect, colorid);
     }
 
+    /// Draws a container frame, skipping rendering when the option disables it.
     pub fn draw_container_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, opt: ContainerOption) {
         if opt.has_no_frame() {
             return;
@@ -378,6 +446,7 @@ impl Container {
     }
 
     #[inline(never)]
+    /// Draws widget text with the appropriate alignment flags.
     pub fn draw_control_text(&mut self, str: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let mut pos: Vec2i = Vec2i { x: 0, y: 0 };
         let font = self.style.font;
@@ -398,12 +467,14 @@ impl Container {
         self.pop_clip_rect();
     }
 
+    /// Returns `true` if the cursor is inside `rect` and the container owns the hover root.
     pub fn mouse_over(&mut self, rect: Recti, in_hover_root: bool) -> bool {
         let clip_rect = self.get_clip_rect();
         rect.contains(&self.input.borrow().mouse_pos) && clip_rect.contains(&self.input.borrow().mouse_pos) && in_hover_root
     }
 
     #[inline(never)]
+    /// Updates hover/focus state for the widget described by `id`.
     pub fn update_control(&mut self, id: Id, rect: Recti, opt: WidgetOption) {
         let in_hover_root = self.in_hover_root;
         let mouseover = self.mouse_over(rect, in_hover_root);
@@ -434,6 +505,7 @@ impl Container {
         }
     }
 
+    /// Resets transient per-frame state after widgets have been processed.
     pub fn finish(&mut self) {
         if !self.updated_focus {
             self.focus = None;
@@ -467,6 +539,7 @@ impl Container {
     }
 
     #[must_use]
+    /// Builds a collapsible header row that executes `f` when expanded.
     pub fn header<F: FnOnce(&mut Self)>(&mut self, label: &str, state: NodeState, f: F) -> NodeState {
         let new_state = self.node(label, false, state);
         if new_state.is_expanded() {
@@ -476,6 +549,7 @@ impl Container {
     }
 
     #[must_use]
+    /// Builds a tree node with automatic indentation while expanded.
     pub fn treenode<F: FnOnce(&mut Self)>(&mut self, label: &str, state: NodeState, f: F) -> NodeState {
         let res = self.node(label, true, state);
         if res.is_expanded() && self.idmngr.last_id().is_some() {
@@ -572,6 +646,7 @@ impl Container {
         self.pop_clip_rect();
     }
 
+    /// Configures layout state for the container's client area, handling scrollbars when necessary.
     pub fn push_container_body(&mut self, body: Recti, opt: ContainerOption) {
         let mut body = body;
         if !opt.has_no_scroll() {
@@ -621,6 +696,7 @@ impl Container {
         self.panels.push(panel.clone())
     }
 
+    /// Embeds another container handle inside the current layout.
     pub fn panel<F: FnOnce(&mut ContainerHandle)>(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, f: F) {
         self.begin_panel(panel, opt);
 
@@ -630,6 +706,7 @@ impl Container {
         self.end_panel(panel);
     }
 
+    /// Temporarily overrides the row definition and restores it after `f` executes.
     pub fn with_row<F: FnOnce(&mut Self)>(&mut self, widths: &[SizePolicy], height: SizePolicy, f: F) {
         let snapshot = self.layout.snapshot_row_state();
         self.layout.row(widths, height);
@@ -637,30 +714,36 @@ impl Container {
         self.layout.restore_row_state(snapshot);
     }
 
+    /// Creates a nested column scope where each call to `next_cell` yields a single column.
     pub fn column<F: FnOnce(&mut Self)>(&mut self, f: F) {
         self.layout.begin_column();
         f(self);
         self.layout.end_column();
     }
 
+    /// Returns the next layout cell's rectangle.
     pub fn next_cell(&mut self) -> Recti {
         self.layout.next()
     }
 
+    /// Replaces the container's style.
     pub fn set_style(&mut self, style: Style) {
         self.style = style;
     }
 
+    /// Returns a copy of the current style.
     pub fn get_style(&self) -> Style {
         self.style.clone()
     }
 
+    /// Displays static text using the default text color.
     pub fn label(&mut self, text: &str) {
         let layout = self.layout.next();
         self.draw_control_text(text, layout, ControlColor::Text, WidgetOption::NONE);
     }
 
     #[inline(never)]
+    /// Draws a button that can optionally show an atlas icon.
     pub fn button_ex(&mut self, label: &str, icon: Option<IconId>, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = if label.len() > 0 {
@@ -688,6 +771,7 @@ impl Container {
     }
 
     #[inline(never)]
+    /// Draws a button that can display an atlas slot or external texture.
     pub fn button_ex2(&mut self, label: &str, image: Option<Image>, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = if label.len() > 0 {
@@ -731,6 +815,7 @@ impl Container {
     }
 
     #[inline(never)]
+    /// Draws a button that refreshes a slot via callback before presentation.
     pub fn button_ex3(&mut self, label: &str, slot: Option<SlotId>, opt: WidgetOption, f: Rc<dyn Fn(usize, usize) -> Color4b>) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = if label.len() > 0 {
@@ -758,6 +843,7 @@ impl Container {
     }
 
     #[inline(never)]
+    /// Draws a checkbox labeled with `label` and toggles `state` when clicked.
     pub fn checkbox(&mut self, label: &str, state: &mut bool) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.idmngr.get_id_from_ptr(state);
@@ -796,6 +882,7 @@ impl Container {
     }
 
     #[inline(never)]
+    /// Allocates a widget cell and hands rendering control to user code.
     pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, name: &str, opt: WidgetOption, f: F) {
         let id: Id = self.idmngr.get_id_from_str(name);
         let rect: Recti = self.layout.next();
@@ -821,6 +908,7 @@ impl Container {
     }
 
     #[inline(never)]
+    /// Internal textbox helper operating on a fixed rectangle.
     pub fn textbox_raw(&mut self, buf: &mut String, id: Id, r: Recti, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         self.update_control(id, r, opt | WidgetOption::HOLD_FOCUS);
@@ -890,6 +978,7 @@ impl Container {
         return ResourceState::NONE;
     }
 
+    /// Draws a textbox using the next available layout cell.
     pub fn textbox_ex(&mut self, buf: &mut String, opt: WidgetOption) -> ResourceState {
         let id: Id = self.idmngr.get_id_from_ptr(buf);
         let r: Recti = self.layout.next();
@@ -897,6 +986,7 @@ impl Container {
     }
 
     #[inline(never)]
+    /// Draws a horizontal slider bound to `value`.
     pub fn slider_ex(&mut self, value: &mut Real, low: Real, high: Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let last = *value;
@@ -936,6 +1026,7 @@ impl Container {
     }
 
     #[inline(never)]
+    /// Draws a numeric input that can be edited via keyboard or by dragging.
     pub fn number_ex(&mut self, value: &mut Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.idmngr.get_id_from_ptr(value);
