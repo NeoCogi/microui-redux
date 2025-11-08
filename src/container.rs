@@ -634,6 +634,13 @@ impl Container {
         self.layout.row(widths, height);
     }
 
+    pub fn with_row<F: FnOnce(&mut Self)>(&mut self, widths: &[SizePolicy], height: SizePolicy, f: F) {
+        let snapshot = self.layout.snapshot_row_state();
+        self.layout.row(widths, height);
+        f(self);
+        self.layout.restore_row_state(snapshot);
+    }
+
     pub fn column<F: FnOnce(&mut Self)>(&mut self, f: F) {
         self.layout.begin_column();
         f(self);
@@ -806,7 +813,14 @@ impl Container {
         let key_codes = if active { input.key_codes() } else { KeyCode::NONE };
         let text_input = if active { input.text_input().to_owned() } else { String::new() };
         drop(input);
-        let cra = CustomRenderArgs { content_area: rect, view: self.get_clip_rect(), mouse_event, key_mods, key_codes, text_input };
+        let cra = CustomRenderArgs {
+            content_area: rect,
+            view: self.get_clip_rect(),
+            mouse_event,
+            key_mods,
+            key_codes,
+            text_input,
+        };
         self.command_list.push(Command::CustomRender(cra, Box::new(f)));
     }
 

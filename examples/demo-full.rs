@@ -409,8 +409,9 @@ impl<'a> State<'a> {
                 }));
                 container.button_ex2("Slot 3", Some(Image::Slot(self.slots[2].clone())), WidgetOption::NONE);
                 if let Some(texture) = self.image_texture {
-                    container.set_row_widths_height(&[SizePolicy::Fixed(256)], SizePolicy::Fixed(256));
-                    container.button_ex2("External Image", Some(Image::Texture(texture)), WidgetOption::NONE);
+                    container.with_row(&[SizePolicy::Fixed(256)], SizePolicy::Fixed(256), |ctx| {
+                        ctx.button_ex2("External Image", Some(Image::Texture(texture)), WidgetOption::NONE);
+                    });
                 }
                 let rng = self.rng.clone();
                 container.button_ex3("Slot 2 - Random", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(move |_x, _y| {
