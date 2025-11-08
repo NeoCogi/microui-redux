@@ -41,6 +41,7 @@ $ cargo run --example demo-full
     - [x] Mouse input event
     - [ ] Keyboard event
     - [ ] Text event
+    - [ ] Drag outside of the region
     - [x] Rendering
 - [x] Dialog support
 - [x] File dialog
