@@ -293,131 +293,143 @@ impl<'a> State<'a> {
             self.window_header = container.header("Window Info", self.window_header, |container| {
                 let win_0 = container.rect;
                 let row_widths = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
-                container.set_row_widths_height(&row_widths, SizePolicy::Auto);
-                container.label("Position:");
+                container.with_row(&row_widths, SizePolicy::Auto, |container| {
+                    container.label("Position:");
 
-                buff.clear();
-                buff.push_str(format!("{}, {}", win_0.x, win_0.y).as_str());
+                    buff.clear();
+                    buff.push_str(format!("{}, {}", win_0.x, win_0.y).as_str());
 
-                container.label(buff.as_str());
-                buff.clear();
-                container.label("Size:");
+                    container.label(buff.as_str());
+                    buff.clear();
+                    container.label("Size:");
 
-                buff.push_str(format!("{}, {}", win_0.width, win_0.height).as_str());
+                    buff.push_str(format!("{}, {}", win_0.width, win_0.height).as_str());
 
-                container.label(buff.as_str());
+                    container.label(buff.as_str());
+                });
             });
             self.test_buttons_header = container.header("Test Buttons", self.test_buttons_header, |container| {
                 let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
-                container.set_row_widths_height(&button_widths, SizePolicy::Auto);
-                container.label("Test buttons 1:");
-                if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
-                    self.write_log("Pressed button 1");
-                }
-                if !container.button_ex("Button 2", None, WidgetOption::ALIGN_CENTER).is_none() {
-                    self.write_log("Pressed button 2");
-                }
-                container.label("Test buttons 2:");
-                if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
-                    self.write_log("Pressed button 3");
-                }
-                if !container.button_ex("Popup", None, WidgetOption::ALIGN_CENTER).is_none() {
-                     self.open_popup = true;
-                }
+                container.with_row(&button_widths, SizePolicy::Auto, |container| {
+                    container.label("Test buttons 1:");
+                    if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
+                        self.write_log("Pressed button 1");
+                    }
+                    if !container.button_ex("Button 2", None, WidgetOption::ALIGN_CENTER).is_none() {
+                        self.write_log("Pressed button 2");
+                    }
+                    container.label("Test buttons 2:");
+                    if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
+                        self.write_log("Pressed button 3");
+                    }
+                    if !container.button_ex("Popup", None, WidgetOption::ALIGN_CENTER).is_none() {
+                         self.open_popup = true;
+                    }
 
-                container.label("Test buttons 3:");
-                if !container.button_ex("Button 4", None, WidgetOption::ALIGN_CENTER).is_none() {
-                    self.write_log("Pressed button 4");
-                }
-                if !container.button_ex("Dialog", None, WidgetOption::ALIGN_CENTER).is_none() {
-                     self.open_dialog = true;
-                }
+                    container.label("Test buttons 3:");
+                    if !container.button_ex("Button 4", None, WidgetOption::ALIGN_CENTER).is_none() {
+                        self.write_log("Pressed button 4");
+                    }
+                    if !container.button_ex("Dialog", None, WidgetOption::ALIGN_CENTER).is_none() {
+                         self.open_dialog = true;
+                    }
+                });
             });
             self.tree_and_text_header = container.header("Tree and Text", self.tree_and_text_header, |container| {
                 let widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
-                container.set_row_widths_height(&widths, SizePolicy::Auto);
-                container.column(|container| {
-                    self.test1_tn = container.treenode("Test 1", self.test1_tn, |container| {
-                        self.test1a_tn = container.treenode("Test 1a", self.test1a_tn, |container| {
-                            container.label("Hello");
-                            container.label("world");
+                container.with_row(&widths, SizePolicy::Auto, |container| {
+                    container.column(|container| {
+                        self.test1_tn = container.treenode("Test 1", self.test1_tn, |container| {
+                            self.test1a_tn = container.treenode("Test 1a", self.test1a_tn, |container| {
+                                container.label("Hello");
+                                container.label("world");
+                            });
+                            self.test1b_tn = container.treenode("Test 1b", self.test1b_tn, |container| {
+                                if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                    self.write_log("Pressed button 1");
+                                }
+                                if !container.button_ex("Button 2", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                    self.write_log("Pressed button 2");
+                                }
+                            });
                         });
-                        self.test1b_tn = container.treenode("Test 1b", self.test1b_tn, |container| {
-                            if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
-                                self.write_log("Pressed button 1");
-                            }
-                            if !container.button_ex("Button 2", None, WidgetOption::ALIGN_CENTER).is_none() {
-                                self.write_log("Pressed button 2");
-                            }
+                        self.test2_tn = container.treenode("Test 2", self.test2_tn, |container| {
+                            let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
+                            container.with_row(&tree_button_widths, SizePolicy::Auto, |container| {
+                                if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                    self.write_log("Pressed button 3");
+                                }
+                                if !container.button_ex("Button 4", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                    self.write_log("Pressed button 4");
+                                }
+                                if !container.button_ex("Button 5", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                    self.write_log("Pressed button 5");
+                                }
+                                if !container.button_ex("Button 6", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                    self.write_log("Pressed button 6");
+                                }
+                            });
+                        });
+                        self.test3_tn = container.treenode("Test 3", self.test3_tn, |container| {
+                            container.checkbox("Checkbox 1", &mut self.checks[0]);
+                            container.checkbox("Checkbox 2", &mut self.checks[1]);
+                            container.checkbox("Checkbox 3", &mut self.checks[2]);
                         });
                     });
-                    self.test2_tn =container.treenode("Test 2", self.test2_tn, |container| {
-                        let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
-                        container.set_row_widths_height(&tree_button_widths, SizePolicy::Auto);
-                        if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
-                            self.write_log("Pressed button 3");
-                        }
-                        if !container.button_ex("Button 4", None, WidgetOption::ALIGN_CENTER).is_none() {
-                            self.write_log("Pressed button 4");
-                        }
-                        if !container.button_ex("Button 5", None, WidgetOption::ALIGN_CENTER).is_none() {
-                            self.write_log("Pressed button 5");
-                        }
-                        if !container.button_ex("Button 6", None, WidgetOption::ALIGN_CENTER).is_none() {
-                            self.write_log("Pressed button 6");
-                        }
+                    container.column(|container| {
+                        container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                            container.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.");
+                        });
                     });
-                    self.test3_tn = container.treenode("Test 3", self.test3_tn, |container| {
-                        container.checkbox("Checkbox 1", &mut self.checks[0]);
-                        container.checkbox("Checkbox 2", &mut self.checks[1]);
-                        container.checkbox("Checkbox 3", &mut self.checks[2]);
-                    });
-                });
-                container.column(|container| {
-                    container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-                    container.text(
-                        "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla."
-                        ,
-                    );
                 });
             });
             self.background_header = container.header("Background Color", self.background_header, |container| {
                 let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
-                container.set_row_widths_height(&background_widths, SizePolicy::Fixed(74));
-                container.column(|container| {
+                container.with_row(&background_widths, SizePolicy::Fixed(74), |container| {
                     let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
-                    container.set_row_widths_height(&slider_row, SizePolicy::Auto);
-                    container.label("Red:");
-                    container.slider_ex(&mut self.bg[0], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
-                    container.label("Green:");
-                    container.slider_ex(&mut self.bg[1], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
-                    container.label("Blue:");
-                    container.slider_ex(&mut self.bg[2], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                    container.column(|container| {
+                        container.with_row(&slider_row, SizePolicy::Auto, |container| {
+                            container.label("Red:");
+                            container.slider_ex(&mut self.bg[0], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                            container.label("Green:");
+                            container.slider_ex(&mut self.bg[1], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                            container.label("Blue:");
+                            container.slider_ex(&mut self.bg[2], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                        });
+                    });
+                    let r: Recti = container.next_cell();
+                    container.draw_rect(r, color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255));
+                    let mut buff = String::new();
+                    buff.push_str(format!("#{:02X}{:02X}{:02X}", self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8).as_str());
+                    container.draw_control_text(buff.as_str(), r, ControlColor::Text, WidgetOption::ALIGN_CENTER);
                 });
-                let r: Recti = container.next_cell();
-                container.draw_rect(r, color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255));
-                let mut buff = String::new();
-                buff.push_str(format!("#{:02X}{:02X}{:02X}", self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8).as_str());
-                container.draw_control_text(buff.as_str(), r, ControlColor::Text, WidgetOption::ALIGN_CENTER);
             });
 
             self.slot_header = container.header("Slots", self.slot_header, |container| {
-                container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67));
-                container.button_ex2("Slot 1", Some(Image::Slot(self.slots[0].clone())), WidgetOption::NONE);
-                container.button_ex3("Slot 2 - Green", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(|_x, _y| {
-                    color4b(0x00, 0xFF, 0x00, 0xFF)
-                }));
-                container.button_ex2("Slot 3", Some(Image::Slot(self.slots[2].clone())), WidgetOption::NONE);
-                if let Some(texture) = self.image_texture {
-                    container.with_row(&[SizePolicy::Fixed(256)], SizePolicy::Fixed(256), |ctx| {
-                        ctx.button_ex2("External Image", Some(Image::Texture(texture)), WidgetOption::NONE);
-                    });
-                }
+                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67), |container| {
+                    container.button_ex2("Slot 1", Some(Image::Slot(self.slots[0].clone())), WidgetOption::NONE);
+                    container.button_ex3("Slot 2 - Green", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(|_x, _y| {
+                        color4b(0x00, 0xFF, 0x00, 0xFF)
+                    }));
+                    container.button_ex2("Slot 3", Some(Image::Slot(self.slots[2].clone())), WidgetOption::NONE);
+                    if let Some(texture) = self.image_texture {
+                        container.with_row(&[SizePolicy::Fixed(256)], SizePolicy::Fixed(256), |ctx| {
+                            ctx.button_ex2("External Image", Some(Image::Texture(texture)), WidgetOption::NONE);
+                        });
+                    }
+                });
                 let rng = self.rng.clone();
-                container.button_ex3("Slot 2 - Random", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(move |_x, _y| {
-                    let mut rm = rng.borrow_mut();
-                    color4b(rm.gen(), rm.gen(), rm.gen(), rm.gen())
-                }));
+                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67), |container| {
+                    container.button_ex3(
+                        "Slot 2 - Random",
+                        Some(self.slots[1].clone()),
+                        WidgetOption::NONE,
+                        Rc::new(move |_x, _y| {
+                            let mut rm = rng.borrow_mut();
+                            color4b(rm.gen(), rm.gen(), rm.gen(), rm.gen())
+                        }),
+                    );
+                });
             });
             WindowState::Open
         });
@@ -442,31 +454,33 @@ impl<'a> State<'a> {
 
     fn log_window(&mut self, ctx: &mut Context<GLRenderer>) {
         ctx.window(&mut self.log_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
-            container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(24));
-            container.panel(self.log_output.as_mut().unwrap(), ContainerOption::NONE, |container_handle| {
-                let container = &mut container_handle.inner_mut();
-                let mut scroll = container.scroll;
-                let content_size = container.content_size;
-                container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0));
+            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(24), |container| {
+                container.panel(self.log_output.as_mut().unwrap(), ContainerOption::NONE, |container_handle| {
+                    let container = &mut container_handle.inner_mut();
+                    let mut scroll = container.scroll;
+                    let content_size = container.content_size;
+                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                        container.text(self.logbuf.as_str());
 
-                container.text(self.logbuf.as_str());
-
-                if self.logbuf_updated {
-                    scroll.y = content_size.y;
-                    container.scroll = scroll;
-                    self.logbuf_updated = false;
-                }
+                        if self.logbuf_updated {
+                            scroll.y = content_size.y;
+                            container.scroll = scroll;
+                            self.logbuf_updated = false;
+                        }
+                    });
+                });
             });
             let mut submitted = false;
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
-            container.set_row_widths_height(&submit_row, SizePolicy::Auto);
-            if container.textbox_ex(&mut self.submit_buf, WidgetOption::NONE).is_submitted() {
-                container.set_focus(container.idmngr.last_id());
-                submitted = true;
-            }
-            if !container.button_ex("Submit", None, WidgetOption::ALIGN_CENTER).is_none() {
-                submitted = true;
-            }
+            container.with_row(&submit_row, SizePolicy::Auto, |container| {
+                if container.textbox_ex(&mut self.submit_buf, WidgetOption::NONE).is_submitted() {
+                    container.set_focus(container.idmngr.last_id());
+                    submitted = true;
+                }
+                if !container.button_ex("Submit", None, WidgetOption::ALIGN_CENTER).is_none() {
+                    submitted = true;
+                }
+            });
             if submitted {
                 let mut buf = String::new();
                 buf.push_str(self.submit_buf.as_str());
@@ -482,9 +496,9 @@ impl<'a> State<'a> {
         let tdi = self.triangle_data.clone();
 
         ctx.window(&mut self.triangle_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
-            container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0));
-            container.custom_render_widget("Triangle", WidgetOption::NONE, move |dim, cra| {
-                let gl = &gl;
+            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                container.custom_render_widget("Triangle", WidgetOption::NONE, move |dim, cra| {
+                    let gl = &gl;
 
                 match tdi.try_read() {
                     Ok(td) => unsafe {
@@ -561,6 +575,7 @@ impl<'a> State<'a> {
                         println!("failed to get lock")
                     }
                 }
+                });
             });
             WindowState::Open
         });
@@ -586,48 +601,50 @@ impl<'a> State<'a> {
                 SizePolicy::Fixed(sw),
                 SizePolicy::Remainder(0),
             ];
-            container.set_row_widths_height(&color_row, SizePolicy::Auto);
-            let mut i = 0;
-            while self.label_colors[i].label.len() > 0 {
-                container.label(self.label_colors[i].label);
-                unsafe {
-                    let color = self.style.colors.as_mut_ptr().offset(i as isize);
-                    self.uint8_slider(&mut (*color).r, 0, 255, container);
-                    self.uint8_slider(&mut (*color).g, 0, 255, container);
-                    self.uint8_slider(&mut (*color).b, 0, 255, container);
-                    self.uint8_slider(&mut (*color).a, 0, 255, container);
+            container.with_row(&color_row, SizePolicy::Auto, |container| {
+                let mut i = 0;
+                while self.label_colors[i].label.len() > 0 {
+                    container.label(self.label_colors[i].label);
+                    unsafe {
+                        let color = self.style.colors.as_mut_ptr().offset(i as isize);
+                        self.uint8_slider(&mut (*color).r, 0, 255, container);
+                        self.uint8_slider(&mut (*color).g, 0, 255, container);
+                        self.uint8_slider(&mut (*color).b, 0, 255, container);
+                        self.uint8_slider(&mut (*color).a, 0, 255, container);
+                    }
+                    let next_layout = container.next_cell();
+                    let color = self.style.colors[i];
+                    container.draw_rect(next_layout, color);
+                    i += 1;
                 }
-                let next_layout = container.next_cell();
-                let color = self.style.colors[i];
-                container.draw_rect(next_layout, color);
-                i += 1;
-            }
+            });
             let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Fixed(sw)];
-            container.set_row_widths_height(&metrics_row, SizePolicy::Auto);
-            container.label("padding");
-            let mut tmp = self.style.padding as u8;
-            self.uint8_slider(&mut tmp, 0, 16, container);
-            self.style.padding = tmp as i32;
+            container.with_row(&metrics_row, SizePolicy::Auto, |container| {
+                container.label("padding");
+                let mut tmp = self.style.padding as u8;
+                self.uint8_slider(&mut tmp, 0, 16, container);
+                self.style.padding = tmp as i32;
 
-            container.label("spacing");
-            let mut tmp = self.style.spacing as u8;
-            self.uint8_slider(&mut tmp, 0, 16, container);
-            self.style.spacing = tmp as i32;
+                container.label("spacing");
+                let mut tmp = self.style.spacing as u8;
+                self.uint8_slider(&mut tmp, 0, 16, container);
+                self.style.spacing = tmp as i32;
 
-            container.label("title height");
-            let mut tmp = self.style.title_height as u8;
-            self.uint8_slider(&mut tmp, 0, 128, container);
-            self.style.title_height = tmp as i32;
+                container.label("title height");
+                let mut tmp = self.style.title_height as u8;
+                self.uint8_slider(&mut tmp, 0, 128, container);
+                self.style.title_height = tmp as i32;
 
-            container.label("thumb size");
-            let mut tmp = self.style.thumb_size as u8;
-            self.uint8_slider(&mut tmp, 0, 128, container);
-            self.style.thumb_size = tmp as i32;
+                container.label("thumb size");
+                let mut tmp = self.style.thumb_size as u8;
+                self.uint8_slider(&mut tmp, 0, 128, container);
+                self.style.thumb_size = tmp as i32;
 
-            container.label("scroll size");
-            let mut tmp = self.style.scrollbar_size as u8;
-            self.uint8_slider(&mut tmp, 0, 128, container);
-            self.style.scrollbar_size = tmp as i32;
+                container.label("scroll size");
+                let mut tmp = self.style.scrollbar_size as u8;
+                self.uint8_slider(&mut tmp, 0, 128, container);
+                self.style.scrollbar_size = tmp as i32;
+            });
             WindowState::Open
         });
         ctx.set_style(&self.style);
@@ -639,10 +656,10 @@ impl<'a> State<'a> {
         let suzane = self.suzane_data.clone();
 
         ctx.window(&mut self.suzane_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
-            container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0));
-            container.custom_render_widget("Suzane", WidgetOption::HOLD_FOCUS, move |dim, cra| {
-                let gl = &gl;
-                let mut suzane = suzane.write().unwrap();
+            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                container.custom_render_widget("Suzane", WidgetOption::HOLD_FOCUS, move |dim, cra| {
+                    let gl = &gl;
+                    let mut suzane = suzane.write().unwrap();
                 suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
 
                 // if !cra.input.get_mouse_buttons().is_none() {
@@ -707,6 +724,7 @@ impl<'a> State<'a> {
                         println!("unable to hold the lock on the polymesh")
                     }
                 }
+                });
             });
             WindowState::Open
         });
