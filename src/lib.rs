@@ -341,10 +341,6 @@ impl MouseButton {
 bitflags! {
     #[derive(Copy, Clone, Debug)]
     pub struct KeyMode : u32 {
-        const RIGHT = 256;
-        const LEFT = 128;
-        const DOWN = 64;
-        const UP = 32;
         const RETURN = 16;
         const BACKSPACE = 8;
         const ALT = 4;
@@ -373,6 +369,23 @@ impl KeyMode {
     pub fn is_shift(&self) -> bool {
         self.intersects(Self::SHIFT)
     }
+}
+
+bitflags! {
+    #[derive(Copy, Clone, Debug)]
+    pub struct KeyCode : u32 {
+        const RIGHT = 8;
+        const LEFT = 4;
+        const DOWN = 2;
+        const UP = 1;
+        const NONE = 0;
+    }
+}
+
+impl KeyCode {
+    pub fn is_none(&self) -> bool {
+        self.bits() == 0
+    }
     pub fn is_up(&self) -> bool {
         self.intersects(Self::UP)
     }
@@ -398,6 +411,8 @@ pub struct Input {
     mouse_pressed: MouseButton,
     key_down: KeyMode,
     key_pressed: KeyMode,
+    key_code_down: KeyCode,
+    key_code_pressed: KeyCode,
     input_text: String,
 }
 
@@ -413,6 +428,8 @@ impl Default for Input {
             mouse_pressed: MouseButton::NONE,
             key_down: KeyMode::NONE,
             key_pressed: KeyMode::NONE,
+            key_code_down: KeyCode::NONE,
+            key_code_pressed: KeyCode::NONE,
             input_text: String::default(),
         }
     }
@@ -425,6 +442,10 @@ impl Input {
 
     pub fn key_state(&self) -> KeyMode {
         self.key_down
+    }
+
+    pub fn key_codes(&self) -> KeyCode {
+        self.key_code_down
     }
 
     pub fn mousemove(&mut self, x: i32, y: i32) {
@@ -460,6 +481,15 @@ impl Input {
         self.key_down &= !key;
     }
 
+    pub fn keydown_code(&mut self, code: KeyCode) {
+        self.key_code_pressed |= code;
+        self.key_code_down |= code;
+    }
+
+    pub fn keyup_code(&mut self, code: KeyCode) {
+        self.key_code_down &= !code;
+    }
+
     pub fn text(&mut self, text: &str) {
         for c in text.chars() {
             self.input_text.push(c);
@@ -473,6 +503,7 @@ impl Input {
 
     fn epilogue(&mut self) {
         self.key_pressed = KeyMode::NONE;
+        self.key_code_pressed = KeyCode::NONE;
         self.input_text.clear();
         self.mouse_pressed = MouseButton::NONE;
         self.scroll_delta = vec2(0, 0);

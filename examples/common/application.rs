@@ -134,14 +134,19 @@ impl<S> Application<S> {
                     Some(sdl2::keyboard::Keycode::LAlt) | Some(sdl2::keyboard::Keycode::RAlt) => microui::KeyMode::ALT,
                     Some(sdl2::keyboard::Keycode::LCtrl) | Some(sdl2::keyboard::Keycode::RCtrl) => microui::KeyMode::CTRL,
                     Some(sdl2::keyboard::Keycode::LShift) | Some(sdl2::keyboard::Keycode::RShift) => microui::KeyMode::SHIFT,
-                    Some(sdl2::keyboard::Keycode::Up) => microui::KeyMode::UP,
-                    Some(sdl2::keyboard::Keycode::Down) => microui::KeyMode::DOWN,
-                    Some(sdl2::keyboard::Keycode::Left) => microui::KeyMode::LEFT,
-                    Some(sdl2::keyboard::Keycode::Right) => microui::KeyMode::RIGHT,
                     _ => microui::KeyMode::NONE,
                 }
             }
 
+            fn map_keycode(sdl_kc: Option<sdl2::keyboard::Keycode>) -> microui::KeyCode {
+                match sdl_kc {
+                    Some(sdl2::keyboard::Keycode::Up) => microui::KeyCode::UP,
+                    Some(sdl2::keyboard::Keycode::Down) => microui::KeyCode::DOWN,
+                    Some(sdl2::keyboard::Keycode::Left) => microui::KeyCode::LEFT,
+                    Some(sdl2::keyboard::Keycode::Right) => microui::KeyCode::RIGHT,
+                    _ => microui::KeyCode::NONE,
+                }
+            }
             for event in event_pump.poll_iter() {
                 match event {
                     Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
@@ -158,11 +163,23 @@ impl<S> Application<S> {
                     }
                     Event::KeyDown { keycode, .. } => {
                         let km = map_keymode(keycode);
-                        self.ctx.input.borrow_mut().keydown(km);
+                        if !km.is_none() {
+                            self.ctx.input.borrow_mut().keydown(km);
+                        }
+                        let kc = map_keycode(keycode);
+                        if !kc.is_none() {
+                            self.ctx.input.borrow_mut().keydown_code(kc);
+                        }
                     }
                     Event::KeyUp { keycode, .. } => {
                         let km = map_keymode(keycode);
-                        self.ctx.input.borrow_mut().keyup(km);
+                        if !km.is_none() {
+                            self.ctx.input.borrow_mut().keyup(km);
+                        }
+                        let kc = map_keycode(keycode);
+                        if !kc.is_none() {
+                            self.ctx.input.borrow_mut().keyup_code(kc);
+                        }
                     }
                     Event::TextInput { text, .. } => {
                         self.ctx.input.borrow_mut().text(text.as_str());
