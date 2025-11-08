@@ -643,16 +643,16 @@ impl<'a> State<'a> {
                 if !matches!(cra.mouse_event, MouseEvent::Drag { .. } | MouseEvent::Scroll(_)) {
                     let step = 20;
                     let mut delta = Vec2i::new(0, 0);
-                    if cra.keys_down.is_left() {
+                    if cra.key_codes.is_left() {
                         delta.x -= step;
                     }
-                    if cra.keys_down.is_right() {
+                    if cra.key_codes.is_right() {
                         delta.x += step;
                     }
-                    if cra.keys_down.is_up() {
+                    if cra.key_codes.is_up() {
                         delta.y -= step;
                     }
-                    if cra.keys_down.is_down() {
+                    if cra.key_codes.is_down() {
                         delta.y += step;
                     }
                     if delta.x != 0 || delta.y != 0 {
