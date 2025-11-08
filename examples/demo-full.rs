@@ -639,7 +639,28 @@ impl<'a> State<'a> {
                 // if !cra.input.get_mouse_buttons().is_none() {
                 //     println!("Mouse Pressed: {:?}", cra.input.rel_mouse_pos());
                 // }
-                suzane.view_3d.update(cra.mouse_event);
+                let _ = suzane.view_3d.update(cra.mouse_event);
+                if !matches!(cra.mouse_event, MouseEvent::Drag { .. } | MouseEvent::Scroll(_)) {
+                    let step = 20;
+                    let mut delta = Vec2i::new(0, 0);
+                    if cra.keys_down.is_left() {
+                        delta.x -= step;
+                    }
+                    if cra.keys_down.is_right() {
+                        delta.x += step;
+                    }
+                    if cra.keys_down.is_up() {
+                        delta.y -= step;
+                    }
+                    if cra.keys_down.is_down() {
+                        delta.y += step;
+                    }
+                    if delta.x != 0 || delta.y != 0 {
+                        let center = Vec2i::new(cra.content_area.width / 2, cra.content_area.height / 2);
+                        let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
+                        suzane.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
+                    }
+                }
 
                 match renderer.try_write() {
                     Ok(mut renderer) => unsafe {

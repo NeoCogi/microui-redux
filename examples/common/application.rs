@@ -127,13 +127,17 @@ impl<S> Application<S> {
                 }
             }
 
-            fn map_keymode(sdl_km: sdl2::keyboard::Mod, sdl_kc: Option<sdl2::keyboard::Keycode>) -> microui::KeyMode {
-                match (sdl_km, sdl_kc) {
-                    (sdl2::keyboard::Mod::LALTMOD, _) | (sdl2::keyboard::Mod::RALTMOD, _) => microui::KeyMode::ALT,
-                    (sdl2::keyboard::Mod::LCTRLMOD, _) | (sdl2::keyboard::Mod::RCTRLMOD, _) => microui::KeyMode::CTRL,
-                    (sdl2::keyboard::Mod::LSHIFTMOD, _) | (sdl2::keyboard::Mod::RSHIFTMOD, _) => microui::KeyMode::SHIFT,
-                    (_, Some(sdl2::keyboard::Keycode::Backspace)) => microui::KeyMode::BACKSPACE,
-                    (_, Some(sdl2::keyboard::Keycode::Return)) => microui::KeyMode::RETURN,
+            fn map_keymode(sdl_kc: Option<sdl2::keyboard::Keycode>) -> microui::KeyMode {
+                match sdl_kc {
+                    Some(sdl2::keyboard::Keycode::Backspace) => microui::KeyMode::BACKSPACE,
+                    Some(sdl2::keyboard::Keycode::Return) => microui::KeyMode::RETURN,
+                    Some(sdl2::keyboard::Keycode::LAlt) | Some(sdl2::keyboard::Keycode::RAlt) => microui::KeyMode::ALT,
+                    Some(sdl2::keyboard::Keycode::LCtrl) | Some(sdl2::keyboard::Keycode::RCtrl) => microui::KeyMode::CTRL,
+                    Some(sdl2::keyboard::Keycode::LShift) | Some(sdl2::keyboard::Keycode::RShift) => microui::KeyMode::SHIFT,
+                    Some(sdl2::keyboard::Keycode::Up) => microui::KeyMode::UP,
+                    Some(sdl2::keyboard::Keycode::Down) => microui::KeyMode::DOWN,
+                    Some(sdl2::keyboard::Keycode::Left) => microui::KeyMode::LEFT,
+                    Some(sdl2::keyboard::Keycode::Right) => microui::KeyMode::RIGHT,
                     _ => microui::KeyMode::NONE,
                 }
             }
@@ -152,12 +156,12 @@ impl<S> Application<S> {
                         let mb = map_mouse_button(mouse_btn);
                         self.ctx.input.borrow_mut().mouseup(x, y, mb);
                     }
-                    Event::KeyDown { keymod, keycode, .. } => {
-                        let km = map_keymode(keymod, keycode);
+                    Event::KeyDown { keycode, .. } => {
+                        let km = map_keymode(keycode);
                         self.ctx.input.borrow_mut().keydown(km);
                     }
-                    Event::KeyUp { keymod, keycode, .. } => {
-                        let km = map_keymode(keymod, keycode);
+                    Event::KeyUp { keycode, .. } => {
+                        let km = map_keymode(keycode);
                         self.ctx.input.borrow_mut().keyup(km);
                     }
                     Event::TextInput { text, .. } => {

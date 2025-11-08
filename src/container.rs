@@ -57,6 +57,7 @@ pub struct CustomRenderArgs {
     pub content_area: Rect<i32>,
     pub view: Rect<i32>, // clipped area
     pub mouse_event: MouseEvent,
+    pub keys_down: KeyMode,
 }
 
 pub enum Command {
@@ -793,11 +794,8 @@ impl Container {
 
         let mouse_event = self.input_to_mouse_event(id, &rect);
 
-        let cra = CustomRenderArgs {
-            content_area: rect,
-            view: self.get_clip_rect(),
-            mouse_event,
-        };
+        let keys_down = self.input.borrow().key_state();
+        let cra = CustomRenderArgs { content_area: rect, view: self.get_clip_rect(), mouse_event, keys_down };
         self.command_list.push(Command::CustomRender(cra, Box::new(f)));
     }
 
@@ -845,7 +843,7 @@ impl Container {
 
     #[inline(never)]
     fn number_textbox(&mut self, precision: usize, value: &mut Real, r: Recti, id: Id) -> ResourceState {
-        if self.input.borrow().mouse_pressed.is_left() && self.input.borrow().key_down.is_shift() && self.hover == Some(id) {
+        if self.input.borrow().mouse_pressed.is_left() && self.input.borrow().key_state().is_shift() && self.hover == Some(id) {
             self.number_edit = Some(id);
             self.number_edit_buf.clear();
             self.number_edit_buf.push_str(format!("{:.*}", precision, value).as_str());
