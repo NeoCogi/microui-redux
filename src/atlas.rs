@@ -60,6 +60,7 @@ pub struct CharEntry {
 #[derive(Clone)]
 struct Font {
     line_size: usize,                  // line size
+    baseline: i32,                     // distance from top of line to baseline
     font_size: usize,                  // font size in pixels
     entries: HashMap<char, CharEntry>, // all printable chars [32-127]
 }
@@ -72,8 +73,8 @@ impl Debug for Font {
             entries.write_fmt(format_args!("{:?}, ", e))?;
         }
         f.write_fmt(format_args!(
-            "Font {{ line_size: {}, font_size: {}, entries: [{}] }}",
-            self.line_size, self.font_size, entries
+            "Font {{ line_size: {}, baseline: {}, font_size: {}, entries: [{}] }}",
+            self.line_size, self.baseline, self.font_size, entries
         ))
     }
 }
@@ -304,8 +305,15 @@ pub mod builder {
             }
 
             let id = self.atlas.fonts.len();
+            let line_metrics = font.horizontal_line_metrics(size as f32);
+            let line_size = line_metrics
+                .as_ref()
+                .map(|m| m.new_line_size.round() as usize)
+                .unwrap_or((max_y - min_y) as usize);
+            let baseline = line_metrics.as_ref().map(|m| m.ascent.round() as i32).unwrap_or(line_size as i32);
             let font = super::Font {
-                line_size: (max_y - min_y) as usize,
+                line_size,
+                baseline,
                 font_size: size,
                 entries,
             };
@@ -433,6 +441,8 @@ pub mod builder {
 pub struct FontEntry<'a> {
     /// Distance between baselines in pixels.
     pub line_size: usize, // line size
+    /// Offset from the top of the line to the baseline.
+    pub baseline: i32,
     /// Requested pixel size.
     pub font_size: usize, // font size in pixels
     /// Glyph metadata table.
@@ -480,6 +490,7 @@ impl AtlasHandle {
             .map(|(name, f)| {
                 let font = Font {
                     line_size: f.line_size,
+                    baseline: f.baseline,
                     font_size: f.font_size,
                     entries: f.entries.iter().map(|(ch, e)| (ch.clone(), e.clone())).collect(),
                 };
@@ -557,8 +568,8 @@ impl AtlasHandle {
             char_entries.push_str("]\n");
             fonts.push_str(
                 format!(
-                    "(\"{}\", FontEntry {{ line_size: {}, font_size: {}, entries: {} }}),\n",
-                    n, f.line_size, f.font_size, char_entries
+                    "(\"{}\", FontEntry {{ line_size: {}, baseline: {}, font_size: {}, entries: {} }}),\n",
+                    n, f.line_size, f.baseline, f.font_size, char_entries
                 )
                 .as_str(),
             );
@@ -630,6 +641,11 @@ impl AtlasHandle {
     /// Returns the line height for the specified font.
     pub fn get_font_height(&self, font: FontId) -> usize {
         self.0.borrow().fonts[font.0].1.line_size
+    }
+
+    /// Returns the baseline offset (in pixels) for the specified font.
+    pub fn get_font_baseline(&self, font: FontId) -> i32 {
+        self.0.borrow().fonts[font.0].1.baseline
     }
 
     /// Returns the dimensions of an icon.

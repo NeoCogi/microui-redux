@@ -378,7 +378,7 @@ impl<'a> State<'a> {
                     });
                     container.column(|container| {
                         container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                            container.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.");
+                            container.text_with_wrap("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.", TextWrap::Word);
                         });
                     });
                 });
