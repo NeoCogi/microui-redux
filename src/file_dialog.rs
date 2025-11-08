@@ -31,6 +31,7 @@ use std::path::Path;
 //
 use crate::*;
 
+/// Simple modal dialog that lets the user browse and pick files.
 pub struct FileDialogState {
     current_working_directory: String,
     file_name: Option<String>,
@@ -43,6 +44,7 @@ pub struct FileDialogState {
 }
 
 impl FileDialogState {
+    /// Returns the selected file name if the dialog completed successfully.
     pub fn file_name(&self) -> &Option<String> {
         &self.file_name
     }
@@ -65,6 +67,7 @@ impl FileDialogState {
         }
     }
 
+    /// Creates a new dialog window and associated panels.
     pub fn new<R: Renderer>(ctx: &mut Context<R>) -> Self {
         let mut folders = Vec::new();
         let mut files = Vec::new();
@@ -85,10 +88,12 @@ impl FileDialogState {
         }
     }
 
+    /// Marks the dialog as open for the next frame.
     pub fn open<R: Renderer>(&mut self, ctx: &mut Context<R>) {
         ctx.open_dialog(&mut self.win);
     }
 
+    /// Renders the dialog and updates the selected file when confirmed.
     pub fn eval<R: Renderer>(&mut self, ctx: &mut Context<R>) {
         ctx.dialog(&mut self.win, ContainerOption::NONE, |cont| {
             let content_size = cont.content_size;

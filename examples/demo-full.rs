@@ -500,81 +500,81 @@ impl<'a> State<'a> {
                 container.custom_render_widget("Triangle", WidgetOption::NONE, move |dim, cra| {
                     let gl = &gl;
 
-                match tdi.try_read() {
-                    Ok(td) => unsafe {
-                        gl.viewport(
-                            cra.content_area.x,
-                            dim.height - cra.content_area.y - cra.content_area.height,
-                            cra.content_area.width,
-                            cra.content_area.height,
-                        );
-                        gl.scissor(
-                            cra.content_area.x,
-                            dim.height - cra.content_area.y - cra.content_area.height,
-                            cra.content_area.width,
-                            cra.content_area.height,
-                        );
-                        gl.clear_color(0.5, 0.5, 0.5, 1.0);
-                        gl.clear(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT);
+                    match tdi.try_read() {
+                        Ok(td) => unsafe {
+                            gl.viewport(
+                                cra.content_area.x,
+                                dim.height - cra.content_area.y - cra.content_area.height,
+                                cra.content_area.width,
+                                cra.content_area.height,
+                            );
+                            gl.scissor(
+                                cra.content_area.x,
+                                dim.height - cra.content_area.y - cra.content_area.height,
+                                cra.content_area.width,
+                                cra.content_area.height,
+                            );
+                            gl.clear_color(0.5, 0.5, 0.5, 1.0);
+                            gl.clear(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT);
 
-                        gl.disable(glow::BLEND);
-                        debug_assert!(gl.get_error() == 0);
-                        gl.disable(glow::CULL_FACE);
-                        debug_assert!(gl.get_error() == 0);
-                        gl.enable(glow::DEPTH_TEST);
-                        debug_assert!(gl.get_error() == 0);
-                        gl.enable(glow::SCISSOR_TEST);
-                        debug_assert!(gl.get_error() == 0);
+                            gl.disable(glow::BLEND);
+                            debug_assert!(gl.get_error() == 0);
+                            gl.disable(glow::CULL_FACE);
+                            debug_assert!(gl.get_error() == 0);
+                            gl.enable(glow::DEPTH_TEST);
+                            debug_assert!(gl.get_error() == 0);
+                            gl.enable(glow::SCISSOR_TEST);
+                            debug_assert!(gl.get_error() == 0);
 
-                        gl.bind_buffer(glow::ARRAY_BUFFER, Some(td.vb));
-                        debug_assert!(gl.get_error() == 0);
+                            gl.bind_buffer(glow::ARRAY_BUFFER, Some(td.vb));
+                            debug_assert!(gl.get_error() == 0);
 
-                        // update the vertex buffer
-                        let vertices_u8: &[u8] =
-                            core::slice::from_raw_parts(TRI_VERTS.as_ptr() as *const u8, TRI_VERTS.len() * core::mem::size_of::<TriVertex>());
-                        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_u8, glow::DYNAMIC_DRAW);
-                        debug_assert!(gl.get_error() == 0);
+                            // update the vertex buffer
+                            let vertices_u8: &[u8] =
+                                core::slice::from_raw_parts(TRI_VERTS.as_ptr() as *const u8, TRI_VERTS.len() * core::mem::size_of::<TriVertex>());
+                            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_u8, glow::DYNAMIC_DRAW);
+                            debug_assert!(gl.get_error() == 0);
 
-                        gl.use_program(Some(td.program));
+                            gl.use_program(Some(td.program));
 
-                        gl.enable_vertex_attrib_array(td.pos_attr);
-                        gl.enable_vertex_attrib_array(td.color_attr);
-                        debug_assert!(gl.get_error() == 0);
+                            gl.enable_vertex_attrib_array(td.pos_attr);
+                            gl.enable_vertex_attrib_array(td.color_attr);
+                            debug_assert!(gl.get_error() == 0);
 
-                        gl.vertex_attrib_pointer_f32(td.pos_attr, 2, glow::FLOAT, false, core::mem::size_of::<TriVertex>() as i32, 0);
-                        gl.vertex_attrib_pointer_f32(td.color_attr, 4, glow::UNSIGNED_BYTE, true, core::mem::size_of::<TriVertex>() as i32, 8);
-                        debug_assert!(gl.get_error() == 0);
+                            gl.vertex_attrib_pointer_f32(td.pos_attr, 2, glow::FLOAT, false, core::mem::size_of::<TriVertex>() as i32, 0);
+                            gl.vertex_attrib_pointer_f32(td.color_attr, 4, glow::UNSIGNED_BYTE, true, core::mem::size_of::<TriVertex>() as i32, 8);
+                            debug_assert!(gl.get_error() == 0);
 
-                        let tm_ptr = td.tm.col.as_ptr() as *const _ as *const f32;
-                        let slice = std::slice::from_raw_parts(tm_ptr, 16);
-                        gl.uniform_matrix_4_f32_slice(Some(&td.tm_uni), false, &slice);
-                        debug_assert_eq!(gl.get_error(), 0);
+                            let tm_ptr = td.tm.col.as_ptr() as *const _ as *const f32;
+                            let slice = std::slice::from_raw_parts(tm_ptr, 16);
+                            gl.uniform_matrix_4_f32_slice(Some(&td.tm_uni), false, &slice);
+                            debug_assert_eq!(gl.get_error(), 0);
 
-                        gl.draw_arrays(glow::TRIANGLES, 0, 3);
-                        debug_assert!(gl.get_error() == 0);
+                            gl.draw_arrays(glow::TRIANGLES, 0, 3);
+                            debug_assert!(gl.get_error() == 0);
 
-                        gl.disable_vertex_attrib_array(td.pos_attr);
-                        gl.disable_vertex_attrib_array(td.color_attr);
-                        debug_assert!(gl.get_error() == 0);
-                        gl.use_program(None);
-                        debug_assert!(gl.get_error() == 0);
-                    },
-                    _ => println!("unable to read"),
-                }
-
-                match tdi.try_write() {
-                    Ok(mut td) => {
-                        td.angle += 0.01;
-                        td.tm = rotation_from_axis_angle(&Vec3f::new(0.0, 0.0, 1.0), td.angle);
+                            gl.disable_vertex_attrib_array(td.pos_attr);
+                            gl.disable_vertex_attrib_array(td.color_attr);
+                            debug_assert!(gl.get_error() == 0);
+                            gl.use_program(None);
+                            debug_assert!(gl.get_error() == 0);
+                        },
+                        _ => println!("unable to read"),
                     }
-                    _ => {
-                        if tdi.is_poisoned() {
-                            println!("poisoned!");
-                            tdi.clear_poison();
+
+                    match tdi.try_write() {
+                        Ok(mut td) => {
+                            td.angle += 0.01;
+                            td.tm = rotation_from_axis_angle(&Vec3f::new(0.0, 0.0, 1.0), td.angle);
                         }
-                        println!("failed to get lock")
+                        _ => {
+                            if tdi.is_poisoned() {
+                                println!("poisoned!");
+                                tdi.clear_poison();
+                            }
+                            println!("failed to get lock")
+                        }
                     }
-                }
                 });
             });
             WindowState::Open
@@ -660,70 +660,70 @@ impl<'a> State<'a> {
                 container.custom_render_widget("Suzane", WidgetOption::HOLD_FOCUS, move |dim, cra| {
                     let gl = &gl;
                     let mut suzane = suzane.write().unwrap();
-                suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
+                    suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
 
-                // if !cra.input.get_mouse_buttons().is_none() {
-                //     println!("Mouse Pressed: {:?}", cra.input.rel_mouse_pos());
-                // }
-                let _ = suzane.view_3d.update(cra.mouse_event);
-                if !matches!(cra.mouse_event, MouseEvent::Drag { .. } | MouseEvent::Scroll(_)) {
-                    let step = 20;
-                    let mut delta = Vec2i::new(0, 0);
-                    if cra.key_codes.is_left() {
-                        delta.x -= step;
-                    }
-                    if cra.key_codes.is_right() {
-                        delta.x += step;
-                    }
-                    if cra.key_codes.is_up() {
-                        delta.y -= step;
-                    }
-                    if cra.key_codes.is_down() {
-                        delta.y += step;
-                    }
-                    if delta.x != 0 || delta.y != 0 {
-                        let center = Vec2i::new(cra.content_area.width / 2, cra.content_area.height / 2);
-                        let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
-                        suzane.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
-                    }
-                    for ch in cra.text_input.chars() {
-                        match ch {
-                            'w' | 'W' => {
-                                suzane.view_3d.update(MouseEvent::Scroll(-0.5));
+                    // if !cra.input.get_mouse_buttons().is_none() {
+                    //     println!("Mouse Pressed: {:?}", cra.input.rel_mouse_pos());
+                    // }
+                    let _ = suzane.view_3d.update(cra.mouse_event);
+                    if !matches!(cra.mouse_event, MouseEvent::Drag { .. } | MouseEvent::Scroll(_)) {
+                        let step = 20;
+                        let mut delta = Vec2i::new(0, 0);
+                        if cra.key_codes.is_left() {
+                            delta.x -= step;
+                        }
+                        if cra.key_codes.is_right() {
+                            delta.x += step;
+                        }
+                        if cra.key_codes.is_up() {
+                            delta.y -= step;
+                        }
+                        if cra.key_codes.is_down() {
+                            delta.y += step;
+                        }
+                        if delta.x != 0 || delta.y != 0 {
+                            let center = Vec2i::new(cra.content_area.width / 2, cra.content_area.height / 2);
+                            let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
+                            suzane.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
+                        }
+                        for ch in cra.text_input.chars() {
+                            match ch {
+                                'w' | 'W' => {
+                                    suzane.view_3d.update(MouseEvent::Scroll(-0.5));
+                                }
+                                's' | 'S' => {
+                                    suzane.view_3d.update(MouseEvent::Scroll(0.5));
+                                }
+                                _ => {}
                             }
-                            's' | 'S' => {
-                                suzane.view_3d.update(MouseEvent::Scroll(0.5));
-                            }
-                            _ => {}
                         }
                     }
-                }
 
-                match renderer.try_write() {
-                    Ok(mut renderer) => unsafe {
-                        gl.viewport(
-                            cra.content_area.x,
-                            dim.height - cra.content_area.y - cra.content_area.height,
-                            cra.content_area.width,
-                            cra.content_area.height,
-                        );
-                        gl.scissor(
-                            cra.content_area.x,
-                            dim.height - cra.content_area.y - cra.content_area.height,
-                            cra.content_area.width,
-                            cra.content_area.height,
-                        );
-                        gl.clear_color(0.5, 0.5, 0.5, 1.0);
-                        gl.clear(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT);
+                    match renderer.try_write() {
+                        Ok(mut renderer) => unsafe {
+                            gl.viewport(
+                                cra.content_area.x,
+                                dim.height - cra.content_area.y - cra.content_area.height,
+                                cra.content_area.width,
+                                cra.content_area.height,
+                            );
+                            gl.scissor(
+                                cra.content_area.x,
+                                dim.height - cra.content_area.y - cra.content_area.height,
+                                cra.content_area.width,
+                                cra.content_area.height,
+                            );
+                            gl.clear_color(0.5, 0.5, 0.5, 1.0);
+                            gl.clear(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT);
 
-                        let pvm = suzane.view_3d.pvm();
-                        let view = suzane.view_3d.view_matrix();
-                        renderer.render(gl, &pvm, &view, &(&suzane.mesh));
-                    },
-                    _ => {
-                        println!("unable to hold the lock on the polymesh")
+                            let pvm = suzane.view_3d.pvm();
+                            let view = suzane.view_3d.view_matrix();
+                            renderer.render(gl, &pvm, &view, &(&suzane.mesh));
+                        },
+                        _ => {
+                            println!("unable to hold the lock on the polymesh")
+                        }
                     }
-                }
                 });
             });
             WindowState::Open
