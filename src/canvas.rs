@@ -28,7 +28,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 use super::*;
-use std::borrow::BorrowMut;
+use std::{borrow::BorrowMut, collections::HashMap};
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
@@ -42,6 +42,14 @@ pub struct Canvas<R: Renderer> {
     current_dim: Dimensioni,
     renderer: RendererHandle<R>,
     clip: Recti,
+    next_texture_id: u32,
+    textures: HashMap<TextureId, TextureInfo>,
+}
+
+#[derive(Clone, Copy)]
+struct TextureInfo {
+    width: i32,
+    height: i32,
 }
 
 impl<R: Renderer> Canvas<R> {
@@ -50,6 +58,8 @@ impl<R: Renderer> Canvas<R> {
             current_dim: dim,
             renderer,
             clip: Recti::new(0, 0, dim.width, dim.height),
+            next_texture_id: 1,
+            textures: HashMap::new(),
         }
     }
 
@@ -197,5 +207,85 @@ impl<R: Renderer> Canvas<R> {
 
     pub fn current_dimension(&self) -> Dimensioni {
         self.current_dim
+    }
+
+    pub fn load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId {
+        let id = TextureId(self.next_texture_id);
+        self.next_texture_id += 1;
+        self.textures.insert(id, TextureInfo { width, height });
+        self.renderer.scope_mut(|r| r.create_texture(id, width, height, pixels));
+        id
+    }
+
+    pub fn free_texture(&mut self, id: TextureId) {
+        if self.textures.remove(&id).is_some() {
+            self.renderer.scope_mut(|r| r.destroy_texture(id));
+        }
+    }
+
+    pub fn draw_image(&mut self, image: Image, rect: Recti, color: Color) {
+        match image {
+            Image::Slot(slot) => self.draw_slot(slot, rect, color),
+            Image::Texture(tex) => self.draw_texture(tex, rect, color),
+        }
+    }
+
+    fn draw_texture(&mut self, texture: TextureId, rect: Recti, color: Color) {
+        let info = match self.textures.get(&texture) {
+            Some(info) => *info,
+            None => return,
+        };
+        let src = Recti::new(0, 0, info.width, info.height);
+        let clip = self.clip;
+        if let Some((dst, src)) = Self::clip_rect(rect, src, clip) {
+            let mut v0 = Vertex::default();
+            let mut v1 = Vertex::default();
+            let mut v2 = Vertex::default();
+            let mut v3 = Vertex::default();
+
+            let color = color4b(color.r, color.g, color.b, color.a);
+
+            let tex_width = info.width as f32;
+            let tex_height = info.height as f32;
+
+            // texture coordinates
+            v0.tex.x = src.x as f32 / tex_width;
+            v0.tex.y = src.y as f32 / tex_height;
+            v1.tex.x = (src.x + src.width) as f32 / tex_width;
+            v1.tex.y = src.y as f32 / tex_height;
+            v2.tex.x = (src.x + src.width) as f32 / tex_width;
+            v2.tex.y = (src.y + src.height) as f32 / tex_height;
+            v3.tex.x = src.x as f32 / tex_width;
+            v3.tex.y = (src.y + src.height) as f32 / tex_height;
+
+            // positions
+            v0.pos.x = dst.x as f32;
+            v0.pos.y = dst.y as f32;
+            v1.pos.x = (dst.x + dst.width) as f32;
+            v1.pos.y = dst.y as f32;
+            v2.pos.x = (dst.x + dst.width) as f32;
+            v2.pos.y = (dst.y + dst.height) as f32;
+            v3.pos.x = dst.x as f32;
+            v3.pos.y = (dst.y + dst.height) as f32;
+
+            v0.color = color;
+            v1.color = color;
+            v2.color = color;
+            v3.color = color;
+
+            self.renderer.scope_mut(|r| r.draw_texture(texture, [v0, v1, v2, v3]));
+        }
+    }
+}
+
+impl<R: Renderer> Drop for Canvas<R> {
+    fn drop(&mut self) {
+        let ids: Vec<_> = self.textures.keys().copied().collect();
+        self.renderer.scope_mut(|r| {
+            for id in &ids {
+                r.destroy_texture(*id);
+            }
+        });
+        self.textures.clear();
     }
 }

@@ -86,6 +86,7 @@ struct State<'a> {
     gl: Arc<glow::Context>,
     rng: Rc<RefCell<ThreadRng>>,
     slots: Vec<SlotId>,
+    image_texture: Option<TextureId>,
     label_colors: [LabelColor<'a>; 15],
     bg: [Real; 3],
     logbuf: String,
@@ -131,7 +132,7 @@ pub struct LabelColor<'a> {
 const MAX_POLYMESH_TRIS: usize = 65536;
 
 impl<'a> State<'a> {
-    pub fn new(gl: Arc<glow::Context>, slots: Vec<SlotId>) -> Self {
+    pub fn new(gl: Arc<glow::Context>, slots: Vec<SlotId>, ctx: &mut Context<GLRenderer>) -> Self {
         let pm_renderer = Arc::new(RwLock::new(PolyMeshRenderer::create(&gl, MAX_POLYMESH_TRIS)));
 
         let program = create_program(&gl, VERTEX_SHADER, FRAGMENT_SHADER).unwrap();
@@ -157,10 +158,17 @@ impl<'a> State<'a> {
 
         let pm_suzane = Obj::from_byte_stream(SUZANE).unwrap().to_polymesh();
         let bounds = pm_suzane.calculate_bounding_box();
+        #[cfg(any(feature = "builder", feature = "png_source"))]
+        let image_texture = ctx
+            .load_image_png(include_bytes!("../assets/IMAGE.png"))
+            .ok();
+        #[cfg(not(any(feature = "builder", feature = "png_source")))]
+        let image_texture = None;
         Self {
             gl,
             rng: Rc::new(RefCell::new(thread_rng())),
             slots,
+            image_texture,
             style: Style::default(),
             label_colors: [
                 LabelColor { label: "text", idx: ControlColor::Text },
@@ -397,11 +405,14 @@ impl<'a> State<'a> {
 
             self.slot_header = container.header("Slots", self.slot_header, |container| {
                 container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67));
-                container.button_ex2("Slot 1", Some(self.slots[0].clone()), WidgetOption::NONE);
+                container.button_ex2("Slot 1", Some(Image::Slot(self.slots[0].clone())), WidgetOption::NONE);
                 container.button_ex3("Slot 2 - Green", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(|_x, _y| {
                     color4b(0x00, 0xFF, 0x00, 0xFF)
                 }));
-                container.button_ex2("Slot 3", Some(self.slots[2].clone()), WidgetOption::NONE);
+                container.button_ex2("Slot 3", Some(Image::Slot(self.slots[2].clone())), WidgetOption::NONE);
+                if let Some(texture) = self.image_texture {
+                    container.button_ex2("External Image", Some(Image::Texture(texture)), WidgetOption::NONE);
+                }
                 let rng = self.rng.clone();
                 container.button_ex3("Slot 2 - Random", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(move |_x, _y| {
                     let mut rm = rng.borrow_mut();
@@ -736,7 +747,7 @@ fn main() {
 
     let mut fw = Application::new(atlas.clone(), move |gl, ctx| {
         let slots = atlas.clone_slot_table();
-        let mut state = State::new(gl.clone(), slots);
+        let mut state = State::new(gl.clone(), slots, ctx);
 
         state.demo_window = Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450)));
         state.log_window = Some(ctx.new_window("Log Window", rect(350, 40, 300, 200)));

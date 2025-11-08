@@ -98,6 +98,7 @@ pub struct GLRenderer {
 
     atlas: AtlasHandle,
     last_update_id: usize,
+    textures: HashMap<TextureId, NativeTexture>,
 }
 
 impl GLRenderer {
@@ -185,6 +186,7 @@ impl GLRenderer {
                 height,
                 atlas,
                 last_update_id: usize::MAX,
+                textures: HashMap::new(),
             }
         }
     }
@@ -318,6 +320,96 @@ impl Renderer for GLRenderer {
 
     fn end(&mut self) {
         self.flush();
+    }
+
+    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) {
+        let gl = &self.gl;
+        unsafe {
+            let tex = gl.create_texture().expect("failed to create texture");
+            gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+            gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGBA as i32,
+                width,
+                height,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                PixelUnpackData::Slice(Some(pixels)),
+            );
+            gl.bind_texture(glow::TEXTURE_2D, None);
+            self.textures.insert(id, tex);
+        }
+    }
+
+    fn destroy_texture(&mut self, id: TextureId) {
+        if let Some(tex) = self.textures.remove(&id) {
+            unsafe {
+                self.gl.delete_texture(tex);
+            }
+        }
+    }
+
+    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
+        let tex = match self.textures.get(&id) {
+            Some(tex) => *tex,
+            None => return,
+        };
+        self.flush();
+        let gl = &self.gl;
+        unsafe {
+            gl.viewport(0, 0, self.width as i32, self.height as i32);
+            gl.scissor(0, 0, self.width as i32, self.height as i32);
+            gl.enable(glow::BLEND);
+            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            gl.disable(glow::CULL_FACE);
+            gl.disable(glow::DEPTH_TEST);
+            gl.enable(glow::SCISSOR_TEST);
+
+            gl.use_program(Some(self.program));
+            gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+            gl.active_texture(glow::TEXTURE0 + 0);
+            let tex_uniform_id = gl.get_uniform_location(self.program, "uTexture").unwrap();
+            gl.uniform_1_i32(Some(&tex_uniform_id), 0);
+
+            let viewport = gl.get_uniform_location(self.program, "uTransform").unwrap();
+            let tm = ortho4(0.0, self.width as f32, self.height as f32, 0.0, -1.0, 1.0);
+            let tm_ptr = tm.col.as_ptr() as *const _ as *const f32;
+            let slice = std::slice::from_raw_parts(tm_ptr, 16);
+            gl.uniform_matrix_4_f32_slice(Some(&viewport), false, &slice);
+
+            let pos_attrib_id = gl.get_attrib_location(self.program, "vertexPosition").unwrap();
+            let tex_attrib_id = gl.get_attrib_location(self.program, "vertexTexCoord").unwrap();
+            let col_attrib_id = gl.get_attrib_location(self.program, "vertexColor").unwrap();
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.ibo));
+
+            let vertices_u8: &[u8] = core::slice::from_raw_parts(vertices.as_ptr() as *const u8, vertices.len() * core::mem::size_of::<Vertex>());
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_u8, glow::DYNAMIC_DRAW);
+
+            let indices: [u16; 6] = [0, 1, 2, 2, 3, 0];
+            let indices_u8: &[u8] = core::slice::from_raw_parts(indices.as_ptr() as *const u8, indices.len() * core::mem::size_of::<u16>());
+            gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, indices_u8, glow::DYNAMIC_DRAW);
+
+            gl.enable_vertex_attrib_array(pos_attrib_id);
+            gl.enable_vertex_attrib_array(tex_attrib_id);
+            gl.enable_vertex_attrib_array(col_attrib_id);
+            gl.vertex_attrib_pointer_f32(pos_attrib_id, 2, glow::FLOAT, false, 20, 0);
+            gl.vertex_attrib_pointer_f32(tex_attrib_id, 2, glow::FLOAT, false, 20, 8);
+            gl.vertex_attrib_pointer_f32(col_attrib_id, 4, glow::UNSIGNED_BYTE, true, 20, 16);
+
+            gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_SHORT, 0);
+
+            gl.disable_vertex_attrib_array(pos_attrib_id);
+            gl.disable_vertex_attrib_array(tex_attrib_id);
+            gl.disable_vertex_attrib_array(col_attrib_id);
+            gl.use_program(None);
+        }
     }
 }
 

@@ -81,9 +81,9 @@ pub enum Command {
         id: IconId,
         color: Color,
     },
-    Slot {
+    Image {
         rect: Recti,
-        id: SlotId,
+        image: Image,
         color: Color,
     },
     SlotRedraw {
@@ -182,8 +182,8 @@ impl Container {
                 Command::Clip { rect } => {
                     canvas.set_clip_rect(rect);
                 }
-                Command::Slot { rect, id, color } => {
-                    canvas.draw_slot(id, rect, color);
+                Command::Image { rect, image, color } => {
+                    canvas.draw_image(image, rect, color);
                 }
                 Command::SlotRedraw { rect, id, color, payload } => {
                     canvas.draw_slot_with_function(id, rect, color, payload.clone());
@@ -305,7 +305,7 @@ impl Container {
             }
             _ => (),
         }
-        self.push_command(Command::Slot { id, rect, color });
+        self.push_command(Command::Image { image: Image::Slot(id), rect, color });
         if clipped != Clip::None {
             self.set_clip(UNCLIPPED_RECT);
         }
@@ -697,12 +697,16 @@ impl Container {
     }
 
     #[inline(never)]
-    pub fn button_ex2(&mut self, label: &str, slot: Option<SlotId>, opt: WidgetOption) -> ResourceState {
+    pub fn button_ex2(&mut self, label: &str, image: Option<Image>, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = if label.len() > 0 {
             self.idmngr.get_id_from_str(label)
         } else {
-            self.idmngr.get_id_u32(slot.unwrap().into())
+            match image {
+                Some(Image::Slot(slot)) => self.idmngr.get_id_u32(slot.into()),
+                Some(Image::Texture(tex)) => self.idmngr.get_id_u32(tex.raw()),
+                None => self.idmngr.get_id_from_str("!image_button"),
+            }
         };
         let r: Recti = self.layout.next();
         self.update_control(id, r, opt);
@@ -713,14 +717,11 @@ impl Container {
         if label.len() > 0 {
             self.draw_control_text(label, r, ControlColor::Text, opt);
         }
-        match slot {
-            Some(slot) => {
-                let color = self.style.colors[ControlColor::Text as usize];
-                self.draw_slot(slot, r, color);
-            }
-            _ => (),
+        if let Some(image) = image {
+            let color = self.style.colors[ControlColor::Text as usize];
+            self.push_command(Command::Image { image, rect: r, color });
         }
-        return res;
+        res
     }
 
     #[inline(never)]
