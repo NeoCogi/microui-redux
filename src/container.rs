@@ -296,19 +296,7 @@ impl Container {
     }
 
     pub fn draw_slot(&mut self, id: SlotId, rect: Recti, color: Color) {
-        let clipped = self.check_clip(rect);
-        match clipped {
-            Clip::All => return,
-            Clip::Part => {
-                let clip = self.get_clip_rect();
-                self.set_clip(clip)
-            }
-            _ => (),
-        }
-        self.push_command(Command::Image { image: Image::Slot(id), rect, color });
-        if clipped != Clip::None {
-            self.set_clip(UNCLIPPED_RECT);
-        }
+        self.push_image(Image::Slot(id), rect, color);
     }
 
     pub fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
@@ -719,9 +707,24 @@ impl Container {
         }
         if let Some(image) = image {
             let color = self.style.colors[ControlColor::Text as usize];
-            self.push_command(Command::Image { image, rect: r, color });
+            self.push_image(image, r, color);
         }
         res
+    }
+    fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
+        let clipped = self.check_clip(rect);
+        match clipped {
+            Clip::All => return,
+            Clip::Part => {
+                let clip = self.get_clip_rect();
+                self.set_clip(clip)
+            }
+            _ => (),
+        }
+        self.push_command(Command::Image { image, rect, color });
+        if clipped != Clip::None {
+            self.set_clip(UNCLIPPED_RECT);
+        }
     }
 
     #[inline(never)]

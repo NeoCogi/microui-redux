@@ -159,9 +159,7 @@ impl<'a> State<'a> {
         let pm_suzane = Obj::from_byte_stream(SUZANE).unwrap().to_polymesh();
         let bounds = pm_suzane.calculate_bounding_box();
         #[cfg(any(feature = "builder", feature = "png_source"))]
-        let image_texture = ctx
-            .load_image_png(include_bytes!("../assets/IMAGE.png"))
-            .ok();
+        let image_texture = ctx.load_image_png(include_bytes!("./FACEPALM.png")).ok();
         #[cfg(not(any(feature = "builder", feature = "png_source")))]
         let image_texture = None;
         Self {
@@ -411,6 +409,7 @@ impl<'a> State<'a> {
                 }));
                 container.button_ex2("Slot 3", Some(Image::Slot(self.slots[2].clone())), WidgetOption::NONE);
                 if let Some(texture) = self.image_texture {
+                    container.set_row_widths_height(&[SizePolicy::Fixed(256)], SizePolicy::Fixed(256));
                     container.button_ex2("External Image", Some(Image::Texture(texture)), WidgetOption::NONE);
                 }
                 let rng = self.rng.clone();
@@ -418,8 +417,6 @@ impl<'a> State<'a> {
                     let mut rm = rng.borrow_mut();
                     color4b(rm.gen(), rm.gen(), rm.gen(), rm.gen())
                 }));
-
-
             });
             WindowState::Open
         });
