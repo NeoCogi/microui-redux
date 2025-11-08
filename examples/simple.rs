@@ -20,8 +20,9 @@ fn main() {
     fw.event_loop(|ctx, state| {
         ctx.frame(|ctx| {
             ctx.window(&mut state.window.clone(), ContainerOption::NONE, |container| {
-                container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-                container.button_ex("Hello World!", None, WidgetOption::ALIGN_CENTER);
+                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                    container.button_ex("Hello World!", None, WidgetOption::ALIGN_CENTER);
+                });
                 WindowState::Open
             });
         });

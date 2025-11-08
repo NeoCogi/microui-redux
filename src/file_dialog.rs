@@ -93,65 +93,68 @@ impl FileDialogState {
         ctx.dialog(&mut self.win, ContainerOption::NONE, |cont| {
             let content_size = cont.content_size;
             let half_width = content_size.x / 2;
-            cont.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-            cont.label(&self.current_working_directory);
-            cont.textbox_ex(&mut self.tmp_file_name, WidgetOption::NONE);
+            cont.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |cont| {
+                cont.label(&self.current_working_directory);
+                cont.textbox_ex(&mut self.tmp_file_name, WidgetOption::NONE);
+            });
             let left_column = if half_width > 0 {
                 SizePolicy::Remainder(half_width - 1)
             } else {
                 SizePolicy::Auto
             };
             let top_row_widths = [left_column, SizePolicy::Remainder(0)];
-            cont.set_row_widths_height(&top_row_widths, SizePolicy::Remainder(24));
-            cont.column(|container| {
-                container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0));
-                container.panel(&mut self.folder_panel, ContainerOption::NONE, |container_handle| {
-                    let container = &mut container_handle.inner_mut();
+            cont.with_row(&top_row_widths, SizePolicy::Remainder(24), |cont| {
+                cont.column(|container| {
+                    container.panel(&mut self.folder_panel, ContainerOption::NONE, |container_handle| {
+                        let container = &mut container_handle.inner_mut();
 
-                    container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-                    let mut refresh = false;
-                    for f in &self.folders {
-                        let path = f.split("/").last().unwrap_or(f);
+                        container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                            let mut refresh = false;
+                            for f in &self.folders {
+                                let path = f.split("/").last().unwrap_or(f);
 
-                        if container.button_ex(path, None, WidgetOption::NONE).is_submitted() {
-                            self.current_working_directory = f.to_string();
-                            refresh = true;
-                        }
-                    }
-                    if refresh {
-                        Self::list_folders_files(&Path::new(&self.current_working_directory), &mut self.folders, &mut self.files);
-                    }
-                });
-            });
-            cont.column(|container| {
-                container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0));
-                container.panel(&mut self.file_panel, ContainerOption::NONE, |container_handle| {
-                    let container = &mut container_handle.inner_mut();
-
-                    container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-                    if self.files.len() != 0 {
-                        for f in &self.files {
-                            if container.button_ex(f, None, WidgetOption::NONE).is_submitted() {
-                                self.tmp_file_name = f.to_string();
+                                if container.button_ex(path, None, WidgetOption::NONE).is_submitted() {
+                                    self.current_working_directory = f.to_string();
+                                    refresh = true;
+                                }
                             }
-                        }
-                    } else {
-                        container.label("No Files");
-                    }
+                            if refresh {
+                                Self::list_folders_files(&Path::new(&self.current_working_directory), &mut self.folders, &mut self.files);
+                            }
+                        });
+                    });
+                });
+                cont.column(|container| {
+                    container.panel(&mut self.file_panel, ContainerOption::NONE, |container_handle| {
+                        let container = &mut container_handle.inner_mut();
+
+                        container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                            if self.files.len() != 0 {
+                                for f in &self.files {
+                                    if container.button_ex(f, None, WidgetOption::NONE).is_submitted() {
+                                        self.tmp_file_name = f.to_string();
+                                    }
+                                }
+                            } else {
+                                container.label("No Files");
+                            }
+                        });
+                    });
                 });
             });
             let bottom_row_widths = [left_column, SizePolicy::Remainder(0)];
-            cont.set_row_widths_height(&bottom_row_widths, SizePolicy::Remainder(0));
-            if cont.button_ex("Ok", None, WidgetOption::NONE).is_submitted() {
-                if self.tmp_file_name != "" {
-                    self.file_name = Some(self.tmp_file_name.clone())
+            cont.with_row(&bottom_row_widths, SizePolicy::Remainder(0), |cont| {
+                if cont.button_ex("Ok", None, WidgetOption::NONE).is_submitted() {
+                    if self.tmp_file_name != "" {
+                        self.file_name = Some(self.tmp_file_name.clone())
+                    }
+                    return;
                 }
-                return WindowState::Closed;
-            }
-            if cont.button_ex("Cancel", None, WidgetOption::NONE).is_submitted() {
-                self.file_name = None;
-                return WindowState::Closed;
-            }
+                if cont.button_ex("Cancel", None, WidgetOption::NONE).is_submitted() {
+                    self.file_name = None;
+                    return;
+                }
+            });
             WindowState::Open
         });
     }

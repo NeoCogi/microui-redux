@@ -630,10 +630,6 @@ impl Container {
         self.end_panel(panel);
     }
 
-    pub fn set_row_widths_height(&mut self, widths: &[SizePolicy], height: SizePolicy) {
-        self.layout.row(widths, height);
-    }
-
     pub fn with_row<F: FnOnce(&mut Self)>(&mut self, widths: &[SizePolicy], height: SizePolicy, f: F) {
         let snapshot = self.layout.snapshot_row_state();
         self.layout.row(widths, height);
