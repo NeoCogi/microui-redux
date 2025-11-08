@@ -229,6 +229,14 @@ impl LayoutManager {
         layout.position = vec2(layout.indent, layout.next_row);
     }
 
+    pub(crate) fn snapshot_row_state(&self) -> RowSnapshot {
+        RowSnapshot::from_layout(self.top())
+    }
+
+    pub(crate) fn restore_row_state(&mut self, snapshot: RowSnapshot) {
+        snapshot.apply(self.top_mut());
+    }
+
     fn resolve_horizontal(&self, cursor_x: i32, policy: SizePolicy, default_width: i32) -> i32 {
         // Amount of horizontal space left in the current scope after the cursor.
         let available_width = self.top().body.width.saturating_sub(cursor_x);
@@ -323,5 +331,32 @@ impl LayoutManager {
 
         self.last_rect = res;
         self.last_rect
+    }
+}
+
+pub(crate) struct RowSnapshot {
+    widths: Vec<SizePolicy>,
+    height: SizePolicy,
+    item_index: usize,
+    position: Vec2i,
+}
+
+impl RowSnapshot {
+    fn from_layout(layout: &Layout) -> Self {
+        let state = layout.direction.row_state();
+        Self {
+            widths: state.widths.clone(),
+            height: state.height,
+            item_index: state.item_index,
+            position: layout.position,
+        }
+    }
+
+    fn apply(self, layout: &mut Layout) {
+        let state = layout.direction.row_state_mut();
+        state.widths = self.widths;
+        state.height = self.height;
+        state.item_index = self.item_index;
+        layout.position = self.position;
     }
 }
