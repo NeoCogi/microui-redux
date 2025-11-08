@@ -448,6 +448,10 @@ impl Input {
         self.key_code_down
     }
 
+    pub fn text_input(&self) -> &str {
+        &self.input_text
+    }
+
     pub fn mousemove(&mut self, x: i32, y: i32) {
         self.mouse_pos = vec2(x, y);
     }
