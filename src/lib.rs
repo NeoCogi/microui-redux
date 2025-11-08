@@ -341,6 +341,10 @@ impl MouseButton {
 bitflags! {
     #[derive(Copy, Clone, Debug)]
     pub struct KeyMode : u32 {
+        const RIGHT = 256;
+        const LEFT = 128;
+        const DOWN = 64;
+        const UP = 32;
         const RETURN = 16;
         const BACKSPACE = 8;
         const ALT = 4;
@@ -368,6 +372,18 @@ impl KeyMode {
     }
     pub fn is_shift(&self) -> bool {
         self.intersects(Self::SHIFT)
+    }
+    pub fn is_up(&self) -> bool {
+        self.intersects(Self::UP)
+    }
+    pub fn is_down(&self) -> bool {
+        self.intersects(Self::DOWN)
+    }
+    pub fn is_left(&self) -> bool {
+        self.intersects(Self::LEFT)
+    }
+    pub fn is_right(&self) -> bool {
+        self.intersects(Self::RIGHT)
     }
 }
 
@@ -405,6 +421,10 @@ impl Default for Input {
 impl Input {
     pub fn rel_mouse_pos(&self) -> Vec2i {
         self.rel_mouse_pos
+    }
+
+    pub fn key_state(&self) -> KeyMode {
+        self.key_down
     }
 
     pub fn mousemove(&mut self, x: i32, y: i32) {
