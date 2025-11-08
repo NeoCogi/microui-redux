@@ -78,14 +78,14 @@ impl Default for SizePolicy {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct SpanState {
+struct SpanState {
     widths: Vec<SizePolicy>,
     height: SizePolicy,
     item_index: usize,
 }
 
 #[derive(Clone)]
-pub(crate) enum LayoutDirection {
+enum LayoutDirection {
     Row(SpanState),
     Column(SpanState),
 }

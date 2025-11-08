@@ -631,7 +631,7 @@ impl<'a> State<'a> {
 
         ctx.window(&mut self.suzane_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
             container.set_row_widths_height(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0));
-            container.custom_render_widget("Suzane", WidgetOption::NONE, move |dim, cra| {
+            container.custom_render_widget("Suzane", WidgetOption::HOLD_FOCUS, move |dim, cra| {
                 let gl = &gl;
                 let mut suzane = suzane.write().unwrap();
                 suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
