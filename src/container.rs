@@ -69,6 +69,15 @@ pub struct CustomRenderArgs {
     pub text_input: String,
 }
 
+/// Controls how text should wrap when rendered inside a container.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum TextWrap {
+    /// Render text on a single line without wrapping.
+    None,
+    /// Wrap text at word boundaries when it exceeds the cell width.
+    Word,
+}
+
 /// Draw commands recorded during container traversal.
 pub enum Command {
     /// Pushes or pops a clip rectangle.
@@ -382,6 +391,12 @@ impl Container {
     #[inline(never)]
     /// Draws multi-line text within the container using automatic wrapping.
     pub fn text(&mut self, text: &str) {
+        self.text_with_wrap(text, TextWrap::None);
+    }
+
+    #[inline(never)]
+    /// Draws multi-line text within the container using the provided wrapping mode.
+    pub fn text_with_wrap(&mut self, text: &str, wrap: TextWrap) {
         let font = self.style.font;
         let color = self.style.colors[ControlColor::Text as usize];
         let h = self.atlas.get_font_height(font) as i32;
@@ -392,16 +407,24 @@ impl Container {
         for line in text.lines() {
             let mut r = self.layout.next();
             let mut rx = r.x;
-            let words = line.split_inclusive(' ');
-            for w in words {
-                // TODO: split w when its width > w into many lines
-                let tw = self.atlas.get_text_size(font, w).width;
-                if tw + rx < r.x + r.width {
-                    self.draw_text(font, w, vec2(rx, r.y), color);
-                    rx += tw;
-                } else {
-                    r = self.layout.next();
-                    rx = r.x;
+            match wrap {
+                TextWrap::None => {
+                    self.draw_text(font, line, vec2(r.x, r.y), color);
+                }
+                TextWrap::Word => {
+                    let words = line.split_inclusive(' ');
+                    for w in words {
+                        // TODO: split w when its width > w into many lines
+                        let tw = self.atlas.get_text_size(font, w).width;
+                        if tw + rx > r.x + r.width {
+                            if rx > r.x {
+                                r = self.layout.next();
+                                rx = r.x;
+                            }
+                        }
+                        self.draw_text(font, w, vec2(rx, r.y), color);
+                        rx += tw;
+                    }
                 }
             }
         }
@@ -453,9 +476,15 @@ impl Container {
         let tsize = self.atlas.get_text_size(font, str);
         let padding = self.style.padding;
         let color = self.style.colors[colorid as usize];
+        let line_height = self.atlas.get_font_height(font) as i32;
+        let baseline = self.atlas.get_font_baseline(font);
+
+        let baseline_center = rect.y + rect.height / 2;
+        let mut top = baseline_center - baseline;
+        top = Self::clamp(top, rect.y, rect.y + rect.height - line_height);
 
         self.push_clip_rect(rect);
-        pos.y = rect.y + (rect.height - tsize.height) / 2;
+        pos.y = top;
         if opt.is_aligned_center() {
             pos.x = rect.x + (rect.width - tsize.width) / 2;
         } else if opt.is_aligned_right() {
@@ -936,13 +965,17 @@ impl Container {
             let color = self.style.colors[ControlColor::Text as usize];
             let font = self.style.font;
             let tsize = self.atlas.get_text_size(font, buf.as_str());
+            let line_height = self.atlas.get_font_height(font) as i32;
+            let baseline = self.atlas.get_font_baseline(font);
+            let baseline_center = r.y + r.height / 2;
+            let mut texty = baseline_center - baseline;
+            texty = Self::clamp(texty, r.y, r.y + r.height - line_height);
             let ofx = r.width - self.style.padding - tsize.width - 1;
             let textx = r.x + (if ofx < self.style.padding { ofx } else { self.style.padding });
-            let texty = r.y + (r.height - tsize.height) / 2;
 
             self.push_clip_rect(r);
             self.draw_text(font, buf.as_str(), vec2(textx, texty), color);
-            self.draw_rect(rect(textx + tsize.width, texty, 1, tsize.height), color);
+            self.draw_rect(rect(textx + tsize.width, texty, 1, line_height), color);
             self.pop_clip_rect();
         } else {
             self.draw_control_text(buf.as_str(), r, ControlColor::Text, opt);
