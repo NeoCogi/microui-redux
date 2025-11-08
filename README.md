@@ -39,9 +39,9 @@ $ cargo run --example demo-full
 - [x] Pass-Through rendering command (for 3D viewports)
 - [ ] Custom Rendering widget
     - [x] Mouse input event
-    - [ ] Keyboard event
-    - [ ] Text event
-    - [ ] Drag outside of the region
+    - [x] Keyboard event
+    - [x] Text event
+    - [x] Drag outside of the region
     - [x] Rendering
 - [x] Dialog support
 - [x] File dialog

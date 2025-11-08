@@ -59,6 +59,7 @@ pub struct CustomRenderArgs {
     pub mouse_event: MouseEvent,
     pub key_mods: KeyMode,
     pub key_codes: KeyCode,
+    pub text_input: String,
 }
 
 pub enum Command {
@@ -799,8 +800,9 @@ impl Container {
         let input = self.input.borrow();
         let key_mods = if active { input.key_state() } else { KeyMode::NONE };
         let key_codes = if active { input.key_codes() } else { KeyCode::NONE };
+        let text_input = if active { input.text_input().to_owned() } else { String::new() };
         drop(input);
-        let cra = CustomRenderArgs { content_area: rect, view: self.get_clip_rect(), mouse_event, key_mods, key_codes };
+        let cra = CustomRenderArgs { content_area: rect, view: self.get_clip_rect(), mouse_event, key_mods, key_codes, text_input };
         self.command_list.push(Command::CustomRender(cra, Box::new(f)));
     }
 

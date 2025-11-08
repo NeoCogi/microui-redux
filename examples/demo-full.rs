@@ -660,6 +660,17 @@ impl<'a> State<'a> {
                         let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
                         suzane.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
                     }
+                    for ch in cra.text_input.chars() {
+                        match ch {
+                            'w' | 'W' => {
+                                suzane.view_3d.update(MouseEvent::Scroll(-0.5));
+                            }
+                            's' | 'S' => {
+                                suzane.view_3d.update(MouseEvent::Scroll(0.5));
+                            }
+                            _ => {}
+                        }
+                    }
                 }
 
                 match renderer.try_write() {
