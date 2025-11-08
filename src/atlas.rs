@@ -80,7 +80,7 @@ pub struct FontId(usize);
 #[derive(Default, Copy, Clone)]
 pub struct IconId(usize);
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
 pub struct SlotId(usize);
 
 impl Into<u32> for IconId {

@@ -106,6 +106,9 @@ pub trait Renderer {
     fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex);
     fn flush(&mut self);
     fn end(&mut self);
+    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]);
+    fn destroy_texture(&mut self, id: TextureId);
+    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
 
 pub struct RendererHandle<R: Renderer> {
@@ -545,6 +548,21 @@ pub struct Style {
 
 pub type Real = f32;
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TextureId(u32);
+
+impl TextureId {
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Image {
+    Slot(SlotId),
+    Texture(TextureId),
+}
+
 static UNCLIPPED_RECT: Recti = Recti {
     x: 0,
     y: 0,
@@ -835,5 +853,49 @@ impl<R: Renderer> Context<R> {
 
     pub fn canvas(&self) -> &Canvas<R> {
         &self.canvas
+    }
+
+    pub fn load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId {
+        self.canvas.load_texture_rgba(width, height, pixels)
+    }
+
+    pub fn free_image(&mut self, id: TextureId) {
+        self.canvas.free_texture(id);
+    }
+
+    #[cfg(any(feature = "builder", feature = "png_source"))]
+    pub fn load_image_png(&mut self, data: &[u8]) -> Result<TextureId, String> {
+        use png::{ColorType, Decoder};
+        let decoder = Decoder::new(data);
+        let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
+        let mut buf = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
+        let raw = &buf[..info.buffer_size()];
+        let mut rgba = Vec::with_capacity((info.width as usize) * (info.height as usize) * 4);
+        match info.color_type {
+            ColorType::Rgba => rgba.extend_from_slice(raw),
+            ColorType::Rgb => {
+                for chunk in raw.chunks(3) {
+                    rgba.extend_from_slice(chunk);
+                    rgba.push(0xFF);
+                }
+            }
+            ColorType::Grayscale => {
+                for &v in raw {
+                    rgba.extend_from_slice(&[v, v, v, 0xFF]);
+                }
+            }
+            ColorType::GrayscaleAlpha => {
+                for chunk in raw.chunks(2) {
+                    let v = chunk[0];
+                    let a = chunk[1];
+                    rgba.extend_from_slice(&[v, v, v, a]);
+                }
+            }
+            _ => {
+                return Err("Unsupported PNG color type".into());
+            }
+        }
+        Ok(self.load_image_rgba(info.width as i32, info.height as i32, &rgba))
     }
 }
