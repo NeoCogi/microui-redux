@@ -141,7 +141,10 @@ pub fn load_image_bytes(bytes: &[u8]) -> Result<(usize, usize, Vec<Color4b>)> {
     let mut reader = decoder
         .read_info()
         .map_err(|e| Error::new(ErrorKind::Other, format!("PNG decode error: {}", e)))?;
-    let mut img_data = vec![0; reader.output_buffer_size()];
+    let buf_size = reader
+        .output_buffer_size()
+        .ok_or_else(|| Error::new(ErrorKind::Other, "PNG decoder did not report output size"))?;
+    let mut img_data = vec![0; buf_size];
     let info = reader.next_frame(&mut img_data)?;
 
     assert_eq!(info.bit_depth, BitDepth::Eight);
