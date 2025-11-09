@@ -950,8 +950,11 @@ impl Container {
     #[inline(never)]
     /// Internal textbox helper operating on a fixed rectangle.
     pub fn textbox_raw(&mut self, buf: &mut String, id: Id, r: Recti, opt: WidgetOption) -> ResourceState {
+        // Track submit/change flags and keep the widget focused while active.
         let mut res = ResourceState::NONE;
         self.update_control(id, r, opt | WidgetOption::HOLD_FOCUS);
+
+        // Cursor position is stored per textbox so we can edit at arbitrary positions.
         let mut cursor = {
             let entry = self.text_states.entry(id).or_insert_with(|| TextEditState { cursor: buf.len() });
             if self.focus != Some(id) {
@@ -960,6 +963,7 @@ impl Container {
             entry.cursor
         };
 
+        // Snapshot the current frame's input so we only borrow the RefCell once.
         let input_text = { self.input.borrow().input_text.clone() };
         let (key_pressed, key_codes, mouse_pressed, mouse_pos) = {
             let input = self.input.borrow();
@@ -967,6 +971,7 @@ impl Container {
         };
 
         if self.focus == Some(id) {
+            // Insert any typed characters at the cursor position.
             if !input_text.is_empty() {
                 let insert_at = cursor.min(buf.len());
                 buf.insert_str(insert_at, input_text.as_str());
@@ -974,6 +979,7 @@ impl Container {
                 res |= ResourceState::CHANGE;
             }
 
+            // Handle backspace, making sure we don't cut UTF-8 graphemes in half.
             if key_pressed.is_backspace() && cursor > 0 && !buf.is_empty() {
                 let mut new_cursor = cursor.min(buf.len());
                 new_cursor -= 1;
@@ -985,6 +991,7 @@ impl Container {
                 res |= ResourceState::CHANGE;
             }
 
+            // Left/right arrows move by grapheme.
             if key_codes.is_left() && cursor > 0 {
                 let mut new_cursor = cursor - 1;
                 while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
@@ -1012,9 +1019,15 @@ impl Container {
         let font = self.style.font;
         let line_height = self.atlas.get_font_height(font) as i32;
         let baseline = self.atlas.get_font_baseline(font);
-        let baseline_center = r.y + r.height / 2;
-        let mut texty = baseline_center - baseline;
-        texty = Self::clamp(texty, r.y, r.y + r.height - line_height);
+        // Treat each cell as having its own local coordinate system. The "content" region starts
+        // at the top of the cell, spans `line_height`, and is independent of the actual clip rect.
+        let content_top = r.y;
+        let content_bottom = (r.y + line_height).min(r.y + r.height);
+        let mut texty = content_top;
+        if texty > content_bottom - line_height {
+            texty = content_bottom - line_height;
+        }
+        texty = texty.max(r.y);
 
         let text_metrics = self.atlas.get_text_size(font, buf.as_str());
         let padding = self.style.padding;
@@ -1059,17 +1072,10 @@ impl Container {
         if self.focus == Some(id) {
             let color = self.style.colors[ControlColor::Text as usize];
             self.push_clip_rect(r);
+            // Render text at the top of the content area. The baseline is `texty + baseline`.
             self.draw_text(font, buf.as_str(), vec2(textx, texty), color);
-            let ascent = baseline;
-            let descent = (line_height - baseline).max(0);
-            let mut caret_top = baseline_center - ascent;
-            let mut caret_bottom = baseline_center + descent;
-            if caret_top < r.y {
-                caret_top = r.y;
-            }
-            if caret_bottom > r.y + r.height {
-                caret_bottom = r.y + r.height;
-            }
+            let caret_top = (content_top + 2).min(content_bottom);
+            let caret_bottom = (content_top + line_height - 2).min(content_bottom);
             let caret_height = (caret_bottom - caret_top).max(1);
             self.draw_rect(rect(textx + caret_offset, caret_top, 1, caret_height), color);
             self.pop_clip_rect();
