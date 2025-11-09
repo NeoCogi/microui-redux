@@ -1021,17 +1021,23 @@ impl Container {
         let baseline = self.atlas.get_font_baseline(font);
         let descent = (line_height - baseline).max(0);
 
-        // Align the text block so the baseline sits at a fixed offset within the cell. If the cell
-        // is shorter than the line height we clamp to the available space.
-        let baseline_y = (r.y + baseline).min(r.y + r.height);
-        let mut texty = baseline_y - baseline;
+        // Center the line height around the cell midpoint. This ensures the baseline sits in the
+        // middle (unless the cell is shorter than the font metrics, in which case we clamp).
+        let mut texty = r.y + r.height / 2 - line_height / 2;
         if texty < r.y {
             texty = r.y;
         }
+        let max_texty = (r.y + r.height - line_height).max(r.y);
+        if texty > max_texty {
+            texty = max_texty;
+        }
+        let baseline_y = texty + line_height - descent;
 
-        // DEBUG visualizers (uncomment if needed)
-        // self.draw_box(r, color(0, 255, 0, 64));
-        // self.draw_rect(rect(r.x, baseline_y, r.width, 1), color(255, 0, 0, 255));
+        // Debug overlay: green = cell, red = baseline, blue = line-height box.
+        self.draw_box(r, color(0, 255, 0, 64));
+        self.draw_rect(rect(r.x, baseline_y, r.width, 1), color(255, 0, 0, 255));
+        println!("rect: {:?} - baseline {}", r, baseline_y);
+        self.draw_box(rect(r.x, texty, r.width, line_height), color(0, 0, 255, 64));
 
         let text_metrics = self.atlas.get_text_size(font, buf.as_str());
         let padding = self.style.padding;
@@ -1078,8 +1084,8 @@ impl Container {
             self.push_clip_rect(r);
             // Render text at the top of the content area. The baseline is `texty + baseline`.
             self.draw_text(font, buf.as_str(), vec2(textx, texty), color);
-            let caret_top = (baseline_y - baseline + 2).min(r.y + r.height);
-            let caret_bottom = (baseline_y + descent - 2).min(r.y + r.height);
+            let caret_top = (baseline_y - baseline + 2).max(r.y).min(r.y + r.height);
+            let caret_bottom = (baseline_y + descent - 2).max(r.y).min(r.y + r.height);
             let caret_height = (caret_bottom - caret_top).max(1);
             self.draw_rect(rect(textx + caret_offset, caret_top, 1, caret_height), color);
             self.pop_clip_rect();
