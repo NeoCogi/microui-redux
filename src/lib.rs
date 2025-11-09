@@ -1065,9 +1065,12 @@ impl<R: Renderer> Context<R> {
     /// Loads a PNG blob, converts it to RGBA, and uploads it as a texture.
     pub fn load_image_png(&mut self, data: &[u8]) -> Result<TextureId, String> {
         use png::{ColorType, Decoder};
-        let decoder = Decoder::new(data);
+        use std::io::Cursor;
+        let cursor = Cursor::new(data);
+        let decoder = Decoder::new(cursor);
         let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
-        let mut buf = vec![0; reader.output_buffer_size()];
+        let buf_size = reader.output_buffer_size().ok_or_else(|| "PNG decoder did not report output size".to_string())?;
+        let mut buf = vec![0; buf_size];
         let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
         let raw = &buf[..info.buffer_size()];
         let mut rgba = Vec::with_capacity((info.width as usize) * (info.height as usize) * 4);

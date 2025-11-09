@@ -405,44 +405,45 @@ impl Container {
 
     #[inline(never)]
     /// Draws multi-line text within the container using the provided wrapping mode.
+    /// The block is rendered inside an internal column with zero spacing so consecutive
+    /// lines sit back-to-back while the outer widget spacing/padding remains intact.
     pub fn text_with_wrap(&mut self, text: &str, wrap: TextWrap) {
         let font = self.style.font;
         let color = self.style.colors[ControlColor::Text as usize];
         let line_height = self.atlas.get_font_height(font) as i32;
         let baseline = self.atlas.get_font_baseline(font);
-        self.layout.begin_column();
-        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(line_height));
+        let saved_spacing = self.layout.style.spacing;
+        self.layout.style.spacing = 0;
+        self.column(|ui| {
+            ui.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(line_height));
 
-        // lines() doesn't count line terminator
-        for line in text.lines() {
-            match wrap {
-                TextWrap::None => {
-                    let r = self.layout.next();
-                    let line_top = Self::baseline_aligned_top(r, line_height, baseline);
-                    self.draw_text(font, line, vec2(r.x, line_top), color);
-                }
-                TextWrap::Word => {
-                    let mut r = self.layout.next();
-                    let mut rx = r.x;
-                    let mut line_top = Self::baseline_aligned_top(r, line_height, baseline);
-                    let words = line.split_inclusive(' ');
-                    for w in words {
-                        // TODO: split w when its width > w into many lines
-                        let tw = self.atlas.get_text_size(font, w).width;
-                        if tw + rx > r.x + r.width {
-                            if rx > r.x {
-                                r = self.layout.next();
+            for line in text.lines() {
+                match wrap {
+                    TextWrap::None => {
+                        let r = ui.layout.next();
+                        let line_top = Self::baseline_aligned_top(r, line_height, baseline);
+                        ui.draw_text(font, line, vec2(r.x, line_top), color);
+                    }
+                    TextWrap::Word => {
+                        let mut r = ui.layout.next();
+                        let mut rx = r.x;
+                        let mut line_top = Self::baseline_aligned_top(r, line_height, baseline);
+                        let words = line.split_inclusive(' ');
+                        for w in words {
+                            let tw = ui.atlas.get_text_size(font, w).width;
+                            if tw + rx > r.x + r.width && rx > r.x {
+                                r = ui.layout.next();
                                 rx = r.x;
                                 line_top = Self::baseline_aligned_top(r, line_height, baseline);
                             }
+                            ui.draw_text(font, w, vec2(rx, line_top), color);
+                            rx += tw;
                         }
-                        self.draw_text(font, w, vec2(rx, line_top), color);
-                        rx += tw;
                     }
                 }
             }
-        }
-        self.layout.end_column();
+        });
+        self.layout.style.spacing = saved_spacing;
     }
 
     /// Draws a frame and optional border using the specified color.
