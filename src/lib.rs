@@ -693,8 +693,8 @@ pub trait Font {
 pub struct Style {
     /// Font used for all text rendering.
     pub font: FontId,
-    /// Default cell dimensions used by layouts.
-    pub default_cell_size: Dimensioni,
+    /// Default width used by layouts when no size policy overrides it.
+    pub default_cell_width: i32,
     /// Inner padding applied to most widgets.
     pub padding: i32,
     /// Spacing between cells in a layout.
@@ -745,7 +745,7 @@ impl Default for Style {
     fn default() -> Self {
         Self {
             font: FontId::default(),
-            default_cell_size: Dimension { width: 68, height: 10 },
+            default_cell_width: 68,
             padding: 5,
             spacing: 4,
             indent: 24,
