@@ -1019,15 +1019,19 @@ impl Container {
         let font = self.style.font;
         let line_height = self.atlas.get_font_height(font) as i32;
         let baseline = self.atlas.get_font_baseline(font);
-        // Treat each cell as having its own local coordinate system. The "content" region starts
-        // at the top of the cell, spans `line_height`, and is independent of the actual clip rect.
-        let content_top = r.y;
-        let content_bottom = (r.y + line_height).min(r.y + r.height);
-        let mut texty = content_top;
-        if texty > content_bottom - line_height {
-            texty = content_bottom - line_height;
+        let descent = (line_height - baseline).max(0);
+
+        // Align the text block so the baseline sits at a fixed offset within the cell. If the cell
+        // is shorter than the line height we clamp to the available space.
+        let baseline_y = (r.y + baseline).min(r.y + r.height);
+        let mut texty = baseline_y - baseline;
+        if texty < r.y {
+            texty = r.y;
         }
-        texty = texty.max(r.y);
+
+        // DEBUG visualizers (uncomment if needed)
+        // self.draw_box(r, color(0, 255, 0, 64));
+        // self.draw_rect(rect(r.x, baseline_y, r.width, 1), color(255, 0, 0, 255));
 
         let text_metrics = self.atlas.get_text_size(font, buf.as_str());
         let padding = self.style.padding;
@@ -1074,8 +1078,8 @@ impl Container {
             self.push_clip_rect(r);
             // Render text at the top of the content area. The baseline is `texty + baseline`.
             self.draw_text(font, buf.as_str(), vec2(textx, texty), color);
-            let caret_top = (content_top + 2).min(content_bottom);
-            let caret_bottom = (content_top + line_height - 2).min(content_bottom);
+            let caret_top = (baseline_y - baseline + 2).min(r.y + r.height);
+            let caret_bottom = (baseline_y + descent - 2).min(r.y + r.height);
             let caret_height = (caret_bottom - caret_top).max(1);
             self.draw_rect(rect(textx + caret_offset, caret_top, 1, caret_height), color);
             self.pop_clip_rect();
