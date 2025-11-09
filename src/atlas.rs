@@ -675,44 +675,64 @@ impl AtlasHandle {
         Dimension::new(self.0.borrow().width as _, self.0.borrow().height as _)
     }
 
-    /// Walks each glyph in the string and invokes the closure with draw information.
-    pub fn draw_string<DrawFunction: FnMut(char, Vec2i, Recti, Recti)>(&self, font: FontId, text: &str, mut f: DrawFunction) {
+    /// Internal helper that walks glyphs applying baseline-aware placement.
+    fn walk_glyphs<F>(&self, font: FontId, text: &str, mut f: F)
+    where
+        F: FnMut(char, Vec2i, Recti, Recti, i32),
+    {
         let mut dst = Recti { x: 0, y: 0, width: 0, height: 0 };
-        let fh = self.get_font_height(font) as i32;
-        let mut acc_x = 0;
-        let mut acc_y = 0;
+        let line_height = self.get_font_height(font) as i32;
+        let baseline = self.get_font_baseline(font);
+        let mut baseline_y = baseline;
+        let mut pen_x = 0;
+
         for chr in text.chars() {
-            // string could be empty
-            if acc_y == 0 {
-                acc_y = fh
+            if chr == '\n' || chr == '\r' {
+                pen_x = 0;
+                baseline_y += line_height;
+                continue;
             }
 
-            if chr == '\n' || chr == '\r' {
-                acc_x = 0;
-                acc_y += fh;
-            } else {
-                let src = self.get_char_entry(font, chr).or_else(|| self.get_char_entry(font, '_')).unwrap_or(CharEntry {
-                    offset: Vec2i::new(0, 0),
-                    advance: Vec2i::new(8, 0),
-                    rect: Recti::new(0, 0, 8, 8),
-                });
-                dst.width = src.rect.width;
-                dst.height = src.rect.height;
-                dst.x = acc_x + src.offset.x;
-                dst.y = acc_y - src.offset.y - src.rect.height;
-                f(chr, src.advance, dst, src.rect);
-                acc_x += src.advance.x;
-            }
+            let src = self.get_char_entry(font, chr).or_else(|| self.get_char_entry(font, '_')).unwrap_or(CharEntry {
+                offset: Vec2i::new(0, 0),
+                advance: Vec2i::new(8, 0),
+                rect: Recti::new(0, 0, 8, 8),
+            });
+
+            dst.width = src.rect.width;
+            dst.height = src.rect.height;
+            dst.x = pen_x + src.offset.x;
+            dst.y = baseline_y - src.offset.y - src.rect.height;
+
+            f(chr, src.advance, dst, src.rect, baseline_y);
+            pen_x += src.advance.x;
         }
+    }
+
+    /// Walks each glyph in the string and invokes the closure with draw information.
+    pub fn draw_string<DrawFunction: FnMut(char, Vec2i, Recti, Recti)>(&self, font: FontId, text: &str, mut f: DrawFunction) {
+        self.walk_glyphs(font, text, |chr, advance, dst, src, _| f(chr, advance, dst, src));
     }
 
     /// Measures the bounding box of the provided text.
     pub fn get_text_size(&self, font: FontId, text: &str) -> Dimensioni {
         let mut res = Dimensioni::new(0, 0);
-        self.draw_string(font, text, |_, advance, dst, _| {
+        let line_height = self.get_font_height(font) as i32;
+        let baseline = self.get_font_baseline(font);
+        let descent = (line_height - baseline).max(0);
+        let mut max_line_bottom = 0;
+        let mut saw_glyph = false;
+
+        self.walk_glyphs(font, text, |_, advance, dst, _, baseline_y| {
+            saw_glyph = true;
             res.width = max(res.width, dst.x + max(advance.x, dst.width));
             res.height = max(res.height, dst.y + dst.height);
+            max_line_bottom = max(max_line_bottom, baseline_y + descent);
         });
+
+        if saw_glyph {
+            res.height = max(res.height, max_line_bottom);
+        }
         res
     }
 
