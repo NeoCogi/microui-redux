@@ -290,7 +290,7 @@ impl<'a> State<'a> {
 
             let mut buff = String::new();
 
-            self.window_header = container.header("Window Info", self.window_header, |container| {
+            self.window_header = container.header("Window Info - ppjjg_,(){}", self.window_header, |container| {
                 let win_0 = container.rect;
                 let row_widths = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
                 container.with_row(&row_widths, SizePolicy::Auto, |container| {

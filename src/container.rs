@@ -408,19 +408,23 @@ impl Container {
     pub fn text_with_wrap(&mut self, text: &str, wrap: TextWrap) {
         let font = self.style.font;
         let color = self.style.colors[ControlColor::Text as usize];
-        let h = self.atlas.get_font_height(font) as i32;
+        let line_height = self.atlas.get_font_height(font) as i32;
+        let baseline = self.atlas.get_font_baseline(font);
         self.layout.begin_column();
-        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(h));
+        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(line_height));
 
         // lines() doesn't count line terminator
         for line in text.lines() {
-            let mut r = self.layout.next();
-            let mut rx = r.x;
             match wrap {
                 TextWrap::None => {
-                    self.draw_text(font, line, vec2(r.x, r.y), color);
+                    let r = self.layout.next();
+                    let line_top = Self::baseline_aligned_top(r, line_height, baseline);
+                    self.draw_text(font, line, vec2(r.x, line_top), color);
                 }
                 TextWrap::Word => {
+                    let mut r = self.layout.next();
+                    let mut rx = r.x;
+                    let mut line_top = Self::baseline_aligned_top(r, line_height, baseline);
                     let words = line.split_inclusive(' ');
                     for w in words {
                         // TODO: split w when its width > w into many lines
@@ -429,9 +433,10 @@ impl Container {
                             if rx > r.x {
                                 r = self.layout.next();
                                 rx = r.x;
+                                line_top = Self::baseline_aligned_top(r, line_height, baseline);
                             }
                         }
-                        self.draw_text(font, w, vec2(rx, r.y), color);
+                        self.draw_text(font, w, vec2(rx, line_top), color);
                         rx += tw;
                     }
                 }
@@ -488,12 +493,8 @@ impl Container {
         let line_height = self.atlas.get_font_height(font) as i32;
         let baseline = self.atlas.get_font_baseline(font);
 
-        let baseline_center = rect.y + rect.height / 2;
-        let mut top = baseline_center - baseline;
-        top = Self::clamp(top, rect.y, rect.y + rect.height - line_height);
-
         self.push_clip_rect(rect);
-        pos.y = top;
+        pos.y = Self::baseline_aligned_top(rect, line_height, baseline);
         if opt.is_aligned_center() {
             pos.x = rect.x + (rect.width - tsize.width) / 2;
         } else if opt.is_aligned_right() {
@@ -610,6 +611,22 @@ impl Container {
         min(b, max(a, x))
     }
 
+    /// Returns the y coordinate where a line of text should start so its baseline sits at the control midpoint.
+    fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32) -> i32 {
+        if rect.height >= line_height {
+            return rect.y + (rect.height - line_height) / 2;
+        }
+
+        let baseline_center = rect.y + rect.height / 2;
+        let min_top = rect.y + rect.height - line_height;
+        let max_top = rect.y;
+        Self::clamp(baseline_center - baseline, min_top, max_top)
+    }
+
+    fn vertical_text_padding(padding: i32) -> i32 {
+        max(1, padding / 2)
+    }
+
     #[inline(never)]
     fn scrollbars(&mut self, body: &mut Recti) {
         let sz = self.style.scrollbar_size;
@@ -696,7 +713,8 @@ impl Container {
         self.layout.reset(expand_rect(body, padding), scroll);
         self.layout.style = self.style.clone();
         let font_height = self.atlas.get_font_height(self.style.font) as i32;
-        self.layout.set_default_cell_height(font_height);
+        let vertical_pad = Self::vertical_text_padding(self.style.padding);
+        self.layout.set_default_cell_height(font_height + vertical_pad * 2);
         self.body = body;
     }
 
@@ -1033,11 +1051,11 @@ impl Container {
         }
         let baseline_y = texty + line_height - descent;
 
-        // Debug overlay: green = cell, red = baseline, blue = line-height box.
-        self.draw_box(r, color(0, 255, 0, 64));
-        self.draw_rect(rect(r.x, baseline_y, r.width, 1), color(255, 0, 0, 255));
-        println!("rect: {:?} - baseline {}", r, baseline_y);
-        self.draw_box(rect(r.x, texty, r.width, line_height), color(0, 0, 255, 64));
+        // // Debug overlay: green = cell, red = baseline, blue = line-height box.
+        // self.draw_box(r, color(0, 255, 0, 64));
+        // self.draw_rect(rect(r.x, baseline_y, r.width, 1), color(255, 0, 0, 255));
+        // println!("rect: {:?} - baseline {}", r, baseline_y);
+        // self.draw_box(rect(r.x, texty, r.width, line_height), color(0, 0, 255, 64));
 
         let text_metrics = self.atlas.get_text_size(font, buf.as_str());
         let padding = self.style.padding;

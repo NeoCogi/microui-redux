@@ -265,7 +265,7 @@ impl LayoutManager {
         let spacing = self.style.spacing;
         let default_width = self.style.default_cell_width + padding * 2;
         let base_height = if self.default_cell_height > 0 { self.default_cell_height } else { 0 };
-        let default_height = base_height + padding * 2;
+        let default_height = if base_height > 0 { base_height } else { padding * 2 };
 
         let (row_len, current_index, height_policy) = {
             let layout = self.top();
