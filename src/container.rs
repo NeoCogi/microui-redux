@@ -52,6 +52,7 @@
 //
 use super::*;
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 /// Arguments forwarded to custom rendering callbacks.
 pub struct CustomRenderArgs {
@@ -76,6 +77,11 @@ pub enum TextWrap {
     None,
     /// Wrap text at word boundaries when it exceeds the cell width.
     Word,
+}
+
+#[derive(Default)]
+struct TextEditState {
+    cursor: usize,
 }
 
 /// Draw commands recorded during container traversal.
@@ -182,6 +188,7 @@ pub struct Container {
     pub number_edit_buf: String,
     /// ID of the number widget currently in edit mode, if any.
     pub number_edit: Option<Id>,
+    text_states: HashMap<Id, TextEditState>,
 
     panels: Vec<ContainerHandle>,
 }
@@ -208,6 +215,7 @@ impl Container {
             number_edit: None,
             in_hover_root: false,
             input: input,
+            text_states: HashMap::new(),
 
             panels: Default::default(),
         }
@@ -218,6 +226,7 @@ impl Container {
         self.focus = None;
         self.updated_focus = false;
         self.in_hover_root = false;
+        self.text_states.clear();
     }
 
     pub(crate) fn prepare(&mut self) {
@@ -686,6 +695,8 @@ impl Container {
         let scroll = self.scroll;
         self.layout.reset(expand_rect(body, padding), scroll);
         self.layout.style = self.style.clone();
+        let font_height = self.atlas.get_font_height(self.style.font) as i32;
+        self.layout.set_default_cell_height(font_height);
         self.body = body;
     }
 
@@ -941,46 +952,128 @@ impl Container {
     pub fn textbox_raw(&mut self, buf: &mut String, id: Id, r: Recti, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         self.update_control(id, r, opt | WidgetOption::HOLD_FOCUS);
+        let mut cursor = {
+            let entry = self.text_states.entry(id).or_insert_with(|| TextEditState { cursor: buf.len() });
+            if self.focus != Some(id) {
+                entry.cursor = buf.len();
+            }
+            entry.cursor
+        };
+
+        let input_text = { self.input.borrow().input_text.clone() };
+        let (key_pressed, key_codes, mouse_pressed, mouse_pos) = {
+            let input = self.input.borrow();
+            (input.key_pressed, input.key_code_pressed, input.mouse_pressed, input.mouse_pos)
+        };
+
         if self.focus == Some(id) {
-            let mut len = buf.len();
-
-            if self.input.borrow().input_text.len() > 0 {
-                buf.push_str(self.input.borrow().input_text.as_str());
-                len += self.input.borrow().input_text.len() as usize;
-                res |= ResourceState::CHANGE
+            if !input_text.is_empty() {
+                let insert_at = cursor.min(buf.len());
+                buf.insert_str(insert_at, input_text.as_str());
+                cursor = insert_at + input_text.len();
+                res |= ResourceState::CHANGE;
             }
 
-            if self.input.borrow().key_pressed.is_backspace() && len > 0 {
-                // skip utf-8 continuation bytes
-                buf.pop();
-                res |= ResourceState::CHANGE
+            if key_pressed.is_backspace() && cursor > 0 && !buf.is_empty() {
+                let mut new_cursor = cursor.min(buf.len());
+                new_cursor -= 1;
+                while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
+                    new_cursor -= 1;
+                }
+                buf.replace_range(new_cursor..cursor, "");
+                cursor = new_cursor;
+                res |= ResourceState::CHANGE;
             }
-            if self.input.borrow().key_pressed.is_return() {
+
+            if key_codes.is_left() && cursor > 0 {
+                let mut new_cursor = cursor - 1;
+                while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
+                    new_cursor -= 1;
+                }
+                cursor = new_cursor;
+            }
+
+            if key_codes.is_right() && cursor < buf.len() {
+                let mut new_cursor = cursor + 1;
+                while new_cursor < buf.len() && !buf.is_char_boundary(new_cursor) {
+                    new_cursor += 1;
+                }
+                cursor = new_cursor;
+            }
+
+            if key_pressed.is_return() {
                 self.set_focus(None);
                 res |= ResourceState::SUBMIT;
             }
         }
+
         self.draw_widget_frame(id, r, ControlColor::Base, opt);
+
+        let font = self.style.font;
+        let line_height = self.atlas.get_font_height(font) as i32;
+        let baseline = self.atlas.get_font_baseline(font);
+        let baseline_center = r.y + r.height / 2;
+        let mut texty = baseline_center - baseline;
+        texty = Self::clamp(texty, r.y, r.y + r.height - line_height);
+
+        let text_metrics = self.atlas.get_text_size(font, buf.as_str());
+        let padding = self.style.padding;
+        let ofx = r.width - padding - text_metrics.width - 1;
+        let textx = r.x + if ofx < padding { ofx } else { padding };
+
+        if self.focus == Some(id) && mouse_pressed.is_left() && self.mouse_over(r, self.in_hover_root) {
+            let click_x = mouse_pos.x - textx;
+            if click_x <= 0 {
+                cursor = 0;
+            } else {
+                let mut last_width = 0;
+                let mut new_cursor = buf.len();
+                for (idx, ch) in buf.char_indices() {
+                    let next = idx + ch.len_utf8();
+                    let width = self.atlas.get_text_size(font, &buf[..next]).width;
+                    if click_x < width {
+                        if click_x < (last_width + width) / 2 {
+                            new_cursor = idx;
+                        } else {
+                            new_cursor = next;
+                        }
+                        break;
+                    }
+                    last_width = width;
+                }
+                cursor = new_cursor.min(buf.len());
+            }
+        }
+
+        cursor = cursor.min(buf.len());
+        if let Some(entry) = self.text_states.get_mut(&id) {
+            entry.cursor = cursor;
+        }
+
+        let caret_offset = if cursor == 0 {
+            0
+        } else {
+            self.atlas.get_text_size(font, &buf[..cursor]).width
+        };
+
         if self.focus == Some(id) {
             let color = self.style.colors[ControlColor::Text as usize];
-            let font = self.style.font;
-            let tsize = self.atlas.get_text_size(font, buf.as_str());
-            let line_height = self.atlas.get_font_height(font) as i32;
-            let baseline = self.atlas.get_font_baseline(font);
-            let baseline_center = r.y + r.height / 2;
-            let mut texty = baseline_center - baseline;
-            texty = Self::clamp(texty, r.y, r.y + r.height - line_height);
-            let ofx = r.width - self.style.padding - tsize.width - 1;
-            let textx = r.x + (if ofx < self.style.padding { ofx } else { self.style.padding });
-
             self.push_clip_rect(r);
             self.draw_text(font, buf.as_str(), vec2(textx, texty), color);
-            self.draw_rect(rect(textx + tsize.width, texty, 1, line_height), color);
+            let baseline_y = baseline_center;
+            let caret_height = baseline.max(1);
+            let mut caret_top = baseline_y - caret_height;
+            if caret_top < r.y {
+                caret_top = r.y;
+            }
+            let caret_bottom = (caret_top + caret_height).min(r.y + r.height);
+            let caret_height = (caret_bottom - caret_top).max(1);
+            self.draw_rect(rect(textx + caret_offset, caret_top, 1, caret_height), color);
             self.pop_clip_rect();
         } else {
             self.draw_control_text(buf.as_str(), r, ControlColor::Text, opt);
         }
-        return res;
+        res
     }
 
     #[inline(never)]

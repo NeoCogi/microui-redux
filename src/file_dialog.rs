@@ -96,8 +96,7 @@ impl FileDialogState {
     /// Renders the dialog and updates the selected file when confirmed.
     pub fn eval<R: Renderer>(&mut self, ctx: &mut Context<R>) {
         ctx.dialog(&mut self.win, ContainerOption::NONE, |cont| {
-            let content_size = cont.content_size;
-            let half_width = content_size.x / 2;
+            let half_width = cont.body.width / 2;
             cont.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |cont| {
                 cont.label(&self.current_working_directory);
                 cont.textbox_ex(&mut self.tmp_file_name, WidgetOption::NONE);
@@ -109,41 +108,37 @@ impl FileDialogState {
             };
             let top_row_widths = [left_column, SizePolicy::Remainder(0)];
             cont.with_row(&top_row_widths, SizePolicy::Remainder(24), |cont| {
-                cont.column(|container| {
-                    container.panel(&mut self.folder_panel, ContainerOption::NONE, |container_handle| {
-                        let container = &mut container_handle.inner_mut();
+                cont.panel(&mut self.folder_panel, ContainerOption::NONE, |container_handle| {
+                    let container = &mut container_handle.inner_mut();
 
-                        container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                            let mut refresh = false;
-                            for f in &self.folders {
-                                let path = f.split("/").last().unwrap_or(f);
+                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                        let mut refresh = false;
+                        for f in &self.folders {
+                            let path = f.split("/").last().unwrap_or(f);
 
-                                if container.button_ex(path, None, WidgetOption::NONE).is_submitted() {
-                                    self.current_working_directory = f.to_string();
-                                    refresh = true;
-                                }
+                            if container.button_ex(path, None, WidgetOption::NONE).is_submitted() {
+                                self.current_working_directory = f.to_string();
+                                refresh = true;
                             }
-                            if refresh {
-                                Self::list_folders_files(&Path::new(&self.current_working_directory), &mut self.folders, &mut self.files);
-                            }
-                        });
+                        }
+                        if refresh {
+                            Self::list_folders_files(&Path::new(&self.current_working_directory), &mut self.folders, &mut self.files);
+                        }
                     });
                 });
-                cont.column(|container| {
-                    container.panel(&mut self.file_panel, ContainerOption::NONE, |container_handle| {
-                        let container = &mut container_handle.inner_mut();
+                cont.panel(&mut self.file_panel, ContainerOption::NONE, |container_handle| {
+                    let container = &mut container_handle.inner_mut();
 
-                        container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                            if self.files.len() != 0 {
-                                for f in &self.files {
-                                    if container.button_ex(f, None, WidgetOption::NONE).is_submitted() {
-                                        self.tmp_file_name = f.to_string();
-                                    }
+                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                        if self.files.len() != 0 {
+                            for f in &self.files {
+                                if container.button_ex(f, None, WidgetOption::NONE).is_submitted() {
+                                    self.tmp_file_name = f.to_string();
                                 }
-                            } else {
-                                container.label("No Files");
                             }
-                        });
+                        } else {
+                            container.label("No Files");
+                        }
                     });
                 });
             });

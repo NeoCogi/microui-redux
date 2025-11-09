@@ -128,6 +128,7 @@ struct Layout {
 pub(crate) struct LayoutManager {
     pub style: Style,
     pub last_rect: Recti,
+    default_cell_height: i32,
     stack: Vec<Layout>,
 }
 
@@ -136,6 +137,10 @@ impl LayoutManager {
         self.stack.clear();
         self.last_rect = Recti::default();
         self.push_layout(body, scroll);
+    }
+
+    pub fn set_default_cell_height(&mut self, height: i32) {
+        self.default_cell_height = height.max(0);
     }
 
     fn push_layout(&mut self, body: Recti, scroll: Vec2i) {
@@ -256,11 +261,11 @@ impl LayoutManager {
     }
 
     pub fn next(&mut self) -> Recti {
-        let dcell_size = self.style.default_cell_size;
         let padding = self.style.padding;
         let spacing = self.style.spacing;
-        let default_width = dcell_size.width + padding * 2;
-        let default_height = dcell_size.height + padding * 2;
+        let default_width = self.style.default_cell_width + padding * 2;
+        let base_height = if self.default_cell_height > 0 { self.default_cell_height } else { 0 };
+        let default_height = base_height + padding * 2;
 
         let (row_len, current_index, height_policy) = {
             let layout = self.top();
@@ -341,8 +346,6 @@ impl LayoutManager {
 pub(crate) struct RowSnapshot {
     widths: Vec<SizePolicy>,
     height: SizePolicy,
-    item_index: usize,
-    position: Vec2i,
 }
 
 impl RowSnapshot {
@@ -351,8 +354,6 @@ impl RowSnapshot {
         Self {
             widths: state.widths.clone(),
             height: state.height,
-            item_index: state.item_index,
-            position: layout.position,
         }
     }
 
@@ -360,7 +361,5 @@ impl RowSnapshot {
         let state = layout.direction.row_state_mut();
         state.widths = self.widths;
         state.height = self.height;
-        state.item_index = self.item_index;
-        layout.position = self.position;
     }
 }
