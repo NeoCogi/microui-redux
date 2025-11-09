@@ -1060,16 +1060,13 @@ impl Container {
             let color = self.style.colors[ControlColor::Text as usize];
             self.push_clip_rect(r);
             self.draw_text(font, buf.as_str(), vec2(textx, texty), color);
-            let ascent = baseline;
-            let descent = (line_height - baseline).max(0);
-            let mut caret_top = baseline_center - ascent;
-            let mut caret_bottom = baseline_center + descent;
+            let baseline_y = baseline_center;
+            let caret_height = baseline.max(1);
+            let mut caret_top = baseline_y - caret_height;
             if caret_top < r.y {
                 caret_top = r.y;
             }
-            if caret_bottom > r.y + r.height {
-                caret_bottom = r.y + r.height;
-            }
+            let caret_bottom = (caret_top + caret_height).min(r.y + r.height);
             let caret_height = (caret_bottom - caret_top).max(1);
             self.draw_rect(rect(textx + caret_offset, caret_top, 1, caret_height), color);
             self.pop_clip_rect();
