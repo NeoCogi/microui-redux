@@ -57,7 +57,7 @@ Disabling default features leaves only the raw RGBA upload path (`ImageSource::R
 - `Container::text_with_wrap` supports explicit wrapping modes (`TextWrap::None` or `TextWrap::Word`) and renders wrapped lines back-to-back inside an internal column, so the block keeps the outer padding without adding extra spacing between lines.
 - Custom drawing code can call `Container::draw_text` directly when precise placement is required, or use `draw_control_text` to get automatic alignment/clip handling.
 
-### Version 3.0
+### Version 0.3
 - [x] Use `std` (`Vec`, `parse`, ...)
 - [x] Containers contain clip stack and command list
 - [x] Move `begin_*`, `end_*` functions to closures
