@@ -1,7 +1,11 @@
+# if you need to test small size executable (no backtrace crap):
+# $ cargo +nightly run -Z build-std=std --release --example demo-full --no-default-features
+# and uncomment this before building:
+# cargo-features = ["panic-immediate-abort"]
 [package]
 name = "microui-redux"
 authors = ["Raja Lehtihet", "Wael El Oraiby"]
-version = "0.2.4"
+version = "0.3.0"
 edition = "2021"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -49,14 +53,7 @@ name = "baseline_probe"
 path = "examples/baseline_probe.rs"
 required-features = ["builder"]
 
-# [profile.dev]
-# overflow-checks = false
-# opt-level = "z"
-# panic = "abort"
-# lto = "fat"
-# codegen-units = 1
-# debug = "full"
-
+# small size executable
 # [profile.release]
 # overflow-checks = false
 # opt-level = "z"
