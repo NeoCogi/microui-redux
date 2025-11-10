@@ -28,23 +28,32 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-use png::BitDepth;
-use png::ColorType;
+#[cfg(any(feature = "builder", feature = "png_source"))]
+use png::{BitDepth, ColorType, Decoder, Transformations};
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+#[cfg(any(feature = "builder", feature = "save-to-rust"))]
 use std::fs::*;
+#[cfg(any(feature = "builder", feature = "png_source"))]
 use std::io::Cursor;
 use std::io::Error;
 use std::io::ErrorKind;
+#[cfg(feature = "builder")]
 use std::io::Read;
+#[cfg(feature = "builder")]
+use std::io::BufWriter;
+#[cfg(any(feature = "builder", feature = "save-to-rust"))]
+use std::io::Result;
+#[cfg(any(feature = "builder", feature = "save-to-rust"))]
 use std::io::Write;
-use std::io::{BufWriter, Result};
+#[cfg(feature = "builder")]
 use std::path::*;
 
 #[cfg(feature = "save-to-rust")]
 use std::str::FromStr;
 
 use super::*;
+use crate::ImageSource;
 
 #[derive(Debug, Clone)]
 /// Metrics and atlas coordinates for a glyph.
@@ -133,11 +142,38 @@ pub const COLLAPSE_ICON: IconId = IconId(3);
 /// Identifier of the checkbox icon baked into the default atlas.
 pub const CHECK_ICON: IconId = IconId(4);
 
-/// Decodes raw PNG bytes into 32-bit pixels and dimensions.
-pub fn load_image_bytes(bytes: &[u8]) -> Result<(usize, usize, Vec<Color4b>)> {
+/// Decodes image data into 32-bit pixels according to `source`.
+pub fn load_image_bytes(source: ImageSource) -> std::io::Result<(usize, usize, Vec<Color4b>)> {
+    match source {
+        ImageSource::Raw { width, height, pixels } => {
+            if width <= 0 || height <= 0 {
+                return Err(Error::new(ErrorKind::Other, "Image dimensions must be positive"));
+            }
+            let width_usize = width as usize;
+            let height_usize = height as usize;
+            let expected = width_usize * height_usize * 4;
+            if pixels.len() != expected {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    format!("Expected {} RGBA bytes, found {}", expected, pixels.len()),
+                ));
+            }
+            let mut colors = Vec::with_capacity(width_usize * height_usize);
+            for chunk in pixels.chunks_exact(4) {
+                colors.push(color4b(chunk[0], chunk[1], chunk[2], chunk[3]));
+            }
+            Ok((width_usize, height_usize, colors))
+        }
+        #[cfg(any(feature = "builder", feature = "png_source"))]
+        ImageSource::Png { bytes } => decode_png_to_colors(bytes),
+    }
+}
+
+#[cfg(any(feature = "builder", feature = "png_source"))]
+fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Color4b>)> {
     let mut cursor = Cursor::new(bytes);
-    let mut decoder = png::Decoder::new(&mut cursor);
-    decoder.set_transformations(png::Transformations::normalize_to_color8());
+    let mut decoder = Decoder::new(&mut cursor);
+    decoder.set_transformations(Transformations::normalize_to_color8());
     let mut reader = decoder
         .read_info()
         .map_err(|e| Error::new(ErrorKind::Other, format!("PNG decode error: {}", e)))?;
@@ -212,6 +248,7 @@ pub mod builder {
 
     #[derive(Clone)]
     /// Configuration for constructing an atlas from disk assets.
+    #[cfg(feature = "builder")]
     pub struct Config<'a> {
         /// Width of the atlas texture in pixels.
         pub texture_width: usize,
@@ -237,6 +274,7 @@ pub mod builder {
 
     impl Builder {
         /// Creates a builder using the provided configuration and assets.
+        #[cfg(feature = "builder")]
         pub fn from_config<'a>(config: &'a Config) -> Result<Builder> {
             let rp_config = rect_packer::Config {
                 width: config.texture_width as _,
@@ -362,11 +400,12 @@ pub mod builder {
             Ok(())
         }
 
+        #[cfg(any(feature = "builder", feature = "png_source"))]
         fn load_icon(path: &str) -> Result<(usize, usize, Vec<Color4b>)> {
             let mut f = File::open(path)?;
             let mut bytes = Vec::new();
             f.read_to_end(&mut bytes)?;
-            load_image_bytes(bytes.as_slice())
+            load_image_bytes(ImageSource::Png { bytes: bytes.as_slice() })
         }
 
         fn add_slot(&mut self, slot: Dimensioni) -> Result<Recti> {
@@ -515,7 +554,7 @@ impl AtlasHandle {
                 v
             }
             #[cfg(feature = "png_source")]
-            SourceFormat::Png => load_image_bytes(source.pixels).unwrap().2,
+            SourceFormat::Png => load_image_bytes(ImageSource::Png { bytes: source.pixels }).unwrap().2,
         };
 
         Self(Rc::new(RefCell::new(Atlas {

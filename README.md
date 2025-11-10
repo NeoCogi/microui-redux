@@ -33,7 +33,7 @@ ctx.window(&mut main_window, ContainerOption::NONE, |ui| {
 Widgets take an `Image` enum, which can reference either a slot **or** an uploaded texture at runtime:
 
 ```rust
-let texture = ctx.load_image_png(include_bytes!("assets/IMAGE.png"))?;
+let texture = ctx.load_image_from(ImageSource::Png { bytes: include_bytes!("assets/IMAGE.png") })?;
 ui.button_ex2(
     "External Image",
     Some(Image::Texture(texture)),
@@ -43,16 +43,21 @@ ui.button_ex2(
 
 - `Image::Slot` renders an entry from the atlas and benefits from batching.
 - `Image::Texture` targets renderer-owned textures. The command list flushes before drawing the texture so the backend can bind the correct resource.
-- Use `Context::load_image_rgba`/`load_image_png` and `Context::free_image` to manage the lifetime of external textures.
+- Use `Context::load_image_rgba`/`load_image_from` and `Context::free_image` to manage the lifetime of external textures.
+
+## Cargo features
+- `builder` *(default)* – enables the runtime atlas builder and PNG decoding helpers used by the examples.
+- `png_source` – allows serialized atlases and `ImageSource::Png { .. }` uploads to stay compressed.
+- `save-to-rust` – emits the current atlas as Rust code so it can be embedded in your binary.
+
+Disabling default features leaves only the raw RGBA upload path (`ImageSource::Raw { .. }`). The demos require `builder`, so run them with `--features builder` if you build with `--no-default-features`.
 
 ## Text rendering and layout
 - Container text widgets automatically center the font’s **baseline** inside each cell, and every line gets a small vertical pad so glyphs never touch the widget borders.
 - `Container::text_with_wrap` supports explicit wrapping modes (`TextWrap::None` or `TextWrap::Word`) and renders wrapped lines back-to-back inside an internal column, so the block keeps the outer padding without adding extra spacing between lines.
 - Custom drawing code can call `Container::draw_text` directly when precise placement is required, or use `draw_control_text` to get automatic alignment/clip handling.
 
-## Roadmap
-
-### Version 1.0
+### Version 3.0
 - [x] Use `std` (`Vec`, `parse`, ...)
 - [x] Containers contain clip stack and command list
 - [x] Move `begin_*`, `end_*` functions to closures

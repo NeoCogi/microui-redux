@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //
 // Copyright 2021-Present (c) Raja Lehtihet & Wael El Oraiby
 //

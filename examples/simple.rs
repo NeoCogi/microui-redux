@@ -2,7 +2,7 @@
 mod common;
 
 use application::Application;
-use common::*;
+use common::{atlas_assets, *};
 use microui_redux::*;
 
 struct State {
@@ -10,9 +10,9 @@ struct State {
 }
 
 fn main() {
-    let slots = vec![Dimensioni::new(64, 64), Dimensioni::new(24, 32), Dimensioni::new(64, 24)];
-    let atlas = builder::Builder::from_config(&application::atlas_config(&slots)).unwrap().to_atlas();
-    let mut fw = Application::new(atlas.clone(), move |gl, ctx| State {
+    let slots = atlas_assets::default_slots();
+    let atlas = atlas_assets::load_atlas(&slots);
+    let mut fw = Application::new(atlas.clone(), move |_gl, ctx| State {
         window: ctx.new_window("Hello Window", rect(40, 40, 300, 450)),
     })
     .unwrap();
