@@ -53,6 +53,7 @@
 use microui_redux::*;
 
 pub mod application;
+pub mod atlas_assets;
 pub mod glow_renderer;
 
 pub mod camera;

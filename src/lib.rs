@@ -63,6 +63,12 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(any(feature = "builder", feature = "png_source"))]
+use std::io::Cursor;
+
+#[cfg(any(feature = "builder", feature = "png_source"))]
+use png::{ColorType, Decoder};
+
 mod atlas;
 mod canvas;
 mod container;
@@ -734,6 +740,26 @@ pub enum Image {
     Texture(TextureId),
 }
 
+/// Describes image bytes that can be uploaded to a texture.
+#[derive(Copy, Clone)]
+pub enum ImageSource<'a> {
+    /// Raw RGBA pixels laid out as width × height × 4 bytes.
+    Raw {
+        /// Width in pixels.
+        width: i32,
+        /// Height in pixels.
+        height: i32,
+        /// Pixel buffer in RGBA8888 format.
+        pixels: &'a [u8],
+    },
+    #[cfg(any(feature = "builder", feature = "png_source"))]
+    /// PNG-compressed byte slice (requires the `png` feature).
+    Png {
+        /// Compressed PNG payload.
+        bytes: &'a [u8],
+    },
+}
+
 static UNCLIPPED_RECT: Recti = Recti {
     x: 0,
     y: 0,
@@ -1061,15 +1087,41 @@ impl<R: Renderer> Context<R> {
         self.canvas.free_texture(id);
     }
 
+    /// Uploads texture data described by `source`. PNG decoding is only available when the
+    /// `png_source` (or `builder`) feature is enabled.
+    pub fn load_image_from(&mut self, source: ImageSource) -> Result<TextureId, String> {
+        match source {
+            ImageSource::Raw { width, height, pixels } => {
+                Self::assert_rgba_len(width, height, pixels.len())?;
+                Ok(self.load_image_rgba(width, height, pixels))
+            }
+            #[cfg(any(feature = "builder", feature = "png_source"))]
+            ImageSource::Png { bytes } => {
+                let (width, height, rgba) = Self::decode_png(bytes)?;
+                Ok(self.load_image_rgba(width, height, rgba.as_slice()))
+            }
+        }
+    }
+
+    fn assert_rgba_len(width: i32, height: i32, len: usize) -> Result<(), String> {
+        if width <= 0 || height <= 0 {
+            return Err(String::from("Image dimensions must be positive"));
+        }
+        let expected = width as usize * height as usize * 4;
+        if len != expected {
+            return Err(format!("Expected {} RGBA bytes, received {}", expected, len));
+        }
+        Ok(())
+    }
+
     #[cfg(any(feature = "builder", feature = "png_source"))]
-    /// Loads a PNG blob, converts it to RGBA, and uploads it as a texture.
-    pub fn load_image_png(&mut self, data: &[u8]) -> Result<TextureId, String> {
-        use png::{ColorType, Decoder};
-        use std::io::Cursor;
-        let cursor = Cursor::new(data);
+    fn decode_png(bytes: &[u8]) -> Result<(i32, i32, Vec<u8>), String> {
+        let cursor = Cursor::new(bytes);
         let decoder = Decoder::new(cursor);
         let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
-        let buf_size = reader.output_buffer_size().ok_or_else(|| "PNG decoder did not report output size".to_string())?;
+        let buf_size = reader
+            .output_buffer_size()
+            .ok_or_else(|| "PNG decoder did not report output size".to_string())?;
         let mut buf = vec![0; buf_size];
         let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
         let raw = &buf[..info.buffer_size()];
@@ -1098,6 +1150,6 @@ impl<R: Renderer> Context<R> {
                 return Err("Unsupported PNG color type".into());
             }
         }
-        Ok(self.load_image_rgba(info.width as i32, info.height as i32, &rgba))
+        Ok((info.width as i32, info.height as i32, rgba))
     }
 }

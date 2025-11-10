@@ -29,6 +29,26 @@ rand = "0.9"
 sdl2 = "0.38"
 glow = "0.16"
 
+[[bin]]
+name = "atlas_export"
+path = "tools/atlas_export.rs"
+required-features = ["builder", "save-to-rust"]
+
+# Examples listed explicitly to ensure shared assets compile across feature sets.
+[[example]]
+name = "simple"
+path = "examples/simple.rs"
+required-features = []
+
+[[example]]
+name = "demo-full"
+path = "examples/demo-full.rs"
+
+[[example]]
+name = "baseline_probe"
+path = "examples/baseline_probe.rs"
+required-features = ["builder"]
+
 # [profile.dev]
 # overflow-checks = false
 # opt-level = "z"

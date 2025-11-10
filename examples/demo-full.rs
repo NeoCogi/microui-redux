@@ -1,7 +1,7 @@
 #[path = "./common/mod.rs"]
 mod common;
 
-use common::*;
+use common::{atlas_assets, *};
 //
 
 use application::*;
@@ -19,8 +19,7 @@ use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 
 use microui_redux::WindowHandle;
-use rand::rngs::ThreadRng;
-use rand::*;
+use rand::{rng, rngs::ThreadRng, Rng};
 
 pub use glow_renderer::{create_program, get_active_program_attributes, get_active_program_uniforms};
 
@@ -159,12 +158,12 @@ impl<'a> State<'a> {
         let pm_suzane = Obj::from_byte_stream(SUZANE).unwrap().to_polymesh();
         let bounds = pm_suzane.calculate_bounding_box();
         #[cfg(any(feature = "builder", feature = "png_source"))]
-        let image_texture = ctx.load_image_png(include_bytes!("./FACEPALM.png")).ok();
+        let image_texture = ctx.load_image_from(ImageSource::Png { bytes: include_bytes!("./FACEPALM.png") }).ok();
         #[cfg(not(any(feature = "builder", feature = "png_source")))]
         let image_texture = None;
         Self {
             gl,
-            rng: Rc::new(RefCell::new(thread_rng())),
+            rng: Rc::new(RefCell::new(rng())),
             slots,
             image_texture,
             style: Style::default(),
@@ -426,7 +425,7 @@ impl<'a> State<'a> {
                         WidgetOption::NONE,
                         Rc::new(move |_x, _y| {
                             let mut rm = rng.borrow_mut();
-                            color4b(rm.gen(), rm.gen(), rm.gen(), rm.gen())
+                            color4b(rm.random(), rm.random(), rm.random(), rm.random())
                         }),
                     );
                 });
@@ -753,13 +752,16 @@ impl<'a> State<'a> {
 
 const SUZANE: &[u8; 63204] = include_bytes!("../assets/suzane.obj");
 fn main() {
-    let slots_orig = vec![Dimensioni::new(64, 64), Dimensioni::new(24, 32), Dimensioni::new(64, 24)];
-    let mut atlas = builder::Builder::from_config(&atlas_config(&slots_orig)).unwrap().to_atlas();
+    let slots_orig = atlas_assets::default_slots();
+    let mut atlas = atlas_assets::load_atlas(&slots_orig);
     let slots = atlas.clone_slot_table();
     atlas.render_slot(slots[0], Rc::new(|_x, _y| color4b(0xFF, 0, 0, 0xFF)));
     atlas.render_slot(slots[1], Rc::new(|_x, _y| color4b(0, 0xFF, 0, 0xFF)));
     atlas.render_slot(slots[2], Rc::new(|_x, _y| color4b(0, 0, 0xFF, 0xFF)));
-    builder::Builder::save_png_image(atlas.clone(), "atlas.png").unwrap();
+    #[cfg(feature = "builder")]
+    {
+        builder::Builder::save_png_image(atlas.clone(), "atlas.png").unwrap();
+    }
 
     let mut fw = Application::new(atlas.clone(), move |gl, ctx| {
         let slots = atlas.clone_slot_table();
