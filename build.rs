@@ -1,6 +1,7 @@
 use std::{
     env,
     error::Error,
+    fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -23,15 +24,20 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);
     let generated = out_dir.join("prebuilt_atlas.rs");
+    let atlas_target_dir = out_dir.join("atlas_export_target");
+    fs::create_dir_all(&atlas_target_dir)?;
 
-    run_atlas_export(&generated)?;
+    run_atlas_export(&generated, &atlas_target_dir)?;
     println!("cargo:rerun-if-changed=examples/common/atlas_assets.rs");
     Ok(())
 }
 
-fn run_atlas_export(output: &Path) -> Result<(), Box<dyn Error>> {
+fn run_atlas_export(output: &Path, target_dir: &Path) -> Result<(), Box<dyn Error>> {
     let mut cmd = Command::new("cargo");
-    cmd.env("MICROUI_BUILD_TOOL", "1").args([
+    // Use a dedicated target dir so release builds don't deadlock on Cargo's global target lock.
+    cmd.env("MICROUI_BUILD_TOOL", "1")
+        .env("CARGO_TARGET_DIR", target_dir)
+        .args([
         "run",
         "--bin",
         "atlas_export",
