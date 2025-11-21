@@ -154,16 +154,12 @@ pub struct RendererHandle<R: Renderer> {
 
 // seems there's a bug in #[derive(Clone)] as it's unable to induce that Arc is sufficient
 impl<R: Renderer> Clone for RendererHandle<R> {
-    fn clone(&self) -> Self {
-        Self { handle: self.handle.clone() }
-    }
+    fn clone(&self) -> Self { Self { handle: self.handle.clone() } }
 }
 
 impl<R: Renderer> RendererHandle<R> {
     /// Wraps a renderer inside an [`Arc<RwLock<...>>`] so it can be shared.
-    pub fn new(renderer: R) -> Self {
-        Self { handle: Arc::new(RwLock::new(renderer)) }
-    }
+    pub fn new(renderer: R) -> Self { Self { handle: Arc::new(RwLock::new(renderer)) } }
 
     /// Executes the provided closure with a shared reference to the renderer.
     pub fn scope<Res, F: Fn(&R) -> Res>(&self, f: F) -> Res {
@@ -276,21 +272,13 @@ bitflags! {
 
 impl ResourceState {
     /// Returns `true` if the widget changed its bound value.
-    pub fn is_changed(&self) -> bool {
-        self.intersects(Self::CHANGE)
-    }
+    pub fn is_changed(&self) -> bool { self.intersects(Self::CHANGE) }
     /// Returns `true` if the widget signaled submission.
-    pub fn is_submitted(&self) -> bool {
-        self.intersects(Self::SUBMIT)
-    }
+    pub fn is_submitted(&self) -> bool { self.intersects(Self::SUBMIT) }
     /// Returns `true` if the widget is active.
-    pub fn is_active(&self) -> bool {
-        self.intersects(Self::ACTIVE)
-    }
+    pub fn is_active(&self) -> bool { self.intersects(Self::ACTIVE) }
     /// Returns `true` if the state contains no flags.
-    pub fn is_none(&self) -> bool {
-        self.bits() == 0
-    }
+    pub fn is_none(&self) -> bool { self.bits() == 0 }
 }
 
 bitflags! {
@@ -362,62 +350,38 @@ impl NodeState {
 
 impl ContainerOption {
     /// Returns `true` if the option requests automatic sizing.
-    pub fn is_auto_sizing(&self) -> bool {
-        self.intersects(Self::AUTO_SIZE)
-    }
+    pub fn is_auto_sizing(&self) -> bool { self.intersects(Self::AUTO_SIZE) }
 
     /// Returns `true` if the title bar should be hidden.
-    pub fn has_no_title(&self) -> bool {
-        self.intersects(Self::NO_TITLE)
-    }
+    pub fn has_no_title(&self) -> bool { self.intersects(Self::NO_TITLE) }
 
     /// Returns `true` if the close button should be hidden.
-    pub fn has_no_close(&self) -> bool {
-        self.intersects(Self::NO_CLOSE)
-    }
+    pub fn has_no_close(&self) -> bool { self.intersects(Self::NO_CLOSE) }
 
     /// Returns `true` if scrolling is disabled.
-    pub fn has_no_scroll(&self) -> bool {
-        self.intersects(Self::NO_SCROLL)
-    }
+    pub fn has_no_scroll(&self) -> bool { self.intersects(Self::NO_SCROLL) }
 
     /// Returns `true` if the container is fixed-size.
-    pub fn is_fixed(&self) -> bool {
-        self.intersects(Self::NO_RESIZE)
-    }
+    pub fn is_fixed(&self) -> bool { self.intersects(Self::NO_RESIZE) }
     /// Returns `true` if the outer frame is hidden.
-    pub fn has_no_frame(&self) -> bool {
-        self.intersects(Self::NO_FRAME)
-    }
+    pub fn has_no_frame(&self) -> bool { self.intersects(Self::NO_FRAME) }
 }
 
 impl WidgetOption {
     /// Returns `true` if the widget should keep focus while held.
-    pub fn is_holding_focus(&self) -> bool {
-        self.intersects(WidgetOption::HOLD_FOCUS)
-    }
+    pub fn is_holding_focus(&self) -> bool { self.intersects(WidgetOption::HOLD_FOCUS) }
 
     /// Returns `true` if the widget should not interact with scrolling.
-    pub fn has_no_scroll(&self) -> bool {
-        self.intersects(WidgetOption::NO_SCROLL)
-    }
+    pub fn has_no_scroll(&self) -> bool { self.intersects(WidgetOption::NO_SCROLL) }
 
     /// Returns `true` if the widget is non-interactive.
-    pub fn is_not_interactive(&self) -> bool {
-        self.intersects(WidgetOption::NO_INTERACT)
-    }
+    pub fn is_not_interactive(&self) -> bool { self.intersects(WidgetOption::NO_INTERACT) }
     /// Returns `true` if the widget prefers right alignment.
-    pub fn is_aligned_right(&self) -> bool {
-        self.intersects(WidgetOption::ALIGN_RIGHT)
-    }
+    pub fn is_aligned_right(&self) -> bool { self.intersects(WidgetOption::ALIGN_RIGHT) }
     /// Returns `true` if the widget prefers centered alignment.
-    pub fn is_aligned_center(&self) -> bool {
-        self.intersects(WidgetOption::ALIGN_CENTER)
-    }
+    pub fn is_aligned_center(&self) -> bool { self.intersects(WidgetOption::ALIGN_CENTER) }
     /// Returns `true` if the option set is empty.
-    pub fn is_none(&self) -> bool {
-        self.bits() == 0
-    }
+    pub fn is_none(&self) -> bool { self.bits() == 0 }
 }
 
 bitflags! {
@@ -437,21 +401,13 @@ bitflags! {
 
 impl MouseButton {
     /// Returns `true` if the middle mouse button is pressed.
-    pub fn is_middle(&self) -> bool {
-        self.intersects(Self::MIDDLE)
-    }
+    pub fn is_middle(&self) -> bool { self.intersects(Self::MIDDLE) }
     /// Returns `true` if the right mouse button is pressed.
-    pub fn is_right(&self) -> bool {
-        self.intersects(Self::RIGHT)
-    }
+    pub fn is_right(&self) -> bool { self.intersects(Self::RIGHT) }
     /// Returns `true` if the left mouse button is pressed.
-    pub fn is_left(&self) -> bool {
-        self.intersects(Self::LEFT)
-    }
+    pub fn is_left(&self) -> bool { self.intersects(Self::LEFT) }
     /// Returns `true` if no mouse buttons are pressed.
-    pub fn is_none(&self) -> bool {
-        self.bits() == 0
-    }
+    pub fn is_none(&self) -> bool { self.bits() == 0 }
 }
 
 bitflags! {
@@ -475,29 +431,17 @@ bitflags! {
 
 impl KeyMode {
     /// Returns `true` if no modifiers are active.
-    pub fn is_none(&self) -> bool {
-        self.bits() == 0
-    }
+    pub fn is_none(&self) -> bool { self.bits() == 0 }
     /// Returns `true` if Return/Enter is held.
-    pub fn is_return(&self) -> bool {
-        self.intersects(Self::RETURN)
-    }
+    pub fn is_return(&self) -> bool { self.intersects(Self::RETURN) }
     /// Returns `true` if Backspace is held.
-    pub fn is_backspace(&self) -> bool {
-        self.intersects(Self::BACKSPACE)
-    }
+    pub fn is_backspace(&self) -> bool { self.intersects(Self::BACKSPACE) }
     /// Returns `true` if Alt is held.
-    pub fn is_alt(&self) -> bool {
-        self.intersects(Self::ALT)
-    }
+    pub fn is_alt(&self) -> bool { self.intersects(Self::ALT) }
     /// Returns `true` if Control is held.
-    pub fn is_ctrl(&self) -> bool {
-        self.intersects(Self::CTRL)
-    }
+    pub fn is_ctrl(&self) -> bool { self.intersects(Self::CTRL) }
     /// Returns `true` if Shift is held.
-    pub fn is_shift(&self) -> bool {
-        self.intersects(Self::SHIFT)
-    }
+    pub fn is_shift(&self) -> bool { self.intersects(Self::SHIFT) }
 }
 
 bitflags! {
@@ -519,25 +463,15 @@ bitflags! {
 
 impl KeyCode {
     /// Returns `true` if no navigation key is pressed.
-    pub fn is_none(&self) -> bool {
-        self.bits() == 0
-    }
+    pub fn is_none(&self) -> bool { self.bits() == 0 }
     /// Returns `true` if up is pressed.
-    pub fn is_up(&self) -> bool {
-        self.intersects(Self::UP)
-    }
+    pub fn is_up(&self) -> bool { self.intersects(Self::UP) }
     /// Returns `true` if down is pressed.
-    pub fn is_down(&self) -> bool {
-        self.intersects(Self::DOWN)
-    }
+    pub fn is_down(&self) -> bool { self.intersects(Self::DOWN) }
     /// Returns `true` if left is pressed.
-    pub fn is_left(&self) -> bool {
-        self.intersects(Self::LEFT)
-    }
+    pub fn is_left(&self) -> bool { self.intersects(Self::LEFT) }
     /// Returns `true` if right is pressed.
-    pub fn is_right(&self) -> bool {
-        self.intersects(Self::RIGHT)
-    }
+    pub fn is_right(&self) -> bool { self.intersects(Self::RIGHT) }
 }
 
 #[derive(Clone, Debug)]
@@ -578,34 +512,22 @@ impl Default for Input {
 
 impl Input {
     /// Returns the mouse position relative to the container that currently owns focus.
-    pub fn rel_mouse_pos(&self) -> Vec2i {
-        self.rel_mouse_pos
-    }
+    pub fn rel_mouse_pos(&self) -> Vec2i { self.rel_mouse_pos }
 
     /// Returns the state of all modifier keys.
-    pub fn key_state(&self) -> KeyMode {
-        self.key_down
-    }
+    pub fn key_state(&self) -> KeyMode { self.key_down }
 
     /// Returns the state of all navigation keys.
-    pub fn key_codes(&self) -> KeyCode {
-        self.key_code_down
-    }
+    pub fn key_codes(&self) -> KeyCode { self.key_code_down }
 
     /// Returns the accumulated UTF-8 text entered this frame.
-    pub fn text_input(&self) -> &str {
-        &self.input_text
-    }
+    pub fn text_input(&self) -> &str { &self.input_text }
 
     /// Updates the current mouse pointer position.
-    pub fn mousemove(&mut self, x: i32, y: i32) {
-        self.mouse_pos = vec2(x, y);
-    }
+    pub fn mousemove(&mut self, x: i32, y: i32) { self.mouse_pos = vec2(x, y); }
 
     /// Returns the currently held mouse buttons.
-    pub fn get_mouse_buttons(&self) -> MouseButton {
-        self.mouse_down
-    }
+    pub fn get_mouse_buttons(&self) -> MouseButton { self.mouse_down }
 
     /// Records that the specified mouse button was pressed.
     pub fn mousedown(&mut self, x: i32, y: i32, btn: MouseButton) {
@@ -633,9 +555,7 @@ impl Input {
     }
 
     /// Records that a modifier key was released.
-    pub fn keyup(&mut self, key: KeyMode) {
-        self.key_down &= !key;
-    }
+    pub fn keyup(&mut self, key: KeyMode) { self.key_down &= !key; }
 
     /// Records that a navigation key was pressed.
     pub fn keydown_code(&mut self, code: KeyCode) {
@@ -644,9 +564,7 @@ impl Input {
     }
 
     /// Records that a navigation key was released.
-    pub fn keyup_code(&mut self, code: KeyCode) {
-        self.key_code_down &= !code;
-    }
+    pub fn keyup_code(&mut self, code: KeyCode) { self.key_code_down &= !code; }
 
     /// Appends UTF-8 text to the input buffer.
     pub fn text(&mut self, text: &str) {
@@ -726,9 +644,7 @@ pub struct TextureId(u32);
 
 impl TextureId {
     /// Returns the raw numeric identifier stored inside the handle.
-    pub fn raw(self) -> u32 {
-        self.0
-    }
+    pub fn raw(self) -> u32 { self.0 }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -799,47 +715,31 @@ impl Default for Style {
 }
 
 /// Convenience constructor for [`Vec2i`].
-pub fn vec2(x: i32, y: i32) -> Vec2i {
-    Vec2i { x, y }
-}
+pub fn vec2(x: i32, y: i32) -> Vec2i { Vec2i { x, y } }
 
 /// Convenience constructor for [`Recti`].
-pub fn rect(x: i32, y: i32, w: i32, h: i32) -> Recti {
-    Recti { x, y, width: w, height: h }
-}
+pub fn rect(x: i32, y: i32, w: i32, h: i32) -> Recti { Recti { x, y, width: w, height: h } }
 
 /// Convenience constructor for [`Color`].
-pub fn color(r: u8, g: u8, b: u8, a: u8) -> Color {
-    Color { r, g, b, a }
-}
+pub fn color(r: u8, g: u8, b: u8, a: u8) -> Color { Color { r, g, b, a } }
 
 /// Expands (or shrinks) a rectangle uniformly on all sides.
-pub fn expand_rect(r: Recti, n: i32) -> Recti {
-    rect(r.x - n, r.y - n, r.width + n * 2, r.height + n * 2)
-}
+pub fn expand_rect(r: Recti, n: i32) -> Recti { rect(r.x - n, r.y - n, r.width + n * 2, r.height + n * 2) }
 
 #[derive(Clone)]
 /// Shared handle to a container that can be embedded inside windows or panels.
 pub struct ContainerHandle(Rc<RefCell<Container>>);
 
 impl ContainerHandle {
-    pub(crate) fn new(container: Container) -> Self {
-        Self(Rc::new(RefCell::new(container)))
-    }
+    pub(crate) fn new(container: Container) -> Self { Self(Rc::new(RefCell::new(container))) }
 
-    pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
-        self.0.borrow_mut().render(canvas)
-    }
+    pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) { self.0.borrow_mut().render(canvas) }
 
     /// Returns an immutable borrow of the underlying container.
-    pub fn inner<'a>(&'a self) -> Ref<'a, Container> {
-        self.0.borrow()
-    }
+    pub fn inner<'a>(&'a self) -> Ref<'a, Container> { self.0.borrow() }
 
     /// Returns a mutable borrow of the underlying container.
-    pub fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Container> {
-        self.0.borrow_mut()
-    }
+    pub fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Container> { self.0.borrow_mut() }
 }
 
 /// Primary entry point used to drive the UI over a renderer implementation.
@@ -880,9 +780,7 @@ impl<R: Renderer> Context<R> {
 
 impl<R: Renderer> Context<R> {
     /// Begins a new UI frame and prepares the canvas for drawing.
-    pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
-        self.canvas.begin(width, height, clr);
-    }
+    pub fn begin(&mut self, width: i32, height: i32, clr: Color) { self.canvas.begin(width, height, clr); }
 
     /// Finishes the UI frame and emits all draw commands to the renderer.
     pub fn end(&mut self) {
@@ -891,6 +789,9 @@ impl<R: Renderer> Context<R> {
         }
         self.canvas.end()
     }
+
+    /// Returns a handle to the underlying renderer.
+    pub fn renderer_handle(&self) -> RendererHandle<R> { self.canvas.renderer_handle() }
 
     #[inline(never)]
     fn frame_begin(&mut self) {
@@ -957,9 +858,7 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Creates a popup window that appears under the mouse cursor.
-    pub fn new_popup(&mut self, name: &str) -> WindowHandle {
-        WindowHandle::popup(name, self.canvas.get_atlas(), &self.style, self.input.clone())
-    }
+    pub fn new_popup(&mut self, name: &str) -> WindowHandle { WindowHandle::popup(name, self.canvas.get_atlas(), &self.style, self.input.clone()) }
 
     /// Creates a standalone panel that can be embedded inside other windows.
     pub fn new_panel(&mut self, name: &str) -> ContainerHandle {
@@ -1035,9 +934,7 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Marks a dialog window as open for the next frame.
-    pub fn open_dialog(&mut self, window: &mut WindowHandle) {
-        window.inner_mut().win_state = WindowState::Open;
-    }
+    pub fn open_dialog(&mut self, window: &mut WindowHandle) { window.inner_mut().win_state = WindowState::Open; }
 
     /// Renders a dialog window if it is currently open.
     pub fn dialog<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, opt: ContainerOption, f: F) {
@@ -1068,24 +965,16 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Replaces the current UI style.
-    pub fn set_style(&mut self, style: &Style) {
-        self.style = style.clone()
-    }
+    pub fn set_style(&mut self, style: &Style) { self.style = style.clone() }
 
     /// Returns the underlying canvas used for rendering.
-    pub fn canvas(&self) -> &Canvas<R> {
-        &self.canvas
-    }
+    pub fn canvas(&self) -> &Canvas<R> { &self.canvas }
 
     /// Uploads an RGBA image to the renderer and returns its [`TextureId`].
-    pub fn load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId {
-        self.canvas.load_texture_rgba(width, height, pixels)
-    }
+    pub fn load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId { self.canvas.load_texture_rgba(width, height, pixels) }
 
     /// Deletes a previously uploaded texture.
-    pub fn free_image(&mut self, id: TextureId) {
-        self.canvas.free_texture(id);
-    }
+    pub fn free_image(&mut self, id: TextureId) { self.canvas.free_texture(id); }
 
     /// Uploads texture data described by `source`. PNG decoding is only available when the
     /// `png_source` (or `builder`) feature is enabled.

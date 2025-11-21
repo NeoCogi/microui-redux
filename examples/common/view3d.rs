@@ -126,9 +126,7 @@ impl View3D {
         self.update(MouseEvent::None);
     }
 
-    pub fn get_navigation_mode(&self) -> NavigationMode {
-        self.nav_mode
-    }
+    pub fn get_navigation_mode(&self) -> NavigationMode { self.nav_mode }
     pub fn set_navigation_mode(&mut self, nav_mode: NavigationMode) {
         if nav_mode != self.nav_mode {
             self.nav_mode = nav_mode;
@@ -136,15 +134,9 @@ impl View3D {
         }
     }
 
-    pub fn pvm(&self) -> Mat4f {
-        self.pvm
-    }
+    pub fn pvm(&self) -> Mat4f { self.pvm }
 
-    pub fn projection_matrix(&self) -> Mat4f {
-        self.camera.projection_matrix().clone()
-    }
+    pub fn projection_matrix(&self) -> Mat4f { self.camera.projection_matrix().clone() }
 
-    pub fn view_matrix(&self) -> Mat4f {
-        self.camera.view_matrix().clone()
-    }
+    pub fn view_matrix(&self) -> Mat4f { self.camera.view_matrix().clone() }
 }

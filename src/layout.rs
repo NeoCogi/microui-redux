@@ -76,9 +76,7 @@ impl SizePolicy {
 }
 
 impl Default for SizePolicy {
-    fn default() -> Self {
-        SizePolicy::Auto
-    }
+    fn default() -> Self { SizePolicy::Auto }
 }
 
 #[derive(Clone, Default)]
@@ -95,9 +93,7 @@ enum LayoutDirection {
 }
 
 impl Default for LayoutDirection {
-    fn default() -> Self {
-        LayoutDirection::Row(SpanState::default())
-    }
+    fn default() -> Self { LayoutDirection::Row(SpanState::default()) }
 }
 
 impl LayoutDirection {
@@ -139,9 +135,7 @@ impl LayoutManager {
         self.push_layout(body, scroll);
     }
 
-    pub fn set_default_cell_height(&mut self, height: i32) {
-        self.default_cell_height = height.max(0);
-    }
+    pub fn set_default_cell_height(&mut self, height: i32) { self.default_cell_height = height.max(0); }
 
     fn push_layout(&mut self, body: Recti, scroll: Vec2i) {
         let mut layout = Layout {
@@ -158,29 +152,17 @@ impl LayoutManager {
         self.row(&[SizePolicy::Auto], SizePolicy::Auto);
     }
 
-    fn top(&self) -> &Layout {
-        self.stack.last().expect("Layout stack should never be empty when accessed")
-    }
+    fn top(&self) -> &Layout { self.stack.last().expect("Layout stack should never be empty when accessed") }
 
-    fn top_mut(&mut self) -> &mut Layout {
-        self.stack.last_mut().expect("Layout stack should never be empty when accessed")
-    }
+    fn top_mut(&mut self) -> &mut Layout { self.stack.last_mut().expect("Layout stack should never be empty when accessed") }
 
-    pub fn current_body(&self) -> Recti {
-        self.top().body
-    }
+    pub fn current_body(&self) -> Recti { self.top().body }
 
-    pub fn current_max(&self) -> Option<Vec2i> {
-        self.top().max
-    }
+    pub fn current_max(&self) -> Option<Vec2i> { self.top().max }
 
-    pub fn pop_scope(&mut self) {
-        self.stack.pop();
-    }
+    pub fn pop_scope(&mut self) { self.stack.pop(); }
 
-    pub fn adjust_indent(&mut self, delta: i32) {
-        self.top_mut().indent += delta;
-    }
+    pub fn adjust_indent(&mut self, delta: i32) { self.top_mut().indent += delta; }
 
     pub fn begin_column(&mut self) {
         let layout_rect = self.next();
@@ -238,13 +220,9 @@ impl LayoutManager {
         layout.position = vec2(layout.indent, layout.next_row);
     }
 
-    pub(crate) fn snapshot_row_state(&self) -> RowSnapshot {
-        RowSnapshot::from_layout(self.top())
-    }
+    pub(crate) fn snapshot_row_state(&self) -> RowSnapshot { RowSnapshot::from_layout(self.top()) }
 
-    pub(crate) fn restore_row_state(&mut self, snapshot: RowSnapshot) {
-        snapshot.apply(self.top_mut());
-    }
+    pub(crate) fn restore_row_state(&mut self, snapshot: RowSnapshot) { snapshot.apply(self.top_mut()); }
 
     fn resolve_horizontal(&self, cursor_x: i32, policy: SizePolicy, default_width: i32) -> i32 {
         // Amount of horizontal space left in the current scope after the cursor.
