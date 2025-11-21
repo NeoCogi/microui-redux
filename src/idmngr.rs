@@ -64,28 +64,18 @@ pub struct IdManager {
 
 impl IdManager {
     /// Creates a fresh ID manager.
-    pub fn new() -> Self {
-        Self { last_id: None, id_stack: Vec::new() }
-    }
+    pub fn new() -> Self { Self { last_id: None, id_stack: Vec::new() } }
 
     /// Returns the depth of the ID stack.
-    pub fn len(&self) -> usize {
-        self.id_stack.len()
-    }
+    pub fn len(&self) -> usize { self.id_stack.len() }
 
     /// Returns the most recently generated ID.
-    pub fn last_id(&self) -> Option<Id> {
-        self.last_id
-    }
+    pub fn last_id(&self) -> Option<Id> { self.last_id }
 
     /// Pushes a specific ID on the stack to namespace future IDs.
-    pub fn push_id(&mut self, id: Id) {
-        self.id_stack.push(id)
-    }
+    pub fn push_id(&mut self, id: Id) { self.id_stack.push(id) }
 
-    fn hash_step(h: u32, n: u32) -> u32 {
-        (h ^ n).wrapping_mul(16777619 as u32)
-    }
+    fn hash_step(h: u32, n: u32) -> u32 { (h ^ n).wrapping_mul(16777619 as u32) }
 
     fn hash_u32(hash_0: &mut Id, orig_id: u32) {
         let bytes = orig_id.to_be_bytes();
@@ -153,7 +143,5 @@ impl IdManager {
     }
 
     /// Pops the most recent ID namespace from the stack.
-    pub fn pop_id(&mut self) {
-        self.id_stack.pop();
-    }
+    pub fn pop_id(&mut self) { self.id_stack.pop(); }
 }

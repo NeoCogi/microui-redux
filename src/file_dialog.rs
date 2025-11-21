@@ -45,9 +45,7 @@ pub struct FileDialogState {
 
 impl FileDialogState {
     /// Returns the selected file name if the dialog completed successfully.
-    pub fn file_name(&self) -> &Option<String> {
-        &self.file_name
-    }
+    pub fn file_name(&self) -> &Option<String> { &self.file_name }
 
     fn list_folders_files(p: &Path, folders: &mut Vec<String>, files: &mut Vec<String>) {
         folders.clear();
@@ -89,9 +87,7 @@ impl FileDialogState {
     }
 
     /// Marks the dialog as open for the next frame.
-    pub fn open<R: Renderer>(&mut self, ctx: &mut Context<R>) {
-        ctx.open_dialog(&mut self.win);
-    }
+    pub fn open<R: Renderer>(&mut self, ctx: &mut Context<R>) { ctx.open_dialog(&mut self.win); }
 
     /// Renders the dialog and updates the selected file when confirmed.
     pub fn eval<R: Renderer>(&mut self, ctx: &mut Context<R>) {

@@ -81,9 +81,7 @@ pub trait RectTrait {
     fn right(&self) -> i32;
 
     /// Returns the area of the rectangle.
-    fn area(&self) -> i32 {
-        (self.bottom() - self.top()) * (self.right() - self.left())
-    }
+    fn area(&self) -> i32 { (self.bottom() - self.top()) * (self.right() - self.left()) }
 
     /// Check if intersection of two rectangles is non empty.
     fn intersects(&self, other: &Self) -> bool {
@@ -103,31 +101,21 @@ pub trait RectTrait {
     }
 
     /// Check if given pixel is inside this rectangle.
-    fn contains_point(&self, x: i32, y: i32) -> bool {
-        self.left() <= x && x < self.right() && self.top() <= y && y < self.bottom()
-    }
+    fn contains_point(&self, x: i32, y: i32) -> bool { self.left() <= x && x < self.right() && self.top() <= y && y < self.bottom() }
 }
 
 impl RectTrait for Recti {
     #[inline(always)]
-    fn top(&self) -> i32 {
-        self.y
-    }
+    fn top(&self) -> i32 { self.y }
 
     #[inline(always)]
-    fn bottom(&self) -> i32 {
-        self.y + self.height
-    }
+    fn bottom(&self) -> i32 { self.y + self.height }
 
     #[inline(always)]
-    fn left(&self) -> i32 {
-        self.x
-    }
+    fn left(&self) -> i32 { self.x }
 
     #[inline(always)]
-    fn right(&self) -> i32 {
-        self.x + self.width
-    }
+    fn right(&self) -> i32 { self.x + self.width }
 }
 
 /// `Packer` is the main structure in this crate. It holds packing context.
@@ -150,9 +138,7 @@ impl Packer {
     }
 
     /// Get config that this packer was created with.
-    pub fn config(&self) -> Config {
-        self.config
-    }
+    pub fn config(&self) -> Config { self.config }
 
     /// Pack new rectangle. Returns position of the newly added rectangle. If there is not enough space returns `None`.
     /// If it returns `None` you can still try to add smaller rectangles.
@@ -195,9 +181,7 @@ struct Skyline {
 
 impl Skyline {
     #[inline(always)]
-    pub fn right(&self) -> i32 {
-        self.left + self.width
-    }
+    pub fn right(&self) -> i32 { self.left + self.width }
 }
 
 /// Similar to `Packer` but does not add any padding between rectangles.
@@ -226,9 +210,7 @@ impl DensePacker {
     }
 
     /// Get size that this packer was created with.
-    pub fn size(&self) -> (i32, i32) {
-        (self.width, self.height)
-    }
+    pub fn size(&self) -> (i32, i32) { (self.width, self.height) }
 
     /// Set new size for this packer.
     ///
@@ -266,9 +248,7 @@ impl DensePacker {
     }
 
     /// Check if rectangle with the specified size can be added.
-    pub fn can_pack(&self, width: i32, height: i32, allow_rotation: bool) -> bool {
-        self.find_skyline(width, height, allow_rotation).is_some()
-    }
+    pub fn can_pack(&self, width: i32, height: i32, allow_rotation: bool) -> bool { self.find_skyline(width, height, allow_rotation).is_some() }
 
     // return `rect` if rectangle (w, h) can fit the skyline started at `i`
     fn can_put(&self, mut i: usize, w: i32, h: i32) -> Option<Recti> {

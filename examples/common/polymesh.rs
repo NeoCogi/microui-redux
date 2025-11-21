@@ -32,6 +32,8 @@
 // TODO: have the polygon points to 2 arrays: vertices and triangles
 //
 use super::*;
+
+#[cfg(feature = "example-glow")]
 use glow_renderer::PolymeshTrait;
 
 use std::iter::*;
@@ -89,9 +91,7 @@ impl<'a> PolyMesh {
             polys: Vec::new(),
         }
     }
-    pub fn poly_count(&self) -> usize {
-        self.polys.len()
-    }
+    pub fn poly_count(&self) -> usize { self.polys.len() }
     pub fn get_poly(&'a self, f: usize) -> PolygonIterator<'a> {
         PolygonIterator {
             mesh: self,
@@ -135,8 +135,18 @@ impl<'a> PolyMesh {
         self.polys.push(Polygon { len, start });
     }
 
-    pub fn polys(&'a self) -> PolyMeshIterator<'a> {
-        PolyMeshIterator { mesh: self, poly_id: 0 }
+    pub fn polys(&'a self) -> PolyMeshIterator<'a> { PolyMeshIterator { mesh: self, poly_id: 0 } }
+
+    pub fn vertex_position(&self, index: usize) -> Vec3f { self.v_positions[index].position }
+
+    pub fn vertex_normal(&self, index: usize) -> Vec3f { self.v_normals[index] }
+
+    pub fn vertex_uv(&self, index: usize) -> Vec2f {
+        if self.v_tex.len() > index {
+            self.v_tex[index]
+        } else {
+            Vec2f::zero()
+        }
     }
 }
 
@@ -162,45 +172,32 @@ impl<'a> Iterator for PolygonIterator<'a> {
 }
 
 impl<'a> PolygonIterator<'a> {
-    pub fn vertex_count(&self) -> usize {
-        self.mesh.polys[self.poly_id].len
-    }
+    pub fn vertex_count(&self) -> usize { self.mesh.polys[self.poly_id].len }
 }
 
+#[cfg(feature = "example-glow")]
 impl glow_renderer::PolymeshVertex for &PolyVertex {
-    fn pos(&self) -> usize {
-        self.pos
-    }
-    fn normal(&self) -> usize {
-        self.normal
-    }
-    fn tex(&self) -> usize {
-        self.tex
-    }
+    fn pos(&self) -> usize { self.pos }
+    fn normal(&self) -> usize { self.normal }
+    fn tex(&self) -> usize { self.tex }
 }
 
+#[cfg(feature = "example-glow")]
 impl<'a> glow_renderer::PolymeshPolygon for PolygonIterator<'a> {
-    fn vertex_count(&self) -> usize {
-        self.mesh.polys[self.poly_id].len
-    }
+    fn vertex_count(&self) -> usize { self.mesh.polys[self.poly_id].len }
 }
 
+#[cfg(feature = "example-glow")]
 impl<'a> PolymeshTrait for &'a PolyMesh {
     type PolyIter = PolyMeshIterator<'a>;
     type VertexIter = PolygonIterator<'a>;
     type Vertex = &'a PolyVertex;
 
-    fn polys(&self) -> Self::PolyIter {
-        PolyMeshIterator { mesh: *self, poly_id: 0 }
-    }
+    fn polys(&self) -> Self::PolyIter { PolyMeshIterator { mesh: *self, poly_id: 0 } }
 
-    fn get_vertex_position(&self, index: usize) -> Vec3f {
-        self.v_positions[index].position
-    }
+    fn get_vertex_position(&self, index: usize) -> Vec3f { self.v_positions[index].position }
 
-    fn get_vertex_normal(&self, index: usize) -> Vec3f {
-        self.v_normals[index]
-    }
+    fn get_vertex_normal(&self, index: usize) -> Vec3f { self.v_normals[index] }
 
     fn get_vertex_uv(&self, index: usize) -> Vec2f {
         if self.v_tex.len() > index {

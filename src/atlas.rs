@@ -101,15 +101,11 @@ pub struct IconId(usize);
 pub struct SlotId(usize);
 
 impl Into<u32> for IconId {
-    fn into(self) -> u32 {
-        self.0 as _
-    }
+    fn into(self) -> u32 { self.0 as _ }
 }
 
 impl Into<u32> for SlotId {
-    fn into(self) -> u32 {
-        self.0 as _
-    }
+    fn into(self) -> u32 { self.0 as _ }
 }
 
 #[derive(Debug, Clone)]
@@ -468,14 +464,10 @@ pub mod builder {
             p.with_extension("").to_str().unwrap_or(path).to_string()
         }
 
-        fn format_path(path: &str) -> String {
-            Self::strip_extension(&Self::strip_path_to_file(path))
-        }
+        fn format_path(path: &str) -> String { Self::strip_extension(&Self::strip_path_to_file(path)) }
 
         /// Consumes the builder and returns an [`AtlasHandle`].
-        pub fn to_atlas(self) -> AtlasHandle {
-            AtlasHandle(Rc::new(RefCell::new(self.atlas)))
-        }
+        pub fn to_atlas(self) -> AtlasHandle { AtlasHandle(Rc::new(RefCell::new(self.atlas))) }
     }
 }
 
@@ -642,17 +634,11 @@ impl AtlasHandle {
     }
 
     /// Returns the atlas texture width in pixels.
-    pub fn width(&self) -> usize {
-        self.0.borrow().width
-    }
+    pub fn width(&self) -> usize { self.0.borrow().width }
     /// Returns the atlas texture height in pixels.
-    pub fn height(&self) -> usize {
-        self.0.borrow().height
-    }
+    pub fn height(&self) -> usize { self.0.borrow().height }
     /// Returns a clone of the atlas pixel data.
-    pub fn pixels_clone(&self) -> Vec<Color4b> {
-        self.0.borrow().pixels.clone()
-    }
+    pub fn pixels_clone(&self) -> Vec<Color4b> { self.0.borrow().pixels.clone() }
 
     /// Executes a closure with shared access to the atlas pixels.
     pub fn apply_pixels<F: FnMut(usize, usize, &Vec<Color4b>)>(&self, mut f: F) {
@@ -661,34 +647,22 @@ impl AtlasHandle {
     }
 
     /// Returns a mapping from icon names to their identifiers.
-    pub fn clone_icon_table(&self) -> Vec<(String, IconId)> {
-        self.0.borrow().icons.iter().enumerate().map(|(i, icon)| (icon.0.clone(), IconId(i))).collect()
-    }
+    pub fn clone_icon_table(&self) -> Vec<(String, IconId)> { self.0.borrow().icons.iter().enumerate().map(|(i, icon)| (icon.0.clone(), IconId(i))).collect() }
 
     /// Returns a mapping from font names to their identifiers.
-    pub fn clone_font_table(&self) -> Vec<(String, FontId)> {
-        self.0.borrow().fonts.iter().enumerate().map(|(i, font)| (font.0.clone(), FontId(i))).collect()
-    }
+    pub fn clone_font_table(&self) -> Vec<(String, FontId)> { self.0.borrow().fonts.iter().enumerate().map(|(i, font)| (font.0.clone(), FontId(i))).collect() }
 
     /// Returns a list of available slot identifiers.
-    pub fn clone_slot_table(&self) -> Vec<SlotId> {
-        self.0.borrow().slots.iter().enumerate().map(|(i, _)| SlotId(i)).collect()
-    }
+    pub fn clone_slot_table(&self) -> Vec<SlotId> { self.0.borrow().slots.iter().enumerate().map(|(i, _)| SlotId(i)).collect() }
 
     /// Returns glyph metrics for the specified character, if available.
-    pub fn get_char_entry(&self, font: FontId, c: char) -> Option<CharEntry> {
-        self.0.borrow().fonts[font.0].1.entries.get(&c).map(|x| x.clone())
-    }
+    pub fn get_char_entry(&self, font: FontId, c: char) -> Option<CharEntry> { self.0.borrow().fonts[font.0].1.entries.get(&c).map(|x| x.clone()) }
 
     /// Returns the line height for the specified font.
-    pub fn get_font_height(&self, font: FontId) -> usize {
-        self.0.borrow().fonts[font.0].1.line_size
-    }
+    pub fn get_font_height(&self, font: FontId) -> usize { self.0.borrow().fonts[font.0].1.line_size }
 
     /// Returns the baseline offset (in pixels) for the specified font.
-    pub fn get_font_baseline(&self, font: FontId) -> i32 {
-        self.0.borrow().fonts[font.0].1.baseline
-    }
+    pub fn get_font_baseline(&self, font: FontId) -> i32 { self.0.borrow().fonts[font.0].1.baseline }
 
     /// Returns the dimensions of an icon.
     pub fn get_icon_size(&self, icon: IconId) -> Dimensioni {
@@ -697,9 +671,7 @@ impl AtlasHandle {
     }
 
     /// Returns the atlas rectangle storing an icon.
-    pub(crate) fn get_icon_rect(&self, icon: IconId) -> Recti {
-        self.0.borrow().icons[icon.0].1.rect
-    }
+    pub fn get_icon_rect(&self, icon: IconId) -> Recti { self.0.borrow().icons[icon.0].1.rect }
 
     /// Returns the dimensions of a slot.
     pub fn get_slot_size(&self, slot: SlotId) -> Dimensioni {
@@ -708,14 +680,10 @@ impl AtlasHandle {
     }
 
     /// Returns the atlas rectangle storing a slot.
-    pub(crate) fn get_slot_rect(&self, slot: SlotId) -> Recti {
-        self.0.borrow().slots[slot.0]
-    }
+    pub(crate) fn get_slot_rect(&self, slot: SlotId) -> Recti { self.0.borrow().slots[slot.0] }
 
     /// Returns the atlas texture dimensions.
-    pub fn get_texture_dimension(&self) -> Dimensioni {
-        Dimension::new(self.0.borrow().width as _, self.0.borrow().height as _)
-    }
+    pub fn get_texture_dimension(&self) -> Dimensioni { Dimension::new(self.0.borrow().width as _, self.0.borrow().height as _) }
 
     /// Internal helper that walks glyphs applying baseline-aware placement.
     fn walk_glyphs<F>(&self, font: FontId, text: &str, mut f: F)
@@ -804,7 +772,5 @@ impl AtlasHandle {
     }
 
     /// Returns a monotonically increasing value that changes whenever slot pixels are modified.
-    pub fn get_last_update_id(&self) -> usize {
-        self.0.borrow().last_update_id
-    }
+    pub fn get_last_update_id(&self) -> usize { self.0.borrow().last_update_id }
 }

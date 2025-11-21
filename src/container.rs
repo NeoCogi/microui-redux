@@ -145,9 +145,7 @@ pub enum Command {
 }
 
 impl Default for Command {
-    fn default() -> Self {
-        Command::None
-    }
+    fn default() -> Self { Command::None }
 }
 
 /// Core UI building block that records commands and hosts layouts.
@@ -257,9 +255,18 @@ impl Container {
                 Command::SlotRedraw { rect, id, color, payload } => {
                     canvas.draw_slot_with_function(id, rect, color, payload.clone());
                 }
-                Command::CustomRender(cra, mut f) => {
-                    canvas.end();
+                Command::CustomRender(mut cra, mut f) => {
+                    canvas.flush();
+                    let prev_clip = canvas.current_clip_rect();
+                    let merged_clip = match prev_clip.intersect(&cra.view) {
+                        Some(rect) => rect,
+                        None => Recti::new(cra.content_area.x, cra.content_area.y, 0, 0),
+                    };
+                    canvas.set_clip_rect(merged_clip);
+                    cra.view = merged_clip;
                     (*f)(canvas.current_dimension(), &cra);
+                    canvas.flush();
+                    canvas.set_clip_rect(prev_clip);
                 }
                 Command::None => (),
             }
@@ -277,9 +284,7 @@ impl Container {
     }
 
     /// Restores the previous clip rectangle from the stack.
-    pub fn pop_clip_rect(&mut self) {
-        self.clip_stack.pop();
-    }
+    pub fn pop_clip_rect(&mut self) { self.clip_stack.pop(); }
 
     /// Returns the active clip rectangle, or an unclipped rect when the stack is empty.
     pub fn get_clip_rect(&mut self) -> Recti {
@@ -302,14 +307,10 @@ impl Container {
     }
 
     /// Enqueues a draw command to be consumed during rendering.
-    pub fn push_command(&mut self, cmd: Command) {
-        self.command_list.push(cmd);
-    }
+    pub fn push_command(&mut self, cmd: Command) { self.command_list.push(cmd); }
 
     /// Adjusts the current clip rectangle.
-    pub fn set_clip(&mut self, rect: Recti) {
-        self.push_command(Command::Clip { rect });
-    }
+    pub fn set_clip(&mut self, rect: Recti) { self.push_command(Command::Clip { rect }); }
 
     /// Manually updates which widget owns focus.
     pub fn set_focus(&mut self, id: Option<Id>) {
@@ -376,9 +377,7 @@ impl Container {
     }
 
     /// Records a slot draw command.
-    pub fn draw_slot(&mut self, id: SlotId, rect: Recti, color: Color) {
-        self.push_image(Image::Slot(id), rect, color);
-    }
+    pub fn draw_slot(&mut self, id: SlotId, rect: Recti, color: Color) { self.push_image(Image::Slot(id), rect, color); }
 
     /// Records a slot redraw that uses a callback to fill pixels.
     pub fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
@@ -399,9 +398,7 @@ impl Container {
 
     #[inline(never)]
     /// Draws multi-line text within the container using automatic wrapping.
-    pub fn text(&mut self, text: &str) {
-        self.text_with_wrap(text, TextWrap::None);
-    }
+    pub fn text(&mut self, text: &str) { self.text_with_wrap(text, TextWrap::None); }
 
     #[inline(never)]
     /// Draws multi-line text within the container using the provided wrapping mode.
@@ -608,9 +605,7 @@ impl Container {
         res
     }
 
-    fn clamp(x: i32, a: i32, b: i32) -> i32 {
-        min(b, max(a, x))
-    }
+    fn clamp(x: i32, a: i32, b: i32) -> i32 { min(b, max(a, x)) }
 
     /// Returns the y coordinate where a line of text should start so its baseline sits at the control midpoint.
     fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32) -> i32 {
@@ -624,9 +619,7 @@ impl Container {
         Self::clamp(baseline_center - baseline, min_top, max_top)
     }
 
-    fn vertical_text_padding(padding: i32) -> i32 {
-        max(1, padding / 2)
-    }
+    fn vertical_text_padding(padding: i32) -> i32 { max(1, padding / 2) }
 
     #[inline(never)]
     fn scrollbars(&mut self, body: &mut Recti) {
@@ -781,19 +774,13 @@ impl Container {
     }
 
     /// Returns the next layout cell's rectangle.
-    pub fn next_cell(&mut self) -> Recti {
-        self.layout.next()
-    }
+    pub fn next_cell(&mut self) -> Recti { self.layout.next() }
 
     /// Replaces the container's style.
-    pub fn set_style(&mut self, style: Style) {
-        self.style = style;
-    }
+    pub fn set_style(&mut self, style: Style) { self.style = style; }
 
     /// Returns a copy of the current style.
-    pub fn get_style(&self) -> Style {
-        self.style.clone()
-    }
+    pub fn get_style(&self) -> Style { self.style.clone() }
 
     /// Displays static text using the default text color.
     pub fn label(&mut self, text: &str) {

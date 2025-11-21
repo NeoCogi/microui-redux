@@ -35,9 +35,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn run_atlas_export(output: &Path, target_dir: &Path) -> Result<(), Box<dyn Error>> {
     let mut cmd = Command::new("cargo");
     // Use a dedicated target dir so release builds don't deadlock on Cargo's global target lock.
-    cmd.env("MICROUI_BUILD_TOOL", "1")
-        .env("CARGO_TARGET_DIR", target_dir)
-        .args([
+    cmd.env("MICROUI_BUILD_TOOL", "1").env("CARGO_TARGET_DIR", target_dir).args([
         "run",
         "--bin",
         "atlas_export",

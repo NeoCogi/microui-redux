@@ -52,65 +52,66 @@
 //
 use crate::*;
 use common::*;
-use microui_redux as microui;
+use microui_redux::{self as microui, AtlasHandle, Dimensioni, RendererHandle};
 
+#[cfg(feature = "example-glow")]
 use std::sync::Arc;
 
+#[cfg(feature = "example-glow")]
+use crate::common::glow_renderer;
+#[cfg(feature = "example-vulkan")]
+use crate::common::vulkan_renderer;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
-use sdl2::video::{GLContext, GLProfile, Window};
+#[cfg(feature = "example-glow")]
+use sdl2::video::{GLContext, GLProfile};
+use sdl2::video::Window;
 use sdl2::{Sdl, VideoSubsystem};
-type MicroUI = microui_redux::Context<glow_renderer::GLRenderer>;
+
+#[cfg(feature = "example-glow")]
+type RendererBackend = glow_renderer::GLRenderer;
+#[cfg(feature = "example-vulkan")]
+type RendererBackend = vulkan_renderer::VulkanRenderer;
+
+type MicroUI = microui::Context<RendererBackend>;
+
+#[cfg(feature = "example-glow")]
+type BackendInitContext = Arc<glow::Context>;
+#[cfg(feature = "example-vulkan")]
+pub struct BackendInitContext {
+    pub renderer: RendererHandle<vulkan_renderer::VulkanRenderer>,
+}
 
 pub struct Application<S> {
     state: S,
     sdl_ctx: Sdl,
     _sdl_vid: VideoSubsystem,
-    gl_ctx: GLContext,
     window: Window,
     ctx: MicroUI,
+    backend: BackendData,
 }
 
 impl<S> Application<S> {
-    pub fn new<F: FnMut(Arc<glow::Context>, &mut MicroUI) -> S>(atlas: AtlasHandle, mut init_state: F) -> Result<Self, String> {
-        let sdl_ctx = sdl2::init().unwrap();
-        let video = sdl_ctx.video().unwrap();
+    pub fn new<F: FnMut(BackendInitContext, &mut MicroUI) -> S>(atlas: AtlasHandle, mut init_state: F) -> Result<Self, String> {
+        let sdl_ctx = sdl2::init().map_err(|err| err.to_string())?;
+        let video = sdl_ctx.video().map_err(|err| err.to_string())?;
+        let (bundle, init_ctx) = init_backend(&video, atlas)?;
+        let BackendBundle { window, backend, renderer, size } = bundle;
 
-        let gl_attr = video.gl_attr();
-        gl_attr.set_context_profile(GLProfile::GLES);
-        gl_attr.set_context_version(3, 0);
-        gl_attr.set_depth_size(24);
-
-        let window = video.window("Window", 800, 600).resizable().opengl().build().unwrap();
-
-        // Unlike the other example above, nobody created a context for your window, so you need to create one.
-
-        // save the gl context from SDL as well, otherwise, it will be dropped and the gl context is lost
-        let gl_ctx = window.gl_create_context().unwrap();
-        let gl = unsafe { glow::Context::from_loader_function(|s| video.gl_get_proc_address(s) as *const _) };
-
-        debug_assert_eq!(gl_attr.context_profile(), GLProfile::GLES);
-        debug_assert_eq!(gl_attr.context_version(), (3, 0));
-
-        let (width, height) = window.size();
-
-        window.gl_make_current(&gl_ctx).unwrap();
-        let gl = Arc::new(gl);
-        let rd = RendererHandle::new(glow_renderer::GLRenderer::new(gl.clone(), atlas, width, height));
-
-        let mut ctx = microui::Context::new(rd, Dimensioni::new(width as _, height as _));
+        let mut ctx = microui::Context::new(renderer, Dimensioni::new(size.0 as i32, size.1 as i32));
         Ok(Self {
-            state: init_state(gl, &mut ctx),
+            state: init_state(init_ctx, &mut ctx),
             sdl_ctx,
             _sdl_vid: video,
-            gl_ctx,
             window,
             ctx,
+            backend,
         })
     }
 
     pub fn event_loop<F: Fn(&mut MicroUI, &mut S)>(&mut self, f: F) {
-        self.window.gl_make_current(&self.gl_ctx).unwrap();
+        #[cfg(feature = "example-glow")]
+        self.window.gl_make_current(&self.backend.gl_ctx).unwrap();
 
         let mut event_pump = self.sdl_ctx.event_pump().unwrap();
         'running: loop {
@@ -191,9 +192,73 @@ impl<S> Application<S> {
 
             f(&mut self.ctx, &mut self.state);
             self.ctx.end();
+            #[cfg(feature = "example-glow")]
             self.window.gl_swap_window();
 
             ::std::thread::sleep(::std::time::Duration::new(0, 1_000_000_000u32 / 60));
         }
     }
 }
+
+#[cfg(feature = "example-glow")]
+fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBundle, BackendInitContext), String> {
+    let gl_attr = video.gl_attr();
+    gl_attr.set_context_profile(GLProfile::GLES);
+    gl_attr.set_context_version(3, 0);
+    gl_attr.set_depth_size(24);
+
+    let window = video.window("Window", 800, 600).resizable().opengl().build().map_err(|err| err.to_string())?;
+    let gl_ctx = window.gl_create_context().map_err(|err| err.to_string())?;
+    window.gl_make_current(&gl_ctx).map_err(|err| err.to_string())?;
+
+    let gl = unsafe { glow::Context::from_loader_function(|s| video.gl_get_proc_address(s) as *const _) };
+    debug_assert_eq!(gl_attr.context_profile(), GLProfile::GLES);
+    debug_assert_eq!(gl_attr.context_version(), (3, 0));
+
+    let (width, height) = window.size();
+    let gl = Arc::new(gl);
+    let renderer = RendererHandle::new(glow_renderer::GLRenderer::new(gl.clone(), atlas, width, height));
+
+    Ok((
+        BackendBundle {
+            window,
+            backend: BackendData { gl_ctx },
+            renderer,
+            size: (width, height),
+        },
+        gl,
+    ))
+}
+
+#[cfg(feature = "example-vulkan")]
+fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBundle, BackendInitContext), String> {
+    let window = video.window("Window", 800, 600).resizable().vulkan().build().map_err(|err| err.to_string())?;
+    let (width, height) = window.size();
+    let renderer = RendererHandle::new(vulkan_renderer::VulkanRenderer::new(&window, atlas, width, height)?);
+    let init_ctx = BackendInitContext { renderer: renderer.clone() };
+
+    Ok((
+        BackendBundle {
+            window,
+            backend: BackendData,
+            renderer,
+            size: (width, height),
+        },
+        init_ctx,
+    ))
+}
+
+struct BackendBundle {
+    window: Window,
+    backend: BackendData,
+    renderer: RendererHandle<RendererBackend>,
+    size: (u32, u32),
+}
+
+#[cfg(feature = "example-glow")]
+struct BackendData {
+    gl_ctx: GLContext,
+}
+
+#[cfg(feature = "example-vulkan")]
+struct BackendData;

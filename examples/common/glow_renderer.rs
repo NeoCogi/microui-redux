@@ -194,9 +194,7 @@ impl GLRenderer {
 }
 
 impl Renderer for GLRenderer {
-    fn get_atlas(&self) -> AtlasHandle {
-        self.atlas.clone()
-    }
+    fn get_atlas(&self) -> AtlasHandle { self.atlas.clone() }
 
     fn flush(&mut self) {
         self.update_atlas();
@@ -319,9 +317,7 @@ impl Renderer for GLRenderer {
         }
     }
 
-    fn end(&mut self) {
-        self.flush();
-    }
+    fn end(&mut self) { self.flush(); }
 
     fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) {
         let gl = &self.gl;
