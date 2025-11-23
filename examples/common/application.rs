@@ -195,7 +195,7 @@ impl<S> Application<S> {
             #[cfg(feature = "example-glow")]
             self.window.gl_swap_window();
 
-            ::std::thread::sleep(::std::time::Duration::new(0, 1_000_000_000u32 / 60));
+            //::std::thread::sleep(::std::time::Duration::new(0, 1_000_000_000u32 / 60));
         }
     }
 }

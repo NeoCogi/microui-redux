@@ -1070,7 +1070,14 @@ impl UiResources {
         self.ensure_vertex_buffer(ctx, dst_offset + copy_size)?;
         if let (Some(staging), Some(buffer)) = (self.staging_buffer.as_ref(), self.vertex_buffer.as_ref()) {
             staging.write(self.staging_offset, vertex_bytes)?;
-            ctx.record_transfer_copy(staging.vk_buffer(), self.staging_offset, buffer.buffer, dst_offset, copy_size)?;
+            ctx.record_transfer_copy(
+                staging.vk_buffer(),
+                self.staging_offset,
+                buffer.buffer,
+                dst_offset,
+                copy_size,
+                vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
+            )?;
             unsafe {
                 ctx.device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
                 ctx.device
@@ -1148,10 +1155,37 @@ struct MeshResources {
     pipeline: vk::Pipeline,
     vertex_buffer: Option<Buffer>,
     index_buffer: Option<Buffer>,
+    vertex_staging: Option<MappedBuffer>,
+    index_staging: Option<MappedBuffer>,
+    vertex_offset: vk::DeviceSize,
+    vertex_staging_offset: vk::DeviceSize,
+    index_offset: vk::DeviceSize,
+    index_staging_offset: vk::DeviceSize,
+    retired_vertex_staging: Vec<MappedBuffer>,
+    retired_index_staging: Vec<MappedBuffer>,
     depth_enabled: bool,
 }
 
 impl MeshResources {
+    const MIN_VERTEX_CAPACITY: vk::DeviceSize = 1_u64 << 20;
+    const MIN_INDEX_CAPACITY: vk::DeviceSize = 64_u64 << 10;
+    const MIN_VERTEX_STAGING_CAPACITY: vk::DeviceSize = 64_u64 << 10;
+    const MIN_INDEX_STAGING_CAPACITY: vk::DeviceSize = 32_u64 << 10;
+
+    fn grow_capacity(current: Option<vk::DeviceSize>, required: vk::DeviceSize, min: vk::DeviceSize) -> vk::DeviceSize {
+        if required == 0 {
+            return min.max(1);
+        }
+        let mut size = current.unwrap_or(min).max(min).max(1);
+        while size < required {
+            size = match size.checked_mul(2) {
+                Some(next) => next,
+                None => return required,
+            };
+        }
+        size
+    }
+
     fn new(ctx: &VulkanContext) -> Result<Self> {
         let depth_enabled = true;
         let device = &ctx.device;
@@ -1266,6 +1300,14 @@ impl MeshResources {
             pipeline,
             vertex_buffer: None,
             index_buffer: None,
+            vertex_staging: None,
+            index_staging: None,
+            vertex_offset: 0,
+            vertex_staging_offset: 0,
+            index_offset: 0,
+            index_staging_offset: 0,
+            retired_vertex_staging: Vec::new(),
+            retired_index_staging: Vec::new(),
             depth_enabled,
         })
     }
@@ -1277,6 +1319,18 @@ impl MeshResources {
         if let Some(mut buffer) = self.index_buffer.take() {
             buffer.destroy(device);
         }
+        if let Some(mut buffer) = self.vertex_staging.take() {
+            buffer.destroy(device);
+        }
+        if let Some(mut buffer) = self.index_staging.take() {
+            buffer.destroy(device);
+        }
+        for mut buffer in self.retired_vertex_staging.drain(..) {
+            buffer.destroy(device);
+        }
+        for mut buffer in self.retired_index_staging.drain(..) {
+            buffer.destroy(device);
+        }
         unsafe {
             device.destroy_pipeline(self.pipeline, None);
             device.destroy_pipeline_layout(self.pipeline_layout, None);
@@ -1285,34 +1339,99 @@ impl MeshResources {
         self.pipeline_layout = vk::PipelineLayout::null();
     }
 
-    fn ensure_vertex_buffer(&mut self, ctx: &VulkanContext, required: vk::DeviceSize) -> Result<()> {
-        let needs_realloc = self.vertex_buffer.as_ref().map(|buf| buf.size < required).unwrap_or(true);
+    fn ensure_vertex_buffer(&mut self, ctx: &VulkanContext, required_total: vk::DeviceSize) -> Result<()> {
+        let current_capacity = self.vertex_buffer.as_ref().map(|buf| buf.size);
+        let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
         if needs_realloc {
+            let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_VERTEX_CAPACITY);
             if let Some(mut buffer) = self.vertex_buffer.take() {
                 buffer.destroy(&ctx.device);
             }
-            self.vertex_buffer = Some(ctx.create_buffer(
-                required.max(4096),
-                vk::BufferUsageFlags::VERTEX_BUFFER,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            )?);
+            let buffer = ctx.create_buffer(
+                new_capacity,
+                vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            )?;
+            self.vertex_buffer = Some(buffer);
+            self.vertex_offset = 0;
         }
         Ok(())
     }
 
-    fn ensure_index_buffer(&mut self, ctx: &VulkanContext, required: vk::DeviceSize) -> Result<()> {
-        let needs_realloc = self.index_buffer.as_ref().map(|buf| buf.size < required).unwrap_or(true);
+    fn ensure_index_buffer(&mut self, ctx: &VulkanContext, required_total: vk::DeviceSize) -> Result<()> {
+        let current_capacity = self.index_buffer.as_ref().map(|buf| buf.size);
+        let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
         if needs_realloc {
+            let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_INDEX_CAPACITY);
             if let Some(mut buffer) = self.index_buffer.take() {
                 buffer.destroy(&ctx.device);
             }
-            self.index_buffer = Some(ctx.create_buffer(
-                required.max(4096),
-                vk::BufferUsageFlags::INDEX_BUFFER,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            )?);
+            let buffer = ctx.create_buffer(
+                new_capacity,
+                vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            )?;
+            self.index_buffer = Some(buffer);
+            self.index_offset = 0;
         }
         Ok(())
+    }
+
+    fn ensure_vertex_staging_buffer(&mut self, ctx: &VulkanContext, required_total: vk::DeviceSize) -> Result<()> {
+        let current_capacity = self.vertex_staging.as_ref().map(|buf| buf.size());
+        let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
+        if needs_realloc {
+            let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_VERTEX_STAGING_CAPACITY);
+            if let Some(buffer) = self.vertex_staging.take() {
+                self.retired_vertex_staging.push(buffer);
+            }
+            let buffer = ctx.create_buffer(
+                new_capacity,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )?;
+            let mapped = MappedBuffer::new(buffer, &ctx.device)?;
+            self.vertex_staging = Some(mapped);
+            self.vertex_staging_offset = 0;
+        }
+        Ok(())
+    }
+
+    fn ensure_index_staging_buffer(&mut self, ctx: &VulkanContext, required_total: vk::DeviceSize) -> Result<()> {
+        let current_capacity = self.index_staging.as_ref().map(|buf| buf.size());
+        let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
+        if needs_realloc {
+            let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_INDEX_STAGING_CAPACITY);
+            if let Some(buffer) = self.index_staging.take() {
+                self.retired_index_staging.push(buffer);
+            }
+            let buffer = ctx.create_buffer(
+                new_capacity,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )?;
+            let mapped = MappedBuffer::new(buffer, &ctx.device)?;
+            self.index_staging = Some(mapped);
+            self.index_staging_offset = 0;
+        }
+        Ok(())
+    }
+
+    fn cleanup_retired_staging(&mut self, device: &ash::Device) {
+        for mut buffer in self.retired_vertex_staging.drain(..) {
+            buffer.destroy(device);
+        }
+        for mut buffer in self.retired_index_staging.drain(..) {
+            buffer.destroy(device);
+        }
+    }
+
+    fn reset_upload_state(&mut self, device: &ash::Device) {
+        self.vertex_offset = 0;
+        self.vertex_staging_offset = 0;
+        self.index_offset = 0;
+        self.index_staging_offset = 0;
+        self.cleanup_retired_staging(device);
     }
 
     fn record(&mut self, ctx: &mut VulkanContext, command_buffer: vk::CommandBuffer, submission: &MeshSubmission, area: &CustomRenderArea) -> Result<()> {
@@ -1339,15 +1458,42 @@ impl MeshResources {
                 submission.mesh.indices().len() * std::mem::size_of::<u32>(),
             )
         };
-        self.ensure_vertex_buffer(ctx, vertex_bytes.len() as u64)?;
-        self.ensure_index_buffer(ctx, index_bytes.len() as u64)?;
+        let vertex_copy_size = vertex_bytes.len() as u64;
+        let index_copy_size = index_bytes.len() as u64;
+        let vertex_dst_offset = self.vertex_offset;
+        let index_dst_offset = self.index_offset;
+        self.ensure_vertex_buffer(ctx, vertex_dst_offset + vertex_copy_size)?;
+        self.ensure_index_buffer(ctx, index_dst_offset + index_copy_size)?;
+        self.ensure_vertex_staging_buffer(ctx, self.vertex_staging_offset + vertex_copy_size)?;
+        self.ensure_index_staging_buffer(ctx, self.index_staging_offset + index_copy_size)?;
 
-        if let Some(buffer) = self.vertex_buffer.as_ref() {
-            ctx.write_buffer(buffer, vertex_bytes)?;
+        if let (Some(staging), Some(buffer)) = (self.vertex_staging.as_ref(), self.vertex_buffer.as_ref()) {
+            staging.write(self.vertex_staging_offset, vertex_bytes)?;
+            ctx.record_transfer_copy(
+                staging.vk_buffer(),
+                self.vertex_staging_offset,
+                buffer.buffer,
+                vertex_dst_offset,
+                vertex_copy_size,
+                vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
+            )?;
         }
-        if let Some(buffer) = self.index_buffer.as_ref() {
-            ctx.write_buffer(buffer, index_bytes)?;
+        if let (Some(staging), Some(buffer)) = (self.index_staging.as_ref(), self.index_buffer.as_ref()) {
+            staging.write(self.index_staging_offset, index_bytes)?;
+            ctx.record_transfer_copy(
+                staging.vk_buffer(),
+                self.index_staging_offset,
+                buffer.buffer,
+                index_dst_offset,
+                index_copy_size,
+                vk::AccessFlags::INDEX_READ,
+            )?;
         }
+
+        self.vertex_offset += vertex_copy_size;
+        self.vertex_staging_offset += vertex_copy_size;
+        self.index_offset += index_copy_size;
+        self.index_staging_offset += index_copy_size;
 
         let viewport_rect = scale_rect_to_surface(area.rect, ctx.logical_width, ctx.logical_height, extent.width, extent.height);
         let viewport = match mesh_viewport_from_rect(viewport_rect, extent.width, extent.height) {
@@ -1372,10 +1518,11 @@ impl MeshResources {
         unsafe {
             ctx.device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
             if let Some(buffer) = self.vertex_buffer.as_ref() {
-                ctx.device.cmd_bind_vertex_buffers(command_buffer, 0, &[buffer.buffer], &[0]);
+                ctx.device.cmd_bind_vertex_buffers(command_buffer, 0, &[buffer.buffer], &[vertex_dst_offset]);
             }
             if let Some(buffer) = self.index_buffer.as_ref() {
-                ctx.device.cmd_bind_index_buffer(command_buffer, buffer.buffer, 0, vk::IndexType::UINT32);
+                ctx.device
+                    .cmd_bind_index_buffer(command_buffer, buffer.buffer, index_dst_offset, vk::IndexType::UINT32);
             }
             ctx.device.cmd_set_viewport(command_buffer, 0, &[viewport]);
             ctx.device.cmd_set_scissor(command_buffer, 0, &[scissor]);
@@ -1935,6 +2082,9 @@ impl VulkanContext {
         if let Some(ref mut ui) = self.ui {
             ui.cleanup_retired_staging(&self.device);
         }
+        if let Some(ref mut mesh) = self.mesh {
+            mesh.reset_upload_state(&self.device);
+        }
 
         let (image_index, _) = unsafe {
             self.swapchain_loader
@@ -2409,6 +2559,7 @@ impl VulkanContext {
         dst: vk::Buffer,
         dst_offset: vk::DeviceSize,
         size: vk::DeviceSize,
+        dst_access: vk::AccessFlags,
     ) -> Result<()> {
         if size == 0 {
             return Ok(());
@@ -2418,7 +2569,7 @@ impl VulkanContext {
         unsafe {
             self.device.cmd_copy_buffer(command_buffer, src, dst, &regions);
         }
-        self.buffer_barrier_transfer_to_vertex(command_buffer, dst, dst_offset, size);
+        self.buffer_barrier_transfer(command_buffer, dst, dst_offset, size, dst_access);
         if let Some(flag) = self.transfer_has_work.get_mut(self.current_frame) {
             *flag = true;
         }
@@ -2479,13 +2630,13 @@ impl VulkanContext {
         Ok(())
     }
 
-    fn buffer_barrier_transfer_to_vertex(&self, command_buffer: vk::CommandBuffer, buffer: vk::Buffer, offset: u64, size: u64) {
+    fn buffer_barrier_transfer(&self, command_buffer: vk::CommandBuffer, buffer: vk::Buffer, offset: u64, size: u64, dst_access: vk::AccessFlags) {
         if size == 0 {
             return;
         }
         let barrier = vk::BufferMemoryBarrier::builder()
             .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-            .dst_access_mask(vk::AccessFlags::VERTEX_ATTRIBUTE_READ)
+            .dst_access_mask(dst_access)
             .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .buffer(buffer)
