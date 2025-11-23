@@ -51,6 +51,18 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+// Vulkan renderer optimizations (current status):
+// - UI and custom geometry uploads go through per-frame staging/device buffers that grow with
+//   demand, stay resident, and are referenced via ring offsets to avoid reallocations.
+// - Staging buffers remain persistently mapped; command submission uses reusable per-frame
+//   transfer command buffers, synchronized with semaphores/barriers instead of queue_wait_idle.
+// - Custom draw uploads share the same staging path as UI vertices so we issue one batched
+//   transfer stream per frame.
+// - Mesh vertex/index data lives in device-local memory and is refreshed via staging uploads.
+// - Texture descriptors are recreated automatically after swapchain rebuilds, and atlas uploads
+//   are retriggered whenever UI resources lose their backing image, keeping rendering seamless
+//   across window resizes.
+//
 
 use std::{collections::HashMap, convert::TryFrom, ffi::CString, io::Cursor, mem, ptr, sync::Arc};
 
@@ -162,6 +174,7 @@ pub struct VulkanRenderer {
     last_atlas_update_id: usize,
     textures: HashMap<TextureId, VulkanTexture>,
     context: VulkanContext,
+    last_swapchain_generation: u64,
     vertices: Vec<Vertex>,
     commands: Vec<FrameCommand>,
     current_batch_end: usize,
@@ -182,12 +195,14 @@ impl VulkanRenderer {
 
     pub fn new(window: &Window, atlas: AtlasHandle, width: u32, height: u32) -> Result<Self> {
         let context = VulkanContext::new(window, width, height)?;
+        let swapchain_generation = context.swapchain_generation();
 
         Ok(Self {
             atlas,
             last_atlas_update_id: usize::MAX,
             textures: HashMap::new(),
             context,
+            last_swapchain_generation: swapchain_generation,
             vertices: Vec::new(),
             commands: Vec::new(),
             current_batch_end: 0,
@@ -211,6 +226,25 @@ impl VulkanRenderer {
         Ok(())
     }
 
+    fn handle_swapchain_updates(&mut self) {
+        let generation = self.context.swapchain_generation();
+        if self.last_swapchain_generation != generation {
+            self.last_swapchain_generation = generation;
+            self.last_atlas_update_id = usize::MAX;
+            if let Err(err) = self.rebind_texture_descriptors() {
+                eprintln!("[microui-redux][vulkan] failed to rebind texture descriptors: {err}");
+            }
+        }
+    }
+
+    fn rebind_texture_descriptors(&mut self) -> Result<()> {
+        for texture in self.textures.values_mut() {
+            let descriptor = self.context.allocate_texture_descriptor(&texture.image)?;
+            texture.descriptor_set = descriptor;
+        }
+        Ok(())
+    }
+
     pub(crate) fn enqueue_custom_render<C: VulkanCustomRenderer + 'static>(&mut self, area: CustomRenderArea, cmd: C) {
         self.flush_ui_batch();
         self.commands.push(FrameCommand::Custom(CustomRenderJob {
@@ -230,7 +264,8 @@ impl VulkanRenderer {
     }
 
     fn sync_atlas(&mut self) {
-        if self.last_atlas_update_id != self.atlas.get_last_update_id() {
+        let needs_upload = self.last_atlas_update_id != self.atlas.get_last_update_id() || !self.context.ui_has_atlas();
+        if needs_upload {
             if let Err(err) = self.context.upload_atlas(&self.atlas) {
                 eprintln!("[microui-redux][vulkan] failed to upload atlas: {err}");
                 return;
@@ -255,6 +290,7 @@ impl Renderer for VulkanRenderer {
         if let Err(err) = self.ensure_swapchain_extent(self.width, self.height) {
             eprintln!("[microui-redux][vulkan] failed to resize swapchain: {err}");
         }
+        self.handle_swapchain_updates();
         self.context.reset_ui_offset();
         self.sync_atlas();
     }
@@ -1590,6 +1626,7 @@ pub(crate) struct VulkanContext {
     ui: Option<UiResources>,
     depth_images: Vec<ImageResource>,
     mesh: Option<MeshResources>,
+    swapchain_generation: u64,
 }
 
 impl VulkanContext {
@@ -1669,6 +1706,7 @@ impl VulkanContext {
             mesh: None,
             logical_width: width,
             logical_height: height,
+            swapchain_generation: 0,
         };
 
         ctx.command_pool = ctx.create_command_pool()?;
@@ -1778,6 +1816,7 @@ impl VulkanContext {
             ui.destroy(&self.device);
         }
         self.ui = Some(UiResources::new(self)?);
+        self.swapchain_generation = self.swapchain_generation.wrapping_add(1);
 
         Ok(())
     }
@@ -2086,11 +2125,26 @@ impl VulkanContext {
             mesh.reset_upload_state(&self.device);
         }
 
-        let (image_index, _) = unsafe {
+        let mut swapchain_needs_recreate = false;
+
+        let (image_index, suboptimal) = match unsafe {
             self.swapchain_loader
                 .acquire_next_image(self.swapchain, u64::MAX, self.image_available_semaphores[self.current_frame], vk::Fence::null())
+        } {
+            Ok((index, suboptimal)) => (index, suboptimal),
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                self.recreate_swapchain(width, height)?;
+                return Ok(());
+            }
+            Err(vk::Result::SUBOPTIMAL_KHR) => {
+                self.recreate_swapchain(width, height)?;
+                return Ok(());
+            }
+            Err(err) => return Err(format!("acquire_next_image failed: {err:?}")),
+        };
+        if suboptimal {
+            swapchain_needs_recreate = true;
         }
-        .map_err(|err| format!("acquire_next_image failed: {err:?}"))?;
 
         unsafe {
             self.device.reset_fences(&[fence]).map_err(|err| format!("reset_fences failed: {err:?}"))?;
@@ -2129,10 +2183,28 @@ impl VulkanContext {
             .image_indices(&image_indices);
 
         let present_info = present_info.build();
-        unsafe {
-            self.swapchain_loader
-                .queue_present(self.present_queue, &present_info)
-                .map_err(|err| format!("queue_present failed: {err:?}"))?;
+        let present_result = unsafe { self.swapchain_loader.queue_present(self.present_queue, &present_info) };
+        match present_result {
+            Ok(present_suboptimal) => {
+                if present_suboptimal {
+                    swapchain_needs_recreate = true;
+                }
+            }
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                self.recreate_swapchain(width, height)?;
+                self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
+                return Ok(());
+            }
+            Err(vk::Result::SUBOPTIMAL_KHR) => {
+                self.recreate_swapchain(width, height)?;
+                self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
+                return Ok(());
+            }
+            Err(err) => return Err(format!("queue_present failed: {err:?}")),
+        }
+
+        if swapchain_needs_recreate {
+            self.recreate_swapchain(width, height)?;
         }
 
         self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
@@ -2261,6 +2333,8 @@ impl VulkanContext {
     }
 
     fn extent(&self) -> vk::Extent2D { self.extent }
+    fn swapchain_generation(&self) -> u64 { self.swapchain_generation }
+    fn ui_has_atlas(&self) -> bool { self.ui.as_ref().map(|ui| ui.atlas.is_some()).unwrap_or(false) }
 
     fn upload_atlas(&mut self, atlas: &AtlasHandle) -> Result<()> {
         if let Some(mut ui) = self.ui.take() {
@@ -2672,11 +2746,15 @@ impl VulkanContext {
         let mut staging = staging;
         staging.destroy(&self.device);
 
-        let mut ui = self.ui.take().ok_or_else(|| "UI resources not initialized".to_string())?;
-        let descriptor_set = ui.allocate_texture_descriptor(self, &image)?;
-        self.ui = Some(ui);
-
+        let descriptor_set = self.allocate_texture_descriptor(&image)?;
         Ok(VulkanTexture { image, descriptor_set })
+    }
+
+    fn allocate_texture_descriptor(&mut self, image: &ImageResource) -> Result<vk::DescriptorSet> {
+        let mut ui = self.ui.take().ok_or_else(|| "UI resources not initialized".to_string())?;
+        let descriptor_set = ui.allocate_texture_descriptor(self, image)?;
+        self.ui = Some(ui);
+        Ok(descriptor_set)
     }
 
     fn single_time_commands<F: FnOnce(vk::CommandBuffer)>(&self, f: F) -> Result<()> {
