@@ -666,24 +666,17 @@ struct UiResources {
     sampler: vk::Sampler,
     descriptor_pool: vk::DescriptorPool,
     descriptor_set: vk::DescriptorSet,
-    vertex_buffer: Option<Buffer>,               // GPU-local
-    staging_buffer: Option<MappedBuffer>,        // CPU-visible
-    custom_vertex_buffer: Option<Buffer>,        // GPU-local
-    custom_staging_buffer: Option<MappedBuffer>, // CPU-visible
+    vertex_buffer: Option<Buffer>,        // GPU-local
+    staging_buffer: Option<MappedBuffer>, // CPU-visible
     atlas: Option<ImageResource>,
     vertex_offset: vk::DeviceSize,
     staging_offset: vk::DeviceSize,
-    custom_vertex_offset: vk::DeviceSize,
-    custom_staging_offset: vk::DeviceSize,
     retired_staging_buffers: Vec<MappedBuffer>,
-    retired_custom_staging_buffers: Vec<MappedBuffer>,
 }
 
 impl UiResources {
     const MIN_VERTEX_CAPACITY: vk::DeviceSize = 1_u64 << 20; // 1 MB default
     const MIN_STAGING_CAPACITY: vk::DeviceSize = 64_u64 << 10; // 64 KB default
-    const MIN_CUSTOM_VERTEX_CAPACITY: vk::DeviceSize = 1_u64 << 20;
-    const MIN_CUSTOM_STAGING_CAPACITY: vk::DeviceSize = 64_u64 << 10;
 
     fn grow_capacity(current: Option<vk::DeviceSize>, required: vk::DeviceSize, min: vk::DeviceSize) -> vk::DeviceSize {
         if required == 0 {
@@ -716,15 +709,10 @@ impl UiResources {
             descriptor_set,
             vertex_buffer: None,
             staging_buffer: None,
-            custom_vertex_buffer: None,
-            custom_staging_buffer: None,
             atlas: None,
             vertex_offset: 0,
             staging_offset: 0,
-            custom_vertex_offset: 0,
-            custom_staging_offset: 0,
             retired_staging_buffers: Vec::new(),
-            retired_custom_staging_buffers: Vec::new(),
         })
     }
 
@@ -735,16 +723,7 @@ impl UiResources {
         if let Some(mut buffer) = self.staging_buffer.take() {
             buffer.destroy(device);
         }
-        if let Some(mut buffer) = self.custom_vertex_buffer.take() {
-            buffer.destroy(device);
-        }
-        if let Some(mut buffer) = self.custom_staging_buffer.take() {
-            buffer.destroy(device);
-        }
         for mut buffer in self.retired_staging_buffers.drain(..) {
-            buffer.destroy(device);
-        }
-        for mut buffer in self.retired_custom_staging_buffers.drain(..) {
             buffer.destroy(device);
         }
         if let Some(mut atlas) = self.atlas.take() {
@@ -1042,49 +1021,8 @@ impl UiResources {
         Ok(())
     }
 
-    fn ensure_custom_vertex_buffer(&mut self, ctx: &VulkanContext, required: vk::DeviceSize) -> Result<()> {
-        let current_capacity = self.custom_vertex_buffer.as_ref().map(|buf| buf.size);
-        let needs_realloc = current_capacity.map(|cap| cap < required).unwrap_or(true);
-        if needs_realloc {
-            let new_capacity = Self::grow_capacity(current_capacity, required, Self::MIN_CUSTOM_VERTEX_CAPACITY);
-            if let Some(mut buffer) = self.custom_vertex_buffer.take() {
-                buffer.destroy(&ctx.device);
-            }
-            let buffer = ctx.create_buffer(
-                new_capacity,
-                vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            )?;
-            self.custom_vertex_buffer = Some(buffer);
-        }
-        Ok(())
-    }
-
-    fn ensure_custom_staging_buffer(&mut self, ctx: &VulkanContext, required_total: vk::DeviceSize) -> Result<()> {
-        let current_capacity = self.custom_staging_buffer.as_ref().map(|buf| buf.size());
-        let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
-        if needs_realloc {
-            let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_CUSTOM_STAGING_CAPACITY);
-            if let Some(buffer) = self.custom_staging_buffer.take() {
-                self.retired_custom_staging_buffers.push(buffer);
-            }
-            let buffer = ctx.create_buffer(
-                new_capacity,
-                vk::BufferUsageFlags::TRANSFER_SRC,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            )?;
-            let mapped = MappedBuffer::new(buffer, &ctx.device)?;
-            self.custom_staging_buffer = Some(mapped);
-            self.custom_staging_offset = 0;
-        }
-        Ok(())
-    }
-
     fn cleanup_retired_staging(&mut self, device: &ash::Device) {
         for mut buffer in self.retired_staging_buffers.drain(..) {
-            buffer.destroy(device);
-        }
-        for mut buffer in self.retired_custom_staging_buffers.drain(..) {
             buffer.destroy(device);
         }
     }
@@ -1109,63 +1047,7 @@ impl UiResources {
         descriptor_set: vk::DescriptorSet,
         area: Option<&CustomRenderArea>,
     ) -> Result<()> {
-        if vertices.is_empty() {
-            return Ok(());
-        }
-        let vertex_bytes = unsafe { std::slice::from_raw_parts(vertices.as_ptr() as *const u8, vertices.len() * std::mem::size_of::<Vertex>()) };
-        let copy_size = vertex_bytes.len() as u64;
-        let dst_offset = self.custom_vertex_offset;
-        self.ensure_custom_staging_buffer(ctx, self.custom_staging_offset + copy_size)?;
-        self.ensure_custom_vertex_buffer(ctx, dst_offset + copy_size)?;
-        if let (Some(staging), Some(buffer)) = (self.custom_staging_buffer.as_ref(), self.custom_vertex_buffer.as_ref()) {
-            staging.write(self.custom_staging_offset, vertex_bytes)?;
-            ctx.record_transfer_copy(staging.vk_buffer(), self.custom_staging_offset, buffer.buffer, dst_offset, copy_size)?;
-            unsafe {
-                ctx.device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
-                ctx.device
-                    .cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline_layout, 0, &[descriptor_set], &[]);
-                ctx.device.cmd_bind_vertex_buffers(command_buffer, 0, &[buffer.buffer], &[dst_offset]);
-
-                let viewport = ui_full_viewport(ctx.extent);
-                ctx.device.cmd_set_viewport(command_buffer, 0, &[viewport]);
-
-                let logical_clip = area.map(|a| a.clip).unwrap_or(rect(0, 0, width as i32, height as i32));
-                let clip_rect = ctx.scale_rect(logical_clip);
-                let clamped = clamp_rect_to_surface(clip_rect, ctx.extent.width, ctx.extent.height);
-                let scissor = rect_to_vk(clamped, ctx.extent.width, ctx.extent.height);
-                ctx.device.cmd_set_scissor(command_buffer, 0, &[scissor]);
-                log_viewport_scissor("ui", logical_clip, &viewport, &scissor);
-                vk_trace!(
-                    "[microui-redux][vk-trace][ui] logical_clip={:?} scaled_clip={:?} viewport=({:.1},{:.1},{:.1},{:.1}) scissor=(offset=({}, {}), extent=({}, {}))",
-                    logical_clip,
-                    clip_rect,
-                    viewport.x,
-                    viewport.y,
-                    viewport.width,
-                    viewport.height,
-                    scissor.offset.x,
-                    scissor.offset.y,
-                    scissor.extent.width,
-                    scissor.extent.height
-                );
-
-                let ortho = Self::ortho_matrix(width as f32, height as f32);
-                let bytes = Self::matrix_bytes(&ortho);
-                vk_trace!(
-                    "[microui-redux][vk-trace][ui] ortho_first_row=[{:.5}, {:.5}, {:.5}, {:.5}]",
-                    ortho[0],
-                    ortho[1],
-                    ortho[2],
-                    ortho[3]
-                );
-                ctx.device
-                    .cmd_push_constants(command_buffer, self.pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes);
-                ctx.device.cmd_draw(command_buffer, vertices.len() as u32, 1, 0, 0);
-            }
-            self.custom_vertex_offset += copy_size;
-            self.custom_staging_offset += copy_size;
-        }
-        Ok(())
+        self.record_with_descriptor(ctx, command_buffer, vertices, width, height, descriptor_set, area)
     }
 
     fn record_with_descriptor(
@@ -2270,8 +2152,6 @@ impl VulkanContext {
         if let Some(ref mut ui) = self.ui {
             ui.vertex_offset = 0;
             ui.staging_offset = 0;
-            ui.custom_vertex_offset = 0;
-            ui.custom_staging_offset = 0;
         }
     }
 
