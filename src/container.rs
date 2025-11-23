@@ -457,7 +457,10 @@ impl Container {
     }
 
     /// Draws a widget background, applying hover/focus accents when needed.
-    pub fn draw_widget_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, _opt: WidgetOption) {
+    pub fn draw_widget_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
+        if opt.has_no_frame() {
+            return;
+        }
         if self.focus == Some(id) {
             colorid.focus()
         } else if self.hover == Some(id) {
@@ -841,6 +844,37 @@ impl Container {
         if let Some(image) = image {
             let color = self.style.colors[ControlColor::Text as usize];
             self.push_image(image, r, color);
+        }
+        res
+    }
+
+    /// Renders a list entry that only highlights while hovered or active.
+    pub fn list_item(&mut self, label: &str, opt: WidgetOption) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let id: Id = if label.is_empty() {
+            self.idmngr.get_id_from_str("!list_item")
+        } else {
+            self.idmngr.get_id_from_str(label)
+        };
+        let rect = self.layout.next();
+        self.update_control(id, rect, opt);
+        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
+            res |= ResourceState::SUBMIT;
+        }
+
+        if self.focus == Some(id) || self.hover == Some(id) {
+            let mut color = ControlColor::Button;
+            if self.focus == Some(id) {
+                color.focus();
+            } else {
+                color.hover();
+            }
+            let fill = self.style.colors[color as usize];
+            self.draw_rect(rect, fill);
+        }
+
+        if !label.is_empty() {
+            self.draw_control_text(label, rect, ControlColor::Text, opt);
         }
         res
     }

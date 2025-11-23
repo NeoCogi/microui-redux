@@ -112,7 +112,7 @@ impl FileDialogState {
                         for f in &self.folders {
                             let path = f.split("/").last().unwrap_or(f);
 
-                            if container.button_ex(path, None, WidgetOption::NONE).is_submitted() {
+                            if container.list_item(path, WidgetOption::NONE).is_submitted() {
                                 self.current_working_directory = f.to_string();
                                 refresh = true;
                             }
@@ -128,7 +128,7 @@ impl FileDialogState {
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
                         if self.files.len() != 0 {
                             for f in &self.files {
-                                if container.button_ex(f, None, WidgetOption::NONE).is_submitted() {
+                                if container.list_item(f, WidgetOption::NONE).is_submitted() {
                                     self.tmp_file_name = f.to_string();
                                 }
                             }
