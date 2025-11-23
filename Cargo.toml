@@ -11,6 +11,7 @@ readme = "README.md"
 license = "BSD-3-Clause"
 description = "Idiomatic Rust MicroUI (immediate mode GUI) library port"
 repository = "https://github.com/NeoCogi/microui-redux"
+autoexamples = false
 categories = ["gui", "rendering"]
 
 [lib]
@@ -21,8 +22,9 @@ default = ["builder", "save-to-rust"]
 builder = ["dep:fontdue", "dep:png"]
 png_source = ["dep:png"]
 save-to-rust = []
-example-glow = ["dep:sdl2", "dep:glow"]
-example-vulkan = ["dep:sdl2", "dep:ash", "dep:ash-window-handle", "dep:raw-window-handle"]
+example-backend = []
+example-glow = ["example-backend", "dep:sdl2", "dep:glow"]
+example-vulkan = ["example-backend", "dep:sdl2", "dep:ash", "dep:ash-window-handle", "dep:raw-window-handle"]
 
 [dependencies]
 fontdue = { version = "0.9.2", optional = true }
@@ -47,11 +49,12 @@ required-features = ["builder", "save-to-rust"]
 [[example]]
 name = "simple"
 path = "examples/simple.rs"
-required-features = []
+required-features = ["example-backend"]
 
 [[example]]
 name = "demo-full"
 path = "examples/demo-full.rs"
+required-features = ["example-backend"]
 
 [[example]]
 name = "demo_full_gl"
@@ -61,11 +64,7 @@ required-features = ["example-glow"]
 [[example]]
 name = "demo_full_vk"
 path = "examples/demo_full_vk.rs"
-
-[[example]]
-name = "baseline_probe"
-path = "examples/baseline_probe.rs"
-required-features = ["builder"]
+required-features = ["example-vulkan"]
 
 # small size executable
 # [profile.release]
