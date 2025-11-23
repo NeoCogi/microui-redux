@@ -308,6 +308,8 @@ bitflags! {
     pub struct WidgetOption : u32 {
         /// Keeps keyboard focus while the widget is held.
         const HOLD_FOCUS = 256;
+        /// Draws the widget without its frame/background.
+        const NO_FRAME = 128;
         /// Prevents scrollbars from reacting to the widget.
         const NO_SCROLL = 32;
         /// Disables interaction for the widget.
@@ -370,6 +372,9 @@ impl ContainerOption {
 impl WidgetOption {
     /// Returns `true` if the widget should keep focus while held.
     pub fn is_holding_focus(&self) -> bool { self.intersects(WidgetOption::HOLD_FOCUS) }
+
+    /// Returns `true` if the widget shouldn't draw its frame.
+    pub fn has_no_frame(&self) -> bool { self.intersects(WidgetOption::NO_FRAME) }
 
     /// Returns `true` if the widget should not interact with scrolling.
     pub fn has_no_scroll(&self) -> bool { self.intersects(WidgetOption::NO_SCROLL) }
