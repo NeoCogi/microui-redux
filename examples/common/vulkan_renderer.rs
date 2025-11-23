@@ -52,15 +52,7 @@
 // IN THE SOFTWARE.
 //
 
-use std::{
-    collections::HashMap,
-    convert::TryFrom,
-    ffi::CString,
-    io::Cursor,
-    mem,
-    ptr,
-    sync::Arc,
-};
+use std::{collections::HashMap, convert::TryFrom, ffi::CString, io::Cursor, mem, ptr, sync::Arc};
 
 use ash::{khr, util::read_spv, vk, Entry};
 use microui_redux::*;
@@ -267,9 +259,7 @@ impl Renderer for VulkanRenderer {
         self.sync_atlas();
     }
 
-    fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) {
-        self.vertices.extend_from_slice(&[*v0, *v1, *v2, *v0, *v2, *v3]);
-    }
+    fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) { self.vertices.extend_from_slice(&[*v0, *v1, *v2, *v0, *v2, *v3]); }
 
     fn flush(&mut self) {
         // Match the GL renderer expectation: turn buffered UI vertices into a draw command before
@@ -388,6 +378,60 @@ impl Buffer {
     }
 }
 
+struct MappedBuffer {
+    buffer: Buffer,
+    ptr: *mut u8,
+}
+
+impl MappedBuffer {
+    fn new(buffer: Buffer, device: &ash::Device) -> Result<Self> {
+        let ptr = unsafe {
+            device
+                .map_memory(buffer.memory, 0, buffer.size, vk::MemoryMapFlags::empty())
+                .map_err(|err| format!("map_memory (staging) failed: {err:?}"))?
+        } as *mut u8;
+        Ok(Self { buffer, ptr })
+    }
+
+    fn size(&self) -> vk::DeviceSize { self.buffer.size }
+
+    fn vk_buffer(&self) -> vk::Buffer { self.buffer.buffer }
+
+    fn write(&self, offset: vk::DeviceSize, data: &[u8]) -> Result<()> {
+        if data.is_empty() {
+            return Ok(());
+        }
+        let len = u64::try_from(data.len()).map_err(|_| "staging data too large".to_string())?;
+        let end = offset.checked_add(len).ok_or_else(|| "staging write overflow".to_string())?;
+        if end > self.buffer.size {
+            return Err("staging write exceeds buffer size".into());
+        }
+        let offset_usize = usize::try_from(offset).map_err(|_| "staging offset exceeds address space".to_string())?;
+        unsafe {
+            ptr::copy_nonoverlapping(data.as_ptr(), self.ptr.add(offset_usize), data.len());
+        }
+        Ok(())
+    }
+
+    fn destroy(&mut self, device: &ash::Device) {
+        unsafe {
+            if !self.ptr.is_null() {
+                device.unmap_memory(self.buffer.memory);
+            }
+        }
+        self.ptr = ptr::null_mut();
+        self.buffer.destroy(device);
+    }
+}
+
+struct PendingCopy {
+    src: vk::Buffer,
+    dst: vk::Buffer,
+    src_offset: vk::DeviceSize,
+    dst_offset: vk::DeviceSize,
+    size: vk::DeviceSize,
+}
+
 struct ImageResource {
     image: vk::Image,
     memory: vk::DeviceMemory,
@@ -447,13 +491,9 @@ struct CustomRenderJob {
     callback: Box<dyn VulkanCustomRenderer>,
 }
 
-fn vk_trace_enabled() -> bool {
-    false
-}
+fn vk_trace_enabled() -> bool { false }
 
-fn vk_dump_enabled() -> bool {
-    false
-}
+fn vk_dump_enabled() -> bool { false }
 
 // No-op toggles removed; keep environment helpers minimal.
 
@@ -626,15 +666,39 @@ struct UiResources {
     sampler: vk::Sampler,
     descriptor_pool: vk::DescriptorPool,
     descriptor_set: vk::DescriptorSet,
-    vertex_buffer: Option<Buffer>,        // GPU-local
-    staging_buffer: Option<Buffer>,       // CPU-visible
-    custom_vertex_buffer: Option<Buffer>, // GPU-local
-    custom_staging_buffer: Option<Buffer>,// CPU-visible
+    vertex_buffer: Option<Buffer>,               // GPU-local
+    staging_buffer: Option<MappedBuffer>,        // CPU-visible
+    custom_vertex_buffer: Option<Buffer>,        // GPU-local
+    custom_staging_buffer: Option<MappedBuffer>, // CPU-visible
     atlas: Option<ImageResource>,
     vertex_offset: vk::DeviceSize,
+    staging_offset: vk::DeviceSize,
+    custom_vertex_offset: vk::DeviceSize,
+    custom_staging_offset: vk::DeviceSize,
+    retired_staging_buffers: Vec<MappedBuffer>,
+    retired_custom_staging_buffers: Vec<MappedBuffer>,
 }
 
 impl UiResources {
+    const MIN_VERTEX_CAPACITY: vk::DeviceSize = 1_u64 << 20; // 1 MB default
+    const MIN_STAGING_CAPACITY: vk::DeviceSize = 64_u64 << 10; // 64 KB default
+    const MIN_CUSTOM_VERTEX_CAPACITY: vk::DeviceSize = 1_u64 << 20;
+    const MIN_CUSTOM_STAGING_CAPACITY: vk::DeviceSize = 64_u64 << 10;
+
+    fn grow_capacity(current: Option<vk::DeviceSize>, required: vk::DeviceSize, min: vk::DeviceSize) -> vk::DeviceSize {
+        if required == 0 {
+            return min.max(1);
+        }
+        let mut size = current.unwrap_or(min).max(min).max(1);
+        while size < required {
+            size = match size.checked_mul(2) {
+                Some(next) => next,
+                None => return required,
+            };
+        }
+        size
+    }
+
     fn new(ctx: &VulkanContext) -> Result<Self> {
         let device = &ctx.device;
         let descriptor_set_layout = Self::create_descriptor_set_layout(device)?;
@@ -656,6 +720,11 @@ impl UiResources {
             custom_staging_buffer: None,
             atlas: None,
             vertex_offset: 0,
+            staging_offset: 0,
+            custom_vertex_offset: 0,
+            custom_staging_offset: 0,
+            retired_staging_buffers: Vec::new(),
+            retired_custom_staging_buffers: Vec::new(),
         })
     }
 
@@ -670,6 +739,12 @@ impl UiResources {
             buffer.destroy(device);
         }
         if let Some(mut buffer) = self.custom_staging_buffer.take() {
+            buffer.destroy(device);
+        }
+        for mut buffer in self.retired_staging_buffers.drain(..) {
+            buffer.destroy(device);
+        }
+        for mut buffer in self.retired_custom_staging_buffers.drain(..) {
             buffer.destroy(device);
         }
         if let Some(mut atlas) = self.atlas.take() {
@@ -929,13 +1004,15 @@ impl UiResources {
     }
 
     fn ensure_vertex_buffer(&mut self, ctx: &VulkanContext, required: vk::DeviceSize) -> Result<()> {
-        let needs_realloc = self.vertex_buffer.as_ref().map(|buf| buf.size < required).unwrap_or(true);
+        let current_capacity = self.vertex_buffer.as_ref().map(|buf| buf.size);
+        let needs_realloc = current_capacity.map(|cap| cap < required).unwrap_or(true);
         if needs_realloc {
+            let new_capacity = Self::grow_capacity(current_capacity, required, Self::MIN_VERTEX_CAPACITY);
             if let Some(mut buffer) = self.vertex_buffer.take() {
                 buffer.destroy(&ctx.device);
             }
             let buffer = ctx.create_buffer(
-                required.max(1 << 20), // 1 MB default, grows as needed
+                new_capacity,
                 vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                 vk::MemoryPropertyFlags::DEVICE_LOCAL,
             )?;
@@ -945,30 +1022,36 @@ impl UiResources {
         Ok(())
     }
 
-    fn ensure_staging_buffer(&mut self, ctx: &VulkanContext, required: vk::DeviceSize) -> Result<()> {
-        let needs_realloc = self.staging_buffer.as_ref().map(|buf| buf.size < required).unwrap_or(true);
+    fn ensure_staging_buffer(&mut self, ctx: &VulkanContext, required_total: vk::DeviceSize) -> Result<()> {
+        let current_capacity = self.staging_buffer.as_ref().map(|buf| buf.size());
+        let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
         if needs_realloc {
-            if let Some(mut buffer) = self.staging_buffer.take() {
-                buffer.destroy(&ctx.device);
+            let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_STAGING_CAPACITY);
+            if let Some(buffer) = self.staging_buffer.take() {
+                self.retired_staging_buffers.push(buffer);
             }
             let buffer = ctx.create_buffer(
-                required.max(1024),
+                new_capacity,
                 vk::BufferUsageFlags::TRANSFER_SRC,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             )?;
-            self.staging_buffer = Some(buffer);
+            let mapped = MappedBuffer::new(buffer, &ctx.device)?;
+            self.staging_buffer = Some(mapped);
+            self.staging_offset = 0;
         }
         Ok(())
     }
 
     fn ensure_custom_vertex_buffer(&mut self, ctx: &VulkanContext, required: vk::DeviceSize) -> Result<()> {
-        let needs_realloc = self.custom_vertex_buffer.as_ref().map(|buf| buf.size < required).unwrap_or(true);
+        let current_capacity = self.custom_vertex_buffer.as_ref().map(|buf| buf.size);
+        let needs_realloc = current_capacity.map(|cap| cap < required).unwrap_or(true);
         if needs_realloc {
+            let new_capacity = Self::grow_capacity(current_capacity, required, Self::MIN_CUSTOM_VERTEX_CAPACITY);
             if let Some(mut buffer) = self.custom_vertex_buffer.take() {
                 buffer.destroy(&ctx.device);
             }
             let buffer = ctx.create_buffer(
-                required.max(1 << 20),
+                new_capacity,
                 vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                 vk::MemoryPropertyFlags::DEVICE_LOCAL,
             )?;
@@ -977,23 +1060,36 @@ impl UiResources {
         Ok(())
     }
 
-    fn ensure_custom_staging_buffer(&mut self, ctx: &VulkanContext, required: vk::DeviceSize) -> Result<()> {
-        let needs_realloc = self.custom_staging_buffer.as_ref().map(|buf| buf.size < required).unwrap_or(true);
+    fn ensure_custom_staging_buffer(&mut self, ctx: &VulkanContext, required_total: vk::DeviceSize) -> Result<()> {
+        let current_capacity = self.custom_staging_buffer.as_ref().map(|buf| buf.size());
+        let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
         if needs_realloc {
-            if let Some(mut buffer) = self.custom_staging_buffer.take() {
-                buffer.destroy(&ctx.device);
+            let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_CUSTOM_STAGING_CAPACITY);
+            if let Some(buffer) = self.custom_staging_buffer.take() {
+                self.retired_custom_staging_buffers.push(buffer);
             }
             let buffer = ctx.create_buffer(
-                required.max(1024),
+                new_capacity,
                 vk::BufferUsageFlags::TRANSFER_SRC,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             )?;
-            self.custom_staging_buffer = Some(buffer);
+            let mapped = MappedBuffer::new(buffer, &ctx.device)?;
+            self.custom_staging_buffer = Some(mapped);
+            self.custom_staging_offset = 0;
         }
         Ok(())
     }
 
-    fn record(&mut self, ctx: &VulkanContext, command_buffer: vk::CommandBuffer, vertices: &[Vertex], width: u32, height: u32) -> Result<()> {
+    fn cleanup_retired_staging(&mut self, device: &ash::Device) {
+        for mut buffer in self.retired_staging_buffers.drain(..) {
+            buffer.destroy(device);
+        }
+        for mut buffer in self.retired_custom_staging_buffers.drain(..) {
+            buffer.destroy(device);
+        }
+    }
+
+    fn record(&mut self, ctx: &mut VulkanContext, command_buffer: vk::CommandBuffer, vertices: &[Vertex], width: u32, height: u32) -> Result<()> {
         if vertices.is_empty() {
             return Ok(());
         }
@@ -1005,7 +1101,7 @@ impl UiResources {
 
     fn record_custom(
         &mut self,
-        ctx: &VulkanContext,
+        ctx: &mut VulkanContext,
         command_buffer: vk::CommandBuffer,
         vertices: &[Vertex],
         width: u32,
@@ -1017,17 +1113,18 @@ impl UiResources {
             return Ok(());
         }
         let vertex_bytes = unsafe { std::slice::from_raw_parts(vertices.as_ptr() as *const u8, vertices.len() * std::mem::size_of::<Vertex>()) };
-        self.ensure_custom_staging_buffer(ctx, vertex_bytes.len() as u64)?;
-        self.ensure_custom_vertex_buffer(ctx, vertex_bytes.len() as u64)?;
+        let copy_size = vertex_bytes.len() as u64;
+        let dst_offset = self.custom_vertex_offset;
+        self.ensure_custom_staging_buffer(ctx, self.custom_staging_offset + copy_size)?;
+        self.ensure_custom_vertex_buffer(ctx, dst_offset + copy_size)?;
         if let (Some(staging), Some(buffer)) = (self.custom_staging_buffer.as_ref(), self.custom_vertex_buffer.as_ref()) {
-            ctx.write_buffer(staging, vertex_bytes)?;
-            let copy_size = vertex_bytes.len() as u64;
-            ctx.copy_buffer_immediate(staging, buffer, 0, copy_size)?;
+            staging.write(self.custom_staging_offset, vertex_bytes)?;
+            ctx.record_transfer_copy(staging.vk_buffer(), self.custom_staging_offset, buffer.buffer, dst_offset, copy_size)?;
             unsafe {
                 ctx.device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
                 ctx.device
                     .cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline_layout, 0, &[descriptor_set], &[]);
-                ctx.device.cmd_bind_vertex_buffers(command_buffer, 0, &[buffer.buffer], &[0]);
+                ctx.device.cmd_bind_vertex_buffers(command_buffer, 0, &[buffer.buffer], &[dst_offset]);
 
                 let viewport = ui_full_viewport(ctx.extent);
                 ctx.device.cmd_set_viewport(command_buffer, 0, &[viewport]);
@@ -1065,14 +1162,15 @@ impl UiResources {
                     .cmd_push_constants(command_buffer, self.pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes);
                 ctx.device.cmd_draw(command_buffer, vertices.len() as u32, 1, 0, 0);
             }
-            // custom draws always start at offset 0 since we currently issue one per frame
+            self.custom_vertex_offset += copy_size;
+            self.custom_staging_offset += copy_size;
         }
         Ok(())
     }
 
     fn record_with_descriptor(
         &mut self,
-        ctx: &VulkanContext,
+        ctx: &mut VulkanContext,
         command_buffer: vk::CommandBuffer,
         vertices: &[Vertex],
         width: u32,
@@ -1086,11 +1184,11 @@ impl UiResources {
         let vertex_bytes = unsafe { std::slice::from_raw_parts(vertices.as_ptr() as *const u8, vertices.len() * std::mem::size_of::<Vertex>()) };
         let copy_size = vertex_bytes.len() as u64;
         let dst_offset = self.vertex_offset;
-        self.ensure_staging_buffer(ctx, copy_size)?;
+        self.ensure_staging_buffer(ctx, self.staging_offset + copy_size)?;
         self.ensure_vertex_buffer(ctx, dst_offset + copy_size)?;
         if let (Some(staging), Some(buffer)) = (self.staging_buffer.as_ref(), self.vertex_buffer.as_ref()) {
-            ctx.write_buffer(staging, vertex_bytes)?;
-            ctx.copy_buffer_immediate(staging, buffer, dst_offset, copy_size)?;
+            staging.write(self.staging_offset, vertex_bytes)?;
+            ctx.record_transfer_copy(staging.vk_buffer(), self.staging_offset, buffer.buffer, dst_offset, copy_size)?;
             unsafe {
                 ctx.device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
                 ctx.device
@@ -1134,6 +1232,7 @@ impl UiResources {
                 ctx.device.cmd_draw(command_buffer, vertices.len() as u32, 1, 0, 0);
             }
             self.vertex_offset += copy_size;
+            self.staging_offset += copy_size;
         }
         Ok(())
     }
@@ -1450,9 +1549,13 @@ pub(crate) struct VulkanContext {
     framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
+    transfer_command_buffers: Vec<vk::CommandBuffer>,
     image_available_semaphores: Vec<vk::Semaphore>,
     render_finished_semaphores: Vec<vk::Semaphore>,
+    transfer_complete_semaphores: Vec<vk::Semaphore>,
     in_flight_fences: Vec<vk::Fence>,
+    transfer_recording: Vec<bool>,
+    transfer_has_work: Vec<bool>,
     current_frame: usize,
     max_frames_in_flight: usize,
     ui: Option<UiResources>,
@@ -1523,9 +1626,13 @@ impl VulkanContext {
             framebuffers: Vec::new(),
             command_pool: vk::CommandPool::null(),
             command_buffers: Vec::new(),
+            transfer_command_buffers: Vec::new(),
             image_available_semaphores: Vec::new(),
             render_finished_semaphores: Vec::new(),
+            transfer_complete_semaphores: Vec::new(),
             in_flight_fences: Vec::new(),
+            transfer_recording: Vec::new(),
+            transfer_has_work: Vec::new(),
             current_frame: 0,
             max_frames_in_flight: 2,
             ui: None,
@@ -1538,6 +1645,7 @@ impl VulkanContext {
         ctx.command_pool = ctx.create_command_pool()?;
         ctx.recreate_swapchain(width, height)?;
         ctx.create_sync_objects()?;
+        ctx.allocate_transfer_command_buffers()?;
         ctx.ui = Some(UiResources::new(&ctx)?);
 
         Ok(ctx)
@@ -1782,8 +1890,10 @@ impl VulkanContext {
 
         let attachments = [color_attachment, depth_attachment];
         let subpasses = [subpass];
-        let render_pass_info =
-            vk::RenderPassCreateInfo::builder().attachments(&attachments).subpasses(&subpasses).dependencies(std::slice::from_ref(&dependency));
+        let render_pass_info = vk::RenderPassCreateInfo::builder()
+            .attachments(&attachments)
+            .subpasses(&subpasses)
+            .dependencies(std::slice::from_ref(&dependency));
 
         unsafe { self.device.create_render_pass(&render_pass_info, None) }.map_err(|err| format!("create_render_pass failed: {err:?}"))
     }
@@ -1830,6 +1940,24 @@ impl VulkanContext {
         Ok(())
     }
 
+    fn allocate_transfer_command_buffers(&mut self) -> Result<()> {
+        if !self.transfer_command_buffers.is_empty() {
+            unsafe {
+                self.device.free_command_buffers(self.command_pool, &self.transfer_command_buffers);
+            }
+        }
+
+        let alloc_info = vk::CommandBufferAllocateInfo::builder()
+            .command_pool(self.command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(self.max_frames_in_flight as u32);
+        self.transfer_command_buffers =
+            unsafe { self.device.allocate_command_buffers(&alloc_info) }.map_err(|err| format!("allocate_command_buffers (transfer) failed: {err:?}"))?;
+        self.transfer_recording = vec![false; self.max_frames_in_flight];
+        self.transfer_has_work = vec![false; self.max_frames_in_flight];
+        Ok(())
+    }
+
     fn create_sync_objects(&mut self) -> Result<()> {
         let semaphore_info = vk::SemaphoreCreateInfo::default();
         let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED).build();
@@ -1837,6 +1965,7 @@ impl VulkanContext {
         self.image_available_semaphores.clear();
         self.render_finished_semaphores.clear();
         self.in_flight_fences.clear();
+        self.transfer_complete_semaphores.clear();
 
         for _ in 0..self.max_frames_in_flight {
             unsafe {
@@ -1848,6 +1977,10 @@ impl VulkanContext {
                     .device
                     .create_semaphore(&semaphore_info, None)
                     .map_err(|err| format!("create_semaphore failed: {err:?}"))?;
+                let transfer_complete = self
+                    .device
+                    .create_semaphore(&semaphore_info, None)
+                    .map_err(|err| format!("create_semaphore failed: {err:?}"))?;
                 let fence = self
                     .device
                     .create_fence(&fence_info, None)
@@ -1855,6 +1988,7 @@ impl VulkanContext {
 
                 self.image_available_semaphores.push(image_available);
                 self.render_finished_semaphores.push(render_finished);
+                self.transfer_complete_semaphores.push(transfer_complete);
                 self.in_flight_fences.push(fence);
             }
         }
@@ -1915,6 +2049,11 @@ impl VulkanContext {
                 .map_err(|err| format!("wait_for_fences failed: {err:?}"))?;
         }
 
+        self.reset_transfer_state(self.current_frame)?;
+        if let Some(ref mut ui) = self.ui {
+            ui.cleanup_retired_staging(&self.device);
+        }
+
         let (image_index, _) = unsafe {
             self.swapchain_loader
                 .acquire_next_image(self.swapchain, u64::MAX, self.image_available_semaphores[self.current_frame], vk::Fence::null())
@@ -1927,10 +2066,15 @@ impl VulkanContext {
 
         let command_buffer = self.command_buffers[image_index as usize];
         self.record_command_buffer(command_buffer, image_index, clear_value, vertices, width, height, frame_index, commands)?;
+        let transfer_semaphore = self.submit_transfer_commands()?;
 
-        let wait_semaphores = [self.image_available_semaphores[self.current_frame]];
+        let mut wait_semaphores = vec![self.image_available_semaphores[self.current_frame]];
+        let mut wait_stages = vec![vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+        if let Some(semaphore) = transfer_semaphore {
+            wait_semaphores.push(semaphore);
+            wait_stages.push(vk::PipelineStageFlags::VERTEX_INPUT);
+        }
         let signal_semaphores = [self.render_finished_semaphores[self.current_frame]];
-        let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
 
         let submit_info = vk::SubmitInfo::builder()
             .wait_semaphores(&wait_semaphores)
@@ -2109,7 +2253,15 @@ impl VulkanContext {
             Some(ui) => ui,
             None => return Ok(()),
         };
-        let result = ui.record_custom(self, command_buffer, vertices, self.logical_width, self.logical_height, descriptor_set, Some(area));
+        let result = ui.record_custom(
+            self,
+            command_buffer,
+            vertices,
+            self.logical_width,
+            self.logical_height,
+            descriptor_set,
+            Some(area),
+        );
         self.ui = Some(ui);
         result
     }
@@ -2117,6 +2269,9 @@ impl VulkanContext {
     fn reset_ui_offset(&mut self) {
         if let Some(ref mut ui) = self.ui {
             ui.vertex_offset = 0;
+            ui.staging_offset = 0;
+            ui.custom_vertex_offset = 0;
+            ui.custom_staging_offset = 0;
         }
     }
 
@@ -2161,11 +2316,16 @@ impl VulkanContext {
         Ok(Buffer { buffer, memory, size })
     }
 
-    fn write_buffer(&self, buffer: &Buffer, data: &[u8]) -> Result<()> {
+    fn write_buffer(&self, buffer: &Buffer, data: &[u8]) -> Result<()> { self.write_buffer_offset(buffer, 0, data) }
+
+    fn write_buffer_offset(&self, buffer: &Buffer, offset: vk::DeviceSize, data: &[u8]) -> Result<()> {
+        if data.is_empty() {
+            return Ok(());
+        }
         unsafe {
             let ptr = self
                 .device
-                .map_memory(buffer.memory, 0, data.len() as u64, vk::MemoryMapFlags::empty())
+                .map_memory(buffer.memory, offset, data.len() as u64, vk::MemoryMapFlags::empty())
                 .map_err(|err| format!("map_memory failed: {err:?}"))?;
             ptr::copy_nonoverlapping(data.as_ptr(), ptr as *mut u8, data.len());
             self.device.unmap_memory(buffer.memory);
@@ -2329,28 +2489,117 @@ impl VulkanContext {
     }
 
     fn copy_buffer(&self, command_buffer: vk::CommandBuffer, src: &Buffer, dst: &Buffer, size: u64) {
-        let regions = [vk::BufferCopy {
-            src_offset: 0,
-            dst_offset: 0,
-            size,
-        }];
+        let regions = [vk::BufferCopy { src_offset: 0, dst_offset: 0, size }];
         unsafe {
             self.device.cmd_copy_buffer(command_buffer, src.buffer, dst.buffer, &regions);
         }
     }
 
     fn copy_buffer_with_offset(&self, command_buffer: vk::CommandBuffer, src: &Buffer, dst: &Buffer, dst_offset: u64, size: u64) {
-        let regions = [vk::BufferCopy {
-            src_offset: 0,
-            dst_offset,
-            size,
-        }];
+        let regions = [vk::BufferCopy { src_offset: 0, dst_offset, size }];
         unsafe {
             self.device.cmd_copy_buffer(command_buffer, src.buffer, dst.buffer, &regions);
         }
     }
 
-    fn buffer_barrier_transfer_to_vertex(&self, command_buffer: vk::CommandBuffer, buffer: &Buffer, offset: u64, size: u64) {
+    fn begin_transfer_command_buffer(&mut self) -> Result<vk::CommandBuffer> {
+        let frame = self.current_frame;
+        if self.transfer_command_buffers.is_empty() {
+            return Err("transfer command buffers not allocated".into());
+        }
+        let command_buffer = self.transfer_command_buffers[frame];
+        if !self.transfer_recording.get(frame).copied().unwrap_or(false) {
+            let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+            unsafe {
+                self.device
+                    .begin_command_buffer(command_buffer, &begin_info)
+                    .map_err(|err| format!("begin_command_buffer (transfer) failed: {err:?}"))?;
+            }
+            if let Some(state) = self.transfer_recording.get_mut(frame) {
+                *state = true;
+            }
+        }
+        Ok(command_buffer)
+    }
+
+    fn record_transfer_copy(
+        &mut self,
+        src: vk::Buffer,
+        src_offset: vk::DeviceSize,
+        dst: vk::Buffer,
+        dst_offset: vk::DeviceSize,
+        size: vk::DeviceSize,
+    ) -> Result<()> {
+        if size == 0 {
+            return Ok(());
+        }
+        let command_buffer = self.begin_transfer_command_buffer()?;
+        let regions = [vk::BufferCopy { src_offset, dst_offset, size }];
+        unsafe {
+            self.device.cmd_copy_buffer(command_buffer, src, dst, &regions);
+        }
+        self.buffer_barrier_transfer_to_vertex(command_buffer, dst, dst_offset, size);
+        if let Some(flag) = self.transfer_has_work.get_mut(self.current_frame) {
+            *flag = true;
+        }
+        Ok(())
+    }
+
+    fn end_transfer_recording_if_needed(&mut self, frame: usize) -> Result<()> {
+        if self.transfer_recording.get(frame).copied().unwrap_or(false) {
+            let command_buffer = self.transfer_command_buffers[frame];
+            unsafe {
+                self.device
+                    .end_command_buffer(command_buffer)
+                    .map_err(|err| format!("end_command_buffer (transfer) failed: {err:?}"))?;
+            }
+            self.transfer_recording[frame] = false;
+        }
+        Ok(())
+    }
+
+    fn submit_transfer_commands(&mut self) -> Result<Option<vk::Semaphore>> {
+        let frame = self.current_frame;
+        let has_work = self.transfer_has_work.get(frame).copied().unwrap_or(false);
+        if !has_work {
+            self.end_transfer_recording_if_needed(frame)?;
+            return Ok(None);
+        }
+        self.end_transfer_recording_if_needed(frame)?;
+        let command_buffer = self.transfer_command_buffers[frame];
+        let semaphore = self.transfer_complete_semaphores.get(frame).copied().ok_or("missing transfer semaphore")?;
+        let command_buffers = [command_buffer];
+        let signal = [semaphore];
+        let submit_info = vk::SubmitInfo::builder().command_buffers(&command_buffers).signal_semaphores(&signal).build();
+        unsafe {
+            self.device
+                .queue_submit(self.graphics_queue, &[submit_info], vk::Fence::null())
+                .map_err(|err| format!("queue_submit (transfer) failed: {err:?}"))?;
+        }
+        self.transfer_has_work[frame] = false;
+        Ok(Some(semaphore))
+    }
+
+    fn reset_transfer_state(&mut self, frame: usize) -> Result<()> {
+        if self.transfer_command_buffers.is_empty() {
+            return Ok(());
+        }
+        let command_buffer = self.transfer_command_buffers[frame];
+        unsafe {
+            self.device
+                .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())
+                .map_err(|err| format!("reset_command_buffer (transfer) failed: {err:?}"))?;
+        }
+        if let Some(flag) = self.transfer_recording.get_mut(frame) {
+            *flag = false;
+        }
+        if let Some(flag) = self.transfer_has_work.get_mut(frame) {
+            *flag = false;
+        }
+        Ok(())
+    }
+
+    fn buffer_barrier_transfer_to_vertex(&self, command_buffer: vk::CommandBuffer, buffer: vk::Buffer, offset: u64, size: u64) {
         if size == 0 {
             return;
         }
@@ -2359,7 +2608,7 @@ impl VulkanContext {
             .dst_access_mask(vk::AccessFlags::VERTEX_ATTRIBUTE_READ)
             .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .buffer(buffer.buffer)
+            .buffer(buffer)
             .offset(offset)
             .size(size)
             .build();
@@ -2375,57 +2624,6 @@ impl VulkanContext {
                 &[],
             );
         }
-    }
-
-    fn copy_buffer_immediate(&self, src: &Buffer, dst: &Buffer, dst_offset: u64, size: u64) -> Result<()> {
-        if size == 0 {
-            return Ok(());
-        }
-
-        let alloc_info = vk::CommandBufferAllocateInfo::builder()
-            .command_pool(self.command_pool)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
-        let command_buffer = unsafe { self.device.allocate_command_buffers(&alloc_info) }
-            .map_err(|err| format!("allocate_command_buffers (copy) failed: {err:?}"))?[0];
-
-        let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        unsafe {
-            self.device
-                .begin_command_buffer(command_buffer, &begin_info)
-                .map_err(|err| format!("begin_command_buffer (copy) failed: {err:?}"))?;
-
-            let regions = [vk::BufferCopy {
-                src_offset: 0,
-                dst_offset,
-                size,
-            }];
-            self.device.cmd_copy_buffer(command_buffer, src.buffer, dst.buffer, &regions);
-            self.buffer_barrier_transfer_to_vertex(command_buffer, dst, dst_offset, size);
-
-            self.device
-                .end_command_buffer(command_buffer)
-                .map_err(|err| format!("end_command_buffer (copy) failed: {err:?}"))?;
-        }
-
-        let fence_info = vk::FenceCreateInfo::default();
-        let fence = unsafe { self.device.create_fence(&fence_info, None) }
-            .map_err(|err| format!("create_fence (copy) failed: {err:?}"))?;
-
-        let submit_info = vk::SubmitInfo::builder().command_buffers(std::slice::from_ref(&command_buffer));
-        let submit_infos = [submit_info.build()];
-
-        unsafe {
-            self.device
-                .queue_submit(self.graphics_queue, &submit_infos, fence)
-                .map_err(|err| format!("queue_submit (copy) failed: {err:?}"))?;
-            self.device
-                .wait_for_fences(&[fence], true, u64::MAX)
-                .map_err(|err| format!("wait_for_fences (copy) failed: {err:?}"))?;
-            self.device.destroy_fence(fence, None);
-            self.device.free_command_buffers(self.command_pool, &[command_buffer]);
-        }
-        Ok(())
     }
 
     fn create_texture_resource(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<VulkanTexture> {
