@@ -38,11 +38,13 @@ ui.button_ex2(
     "External Image",
     Some(Image::Texture(texture)),
     WidgetOption::NONE,
+    WidgetFillOption::ALL,
 );
 ```
 
 - `Image::Slot` renders an entry from the atlas and benefits from batching.
 - `Image::Texture` targets renderer-owned textures. The command list flushes before drawing the texture so the backend can bind the correct resource.
+- `WidgetFillOption` controls which interaction states draw a filled background; use `WidgetFillOption::ALL` to keep the default normal/hover/click fills.
 - Use `Context::load_image_rgba`/`load_image_from` and `Context::free_image` to manage the lifetime of external textures.
 
 ## Cargo features

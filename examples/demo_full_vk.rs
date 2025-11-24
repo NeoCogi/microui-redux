@@ -576,14 +576,14 @@ impl<'a> State<'a> {
 
             self.slot_header = container.header("Slots", self.slot_header, |container| {
                 container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67), |container| {
-                    container.button_ex2("Slot 1", Some(Image::Slot(self.slots[0].clone())), WidgetOption::NONE);
+                    container.button_ex2("Slot 1", Some(Image::Slot(self.slots[0].clone())), WidgetOption::NONE, WidgetFillOption::ALL);
                     container.button_ex3("Slot 2 - Green", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(|_x, _y| {
                         color4b(0x00, 0xFF, 0x00, 0xFF)
                     }));
-                    container.button_ex2("Slot 3", Some(Image::Slot(self.slots[2].clone())), WidgetOption::NONE);
+                    container.button_ex2("Slot 3", Some(Image::Slot(self.slots[2].clone())), WidgetOption::NONE, WidgetFillOption::ALL);
                     if let Some(texture) = self.image_texture {
                         container.with_row(&[SizePolicy::Fixed(256)], SizePolicy::Fixed(256), |ctx| {
-                            ctx.button_ex2("External Image", Some(Image::Texture(texture)), WidgetOption::NONE);
+                            ctx.button_ex2("External Image", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL);
                         });
                     }
                 });
