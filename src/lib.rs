@@ -321,6 +321,19 @@ bitflags! {
         /// No special options.
         const NONE = 0;
     }
+
+    #[derive(Copy, Clone)]
+    /// Controls which widget states should draw a filled background.
+    pub struct WidgetFillOption : u32 {
+        /// Fill the background for the idle/normal state.
+        const NORMAL = 1;
+        /// Fill the background while hovered.
+        const HOVER = 2;
+        /// Fill the background while actively clicked.
+        const CLICK = 4;
+        /// Fill the background for every interaction state.
+        const ALL = Self::NORMAL.bits() | Self::HOVER.bits() | Self::CLICK.bits();
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -387,6 +400,17 @@ impl WidgetOption {
     pub fn is_aligned_center(&self) -> bool { self.intersects(WidgetOption::ALIGN_CENTER) }
     /// Returns `true` if the option set is empty.
     pub fn is_none(&self) -> bool { self.bits() == 0 }
+}
+
+impl WidgetFillOption {
+    /// Returns `true` when the normal state should be filled.
+    pub fn fill_normal(&self) -> bool { self.intersects(Self::NORMAL) }
+
+    /// Returns `true` when the hover state should be filled.
+    pub fn fill_hover(&self) -> bool { self.intersects(Self::HOVER) }
+
+    /// Returns `true` when the clicked/active state should be filled.
+    pub fn fill_click(&self) -> bool { self.intersects(Self::CLICK) }
 }
 
 bitflags! {

@@ -469,6 +469,22 @@ impl Container {
         self.draw_frame(rect, colorid);
     }
 
+    fn widget_fill_color(&self, id: Id, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
+        if self.focus == Some(id) && fill.fill_click() {
+            let mut color = base;
+            color.focus();
+            Some(color)
+        } else if self.hover == Some(id) && fill.fill_hover() {
+            let mut color = base;
+            color.hover();
+            Some(color)
+        } else if fill.fill_normal() {
+            Some(base)
+        } else {
+            None
+        }
+    }
+
     /// Draws a container frame, skipping rendering when the option disables it.
     pub fn draw_container_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, opt: ContainerOption) {
         if opt.has_no_frame() {
@@ -821,7 +837,7 @@ impl Container {
 
     #[inline(never)]
     /// Draws a button that can display an atlas slot or external texture.
-    pub fn button_ex2(&mut self, label: &str, image: Option<Image>, opt: WidgetOption) -> ResourceState {
+    pub fn button_ex2(&mut self, label: &str, image: Option<Image>, opt: WidgetOption, fill: WidgetFillOption) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = if label.len() > 0 {
             self.idmngr.get_id_from_str(label)
@@ -837,7 +853,11 @@ impl Container {
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
-        self.draw_widget_frame(id, r, ControlColor::Button, opt);
+        if !opt.has_no_frame() {
+            if let Some(colorid) = self.widget_fill_color(id, ControlColor::Button, fill) {
+                self.draw_frame(r, colorid);
+            }
+        }
         if label.len() > 0 {
             self.draw_control_text(label, r, ControlColor::Text, opt);
         }
@@ -877,6 +897,12 @@ impl Container {
             self.draw_control_text(label, rect, ControlColor::Text, opt);
         }
         res
+    }
+
+    #[inline(never)]
+    /// Shim for list boxes that only fills on hover or click.
+    pub fn list_box(&mut self, label: &str, image: Option<Image>, opt: WidgetOption) -> ResourceState {
+        self.button_ex2(label, image, opt, WidgetFillOption::HOVER | WidgetFillOption::CLICK)
     }
     fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
         let clipped = self.check_clip(rect);
