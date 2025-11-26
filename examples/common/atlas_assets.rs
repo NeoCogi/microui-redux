@@ -15,6 +15,7 @@ pub fn atlas_config<'a>(slots: &'a [Dimensioni]) -> builder::Config<'a> {
         expand_icon: String::from("assets/PLUS.png"),
         collapse_icon: String::from("assets/MINUS.png"),
         check_icon: String::from("assets/CHECK.png"),
+        expand_down_icon: String::from("assets/EXPAND_DOWN.png"),
         default_font: String::from("assets/NORMAL.ttf"),
         default_font_size: 12,
         slots,
