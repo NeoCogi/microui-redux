@@ -984,6 +984,18 @@ impl<R: Renderer> Context<R> {
         window.inner_mut().main.rect = rect(self.input.borrow().mouse_pos.x, self.input.borrow().mouse_pos.y, 1, 1);
         window.inner_mut().win_state = WindowState::Open;
         window.inner_mut().main.in_hover_root = true;
+        window.inner_mut().main.popup_just_opened = true;
+        self.bring_to_front(window);
+    }
+
+    /// Shows a popup anchored at the provided rectangle instead of the mouse cursor.
+    pub fn open_popup_at(&mut self, window: &mut WindowHandle, anchor: Recti) {
+        self.next_hover_root = Some(window.clone());
+        self.hover_root = self.next_hover_root.clone();
+        window.inner_mut().main.rect = anchor;
+        window.inner_mut().win_state = WindowState::Open;
+        window.inner_mut().main.in_hover_root = true;
+        window.inner_mut().main.popup_just_opened = true;
         self.bring_to_front(window);
     }
 

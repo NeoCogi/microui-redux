@@ -71,6 +71,7 @@ struct State<'a> {
     logbuf_updated: bool,
     submit_buf: String,
     checks: [bool; 3],
+    combo_state: Option<ComboState>,
     style: Style,
 
     demo_window: Option<WindowHandle>,
@@ -90,6 +91,7 @@ struct State<'a> {
     background_header: NodeState,
     tree_and_text_header: NodeState,
     slot_header: NodeState,
+    combo_header: NodeState,
     test1_tn: NodeState,
     test1a_tn: NodeState,
     test1b_tn: NodeState,
@@ -201,6 +203,7 @@ impl<'a> State<'a> {
             logbuf_updated: false,
             submit_buf: String::new(),
             checks: [false, true, false],
+            combo_state: None,
             style: Style::default(),
             demo_window: None,
             style_window: None,
@@ -217,6 +220,7 @@ impl<'a> State<'a> {
             background_header: NodeState::Expanded,
             tree_and_text_header: NodeState::Expanded,
             slot_header: NodeState::Expanded,
+            combo_header: NodeState::Expanded,
             test1_tn: NodeState::Closed,
             test1a_tn: NodeState::Closed,
             test1b_tn: NodeState::Closed,
@@ -441,6 +445,10 @@ impl<'a> State<'a> {
     }
 
     fn test_window(&mut self, ctx: &mut Context<VulkanRenderer>) {
+        let combo_items = ["Apple", "Banana", "Cherry", "Date"];
+        let mut combo_anchor = None;
+        let mut combo_changed = false;
+
         ctx.window(&mut self.demo_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
             let mut win = container.rect;
             win.width = win.width.max(240);
@@ -498,6 +506,17 @@ impl<'a> State<'a> {
                     }
                     if !container.button_ex("Dialog", None, WidgetOption::ALIGN_CENTER).is_none() {
                         self.open_dialog = true;
+                    }
+                });
+            });
+            self.combo_header = container.header("Combo Box", self.combo_header, |container| {
+                let combo_state = self.combo_state.as_mut().unwrap();
+                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                    let (anchor, toggled, _) =
+                        container.combo_box(combo_state, &combo_items, WidgetOption::NONE);
+                    combo_anchor = Some(anchor);
+                    if toggled {
+                        combo_state.open = !combo_state.open;
                     }
                 });
             });
@@ -603,6 +622,43 @@ impl<'a> State<'a> {
             WindowState::Open
         });
 
+        if let Some(anchor) = combo_anchor {
+            let combo_state = self.combo_state.as_mut().unwrap();
+            let popup = &mut combo_state.popup;
+            let was_open = popup.is_open();
+            if combo_state.open && !popup.is_open() {
+                ctx.open_popup_at(popup, anchor);
+            }
+
+            ctx.popup(popup, |dropdown| {
+                dropdown.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |dropdown| {
+                    for (idx, item) in combo_items.iter().enumerate() {
+                        if dropdown.list_item(item, WidgetOption::NONE).is_submitted() {
+                            combo_state.selected = idx;
+                            combo_changed = true;
+                            dropdown.set_focus(None);
+                        }
+                    }
+                });
+                if combo_changed {
+                    WindowState::Closed
+                } else {
+                    WindowState::Open
+                }
+            });
+
+            if !popup.is_open() {
+                combo_state.open = false;
+            }
+        }
+
+        if combo_changed {
+            if let Some(choice) = combo_items.get(self.combo_state.as_ref().unwrap().selected) {
+                let msg = format!("Selected: {}", choice);
+                self.write_log(msg.as_str());
+            }
+        }
+
         if self.open_popup {
             ctx.open_popup(self.popup_window.as_mut().unwrap());
             self.open_popup = false;
@@ -669,6 +725,7 @@ fn main() {
         state.log_window = Some(ctx.new_window("Log Window", rect(350, 40, 300, 200)));
         state.style_window = Some(ctx.new_window("Style Editor", rect(350, 250, 300, 240)));
         state.popup_window = Some(ctx.new_popup("Test Popup"));
+        state.combo_state = Some(ComboState::new(ctx.new_popup("Combo Box Popup")));
         state.log_output = Some(ctx.new_panel("Log Output"));
         state.dialog_window = Some(FileDialogState::new(ctx));
         state.triangle_window = Some(ctx.new_window("Triangle Window", rect(200, 100, 200, 200)));

@@ -186,9 +186,27 @@ pub struct Container {
     pub number_edit_buf: String,
     /// ID of the number widget currently in edit mode, if any.
     pub number_edit: Option<Id>,
+    /// Tracks whether a popup was just opened this frame to avoid instant auto-close.
+    pub popup_just_opened: bool,
     text_states: HashMap<Id, TextEditState>,
 
     panels: Vec<ContainerHandle>,
+}
+
+/// Persistent state used by `combo_box` to track popup and selection.
+#[derive(Clone)]
+pub struct ComboState {
+    /// Popup window backing the dropdown list.
+    pub popup: WindowHandle,
+    /// Currently selected item index.
+    pub selected: usize,
+    /// Whether the combo popup should be open.
+    pub open: bool,
+}
+
+impl ComboState {
+    /// Creates a new combo state with the provided popup handle.
+    pub fn new(popup: WindowHandle) -> Self { Self { popup, selected: 0, open: false } }
 }
 
 impl Container {
@@ -211,6 +229,7 @@ impl Container {
             idmngr: IdManager::new(),
             number_edit_buf: String::default(),
             number_edit: None,
+            popup_just_opened: false,
             in_hover_root: false,
             input: input,
             text_states: HashMap::new(),
@@ -904,6 +923,52 @@ impl Container {
     pub fn list_box(&mut self, label: &str, image: Option<Image>, opt: WidgetOption) -> ResourceState {
         self.button_ex2(label, image, opt, WidgetFillOption::HOVER | WidgetFillOption::CLICK)
     }
+
+    #[inline(never)]
+    /// Draws a combo box that opens a popup listing `items` and writes back the selected index.
+    pub fn combo_box<S: AsRef<str>>(
+        &mut self,
+        state: &mut ComboState,
+        items: &[S],
+        opt: WidgetOption,
+    ) -> (Recti, bool, ResourceState) {
+        let mut res = ResourceState::NONE;
+
+        // Keep the selected index within bounds so we never index past the slice.
+        if state.selected >= items.len() {
+            if !items.is_empty() {
+                state.selected = items.len() - 1;
+                res |= ResourceState::CHANGE;
+            } else if state.selected != 0 {
+                state.selected = 0;
+                res |= ResourceState::CHANGE;
+            }
+        }
+
+        let id: Id = self.idmngr.get_id_from_ptr(&state.selected);
+        let header: Recti = self.layout.next();
+        self.update_control(id, header, opt);
+
+        let header_clicked = self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id);
+        let popup_open = state.popup.is_open();
+
+        // Toggle the popup when the header is clicked.
+        if header_clicked {
+            res |= ResourceState::ACTIVE;
+        }
+
+        self.draw_widget_frame(id, header, ControlColor::Button, opt);
+        let label = items.get(state.selected).map(|s| s.as_ref()).unwrap_or("");
+        self.draw_control_text(label, header, ControlColor::Text, opt);
+
+        if popup_open {
+            res |= ResourceState::ACTIVE;
+        }
+
+        let anchor = rect(header.x, header.y + header.height, header.width, 1);
+        (anchor, header_clicked, res)
+    }
+
     fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
         let clipped = self.check_clip(rect);
         match clipped {
