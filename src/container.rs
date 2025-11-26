@@ -746,7 +746,9 @@ impl Container {
         self.layout.style = self.style.clone();
         let font_height = self.atlas.get_font_height(self.style.font) as i32;
         let vertical_pad = Self::vertical_text_padding(self.style.padding);
-        self.layout.set_default_cell_height(font_height + vertical_pad * 2);
+        let icon_height = self.atlas.get_icon_size(EXPAND_DOWN_ICON).height;
+        let default_height = max(font_height + vertical_pad * 2, icon_height);
+        self.layout.set_default_cell_height(default_height);
         self.body = body;
     }
 
@@ -959,7 +961,18 @@ impl Container {
 
         self.draw_widget_frame(id, header, ControlColor::Button, opt);
         let label = items.get(state.selected).map(|s| s.as_ref()).unwrap_or("");
-        self.draw_control_text(label, header, ControlColor::Text, opt);
+        let indicator_size = self.atlas.get_icon_size(EXPAND_DOWN_ICON);
+        let indicator_x = header.x + header.width - indicator_size.width;
+        let indicator_y = header.y + ((header.height - indicator_size.height) / 2).max(0);
+        let indicator = rect(indicator_x, indicator_y, indicator_size.width, indicator_size.height);
+
+        let mut text_rect = header;
+        let reserved_width = indicator_size.width;
+        text_rect.width = (text_rect.width - reserved_width).max(0);
+        self.draw_control_text(label, text_rect, ControlColor::Text, opt);
+        self.draw_widget_frame(id, indicator, ControlColor::Button, opt);
+        let icon_color = self.style.colors[ControlColor::Text as usize];
+        self.draw_icon(EXPAND_DOWN_ICON, indicator, icon_color);
 
         if popup_open {
             res |= ResourceState::ACTIVE;

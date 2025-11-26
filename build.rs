@@ -13,6 +13,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=assets/PLUS.png");
     println!("cargo:rerun-if-changed=assets/MINUS.png");
     println!("cargo:rerun-if-changed=assets/CHECK.png");
+    println!("cargo:rerun-if-changed=assets/EXPAND_DOWN.png");
 
     if env::var("MICROUI_BUILD_TOOL").is_ok() {
         return Ok(());

@@ -137,6 +137,8 @@ pub const EXPAND_ICON: IconId = IconId(2);
 pub const COLLAPSE_ICON: IconId = IconId(3);
 /// Identifier of the checkbox icon baked into the default atlas.
 pub const CHECK_ICON: IconId = IconId(4);
+/// Identifier of the combo-box expand icon baked into the default atlas.
+pub const EXPAND_DOWN_ICON: IconId = IconId(5);
 
 /// Decodes image data into 32-bit pixels according to `source`.
 pub fn load_image_bytes(source: ImageSource) -> std::io::Result<(usize, usize, Vec<Color4b>)> {
@@ -260,6 +262,8 @@ pub mod builder {
         pub collapse_icon: String,
         /// Path to the checkbox icon.
         pub check_icon: String,
+        /// Path to the combo box expand icon.
+        pub expand_down_icon: String,
         /// Path to the default font file.
         pub default_font: String,
         /// Size of the default font.
@@ -297,6 +301,7 @@ pub mod builder {
             builder.add_icon(&config.expand_icon)?;
             builder.add_icon(&config.collapse_icon)?;
             builder.add_icon(&config.check_icon)?;
+            builder.add_icon(&config.expand_down_icon)?;
             builder.add_font(&config.default_font, config.default_font_size)?;
 
             for slot in config.slots {
