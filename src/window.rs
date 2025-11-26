@@ -183,13 +183,16 @@ impl Window {
                 };
             }
         }
-        if opt.is_auto_sizing() {
+        if opt.is_auto_sizing() && (container.content_size.x > 0 || container.content_size.y > 0) {
             let r_1 = container.layout.current_body();
             container.rect.width = container.content_size.x + (container.rect.width - r_1.width);
             container.rect.height = container.content_size.y + (container.rect.height - r_1.height);
         }
 
-        if is_popup && !container.input.borrow().mouse_pressed.is_none() && !container.in_hover_root {
+        if is_popup && container.popup_just_opened {
+            // Skip the auto-close check on the same frame the popup is opened.
+            container.popup_just_opened = false;
+        } else if is_popup && !container.input.borrow().mouse_pressed.is_none() && !container.in_hover_root {
             self.win_state = WindowState::Closed;
         }
         let body = container.body;
