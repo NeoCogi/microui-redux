@@ -14,6 +14,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=assets/MINUS.png");
     println!("cargo:rerun-if-changed=assets/CHECK.png");
     println!("cargo:rerun-if-changed=assets/EXPAND_DOWN.png");
+    println!("cargo:rerun-if-changed=assets/OPEN_FOLDER_16.png");
+    println!("cargo:rerun-if-changed=assets/CLOSED_FOLDER_16.png");
+    println!("cargo:rerun-if-changed=assets/FILE_16.png");
 
     if env::var("MICROUI_BUILD_TOOL").is_ok() {
         return Ok(());

@@ -36,6 +36,7 @@ pub struct FileDialogState {
     current_working_directory: String,
     file_name: Option<String>,
     tmp_file_name: String,
+    selected_folder: Option<String>,
     win: WindowHandle,
     folder_panel: ContainerHandle,
     file_panel: ContainerHandle,
@@ -46,6 +47,49 @@ pub struct FileDialogState {
 impl FileDialogState {
     /// Returns the selected file name if the dialog completed successfully.
     pub fn file_name(&self) -> &Option<String> { &self.file_name }
+
+    fn list_item_with_icon(container: &mut Container, label: &str, icon: IconId, opt: WidgetOption) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let id: Id = if label.is_empty() {
+            container.idmngr.get_id_from_str("!list_item_icon")
+        } else {
+            container.idmngr.get_id_from_str(label)
+        };
+        let item_rect = container.layout.next();
+        container.update_control(id, item_rect, opt);
+        if container.input.borrow().mouse_pressed.is_left() && container.focus == Some(id) {
+            res |= ResourceState::SUBMIT;
+        }
+
+        if container.focus == Some(id) || container.hover == Some(id) {
+            let mut color = ControlColor::Button;
+            if container.focus == Some(id) {
+                color.focus();
+            } else {
+                color.hover();
+            }
+            let fill = container.style.colors[color as usize];
+            container.draw_rect(item_rect, fill);
+        }
+
+        let padding = container.style.padding.max(0);
+        let icon_size = container.atlas.get_icon_size(icon);
+        let icon_x = item_rect.x + padding;
+        let icon_y = item_rect.y + ((item_rect.height - icon_size.height) / 2).max(0);
+        let icon_rect = rect(icon_x, icon_y, icon_size.width, icon_size.height);
+        let mut text_rect = item_rect;
+        let consumed = icon_size.width + padding * 2;
+        text_rect.x += consumed;
+        text_rect.width = (text_rect.width - consumed).max(0);
+
+        let color = container.style.colors[ControlColor::Text as usize];
+        container.draw_icon(icon, icon_rect, color);
+        if !label.is_empty() {
+            container.draw_control_text(label, text_rect, ControlColor::Text, opt);
+        }
+
+        res
+    }
 
     fn list_folders_files(p: &Path, folders: &mut Vec<String>, files: &mut Vec<String>) {
         folders.clear();
@@ -78,6 +122,7 @@ impl FileDialogState {
             current_working_directory,
             file_name: None,
             tmp_file_name: String::new(),
+            selected_folder: None,
             win: ctx.new_dialog("File Dialog", Recti::new(50, 50, 500, 500)),
             folder_panel: ctx.new_panel("folders"),
             file_panel: ctx.new_panel("files"),
@@ -112,8 +157,15 @@ impl FileDialogState {
                         for f in &self.folders {
                             let path = f.split("/").last().unwrap_or(f);
 
-                            if container.list_item(path, WidgetOption::NONE).is_submitted() {
+                            let icon = if self.selected_folder.as_deref() == Some(f) {
+                                OPEN_FOLDER_16_ICON
+                            } else {
+                                CLOSED_FOLDER_16_ICON
+                            };
+
+                            if Self::list_item_with_icon(container, path, icon, WidgetOption::NONE).is_submitted() {
                                 self.current_working_directory = f.to_string();
+                                self.selected_folder = Some(f.to_string());
                                 refresh = true;
                             }
                         }
@@ -128,7 +180,7 @@ impl FileDialogState {
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
                         if self.files.len() != 0 {
                             for f in &self.files {
-                                if container.list_item(f, WidgetOption::NONE).is_submitted() {
+                                if Self::list_item_with_icon(container, f, FILE_16_ICON, WidgetOption::NONE).is_submitted() {
                                     self.tmp_file_name = f.to_string();
                                 }
                             }
