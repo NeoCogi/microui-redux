@@ -139,6 +139,12 @@ pub const COLLAPSE_ICON: IconId = IconId(3);
 pub const CHECK_ICON: IconId = IconId(4);
 /// Identifier of the combo-box expand icon baked into the default atlas.
 pub const EXPAND_DOWN_ICON: IconId = IconId(5);
+/// Identifier of the open-folder icon baked into the default atlas.
+pub const OPEN_FOLDER_16_ICON: IconId = IconId(6);
+/// Identifier of the closed-folder icon baked into the default atlas.
+pub const CLOSED_FOLDER_16_ICON: IconId = IconId(7);
+/// Identifier of the file icon baked into the default atlas.
+pub const FILE_16_ICON: IconId = IconId(8);
 
 /// Decodes image data into 32-bit pixels according to `source`.
 pub fn load_image_bytes(source: ImageSource) -> std::io::Result<(usize, usize, Vec<Color4b>)> {
@@ -264,6 +270,12 @@ pub mod builder {
         pub check_icon: String,
         /// Path to the combo box expand icon.
         pub expand_down_icon: String,
+        /// Path to the open-folder icon.
+        pub open_folder_16_icon: String,
+        /// Path to the closed-folder icon.
+        pub closed_folder_16_icon: String,
+        /// Path to the file icon.
+        pub file_16_icon: String,
         /// Path to the default font file.
         pub default_font: String,
         /// Size of the default font.
@@ -302,6 +314,9 @@ pub mod builder {
             builder.add_icon(&config.collapse_icon)?;
             builder.add_icon(&config.check_icon)?;
             builder.add_icon(&config.expand_down_icon)?;
+            builder.add_icon(&config.open_folder_16_icon)?;
+            builder.add_icon(&config.closed_folder_16_icon)?;
+            builder.add_icon(&config.file_16_icon)?;
             builder.add_font(&config.default_font, config.default_font_size)?;
 
             for slot in config.slots {
