@@ -76,7 +76,7 @@ type RendererBackend = vulkan_renderer::VulkanRenderer;
 type MicroUI = microui::Context<RendererBackend>;
 
 #[cfg(feature = "example-glow")]
-type BackendInitContext = Arc<glow::Context>;
+pub type BackendInitContext = Arc<glow::Context>;
 #[cfg(feature = "example-vulkan")]
 pub struct BackendInitContext {
     pub renderer: RendererHandle<vulkan_renderer::VulkanRenderer>,

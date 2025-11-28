@@ -57,6 +57,51 @@ use std::{collections::HashMap, io, sync::Arc, usize};
 
 use microui_redux::*;
 use glow::*;
+use rs_math3d::{Vec3f, Vec4f};
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct MeshVertex {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+    pub uv: [f32; 2],
+}
+
+#[derive(Clone)]
+pub struct MeshBuffers {
+    vertices: Arc<[MeshVertex]>,
+    indices: Arc<[u32]>,
+}
+
+impl MeshBuffers {
+    pub fn from_vecs(vertices: Vec<MeshVertex>, indices: Vec<u32>) -> Self {
+        Self {
+            vertices: vertices.into(),
+            indices: indices.into(),
+        }
+    }
+
+    pub fn vertices(&self) -> &[MeshVertex] { &self.vertices }
+    pub fn indices(&self) -> &[u32] { &self.indices }
+    pub fn is_empty(&self) -> bool { self.vertices.is_empty() || self.indices.is_empty() }
+}
+
+#[derive(Clone)]
+pub struct MeshSubmission {
+    pub mesh: MeshBuffers,
+    pub pvm: Mat4f,
+    pub view_model: Mat4f,
+}
+
+#[derive(Clone, Copy)]
+pub struct CustomRenderArea {
+    pub rect: Recti,
+    pub clip: Recti,
+}
+
+pub(crate) trait GLCustomRenderer {
+    fn record(&mut self, gl: &glow::Context, framebuffer_size: (u32, u32), area: &CustomRenderArea);
+}
 
 const VERTEX_SHADER: &str = "#version 100
 uniform highp mat4 uTransform;
@@ -103,6 +148,25 @@ pub struct GLRenderer {
 }
 
 impl GLRenderer {
+    fn white_uv_center(&self) -> Vec2f {
+        let atlas = self.get_atlas();
+        let rect = atlas.get_icon_rect(WHITE_ICON);
+        let dim = atlas.get_texture_dimension();
+        Vec2f::new(
+            (rect.x as f32 + rect.width as f32 * 0.5) / dim.width as f32,
+            (rect.y as f32 + rect.height as f32 * 0.5) / dim.height as f32,
+        )
+    }
+
+    fn scissor_from_ui(&self, clip: Recti) -> Option<(i32, i32, i32, i32)> {
+        if clip.width <= 0 || clip.height <= 0 {
+            return None;
+        }
+        let x = clip.x;
+        let y = (self.height as i32).saturating_sub(clip.y + clip.height);
+        Some((x, y, clip.width, clip.height))
+    }
+
     fn update_atlas(&mut self) {
         let gl = &self.gl;
         if self.last_update_id != self.atlas.get_last_update_id() {
@@ -407,6 +471,152 @@ impl Renderer for GLRenderer {
             gl.disable_vertex_attrib_array(col_attrib_id);
             gl.use_program(None);
         }
+    }
+}
+
+impl GLRenderer {
+    pub(crate) fn enqueue_custom_render<C: GLCustomRenderer + 'static>(&mut self, area: CustomRenderArea, mut cmd: C) {
+        self.flush();
+        cmd.record(&self.gl, (self.width, self.height), &area);
+    }
+
+    pub fn enqueue_colored_vertices(&mut self, area: CustomRenderArea, vertices: Vec<Vertex>) {
+        if vertices.is_empty() {
+            return;
+        }
+        self.flush();
+        let gl = &self.gl;
+        unsafe {
+            gl.viewport(0, 0, self.width as i32, self.height as i32);
+            if let Some((sx, sy, sw, sh)) = self.scissor_from_ui(area.clip) {
+                gl.scissor(sx, sy, sw, sh);
+            }
+            gl.enable(glow::BLEND);
+            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            gl.disable(glow::CULL_FACE);
+            gl.disable(glow::DEPTH_TEST);
+            gl.enable(glow::SCISSOR_TEST);
+
+            gl.use_program(Some(self.program));
+            gl.bind_texture(glow::TEXTURE_2D, Some(self.tex_o));
+            gl.active_texture(glow::TEXTURE0 + 0);
+            if let Some(tex_uniform_id) = gl.get_uniform_location(self.program, "uTexture") {
+                gl.uniform_1_i32(Some(&tex_uniform_id), 0);
+            }
+
+            if let Some(viewport) = gl.get_uniform_location(self.program, "uTransform") {
+                let tm = ortho4(0.0, self.width as f32, self.height as f32, 0.0, -1.0, 1.0);
+                let tm_ptr = tm.col.as_ptr() as *const _ as *const f32;
+                let slice = std::slice::from_raw_parts(tm_ptr, 16);
+                gl.uniform_matrix_4_f32_slice(Some(&viewport), false, &slice);
+            }
+
+            let pos_attrib_id = gl.get_attrib_location(self.program, "vertexPosition").unwrap();
+            let tex_attrib_id = gl.get_attrib_location(self.program, "vertexTexCoord").unwrap();
+            let col_attrib_id = gl.get_attrib_location(self.program, "vertexColor").unwrap();
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
+
+            let vertices_u8: &[u8] = core::slice::from_raw_parts(vertices.as_ptr() as *const u8, vertices.len() * core::mem::size_of::<Vertex>());
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_u8, glow::DYNAMIC_DRAW);
+
+            gl.enable_vertex_attrib_array(pos_attrib_id);
+            gl.enable_vertex_attrib_array(tex_attrib_id);
+            gl.enable_vertex_attrib_array(col_attrib_id);
+            gl.vertex_attrib_pointer_f32(pos_attrib_id, 2, glow::FLOAT, false, 20, 0);
+            gl.vertex_attrib_pointer_f32(tex_attrib_id, 2, glow::FLOAT, false, 20, 8);
+            gl.vertex_attrib_pointer_f32(col_attrib_id, 4, glow::UNSIGNED_BYTE, true, 20, 16);
+
+            gl.draw_arrays(glow::TRIANGLES, 0, vertices.len() as i32);
+
+            gl.disable_vertex_attrib_array(pos_attrib_id);
+            gl.disable_vertex_attrib_array(tex_attrib_id);
+            gl.disable_vertex_attrib_array(col_attrib_id);
+            gl.use_program(None);
+            gl.scissor(0, 0, self.width as i32, self.height as i32);
+        }
+    }
+
+    pub fn enqueue_mesh_draw(&mut self, _area: CustomRenderArea, _submission: MeshSubmission) {
+        if _submission.mesh.is_empty() {
+            return;
+        }
+        // Early exit if the rect is empty; nothing to draw.
+        if _area.rect.width <= 0 || _area.rect.height <= 0 {
+            return;
+        }
+        let white_uv = self.white_uv_center();
+        #[derive(Clone)]
+        struct Tri {
+            depth: f32,
+            verts: [Vertex; 3],
+        }
+        let mut tris: Vec<Tri> = Vec::with_capacity(_submission.mesh.indices().len() / 3);
+
+        let mesh = &_submission.mesh;
+        let pvm = &_submission.pvm;
+        let indices = mesh.indices();
+        let positions = mesh.vertices();
+
+        for tri in indices.chunks_exact(3) {
+            let idxs = [tri[0] as usize, tri[1] as usize, tri[2] as usize];
+            let mut clip_space = [Vec4f::default(); 3];
+            for (dst, src_idx) in clip_space.iter_mut().zip(&idxs) {
+                let v = &positions[*src_idx];
+                *dst = *pvm * Vec4f::new(v.position[0], v.position[1], v.position[2], 1.0);
+            }
+            // Basic backface culling in clip space (approximate).
+            let a = clip_space[0];
+            let b = clip_space[1];
+            let c = clip_space[2];
+            let ab = Vec3f::new(b.x - a.x, b.y - a.y, b.z - a.z);
+            let ac = Vec3f::new(c.x - a.x, c.y - a.y, c.z - a.z);
+            let cross = Vec3f::cross(&ab, &ac);
+            if cross.z <= 0.0 {
+                continue;
+            }
+
+            let mut verts = [Vertex::new(Vec2f::default(), white_uv, color4b(0, 0, 0, 255)); 3];
+            let mut depth_acc = 0.0;
+            let mut valid = true;
+
+            for ((clip, src_idx), out_v) in clip_space.iter().zip(&idxs).zip(verts.iter_mut()) {
+                if clip.w.abs() < 1e-5 {
+                    valid = false;
+                    break;
+                }
+                let ndc = Vec3f::new(clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
+                depth_acc += ndc.z;
+                let sx = _area.rect.x as f32 + (ndc.x * 0.5 + 0.5) * _area.rect.width as f32;
+                let sy = _area.rect.y as f32 + (-ndc.y * 0.5 + 0.5) * _area.rect.height as f32;
+
+                let v = &positions[*src_idx];
+                let normal = Vec3f::new(v.normal[0], v.normal[1], v.normal[2]);
+                let color = (normal * 0.5) + Vec3f::new(0.5, 0.5, 0.5);
+                let r = (color.x.clamp(0.0, 1.0) * 255.0) as u8;
+                let g = (color.y.clamp(0.0, 1.0) * 255.0) as u8;
+                let b = (color.z.clamp(0.0, 1.0) * 255.0) as u8;
+
+                *out_v = Vertex::new(Vec2f::new(sx, sy), white_uv, color4b(r, g, b, 255));
+            }
+
+            if valid {
+                tris.push(Tri {
+                    depth: depth_acc / 3.0,
+                    verts,
+                });
+            }
+        }
+
+        // Painter's algorithm: draw farthest triangles first so nearer ones occlude.
+        tris.sort_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut verts: Vec<Vertex> = Vec::with_capacity(tris.len() * 3);
+        for tri in tris {
+            verts.extend_from_slice(&tri.verts);
+        }
+
+        self.enqueue_colored_vertices(_area, verts);
     }
 }
 
