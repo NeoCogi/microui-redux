@@ -1,7 +1,3 @@
-# if you need to test small size executable (no backtrace crap):
-# $ cargo +nightly run -Z build-std=std --release --example demo-full --no-default-features
-# and uncomment this before building:
-# cargo-features = ["panic-immediate-abort"]
 [package]
 name = "microui-redux"
 authors = ["Raja Lehtihet", "Wael El Oraiby"]
@@ -63,16 +59,6 @@ required-features = ["example-backend"]
 name = "demo-full"
 path = "examples/demo-full.rs"
 required-features = ["example-backend"]
-
-[[example]]
-name = "demo_full_gl"
-path = "examples/demo_full_gl.rs"
-required-features = ["example-glow"]
-
-[[example]]
-name = "demo_full_vk"
-path = "examples/demo_full_vk.rs"
-required-features = ["example-vulkan"]
 
 # small size executable
 # [profile.release]

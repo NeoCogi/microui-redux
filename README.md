@@ -6,9 +6,11 @@ This was originally a port of Rxi's MicroUI to Rust language. We used C2Rust to 
 While we tried to keep the usage pattern as close to the original as possible, we wanted also to make it as idiomatic to Rust as possible (closures, safety, ...). In contrast with ![microui-rs](https://github.com/neocogi/microui-rs), this version uses the standard library to give us more flexibity and switch to closures for all container related operations (Window, Panel, Columns, ...).
 
 ## Demo
-Clone and build the demo (SDL2 & glow) / Tested on linux:
+Clone and build the demo (enable exactly one backend feature):
 ```
-$ cargo run --example demo-full
+$ cargo run --example demo-full --features example-vulkan   # Vulkan backend
+# or
+$ cargo run --example demo-full --features example-glow     # Glow backend
 ```
 
 ![random](https://github.com/NeoCogi/microui-redux/raw/master/res/microui.png)
