@@ -137,6 +137,7 @@ impl FileDialogState {
     /// Renders the dialog and updates the selected file when confirmed.
     pub fn eval<R: Renderer>(&mut self, ctx: &mut Context<R>) {
         ctx.dialog(&mut self.win, ContainerOption::NONE, |cont| {
+            let mut dialog_state = WindowState::Open;
             let half_width = cont.body.width / 2;
             cont.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |cont| {
                 cont.label(&self.current_working_directory);
@@ -196,14 +197,14 @@ impl FileDialogState {
                     if self.tmp_file_name != "" {
                         self.file_name = Some(self.tmp_file_name.clone())
                     }
-                    return;
+                    dialog_state = WindowState::Closed;
                 }
                 if cont.button_ex("Cancel", None, WidgetOption::NONE).is_submitted() {
                     self.file_name = None;
-                    return;
+                    dialog_state = WindowState::Closed;
                 }
             });
-            WindowState::Open
+            dialog_state
         });
     }
 }
