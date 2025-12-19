@@ -768,7 +768,6 @@ impl Container {
     #[inline(never)]
     fn begin_panel(&mut self, panel: &mut ContainerHandle, opt: ContainerOption) {
         let rect = self.layout.next();
-        let clip_rect = panel.inner().body;
         let container = &mut panel.inner_mut();
         container.prepare();
 
@@ -779,6 +778,7 @@ impl Container {
 
         container.in_hover_root = self.in_hover_root;
         container.push_container_body(rect, opt);
+        let clip_rect = container.body;
         container.push_clip_rect(clip_rect);
     }
 

@@ -632,8 +632,7 @@ impl<'a> State<'a> {
         if let Some(anchor) = combo_anchor {
             let combo_state = self.combo_state.as_mut().unwrap();
             let popup = &mut combo_state.popup;
-            let was_open = popup.is_open();
-            if combo_state.open && !popup.is_open() {
+            if combo_state.open {
                 ctx.open_popup_at(popup, anchor);
             }
 
