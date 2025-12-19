@@ -94,7 +94,9 @@ impl FileDialogState {
     fn list_folders_files(p: &Path, folders: &mut Vec<String>, files: &mut Vec<String>) {
         folders.clear();
         files.clear();
-        folders.push(p.to_string_lossy().to_string() + "/..");
+        if let Some(parent) = p.parent() {
+            folders.push(parent.to_string_lossy().to_string());
+        }
         if let Ok(read_dir) = std::fs::read_dir(p) {
             for entry in read_dir {
                 if let Ok(e) = entry {
@@ -139,6 +141,9 @@ impl FileDialogState {
         ctx.dialog(&mut self.win, ContainerOption::NONE, |cont| {
             let mut dialog_state = WindowState::Open;
             let half_width = cont.body.width / 2;
+            let parent_path = Path::new(&self.current_working_directory)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string());
             cont.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |cont| {
                 cont.label(&self.current_working_directory);
                 cont.textbox_ex(&mut self.tmp_file_name, WidgetOption::NONE);
@@ -156,7 +161,14 @@ impl FileDialogState {
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
                         let mut refresh = false;
                         for f in &self.folders {
-                            let path = f.split("/").last().unwrap_or(f);
+                            let label = if parent_path.as_deref() == Some(f.as_str()) {
+                                ".."
+                            } else {
+                                Path::new(f)
+                                    .file_name()
+                                    .and_then(|name| name.to_str())
+                                    .unwrap_or(f.as_str())
+                            };
 
                             let icon = if self.selected_folder.as_deref() == Some(f) {
                                 OPEN_FOLDER_16_ICON
@@ -164,7 +176,7 @@ impl FileDialogState {
                                 CLOSED_FOLDER_16_ICON
                             };
 
-                            if Self::list_item_with_icon(container, path, icon, WidgetOption::NONE).is_submitted() {
+                            if Self::list_item_with_icon(container, label, icon, WidgetOption::NONE).is_submitted() {
                                 self.current_working_directory = f.to_string();
                                 self.selected_folder = Some(f.to_string());
                                 refresh = true;
