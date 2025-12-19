@@ -979,24 +979,52 @@ impl<R: Renderer> Context<R> {
 
     /// Shows a popup at the mouse cursor position.
     pub fn open_popup(&mut self, window: &mut WindowHandle) {
-        self.next_hover_root = Some(window.clone());
-        self.hover_root = self.next_hover_root.clone();
-        window.inner_mut().main.rect = rect(self.input.borrow().mouse_pos.x, self.input.borrow().mouse_pos.y, 1, 1);
-        window.inner_mut().win_state = WindowState::Open;
-        window.inner_mut().main.in_hover_root = true;
-        window.inner_mut().main.popup_just_opened = true;
-        self.bring_to_front(window);
+        let was_open = window.is_open();
+        let mouse_pos = self.input.borrow().mouse_pos;
+        {
+            let mut inner = window.inner_mut();
+            if was_open {
+                let mut rect = inner.main.rect;
+                rect.x = mouse_pos.x;
+                rect.y = mouse_pos.y;
+                inner.main.rect = rect;
+            } else {
+                inner.main.rect = rect(mouse_pos.x, mouse_pos.y, 1, 1);
+                inner.win_state = WindowState::Open;
+                inner.main.in_hover_root = true;
+                inner.main.popup_just_opened = true;
+            }
+        }
+        if !was_open {
+            self.next_hover_root = Some(window.clone());
+            self.hover_root = self.next_hover_root.clone();
+            self.bring_to_front(window);
+        }
     }
 
     /// Shows a popup anchored at the provided rectangle instead of the mouse cursor.
     pub fn open_popup_at(&mut self, window: &mut WindowHandle, anchor: Recti) {
-        self.next_hover_root = Some(window.clone());
-        self.hover_root = self.next_hover_root.clone();
-        window.inner_mut().main.rect = anchor;
-        window.inner_mut().win_state = WindowState::Open;
-        window.inner_mut().main.in_hover_root = true;
-        window.inner_mut().main.popup_just_opened = true;
-        self.bring_to_front(window);
+        let was_open = window.is_open();
+        {
+            let mut inner = window.inner_mut();
+            if was_open {
+                let mut rect = inner.main.rect;
+                rect.x = anchor.x;
+                rect.y = anchor.y;
+                rect.width = anchor.width;
+                inner.main.rect = rect;
+            } else {
+                inner.main.rect = anchor;
+                inner.win_state = WindowState::Open;
+                inner.main.in_hover_root = true;
+                inner.main.popup_just_opened = true;
+            }
+        }
+        if !was_open {
+            self.next_hover_root = Some(window.clone());
+            self.hover_root = self.next_hover_root.clone();
+            self.bring_to_front(window);
+        }
     }
 
     /// Opens a popup window with default options.
