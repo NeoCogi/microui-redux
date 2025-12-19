@@ -835,7 +835,10 @@ impl Container {
         let id: Id = if label.len() > 0 {
             self.idmngr.get_id_from_str(label)
         } else {
-            self.idmngr.get_id_u32(icon.unwrap().into())
+            match icon {
+                Some(icon) => self.idmngr.get_id_u32(icon.into()),
+                None => self.idmngr.get_id_from_str("!button"),
+            }
         };
         let r: Recti = self.layout.next();
         self.update_control(id, r, opt);
@@ -1005,7 +1008,10 @@ impl Container {
         let id: Id = if label.len() > 0 {
             self.idmngr.get_id_from_str(label)
         } else {
-            self.idmngr.get_id_u32(slot.unwrap().into())
+            match slot {
+                Some(slot) => self.idmngr.get_id_u32(slot.into()),
+                None => self.idmngr.get_id_from_str("!button"),
+            }
         };
         let r: Recti = self.layout.next();
         self.update_control(id, r, opt);
