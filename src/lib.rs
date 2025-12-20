@@ -676,6 +676,18 @@ impl CustomState {
     }
 }
 
+#[derive(Clone)]
+/// Persistent state for internal window/container controls.
+pub struct InternalState {
+    /// Stable tag describing the internal control.
+    pub tag: &'static str,
+}
+
+impl InternalState {
+    /// Creates an internal control state with a stable tag.
+    pub fn new(tag: &'static str) -> Self { Self { tag } }
+}
+
 impl ContainerOption {
     /// Returns `true` if the option requests automatic sizing.
     pub fn is_auto_sizing(&self) -> bool { self.intersects(Self::AUTO_SIZE) }

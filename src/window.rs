@@ -141,7 +141,7 @@ impl Window {
 
             // TODO: Is this necessary?
             if !opt.has_no_title() {
-                let id = container.idmngr.get_id_from_str("!title");
+                let id = container.idmngr.get_id_from_ptr(&container.title_state);
                 let _ = container.update_control(id, tr, WidgetOption::NONE, WidgetBehaviourOption::NONE);
                 let name = container.name.clone(); // Necessary due to borrow checker limitations
                 container.draw_control_text(&name, tr, ControlColor::TitleText, WidgetOption::NONE);
@@ -153,7 +153,7 @@ impl Window {
                 body.height -= tr.height;
             }
             if !opt.has_no_close() {
-                let id = container.idmngr.get_id_from_str("!close");
+                let id = container.idmngr.get_id_from_ptr(&container.close_state);
                 let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
                 tr.width -= r.width;
                 let color = container.style.colors[ControlColor::TitleText as usize];
@@ -167,7 +167,7 @@ impl Window {
         container.push_container_body(body, opt, bopt);
         if !opt.is_auto_sizing() {
             let sz = container.style.title_height;
-            let id_2 = container.idmngr.get_id_from_str("!resize");
+            let id_2 = container.idmngr.get_id_from_ptr(&container.resize_state);
             let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
             let _ = container.update_control(id_2, r_0, WidgetOption::NONE, WidgetBehaviourOption::NONE);
             if Some(id_2) == container.focus && container.input.borrow().mouse_down.is_left() {

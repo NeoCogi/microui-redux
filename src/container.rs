@@ -184,6 +184,16 @@ pub struct Container {
     pub updated_focus: bool,
     /// ID allocator used for widgets.
     pub idmngr: IdManager,
+    /// Internal state for the window title bar.
+    pub(crate) title_state: InternalState,
+    /// Internal state for the window close button.
+    pub(crate) close_state: InternalState,
+    /// Internal state for the window resize handle.
+    pub(crate) resize_state: InternalState,
+    /// Internal state for the vertical scrollbar.
+    pub(crate) scrollbar_y_state: InternalState,
+    /// Internal state for the horizontal scrollbar.
+    pub(crate) scrollbar_x_state: InternalState,
     /// Shared access to the input state.
     pub input: Rc<RefCell<Input>>,
     /// Whether this container is the current hover root.
@@ -236,6 +246,11 @@ impl Container {
             updated_focus: false,
             layout: LayoutManager::default(),
             idmngr: IdManager::new(),
+            title_state: InternalState::new("!title"),
+            close_state: InternalState::new("!close"),
+            resize_state: InternalState::new("!resize"),
+            scrollbar_y_state: InternalState::new("!scrollbary"),
+            scrollbar_x_state: InternalState::new("!scrollbarx"),
             number_edit_buf: String::default(),
             number_edit: None,
             popup_just_opened: false,
@@ -752,7 +767,7 @@ impl Container {
         let body = *body;
         let maxscroll = cs.y - body.height;
         if maxscroll > 0 && body.height > 0 {
-            let id: Id = self.idmngr.get_id_from_str("!scrollbary");
+            let id: Id = self.idmngr.get_id_from_ptr(&self.scrollbar_y_state);
             let mut base = body;
             base.x = body.x + body.width;
             base.width = self.style.scrollbar_size;
@@ -776,7 +791,7 @@ impl Container {
         }
         let maxscroll_0 = cs.x - body.width;
         if maxscroll_0 > 0 && body.width > 0 {
-            let id_0: Id = self.idmngr.get_id_from_str("!scrollbarx");
+            let id_0: Id = self.idmngr.get_id_from_ptr(&self.scrollbar_x_state);
             let mut base_0 = body;
             base_0.y = body.y + body.height;
             base_0.height = self.style.scrollbar_size;
