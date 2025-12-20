@@ -1174,23 +1174,23 @@ impl Container {
 
     #[inline(never)]
     /// Draws a checkbox labeled with `label` and toggles `state` when clicked.
-    pub fn checkbox(&mut self, label: &str, state: &mut bool) -> ResourceState {
+    pub fn checkbox(&mut self, state: &mut CheckboxState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let id: Id = self.idmngr.get_id_from_ptr(state);
         let mut r: Recti = self.layout.next();
         let box_0: Recti = rect(r.x, r.y, r.height, r.height);
-        let _ = self.update_control(id, r, WidgetOption::NONE, WidgetBehaviourOption::NONE);
+        let _ = self.update_control(id, r, state.opt, WidgetBehaviourOption::NONE);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::CHANGE;
-            *state = *state == false;
+            state.value = !state.value;
         }
-        self.draw_widget_frame(id, box_0, ControlColor::Base, WidgetOption::NONE);
-        if *state {
+        self.draw_widget_frame(id, box_0, ControlColor::Base, state.opt);
+        if state.value {
             let color = self.style.colors[ControlColor::Text as usize];
             self.draw_icon(CHECK_ICON, box_0, color);
         }
         r = rect(r.x + box_0.width, r.y, r.width - box_0.width, r.height);
-        self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
+        self.draw_control_text(&state.label, r, ControlColor::Text, state.opt);
         return res;
     }
 
