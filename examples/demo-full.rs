@@ -75,7 +75,6 @@ struct State<'a> {
     logbuf: String,
     logbuf_updated: bool,
     submit_buf: String,
-    checks: [bool; 3],
     combo_state: Option<ComboState>,
     combo_items: [ListItemState; 4],
     style: Style,
@@ -109,6 +108,7 @@ struct State<'a> {
     popup_buttons: [ButtonState; 2],
     slot_buttons: [ButtonState; 4],
     external_image_button: Option<ButtonState>,
+    checkboxes: [CheckboxState; 3],
     open_popup: bool,
     open_dialog: bool,
     white_uv: Vec2f,
@@ -229,7 +229,6 @@ impl<'a> State<'a> {
             logbuf: String::new(),
             logbuf_updated: false,
             submit_buf: String::new(),
-            checks: [false, true, false],
             combo_state: None,
             combo_items: [
                 ListItemState::new("Apple"),
@@ -282,6 +281,11 @@ impl<'a> State<'a> {
             ],
             slot_buttons,
             external_image_button,
+            checkboxes: [
+                CheckboxState::new("Checkbox 1", false),
+                CheckboxState::new("Checkbox 2", true),
+                CheckboxState::new("Checkbox 3", false),
+            ],
             open_popup: false,
             open_dialog: false,
             white_uv,
@@ -620,7 +624,7 @@ impl<'a> State<'a> {
                 let test2_tn = &mut self.test2_tn;
                 let test3_tn = &mut self.test3_tn;
                 let tree_buttons = &mut self.tree_buttons;
-                let checks = &mut self.checks;
+                let checkboxes = &mut self.checkboxes;
                 container.header(tree_and_text_header, |container| {
                     let widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
                     container.with_row(&widths, SizePolicy::Auto, |container| {
@@ -657,9 +661,9 @@ impl<'a> State<'a> {
                                 });
                             });
                             container.treenode(test3_tn, |container| {
-                                container.checkbox("Checkbox 1", &mut checks[0]);
-                                container.checkbox("Checkbox 2", &mut checks[1]);
-                                container.checkbox("Checkbox 3", &mut checks[2]);
+                                container.checkbox(&mut checkboxes[0]);
+                                container.checkbox(&mut checkboxes[1]);
+                                container.checkbox(&mut checkboxes[2]);
                             });
                         });
                         container.column(|container| {

@@ -544,6 +544,29 @@ impl ListBoxState {
     }
 }
 
+#[derive(Clone)]
+/// Persistent state for checkbox widgets.
+pub struct CheckboxState {
+    /// Label displayed for the checkbox.
+    pub label: String,
+    /// Current value of the checkbox.
+    pub value: bool,
+    /// Widget options applied to the checkbox.
+    pub opt: WidgetOption,
+}
+
+impl CheckboxState {
+    /// Creates a checkbox with default widget options.
+    pub fn new(label: impl Into<String>, value: bool) -> Self {
+        Self { label: label.into(), value, opt: WidgetOption::NONE }
+    }
+
+    /// Creates a checkbox with explicit widget options.
+    pub fn with_opt(label: impl Into<String>, value: bool, opt: WidgetOption) -> Self {
+        Self { label: label.into(), value, opt }
+    }
+}
+
 impl ContainerOption {
     /// Returns `true` if the option requests automatic sizing.
     pub fn is_auto_sizing(&self) -> bool { self.intersects(Self::AUTO_SIZE) }
