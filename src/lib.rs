@@ -357,14 +357,14 @@ impl WidgetBehaviourOption {
 
 #[derive(Clone, Copy)]
 /// Expansion state used by tree nodes, headers, and similar widgets.
-pub enum NodeState {
+pub enum NodeStateValue {
     /// Child content is visible.
     Expanded,
     /// Child content is hidden.
     Closed,
 }
 
-impl NodeState {
+impl NodeStateValue {
     /// Returns `true` when the node is expanded.
     pub fn is_expanded(&self) -> bool {
         match self {
@@ -380,6 +380,35 @@ impl NodeState {
             _ => false,
         }
     }
+}
+
+#[derive(Clone)]
+/// Persistent state for headers and tree nodes.
+pub struct NodeState {
+    /// Label displayed for the node.
+    pub label: String,
+    /// Current expansion state.
+    pub state: NodeStateValue,
+    /// Widget options applied to the node.
+    pub opt: WidgetOption,
+}
+
+impl NodeState {
+    /// Creates a node state with the default widget options.
+    pub fn new(label: impl Into<String>, state: NodeStateValue) -> Self {
+        Self { label: label.into(), state, opt: WidgetOption::NONE }
+    }
+
+    /// Creates a node state with explicit widget options.
+    pub fn with_opt(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self {
+        Self { label: label.into(), state, opt }
+    }
+
+    /// Returns `true` when the node is expanded.
+    pub fn is_expanded(&self) -> bool { self.state.is_expanded() }
+
+    /// Returns `true` when the node is closed.
+    pub fn is_closed(&self) -> bool { self.state.is_closed() }
 }
 
 impl ContainerOption {
