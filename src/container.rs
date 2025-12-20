@@ -1489,25 +1489,25 @@ impl Container {
 
     #[inline(never)]
     /// Draws a numeric input that can be edited via keyboard or by dragging.
-    pub fn number_ex(&mut self, value: &mut Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
+    pub fn number_ex(&mut self, state: &mut NumberState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = self.idmngr.get_id_from_ptr(value);
+        let id: Id = self.idmngr.get_id_from_ptr(state);
         let base: Recti = self.layout.next();
-        let last: Real = *value;
-        if !self.number_textbox(precision, value, base, id).is_none() {
+        let last: Real = state.value;
+        if !self.number_textbox(state.precision, &mut state.value, base, id).is_none() {
             return res;
         }
-        let _ = self.update_control(id, base, opt, WidgetBehaviourOption::NONE);
+        let _ = self.update_control(id, base, state.opt, WidgetBehaviourOption::NONE);
         if self.focus == Some(id) && self.input.borrow().mouse_down.is_left() {
-            *value += self.input.borrow().mouse_delta.x as Real * step;
+            state.value += self.input.borrow().mouse_delta.x as Real * state.step;
         }
-        if *value != last {
+        if state.value != last {
             res |= ResourceState::CHANGE;
         }
-        self.draw_widget_frame(id, base, ControlColor::Base, opt);
+        self.draw_widget_frame(id, base, ControlColor::Base, state.opt);
         let mut buff = String::new();
-        buff.push_str(format!("{:.*}", precision, value).as_str());
-        self.draw_control_text(buff.as_str(), base, ControlColor::Text, opt);
+        buff.push_str(format!("{:.*}", state.precision, state.value).as_str());
+        self.draw_control_text(buff.as_str(), base, ControlColor::Text, state.opt);
         return res;
     }
 }

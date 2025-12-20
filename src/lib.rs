@@ -624,6 +624,31 @@ impl SliderState {
     }
 }
 
+#[derive(Clone)]
+/// Persistent state for number input widgets.
+pub struct NumberState {
+    /// Current number value.
+    pub value: Real,
+    /// Step applied when dragging.
+    pub step: Real,
+    /// Number of digits after the decimal point when rendering.
+    pub precision: usize,
+    /// Widget options applied to the number input.
+    pub opt: WidgetOption,
+}
+
+impl NumberState {
+    /// Creates a number input with default widget options.
+    pub fn new(value: Real, step: Real, precision: usize) -> Self {
+        Self { value, step, precision, opt: WidgetOption::NONE }
+    }
+
+    /// Creates a number input with explicit widget options.
+    pub fn with_opt(value: Real, step: Real, precision: usize, opt: WidgetOption) -> Self {
+        Self { value, step, precision, opt }
+    }
+}
+
 impl ContainerOption {
     /// Returns `true` if the option requests automatic sizing.
     pub fn is_auto_sizing(&self) -> bool { self.intersects(Self::AUTO_SIZE) }
