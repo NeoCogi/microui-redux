@@ -105,6 +105,10 @@ struct State<'a> {
     test1b_tn: NodeState,
     test2_tn: NodeState,
     test3_tn: NodeState,
+    submit_button: ButtonState,
+    test_buttons: [ButtonState; 6],
+    tree_buttons: [ButtonState; 6],
+    popup_buttons: [ButtonState; 2],
     open_popup: bool,
     open_dialog: bool,
     white_uv: Vec2f,
@@ -233,6 +237,27 @@ impl<'a> State<'a> {
             test1b_tn: NodeState::new("Test 1b", NodeStateValue::Closed),
             test2_tn: NodeState::new("Test 2", NodeStateValue::Closed),
             test3_tn: NodeState::new("Test 3", NodeStateValue::Closed),
+            submit_button: ButtonState::with_opt("Submit", WidgetOption::ALIGN_CENTER),
+            test_buttons: [
+                ButtonState::with_opt("Button 1", WidgetOption::ALIGN_CENTER),
+                ButtonState::with_opt("Button 2", WidgetOption::ALIGN_CENTER),
+                ButtonState::with_opt("Button 3", WidgetOption::ALIGN_CENTER),
+                ButtonState::with_opt("Popup", WidgetOption::ALIGN_CENTER),
+                ButtonState::with_opt("Button 4", WidgetOption::ALIGN_CENTER),
+                ButtonState::with_opt("Dialog", WidgetOption::ALIGN_CENTER),
+            ],
+            tree_buttons: [
+                ButtonState::with_opt("Button 1", WidgetOption::ALIGN_CENTER),
+                ButtonState::with_opt("Button 2", WidgetOption::ALIGN_CENTER),
+                ButtonState::with_opt("Button 3", WidgetOption::ALIGN_CENTER),
+                ButtonState::with_opt("Button 4", WidgetOption::ALIGN_CENTER),
+                ButtonState::with_opt("Button 5", WidgetOption::ALIGN_CENTER),
+                ButtonState::with_opt("Button 6", WidgetOption::ALIGN_CENTER),
+            ],
+            popup_buttons: [
+                ButtonState::with_opt("Hello", WidgetOption::ALIGN_CENTER),
+                ButtonState::with_opt("World", WidgetOption::ALIGN_CENTER),
+            ],
             open_popup: false,
             open_dialog: false,
             white_uv,
@@ -350,7 +375,7 @@ impl<'a> State<'a> {
                     container.set_focus(container.idmngr.last_id());
                     submitted = true;
                 }
-                if !container.button_ex("Submit", None, WidgetOption::ALIGN_CENTER).is_none() {
+                if container.button(&mut self.submit_button).is_submitted() {
                     submitted = true;
                 }
             });
@@ -507,31 +532,32 @@ impl<'a> State<'a> {
             let mut button_logs: Vec<&'static str> = Vec::new();
             {
                 let test_buttons_header = &mut self.test_buttons_header;
+                let test_buttons = &mut self.test_buttons;
                 let open_popup = &mut self.open_popup;
                 let open_dialog = &mut self.open_dialog;
                 container.header(test_buttons_header, |container| {
                     let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
                     container.with_row(&button_widths, SizePolicy::Auto, |container| {
                         container.label("Test buttons 1:");
-                        if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if container.button(&mut test_buttons[0]).is_submitted() {
                             button_logs.push("Pressed button 1");
                         }
-                        if !container.button_ex("Button 2", None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if container.button(&mut test_buttons[1]).is_submitted() {
                             button_logs.push("Pressed button 2");
                         }
                         container.label("Test buttons 2:");
-                        if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if container.button(&mut test_buttons[2]).is_submitted() {
                             button_logs.push("Pressed button 3");
                         }
-                        if !container.button_ex("Popup", None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if container.button(&mut test_buttons[3]).is_submitted() {
                             *open_popup = true;
                         }
 
                         container.label("Test buttons 3:");
-                        if !container.button_ex("Button 4", None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if container.button(&mut test_buttons[4]).is_submitted() {
                             button_logs.push("Pressed button 4");
                         }
-                        if !container.button_ex("Dialog", None, WidgetOption::ALIGN_CENTER).is_none() {
+                        if container.button(&mut test_buttons[5]).is_submitted() {
                             *open_dialog = true;
                         }
                     });
@@ -564,6 +590,7 @@ impl<'a> State<'a> {
                 let test1b_tn = &mut self.test1b_tn;
                 let test2_tn = &mut self.test2_tn;
                 let test3_tn = &mut self.test3_tn;
+                let tree_buttons = &mut self.tree_buttons;
                 let checks = &mut self.checks;
                 container.header(tree_and_text_header, |container| {
                     let widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
@@ -575,10 +602,10 @@ impl<'a> State<'a> {
                                     container.label("world");
                                 });
                                 container.treenode(test1b_tn, |container| {
-                                    if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                    if container.button(&mut tree_buttons[0]).is_submitted() {
                                         tree_logs.push("Pressed button 1");
                                     }
-                                    if !container.button_ex("Button 2", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                    if container.button(&mut tree_buttons[1]).is_submitted() {
                                         tree_logs.push("Pressed button 2");
                                     }
                                 });
@@ -586,16 +613,16 @@ impl<'a> State<'a> {
                             container.treenode(test2_tn, |container| {
                                 let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
                                 container.with_row(&tree_button_widths, SizePolicy::Auto, |container| {
-                                    if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                    if container.button(&mut tree_buttons[2]).is_submitted() {
                                         tree_logs.push("Pressed button 3");
                                     }
-                                    if !container.button_ex("Button 4", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                    if container.button(&mut tree_buttons[3]).is_submitted() {
                                         tree_logs.push("Pressed button 4");
                                     }
-                                    if !container.button_ex("Button 5", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                    if container.button(&mut tree_buttons[4]).is_submitted() {
                                         tree_logs.push("Pressed button 5");
                                     }
-                                    if !container.button_ex("Button 6", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                    if container.button(&mut tree_buttons[5]).is_submitted() {
                                         tree_logs.push("Pressed button 6");
                                     }
                                 });
@@ -723,15 +750,22 @@ impl<'a> State<'a> {
             self.open_popup = false;
         }
 
-        ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), WidgetBehaviourOption::NO_SCROLL, |ctx| {
-            if !ctx.button_ex("Hello", None, WidgetOption::ALIGN_CENTER).is_none() {
-                self.write_log("Hello")
-            }
-            if !ctx.button_ex("World", None, WidgetOption::ALIGN_CENTER).is_none() {
-                self.write_log("World")
-            }
-            WindowState::Open
-        });
+        let mut popup_logs: Vec<&'static str> = Vec::new();
+        {
+            let popup_buttons = &mut self.popup_buttons;
+            ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), WidgetBehaviourOption::NO_SCROLL, |ctx| {
+                if ctx.button(&mut popup_buttons[0]).is_submitted() {
+                    popup_logs.push("Hello")
+                }
+                if ctx.button(&mut popup_buttons[1]).is_submitted() {
+                    popup_logs.push("World")
+                }
+                WindowState::Open
+            });
+        }
+        for msg in popup_logs {
+            self.write_log(msg);
+        }
 
         self.dialog(ctx);
     }

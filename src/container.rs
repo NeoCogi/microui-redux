@@ -909,6 +909,35 @@ impl Container {
     }
 
     #[inline(never)]
+    /// Draws a button using the provided persistent state.
+    pub fn button(&mut self, state: &mut ButtonState) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let id: Id = self.idmngr.get_id_from_ptr(state);
+        let r: Recti = self.layout.next();
+        let _ = self.update_control(id, r, state.opt, state.bopt);
+        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
+            res |= ResourceState::SUBMIT;
+        }
+        if !state.opt.has_no_frame() {
+            if let Some(colorid) = self.widget_fill_color(id, ControlColor::Button, state.fill) {
+                self.draw_frame(r, colorid);
+            }
+        }
+        match &state.content {
+            ButtonContent::Text { label, icon } => {
+                if !label.is_empty() {
+                    self.draw_control_text(label, r, ControlColor::Text, state.opt);
+                }
+                if let Some(icon) = icon {
+                    let color = self.style.colors[ControlColor::Text as usize];
+                    self.draw_icon(*icon, r, color);
+                }
+            }
+        }
+        res
+    }
+
+    #[inline(never)]
     /// Draws a button that can optionally show an atlas icon.
     pub fn button_ex(&mut self, label: &str, icon: Option<IconId>, opt: WidgetOption) -> ResourceState {
         let mut res = ResourceState::NONE;

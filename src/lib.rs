@@ -95,8 +95,8 @@ use std::cmp::{max, min};
 use std::sync::RwLock;
 
 #[derive(Debug, Copy, Clone)]
-/// Tracks button transitions seen since the previous frame.
-pub enum ButtonState {
+/// Tracks input button transitions seen since the previous frame.
+pub enum InputButtonState {
     /// No interaction was registered.
     None,
     /// The button was pressed this frame, storing the press timestamp.
@@ -409,6 +409,53 @@ impl NodeState {
 
     /// Returns `true` when the node is closed.
     pub fn is_closed(&self) -> bool { self.state.is_closed() }
+}
+
+#[derive(Clone)]
+/// Describes the content rendered inside a button widget.
+pub enum ButtonContent {
+    /// A text label and optional icon from the atlas.
+    Text {
+        /// Text displayed on the button.
+        label: String,
+        /// Optional icon rendered on the button.
+        icon: Option<IconId>,
+    },
+}
+
+#[derive(Clone)]
+/// Persistent state for button widgets.
+pub struct ButtonState {
+    /// Content rendered inside the button.
+    pub content: ButtonContent,
+    /// Widget options applied to the button.
+    pub opt: WidgetOption,
+    /// Behaviour options applied to the button.
+    pub bopt: WidgetBehaviourOption,
+    /// Fill behavior for the button background.
+    pub fill: WidgetFillOption,
+}
+
+impl ButtonState {
+    /// Creates a text button with default options.
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            content: ButtonContent::Text { label: label.into(), icon: None },
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+            fill: WidgetFillOption::ALL,
+        }
+    }
+
+    /// Creates a text button with explicit widget options.
+    pub fn with_opt(label: impl Into<String>, opt: WidgetOption) -> Self {
+        Self {
+            content: ButtonContent::Text { label: label.into(), icon: None },
+            opt,
+            bopt: WidgetBehaviourOption::NONE,
+            fill: WidgetFillOption::ALL,
+        }
+    }
 }
 
 impl ContainerOption {
