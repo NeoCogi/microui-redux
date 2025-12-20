@@ -1018,15 +1018,11 @@ impl Container {
     }
 
     /// Renders a list entry that only highlights while hovered or active.
-    pub fn list_item(&mut self, label: &str, opt: WidgetOption) -> ResourceState {
+    pub fn list_item(&mut self, state: &mut ListItemState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = if label.is_empty() {
-            self.idmngr.get_id_from_str("!list_item")
-        } else {
-            self.idmngr.get_id_from_str(label)
-        };
+        let id: Id = self.idmngr.get_id_from_ptr(state);
         let rect = self.layout.next();
-        let _ = self.update_control(id, rect, opt, WidgetBehaviourOption::NONE);
+        let _ = self.update_control(id, rect, state.opt, WidgetBehaviourOption::NONE);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -1042,16 +1038,35 @@ impl Container {
             self.draw_rect(rect, fill);
         }
 
-        if !label.is_empty() {
-            self.draw_control_text(label, rect, ControlColor::Text, opt);
+        if !state.label.is_empty() {
+            self.draw_control_text(&state.label, rect, ControlColor::Text, state.opt);
         }
         res
     }
 
     #[inline(never)]
     /// Shim for list boxes that only fills on hover or click.
-    pub fn list_box(&mut self, label: &str, image: Option<Image>, opt: WidgetOption) -> ResourceState {
-        self.button_ex2(label, image, opt, WidgetFillOption::HOVER | WidgetFillOption::CLICK)
+    pub fn list_box(&mut self, state: &mut ListBoxState) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let id: Id = self.idmngr.get_id_from_ptr(state);
+        let r: Recti = self.layout.next();
+        let _ = self.update_control(id, r, state.opt, WidgetBehaviourOption::NONE);
+        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
+            res |= ResourceState::SUBMIT;
+        }
+        if !state.opt.has_no_frame() {
+            if let Some(colorid) = self.widget_fill_color(id, ControlColor::Button, WidgetFillOption::HOVER | WidgetFillOption::CLICK) {
+                self.draw_frame(r, colorid);
+            }
+        }
+        if !state.label.is_empty() {
+            self.draw_control_text(&state.label, r, ControlColor::Text, state.opt);
+        }
+        if let Some(image) = state.image {
+            let color = self.style.colors[ControlColor::Text as usize];
+            self.push_image(image, r, color);
+        }
+        res
     }
 
     #[inline(never)]
