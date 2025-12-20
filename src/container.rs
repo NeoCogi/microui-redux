@@ -1090,7 +1090,7 @@ impl Container {
             }
         }
 
-        let id: Id = self.idmngr.get_id_from_ptr(&state.selected);
+        let id: Id = self.idmngr.get_id_from_ptr(state);
         let header: Recti = self.layout.next();
         let _ = self.update_control(id, header, opt, WidgetBehaviourOption::NONE);
 
