@@ -62,6 +62,12 @@ pub struct CustomRenderArgs {
     pub view: Rect<i32>, // clipped area
     /// Latest mouse interaction affecting the widget.
     pub mouse_event: MouseEvent,
+    /// Scroll delta consumed for this widget, if any.
+    pub scroll_delta: Option<Vec2i>,
+    /// Options provided when the widget was created.
+    pub widget_opt: WidgetOption,
+    /// Behaviour options provided when the widget was created.
+    pub behaviour_opt: WidgetBehaviourOption,
     /// Currently active modifier keys.
     pub key_mods: KeyMode,
     /// Currently active navigation keys.
@@ -189,6 +195,8 @@ pub struct Container {
     /// Tracks whether a popup was just opened this frame to avoid instant auto-close.
     pub popup_just_opened: bool,
     text_states: HashMap<Id, TextEditState>,
+    pending_scroll: Option<Vec2i>,
+    scroll_enabled: bool,
 
     panels: Vec<ContainerHandle>,
 }
@@ -233,6 +241,8 @@ impl Container {
             in_hover_root: false,
             input: input,
             text_states: HashMap::new(),
+            pending_scroll: None,
+            scroll_enabled: true,
 
             panels: Default::default(),
         }
@@ -244,13 +254,19 @@ impl Container {
         self.updated_focus = false;
         self.in_hover_root = false;
         self.text_states.clear();
+        self.pending_scroll = None;
+        self.scroll_enabled = true;
     }
 
     pub(crate) fn prepare(&mut self) {
         self.command_list.clear();
         assert!(self.clip_stack.len() == 0);
         self.panels.clear();
+        self.pending_scroll = None;
+        self.scroll_enabled = true;
     }
+
+    pub(crate) fn seed_pending_scroll(&mut self, delta: Option<Vec2i>) { self.pending_scroll = delta; }
 
     #[inline(never)]
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
@@ -549,8 +565,8 @@ impl Container {
     }
 
     #[inline(never)]
-    /// Updates hover/focus state for the widget described by `id`.
-    pub fn update_control(&mut self, id: Id, rect: Recti, opt: WidgetOption) {
+    /// Updates hover/focus state for the widget described by `id` and optionally consumes scroll.
+    pub fn update_control(&mut self, id: Id, rect: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Option<Vec2i> {
         let in_hover_root = self.in_hover_root;
         let mouseover = self.mouse_over(rect, in_hover_root);
         if self.focus == Some(id) {
@@ -558,7 +574,7 @@ impl Container {
             self.updated_focus = true;
         }
         if opt.is_not_interactive() {
-            return;
+            return None;
         }
         if mouseover && self.input.borrow().mouse_down.is_none() {
             self.hover = Some(id);
@@ -578,6 +594,24 @@ impl Container {
                 self.hover = None;
             }
         }
+
+        let mut scroll = None;
+        if bopt.is_grab_scroll() && self.hover == Some(id) {
+            if let Some(delta) = self.pending_scroll {
+                if delta.x != 0 || delta.y != 0 {
+                    self.pending_scroll = None;
+                    scroll = Some(delta);
+                }
+            }
+        }
+
+        if self.focus == Some(id) {
+            let mouse_pos = self.input.borrow().mouse_pos;
+            let origin = vec2(self.body.x, self.body.y);
+            self.input.borrow_mut().rel_mouse_pos = mouse_pos - origin;
+        }
+
+        scroll
     }
 
     /// Resets transient per-frame state after widgets have been processed.
@@ -593,7 +627,7 @@ impl Container {
         let id: Id = self.idmngr.get_id_from_str(label);
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let mut r = self.layout.next();
-        self.update_control(id, r, WidgetOption::NONE);
+        let _ = self.update_control(id, r, WidgetOption::NONE, WidgetBehaviourOption::NONE);
 
         let expanded = state.is_expanded();
         let active = expanded ^ (self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id));
@@ -659,6 +693,47 @@ impl Container {
 
     fn vertical_text_padding(padding: i32) -> i32 { max(1, padding / 2) }
 
+    pub(crate) fn consume_pending_scroll(&mut self) {
+        if !self.scroll_enabled {
+            return;
+        }
+        let delta = match self.pending_scroll {
+            Some(delta) if delta.x != 0 || delta.y != 0 => delta,
+            _ => return,
+        };
+
+        let mut consumed = false;
+        let mut scroll = self.scroll;
+        let mut content_size = self.content_size;
+        let padding = self.style.padding * 2;
+        content_size.x += padding;
+        content_size.y += padding;
+        let body = self.body;
+
+        let maxscroll_y = content_size.y - body.height;
+        if delta.y != 0 && maxscroll_y > 0 && body.height > 0 {
+            let new_scroll = Self::clamp(scroll.y + delta.y, 0, maxscroll_y);
+            if new_scroll != scroll.y {
+                scroll.y = new_scroll;
+                consumed = true;
+            }
+        }
+
+        let maxscroll_x = content_size.x - body.width;
+        if delta.x != 0 && maxscroll_x > 0 && body.width > 0 {
+            let new_scroll = Self::clamp(scroll.x + delta.x, 0, maxscroll_x);
+            if new_scroll != scroll.x {
+                scroll.x = new_scroll;
+                consumed = true;
+            }
+        }
+
+        if consumed {
+            self.scroll = scroll;
+            self.pending_scroll = None;
+        }
+    }
+
     #[inline(never)]
     fn scrollbars(&mut self, body: &mut Recti) {
         let sz = self.style.scrollbar_size;
@@ -679,7 +754,7 @@ impl Container {
             let mut base = body;
             base.x = body.x + body.width;
             base.width = self.style.scrollbar_size;
-            self.update_control(id, base, WidgetOption::NONE);
+            let _ = self.update_control(id, base, WidgetOption::NONE, WidgetBehaviourOption::NONE);
             if self.focus == Some(id) && self.input.borrow().mouse_down.is_left() {
                 self.scroll.y += self.input.borrow().mouse_delta.y * cs.y / base.height;
             }
@@ -693,11 +768,6 @@ impl Container {
             };
             thumb.y += self.scroll.y * (base.height - thumb.height) / maxscroll;
             self.draw_frame(thumb, ControlColor::ScrollThumb);
-            let in_hover_root = self.in_hover_root;
-            if self.mouse_over(body, in_hover_root) {
-                // TODO: doesn't solve the issue where we have a panel inside a panel
-                self.scroll.y += self.input.borrow().scroll_delta.y;
-            }
             self.scroll.y = Self::clamp(self.scroll.y, 0, maxscroll);
         } else {
             self.scroll.y = 0;
@@ -708,7 +778,7 @@ impl Container {
             let mut base_0 = body;
             base_0.y = body.y + body.height;
             base_0.height = self.style.scrollbar_size;
-            self.update_control(id_0, base_0, WidgetOption::NONE);
+            let _ = self.update_control(id_0, base_0, WidgetOption::NONE, WidgetBehaviourOption::NONE);
             if self.focus == Some(id_0) && self.input.borrow().mouse_down.is_left() {
                 self.scroll.x += self.input.borrow().mouse_delta.x * cs.x / base_0.width;
             }
@@ -722,10 +792,6 @@ impl Container {
             };
             thumb_0.x += self.scroll.x * (base_0.width - thumb_0.width) / maxscroll_0;
             self.draw_frame(thumb_0, ControlColor::ScrollThumb);
-            let in_hover_root = self.in_hover_root;
-            if self.mouse_over(body, in_hover_root) {
-                self.scroll.x += self.input.borrow().scroll_delta.x;
-            }
             self.scroll.x = Self::clamp(self.scroll.x, 0, maxscroll_0);
         } else {
             self.scroll.x = 0;
@@ -734,9 +800,10 @@ impl Container {
     }
 
     /// Configures layout state for the container's client area, handling scrollbars when necessary.
-    pub fn push_container_body(&mut self, body: Recti, opt: ContainerOption) {
+    pub fn push_container_body(&mut self, body: Recti, opt: ContainerOption, bopt: WidgetBehaviourOption) {
         let mut body = body;
-        if !opt.has_no_scroll() {
+        self.scroll_enabled = !bopt.is_no_scroll();
+        if self.scroll_enabled {
             self.scrollbars(&mut body);
         }
         let style = self.style;
@@ -766,7 +833,7 @@ impl Container {
     }
 
     #[inline(never)]
-    fn begin_panel(&mut self, panel: &mut ContainerHandle, opt: ContainerOption) {
+    fn begin_panel(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, bopt: WidgetBehaviourOption) {
         let rect = self.layout.next();
         let container = &mut panel.inner_mut();
         container.prepare();
@@ -777,7 +844,10 @@ impl Container {
         }
 
         container.in_hover_root = self.in_hover_root;
-        container.push_container_body(rect, opt);
+        if self.pending_scroll.is_some() && self.mouse_over(rect, self.in_hover_root) {
+            container.pending_scroll = self.pending_scroll.take();
+        }
+        container.push_container_body(rect, opt, bopt);
         let clip_rect = container.body;
         container.push_clip_rect(clip_rect);
     }
@@ -785,12 +855,20 @@ impl Container {
     fn end_panel(&mut self, panel: &mut ContainerHandle) {
         panel.inner_mut().pop_clip_rect();
         self.pop_panel(panel);
+        {
+            let mut inner = panel.inner_mut();
+            inner.consume_pending_scroll();
+            let pending = inner.pending_scroll.take();
+            if self.pending_scroll.is_none() {
+                self.pending_scroll = pending;
+            }
+        }
         self.panels.push(panel.clone())
     }
 
     /// Embeds another container handle inside the current layout.
-    pub fn panel<F: FnOnce(&mut ContainerHandle)>(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, f: F) {
-        self.begin_panel(panel, opt);
+    pub fn panel<F: FnOnce(&mut ContainerHandle)>(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, f: F) {
+        self.begin_panel(panel, opt, bopt);
 
         // call the panel function
         f(panel);
@@ -841,7 +919,7 @@ impl Container {
             }
         };
         let r: Recti = self.layout.next();
-        self.update_control(id, r, opt);
+        let _ = self.update_control(id, r, opt, WidgetBehaviourOption::NONE);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -873,7 +951,7 @@ impl Container {
             }
         };
         let r: Recti = self.layout.next();
-        self.update_control(id, r, opt);
+        let _ = self.update_control(id, r, opt, WidgetBehaviourOption::NONE);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -901,7 +979,7 @@ impl Container {
             self.idmngr.get_id_from_str(label)
         };
         let rect = self.layout.next();
-        self.update_control(id, rect, opt);
+        let _ = self.update_control(id, rect, opt, WidgetBehaviourOption::NONE);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -952,7 +1030,7 @@ impl Container {
 
         let id: Id = self.idmngr.get_id_from_ptr(&state.selected);
         let header: Recti = self.layout.next();
-        self.update_control(id, header, opt);
+        let _ = self.update_control(id, header, opt, WidgetBehaviourOption::NONE);
 
         let header_clicked = self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id);
         let popup_open = state.popup.is_open();
@@ -1014,7 +1092,7 @@ impl Container {
             }
         };
         let r: Recti = self.layout.next();
-        self.update_control(id, r, opt);
+        let _ = self.update_control(id, r, opt, WidgetBehaviourOption::NONE);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -1039,7 +1117,7 @@ impl Container {
         let id: Id = self.idmngr.get_id_from_ptr(state);
         let mut r: Recti = self.layout.next();
         let box_0: Recti = rect(r.x, r.y, r.height, r.height);
-        self.update_control(id, r, WidgetOption::NONE);
+        let _ = self.update_control(id, r, WidgetOption::NONE, WidgetBehaviourOption::NONE);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::CHANGE;
             *state = *state == false;
@@ -1061,8 +1139,16 @@ impl Container {
 
         let prev_pos = input.last_mouse_pos - orig;
         let curr_pos = input.mouse_pos - orig;
-        if self.focus == Some(id) && input.mouse_down.is_left() {
+        let mouse_down = input.mouse_down;
+        let mouse_pressed = input.mouse_pressed;
+        drop(input);
+
+        if self.focus == Some(id) && mouse_down.is_left() {
             return MouseEvent::Drag { prev_pos, curr_pos };
+        }
+
+        if self.hover == Some(id) && mouse_pressed.is_left() {
+            return MouseEvent::Click(curr_pos);
         }
 
         if self.hover == Some(id) {
@@ -1073,10 +1159,16 @@ impl Container {
 
     #[inline(never)]
     /// Allocates a widget cell and hands rendering control to user code.
-    pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, name: &str, opt: WidgetOption, f: F) {
+    pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(
+        &mut self,
+        name: &str,
+        opt: WidgetOption,
+        bopt: WidgetBehaviourOption,
+        f: F,
+    ) {
         let id: Id = self.idmngr.get_id_from_str(name);
         let rect: Recti = self.layout.next();
-        self.update_control(id, rect, opt);
+        let scroll_delta = self.update_control(id, rect, opt, bopt);
 
         let mouse_event = self.input_to_mouse_event(id, &rect);
 
@@ -1090,6 +1182,9 @@ impl Container {
             content_area: rect,
             view: self.get_clip_rect(),
             mouse_event,
+            scroll_delta,
+            widget_opt: opt,
+            behaviour_opt: bopt,
             key_mods,
             key_codes,
             text_input,
@@ -1102,7 +1197,7 @@ impl Container {
     pub fn textbox_raw(&mut self, buf: &mut String, id: Id, r: Recti, opt: WidgetOption) -> ResourceState {
         // Track submit/change flags and keep the widget focused while active.
         let mut res = ResourceState::NONE;
-        self.update_control(id, r, opt | WidgetOption::HOLD_FOCUS);
+        let _ = self.update_control(id, r, opt | WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::NONE);
 
         // Cursor position is stored per textbox so we can edit at arbitrary positions.
         let mut cursor = {
@@ -1291,7 +1386,17 @@ impl Container {
         if !self.number_textbox(precision, &mut v, base, id).is_none() {
             return res;
         }
-        self.update_control(id, base, opt);
+        let scroll_delta = self.update_control(id, base, opt, WidgetBehaviourOption::GRAB_SCROLL);
+        if let Some(delta) = scroll_delta {
+            let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
+            if wheel != 0 {
+                let step_amount = if step != 0. { step } else { (high - low) / 100.0 };
+                v += wheel as Real * step_amount;
+                if step != 0. {
+                    v = (v + step / 2 as Real) / step * step;
+                }
+            }
+        }
         if self.focus == Some(id) && (!self.input.borrow().mouse_down.is_none() | self.input.borrow().mouse_pressed.is_left()) {
             v = low + (self.input.borrow().mouse_pos.x - base.x) as Real * (high - low) / base.width as Real;
             if step != 0. {
@@ -1330,7 +1435,7 @@ impl Container {
         if !self.number_textbox(precision, value, base, id).is_none() {
             return res;
         }
-        self.update_control(id, base, opt);
+        let _ = self.update_control(id, base, opt, WidgetBehaviourOption::NONE);
         if self.focus == Some(id) && self.input.borrow().mouse_down.is_left() {
             *value += self.input.borrow().mouse_delta.x as Real * step;
         }
@@ -1410,7 +1515,7 @@ mod tests {
         let input = Rc::new(RefCell::new(Input::default()));
         let mut container = Container::new("test", atlas, &Style::default(), input);
         container.in_hover_root = true;
-        container.push_container_body(rect(0, 0, 100, 30), ContainerOption::NONE);
+        container.push_container_body(rect(0, 0, 100, 30), ContainerOption::NONE, WidgetBehaviourOption::NONE);
         container
     }
 

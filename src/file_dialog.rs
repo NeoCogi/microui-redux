@@ -56,7 +56,7 @@ impl FileDialogState {
             container.idmngr.get_id_from_str(label)
         };
         let item_rect = container.layout.next();
-        container.update_control(id, item_rect, opt);
+        let _ = container.update_control(id, item_rect, opt, WidgetBehaviourOption::NONE);
         if container.input.borrow().mouse_pressed.is_left() && container.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -138,7 +138,7 @@ impl FileDialogState {
 
     /// Renders the dialog and updates the selected file when confirmed.
     pub fn eval<R: Renderer>(&mut self, ctx: &mut Context<R>) {
-        ctx.dialog(&mut self.win, ContainerOption::NONE, |cont| {
+        ctx.dialog(&mut self.win, ContainerOption::NONE, WidgetBehaviourOption::NONE, |cont| {
             let mut dialog_state = WindowState::Open;
             let half_width = cont.body.width / 2;
             let parent_path = Path::new(&self.current_working_directory)
@@ -155,7 +155,7 @@ impl FileDialogState {
             };
             let top_row_widths = [left_column, SizePolicy::Remainder(0)];
             cont.with_row(&top_row_widths, SizePolicy::Remainder(24), |cont| {
-                cont.panel(&mut self.folder_panel, ContainerOption::NONE, |container_handle| {
+                cont.panel(&mut self.folder_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
                     let container = &mut container_handle.inner_mut();
 
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
@@ -187,7 +187,7 @@ impl FileDialogState {
                         }
                     });
                 });
-                cont.panel(&mut self.file_panel, ContainerOption::NONE, |container_handle| {
+                cont.panel(&mut self.file_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
                     let container = &mut container_handle.inner_mut();
 
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {

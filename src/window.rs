@@ -121,7 +121,7 @@ impl Window {
     }
 
     #[inline(never)]
-    fn begin_window(&mut self, opt: ContainerOption) {
+    fn begin_window(&mut self, opt: ContainerOption, bopt: WidgetBehaviourOption) {
         let is_popup = self.is_popup();
         let container = &mut self.main;
         let mut body = container.rect;
@@ -142,7 +142,7 @@ impl Window {
             // TODO: Is this necessary?
             if !opt.has_no_title() {
                 let id = container.idmngr.get_id_from_str("!title");
-                container.update_control(id, tr, WidgetOption::NONE);
+                let _ = container.update_control(id, tr, WidgetOption::NONE, WidgetBehaviourOption::NONE);
                 let name = container.name.clone(); // Necessary due to borrow checker limitations
                 container.draw_control_text(&name, tr, ControlColor::TitleText, WidgetOption::NONE);
                 if Some(id) == container.focus && container.input.borrow().mouse_down.is_left() {
@@ -158,18 +158,18 @@ impl Window {
                 tr.width -= r.width;
                 let color = container.style.colors[ControlColor::TitleText as usize];
                 container.draw_icon(CLOSE_ICON, r, color);
-                container.update_control(id, r, WidgetOption::NONE);
+                let _ = container.update_control(id, r, WidgetOption::NONE, WidgetBehaviourOption::NONE);
                 if container.input.borrow().mouse_pressed.is_left() && Some(id) == container.focus {
                     self.win_state = WindowState::Closed;
                 }
             }
         }
-        container.push_container_body(body, opt);
+        container.push_container_body(body, opt, bopt);
         if !opt.is_auto_sizing() {
             let sz = container.style.title_height;
             let id_2 = container.idmngr.get_id_from_str("!resize");
             let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
-            container.update_control(id_2, r_0, WidgetOption::NONE);
+            let _ = container.update_control(id_2, r_0, WidgetOption::NONE, WidgetBehaviourOption::NONE);
             if Some(id_2) == container.focus && container.input.borrow().mouse_down.is_left() {
                 container.rect.width = if 96 > container.rect.width + container.input.borrow().mouse_delta.x {
                     96
@@ -242,7 +242,7 @@ impl WindowHandle {
 
     pub(crate) fn zindex(&self) -> i32 { self.0.borrow().main.zindex }
 
-    pub(crate) fn begin_window(&mut self, opt: ContainerOption) { self.0.borrow_mut().begin_window(opt) }
+    pub(crate) fn begin_window(&mut self, opt: ContainerOption, bopt: WidgetBehaviourOption) { self.0.borrow_mut().begin_window(opt, bopt) }
 
     pub(crate) fn end_window(&mut self) { self.inner_mut().end_window() }
 

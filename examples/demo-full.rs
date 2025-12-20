@@ -261,7 +261,7 @@ impl<'a> State<'a> {
     }
 
     fn style_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        ctx.window(&mut self.style_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
+        ctx.window(&mut self.style_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
             let sw = (container.body.width as f64 * 0.14) as i32;
             let color_row = [
                 SizePolicy::Fixed(80),
@@ -321,22 +321,27 @@ impl<'a> State<'a> {
     }
 
     fn log_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        ctx.window(&mut self.log_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
+        ctx.window(&mut self.log_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
             container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(24), |container| {
-                container.panel(self.log_output.as_mut().unwrap(), ContainerOption::NONE, |container_handle| {
-                    let container = &mut container_handle.inner_mut();
-                    let mut scroll = container.scroll;
-                    let content_size = container.content_size;
-                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
-                        container.text(self.logbuf.as_str());
+                container.panel(
+                    self.log_output.as_mut().unwrap(),
+                    ContainerOption::NONE,
+                    WidgetBehaviourOption::NONE,
+                    |container_handle| {
+                        let container = &mut container_handle.inner_mut();
+                        let mut scroll = container.scroll;
+                        let content_size = container.content_size;
+                        container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                            container.text(self.logbuf.as_str());
 
-                        if self.logbuf_updated {
-                            scroll.y = content_size.y;
-                            container.scroll = scroll;
-                            self.logbuf_updated = false;
-                        }
-                    });
-                });
+                            if self.logbuf_updated {
+                                scroll.y = content_size.y;
+                                container.scroll = scroll;
+                                self.logbuf_updated = false;
+                            }
+                        });
+                    },
+                );
             });
             let mut submitted = false;
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
@@ -366,9 +371,9 @@ impl<'a> State<'a> {
         let mut renderer = self.renderer.clone();
         let tri_state = self.triangle_data.clone();
         let white_uv = self.white_uv;
-        ctx.window(&mut self.triangle_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
+        ctx.window(&mut self.triangle_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
             container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
-                container.custom_render_widget("Triangle", WidgetOption::HOLD_FOCUS, move |_dim, cra| {
+                container.custom_render_widget("Triangle", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::NONE, move |_dim, cra| {
                     if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                         return;
                     }
@@ -393,16 +398,22 @@ impl<'a> State<'a> {
         }
         let mut renderer = self.renderer.clone();
         let suzane_state = self.suzane_data.clone();
-        ctx.window(&mut self.suzane_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
+        ctx.window(&mut self.suzane_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
             container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
-                container.custom_render_widget("Suzane", WidgetOption::HOLD_FOCUS, move |_dim, cra| {
+                container.custom_render_widget("Suzane", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::GRAB_SCROLL, move |_dim, cra| {
                     if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                         return;
                     }
                     if let Ok(mut suzane) = suzane_state.write() {
                         suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
                         let _ = suzane.view_3d.update(cra.mouse_event);
-                        if !matches!(cra.mouse_event, MouseEvent::Drag { .. } | MouseEvent::Scroll(_)) {
+                        if let Some(delta) = cra.scroll_delta {
+                            let axis = if delta.y != 0 { delta.y } else { delta.x };
+                            if axis != 0 {
+                                suzane.view_3d.apply_scroll(axis as f32);
+                            }
+                        }
+                        if !matches!(cra.mouse_event, MouseEvent::Drag { .. }) && cra.scroll_delta.is_none() {
                             let step = 20;
                             let mut delta = Vec2i::new(0, 0);
                             if cra.key_codes.is_left() {
@@ -425,10 +436,10 @@ impl<'a> State<'a> {
                             for ch in cra.text_input.chars() {
                                 match ch {
                                     'w' | 'W' => {
-                                        suzane.view_3d.update(MouseEvent::Scroll(-0.5));
+                                        suzane.view_3d.apply_scroll(-0.5);
                                     }
                                     's' | 'S' => {
-                                        suzane.view_3d.update(MouseEvent::Scroll(0.5));
+                                        suzane.view_3d.apply_scroll(0.5);
                                     }
                                     _ => {}
                                 }
@@ -456,7 +467,7 @@ impl<'a> State<'a> {
         let mut combo_anchor = None;
         let mut combo_changed = false;
 
-        ctx.window(&mut self.demo_window.as_mut().unwrap().clone(), ContainerOption::NONE, |container| {
+        ctx.window(&mut self.demo_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
             let mut win = container.rect;
             win.width = win.width.max(240);
             win.height = win.height.max(300);
@@ -636,7 +647,7 @@ impl<'a> State<'a> {
                 ctx.open_popup_at(popup, anchor);
             }
 
-            ctx.popup(popup, |dropdown| {
+            ctx.popup(popup, WidgetBehaviourOption::NO_SCROLL, |dropdown| {
                 dropdown.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |dropdown| {
                     for (idx, item) in combo_items.iter().enumerate() {
                         if dropdown.list_item(item, WidgetOption::NONE).is_submitted() {
@@ -670,7 +681,7 @@ impl<'a> State<'a> {
             self.open_popup = false;
         }
 
-        ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), |ctx| {
+        ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), WidgetBehaviourOption::NO_SCROLL, |ctx| {
             if !ctx.button_ex("Hello", None, WidgetOption::ALIGN_CENTER).is_none() {
                 self.write_log("Hello")
             }
