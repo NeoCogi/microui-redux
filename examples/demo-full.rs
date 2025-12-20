@@ -117,6 +117,8 @@ struct State<'a> {
     white_uv: Vec2f,
     triangle_data: Arc<RwLock<TriangleState>>,
     suzane_data: Arc<RwLock<SuzaneData>>,
+    triangle_widget: CustomState,
+    suzane_widget: CustomState,
 }
 
 impl<'a> State<'a> {
@@ -310,6 +312,8 @@ impl<'a> State<'a> {
             white_uv,
             triangle_data,
             suzane_data,
+            triangle_widget: CustomState::with_opt("Triangle", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::NONE),
+            suzane_widget: CustomState::with_opt("Suzane", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::GRAB_SCROLL),
         }
     }
 
@@ -448,9 +452,10 @@ impl<'a> State<'a> {
         let mut renderer = self.renderer.clone();
         let tri_state = self.triangle_data.clone();
         let white_uv = self.white_uv;
+        let triangle_widget = &mut self.triangle_widget;
         ctx.window(&mut self.triangle_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
             container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
-                container.custom_render_widget("Triangle", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::NONE, move |_dim, cra| {
+                container.custom_render_widget(triangle_widget, move |_dim, cra| {
                     if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                         return;
                     }
@@ -475,9 +480,10 @@ impl<'a> State<'a> {
         }
         let mut renderer = self.renderer.clone();
         let suzane_state = self.suzane_data.clone();
+        let suzane_widget = &mut self.suzane_widget;
         ctx.window(&mut self.suzane_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
             container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
-                container.custom_render_widget("Suzane", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::GRAB_SCROLL, move |_dim, cra| {
+                container.custom_render_widget(suzane_widget, move |_dim, cra| {
                     if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                         return;
                     }

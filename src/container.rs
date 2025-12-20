@@ -1223,14 +1223,12 @@ impl Container {
     /// Allocates a widget cell and hands rendering control to user code.
     pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(
         &mut self,
-        name: &str,
-        opt: WidgetOption,
-        bopt: WidgetBehaviourOption,
+        state: &mut CustomState,
         f: F,
     ) {
-        let id: Id = self.idmngr.get_id_from_str(name);
+        let id: Id = self.idmngr.get_id_from_ptr(state);
         let rect: Recti = self.layout.next();
-        let scroll_delta = self.update_control(id, rect, opt, bopt);
+        let scroll_delta = self.update_control(id, rect, state.opt, state.bopt);
 
         let mouse_event = self.input_to_mouse_event(id, &rect);
 
@@ -1245,8 +1243,8 @@ impl Container {
             view: self.get_clip_rect(),
             mouse_event,
             scroll_delta,
-            widget_opt: opt,
-            behaviour_opt: bopt,
+            widget_opt: state.opt,
+            behaviour_opt: state.bopt,
             key_mods,
             key_codes,
             text_input,
