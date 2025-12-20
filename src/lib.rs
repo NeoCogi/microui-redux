@@ -355,6 +355,14 @@ impl WidgetBehaviourOption {
     pub fn is_no_scroll(self) -> bool { matches!(self, Self::NoScroll) }
 }
 
+/// Trait implemented by persistent widget state structures.
+pub trait WidgetState {
+    /// Returns the widget options for this state.
+    fn widget_opt(&self) -> &WidgetOption;
+    /// Returns the behaviour options for this state.
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption;
+}
+
 #[derive(Clone, Copy)]
 /// Expansion state used by tree nodes, headers, and similar widgets.
 pub enum NodeStateValue {
@@ -391,17 +399,19 @@ pub struct NodeState {
     pub state: NodeStateValue,
     /// Widget options applied to the node.
     pub opt: WidgetOption,
+    /// Behaviour options applied to the node.
+    pub bopt: WidgetBehaviourOption,
 }
 
 impl NodeState {
     /// Creates a node state with the default widget options.
     pub fn new(label: impl Into<String>, state: NodeStateValue) -> Self {
-        Self { label: label.into(), state, opt: WidgetOption::NONE }
+        Self { label: label.into(), state, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
     }
 
     /// Creates a node state with explicit widget options.
     pub fn with_opt(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self {
-        Self { label: label.into(), state, opt }
+        Self { label: label.into(), state, opt, bopt: WidgetBehaviourOption::NONE }
     }
 
     /// Returns `true` when the node is expanded.
@@ -409,6 +419,11 @@ impl NodeState {
 
     /// Returns `true` when the node is closed.
     pub fn is_closed(&self) -> bool { self.state.is_closed() }
+}
+
+impl WidgetState for NodeState {
+    fn widget_opt(&self) -> &WidgetOption { &self.opt }
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
 }
 
 #[derive(Clone)]
@@ -500,6 +515,11 @@ impl ButtonState {
     }
 }
 
+impl WidgetState for ButtonState {
+    fn widget_opt(&self) -> &WidgetOption { &self.opt }
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+}
+
 #[derive(Clone)]
 /// Persistent state for list items.
 pub struct ListItemState {
@@ -507,18 +527,25 @@ pub struct ListItemState {
     pub label: String,
     /// Widget options applied to the list item.
     pub opt: WidgetOption,
+    /// Behaviour options applied to the list item.
+    pub bopt: WidgetBehaviourOption,
 }
 
 impl ListItemState {
     /// Creates a list item with default widget options.
     pub fn new(label: impl Into<String>) -> Self {
-        Self { label: label.into(), opt: WidgetOption::NONE }
+        Self { label: label.into(), opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
     }
 
     /// Creates a list item with explicit widget options.
     pub fn with_opt(label: impl Into<String>, opt: WidgetOption) -> Self {
-        Self { label: label.into(), opt }
+        Self { label: label.into(), opt, bopt: WidgetBehaviourOption::NONE }
     }
+}
+
+impl WidgetState for ListItemState {
+    fn widget_opt(&self) -> &WidgetOption { &self.opt }
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
 }
 
 #[derive(Clone)]
@@ -530,18 +557,25 @@ pub struct ListBoxState {
     pub image: Option<Image>,
     /// Widget options applied to the list box.
     pub opt: WidgetOption,
+    /// Behaviour options applied to the list box.
+    pub bopt: WidgetBehaviourOption,
 }
 
 impl ListBoxState {
     /// Creates a list box with default widget options.
     pub fn new(label: impl Into<String>, image: Option<Image>) -> Self {
-        Self { label: label.into(), image, opt: WidgetOption::NONE }
+        Self { label: label.into(), image, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
     }
 
     /// Creates a list box with explicit widget options.
     pub fn with_opt(label: impl Into<String>, image: Option<Image>, opt: WidgetOption) -> Self {
-        Self { label: label.into(), image, opt }
+        Self { label: label.into(), image, opt, bopt: WidgetBehaviourOption::NONE }
     }
+}
+
+impl WidgetState for ListBoxState {
+    fn widget_opt(&self) -> &WidgetOption { &self.opt }
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
 }
 
 #[derive(Clone)]
@@ -553,18 +587,25 @@ pub struct CheckboxState {
     pub value: bool,
     /// Widget options applied to the checkbox.
     pub opt: WidgetOption,
+    /// Behaviour options applied to the checkbox.
+    pub bopt: WidgetBehaviourOption,
 }
 
 impl CheckboxState {
     /// Creates a checkbox with default widget options.
     pub fn new(label: impl Into<String>, value: bool) -> Self {
-        Self { label: label.into(), value, opt: WidgetOption::NONE }
+        Self { label: label.into(), value, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
     }
 
     /// Creates a checkbox with explicit widget options.
     pub fn with_opt(label: impl Into<String>, value: bool, opt: WidgetOption) -> Self {
-        Self { label: label.into(), value, opt }
+        Self { label: label.into(), value, opt, bopt: WidgetBehaviourOption::NONE }
     }
+}
+
+impl WidgetState for CheckboxState {
+    fn widget_opt(&self) -> &WidgetOption { &self.opt }
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
 }
 
 #[derive(Clone)]
@@ -574,18 +615,25 @@ pub struct TextboxState {
     pub buf: String,
     /// Widget options applied to the textbox.
     pub opt: WidgetOption,
+    /// Behaviour options applied to the textbox.
+    pub bopt: WidgetBehaviourOption,
 }
 
 impl TextboxState {
     /// Creates a textbox with default widget options.
     pub fn new(buf: impl Into<String>) -> Self {
-        Self { buf: buf.into(), opt: WidgetOption::NONE }
+        Self { buf: buf.into(), opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
     }
 
     /// Creates a textbox with explicit widget options.
     pub fn with_opt(buf: impl Into<String>, opt: WidgetOption) -> Self {
-        Self { buf: buf.into(), opt }
+        Self { buf: buf.into(), opt, bopt: WidgetBehaviourOption::NONE }
     }
+}
+
+impl WidgetState for TextboxState {
+    fn widget_opt(&self) -> &WidgetOption { &self.opt }
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
 }
 
 #[derive(Clone)]
@@ -603,6 +651,8 @@ pub struct SliderState {
     pub precision: usize,
     /// Widget options applied to the slider.
     pub opt: WidgetOption,
+    /// Behaviour options applied to the slider.
+    pub bopt: WidgetBehaviourOption,
 }
 
 impl SliderState {
@@ -615,13 +665,27 @@ impl SliderState {
             step: 0.0,
             precision: 0,
             opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::GRAB_SCROLL,
         }
     }
 
     /// Creates a slider with explicit widget options.
     pub fn with_opt(value: Real, low: Real, high: Real, step: Real, precision: usize, opt: WidgetOption) -> Self {
-        Self { value, low, high, step, precision, opt }
+        Self {
+            value,
+            low,
+            high,
+            step,
+            precision,
+            opt,
+            bopt: WidgetBehaviourOption::GRAB_SCROLL,
+        }
     }
+}
+
+impl WidgetState for SliderState {
+    fn widget_opt(&self) -> &WidgetOption { &self.opt }
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
 }
 
 #[derive(Clone)]
@@ -635,18 +699,25 @@ pub struct NumberState {
     pub precision: usize,
     /// Widget options applied to the number input.
     pub opt: WidgetOption,
+    /// Behaviour options applied to the number input.
+    pub bopt: WidgetBehaviourOption,
 }
 
 impl NumberState {
     /// Creates a number input with default widget options.
     pub fn new(value: Real, step: Real, precision: usize) -> Self {
-        Self { value, step, precision, opt: WidgetOption::NONE }
+        Self { value, step, precision, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
     }
 
     /// Creates a number input with explicit widget options.
     pub fn with_opt(value: Real, step: Real, precision: usize, opt: WidgetOption) -> Self {
-        Self { value, step, precision, opt }
+        Self { value, step, precision, opt, bopt: WidgetBehaviourOption::NONE }
     }
+}
+
+impl WidgetState for NumberState {
+    fn widget_opt(&self) -> &WidgetOption { &self.opt }
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
 }
 
 #[derive(Clone)]
@@ -676,16 +747,36 @@ impl CustomState {
     }
 }
 
+impl WidgetState for CustomState {
+    fn widget_opt(&self) -> &WidgetOption { &self.opt }
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+}
+
 #[derive(Clone)]
 /// Persistent state for internal window/container controls.
 pub struct InternalState {
     /// Stable tag describing the internal control.
     pub tag: &'static str,
+    /// Widget options applied to the internal control.
+    pub opt: WidgetOption,
+    /// Behaviour options applied to the internal control.
+    pub bopt: WidgetBehaviourOption,
 }
 
 impl InternalState {
     /// Creates an internal control state with a stable tag.
-    pub fn new(tag: &'static str) -> Self { Self { tag } }
+    pub fn new(tag: &'static str) -> Self {
+        Self {
+            tag,
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+        }
+    }
+}
+
+impl WidgetState for InternalState {
+    fn widget_opt(&self) -> &WidgetOption { &self.opt }
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
 }
 
 impl ContainerOption {

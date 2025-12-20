@@ -635,8 +635,7 @@ impl<'a> State<'a> {
                 ];
                 container.header(combo_header, |container| {
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                        let (anchor, toggled, _) =
-                            container.combo_box(combo_state, &combo_labels, WidgetOption::NONE);
+                        let (anchor, toggled, _) = container.combo_box(combo_state, &combo_labels);
                         combo_anchor = Some(anchor);
                         if toggled {
                             combo_state.open = !combo_state.open;
