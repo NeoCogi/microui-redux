@@ -421,6 +421,22 @@ pub enum ButtonContent {
         /// Optional icon rendered on the button.
         icon: Option<IconId>,
     },
+    /// A text label and optional image.
+    Image {
+        /// Text displayed on the button.
+        label: String,
+        /// Optional image rendered on the button.
+        image: Option<Image>,
+    },
+    /// A text label and a slot refreshed via a paint callback.
+    Slot {
+        /// Text displayed on the button.
+        label: String,
+        /// Slot rendered on the button.
+        slot: SlotId,
+        /// Callback used to fill the slot pixels.
+        paint: Rc<dyn Fn(usize, usize) -> Color4b>,
+    },
 }
 
 #[derive(Clone)]
@@ -454,6 +470,32 @@ impl ButtonState {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             fill: WidgetFillOption::ALL,
+        }
+    }
+
+    /// Creates an image button with explicit widget options and fill behavior.
+    pub fn with_image(label: impl Into<String>, image: Option<Image>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
+        Self {
+            content: ButtonContent::Image { label: label.into(), image },
+            opt,
+            bopt: WidgetBehaviourOption::NONE,
+            fill,
+        }
+    }
+
+    /// Creates a slot button that repaints via the provided callback.
+    pub fn with_slot(
+        label: impl Into<String>,
+        slot: SlotId,
+        paint: Rc<dyn Fn(usize, usize) -> Color4b>,
+        opt: WidgetOption,
+        fill: WidgetFillOption,
+    ) -> Self {
+        Self {
+            content: ButtonContent::Slot { label: label.into(), slot, paint },
+            opt,
+            bopt: WidgetBehaviourOption::NONE,
+            fill,
         }
     }
 }

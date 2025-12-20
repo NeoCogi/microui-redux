@@ -22,7 +22,7 @@ use common::vulkan_renderer::{CustomRenderArea, MeshBuffers, MeshSubmission, Mes
 #[cfg(feature = "builder")]
 use microui_redux::builder;
 use microui_redux::*;
-use rand::{rng, rngs::ThreadRng, Rng};
+use rand::{rng, Rng};
 use std::{
     cell::RefCell,
     f32::consts::PI,
@@ -70,9 +70,6 @@ pub struct LabelColor<'a> {
 
 struct State<'a> {
     renderer: RendererHandle<BackendRenderer>,
-    rng: Rc<RefCell<ThreadRng>>,
-    slots: Vec<SlotId>,
-    image_texture: Option<TextureId>,
     label_colors: [LabelColor<'a>; 15],
     bg: [Real; 3],
     logbuf: String,
@@ -109,6 +106,8 @@ struct State<'a> {
     test_buttons: [ButtonState; 6],
     tree_buttons: [ButtonState; 6],
     popup_buttons: [ButtonState; 2],
+    slot_buttons: [ButtonState; 4],
+    external_image_button: Option<ButtonState>,
     open_popup: bool,
     open_dialog: bool,
     white_uv: Vec2f,
@@ -151,11 +150,27 @@ impl<'a> State<'a> {
         );
         let suzane_data = Arc::new(RwLock::new(SuzaneData { view_3d, mesh: mesh_buffers }));
 
+        let rng = Rc::new(RefCell::new(rng()));
+        let green_paint: Rc<dyn Fn(usize, usize) -> Color4b> = Rc::new(|_x, _y| color4b(0x00, 0xFF, 0x00, 0xFF));
+        let random_paint: Rc<dyn Fn(usize, usize) -> Color4b> = {
+            let rng = rng.clone();
+            Rc::new(move |_x, _y| {
+                let mut rm = rng.borrow_mut();
+                color4b(rm.random(), rm.random(), rm.random(), rm.random())
+            })
+        };
+        let slot_buttons = [
+            ButtonState::with_image("Slot 1", Some(Image::Slot(slots[0])), WidgetOption::NONE, WidgetFillOption::ALL),
+            ButtonState::with_slot("Slot 2 - Green", slots[1], green_paint, WidgetOption::NONE, WidgetFillOption::ALL),
+            ButtonState::with_image("Slot 3", Some(Image::Slot(slots[2])), WidgetOption::NONE, WidgetFillOption::ALL),
+            ButtonState::with_slot("Slot 2 - Random", slots[1], random_paint, WidgetOption::NONE, WidgetFillOption::ALL),
+        ];
+        let external_image_button = image_texture.map(|texture| {
+            ButtonState::with_image("External Image", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL)
+        });
+
         Self {
             renderer,
-            rng: Rc::new(RefCell::new(rng())),
-            slots,
-            image_texture,
             label_colors: [
                 LabelColor { label: "text", idx: ControlColor::Text },
                 LabelColor {
@@ -258,6 +273,8 @@ impl<'a> State<'a> {
                 ButtonState::with_opt("Hello", WidgetOption::ALIGN_CENTER),
                 ButtonState::with_opt("World", WidgetOption::ALIGN_CENTER),
             ],
+            slot_buttons,
+            external_image_button,
             open_popup: false,
             open_dialog: false,
             white_uv,
@@ -676,33 +693,21 @@ impl<'a> State<'a> {
 
             {
                 let slot_header = &mut self.slot_header;
-                let slots = &self.slots;
-                let image_texture = self.image_texture;
-                let rng = self.rng.clone();
+                let slot_buttons = &mut self.slot_buttons;
+                let external_image_button = &mut self.external_image_button;
                 container.header(slot_header, |container| {
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67), |container| {
-                        container.button_ex2("Slot 1", Some(Image::Slot(slots[0].clone())), WidgetOption::NONE, WidgetFillOption::ALL);
-                        container.button_ex3("Slot 2 - Green", Some(slots[1].clone()), WidgetOption::NONE, Rc::new(|_x, _y| {
-                            color4b(0x00, 0xFF, 0x00, 0xFF)
-                        }));
-                        container.button_ex2("Slot 3", Some(Image::Slot(slots[2].clone())), WidgetOption::NONE, WidgetFillOption::ALL);
-                        if let Some(texture) = image_texture {
+                        container.button(&mut slot_buttons[0]);
+                        container.button(&mut slot_buttons[1]);
+                        container.button(&mut slot_buttons[2]);
+                        if let Some(button) = external_image_button.as_mut() {
                             container.with_row(&[SizePolicy::Fixed(256)], SizePolicy::Fixed(256), |ctx| {
-                                ctx.button_ex2("External Image", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL);
+                                ctx.button(button);
                             });
                         }
                     });
-                    let rng = rng.clone();
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67), |container| {
-                        container.button_ex3(
-                            "Slot 2 - Random",
-                            Some(slots[1].clone()),
-                            WidgetOption::NONE,
-                            Rc::new(move |_x, _y| {
-                                let mut rm = rng.borrow_mut();
-                                color4b(rm.random(), rm.random(), rm.random(), rm.random())
-                            }),
-                        );
+                        container.button(&mut slot_buttons[3]);
                     });
                 });
             }
