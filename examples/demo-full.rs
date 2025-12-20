@@ -74,7 +74,7 @@ struct State<'a> {
     bg: [Real; 3],
     logbuf: String,
     logbuf_updated: bool,
-    submit_buf: String,
+    submit_buf: TextboxState,
     combo_state: Option<ComboState>,
     combo_items: [ListItemState; 4],
     style: Style,
@@ -228,7 +228,7 @@ impl<'a> State<'a> {
             bg: [90.0, 95.0, 100.0],
             logbuf: String::new(),
             logbuf_updated: false,
-            submit_buf: String::new(),
+            submit_buf: TextboxState::new(""),
             combo_state: None,
             combo_items: [
                 ListItemState::new("Apple"),
@@ -399,7 +399,7 @@ impl<'a> State<'a> {
             let mut submitted = false;
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             container.with_row(&submit_row, SizePolicy::Auto, |container| {
-                if container.textbox_ex(&mut self.submit_buf, WidgetOption::NONE).is_submitted() {
+                if container.textbox_ex(&mut self.submit_buf).is_submitted() {
                     container.set_focus(container.idmngr.last_id());
                     submitted = true;
                 }
@@ -409,9 +409,9 @@ impl<'a> State<'a> {
             });
             if submitted {
                 let mut buf = String::new();
-                buf.push_str(self.submit_buf.as_str());
+                buf.push_str(self.submit_buf.buf.as_str());
                 self.write_log(buf.as_str());
-                self.submit_buf.clear();
+                self.submit_buf.buf.clear();
             }
             WindowState::Open
         });

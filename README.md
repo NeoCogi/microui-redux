@@ -26,7 +26,7 @@ ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE,
     let widths = [SizePolicy::Fixed(120), SizePolicy::Remainder(0)];
     ui.with_row(&widths, SizePolicy::Auto, |ui| {
         ui.label("Name");
-        ui.textbox_ex(&mut self.name, WidgetOption::NONE);
+        ui.textbox_ex(&mut self.name);
     });
 });
 ```
