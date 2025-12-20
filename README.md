@@ -22,7 +22,7 @@ $ cargo run --example demo-full --features example-glow     # Glow backend
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
 
 ```rust
-ctx.window(&mut main_window, ContainerOption::NONE, |ui| {
+ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, |ui| {
     let widths = [SizePolicy::Fixed(120), SizePolicy::Remainder(0)];
     ui.with_row(&widths, SizePolicy::Auto, |ui| {
         ui.label("Name");
@@ -30,6 +30,10 @@ ctx.window(&mut main_window, ContainerOption::NONE, |ui| {
     });
 });
 ```
+
+Window, dialog, and popup builders now accept a `WidgetBehaviourOption` to control scroll behavior. Use `WidgetBehaviourOption::NO_SCROLL`
+for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widgets that want to consume scroll, and
+`WidgetBehaviourOption::NONE` for default behavior. Custom widgets receive consumed scroll in `CustomRenderArgs::scroll_delta`.
 
 ## Images and textures
 Widgets take an `Image` enum, which can reference either a slot **or** an uploaded texture at runtime:
