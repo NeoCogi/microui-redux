@@ -1431,10 +1431,10 @@ impl Container {
     }
 
     /// Draws a textbox using the next available layout cell.
-    pub fn textbox_ex(&mut self, buf: &mut String, opt: WidgetOption) -> ResourceState {
-        let id: Id = self.idmngr.get_id_from_ptr(buf);
+    pub fn textbox_ex(&mut self, state: &mut TextboxState) -> ResourceState {
+        let id: Id = self.idmngr.get_id_from_ptr(state);
         let r: Recti = self.layout.next();
-        return self.textbox_raw(buf, id, r, opt);
+        return self.textbox_raw(&mut state.buf, id, r, state.opt);
     }
 
     #[inline(never)]

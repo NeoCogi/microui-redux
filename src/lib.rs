@@ -567,6 +567,27 @@ impl CheckboxState {
     }
 }
 
+#[derive(Clone)]
+/// Persistent state for textbox widgets.
+pub struct TextboxState {
+    /// Buffer edited by the textbox.
+    pub buf: String,
+    /// Widget options applied to the textbox.
+    pub opt: WidgetOption,
+}
+
+impl TextboxState {
+    /// Creates a textbox with default widget options.
+    pub fn new(buf: impl Into<String>) -> Self {
+        Self { buf: buf.into(), opt: WidgetOption::NONE }
+    }
+
+    /// Creates a textbox with explicit widget options.
+    pub fn with_opt(buf: impl Into<String>, opt: WidgetOption) -> Self {
+        Self { buf: buf.into(), opt }
+    }
+}
+
 impl ContainerOption {
     /// Returns `true` if the option requests automatic sizing.
     pub fn is_auto_sizing(&self) -> bool { self.intersects(Self::AUTO_SIZE) }

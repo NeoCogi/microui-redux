@@ -35,7 +35,7 @@ use crate::*;
 pub struct FileDialogState {
     current_working_directory: String,
     file_name: Option<String>,
-    tmp_file_name: String,
+    tmp_file_name: TextboxState,
     selected_folder: Option<String>,
     win: WindowHandle,
     folder_panel: ContainerHandle,
@@ -125,7 +125,7 @@ impl FileDialogState {
         Self {
             current_working_directory,
             file_name: None,
-            tmp_file_name: String::new(),
+            tmp_file_name: TextboxState::new(""),
             selected_folder: None,
             win: ctx.new_dialog("File Dialog", Recti::new(50, 50, 500, 500)),
             folder_panel: ctx.new_panel("folders"),
@@ -150,7 +150,7 @@ impl FileDialogState {
                 .map(|p| p.to_string_lossy().to_string());
             cont.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |cont| {
                 cont.label(&self.current_working_directory);
-                cont.textbox_ex(&mut self.tmp_file_name, WidgetOption::NONE);
+                cont.textbox_ex(&mut self.tmp_file_name);
             });
             let left_column = if half_width > 0 {
                 SizePolicy::Remainder(half_width - 1)
@@ -198,7 +198,7 @@ impl FileDialogState {
                         if self.files.len() != 0 {
                             for f in &self.files {
                                 if Self::list_item_with_icon(container, f, FILE_16_ICON, WidgetOption::NONE).is_submitted() {
-                                    self.tmp_file_name = f.to_string();
+                                    self.tmp_file_name.buf = f.to_string();
                                 }
                             }
                         } else {
@@ -210,8 +210,8 @@ impl FileDialogState {
             let bottom_row_widths = [left_column, SizePolicy::Remainder(0)];
             cont.with_row(&bottom_row_widths, SizePolicy::Remainder(0), |cont| {
                 if cont.button(&mut self.ok_button).is_submitted() {
-                    if self.tmp_file_name != "" {
-                        self.file_name = Some(self.tmp_file_name.clone())
+                    if self.tmp_file_name.buf != "" {
+                        self.file_name = Some(self.tmp_file_name.buf.clone())
                     }
                     dialog_state = WindowState::Closed;
                 }
