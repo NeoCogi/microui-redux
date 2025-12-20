@@ -1438,52 +1438,52 @@ impl Container {
     }
 
     #[inline(never)]
-    /// Draws a horizontal slider bound to `value`.
-    pub fn slider_ex(&mut self, value: &mut Real, low: Real, high: Real, step: Real, precision: usize, opt: WidgetOption) -> ResourceState {
+    /// Draws a horizontal slider bound to `state`.
+    pub fn slider_ex(&mut self, state: &mut SliderState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let last = *value;
+        let last = state.value;
         let mut v = last;
-        let id = self.idmngr.get_id_from_ptr(value);
+        let id = self.idmngr.get_id_from_ptr(state);
         let base = self.layout.next();
-        if !self.number_textbox(precision, &mut v, base, id).is_none() {
+        if !self.number_textbox(state.precision, &mut v, base, id).is_none() {
             return res;
         }
-        let scroll_delta = self.update_control(id, base, opt, WidgetBehaviourOption::GRAB_SCROLL);
+        let scroll_delta = self.update_control(id, base, state.opt, WidgetBehaviourOption::GRAB_SCROLL);
         if let Some(delta) = scroll_delta {
             let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
             if wheel != 0 {
-                let step_amount = if step != 0. { step } else { (high - low) / 100.0 };
+                let step_amount = if state.step != 0. { state.step } else { (state.high - state.low) / 100.0 };
                 v += wheel as Real * step_amount;
-                if step != 0. {
-                    v = (v + step / 2 as Real) / step * step;
+                if state.step != 0. {
+                    v = (v + state.step / 2 as Real) / state.step * state.step;
                 }
             }
         }
         if self.focus == Some(id) && (!self.input.borrow().mouse_down.is_none() | self.input.borrow().mouse_pressed.is_left()) {
-            v = low + (self.input.borrow().mouse_pos.x - base.x) as Real * (high - low) / base.width as Real;
-            if step != 0. {
-                v = (v + step / 2 as Real) / step * step;
+            v = state.low + (self.input.borrow().mouse_pos.x - base.x) as Real * (state.high - state.low) / base.width as Real;
+            if state.step != 0. {
+                v = (v + state.step / 2 as Real) / state.step * state.step;
             }
         }
-        v = if high < (if low > v { low } else { v }) {
-            high
-        } else if low > v {
-            low
+        v = if state.high < (if state.low > v { state.low } else { v }) {
+            state.high
+        } else if state.low > v {
+            state.low
         } else {
             v
         };
-        *value = v;
+        state.value = v;
         if last != v {
             res |= ResourceState::CHANGE;
         }
-        self.draw_widget_frame(id, base, ControlColor::Base, opt);
+        self.draw_widget_frame(id, base, ControlColor::Base, state.opt);
         let w = self.style.thumb_size;
-        let x = ((v - low) * (base.width - w) as Real / (high - low)) as i32;
+        let x = ((v - state.low) * (base.width - w) as Real / (state.high - state.low)) as i32;
         let thumb = rect(base.x + x, base.y, w, base.height);
-        self.draw_widget_frame(id, thumb, ControlColor::Button, opt);
+        self.draw_widget_frame(id, thumb, ControlColor::Button, state.opt);
         let mut buff = String::new();
-        buff.push_str(format!("{:.*}", precision, value).as_str());
-        self.draw_control_text(buff.as_str(), base, ControlColor::Text, opt);
+        buff.push_str(format!("{:.*}", state.precision, state.value).as_str());
+        self.draw_control_text(buff.as_str(), base, ControlColor::Text, state.opt);
         return res;
     }
 

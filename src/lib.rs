@@ -588,6 +588,42 @@ impl TextboxState {
     }
 }
 
+#[derive(Clone)]
+/// Persistent state for slider widgets.
+pub struct SliderState {
+    /// Current slider value.
+    pub value: Real,
+    /// Lower bound of the slider range.
+    pub low: Real,
+    /// Upper bound of the slider range.
+    pub high: Real,
+    /// Step size used for snapping (0 for continuous).
+    pub step: Real,
+    /// Number of digits after the decimal point when rendering.
+    pub precision: usize,
+    /// Widget options applied to the slider.
+    pub opt: WidgetOption,
+}
+
+impl SliderState {
+    /// Creates a slider with default widget options.
+    pub fn new(value: Real, low: Real, high: Real) -> Self {
+        Self {
+            value,
+            low,
+            high,
+            step: 0.0,
+            precision: 0,
+            opt: WidgetOption::NONE,
+        }
+    }
+
+    /// Creates a slider with explicit widget options.
+    pub fn with_opt(value: Real, low: Real, high: Real, step: Real, precision: usize, opt: WidgetOption) -> Self {
+        Self { value, low, high, step, precision, opt }
+    }
+}
+
 impl ContainerOption {
     /// Returns `true` if the option requests automatic sizing.
     pub fn is_auto_sizing(&self) -> bool { self.intersects(Self::AUTO_SIZE) }
