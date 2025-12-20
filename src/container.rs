@@ -196,6 +196,7 @@ pub struct Container {
     pub popup_just_opened: bool,
     text_states: HashMap<Id, TextEditState>,
     pending_scroll: Option<Vec2i>,
+    /// Determines whether container scrollbars and scroll consumption are enabled.
     scroll_enabled: bool,
 
     panels: Vec<ContainerHandle>,
