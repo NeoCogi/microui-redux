@@ -42,6 +42,8 @@ pub struct FileDialogState {
     file_panel: ContainerHandle,
     folders: Vec<String>,
     files: Vec<String>,
+    ok_button: ButtonState,
+    cancel_button: ButtonState,
 }
 
 impl FileDialogState {
@@ -130,6 +132,8 @@ impl FileDialogState {
             file_panel: ctx.new_panel("files"),
             folders,
             files,
+            ok_button: ButtonState::new("Ok"),
+            cancel_button: ButtonState::new("Cancel"),
         }
     }
 
@@ -205,13 +209,13 @@ impl FileDialogState {
             });
             let bottom_row_widths = [left_column, SizePolicy::Remainder(0)];
             cont.with_row(&bottom_row_widths, SizePolicy::Remainder(0), |cont| {
-                if cont.button_ex("Ok", None, WidgetOption::NONE).is_submitted() {
+                if cont.button(&mut self.ok_button).is_submitted() {
                     if self.tmp_file_name != "" {
                         self.file_name = Some(self.tmp_file_name.clone())
                     }
                     dialog_state = WindowState::Closed;
                 }
-                if cont.button_ex("Cancel", None, WidgetOption::NONE).is_submitted() {
+                if cont.button(&mut self.cancel_button).is_submitted() {
                     self.file_name = None;
                     dialog_state = WindowState::Closed;
                 }
