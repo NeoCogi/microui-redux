@@ -72,6 +72,9 @@ struct State<'a> {
     renderer: RendererHandle<BackendRenderer>,
     label_colors: [LabelColor<'a>; 15],
     bg: [Real; 3],
+    bg_sliders: [SliderState; 3],
+    style_color_sliders: [SliderState; 60],
+    style_value_sliders: [SliderState; 5],
     logbuf: String,
     logbuf_updated: bool,
     submit_buf: TextboxState,
@@ -169,6 +172,19 @@ impl<'a> State<'a> {
         let external_image_button = image_texture.map(|texture| {
             ButtonState::with_image("External Image", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL)
         });
+        let style_color_sliders = std::array::from_fn(|_| {
+            SliderState::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)
+        });
+        let style_value_sliders = [
+            SliderState::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
+            SliderState::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
+            SliderState::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
+            SliderState::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
+            SliderState::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
+        ];
+        let bg_sliders = std::array::from_fn(|_| {
+            SliderState::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)
+        });
 
         Self {
             renderer,
@@ -226,6 +242,9 @@ impl<'a> State<'a> {
                 LabelColor { label: "", idx: ControlColor::Text },
             ],
             bg: [90.0, 95.0, 100.0],
+            bg_sliders,
+            style_color_sliders,
+            style_value_sliders,
             logbuf: String::new(),
             logbuf_updated: false,
             submit_buf: TextboxState::new(""),
@@ -304,12 +323,26 @@ impl<'a> State<'a> {
         self.logbuf_updated = true;
     }
 
-    fn uint8_slider(&mut self, value: &mut u8, low: i32, high: i32, ctx: &mut Container) -> ResourceState {
-        let mut tmp = *value as f32;
-        ctx.idmngr.push_id_from_ptr(value);
-        let res = ctx.slider_ex(&mut tmp, low as Real, high as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
-        *value = tmp as u8;
-        ctx.idmngr.pop_id();
+    fn u8_slider(value: &mut u8, slider: &mut SliderState, ctx: &mut Container) -> ResourceState {
+        slider.value = *value as Real;
+        let res = ctx.slider_ex(slider);
+        *value = slider.value as u8;
+        slider.value = *value as Real;
+        res
+    }
+
+    fn i32_slider(value: &mut i32, slider: &mut SliderState, ctx: &mut Container) -> ResourceState {
+        slider.value = *value as Real;
+        let res = ctx.slider_ex(slider);
+        *value = slider.value as i32;
+        slider.value = *value as Real;
+        res
+    }
+
+    fn real_slider(value: &mut Real, slider: &mut SliderState, ctx: &mut Container) -> ResourceState {
+        slider.value = *value;
+        let res = ctx.slider_ex(slider);
+        *value = slider.value;
         res
     }
 
@@ -330,10 +363,11 @@ impl<'a> State<'a> {
                     container.label(self.label_colors[i].label);
                     unsafe {
                         let color = self.style.colors.as_mut_ptr().offset(i as isize);
-                        self.uint8_slider(&mut (*color).r, 0, 255, container);
-                        self.uint8_slider(&mut (*color).g, 0, 255, container);
-                        self.uint8_slider(&mut (*color).b, 0, 255, container);
-                        self.uint8_slider(&mut (*color).a, 0, 255, container);
+                        let slider_base = i * 4;
+                        Self::u8_slider(&mut (*color).r, &mut self.style_color_sliders[slider_base], container);
+                        Self::u8_slider(&mut (*color).g, &mut self.style_color_sliders[slider_base + 1], container);
+                        Self::u8_slider(&mut (*color).b, &mut self.style_color_sliders[slider_base + 2], container);
+                        Self::u8_slider(&mut (*color).a, &mut self.style_color_sliders[slider_base + 3], container);
                     }
                     let next_layout = container.next_cell();
                     let color = self.style.colors[i];
@@ -344,29 +378,19 @@ impl<'a> State<'a> {
             let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Fixed(sw)];
             container.with_row(&metrics_row, SizePolicy::Auto, |container| {
                 container.label("padding");
-                let mut tmp = self.style.padding as u8;
-                self.uint8_slider(&mut tmp, 0, 16, container);
-                self.style.padding = tmp as i32;
+                Self::i32_slider(&mut self.style.padding, &mut self.style_value_sliders[0], container);
 
                 container.label("spacing");
-                let mut tmp = self.style.spacing as u8;
-                self.uint8_slider(&mut tmp, 0, 16, container);
-                self.style.spacing = tmp as i32;
+                Self::i32_slider(&mut self.style.spacing, &mut self.style_value_sliders[1], container);
 
                 container.label("title height");
-                let mut tmp = self.style.title_height as u8;
-                self.uint8_slider(&mut tmp, 0, 128, container);
-                self.style.title_height = tmp as i32;
+                Self::i32_slider(&mut self.style.title_height, &mut self.style_value_sliders[2], container);
 
                 container.label("thumb size");
-                let mut tmp = self.style.thumb_size as u8;
-                self.uint8_slider(&mut tmp, 0, 128, container);
-                self.style.thumb_size = tmp as i32;
+                Self::i32_slider(&mut self.style.thumb_size, &mut self.style_value_sliders[3], container);
 
                 container.label("scroll size");
-                let mut tmp = self.style.scrollbar_size as u8;
-                self.uint8_slider(&mut tmp, 0, 128, container);
-                self.style.scrollbar_size = tmp as i32;
+                Self::i32_slider(&mut self.style.scrollbar_size, &mut self.style_value_sliders[4], container);
             });
             WindowState::Open
         });
@@ -684,6 +708,7 @@ impl<'a> State<'a> {
             {
                 let background_header = &mut self.background_header;
                 let bg = &mut self.bg;
+                let bg_sliders = &mut self.bg_sliders;
                 container.header(background_header, |container| {
                     let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
                     container.with_row(&background_widths, SizePolicy::Fixed(74), |container| {
@@ -691,11 +716,11 @@ impl<'a> State<'a> {
                         container.column(|container| {
                             container.with_row(&slider_row, SizePolicy::Auto, |container| {
                                 container.label("Red:");
-                                container.slider_ex(&mut bg[0], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                                Self::real_slider(&mut bg[0], &mut bg_sliders[0], container);
                                 container.label("Green:");
-                                container.slider_ex(&mut bg[1], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                                Self::real_slider(&mut bg[1], &mut bg_sliders[1], container);
                                 container.label("Blue:");
-                                container.slider_ex(&mut bg[2], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                                Self::real_slider(&mut bg[2], &mut bg_sliders[2], container);
                             });
                         });
                         let r: Recti = container.next_cell();
