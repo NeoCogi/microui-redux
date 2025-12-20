@@ -933,6 +933,22 @@ impl Container {
                     self.draw_icon(*icon, r, color);
                 }
             }
+            ButtonContent::Image { label, image } => {
+                if !label.is_empty() {
+                    self.draw_control_text(label, r, ControlColor::Text, state.opt);
+                }
+                if let Some(image) = *image {
+                    let color = self.style.colors[ControlColor::Text as usize];
+                    self.push_image(image, r, color);
+                }
+            }
+            ButtonContent::Slot { label, slot, paint } => {
+                if !label.is_empty() {
+                    self.draw_control_text(label, r, ControlColor::Text, state.opt);
+                }
+                let color = self.style.colors[ControlColor::Text as usize];
+                self.draw_slot_with_function(*slot, r, color, paint.clone());
+            }
         }
         res
     }
