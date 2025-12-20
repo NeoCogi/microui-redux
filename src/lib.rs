@@ -649,6 +649,33 @@ impl NumberState {
     }
 }
 
+#[derive(Clone)]
+/// Persistent state for custom render widgets.
+pub struct CustomState {
+    /// Label used for debugging or inspection.
+    pub name: String,
+    /// Widget options applied to the custom widget.
+    pub opt: WidgetOption,
+    /// Behaviour options applied to the custom widget.
+    pub bopt: WidgetBehaviourOption,
+}
+
+impl CustomState {
+    /// Creates a custom widget state with default options.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+        }
+    }
+
+    /// Creates a custom widget state with explicit options.
+    pub fn with_opt(name: impl Into<String>, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self {
+        Self { name: name.into(), opt, bopt }
+    }
+}
+
 impl ContainerOption {
     /// Returns `true` if the option requests automatic sizing.
     pub fn is_auto_sizing(&self) -> bool { self.intersects(Self::AUTO_SIZE) }
