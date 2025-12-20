@@ -500,6 +500,50 @@ impl ButtonState {
     }
 }
 
+#[derive(Clone)]
+/// Persistent state for list items.
+pub struct ListItemState {
+    /// Label displayed for the list item.
+    pub label: String,
+    /// Widget options applied to the list item.
+    pub opt: WidgetOption,
+}
+
+impl ListItemState {
+    /// Creates a list item with default widget options.
+    pub fn new(label: impl Into<String>) -> Self {
+        Self { label: label.into(), opt: WidgetOption::NONE }
+    }
+
+    /// Creates a list item with explicit widget options.
+    pub fn with_opt(label: impl Into<String>, opt: WidgetOption) -> Self {
+        Self { label: label.into(), opt }
+    }
+}
+
+#[derive(Clone)]
+/// Persistent state for list boxes.
+pub struct ListBoxState {
+    /// Label displayed for the list box.
+    pub label: String,
+    /// Optional image rendered alongside the label.
+    pub image: Option<Image>,
+    /// Widget options applied to the list box.
+    pub opt: WidgetOption,
+}
+
+impl ListBoxState {
+    /// Creates a list box with default widget options.
+    pub fn new(label: impl Into<String>, image: Option<Image>) -> Self {
+        Self { label: label.into(), image, opt: WidgetOption::NONE }
+    }
+
+    /// Creates a list box with explicit widget options.
+    pub fn with_opt(label: impl Into<String>, image: Option<Image>, opt: WidgetOption) -> Self {
+        Self { label: label.into(), image, opt }
+    }
+}
+
 impl ContainerOption {
     /// Returns `true` if the option requests automatic sizing.
     pub fn is_auto_sizing(&self) -> bool { self.intersects(Self::AUTO_SIZE) }

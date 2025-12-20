@@ -77,6 +77,7 @@ struct State<'a> {
     submit_buf: String,
     checks: [bool; 3],
     combo_state: Option<ComboState>,
+    combo_items: [ListItemState; 4],
     style: Style,
 
     demo_window: Option<WindowHandle>,
@@ -230,6 +231,12 @@ impl<'a> State<'a> {
             submit_buf: String::new(),
             checks: [false, true, false],
             combo_state: None,
+            combo_items: [
+                ListItemState::new("Apple"),
+                ListItemState::new("Banana"),
+                ListItemState::new("Cherry"),
+                ListItemState::new("Date"),
+            ],
             style: Style::default(),
             demo_window: None,
             style_window: None,
@@ -505,7 +512,6 @@ impl<'a> State<'a> {
     }
 
     fn test_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        let combo_items = ["Apple", "Banana", "Cherry", "Date"];
         let mut combo_anchor = None;
         let mut combo_changed = false;
 
@@ -587,10 +593,16 @@ impl<'a> State<'a> {
             {
                 let combo_header = &mut self.combo_header;
                 let combo_state = self.combo_state.as_mut().unwrap();
+                let combo_labels = [
+                    self.combo_items[0].label.as_str(),
+                    self.combo_items[1].label.as_str(),
+                    self.combo_items[2].label.as_str(),
+                    self.combo_items[3].label.as_str(),
+                ];
                 container.header(combo_header, |container| {
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
                         let (anchor, toggled, _) =
-                            container.combo_box(combo_state, &combo_items, WidgetOption::NONE);
+                            container.combo_box(combo_state, &combo_labels, WidgetOption::NONE);
                         combo_anchor = Some(anchor);
                         if toggled {
                             combo_state.open = !combo_state.open;
@@ -716,6 +728,7 @@ impl<'a> State<'a> {
 
         if let Some(anchor) = combo_anchor {
             let combo_state = self.combo_state.as_mut().unwrap();
+            let combo_items = &mut self.combo_items;
             let popup = &mut combo_state.popup;
             if combo_state.open {
                 ctx.open_popup_at(popup, anchor);
@@ -723,8 +736,8 @@ impl<'a> State<'a> {
 
             ctx.popup(popup, WidgetBehaviourOption::NO_SCROLL, |dropdown| {
                 dropdown.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |dropdown| {
-                    for (idx, item) in combo_items.iter().enumerate() {
-                        if dropdown.list_item(item, WidgetOption::NONE).is_submitted() {
+                    for (idx, item) in combo_items.iter_mut().enumerate() {
+                        if dropdown.list_item(item).is_submitted() {
                             combo_state.selected = idx;
                             combo_changed = true;
                             dropdown.set_focus(None);
@@ -744,8 +757,9 @@ impl<'a> State<'a> {
         }
 
         if combo_changed {
-            if let Some(choice) = combo_items.get(self.combo_state.as_ref().unwrap().selected) {
-                let msg = format!("Selected: {}", choice);
+            let selected = self.combo_state.as_ref().unwrap().selected;
+            if let Some(choice) = self.combo_items.get(selected) {
+                let msg = format!("Selected: {}", choice.label);
                 self.write_log(msg.as_str());
             }
         }
