@@ -222,17 +222,17 @@ impl<'a> State<'a> {
             dialog_window: None,
             fps: 0.0,
             last_frame: Instant::now(),
-            window_header: NodeState::Closed,
-            test_buttons_header: NodeState::Expanded,
-            background_header: NodeState::Expanded,
-            tree_and_text_header: NodeState::Expanded,
-            slot_header: NodeState::Expanded,
-            combo_header: NodeState::Expanded,
-            test1_tn: NodeState::Closed,
-            test1a_tn: NodeState::Closed,
-            test1b_tn: NodeState::Closed,
-            test2_tn: NodeState::Closed,
-            test3_tn: NodeState::Closed,
+            window_header: NodeState::new("Window Info", NodeStateValue::Closed),
+            test_buttons_header: NodeState::new("Test Buttons", NodeStateValue::Expanded),
+            background_header: NodeState::new("Background Color", NodeStateValue::Expanded),
+            tree_and_text_header: NodeState::new("Tree and Text", NodeStateValue::Expanded),
+            slot_header: NodeState::new("Slots", NodeStateValue::Expanded),
+            combo_header: NodeState::new("Combo Box", NodeStateValue::Expanded),
+            test1_tn: NodeState::new("Test 1", NodeStateValue::Closed),
+            test1a_tn: NodeState::new("Test 1a", NodeStateValue::Closed),
+            test1b_tn: NodeState::new("Test 1b", NodeStateValue::Closed),
+            test2_tn: NodeState::new("Test 2", NodeStateValue::Closed),
+            test3_tn: NodeState::new("Test 3", NodeStateValue::Closed),
             open_popup: false,
             open_dialog: false,
             white_uv,
@@ -475,168 +475,210 @@ impl<'a> State<'a> {
             container.rect = win;
 
             let mut buff = String::new();
+            let fps = self.fps;
 
-            self.window_header = container.header("Window Info", self.window_header, |container| {
-                let win_0 = container.rect;
-                let row_widths = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
-                container.with_row(&row_widths, SizePolicy::Auto, |container| {
-                    container.label("Position:");
+            {
+                let window_header = &mut self.window_header;
+                container.header(window_header, |container| {
+                    let win_0 = container.rect;
+                    let row_widths = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
+                    container.with_row(&row_widths, SizePolicy::Auto, |container| {
+                        container.label("Position:");
 
-                    buff.clear();
-                    buff.push_str(format!("{}, {}", win_0.x, win_0.y).as_str());
+                        buff.clear();
+                        buff.push_str(format!("{}, {}", win_0.x, win_0.y).as_str());
 
-                    container.label(buff.as_str());
-                    buff.clear();
-                    container.label("Size:");
+                        container.label(buff.as_str());
+                        buff.clear();
+                        container.label("Size:");
 
-                    buff.push_str(format!("{}, {}", win_0.width, win_0.height).as_str());
+                        buff.push_str(format!("{}, {}", win_0.width, win_0.height).as_str());
 
-                    container.label(buff.as_str());
+                        container.label(buff.as_str());
+                    });
+                    container.with_row(&row_widths, SizePolicy::Auto, |container| {
+                        container.label("FPS:");
+                        buff.clear();
+                        buff.push_str(format!("{:.1}", fps).as_str());
+                        container.label(buff.as_str());
+                    });
                 });
-                container.with_row(&row_widths, SizePolicy::Auto, |container| {
-                    container.label("FPS:");
-                    buff.clear();
-                    buff.push_str(format!("{:.1}", self.fps).as_str());
-                    container.label(buff.as_str());
-                });
-            });
-            self.test_buttons_header = container.header("Test Buttons", self.test_buttons_header, |container| {
-                let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
-                container.with_row(&button_widths, SizePolicy::Auto, |container| {
-                    container.label("Test buttons 1:");
-                    if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
-                        self.write_log("Pressed button 1");
-                    }
-                    if !container.button_ex("Button 2", None, WidgetOption::ALIGN_CENTER).is_none() {
-                        self.write_log("Pressed button 2");
-                    }
-                    container.label("Test buttons 2:");
-                    if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
-                        self.write_log("Pressed button 3");
-                    }
-                    if !container.button_ex("Popup", None, WidgetOption::ALIGN_CENTER).is_none() {
-                        self.open_popup = true;
-                    }
+            }
+            let mut button_logs: Vec<&'static str> = Vec::new();
+            {
+                let test_buttons_header = &mut self.test_buttons_header;
+                let open_popup = &mut self.open_popup;
+                let open_dialog = &mut self.open_dialog;
+                container.header(test_buttons_header, |container| {
+                    let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
+                    container.with_row(&button_widths, SizePolicy::Auto, |container| {
+                        container.label("Test buttons 1:");
+                        if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
+                            button_logs.push("Pressed button 1");
+                        }
+                        if !container.button_ex("Button 2", None, WidgetOption::ALIGN_CENTER).is_none() {
+                            button_logs.push("Pressed button 2");
+                        }
+                        container.label("Test buttons 2:");
+                        if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
+                            button_logs.push("Pressed button 3");
+                        }
+                        if !container.button_ex("Popup", None, WidgetOption::ALIGN_CENTER).is_none() {
+                            *open_popup = true;
+                        }
 
-                    container.label("Test buttons 3:");
-                    if !container.button_ex("Button 4", None, WidgetOption::ALIGN_CENTER).is_none() {
-                        self.write_log("Pressed button 4");
-                    }
-                    if !container.button_ex("Dialog", None, WidgetOption::ALIGN_CENTER).is_none() {
-                        self.open_dialog = true;
-                    }
+                        container.label("Test buttons 3:");
+                        if !container.button_ex("Button 4", None, WidgetOption::ALIGN_CENTER).is_none() {
+                            button_logs.push("Pressed button 4");
+                        }
+                        if !container.button_ex("Dialog", None, WidgetOption::ALIGN_CENTER).is_none() {
+                            *open_dialog = true;
+                        }
+                    });
                 });
-            });
-            self.combo_header = container.header("Combo Box", self.combo_header, |container| {
+            }
+            for msg in button_logs {
+                self.write_log(msg);
+            }
+
+            {
+                let combo_header = &mut self.combo_header;
                 let combo_state = self.combo_state.as_mut().unwrap();
-                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                    let (anchor, toggled, _) =
-                        container.combo_box(combo_state, &combo_items, WidgetOption::NONE);
-                    combo_anchor = Some(anchor);
-                    if toggled {
-                        combo_state.open = !combo_state.open;
-                    }
-                });
-            });
-            self.tree_and_text_header = container.header("Tree and Text", self.tree_and_text_header, |container| {
-                let widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
-                container.with_row(&widths, SizePolicy::Auto, |container| {
-                    container.column(|container| {
-                        self.test1_tn = container.treenode("Test 1", self.test1_tn, |container| {
-                            self.test1a_tn = container.treenode("Test 1a", self.test1a_tn, |container| {
-                                container.label("Hello");
-                                container.label("world");
-                            });
-                            self.test1b_tn = container.treenode("Test 1b", self.test1b_tn, |container| {
-                                if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
-                                    self.write_log("Pressed button 1");
-                                }
-                                if !container.button_ex("Button 2", None, WidgetOption::ALIGN_CENTER).is_none() {
-                                    self.write_log("Pressed button 2");
-                                }
-                            });
-                        });
-                        self.test2_tn = container.treenode("Test 2", self.test2_tn, |container| {
-                            let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
-                            container.with_row(&tree_button_widths, SizePolicy::Auto, |container| {
-                                if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
-                                    self.write_log("Pressed button 3");
-                                }
-                                if !container.button_ex("Button 4", None, WidgetOption::ALIGN_CENTER).is_none() {
-                                    self.write_log("Pressed button 4");
-                                }
-                                if !container.button_ex("Button 5", None, WidgetOption::ALIGN_CENTER).is_none() {
-                                    self.write_log("Pressed button 5");
-                                }
-                                if !container.button_ex("Button 6", None, WidgetOption::ALIGN_CENTER).is_none() {
-                                    self.write_log("Pressed button 6");
-                                }
-                            });
-                        });
-                        self.test3_tn = container.treenode("Test 3", self.test3_tn, |container| {
-                            container.checkbox("Checkbox 1", &mut self.checks[0]);
-                            container.checkbox("Checkbox 2", &mut self.checks[1]);
-                            container.checkbox("Checkbox 3", &mut self.checks[2]);
-                        });
-                    });
-                    container.column(|container| {
-                        container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                            container.text_with_wrap(
-                                "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.",
-                                TextWrap::Word,
-                            );
-                        });
+                container.header(combo_header, |container| {
+                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                        let (anchor, toggled, _) =
+                            container.combo_box(combo_state, &combo_items, WidgetOption::NONE);
+                        combo_anchor = Some(anchor);
+                        if toggled {
+                            combo_state.open = !combo_state.open;
+                        }
                     });
                 });
-            });
-            self.background_header = container.header("Background Color", self.background_header, |container| {
-                let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
-                container.with_row(&background_widths, SizePolicy::Fixed(74), |container| {
-                    let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
-                    container.column(|container| {
-                        container.with_row(&slider_row, SizePolicy::Auto, |container| {
-                            container.label("Red:");
-                            container.slider_ex(&mut self.bg[0], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
-                            container.label("Green:");
-                            container.slider_ex(&mut self.bg[1], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
-                            container.label("Blue:");
-                            container.slider_ex(&mut self.bg[2], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
-                        });
-                    });
-                    let r: Recti = container.next_cell();
-                    container.draw_rect(r, color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255));
-                    let mut buff = String::new();
-                    buff.push_str(format!("#{:02X}{:02X}{:02X}", self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8).as_str());
-                    container.draw_control_text(buff.as_str(), r, ControlColor::Text, WidgetOption::ALIGN_CENTER);
-                });
-            });
+            }
 
-            self.slot_header = container.header("Slots", self.slot_header, |container| {
-                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67), |container| {
-                    container.button_ex2("Slot 1", Some(Image::Slot(self.slots[0].clone())), WidgetOption::NONE, WidgetFillOption::ALL);
-                    container.button_ex3("Slot 2 - Green", Some(self.slots[1].clone()), WidgetOption::NONE, Rc::new(|_x, _y| {
-                        color4b(0x00, 0xFF, 0x00, 0xFF)
-                    }));
-                    container.button_ex2("Slot 3", Some(Image::Slot(self.slots[2].clone())), WidgetOption::NONE, WidgetFillOption::ALL);
-                    if let Some(texture) = self.image_texture {
-                        container.with_row(&[SizePolicy::Fixed(256)], SizePolicy::Fixed(256), |ctx| {
-                            ctx.button_ex2("External Image", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL);
+            let mut tree_logs: Vec<&'static str> = Vec::new();
+            {
+                let tree_and_text_header = &mut self.tree_and_text_header;
+                let test1_tn = &mut self.test1_tn;
+                let test1a_tn = &mut self.test1a_tn;
+                let test1b_tn = &mut self.test1b_tn;
+                let test2_tn = &mut self.test2_tn;
+                let test3_tn = &mut self.test3_tn;
+                let checks = &mut self.checks;
+                container.header(tree_and_text_header, |container| {
+                    let widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
+                    container.with_row(&widths, SizePolicy::Auto, |container| {
+                        container.column(|container| {
+                            container.treenode(test1_tn, |container| {
+                                container.treenode(test1a_tn, |container| {
+                                    container.label("Hello");
+                                    container.label("world");
+                                });
+                                container.treenode(test1b_tn, |container| {
+                                    if !container.button_ex("Button 1", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                        tree_logs.push("Pressed button 1");
+                                    }
+                                    if !container.button_ex("Button 2", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                        tree_logs.push("Pressed button 2");
+                                    }
+                                });
+                            });
+                            container.treenode(test2_tn, |container| {
+                                let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
+                                container.with_row(&tree_button_widths, SizePolicy::Auto, |container| {
+                                    if !container.button_ex("Button 3", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                        tree_logs.push("Pressed button 3");
+                                    }
+                                    if !container.button_ex("Button 4", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                        tree_logs.push("Pressed button 4");
+                                    }
+                                    if !container.button_ex("Button 5", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                        tree_logs.push("Pressed button 5");
+                                    }
+                                    if !container.button_ex("Button 6", None, WidgetOption::ALIGN_CENTER).is_none() {
+                                        tree_logs.push("Pressed button 6");
+                                    }
+                                });
+                            });
+                            container.treenode(test3_tn, |container| {
+                                container.checkbox("Checkbox 1", &mut checks[0]);
+                                container.checkbox("Checkbox 2", &mut checks[1]);
+                                container.checkbox("Checkbox 3", &mut checks[2]);
+                            });
                         });
-                    }
+                        container.column(|container| {
+                            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                                container.text_with_wrap(
+                                    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.",
+                                    TextWrap::Word,
+                                );
+                            });
+                        });
+                    });
                 });
+            }
+            for msg in tree_logs {
+                self.write_log(msg);
+            }
+
+            {
+                let background_header = &mut self.background_header;
+                let bg = &mut self.bg;
+                container.header(background_header, |container| {
+                    let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
+                    container.with_row(&background_widths, SizePolicy::Fixed(74), |container| {
+                        let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
+                        container.column(|container| {
+                            container.with_row(&slider_row, SizePolicy::Auto, |container| {
+                                container.label("Red:");
+                                container.slider_ex(&mut bg[0], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                                container.label("Green:");
+                                container.slider_ex(&mut bg[1], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                                container.label("Blue:");
+                                container.slider_ex(&mut bg[2], 0 as Real, 255 as Real, 0 as Real, 0, WidgetOption::ALIGN_CENTER);
+                            });
+                        });
+                        let r: Recti = container.next_cell();
+                        container.draw_rect(r, color(bg[0] as u8, bg[1] as u8, bg[2] as u8, 255));
+                        let mut buff = String::new();
+                        buff.push_str(format!("#{:02X}{:02X}{:02X}", bg[0] as u8, bg[1] as u8, bg[2] as u8).as_str());
+                        container.draw_control_text(buff.as_str(), r, ControlColor::Text, WidgetOption::ALIGN_CENTER);
+                    });
+                });
+            }
+
+            {
+                let slot_header = &mut self.slot_header;
+                let slots = &self.slots;
+                let image_texture = self.image_texture;
                 let rng = self.rng.clone();
-                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67), |container| {
-                    container.button_ex3(
-                        "Slot 2 - Random",
-                        Some(self.slots[1].clone()),
-                        WidgetOption::NONE,
-                        Rc::new(move |_x, _y| {
-                            let mut rm = rng.borrow_mut();
-                            color4b(rm.random(), rm.random(), rm.random(), rm.random())
-                        }),
-                    );
+                container.header(slot_header, |container| {
+                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67), |container| {
+                        container.button_ex2("Slot 1", Some(Image::Slot(slots[0].clone())), WidgetOption::NONE, WidgetFillOption::ALL);
+                        container.button_ex3("Slot 2 - Green", Some(slots[1].clone()), WidgetOption::NONE, Rc::new(|_x, _y| {
+                            color4b(0x00, 0xFF, 0x00, 0xFF)
+                        }));
+                        container.button_ex2("Slot 3", Some(Image::Slot(slots[2].clone())), WidgetOption::NONE, WidgetFillOption::ALL);
+                        if let Some(texture) = image_texture {
+                            container.with_row(&[SizePolicy::Fixed(256)], SizePolicy::Fixed(256), |ctx| {
+                                ctx.button_ex2("External Image", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL);
+                            });
+                        }
+                    });
+                    let rng = rng.clone();
+                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67), |container| {
+                        container.button_ex3(
+                            "Slot 2 - Random",
+                            Some(slots[1].clone()),
+                            WidgetOption::NONE,
+                            Rc::new(move |_x, _y| {
+                                let mut rm = rng.borrow_mut();
+                                color4b(rm.random(), rm.random(), rm.random(), rm.random())
+                            }),
+                        );
+                    });
                 });
-            });
+            }
             WindowState::Open
         });
 

@@ -55,10 +55,10 @@ path = "examples/demo-full.rs"
 required-features = ["example-backend"]
 
 # small size executable
-# [profile.release]
-# overflow-checks = false
-# opt-level = "z"
-# panic = "immediate-abort"
-# lto = "fat"
-# codegen-units = 1
-# debug = "none"
+[profile.release]
+overflow-checks = false
+opt-level = "z"
+panic = "abort"
+lto = "fat"
+codegen-units = 1
+debug = "none"

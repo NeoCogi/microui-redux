@@ -624,13 +624,14 @@ impl Container {
     }
 
     #[inline(never)]
-    fn node(&mut self, label: &str, is_treenode: bool, state: NodeState) -> NodeState {
-        let id: Id = self.idmngr.get_id_from_str(label);
+    fn node(&mut self, state: &mut NodeState, is_treenode: bool) -> NodeStateValue {
+        let id: Id = self.idmngr.get_id_from_ptr(state);
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let mut r = self.layout.next();
-        let _ = self.update_control(id, r, WidgetOption::NONE, WidgetBehaviourOption::NONE);
+        let opt = state.opt;
+        let _ = self.update_control(id, r, opt, WidgetBehaviourOption::NONE);
 
-        let expanded = state.is_expanded();
+        let expanded = state.state.is_expanded();
         let active = expanded ^ (self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id));
 
         if is_treenode {
@@ -638,30 +639,30 @@ impl Container {
                 self.draw_frame(r, ControlColor::ButtonHover);
             }
         } else {
-            self.draw_widget_frame(id, r, ControlColor::Button, WidgetOption::NONE);
+            self.draw_widget_frame(id, r, ControlColor::Button, opt);
         }
         let color = self.style.colors[ControlColor::Text as usize];
         self.draw_icon(if expanded { COLLAPSE_ICON } else { EXPAND_ICON }, rect(r.x, r.y, r.height, r.height), color);
         r.x += r.height - self.style.padding;
         r.width -= r.height - self.style.padding;
-        self.draw_control_text(label, r, ControlColor::Text, WidgetOption::NONE);
-        return if active { NodeState::Expanded } else { NodeState::Closed };
+        self.draw_control_text(state.label.as_str(), r, ControlColor::Text, opt);
+        let new_state = if active { NodeStateValue::Expanded } else { NodeStateValue::Closed };
+        state.state = new_state;
+        new_state
     }
 
-    #[must_use]
     /// Builds a collapsible header row that executes `f` when expanded.
-    pub fn header<F: FnOnce(&mut Self)>(&mut self, label: &str, state: NodeState, f: F) -> NodeState {
-        let new_state = self.node(label, false, state);
+    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut NodeState, f: F) -> NodeStateValue {
+        let new_state = self.node(state, false);
         if new_state.is_expanded() {
             f(self);
         }
         new_state
     }
 
-    #[must_use]
     /// Builds a tree node with automatic indentation while expanded.
-    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, label: &str, state: NodeState, f: F) -> NodeState {
-        let res = self.node(label, true, state);
+    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut NodeState, f: F) -> NodeStateValue {
+        let res = self.node(state, true);
         if res.is_expanded() && self.idmngr.last_id().is_some() {
             let indent = self.style.indent;
             self.layout.adjust_indent(indent);
