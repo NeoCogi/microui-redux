@@ -341,3 +341,43 @@ impl RowSnapshot {
         state.height = self.height;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layout_next_advances_row() {
+        let mut layout = LayoutManager::default();
+        layout.style = Style::default();
+        let body = rect(0, 0, 100, 100);
+        layout.reset(body, vec2(0, 0));
+        layout.set_default_cell_height(10);
+        layout.row(&[SizePolicy::Auto], SizePolicy::Auto);
+
+        let first = layout.next();
+        let second = layout.next();
+
+        let expected_width = layout.style.default_cell_width + layout.style.padding * 2;
+        assert_eq!(first.x, body.x);
+        assert_eq!(first.y, body.y);
+        assert_eq!(first.width, expected_width);
+        assert_eq!(first.height, 10);
+        assert_eq!(second.x, body.x);
+        assert_eq!(second.y, body.y + first.height + layout.style.spacing);
+    }
+
+    #[test]
+    fn layout_remainder_consumes_available_width() {
+        let mut layout = LayoutManager::default();
+        layout.style = Style::default();
+        let body = rect(0, 0, 120, 40);
+        layout.reset(body, vec2(0, 0));
+        layout.set_default_cell_height(10);
+        layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(10));
+
+        let cell = layout.next();
+        assert_eq!(cell.width, body.width);
+        assert_eq!(cell.height, 10);
+    }
+}
