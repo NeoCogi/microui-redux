@@ -1344,3 +1344,108 @@ impl Container {
         return res;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AtlasSource, FontEntry, SourceFormat};
+
+    const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
+
+    fn make_test_atlas() -> AtlasHandle {
+        let pixels: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+        let icons: Vec<(&str, Recti)> = ICON_NAMES
+            .iter()
+            .map(|name| (*name, Recti::new(0, 0, 1, 1)))
+            .collect();
+        let entries = vec![
+            (
+                '_',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+            (
+                'a',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+            (
+                'b',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+        ];
+        let fonts = vec![(
+            "default",
+            FontEntry {
+                line_size: 10,
+                baseline: 8,
+                font_size: 10,
+                entries: &entries,
+            },
+        )];
+        let source = AtlasSource {
+            width: 1,
+            height: 1,
+            pixels: &pixels,
+            icons: &icons,
+            fonts: &fonts,
+            format: SourceFormat::Raw,
+            slots: &[],
+        };
+        AtlasHandle::from(&source)
+    }
+
+    fn make_container() -> Container {
+        let atlas = make_test_atlas();
+        let input = Rc::new(RefCell::new(Input::default()));
+        let mut container = Container::new("test", atlas, &Style::default(), input);
+        container.in_hover_root = true;
+        container.push_container_body(rect(0, 0, 100, 30), ContainerOption::NONE);
+        container
+    }
+
+    #[test]
+    fn textbox_left_moves_over_multibyte() {
+        let mut container = make_container();
+        let input = container.input.clone();
+        let id = container.idmngr.get_id_from_str("textbox_left");
+        container.set_focus(Some(id));
+        container.text_states.insert(id, TextEditState { cursor: 5 });
+
+        let mut buf = String::from("a\u{1F600}b");
+        input.borrow_mut().keydown_code(KeyCode::LEFT);
+        let rect = container.layout.next();
+        container.textbox_raw(&mut buf, id, rect, WidgetOption::NONE);
+
+        let cursor = container.text_states.get(&id).unwrap().cursor;
+        assert_eq!(cursor, 1);
+    }
+
+    #[test]
+    fn textbox_backspace_removes_multibyte() {
+        let mut container = make_container();
+        let input = container.input.clone();
+        let id = container.idmngr.get_id_from_str("textbox_backspace");
+        container.set_focus(Some(id));
+        container.text_states.insert(id, TextEditState { cursor: 5 });
+
+        let mut buf = String::from("a\u{1F600}b");
+        input.borrow_mut().keydown(KeyMode::BACKSPACE);
+        let rect = container.layout.next();
+        container.textbox_raw(&mut buf, id, rect, WidgetOption::NONE);
+
+        let cursor = container.text_states.get(&id).unwrap().cursor;
+        assert_eq!(buf, "ab");
+        assert_eq!(cursor, 1);
+    }
+}

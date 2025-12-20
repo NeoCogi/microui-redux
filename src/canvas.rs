@@ -322,3 +322,49 @@ impl<R: Renderer> Drop for Canvas<R> {
         self.textures.clear();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NoopRenderer;
+
+    impl Renderer for NoopRenderer {
+        fn get_atlas(&self) -> AtlasHandle { unimplemented!() }
+        fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
+        fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {}
+        fn flush(&mut self) {}
+        fn end(&mut self) {}
+        fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) {}
+        fn destroy_texture(&mut self, _id: TextureId) {}
+        fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
+    }
+
+    #[test]
+    fn clip_rect_passthrough() {
+        let dst = Recti::new(0, 0, 10, 10);
+        let src = Recti::new(5, 5, 10, 10);
+        let clip = Recti::new(0, 0, 20, 20);
+        let res = Canvas::<NoopRenderer>::clip_rect(dst, src, clip).unwrap();
+        assert_eq!(res.0, dst);
+        assert_eq!(res.1, src);
+    }
+
+    #[test]
+    fn clip_rect_partial() {
+        let dst = Recti::new(0, 0, 100, 100);
+        let src = Recti::new(0, 0, 50, 50);
+        let clip = Recti::new(20, 20, 40, 40);
+        let res = Canvas::<NoopRenderer>::clip_rect(dst, src, clip).unwrap();
+        assert_eq!(res.0, Recti::new(20, 20, 40, 40));
+        assert_eq!(res.1, Recti::new(10, 10, 20, 20));
+    }
+
+    #[test]
+    fn clip_rect_none() {
+        let dst = Recti::new(0, 0, 10, 10);
+        let src = Recti::new(0, 0, 10, 10);
+        let clip = Recti::new(50, 50, 10, 10);
+        assert!(Canvas::<NoopRenderer>::clip_rect(dst, src, clip).is_none());
+    }
+}

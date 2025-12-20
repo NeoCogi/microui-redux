@@ -794,3 +794,15 @@ impl AtlasHandle {
     /// Returns a monotonically increasing value that changes whenever slot pixels are modified.
     pub fn get_last_update_id(&self) -> usize { self.0.borrow().last_update_id }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(any(feature = "builder", feature = "png_source"))]
+    #[test]
+    fn png_decode_error_returns_err() {
+        let res = load_image_bytes(ImageSource::Png { bytes: &[] });
+        assert!(res.is_err());
+    }
+}
