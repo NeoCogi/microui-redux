@@ -19,7 +19,7 @@ fn main() {
 
     fw.event_loop(|ctx, state| {
         ctx.frame(|ctx| {
-            ctx.window(&mut state.window.clone(), ContainerOption::NONE, |container| {
+            ctx.window(&mut state.window.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
                 container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
                     container.button_ex("Hello World!", None, WidgetOption::ALIGN_CENTER);
                 });

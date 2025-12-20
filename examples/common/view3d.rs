@@ -95,28 +95,29 @@ impl View3D {
                 UpdateResult::Handled
             }
 
-            (_, MouseEvent::Scroll(v)) => {
-                self.scroll += v;
-                self.scroll = f32::max(0.5, self.scroll);
-                let distance = self.scroll;
-                let aspect = (self.dimension.width as f32) / (self.dimension.height as f32);
-                self.camera = Camera::new(
-                    self.camera.target(),
-                    distance,
-                    self.camera.rotation(),
-                    self.camera.fov(),
-                    aspect,
-                    self.camera.near_plane(),
-                    self.camera.far_plane(),
-                );
-                UpdateResult::Handled
-            }
-
             _ => UpdateResult::Unhandled,
         };
 
         self.pvm = self.camera.projection_matrix().clone() * self.camera.view_matrix().clone();
         handled
+    }
+
+    pub fn apply_scroll(&mut self, delta: f32) -> UpdateResult {
+        self.scroll += delta;
+        self.scroll = f32::max(0.5, self.scroll);
+        let distance = self.scroll;
+        let aspect = (self.dimension.width as f32) / (self.dimension.height as f32);
+        self.camera = Camera::new(
+            self.camera.target(),
+            distance,
+            self.camera.rotation(),
+            self.camera.fov(),
+            aspect,
+            self.camera.near_plane(),
+            self.camera.far_plane(),
+        );
+        self.pvm = self.camera.projection_matrix().clone() * self.camera.view_matrix().clone();
+        UpdateResult::Handled
     }
 
     pub fn set_dimension(&mut self, dimension: Dimensioni) {

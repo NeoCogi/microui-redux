@@ -123,8 +123,6 @@ pub enum MouseEvent {
     },
     /// The pointer moved to a new coordinate without interacting.
     Move(Vec2i),
-    /// The mouse wheel moved by the given delta.
-    Scroll(f32),
 }
 
 /// Trait implemented by render backends used by the UI context.
@@ -291,8 +289,6 @@ bitflags! {
         const NO_TITLE = 128;
         /// Hides the close button.
         const NO_CLOSE = 64;
-        /// Disables scrollbars.
-        const NO_SCROLL = 32;
         /// Prevents the user from resizing the window.
         const NO_RESIZE = 16;
         /// Hides the outer frame.
@@ -310,8 +306,6 @@ bitflags! {
         const HOLD_FOCUS = 256;
         /// Draws the widget without its frame/background.
         const NO_FRAME = 128;
-        /// Prevents scrollbars from reacting to the widget.
-        const NO_SCROLL = 32;
         /// Disables interaction for the widget.
         const NO_INTERACT = 4;
         /// Aligns the widget to the right side of the cell.
@@ -334,6 +328,31 @@ bitflags! {
         /// Fill the background for every interaction state.
         const ALL = Self::NORMAL.bits() | Self::HOVER.bits() | Self::CLICK.bits();
     }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// Behaviour options that control how widgets and containers handle input side effects.
+pub enum WidgetBehaviourOption {
+    /// No special behaviour.
+    None,
+    /// Consume pending scroll when the widget is hovered.
+    GrabScroll,
+    /// Disable container scroll handling.
+    NoScroll,
+}
+
+impl WidgetBehaviourOption {
+    /// No special behaviour.
+    pub const NONE: Self = Self::None;
+    /// Consume pending scroll when the widget is hovered.
+    pub const GRAB_SCROLL: Self = Self::GrabScroll;
+    /// Disable container scroll handling.
+    pub const NO_SCROLL: Self = Self::NoScroll;
+
+    /// Returns `true` if the option enables scroll grabbing for a widget.
+    pub fn is_grab_scroll(self) -> bool { matches!(self, Self::GrabScroll) }
+    /// Returns `true` if the option disables container scroll handling.
+    pub fn is_no_scroll(self) -> bool { matches!(self, Self::NoScroll) }
 }
 
 #[derive(Clone, Copy)]
@@ -373,9 +392,6 @@ impl ContainerOption {
     /// Returns `true` if the close button should be hidden.
     pub fn has_no_close(&self) -> bool { self.intersects(Self::NO_CLOSE) }
 
-    /// Returns `true` if scrolling is disabled.
-    pub fn has_no_scroll(&self) -> bool { self.intersects(Self::NO_SCROLL) }
-
     /// Returns `true` if the container is fixed-size.
     pub fn is_fixed(&self) -> bool { self.intersects(Self::NO_RESIZE) }
     /// Returns `true` if the outer frame is hidden.
@@ -388,9 +404,6 @@ impl WidgetOption {
 
     /// Returns `true` if the widget shouldn't draw its frame.
     pub fn has_no_frame(&self) -> bool { self.intersects(WidgetOption::NO_FRAME) }
-
-    /// Returns `true` if the widget should not interact with scrolling.
-    pub fn has_no_scroll(&self) -> bool { self.intersects(WidgetOption::NO_SCROLL) }
 
     /// Returns `true` if the widget is non-interactive.
     pub fn is_not_interactive(&self) -> bool { self.intersects(WidgetOption::NO_INTERACT) }
@@ -910,6 +923,13 @@ impl<R: Renderer> Context<R> {
             self.next_hover_root = Some(window.clone());
         }
         let container = &mut window.inner_mut().main;
+        let scroll_delta = self.input.borrow().scroll_delta;
+        let pending_scroll = if container.in_hover_root && (scroll_delta.x != 0 || scroll_delta.y != 0) {
+            Some(scroll_delta)
+        } else {
+            None
+        };
+        container.seed_pending_scroll(pending_scroll);
         container.clip_stack.push(UNCLIPPED_RECT);
     }
 
@@ -923,18 +943,19 @@ impl<R: Renderer> Context<R> {
             None => (),
             Some(lm) => container.content_size = Vec2i::new(lm.x - layout_body.x, lm.y - layout_body.y),
         }
+        container.consume_pending_scroll();
         container.layout.pop_scope();
     }
 
     #[inline(never)]
     #[must_use]
-    fn begin_window(&mut self, window: &mut WindowHandle, opt: ContainerOption) -> bool {
+    fn begin_window(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption) -> bool {
         if !window.is_open() {
             return false;
         }
 
         self.begin_root_container(window);
-        window.begin_window(opt);
+        window.begin_window(opt, bopt);
 
         true
     }
@@ -945,9 +966,15 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Opens a window, executes the provided UI builder, and closes the window.
-    pub fn window<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, opt: ContainerOption, f: F) {
+    pub fn window<F: FnOnce(&mut Container) -> WindowState>(
+        &mut self,
+        window: &mut WindowHandle,
+        opt: ContainerOption,
+        bopt: WidgetBehaviourOption,
+        f: F,
+    ) {
         // call the window function if the window is open
-        if self.begin_window(window, opt) {
+        if self.begin_window(window, opt, bopt) {
             window.inner_mut().main.style = self.style.clone();
             let state = f(&mut window.inner_mut().main);
             self.end_window(window);
@@ -966,14 +993,20 @@ impl<R: Renderer> Context<R> {
     pub fn open_dialog(&mut self, window: &mut WindowHandle) { window.inner_mut().win_state = WindowState::Open; }
 
     /// Renders a dialog window if it is currently open.
-    pub fn dialog<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, opt: ContainerOption, f: F) {
+    pub fn dialog<F: FnOnce(&mut Container) -> WindowState>(
+        &mut self,
+        window: &mut WindowHandle,
+        opt: ContainerOption,
+        bopt: WidgetBehaviourOption,
+        f: F,
+    ) {
         if window.is_open() {
             self.next_hover_root = Some(window.clone());
             self.hover_root = self.next_hover_root.clone();
             window.inner_mut().main.in_hover_root = true;
             self.bring_to_front(window);
 
-            self.window(window, opt, f);
+            self.window(window, opt, bopt, f);
         }
     }
 
@@ -1028,9 +1061,14 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Opens a popup window with default options.
-    pub fn popup<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, f: F) {
-        let opt = ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_SCROLL | ContainerOption::NO_TITLE;
-        self.window(window, opt, f);
+    pub fn popup<F: FnOnce(&mut Container) -> WindowState>(
+        &mut self,
+        window: &mut WindowHandle,
+        bopt: WidgetBehaviourOption,
+        f: F,
+    ) {
+        let opt = ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE;
+        self.window(window, opt, bopt, f);
     }
 
     /// Replaces the current UI style.
