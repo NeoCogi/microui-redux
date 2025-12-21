@@ -58,7 +58,8 @@ impl FileDialogState {
             container.idmngr.get_id_from_str(label)
         };
         let item_rect = container.layout.next();
-        let _ = container.update_control(id, item_rect, opt, WidgetBehaviourOption::NONE);
+        let control_state = (opt, WidgetBehaviourOption::NONE);
+        let _ = container.update_control(id, item_rect, &control_state);
         if container.input.borrow().mouse_pressed.is_left() && container.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }

@@ -142,7 +142,8 @@ impl Window {
             // TODO: Is this necessary?
             if !opt.has_no_title() {
                 let id = container.idmngr.get_id_from_ptr(&container.title_state);
-                let _ = container.update_control(id, tr, container.title_state.opt, container.title_state.bopt);
+                let control_state = (container.title_state.opt, container.title_state.bopt);
+                let _ = container.update_control(id, tr, &control_state);
                 let name = container.name.clone(); // Necessary due to borrow checker limitations
                 container.draw_control_text(&name, tr, ControlColor::TitleText, WidgetOption::NONE);
                 if Some(id) == container.focus && container.input.borrow().mouse_down.is_left() {
@@ -158,7 +159,8 @@ impl Window {
                 tr.width -= r.width;
                 let color = container.style.colors[ControlColor::TitleText as usize];
                 container.draw_icon(CLOSE_ICON, r, color);
-                let _ = container.update_control(id, r, container.close_state.opt, container.close_state.bopt);
+                let control_state = (container.close_state.opt, container.close_state.bopt);
+                let _ = container.update_control(id, r, &control_state);
                 if container.input.borrow().mouse_pressed.is_left() && Some(id) == container.focus {
                     self.win_state = WindowState::Closed;
                 }
@@ -169,7 +171,8 @@ impl Window {
             let sz = container.style.title_height;
             let id_2 = container.idmngr.get_id_from_ptr(&container.resize_state);
             let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
-            let _ = container.update_control(id_2, r_0, container.resize_state.opt, container.resize_state.bopt);
+            let control_state = (container.resize_state.opt, container.resize_state.bopt);
+            let _ = container.update_control(id_2, r_0, &control_state);
             if Some(id_2) == container.focus && container.input.borrow().mouse_down.is_left() {
                 container.rect.width = if 96 > container.rect.width + container.input.borrow().mouse_delta.x {
                     96
