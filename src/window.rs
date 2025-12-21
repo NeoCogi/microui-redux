@@ -141,7 +141,7 @@ impl Window {
 
             // TODO: Is this necessary?
             if !opt.has_no_title() {
-                let id = container.idmngr.get_id_from_ptr(&container.title_state);
+                let id = container.title_state.get_id(&mut container.idmngr);
                 let control_state = (container.title_state.opt, container.title_state.bopt);
                 let _ = container.update_control(id, tr, &control_state);
                 let name = container.name.clone(); // Necessary due to borrow checker limitations
@@ -154,7 +154,7 @@ impl Window {
                 body.height -= tr.height;
             }
             if !opt.has_no_close() {
-                let id = container.idmngr.get_id_from_ptr(&container.close_state);
+                let id = container.close_state.get_id(&mut container.idmngr);
                 let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
                 tr.width -= r.width;
                 let color = container.style.colors[ControlColor::TitleText as usize];
@@ -169,7 +169,7 @@ impl Window {
         container.push_container_body(body, opt, bopt);
         if !opt.is_auto_sizing() {
             let sz = container.style.title_height;
-            let id_2 = container.idmngr.get_id_from_ptr(&container.resize_state);
+            let id_2 = container.resize_state.get_id(&mut container.idmngr);
             let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
             let control_state = (container.resize_state.opt, container.resize_state.bopt);
             let _ = container.update_control(id_2, r_0, &control_state);
