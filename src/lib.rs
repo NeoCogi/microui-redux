@@ -363,6 +363,11 @@ pub trait WidgetState {
     fn behaviour_opt(&self) -> &WidgetBehaviourOption;
 }
 
+impl WidgetState for (WidgetOption, WidgetBehaviourOption) {
+    fn widget_opt(&self) -> &WidgetOption { &self.0 }
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.1 }
+}
+
 #[derive(Clone, Copy)]
 /// Expansion state used by tree nodes, headers, and similar widgets.
 pub enum NodeStateValue {

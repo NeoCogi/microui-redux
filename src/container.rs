@@ -598,7 +598,9 @@ impl Container {
 
     #[inline(never)]
     /// Updates hover/focus state for the widget described by `id` and optionally consumes scroll.
-    pub fn update_control(&mut self, id: Id, rect: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Option<Vec2i> {
+    pub fn update_control<W: WidgetState>(&mut self, id: Id, rect: Recti, state: &W) -> Option<Vec2i> {
+        let opt = *state.widget_opt();
+        let bopt = *state.behaviour_opt();
         let in_hover_root = self.in_hover_root;
         let mouseover = self.mouse_over(rect, in_hover_root);
         if self.focus == Some(id) {
@@ -660,7 +662,7 @@ impl Container {
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let mut r = self.layout.next();
         let opt = state.opt;
-        let _ = self.update_control(id, r, opt, state.bopt);
+        let _ = self.update_control(id, r, state);
 
         let expanded = state.state.is_expanded();
         let active = expanded ^ (self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id));
@@ -787,7 +789,8 @@ impl Container {
             let mut base = body;
             base.x = body.x + body.width;
             base.width = self.style.scrollbar_size;
-            let _ = self.update_control(id, base, self.scrollbar_y_state.opt, self.scrollbar_y_state.bopt);
+            let scroll_state = (self.scrollbar_y_state.opt, self.scrollbar_y_state.bopt);
+            let _ = self.update_control(id, base, &scroll_state);
             if self.focus == Some(id) && self.input.borrow().mouse_down.is_left() {
                 self.scroll.y += self.input.borrow().mouse_delta.y * cs.y / base.height;
             }
@@ -811,7 +814,8 @@ impl Container {
             let mut base_0 = body;
             base_0.y = body.y + body.height;
             base_0.height = self.style.scrollbar_size;
-            let _ = self.update_control(id_0, base_0, self.scrollbar_x_state.opt, self.scrollbar_x_state.bopt);
+            let scroll_state = (self.scrollbar_x_state.opt, self.scrollbar_x_state.bopt);
+            let _ = self.update_control(id_0, base_0, &scroll_state);
             if self.focus == Some(id_0) && self.input.borrow().mouse_down.is_left() {
                 self.scroll.x += self.input.borrow().mouse_delta.x * cs.x / base_0.width;
             }
@@ -945,7 +949,7 @@ impl Container {
         let mut res = ResourceState::NONE;
         let id: Id = self.idmngr.get_id_from_ptr(state);
         let r: Recti = self.layout.next();
-        let _ = self.update_control(id, r, state.opt, state.bopt);
+        let _ = self.update_control(id, r, state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -997,7 +1001,8 @@ impl Container {
             }
         };
         let r: Recti = self.layout.next();
-        let _ = self.update_control(id, r, opt, WidgetBehaviourOption::NONE);
+        let control_state = (opt, WidgetBehaviourOption::NONE);
+        let _ = self.update_control(id, r, &control_state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -1029,7 +1034,8 @@ impl Container {
             }
         };
         let r: Recti = self.layout.next();
-        let _ = self.update_control(id, r, opt, WidgetBehaviourOption::NONE);
+        let control_state = (opt, WidgetBehaviourOption::NONE);
+        let _ = self.update_control(id, r, &control_state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -1053,7 +1059,7 @@ impl Container {
         let mut res = ResourceState::NONE;
         let id: Id = self.idmngr.get_id_from_ptr(state);
         let rect = self.layout.next();
-        let _ = self.update_control(id, rect, state.opt, state.bopt);
+        let _ = self.update_control(id, rect, state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -1081,7 +1087,7 @@ impl Container {
         let mut res = ResourceState::NONE;
         let id: Id = self.idmngr.get_id_from_ptr(state);
         let r: Recti = self.layout.next();
-        let _ = self.update_control(id, r, state.opt, state.bopt);
+        let _ = self.update_control(id, r, state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -1118,7 +1124,7 @@ impl Container {
 
         let id: Id = self.idmngr.get_id_from_ptr(state);
         let header: Recti = self.layout.next();
-        let _ = self.update_control(id, header, state.opt, state.bopt);
+        let _ = self.update_control(id, header, state);
 
         let header_clicked = self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id);
         let popup_open = state.popup.is_open();
@@ -1180,7 +1186,8 @@ impl Container {
             }
         };
         let r: Recti = self.layout.next();
-        let _ = self.update_control(id, r, opt, WidgetBehaviourOption::NONE);
+        let control_state = (opt, WidgetBehaviourOption::NONE);
+        let _ = self.update_control(id, r, &control_state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -1205,7 +1212,7 @@ impl Container {
         let id: Id = self.idmngr.get_id_from_ptr(state);
         let mut r: Recti = self.layout.next();
         let box_0: Recti = rect(r.x, r.y, r.height, r.height);
-        let _ = self.update_control(id, r, state.opt, state.bopt);
+        let _ = self.update_control(id, r, state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::CHANGE;
             state.value = !state.value;
@@ -1254,7 +1261,7 @@ impl Container {
     ) {
         let id: Id = self.idmngr.get_id_from_ptr(state);
         let rect: Recti = self.layout.next();
-        let scroll_delta = self.update_control(id, rect, state.opt, state.bopt);
+        let scroll_delta = self.update_control(id, rect, state);
 
         let mouse_event = self.input_to_mouse_event(id, &rect);
 
@@ -1283,7 +1290,8 @@ impl Container {
     pub fn textbox_raw(&mut self, buf: &mut String, id: Id, r: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ResourceState {
         // Track submit/change flags and keep the widget focused while active.
         let mut res = ResourceState::NONE;
-        let _ = self.update_control(id, r, opt | WidgetOption::HOLD_FOCUS, bopt);
+        let control_state = (opt | WidgetOption::HOLD_FOCUS, bopt);
+        let _ = self.update_control(id, r, &control_state);
 
         // Cursor position is stored per textbox so we can edit at arbitrary positions.
         let mut cursor = {
@@ -1472,7 +1480,7 @@ impl Container {
         if !self.number_textbox(state.precision, &mut v, base, id).is_none() {
             return res;
         }
-        let scroll_delta = self.update_control(id, base, state.opt, state.bopt);
+        let scroll_delta = self.update_control(id, base, state);
         if let Some(delta) = scroll_delta {
             let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
             if wheel != 0 {
@@ -1521,7 +1529,7 @@ impl Container {
         if !self.number_textbox(state.precision, &mut state.value, base, id).is_none() {
             return res;
         }
-        let _ = self.update_control(id, base, state.opt, state.bopt);
+        let _ = self.update_control(id, base, state);
         if self.focus == Some(id) && self.input.borrow().mouse_down.is_left() {
             state.value += self.input.borrow().mouse_delta.x as Real * state.step;
         }
