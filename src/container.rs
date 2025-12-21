@@ -159,7 +159,7 @@ pub struct Container {
     pub(crate) atlas: AtlasHandle,
     /// Style used when drawing widgets in the container.
     pub style: Style,
-    /// Identifier used for generating child IDs.
+    /// Human-readable name for the container.
     pub name: String,
     /// Outer rectangle including frame and title.
     pub rect: Recti,
@@ -182,8 +182,6 @@ pub struct Container {
     pub focus: Option<Id>,
     /// Tracks whether focus changed this frame.
     pub updated_focus: bool,
-    /// ID allocator used for widgets.
-    pub idmngr: IdManager,
     /// Internal state for the window title bar.
     pub(crate) title_state: InternalState,
     /// Internal state for the window close button.
@@ -261,7 +259,6 @@ impl Container {
             focus: None,
             updated_focus: false,
             layout: LayoutManager::default(),
-            idmngr: IdManager::new(),
             title_state: InternalState::new("!title"),
             close_state: InternalState::new("!close"),
             resize_state: InternalState::new("!resize"),
@@ -658,7 +655,7 @@ impl Container {
 
     #[inline(never)]
     fn node(&mut self, state: &mut NodeState, is_treenode: bool) -> NodeStateValue {
-        let id: Id = state.get_id(&mut self.idmngr);
+        let id: Id = state.get_id();
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let mut r = self.layout.next();
         let opt = state.opt;
@@ -696,17 +693,11 @@ impl Container {
     /// Builds a tree node with automatic indentation while expanded.
     pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut NodeState, f: F) -> NodeStateValue {
         let res = self.node(state, true);
-        if res.is_expanded() && self.idmngr.last_id().is_some() {
+        if res.is_expanded() {
             let indent = self.style.indent;
             self.layout.adjust_indent(indent);
-            self.idmngr.push_id(self.idmngr.last_id().unwrap());
-        }
-
-        if res.is_expanded() {
             f(self);
-            let indent = self.style.indent;
             self.layout.adjust_indent(-indent);
-            self.idmngr.pop_id();
         }
 
         res
@@ -785,7 +776,7 @@ impl Container {
         let body = *body;
         let maxscroll = cs.y - body.height;
         if maxscroll > 0 && body.height > 0 {
-            let id: Id = self.scrollbar_y_state.get_id(&mut self.idmngr);
+            let id: Id = self.scrollbar_y_state.get_id();
             let mut base = body;
             base.x = body.x + body.width;
             base.width = self.style.scrollbar_size;
@@ -810,7 +801,7 @@ impl Container {
         }
         let maxscroll_0 = cs.x - body.width;
         if maxscroll_0 > 0 && body.width > 0 {
-            let id_0: Id = self.scrollbar_x_state.get_id(&mut self.idmngr);
+            let id_0: Id = self.scrollbar_x_state.get_id();
             let mut base_0 = body;
             base_0.y = body.y + body.height;
             base_0.height = self.style.scrollbar_size;
@@ -947,7 +938,7 @@ impl Container {
     /// Draws a button using the provided persistent state.
     pub fn button(&mut self, state: &mut ButtonState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = state.get_id(&mut self.idmngr);
+        let id: Id = state.get_id();
         let r: Recti = self.layout.next();
         let _ = self.update_control(id, r, state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
@@ -999,7 +990,7 @@ impl Container {
     /// Renders a list entry that only highlights while hovered or active.
     pub fn list_item(&mut self, state: &mut ListItemState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = state.get_id(&mut self.idmngr);
+        let id: Id = state.get_id();
         let item_rect = self.layout.next();
         let _ = self.update_control(id, item_rect, state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
@@ -1041,7 +1032,7 @@ impl Container {
     /// Shim for list boxes that only fills on hover or click.
     pub fn list_box(&mut self, state: &mut ListBoxState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = state.get_id(&mut self.idmngr);
+        let id: Id = state.get_id();
         let r: Recti = self.layout.next();
         let _ = self.update_control(id, r, state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
@@ -1078,7 +1069,7 @@ impl Container {
             }
         }
 
-        let id: Id = state.get_id(&mut self.idmngr);
+        let id: Id = state.get_id();
         let header: Recti = self.layout.next();
         let _ = self.update_control(id, header, state);
 
@@ -1137,7 +1128,7 @@ impl Container {
     /// Draws a checkbox labeled with `label` and toggles `state` when clicked.
     pub fn checkbox(&mut self, state: &mut CheckboxState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = state.get_id(&mut self.idmngr);
+        let id: Id = state.get_id();
         let mut r: Recti = self.layout.next();
         let box_0: Recti = rect(r.x, r.y, r.height, r.height);
         let _ = self.update_control(id, r, state);
@@ -1187,7 +1178,7 @@ impl Container {
         state: &mut CustomState,
         f: F,
     ) {
-        let id: Id = state.get_id(&mut self.idmngr);
+        let id: Id = state.get_id();
         let rect: Recti = self.layout.next();
         let scroll_delta = self.update_control(id, rect, state);
 
@@ -1364,7 +1355,7 @@ impl Container {
 
     /// Draws a textbox in the provided rectangle using the supplied state.
     pub fn textbox_raw(&mut self, state: &mut TextboxState, r: Recti) -> ResourceState {
-        let id = state.get_id(&mut self.idmngr);
+        let id = state.get_id();
         self.textbox_raw_with_id(&mut state.buf, id, r, state.opt, state.bopt)
     }
 
@@ -1408,7 +1399,7 @@ impl Container {
         let mut res = ResourceState::NONE;
         let last = state.value;
         let mut v = last;
-        let id = state.get_id(&mut self.idmngr);
+        let id = state.get_id();
         let base = self.layout.next();
         if !self.number_textbox(state.precision, &mut v, base, id).is_none() {
             return res;
@@ -1456,7 +1447,7 @@ impl Container {
     /// Draws a numeric input that can be edited via keyboard or by dragging.
     pub fn number_ex(&mut self, state: &mut NumberState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = state.get_id(&mut self.idmngr);
+        let id: Id = state.get_id();
         let base: Recti = self.layout.next();
         let last: Real = state.value;
         if !self.number_textbox(state.precision, &mut state.value, base, id).is_none() {
@@ -1551,7 +1542,7 @@ mod tests {
         let mut container = make_container();
         let input = container.input.clone();
         let mut state = TextboxState::new("a\u{1F600}b");
-        let id = state.get_id(&mut container.idmngr);
+        let id = state.get_id();
         container.set_focus(Some(id));
         container.text_states.insert(id, TextEditState { cursor: 5 });
 
@@ -1568,7 +1559,7 @@ mod tests {
         let mut container = make_container();
         let input = container.input.clone();
         let mut state = TextboxState::new("a\u{1F600}b");
-        let id = state.get_id(&mut container.idmngr);
+        let id = state.get_id();
         container.set_focus(Some(id));
         container.text_states.insert(id, TextEditState { cursor: 5 });
 

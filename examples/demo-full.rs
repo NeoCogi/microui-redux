@@ -428,7 +428,7 @@ impl<'a> State<'a> {
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             container.with_row(&submit_row, SizePolicy::Auto, |container| {
                 if container.textbox_ex(&mut self.submit_buf).is_submitted() {
-                    container.set_focus(container.idmngr.last_id());
+                    container.set_focus(Some(self.submit_buf.get_id()));
                     submitted = true;
                 }
                 if container.button(&mut self.submit_button).is_submitted() {
