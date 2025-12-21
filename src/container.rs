@@ -658,7 +658,7 @@ impl Container {
 
     #[inline(never)]
     fn node(&mut self, state: &mut NodeState, is_treenode: bool) -> NodeStateValue {
-        let id: Id = self.idmngr.get_id_from_ptr(state);
+        let id: Id = state.get_id(&mut self.idmngr);
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let mut r = self.layout.next();
         let opt = state.opt;
@@ -785,7 +785,7 @@ impl Container {
         let body = *body;
         let maxscroll = cs.y - body.height;
         if maxscroll > 0 && body.height > 0 {
-            let id: Id = self.idmngr.get_id_from_ptr(&self.scrollbar_y_state);
+            let id: Id = self.scrollbar_y_state.get_id(&mut self.idmngr);
             let mut base = body;
             base.x = body.x + body.width;
             base.width = self.style.scrollbar_size;
@@ -810,7 +810,7 @@ impl Container {
         }
         let maxscroll_0 = cs.x - body.width;
         if maxscroll_0 > 0 && body.width > 0 {
-            let id_0: Id = self.idmngr.get_id_from_ptr(&self.scrollbar_x_state);
+            let id_0: Id = self.scrollbar_x_state.get_id(&mut self.idmngr);
             let mut base_0 = body;
             base_0.y = body.y + body.height;
             base_0.height = self.style.scrollbar_size;
@@ -947,7 +947,7 @@ impl Container {
     /// Draws a button using the provided persistent state.
     pub fn button(&mut self, state: &mut ButtonState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = self.idmngr.get_id_from_ptr(state);
+        let id: Id = state.get_id(&mut self.idmngr);
         let r: Recti = self.layout.next();
         let _ = self.update_control(id, r, state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
@@ -989,77 +989,19 @@ impl Container {
     }
 
     #[inline(never)]
-    /// Draws a button that can optionally show an atlas icon.
-    pub fn button_ex(&mut self, label: &str, icon: Option<IconId>, opt: WidgetOption) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let id: Id = if label.len() > 0 {
-            self.idmngr.get_id_from_str(label)
-        } else {
-            match icon {
-                Some(icon) => self.idmngr.get_id_u32(icon.into()),
-                None => self.idmngr.get_id_from_str("!button"),
-            }
-        };
-        let r: Recti = self.layout.next();
-        let control_state = (opt, WidgetBehaviourOption::NONE);
-        let _ = self.update_control(id, r, &control_state);
-        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
-            res |= ResourceState::SUBMIT;
-        }
-        self.draw_widget_frame(id, r, ControlColor::Button, opt);
-        if label.len() > 0 {
-            self.draw_control_text(label, r, ControlColor::Text, opt);
-        }
-        match icon {
-            Some(icon) => {
-                let color = self.style.colors[ControlColor::Text as usize];
-                self.draw_icon(icon, r, color);
-            }
-            _ => (),
-        }
-        return res;
-    }
+    /// Compatibility shim for state-based buttons that render text and optional icons.
+    pub fn button_ex(&mut self, state: &mut ButtonState) -> ResourceState { self.button(state) }
 
     #[inline(never)]
-    /// Draws a button that can display an atlas slot or external texture.
-    pub fn button_ex2(&mut self, label: &str, image: Option<Image>, opt: WidgetOption, fill: WidgetFillOption) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let id: Id = if label.len() > 0 {
-            self.idmngr.get_id_from_str(label)
-        } else {
-            match image {
-                Some(Image::Slot(slot)) => self.idmngr.get_id_u32(slot.into()),
-                Some(Image::Texture(tex)) => self.idmngr.get_id_u32(tex.raw()),
-                None => self.idmngr.get_id_from_str("!image_button"),
-            }
-        };
-        let r: Recti = self.layout.next();
-        let control_state = (opt, WidgetBehaviourOption::NONE);
-        let _ = self.update_control(id, r, &control_state);
-        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
-            res |= ResourceState::SUBMIT;
-        }
-        if !opt.has_no_frame() {
-            if let Some(colorid) = self.widget_fill_color(id, ControlColor::Button, fill) {
-                self.draw_frame(r, colorid);
-            }
-        }
-        if label.len() > 0 {
-            self.draw_control_text(label, r, ControlColor::Text, opt);
-        }
-        if let Some(image) = image {
-            let color = self.style.colors[ControlColor::Text as usize];
-            self.push_image(image, r, color);
-        }
-        res
-    }
+    /// Compatibility shim for state-based buttons that render images.
+    pub fn button_ex2(&mut self, state: &mut ButtonState) -> ResourceState { self.button(state) }
 
     /// Renders a list entry that only highlights while hovered or active.
     pub fn list_item(&mut self, state: &mut ListItemState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = self.idmngr.get_id_from_ptr(state);
-        let rect = self.layout.next();
-        let _ = self.update_control(id, rect, state);
+        let id: Id = state.get_id(&mut self.idmngr);
+        let item_rect = self.layout.next();
+        let _ = self.update_control(id, item_rect, state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
             res |= ResourceState::SUBMIT;
         }
@@ -1072,11 +1014,25 @@ impl Container {
                 color.hover();
             }
             let fill = self.style.colors[color as usize];
-            self.draw_rect(rect, fill);
+            self.draw_rect(item_rect, fill);
+        }
+
+        let mut text_rect = item_rect;
+        if let Some(icon) = state.icon {
+            let padding = self.style.padding.max(0);
+            let icon_size = self.atlas.get_icon_size(icon);
+            let icon_x = item_rect.x + padding;
+            let icon_y = item_rect.y + ((item_rect.height - icon_size.height) / 2).max(0);
+            let icon_rect = rect(icon_x, icon_y, icon_size.width, icon_size.height);
+            let consumed = icon_size.width + padding * 2;
+            text_rect.x += consumed;
+            text_rect.width = (text_rect.width - consumed).max(0);
+            let color = self.style.colors[ControlColor::Text as usize];
+            self.draw_icon(icon, icon_rect, color);
         }
 
         if !state.label.is_empty() {
-            self.draw_control_text(&state.label, rect, ControlColor::Text, state.opt);
+            self.draw_control_text(&state.label, text_rect, ControlColor::Text, state.opt);
         }
         res
     }
@@ -1085,7 +1041,7 @@ impl Container {
     /// Shim for list boxes that only fills on hover or click.
     pub fn list_box(&mut self, state: &mut ListBoxState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = self.idmngr.get_id_from_ptr(state);
+        let id: Id = state.get_id(&mut self.idmngr);
         let r: Recti = self.layout.next();
         let _ = self.update_control(id, r, state);
         if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
@@ -1122,7 +1078,7 @@ impl Container {
             }
         }
 
-        let id: Id = self.idmngr.get_id_from_ptr(state);
+        let id: Id = state.get_id(&mut self.idmngr);
         let header: Recti = self.layout.next();
         let _ = self.update_control(id, header, state);
 
@@ -1174,42 +1130,14 @@ impl Container {
     }
 
     #[inline(never)]
-    /// Draws a button that refreshes a slot via callback before presentation.
-    pub fn button_ex3(&mut self, label: &str, slot: Option<SlotId>, opt: WidgetOption, f: Rc<dyn Fn(usize, usize) -> Color4b>) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let id: Id = if label.len() > 0 {
-            self.idmngr.get_id_from_str(label)
-        } else {
-            match slot {
-                Some(slot) => self.idmngr.get_id_u32(slot.into()),
-                None => self.idmngr.get_id_from_str("!button"),
-            }
-        };
-        let r: Recti = self.layout.next();
-        let control_state = (opt, WidgetBehaviourOption::NONE);
-        let _ = self.update_control(id, r, &control_state);
-        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
-            res |= ResourceState::SUBMIT;
-        }
-        self.draw_widget_frame(id, r, ControlColor::Button, opt);
-        if label.len() > 0 {
-            self.draw_control_text(label, r, ControlColor::Text, opt);
-        }
-        match slot {
-            Some(slot) => {
-                let color = self.style.colors[ControlColor::Text as usize];
-                self.draw_slot_with_function(slot, r, color, f);
-            }
-            _ => (),
-        }
-        return res;
-    }
+    /// Compatibility shim for state-based buttons that render atlas slots.
+    pub fn button_ex3(&mut self, state: &mut ButtonState) -> ResourceState { self.button(state) }
 
     #[inline(never)]
     /// Draws a checkbox labeled with `label` and toggles `state` when clicked.
     pub fn checkbox(&mut self, state: &mut CheckboxState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = self.idmngr.get_id_from_ptr(state);
+        let id: Id = state.get_id(&mut self.idmngr);
         let mut r: Recti = self.layout.next();
         let box_0: Recti = rect(r.x, r.y, r.height, r.height);
         let _ = self.update_control(id, r, state);
@@ -1259,7 +1187,7 @@ impl Container {
         state: &mut CustomState,
         f: F,
     ) {
-        let id: Id = self.idmngr.get_id_from_ptr(state);
+        let id: Id = state.get_id(&mut self.idmngr);
         let rect: Recti = self.layout.next();
         let scroll_delta = self.update_control(id, rect, state);
 
@@ -1287,7 +1215,7 @@ impl Container {
 
     #[inline(never)]
     /// Internal textbox helper operating on a fixed rectangle.
-    pub fn textbox_raw(&mut self, buf: &mut String, id: Id, r: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ResourceState {
+    fn textbox_raw_with_id(&mut self, buf: &mut String, id: Id, r: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ResourceState {
         // Track submit/change flags and keep the widget focused while active.
         let mut res = ResourceState::NONE;
         let control_state = (opt | WidgetOption::HOLD_FOCUS, bopt);
@@ -1434,6 +1362,12 @@ impl Container {
         res
     }
 
+    /// Draws a textbox in the provided rectangle using the supplied state.
+    pub fn textbox_raw(&mut self, state: &mut TextboxState, r: Recti) -> ResourceState {
+        let id = state.get_id(&mut self.idmngr);
+        self.textbox_raw_with_id(&mut state.buf, id, r, state.opt, state.bopt)
+    }
+
     #[inline(never)]
     fn number_textbox(&mut self, precision: usize, value: &mut Real, r: Recti, id: Id) -> ResourceState {
         if self.input.borrow().mouse_pressed.is_left() && self.input.borrow().key_state().is_shift() && self.hover == Some(id) {
@@ -1444,7 +1378,7 @@ impl Container {
 
         if self.number_edit == Some(id) {
             let mut temp = self.number_edit_buf.clone();
-            let res: ResourceState = self.textbox_raw(&mut temp, id, r, WidgetOption::NONE, WidgetBehaviourOption::NONE);
+            let res: ResourceState = self.textbox_raw_with_id(&mut temp, id, r, WidgetOption::NONE, WidgetBehaviourOption::NONE);
             self.number_edit_buf = temp;
             if res.is_submitted() || self.focus != Some(id) {
                 match self.number_edit_buf.parse::<f32>() {
@@ -1464,9 +1398,8 @@ impl Container {
 
     /// Draws a textbox using the next available layout cell.
     pub fn textbox_ex(&mut self, state: &mut TextboxState) -> ResourceState {
-        let id: Id = self.idmngr.get_id_from_ptr(state);
         let r: Recti = self.layout.next();
-        return self.textbox_raw(&mut state.buf, id, r, state.opt, state.bopt);
+        return self.textbox_raw(state, r);
     }
 
     #[inline(never)]
@@ -1475,7 +1408,7 @@ impl Container {
         let mut res = ResourceState::NONE;
         let last = state.value;
         let mut v = last;
-        let id = self.idmngr.get_id_from_ptr(state);
+        let id = state.get_id(&mut self.idmngr);
         let base = self.layout.next();
         if !self.number_textbox(state.precision, &mut v, base, id).is_none() {
             return res;
@@ -1523,7 +1456,7 @@ impl Container {
     /// Draws a numeric input that can be edited via keyboard or by dragging.
     pub fn number_ex(&mut self, state: &mut NumberState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let id: Id = self.idmngr.get_id_from_ptr(state);
+        let id: Id = state.get_id(&mut self.idmngr);
         let base: Recti = self.layout.next();
         let last: Real = state.value;
         if !self.number_textbox(state.precision, &mut state.value, base, id).is_none() {
@@ -1617,14 +1550,14 @@ mod tests {
     fn textbox_left_moves_over_multibyte() {
         let mut container = make_container();
         let input = container.input.clone();
-        let id = container.idmngr.get_id_from_str("textbox_left");
+        let mut state = TextboxState::new("a\u{1F600}b");
+        let id = state.get_id(&mut container.idmngr);
         container.set_focus(Some(id));
         container.text_states.insert(id, TextEditState { cursor: 5 });
 
-        let mut buf = String::from("a\u{1F600}b");
         input.borrow_mut().keydown_code(KeyCode::LEFT);
         let rect = container.layout.next();
-        container.textbox_raw(&mut buf, id, rect, WidgetOption::NONE, WidgetBehaviourOption::NONE);
+        container.textbox_raw(&mut state, rect);
 
         let cursor = container.text_states.get(&id).unwrap().cursor;
         assert_eq!(cursor, 1);
@@ -1634,17 +1567,17 @@ mod tests {
     fn textbox_backspace_removes_multibyte() {
         let mut container = make_container();
         let input = container.input.clone();
-        let id = container.idmngr.get_id_from_str("textbox_backspace");
+        let mut state = TextboxState::new("a\u{1F600}b");
+        let id = state.get_id(&mut container.idmngr);
         container.set_focus(Some(id));
         container.text_states.insert(id, TextEditState { cursor: 5 });
 
-        let mut buf = String::from("a\u{1F600}b");
         input.borrow_mut().keydown(KeyMode::BACKSPACE);
         let rect = container.layout.next();
-        container.textbox_raw(&mut buf, id, rect, WidgetOption::NONE, WidgetBehaviourOption::NONE);
+        container.textbox_raw(&mut state, rect);
 
         let cursor = container.text_states.get(&id).unwrap().cursor;
-        assert_eq!(buf, "ab");
+        assert_eq!(state.buf, "ab");
         assert_eq!(cursor, 1);
     }
 }

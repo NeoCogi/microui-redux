@@ -361,6 +361,8 @@ pub trait WidgetState {
     fn widget_opt(&self) -> &WidgetOption;
     /// Returns the behaviour options for this state.
     fn behaviour_opt(&self) -> &WidgetBehaviourOption;
+    /// Returns the widget identifier for this state.
+    fn get_id(&self, idmngr: &mut IdManager) -> Id { idmngr.get_id_from_ptr(self) }
 }
 
 impl WidgetState for (WidgetOption, WidgetBehaviourOption) {
@@ -530,6 +532,8 @@ impl WidgetState for ButtonState {
 pub struct ListItemState {
     /// Label displayed for the list item.
     pub label: String,
+    /// Optional atlas icon rendered alongside the label.
+    pub icon: Option<IconId>,
     /// Widget options applied to the list item.
     pub opt: WidgetOption,
     /// Behaviour options applied to the list item.
@@ -539,12 +543,22 @@ pub struct ListItemState {
 impl ListItemState {
     /// Creates a list item with default widget options.
     pub fn new(label: impl Into<String>) -> Self {
-        Self { label: label.into(), opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
+        Self { label: label.into(), icon: None, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
     }
 
     /// Creates a list item with explicit widget options.
     pub fn with_opt(label: impl Into<String>, opt: WidgetOption) -> Self {
-        Self { label: label.into(), opt, bopt: WidgetBehaviourOption::NONE }
+        Self { label: label.into(), icon: None, opt, bopt: WidgetBehaviourOption::NONE }
+    }
+
+    /// Creates a list item with an icon and default widget options.
+    pub fn with_icon(label: impl Into<String>, icon: IconId) -> Self {
+        Self { label: label.into(), icon: Some(icon), opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
+    }
+
+    /// Creates a list item with an icon and explicit widget options.
+    pub fn with_icon_opt(label: impl Into<String>, icon: IconId, opt: WidgetOption) -> Self {
+        Self { label: label.into(), icon: Some(icon), opt, bopt: WidgetBehaviourOption::NONE }
     }
 }
 

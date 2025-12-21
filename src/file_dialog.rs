@@ -42,6 +42,8 @@ pub struct FileDialogState {
     file_panel: ContainerHandle,
     folders: Vec<String>,
     files: Vec<String>,
+    folder_items: Vec<ListItemState>,
+    file_items: Vec<ListItemState>,
     ok_button: ButtonState,
     cancel_button: ButtonState,
 }
@@ -49,50 +51,6 @@ pub struct FileDialogState {
 impl FileDialogState {
     /// Returns the selected file name if the dialog completed successfully.
     pub fn file_name(&self) -> &Option<String> { &self.file_name }
-
-    fn list_item_with_icon(container: &mut Container, label: &str, icon: IconId, opt: WidgetOption) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let id: Id = if label.is_empty() {
-            container.idmngr.get_id_from_str("!list_item_icon")
-        } else {
-            container.idmngr.get_id_from_str(label)
-        };
-        let item_rect = container.layout.next();
-        let control_state = (opt, WidgetBehaviourOption::NONE);
-        let _ = container.update_control(id, item_rect, &control_state);
-        if container.input.borrow().mouse_pressed.is_left() && container.focus == Some(id) {
-            res |= ResourceState::SUBMIT;
-        }
-
-        if container.focus == Some(id) || container.hover == Some(id) {
-            let mut color = ControlColor::Button;
-            if container.focus == Some(id) {
-                color.focus();
-            } else {
-                color.hover();
-            }
-            let fill = container.style.colors[color as usize];
-            container.draw_rect(item_rect, fill);
-        }
-
-        let padding = container.style.padding.max(0);
-        let icon_size = container.atlas.get_icon_size(icon);
-        let icon_x = item_rect.x + padding;
-        let icon_y = item_rect.y + ((item_rect.height - icon_size.height) / 2).max(0);
-        let icon_rect = rect(icon_x, icon_y, icon_size.width, icon_size.height);
-        let mut text_rect = item_rect;
-        let consumed = icon_size.width + padding * 2;
-        text_rect.x += consumed;
-        text_rect.width = (text_rect.width - consumed).max(0);
-
-        let color = container.style.colors[ControlColor::Text as usize];
-        container.draw_icon(icon, icon_rect, color);
-        if !label.is_empty() {
-            container.draw_control_text(label, text_rect, ControlColor::Text, opt);
-        }
-
-        res
-    }
 
     fn list_folders_files(p: &Path, folders: &mut Vec<String>, files: &mut Vec<String>) {
         folders.clear();
@@ -114,16 +72,53 @@ impl FileDialogState {
         }
     }
 
+    fn refresh_entries(&mut self) {
+        Self::list_folders_files(Path::new(&self.current_working_directory), &mut self.folders, &mut self.files);
+        self.rebuild_item_states();
+    }
+
+    fn rebuild_item_states(&mut self) {
+        let parent_path = Path::new(&self.current_working_directory)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string());
+
+        self.folder_items.clear();
+        self.folder_items.reserve(self.folders.len());
+        for f in &self.folders {
+            let label = if parent_path.as_deref() == Some(f.as_str()) {
+                ".."
+            } else {
+                Path::new(f)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(f.as_str())
+            };
+            let icon = if self.selected_folder.as_deref() == Some(f.as_str()) {
+                OPEN_FOLDER_16_ICON
+            } else {
+                CLOSED_FOLDER_16_ICON
+            };
+            let mut state = ListItemState::new(label);
+            state.icon = Some(icon);
+            self.folder_items.push(state);
+        }
+
+        self.file_items.clear();
+        self.file_items.reserve(self.files.len());
+        for f in &self.files {
+            let mut state = ListItemState::new(f.as_str());
+            state.icon = Some(FILE_16_ICON);
+            self.file_items.push(state);
+        }
+    }
+
     /// Creates a new dialog window and associated panels.
     pub fn new<R: Renderer>(ctx: &mut Context<R>) -> Self {
-        let mut folders = Vec::new();
-        let mut files = Vec::new();
         let current_working_directory = std::env::current_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .to_string_lossy()
             .to_string();
-        Self::list_folders_files(Path::new(&current_working_directory), &mut folders, &mut files);
-        Self {
+        let mut dialog = Self {
             current_working_directory,
             file_name: None,
             tmp_file_name: TextboxState::new(""),
@@ -131,11 +126,15 @@ impl FileDialogState {
             win: ctx.new_dialog("File Dialog", Recti::new(50, 50, 500, 500)),
             folder_panel: ctx.new_panel("folders"),
             file_panel: ctx.new_panel("files"),
-            folders,
-            files,
+            folders: Vec::new(),
+            files: Vec::new(),
+            folder_items: Vec::new(),
+            file_items: Vec::new(),
             ok_button: ButtonState::new("Ok"),
             cancel_button: ButtonState::new("Cancel"),
-        }
+        };
+        dialog.refresh_entries();
+        dialog
     }
 
     /// Marks the dialog as open for the next frame.
@@ -143,85 +142,100 @@ impl FileDialogState {
 
     /// Renders the dialog and updates the selected file when confirmed.
     pub fn eval<R: Renderer>(&mut self, ctx: &mut Context<R>) {
-        ctx.dialog(&mut self.win, ContainerOption::NONE, WidgetBehaviourOption::NONE, |cont| {
-            let mut dialog_state = WindowState::Open;
-            let half_width = cont.body.width / 2;
-            let parent_path = Path::new(&self.current_working_directory)
-                .parent()
-                .map(|p| p.to_string_lossy().to_string());
-            cont.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |cont| {
-                cont.label(&self.current_working_directory);
-                cont.textbox_ex(&mut self.tmp_file_name);
-            });
-            let left_column = if half_width > 0 {
-                SizePolicy::Remainder(half_width - 1)
-            } else {
-                SizePolicy::Auto
-            };
-            let top_row_widths = [left_column, SizePolicy::Remainder(0)];
-            cont.with_row(&top_row_widths, SizePolicy::Remainder(24), |cont| {
-                cont.panel(&mut self.folder_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
-                    let container = &mut container_handle.inner_mut();
+        let mut needs_refresh = false;
+        {
+            let win = &mut self.win;
+            let folder_panel = &mut self.folder_panel;
+            let file_panel = &mut self.file_panel;
+            let folders = &self.folders;
+            let files = &self.files;
+            let folder_items = &mut self.folder_items;
+            let file_items = &mut self.file_items;
+            let current_working_directory = &mut self.current_working_directory;
+            let tmp_file_name = &mut self.tmp_file_name;
+            let selected_folder = &mut self.selected_folder;
+            let ok_button = &mut self.ok_button;
+            let cancel_button = &mut self.cancel_button;
+            let file_name = &mut self.file_name;
 
-                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                        let mut refresh = false;
-                        for f in &self.folders {
-                            let label = if parent_path.as_deref() == Some(f.as_str()) {
-                                ".."
-                            } else {
-                                Path::new(f)
-                                    .file_name()
-                                    .and_then(|name| name.to_str())
-                                    .unwrap_or(f.as_str())
-                            };
-
-                            let icon = if self.selected_folder.as_deref() == Some(f) {
-                                OPEN_FOLDER_16_ICON
-                            } else {
-                                CLOSED_FOLDER_16_ICON
-                            };
-
-                            if Self::list_item_with_icon(container, label, icon, WidgetOption::NONE).is_submitted() {
-                                self.current_working_directory = f.to_string();
-                                self.selected_folder = Some(f.to_string());
-                                refresh = true;
-                            }
-                        }
-                        if refresh {
-                            Self::list_folders_files(&Path::new(&self.current_working_directory), &mut self.folders, &mut self.files);
-                        }
-                    });
+            ctx.dialog(win, ContainerOption::NONE, WidgetBehaviourOption::NONE, |cont| {
+                let mut dialog_state = WindowState::Open;
+                let half_width = cont.body.width / 2;
+                cont.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |cont| {
+                    cont.label(current_working_directory.as_str());
+                    cont.textbox_ex(tmp_file_name);
                 });
-                cont.panel(&mut self.file_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
-                    let container = &mut container_handle.inner_mut();
+                let left_column = if half_width > 0 {
+                    SizePolicy::Remainder(half_width - 1)
+                } else {
+                    SizePolicy::Auto
+                };
+                let top_row_widths = [left_column, SizePolicy::Remainder(0)];
+                cont.with_row(&top_row_widths, SizePolicy::Remainder(24), |cont| {
+                    cont.panel(folder_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
+                        let container = &mut container_handle.inner_mut();
 
-                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                        if self.files.len() != 0 {
-                            for f in &self.files {
-                                if Self::list_item_with_icon(container, f, FILE_16_ICON, WidgetOption::NONE).is_submitted() {
-                                    self.tmp_file_name.buf = f.to_string();
+                        container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                            let mut refresh = false;
+                            for index in 0..folder_items.len() {
+                                let submitted = {
+                                    let item = &mut folder_items[index];
+                                    container.list_item(item).is_submitted()
+                                };
+                                if submitted {
+                                    if let Some(path) = folders.get(index) {
+                                        *current_working_directory = path.to_string();
+                                        *selected_folder = Some(path.to_string());
+                                    }
+                                    refresh = true;
                                 }
                             }
-                        } else {
-                            container.label("No Files");
-                        }
+                            if refresh {
+                                needs_refresh = true;
+                            }
+                        });
+                    });
+                    cont.panel(file_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
+                        let container = &mut container_handle.inner_mut();
+
+                        container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                            if !file_items.is_empty() {
+                                for index in 0..file_items.len() {
+                                    let submitted = {
+                                        let item = &mut file_items[index];
+                                        container.list_item(item).is_submitted()
+                                    };
+                                    if submitted {
+                                        if let Some(name) = files.get(index) {
+                                            tmp_file_name.buf = name.to_string();
+                                        }
+                                    }
+                                }
+                            } else {
+                                container.label("No Files");
+                            }
+                        });
                     });
                 });
-            });
-            let bottom_row_widths = [left_column, SizePolicy::Remainder(0)];
-            cont.with_row(&bottom_row_widths, SizePolicy::Remainder(0), |cont| {
-                if cont.button(&mut self.ok_button).is_submitted() {
-                    if self.tmp_file_name.buf != "" {
-                        self.file_name = Some(self.tmp_file_name.buf.clone())
+                let bottom_row_widths = [left_column, SizePolicy::Remainder(0)];
+                cont.with_row(&bottom_row_widths, SizePolicy::Remainder(0), |cont| {
+                    if cont.button(ok_button).is_submitted() {
+                        if !tmp_file_name.buf.is_empty() {
+                            *file_name = Some(tmp_file_name.buf.clone());
+                        }
+                        dialog_state = WindowState::Closed;
                     }
-                    dialog_state = WindowState::Closed;
-                }
-                if cont.button(&mut self.cancel_button).is_submitted() {
-                    self.file_name = None;
-                    dialog_state = WindowState::Closed;
-                }
+                    if cont.button(cancel_button).is_submitted() {
+                        *file_name = None;
+                        dialog_state = WindowState::Closed;
+                    }
+                });
+                dialog_state
             });
-            dialog_state
-        });
+        }
+
+        if needs_refresh {
+            self.refresh_entries();
+        }
     }
 }
