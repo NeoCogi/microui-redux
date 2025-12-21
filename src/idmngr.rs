@@ -53,95 +53,12 @@
 
 #[derive(Default, Copy, Clone, Eq, PartialEq, Hash, Debug)]
 /// Numeric identifier assigned to widgets and containers.
-pub struct Id(u32);
+pub struct Id(usize);
 
-#[derive(Clone)]
-/// Hierarchical ID generator modeled after the original microui implementation.
-pub struct IdManager {
-    last_id: Option<Id>,
-    id_stack: Vec<Id>,
-}
+impl Id {
+    /// Creates an ID from the address of a stable state object.
+    pub fn from_ptr<T: ?Sized>(value: &T) -> Self { Self(value as *const T as *const () as usize) }
 
-impl IdManager {
-    /// Creates a fresh ID manager.
-    pub fn new() -> Self { Self { last_id: None, id_stack: Vec::new() } }
-
-    /// Returns the depth of the ID stack.
-    pub fn len(&self) -> usize { self.id_stack.len() }
-
-    /// Returns the most recently generated ID.
-    pub fn last_id(&self) -> Option<Id> { self.last_id }
-
-    /// Pushes a specific ID on the stack to namespace future IDs.
-    pub fn push_id(&mut self, id: Id) { self.id_stack.push(id) }
-
-    fn hash_step(h: u32, n: u32) -> u32 { (h ^ n).wrapping_mul(16777619 as u32) }
-
-    fn hash_u32(hash_0: &mut Id, orig_id: u32) {
-        let bytes = orig_id.to_be_bytes();
-        for b in bytes {
-            *hash_0 = Id(Self::hash_step(hash_0.0, b as u32));
-        }
-    }
-
-    fn hash_str(hash_0: &mut Id, s: &str) {
-        for c in s.chars() {
-            *hash_0 = Id(Self::hash_step(hash_0.0, c as u32));
-        }
-    }
-
-    fn hash_bytes(hash_0: &mut Id, s: &[u8]) {
-        for c in s {
-            *hash_0 = Id(Self::hash_step(hash_0.0, *c as u32));
-        }
-    }
-    /// Hashes a `u32` into a deterministic ID that respects the current stack.
-    pub fn get_id_u32(&mut self, orig_id: u32) -> Id {
-        let mut res: Id = match self.id_stack.last() {
-            Some(id) => *id,
-            None => Id(2166136261),
-        };
-        Self::hash_u32(&mut res, orig_id);
-        self.last_id = Some(res);
-        return res;
-    }
-
-    /// Hashes an object's pointer address into an ID.
-    pub fn get_id_from_ptr<T: ?Sized>(&mut self, orig_id: &T) -> Id {
-        let mut res: Id = match self.id_stack.last() {
-            Some(id) => *id,
-            None => Id(2166136261),
-        };
-        let ptr = orig_id as *const T as *const u8 as usize;
-        let bytes = ptr.to_le_bytes();
-        Self::hash_bytes(&mut res, &bytes);
-        self.last_id = Some(res);
-        return res;
-    }
-
-    /// Hashes a string label into an ID.
-    pub fn get_id_from_str(&mut self, s: &str) -> Id {
-        let mut res: Id = match self.id_stack.last() {
-            Some(id) => *id,
-            None => Id(2166136261),
-        };
-        Self::hash_str(&mut res, s);
-        self.last_id = Some(res);
-        return res;
-    }
-
-    /// Pushes a pointer-derived ID on the stack.
-    pub fn push_id_from_ptr<T>(&mut self, orig_id: &T) {
-        let id = self.get_id_from_ptr(orig_id);
-        self.id_stack.push(id);
-    }
-
-    /// Pushes a string-derived ID on the stack.
-    pub fn push_id_from_str(&mut self, s: &str) {
-        let id = self.get_id_from_str(s);
-        self.id_stack.push(id);
-    }
-
-    /// Pops the most recent ID namespace from the stack.
-    pub fn pop_id(&mut self) { self.id_stack.pop(); }
+    /// Returns the raw pointer value wrapped by this ID.
+    pub fn raw(self) -> usize { self.0 }
 }

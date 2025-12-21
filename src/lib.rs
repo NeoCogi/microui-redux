@@ -362,7 +362,7 @@ pub trait WidgetState {
     /// Returns the behaviour options for this state.
     fn behaviour_opt(&self) -> &WidgetBehaviourOption;
     /// Returns the widget identifier for this state.
-    fn get_id(&self, idmngr: &mut IdManager) -> Id { idmngr.get_id_from_ptr(self) }
+    fn get_id(&self) -> Id { Id::from_ptr(self) }
 }
 
 impl WidgetState for (WidgetOption, WidgetBehaviourOption) {
