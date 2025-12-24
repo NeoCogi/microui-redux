@@ -595,7 +595,7 @@ impl Container {
 
     #[inline(never)]
     /// Updates hover/focus state for the widget described by `id` and optionally consumes scroll.
-    pub fn update_control<W: WidgetState>(&mut self, id: Id, rect: Recti, state: &W) -> Option<Vec2i> {
+    pub fn update_control<W: WidgetState>(&mut self, id: Id, rect: Recti, state: &W) -> ControlState {
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
         let in_hover_root = self.in_hover_root;
@@ -605,7 +605,7 @@ impl Container {
             self.updated_focus = true;
         }
         if opt.is_not_interactive() {
-            return None;
+            return ControlState::default();
         }
         if mouseover && self.input.borrow().mouse_down.is_none() {
             self.hover = Some(id);
@@ -642,7 +642,20 @@ impl Container {
             self.input.borrow_mut().rel_mouse_pos = mouse_pos - origin;
         }
 
-        scroll
+        let input = self.input.borrow();
+        let focused = self.focus == Some(id);
+        let hovered = self.hover == Some(id);
+        let clicked = focused && input.mouse_pressed.is_left();
+        let active = focused && input.mouse_down.is_left();
+        drop(input);
+
+        ControlState {
+            hovered,
+            focused,
+            clicked,
+            active,
+            scroll_delta: scroll,
+        }
     }
 
     /// Resets transient per-frame state after widgets have been processed.
@@ -1180,7 +1193,7 @@ impl Container {
     ) {
         let id: Id = state.get_id();
         let rect: Recti = self.layout.next();
-        let scroll_delta = self.update_control(id, rect, state);
+        let control = self.update_control(id, rect, state);
 
         let mouse_event = self.input_to_mouse_event(id, &rect);
 
@@ -1194,7 +1207,7 @@ impl Container {
             content_area: rect,
             view: self.get_clip_rect(),
             mouse_event,
-            scroll_delta,
+            scroll_delta: control.scroll_delta,
             widget_opt: state.opt,
             behaviour_opt: state.bopt,
             key_mods,
@@ -1404,8 +1417,8 @@ impl Container {
         if !self.number_textbox(state.precision, &mut v, base, id).is_none() {
             return res;
         }
-        let scroll_delta = self.update_control(id, base, state);
-        if let Some(delta) = scroll_delta {
+        let control = self.update_control(id, base, state);
+        if let Some(delta) = control.scroll_delta {
             let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
             if wheel != 0 {
                 let step_amount = if state.step != 0. { state.step } else { (state.high - state.low) / 100.0 };
