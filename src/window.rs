@@ -143,10 +143,25 @@ impl Window {
             if !opt.has_no_title() {
                 let id = container.title_state.get_id();
                 let control_state = (container.title_state.opt, container.title_state.bopt);
-                let _ = container.update_control(id, tr, &control_state);
+                let control = container.update_control(id, tr, &control_state);
+                {
+                    let mut ctx = WidgetCtx::new(
+                        id,
+                        tr,
+                        &mut container.command_list,
+                        &mut container.clip_stack,
+                        &container.style,
+                        &container.atlas,
+                        &mut container.focus,
+                        &mut container.updated_focus,
+                        container.in_hover_root,
+                        None,
+                    );
+                    let _ = container.title_state.handle(&mut ctx, &control);
+                }
                 let name = container.name.clone(); // Necessary due to borrow checker limitations
                 container.draw_control_text(&name, tr, ControlColor::TitleText, WidgetOption::NONE);
-                if Some(id) == container.focus && container.input.borrow().mouse_down.is_left() {
+                if control.active {
                     container.rect.x += container.input.borrow().mouse_delta.x;
                     container.rect.y += container.input.borrow().mouse_delta.y;
                 }
@@ -160,8 +175,23 @@ impl Window {
                 let color = container.style.colors[ControlColor::TitleText as usize];
                 container.draw_icon(CLOSE_ICON, r, color);
                 let control_state = (container.close_state.opt, container.close_state.bopt);
-                let _ = container.update_control(id, r, &control_state);
-                if container.input.borrow().mouse_pressed.is_left() && Some(id) == container.focus {
+                let control = container.update_control(id, r, &control_state);
+                {
+                    let mut ctx = WidgetCtx::new(
+                        id,
+                        r,
+                        &mut container.command_list,
+                        &mut container.clip_stack,
+                        &container.style,
+                        &container.atlas,
+                        &mut container.focus,
+                        &mut container.updated_focus,
+                        container.in_hover_root,
+                        None,
+                    );
+                    let _ = container.close_state.handle(&mut ctx, &control);
+                }
+                if control.clicked {
                     self.win_state = WindowState::Closed;
                 }
             }
@@ -172,8 +202,23 @@ impl Window {
             let id_2 = container.resize_state.get_id();
             let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
             let control_state = (container.resize_state.opt, container.resize_state.bopt);
-            let _ = container.update_control(id_2, r_0, &control_state);
-            if Some(id_2) == container.focus && container.input.borrow().mouse_down.is_left() {
+            let control = container.update_control(id_2, r_0, &control_state);
+            {
+                let mut ctx = WidgetCtx::new(
+                    id_2,
+                    r_0,
+                    &mut container.command_list,
+                    &mut container.clip_stack,
+                    &container.style,
+                    &container.atlas,
+                    &mut container.focus,
+                    &mut container.updated_focus,
+                    container.in_hover_root,
+                    None,
+                );
+                let _ = container.resize_state.handle(&mut ctx, &control);
+            }
+            if control.active {
                 container.rect.width = if 96 > container.rect.width + container.input.borrow().mouse_delta.x {
                     96
                 } else {

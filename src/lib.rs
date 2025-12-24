@@ -383,8 +383,12 @@ pub struct InputSnapshot {
     pub mouse_pressed: MouseButton,
     /// Active modifier keys.
     pub key_mods: KeyMode,
+    /// Modifier keys pressed this frame.
+    pub key_pressed: KeyMode,
     /// Active navigation keys.
     pub key_codes: KeyCode,
+    /// Navigation keys pressed this frame.
+    pub key_code_pressed: KeyCode,
     /// UTF-8 text input collected this frame.
     pub text_input: String,
 }
@@ -397,7 +401,9 @@ impl Default for InputSnapshot {
             mouse_down: MouseButton::NONE,
             mouse_pressed: MouseButton::NONE,
             key_mods: KeyMode::NONE,
+            key_pressed: KeyMode::NONE,
             key_codes: KeyCode::NONE,
+            key_code_pressed: KeyCode::NONE,
             text_input: String::new(),
         }
     }
@@ -482,7 +488,30 @@ impl NodeState {
 impl WidgetState for NodeState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        if control.clicked {
+            self.state = if self.state.is_expanded() { NodeStateValue::Closed } else { NodeStateValue::Expanded };
+            ResourceState::CHANGE
+        } else {
+            ResourceState::NONE
+        }
+    }
+}
+
+fn widget_fill_color(control: &ControlState, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
+    if control.focused && fill.fill_click() {
+        let mut color = base;
+        color.focus();
+        Some(color)
+    } else if control.hovered && fill.fill_hover() {
+        let mut color = base;
+        color.hover();
+        Some(color)
+    } else if fill.fill_normal() {
+        Some(base)
+    } else {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -577,7 +606,46 @@ impl ButtonState {
 impl WidgetState for ButtonState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
+    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        if control.clicked {
+            res |= ResourceState::SUBMIT;
+        }
+        let rect = ctx.rect();
+        if !self.opt.has_no_frame() {
+            if let Some(colorid) = widget_fill_color(control, ControlColor::Button, self.fill) {
+                ctx.draw_frame(rect, colorid);
+            }
+        }
+        match &self.content {
+            ButtonContent::Text { label, icon } => {
+                if !label.is_empty() {
+                    ctx.draw_control_text(label, rect, ControlColor::Text, self.opt);
+                }
+                if let Some(icon) = icon {
+                    let color = ctx.style().colors[ControlColor::Text as usize];
+                    ctx.draw_icon(*icon, rect, color);
+                }
+            }
+            ButtonContent::Image { label, image } => {
+                if !label.is_empty() {
+                    ctx.draw_control_text(label, rect, ControlColor::Text, self.opt);
+                }
+                if let Some(image) = *image {
+                    let color = ctx.style().colors[ControlColor::Text as usize];
+                    ctx.push_image(image, rect, color);
+                }
+            }
+            ButtonContent::Slot { label, slot, paint } => {
+                if !label.is_empty() {
+                    ctx.draw_control_text(label, rect, ControlColor::Text, self.opt);
+                }
+                let color = ctx.style().colors[ControlColor::Text as usize];
+                ctx.draw_slot_with_function(*slot, rect, color, paint.clone());
+            }
+        }
+        res
+    }
 }
 
 #[derive(Clone)]
@@ -618,7 +686,43 @@ impl ListItemState {
 impl WidgetState for ListItemState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
+    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let bounds = ctx.rect();
+        if control.clicked {
+            res |= ResourceState::SUBMIT;
+        }
+
+        if control.focused || control.hovered {
+            let mut color = ControlColor::Button;
+            if control.focused {
+                color.focus();
+            } else {
+                color.hover();
+            }
+            let fill = ctx.style().colors[color as usize];
+            ctx.draw_rect(bounds, fill);
+        }
+
+        let mut text_rect = bounds;
+        if let Some(icon) = self.icon {
+            let padding = ctx.style().padding.max(0);
+            let icon_size = ctx.atlas().get_icon_size(icon);
+            let icon_x = bounds.x + padding;
+            let icon_y = bounds.y + ((bounds.height - icon_size.height) / 2).max(0);
+            let icon_rect = rect(icon_x, icon_y, icon_size.width, icon_size.height);
+            let consumed = icon_size.width + padding * 2;
+            text_rect.x += consumed;
+            text_rect.width = (text_rect.width - consumed).max(0);
+            let color = ctx.style().colors[ControlColor::Text as usize];
+            ctx.draw_icon(icon, icon_rect, color);
+        }
+
+        if !self.label.is_empty() {
+            ctx.draw_control_text(&self.label, text_rect, ControlColor::Text, self.opt);
+        }
+        res
+    }
 }
 
 #[derive(Clone)]
@@ -649,7 +753,27 @@ impl ListBoxState {
 impl WidgetState for ListBoxState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
+    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let rect = ctx.rect();
+        if control.clicked {
+            res |= ResourceState::SUBMIT;
+        }
+        if !self.opt.has_no_frame() {
+            if let Some(colorid) = widget_fill_color(control, ControlColor::Button, WidgetFillOption::HOVER | WidgetFillOption::CLICK)
+            {
+                ctx.draw_frame(rect, colorid);
+            }
+        }
+        if !self.label.is_empty() {
+            ctx.draw_control_text(&self.label, rect, ControlColor::Text, self.opt);
+        }
+        if let Some(image) = self.image {
+            let color = ctx.style().colors[ControlColor::Text as usize];
+            ctx.push_image(image, rect, color);
+        }
+        res
+    }
 }
 
 #[derive(Clone)]
@@ -680,7 +804,25 @@ impl CheckboxState {
 impl WidgetState for CheckboxState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
+    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let bounds = ctx.rect();
+        let box_rect = rect(bounds.x, bounds.y, bounds.height, bounds.height);
+        if control.clicked {
+            res |= ResourceState::CHANGE;
+            self.value = !self.value;
+        }
+        ctx.draw_widget_frame(control, box_rect, ControlColor::Base, self.opt);
+        if self.value {
+            let color = ctx.style().colors[ControlColor::Text as usize];
+            ctx.draw_icon(CHECK_ICON, box_rect, color);
+        }
+        let text_rect = rect(bounds.x + box_rect.width, bounds.y, bounds.width - box_rect.width, bounds.height);
+        if !self.label.is_empty() {
+            ctx.draw_control_text(&self.label, text_rect, ControlColor::Text, self.opt);
+        }
+        res
+    }
 }
 
 #[derive(Clone)]
@@ -712,10 +854,139 @@ impl TextboxState {
     }
 }
 
+fn textbox_handle(
+    ctx: &mut WidgetCtx<'_>,
+    control: &ControlState,
+    buf: &mut String,
+    cursor: &mut usize,
+    opt: WidgetOption,
+) -> ResourceState {
+    let mut res = ResourceState::NONE;
+    let r = ctx.rect();
+    if !control.focused {
+        *cursor = buf.len();
+    }
+    let mut cursor_pos = (*cursor).min(buf.len());
+
+    let input = ctx.input().cloned().unwrap_or_default();
+
+    if control.focused {
+        if !input.text_input.is_empty() {
+            let insert_at = cursor_pos.min(buf.len());
+            buf.insert_str(insert_at, input.text_input.as_str());
+            cursor_pos = insert_at + input.text_input.len();
+            res |= ResourceState::CHANGE;
+        }
+
+        if input.key_pressed.is_backspace() && cursor_pos > 0 && !buf.is_empty() {
+            let mut new_cursor = cursor_pos.min(buf.len());
+            new_cursor -= 1;
+            while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
+                new_cursor -= 1;
+            }
+            buf.replace_range(new_cursor..cursor_pos, "");
+            cursor_pos = new_cursor;
+            res |= ResourceState::CHANGE;
+        }
+
+        if input.key_code_pressed.is_left() && cursor_pos > 0 {
+            let mut new_cursor = cursor_pos - 1;
+            while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
+                new_cursor -= 1;
+            }
+            cursor_pos = new_cursor;
+        }
+
+        if input.key_code_pressed.is_right() && cursor_pos < buf.len() {
+            let mut new_cursor = cursor_pos + 1;
+            while new_cursor < buf.len() && !buf.is_char_boundary(new_cursor) {
+                new_cursor += 1;
+            }
+            cursor_pos = new_cursor;
+        }
+
+        if input.key_pressed.is_return() {
+            ctx.clear_focus();
+            res |= ResourceState::SUBMIT;
+        }
+    }
+
+    ctx.draw_widget_frame(control, r, ControlColor::Base, opt);
+
+    let font = ctx.style().font;
+    let line_height = ctx.atlas().get_font_height(font) as i32;
+    let baseline = ctx.atlas().get_font_baseline(font);
+    let descent = (line_height - baseline).max(0);
+
+    let mut texty = r.y + r.height / 2 - line_height / 2;
+    if texty < r.y {
+        texty = r.y;
+    }
+    let max_texty = (r.y + r.height - line_height).max(r.y);
+    if texty > max_texty {
+        texty = max_texty;
+    }
+    let baseline_y = texty + line_height - descent;
+
+    let text_metrics = ctx.atlas().get_text_size(font, buf.as_str());
+    let padding = ctx.style().padding;
+    let ofx = r.width - padding - text_metrics.width - 1;
+    let textx = r.x + if ofx < padding { ofx } else { padding };
+
+    if control.focused && input.mouse_pressed.is_left() && ctx.mouse_over(r) {
+        let click_x = input.mouse_pos.x - textx;
+        if click_x <= 0 {
+            cursor_pos = 0;
+        } else {
+            let mut last_width = 0;
+            let mut new_cursor = buf.len();
+            for (idx, ch) in buf.char_indices() {
+                let next = idx + ch.len_utf8();
+                let width = ctx.atlas().get_text_size(font, &buf[..next]).width;
+                if click_x < width {
+                    if click_x < (last_width + width) / 2 {
+                        new_cursor = idx;
+                    } else {
+                        new_cursor = next;
+                    }
+                    break;
+                }
+                last_width = width;
+            }
+            cursor_pos = new_cursor.min(buf.len());
+        }
+    }
+
+    cursor_pos = cursor_pos.min(buf.len());
+    *cursor = cursor_pos;
+
+    let caret_offset = if cursor_pos == 0 {
+        0
+    } else {
+        ctx.atlas().get_text_size(font, &buf[..cursor_pos]).width
+    };
+
+    if control.focused {
+        let color = ctx.style().colors[ControlColor::Text as usize];
+        ctx.push_clip_rect(r);
+        ctx.draw_text(font, buf.as_str(), vec2(textx, texty), color);
+        let caret_top = (baseline_y - baseline + 2).max(r.y).min(r.y + r.height);
+        let caret_bottom = (baseline_y + descent - 2).max(r.y).min(r.y + r.height);
+        let caret_height = (caret_bottom - caret_top).max(1);
+        ctx.draw_rect(rect(textx + caret_offset, caret_top, 1, caret_height), color);
+        ctx.pop_clip_rect();
+    } else {
+        ctx.draw_control_text(buf.as_str(), r, ControlColor::Text, opt);
+    }
+    res
+}
+
 impl WidgetState for TextboxState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
+    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        textbox_handle(ctx, control, &mut self.buf, &mut self.cursor, self.opt)
+    }
 }
 
 #[derive(Clone)]
@@ -769,10 +1040,87 @@ impl SliderState {
     }
 }
 
+fn number_textbox_handle(
+    ctx: &mut WidgetCtx<'_>,
+    control: &ControlState,
+    edit: &mut NumberEditState,
+    precision: usize,
+    value: &mut Real,
+) -> ResourceState {
+    let input = ctx.input().cloned().unwrap_or_default();
+
+    if input.mouse_pressed.is_left() && input.key_mods.is_shift() && control.hovered {
+        edit.editing = true;
+        edit.buf.clear();
+        edit.buf.push_str(format!("{:.*}", precision, value).as_str());
+        edit.cursor = edit.buf.len();
+    }
+
+    if edit.editing {
+        let res = textbox_handle(ctx, control, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE);
+        if res.is_submitted() || !control.focused {
+            if let Ok(v) = edit.buf.parse::<f32>() {
+                *value = v as Real;
+            }
+            edit.editing = false;
+            edit.cursor = 0;
+        } else {
+            return ResourceState::ACTIVE;
+        }
+    }
+    ResourceState::NONE
+}
+
 impl WidgetState for SliderState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
+    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let base = ctx.rect();
+        let last = self.value;
+        let mut v = last;
+        if !number_textbox_handle(ctx, control, &mut self.edit, self.precision, &mut v).is_none() {
+            return res;
+        }
+        if let Some(delta) = control.scroll_delta {
+            let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
+            if wheel != 0 {
+                let step_amount = if self.step != 0. { self.step } else { (self.high - self.low) / 100.0 };
+                v += wheel as Real * step_amount;
+                if self.step != 0. {
+                    v = (v + self.step / 2 as Real) / self.step * self.step;
+                }
+            }
+        }
+        let default_input = InputSnapshot::default();
+        let input = ctx.input().unwrap_or(&default_input);
+        if control.focused && (!input.mouse_down.is_none() || input.mouse_pressed.is_left()) {
+            v = self.low + (input.mouse_pos.x - base.x) as Real * (self.high - self.low) / base.width as Real;
+            if self.step != 0. {
+                v = (v + self.step / 2 as Real) / self.step * self.step;
+            }
+        }
+        v = if self.high < (if self.low > v { self.low } else { v }) {
+            self.high
+        } else if self.low > v {
+            self.low
+        } else {
+            v
+        };
+        self.value = v;
+        if last != v {
+            res |= ResourceState::CHANGE;
+        }
+        ctx.draw_widget_frame(control, base, ControlColor::Base, self.opt);
+        let w = ctx.style().thumb_size;
+        let x = ((v - self.low) * (base.width - w) as Real / (self.high - self.low)) as i32;
+        let thumb = rect(base.x + x, base.y, w, base.height);
+        ctx.draw_widget_frame(control, thumb, ControlColor::Button, self.opt);
+        let mut buff = String::new();
+        buff.push_str(format!("{:.*}", self.precision, self.value).as_str());
+        ctx.draw_control_text(buff.as_str(), base, ControlColor::Text, self.opt);
+        res
+    }
 }
 
 #[derive(Clone)]
@@ -832,7 +1180,27 @@ impl NumberState {
 impl WidgetState for NumberState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
+    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        let base = ctx.rect();
+        let last = self.value;
+        if !number_textbox_handle(ctx, control, &mut self.edit, self.precision, &mut self.value).is_none() {
+            return res;
+        }
+        let default_input = InputSnapshot::default();
+        let input = ctx.input().unwrap_or(&default_input);
+        if control.focused && input.mouse_down.is_left() {
+            self.value += input.mouse_delta.x as Real * self.step;
+        }
+        if self.value != last {
+            res |= ResourceState::CHANGE;
+        }
+        ctx.draw_widget_frame(control, base, ControlColor::Base, self.opt);
+        let mut buff = String::new();
+        buff.push_str(format!("{:.*}", self.precision, self.value).as_str());
+        ctx.draw_control_text(buff.as_str(), base, ControlColor::Text, self.opt);
+        res
+    }
 }
 
 #[derive(Clone)]
