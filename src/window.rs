@@ -133,11 +133,13 @@ impl Window {
             let mut tr: Recti = r;
             // Guard against a too-small title bar: enforce enough room for the font plus padding so
             // the title text/close button stay visible even if the style is set to zero.
-            let style = container.style.as_ref();
-            let font_height = container.atlas.get_font_height(style.font) as i32;
-            let padding = style.padding.max(0);
+            let (font, padding, title_height, title_text_color) = {
+                let style = container.style.as_ref();
+                (style.font, style.padding.max(0), style.title_height, style.colors[ControlColor::TitleText as usize])
+            };
+            let font_height = container.atlas.get_font_height(font) as i32;
             let min_title_h = font_height + (padding / 2).max(1) * 2;
-            tr.height = style.title_height.max(min_title_h);
+            tr.height = title_height.max(min_title_h);
             container.draw_frame(tr, ControlColor::TitleBG);
 
             // TODO: Is this necessary?
@@ -151,7 +153,7 @@ impl Window {
                         tr,
                         &mut container.command_list,
                         &mut container.clip_stack,
-                        style,
+                        container.style.as_ref(),
                         &container.atlas,
                         &mut container.focus,
                         &mut container.updated_focus,
@@ -173,7 +175,7 @@ impl Window {
                 let id = container.close_state.get_id();
                 let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
                 tr.width -= r.width;
-                let color = style.colors[ControlColor::TitleText as usize];
+                let color = title_text_color;
                 container.draw_icon(CLOSE_ICON, r, color);
                 let control_state = (container.close_state.opt, container.close_state.bopt);
                 let control = container.update_control(id, r, &control_state);
@@ -183,7 +185,7 @@ impl Window {
                         r,
                         &mut container.command_list,
                         &mut container.clip_stack,
-                        style,
+                        container.style.as_ref(),
                         &container.atlas,
                         &mut container.focus,
                         &mut container.updated_focus,

@@ -534,7 +534,10 @@ impl Container {
 
     #[inline(never)]
     fn node(&mut self, state: &mut Node, is_treenode: bool) -> NodeStateValue {
-        let style = self.style.as_ref();
+        let (padding, text_color) = {
+            let style = self.style.as_ref();
+            (style.padding, style.colors[ControlColor::Text as usize])
+        };
         let id: Id = state.get_id();
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let mut r = self.layout.next();
@@ -549,10 +552,13 @@ impl Container {
         } else {
             self.draw_widget_frame(id, r, ControlColor::Button, opt);
         }
-        let color = style.colors[ControlColor::Text as usize];
-        self.draw_icon(if expanded { COLLAPSE_ICON } else { EXPAND_ICON }, rect(r.x, r.y, r.height, r.height), color);
-        r.x += r.height - style.padding;
-        r.width -= r.height - style.padding;
+        self.draw_icon(
+            if expanded { COLLAPSE_ICON } else { EXPAND_ICON },
+            rect(r.x, r.y, r.height, r.height),
+            text_color,
+        );
+        r.x += r.height - padding;
+        r.width -= r.height - padding;
         self.draw_control_text(state.label.as_str(), r, ControlColor::Text, opt);
         {
             let mut ctx = self.widget_ctx(id, node_rect, None);
@@ -642,11 +648,14 @@ impl Container {
 
     #[inline(never)]
     fn scrollbars(&mut self, body: &mut Recti) {
-        let style = self.style.as_ref();
-        let sz = style.scrollbar_size;
+        let (scrollbar_size, padding, thumb_size) = {
+            let style = self.style.as_ref();
+            (style.scrollbar_size, style.padding, style.thumb_size)
+        };
+        let sz = scrollbar_size;
         let mut cs: Vec2i = self.content_size;
-        cs.x += style.padding * 2;
-        cs.y += style.padding * 2;
+        cs.x += padding * 2;
+        cs.y += padding * 2;
         let base_body = *body;
         self.push_clip_rect(body.clone());
         if cs.y > base_body.height {
@@ -661,7 +670,7 @@ impl Container {
             let id: Id = self.scrollbar_y_state.get_id();
             let mut base = body;
             base.x = body.x + body.width;
-            base.width = style.scrollbar_size;
+            base.width = scrollbar_size;
             let control_state = (self.scrollbar_y_state.opt, self.scrollbar_y_state.bopt);
             let control = self.update_control(id, base, &control_state);
             {
@@ -670,7 +679,7 @@ impl Container {
                     base,
                     &mut self.command_list,
                     &mut self.clip_stack,
-                    style,
+                    self.style.as_ref(),
                     &self.atlas,
                     &mut self.focus,
                     &mut self.updated_focus,
@@ -685,8 +694,8 @@ impl Container {
 
             self.draw_frame(base, ControlColor::ScrollBase);
             let mut thumb = base;
-            thumb.height = if style.thumb_size > base.height * body.height / cs.y {
-                style.thumb_size
+            thumb.height = if thumb_size > base.height * body.height / cs.y {
+                thumb_size
             } else {
                 base.height * body.height / cs.y
             };
@@ -701,7 +710,7 @@ impl Container {
             let id_0: Id = self.scrollbar_x_state.get_id();
             let mut base_0 = body;
             base_0.y = body.y + body.height;
-            base_0.height = style.scrollbar_size;
+            base_0.height = scrollbar_size;
             let control_state = (self.scrollbar_x_state.opt, self.scrollbar_x_state.bopt);
             let control = self.update_control(id_0, base_0, &control_state);
             {
@@ -710,7 +719,7 @@ impl Container {
                     base_0,
                     &mut self.command_list,
                     &mut self.clip_stack,
-                    style,
+                    self.style.as_ref(),
                     &self.atlas,
                     &mut self.focus,
                     &mut self.updated_focus,
@@ -725,8 +734,8 @@ impl Container {
 
             self.draw_frame(base_0, ControlColor::ScrollBase);
             let mut thumb_0 = base_0;
-            thumb_0.width = if style.thumb_size > base_0.width * body.width / cs.x {
-                style.thumb_size
+            thumb_0.width = if thumb_size > base_0.width * body.width / cs.x {
+                thumb_size
             } else {
                 base_0.width * body.width / cs.x
             };
@@ -746,13 +755,15 @@ impl Container {
         if self.scroll_enabled {
             self.scrollbars(&mut body);
         }
-        let style = self.style.as_ref();
-        let padding = -style.padding;
+        let (layout_padding, style_padding, font, style_clone) = {
+            let style = self.style.as_ref();
+            (-style.padding, style.padding, style.font, style.clone())
+        };
         let scroll = self.scroll;
-        self.layout.reset(expand_rect(body, padding), scroll);
-        self.layout.style = (*self.style).clone();
-        let font_height = self.atlas.get_font_height(style.font) as i32;
-        let vertical_pad = Self::vertical_text_padding(style.padding);
+        self.layout.reset(expand_rect(body, layout_padding), scroll);
+        self.layout.style = style_clone;
+        let font_height = self.atlas.get_font_height(font) as i32;
+        let vertical_pad = Self::vertical_text_padding(style_padding);
         let icon_height = self.atlas.get_icon_size(EXPAND_DOWN_ICON).height;
         let default_height = max(font_height + vertical_pad * 2, icon_height);
         self.layout.set_default_cell_height(default_height);
