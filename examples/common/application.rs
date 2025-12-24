@@ -79,6 +79,7 @@ type MicroUI = microui::Context<RendererBackend>;
 pub type BackendInitContext = Arc<glow::Context>;
 #[cfg(feature = "example-vulkan")]
 pub struct BackendInitContext {
+    #[allow(dead_code)]
     pub renderer: RendererHandle<vulkan_renderer::VulkanRenderer>,
 }
 
@@ -88,6 +89,7 @@ pub struct Application<S> {
     _sdl_vid: VideoSubsystem,
     window: Window,
     ctx: MicroUI,
+    #[cfg_attr(not(feature = "example-glow"), allow(dead_code))]
     backend: BackendData,
 }
 
