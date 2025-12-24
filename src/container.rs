@@ -1293,25 +1293,23 @@ impl Container {
     }
 
     #[inline(never)]
-    fn input_to_mouse_event(&self, id: Id, rect: &Recti) -> MouseEvent {
-        let input = self.input.borrow();
+    fn input_to_mouse_event(&self, control: &ControlState, input: &InputSnapshot, rect: Recti) -> MouseEvent {
         let orig = Vec2i::new(rect.x, rect.y);
 
-        let prev_pos = input.last_mouse_pos - orig;
+        let prev_pos = input.mouse_pos - input.mouse_delta - orig;
         let curr_pos = input.mouse_pos - orig;
         let mouse_down = input.mouse_down;
         let mouse_pressed = input.mouse_pressed;
-        drop(input);
 
-        if self.focus == Some(id) && mouse_down.is_left() {
+        if control.focused && mouse_down.is_left() {
             return MouseEvent::Drag { prev_pos, curr_pos };
         }
 
-        if self.hover == Some(id) && mouse_pressed.is_left() {
+        if control.hovered && mouse_pressed.is_left() {
             return MouseEvent::Click(curr_pos);
         }
 
-        if self.hover == Some(id) {
+        if control.hovered {
             return MouseEvent::Move(curr_pos);
         }
         MouseEvent::None
@@ -1332,14 +1330,13 @@ impl Container {
             let _ = state.handle(&mut ctx, &control);
         }
 
-        let mouse_event = self.input_to_mouse_event(id, &rect);
+        let input = self.snapshot_input();
+        let mouse_event = self.input_to_mouse_event(&control, &input, rect);
 
-        let active = self.focus == Some(id) && self.in_hover_root;
-        let input = self.input.borrow();
-        let key_mods = if active { input.key_state() } else { KeyMode::NONE };
-        let key_codes = if active { input.key_codes() } else { KeyCode::NONE };
-        let text_input = if active { input.text_input().to_owned() } else { String::new() };
-        drop(input);
+        let active = control.focused && self.in_hover_root;
+        let key_mods = if active { input.key_mods } else { KeyMode::NONE };
+        let key_codes = if active { input.key_codes } else { KeyCode::NONE };
+        let text_input = if active { input.text_input } else { String::new() };
         let cra = CustomRenderArgs {
             content_area: rect,
             view: self.get_clip_rect(),
