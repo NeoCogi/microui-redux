@@ -688,6 +688,8 @@ impl WidgetState for CheckboxState {
 pub struct TextboxState {
     /// Buffer edited by the textbox.
     pub buf: String,
+    /// Current cursor position within the buffer (byte index).
+    pub cursor: usize,
     /// Widget options applied to the textbox.
     pub opt: WidgetOption,
     /// Behaviour options applied to the textbox.
@@ -697,12 +699,16 @@ pub struct TextboxState {
 impl TextboxState {
     /// Creates a textbox with default widget options.
     pub fn new(buf: impl Into<String>) -> Self {
-        Self { buf: buf.into(), opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
+        let buf = buf.into();
+        let cursor = buf.len();
+        Self { buf, cursor, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
     }
 
     /// Creates a textbox with explicit widget options.
     pub fn with_opt(buf: impl Into<String>, opt: WidgetOption) -> Self {
-        Self { buf: buf.into(), opt, bopt: WidgetBehaviourOption::NONE }
+        let buf = buf.into();
+        let cursor = buf.len();
+        Self { buf, cursor, opt, bopt: WidgetBehaviourOption::NONE }
     }
 }
 
