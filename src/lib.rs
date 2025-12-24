@@ -71,6 +71,7 @@ use png::{ColorType, Decoder};
 
 mod atlas;
 mod canvas;
+mod draw_context;
 mod container;
 mod file_dialog;
 mod idmngr;
