@@ -81,18 +81,33 @@ fn parse_vec2(parts: &[&str], uvws: &mut Vec<Vec2f>) -> Result<i32, String> {
 
 fn parse_face_part(part: &str) -> Result<(u32, u32, u32), String> {
     let parts: Vec<&str> = part.split('/').collect();
-    if parts.len() != 1 && parts.len() != 3 {
-        return Result::Err(String::from("expecting vertex or vertex//uv"));
+    if parts.is_empty() || parts.len() > 3 {
+        return Result::Err(String::from("expecting vertex, vertex/uv, vertex//normal, or vertex/uv/normal"));
     }
 
-    let v: Result<u32, _> = parts[0].parse();
-    let n: Result<u32, _> = parts[2].parse();
-    let uv: Result<u32, _> = if parts.len() == 1 { Ok(0) } else { parts[1].parse() };
-
-    match (v, n, uv) {
-        (Ok(v), Ok(n), Ok(uv)) => Result::Ok((v - 1, n - 1, uv - 1)),
-        _ => Result::Err(String::from("expecting vertex/uv/normal, vertex/uv or vertex")),
+    if parts[0].is_empty() {
+        return Result::Err(String::from("expecting vertex index"));
     }
+
+    let parse_optional = |s: &str| -> Result<u32, String> {
+        if s.is_empty() {
+            Ok(0)
+        } else {
+            s.parse::<u32>().map_err(|_| String::from("expecting vertex index"))
+        }
+    };
+
+    let v = parts[0].parse::<u32>().map_err(|_| String::from("expecting vertex index"))?;
+    if v == 0 {
+        return Result::Err(String::from("expecting vertex index"));
+    }
+    let uv = if parts.len() >= 2 { parse_optional(parts[1])? } else { 0 };
+    let n = if parts.len() == 3 { parse_optional(parts[2])? } else { 0 };
+
+    let v = v - 1;
+    let uv = if uv > 0 { uv - 1 } else { 0 };
+    let n = if n > 0 { n - 1 } else { 0 };
+    Result::Ok((v, n, uv))
 }
 
 pub struct ObjFace {
