@@ -355,11 +355,6 @@ impl WidgetBehaviourOption {
     pub fn is_no_scroll(self) -> bool { matches!(self, Self::NoScroll) }
 }
 
-/// Context passed to widget handlers.
-pub struct WidgetCtx<'a> {
-    _marker: std::marker::PhantomData<&'a mut ()>,
-}
-
 #[derive(Copy, Clone, Default, Debug)]
 /// Captures the interaction state for a widget during the current frame.
 pub struct ControlState {
