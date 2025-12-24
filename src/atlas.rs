@@ -147,6 +147,7 @@ pub const CLOSED_FOLDER_16_ICON: IconId = IconId(7);
 pub const FILE_16_ICON: IconId = IconId(8);
 
 /// Decodes image data into 32-bit pixels according to `source`.
+/// Grayscale and RGB PNG inputs are expanded to opaque RGBA (alpha = 255).
 pub fn load_image_bytes(source: ImageSource) -> std::io::Result<(usize, usize, Vec<Color4b>)> {
     match source {
         ImageSource::Raw { width, height, pixels } => {
@@ -206,8 +207,8 @@ fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Colo
             let xx = (x * pixel_size) as usize;
             let color = match info.color_type {
                 ColorType::Grayscale => {
-                    let a = line[xx];
-                    color4b(0xFF, 0xFF, 0xFF, a)
+                    let v = line[xx];
+                    color4b(v, v, v, 0xFF)
                 }
                 ColorType::GrayscaleAlpha => {
                     let c = line[xx];
@@ -215,10 +216,7 @@ fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Colo
                     color4b(c, c, c, a)
                 }
                 ColorType::Indexed => todo!(),
-                ColorType::Rgb => {
-                    let c = ((line[xx] as u32 + line[xx + 1] as u32 + line[xx + 2] as u32) / 3) as u8;
-                    color4b(c, c, c, c)
-                }
+                ColorType::Rgb => color4b(line[xx], line[xx + 1], line[xx + 2], 0xFF),
                 ColorType::Rgba => {
                     let r = line[xx];
                     let g = line[xx + 1];
