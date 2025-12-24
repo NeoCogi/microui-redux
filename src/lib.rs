@@ -370,6 +370,25 @@ pub struct ControlState {
     pub scroll_delta: Option<Vec2i>,
 }
 
+#[derive(Clone, Default, Debug)]
+/// Snapshot of the per-frame input state for widgets that need it.
+pub struct InputSnapshot {
+    /// Absolute mouse position in screen coordinates.
+    pub mouse_pos: Vec2i,
+    /// Mouse movement delta since the previous frame.
+    pub mouse_delta: Vec2i,
+    /// Currently held mouse buttons.
+    pub mouse_down: MouseButton,
+    /// Mouse buttons pressed this frame.
+    pub mouse_pressed: MouseButton,
+    /// Active modifier keys.
+    pub key_mods: KeyMode,
+    /// Active navigation keys.
+    pub key_codes: KeyCode,
+    /// UTF-8 text input collected this frame.
+    pub text_input: String,
+}
+
 /// Trait implemented by persistent widget state structures.
 pub trait WidgetState {
     /// Returns the widget options for this state.
