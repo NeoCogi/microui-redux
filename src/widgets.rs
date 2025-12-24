@@ -834,22 +834,29 @@ impl Widget for Slider {
             return res;
         }
         if let Some(delta) = control.scroll_delta {
-            let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
-            if wheel != 0 {
-                let step_amount = if self.step != 0. { self.step } else { (self.high - self.low) / 100.0 };
-                v += wheel as Real * step_amount;
-                if self.step != 0. {
-                    v = (v + self.step / 2 as Real) / self.step * self.step;
+            let range = self.high - self.low;
+            if range != 0.0 {
+                let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
+                if wheel != 0 {
+                    let step_amount = if self.step != 0. { self.step } else { range / 100.0 };
+                    v += wheel as Real * step_amount;
+                    if self.step != 0. {
+                        v = (v + self.step / 2 as Real) / self.step * self.step;
+                    }
                 }
             }
         }
         let default_input = InputSnapshot::default();
         let input = ctx.input().unwrap_or(&default_input);
-        if control.focused && (!input.mouse_down.is_none() || input.mouse_pressed.is_left()) {
-            v = self.low + (input.mouse_pos.x - base.x) as Real * (self.high - self.low) / base.width as Real;
+        let range = self.high - self.low;
+        if control.focused && (!input.mouse_down.is_none() || input.mouse_pressed.is_left()) && base.width > 0 && range != 0.0 {
+            v = self.low + (input.mouse_pos.x - base.x) as Real * range / base.width as Real;
             if self.step != 0. {
                 v = (v + self.step / 2 as Real) / self.step * self.step;
             }
+        }
+        if range == 0.0 {
+            v = self.low;
         }
         v = if self.high < (if self.low > v { self.low } else { v }) {
             self.high
@@ -864,7 +871,12 @@ impl Widget for Slider {
         }
         ctx.draw_widget_frame(control, base, ControlColor::Base, self.opt);
         let w = ctx.style().thumb_size;
-        let x = ((v - self.low) * (base.width - w) as Real / (self.high - self.low)) as i32;
+        let available = (base.width - w).max(0);
+        let x = if range != 0.0 && available > 0 {
+            ((v - self.low) * available as Real / range) as i32
+        } else {
+            0
+        };
         let thumb = rect(base.x + x, base.y, w, base.height);
         ctx.draw_widget_frame(control, thumb, ControlColor::Button, self.opt);
         let mut buff = String::new();
