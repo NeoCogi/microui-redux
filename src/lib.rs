@@ -365,6 +365,21 @@ pub trait WidgetState {
     fn get_id(&self) -> Id { Id::from_ptr(self) }
 }
 
+#[derive(Copy, Clone, Default, Debug)]
+/// Captures the interaction state for a widget during the current frame.
+pub struct ControlState {
+    /// Cursor is hovering the widget.
+    pub hovered: bool,
+    /// Widget currently owns focus.
+    pub focused: bool,
+    /// Mouse was pressed on the widget this frame.
+    pub clicked: bool,
+    /// Mouse is held down while the widget is focused.
+    pub active: bool,
+    /// Scroll delta consumed by this widget, if any.
+    pub scroll_delta: Option<Vec2i>,
+}
+
 impl WidgetState for (WidgetOption, WidgetBehaviourOption) {
     fn widget_opt(&self) -> &WidgetOption { &self.0 }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.1 }
