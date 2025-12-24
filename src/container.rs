@@ -269,12 +269,6 @@ pub struct Container {
     pub input: Rc<RefCell<Input>>,
     /// Whether this container is the current hover root.
     pub in_hover_root: bool,
-    /// Buffer used when editing number widgets.
-    pub number_edit_buf: String,
-    /// ID of the number widget currently in edit mode, if any.
-    pub number_edit: Option<Id>,
-    /// Cursor position used while editing a number widget.
-    pub number_edit_cursor: usize,
     /// Tracks whether a popup was just opened this frame to avoid instant auto-close.
     pub popup_just_opened: bool,
     pending_scroll: Option<Vec2i>,
@@ -339,9 +333,6 @@ impl Container {
             resize_state: InternalState::new("!resize"),
             scrollbar_y_state: InternalState::new("!scrollbary"),
             scrollbar_x_state: InternalState::new("!scrollbarx"),
-            number_edit_buf: String::default(),
-            number_edit: None,
-            number_edit_cursor: 0,
             popup_just_opened: false,
             in_hover_root: false,
             input: input,
@@ -1450,37 +1441,44 @@ impl Container {
     }
 
     #[inline(never)]
-    fn number_textbox(&mut self, precision: usize, value: &mut Real, r: Recti, id: Id) -> ResourceState {
-        if self.input.borrow().mouse_pressed.is_left() && self.input.borrow().key_state().is_shift() && self.hover == Some(id) {
-            self.number_edit = Some(id);
-            self.number_edit_buf.clear();
-            self.number_edit_buf.push_str(format!("{:.*}", precision, value).as_str());
-            self.number_edit_cursor = self.number_edit_buf.len();
+    fn number_textbox(
+        &mut self,
+        edit: &mut NumberEditState,
+        precision: usize,
+        value: &mut Real,
+        r: Recti,
+        id: Id,
+    ) -> ResourceState {
+        let start_edit = {
+            let input = self.input.borrow();
+            input.mouse_pressed.is_left() && input.key_state().is_shift() && self.hover == Some(id)
+        };
+
+        if start_edit {
+            edit.editing = true;
+            edit.buf.clear();
+            edit.buf.push_str(format!("{:.*}", precision, value).as_str());
+            edit.cursor = edit.buf.len();
         }
 
-        if self.number_edit == Some(id) {
-            let mut temp = self.number_edit_buf.clone();
-            let mut cursor = self.number_edit_cursor;
-            let res: ResourceState =
+        if edit.editing {
+            let mut temp = edit.buf.clone();
+            let mut cursor = edit.cursor;
+            let res =
                 self.textbox_raw_with_id(&mut temp, &mut cursor, id, r, WidgetOption::NONE, WidgetBehaviourOption::NONE);
-            self.number_edit_cursor = cursor;
-            self.number_edit_buf = temp;
+            edit.cursor = cursor;
+            edit.buf = temp;
             if res.is_submitted() || self.focus != Some(id) {
-                match self.number_edit_buf.parse::<f32>() {
-                    Ok(v) => {
-                        *value = v as Real;
-                        self.number_edit = None;
-                        self.number_edit_cursor = 0;
-                    }
-                    _ => (),
+                if let Ok(v) = edit.buf.parse::<f32>() {
+                    *value = v as Real;
                 }
-                self.number_edit = None;
-                self.number_edit_cursor = 0;
+                edit.editing = false;
+                edit.cursor = 0;
             } else {
                 return ResourceState::ACTIVE;
             }
         }
-        return ResourceState::NONE;
+        ResourceState::NONE
     }
 
     /// Draws a textbox using the next available layout cell.
@@ -1497,7 +1495,7 @@ impl Container {
         let mut v = last;
         let id = state.get_id();
         let base = self.layout.next();
-        if !self.number_textbox(state.precision, &mut v, base, id).is_none() {
+        if !self.number_textbox(&mut state.edit, state.precision, &mut v, base, id).is_none() {
             return res;
         }
         let control = self.update_control(id, base, state);
@@ -1546,7 +1544,7 @@ impl Container {
         let id: Id = state.get_id();
         let base: Recti = self.layout.next();
         let last: Real = state.value;
-        if !self.number_textbox(state.precision, &mut state.value, base, id).is_none() {
+        if !self.number_textbox(&mut state.edit, state.precision, &mut state.value, base, id).is_none() {
             return res;
         }
         let _ = self.update_control(id, base, state);

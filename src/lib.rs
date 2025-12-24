@@ -735,6 +735,8 @@ pub struct SliderState {
     pub opt: WidgetOption,
     /// Behaviour options applied to the slider.
     pub bopt: WidgetBehaviourOption,
+    /// Text editing state for shift-click numeric entry.
+    pub edit: NumberEditState,
 }
 
 impl SliderState {
@@ -748,6 +750,7 @@ impl SliderState {
             precision: 0,
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
+            edit: NumberEditState::default(),
         }
     }
 
@@ -761,6 +764,7 @@ impl SliderState {
             precision,
             opt,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
+            edit: NumberEditState::default(),
         }
     }
 }
@@ -784,17 +788,44 @@ pub struct NumberState {
     pub opt: WidgetOption,
     /// Behaviour options applied to the number input.
     pub bopt: WidgetBehaviourOption,
+    /// Text editing state for shift-click numeric entry.
+    pub edit: NumberEditState,
+}
+
+#[derive(Clone, Default)]
+/// Editing buffer for number-style widgets.
+pub struct NumberEditState {
+    /// Whether the widget is currently in edit mode.
+    pub editing: bool,
+    /// Text buffer for numeric input.
+    pub buf: String,
+    /// Cursor position within the buffer (byte index).
+    pub cursor: usize,
 }
 
 impl NumberState {
     /// Creates a number input with default widget options.
     pub fn new(value: Real, step: Real, precision: usize) -> Self {
-        Self { value, step, precision, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
+        Self {
+            value,
+            step,
+            precision,
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+            edit: NumberEditState::default(),
+        }
     }
 
     /// Creates a number input with explicit widget options.
     pub fn with_opt(value: Real, step: Real, precision: usize, opt: WidgetOption) -> Self {
-        Self { value, step, precision, opt, bopt: WidgetBehaviourOption::NONE }
+        Self {
+            value,
+            step,
+            precision,
+            opt,
+            bopt: WidgetBehaviourOption::NONE,
+            edit: NumberEditState::default(),
+        }
     }
 }
 
