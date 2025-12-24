@@ -72,14 +72,14 @@ struct State<'a> {
     renderer: RendererHandle<BackendRenderer>,
     label_colors: [LabelColor<'a>; 15],
     bg: [Real; 3],
-    bg_sliders: [SliderState; 3],
-    style_color_sliders: [SliderState; 60],
-    style_value_sliders: [SliderState; 5],
+    bg_sliders: [Slider; 3],
+    style_color_sliders: [Slider; 60],
+    style_value_sliders: [Slider; 5],
     logbuf: String,
     logbuf_updated: bool,
-    submit_buf: TextboxState,
-    combo_state: Option<ComboState>,
-    combo_items: [ListItemState; 4],
+    submit_buf: Textbox,
+    combo_state: Option<Combo>,
+    combo_items: [ListItem; 4],
     style: Style,
 
     demo_window: Option<WindowHandle>,
@@ -94,31 +94,31 @@ struct State<'a> {
     fps: f32,
     last_frame: Instant,
 
-    window_header: NodeState,
-    test_buttons_header: NodeState,
-    background_header: NodeState,
-    tree_and_text_header: NodeState,
-    slot_header: NodeState,
-    combo_header: NodeState,
-    test1_tn: NodeState,
-    test1a_tn: NodeState,
-    test1b_tn: NodeState,
-    test2_tn: NodeState,
-    test3_tn: NodeState,
-    submit_button: ButtonState,
-    test_buttons: [ButtonState; 6],
-    tree_buttons: [ButtonState; 6],
-    popup_buttons: [ButtonState; 2],
-    slot_buttons: [ButtonState; 4],
-    external_image_button: Option<ButtonState>,
-    checkboxes: [CheckboxState; 3],
+    window_header: Node,
+    test_buttons_header: Node,
+    background_header: Node,
+    tree_and_text_header: Node,
+    slot_header: Node,
+    combo_header: Node,
+    test1_tn: Node,
+    test1a_tn: Node,
+    test1b_tn: Node,
+    test2_tn: Node,
+    test3_tn: Node,
+    submit_button: Button,
+    test_buttons: [Button; 6],
+    tree_buttons: [Button; 6],
+    popup_buttons: [Button; 2],
+    slot_buttons: [Button; 4],
+    external_image_button: Option<Button>,
+    checkboxes: [Checkbox; 3],
     open_popup: bool,
     open_dialog: bool,
     white_uv: Vec2f,
     triangle_data: Arc<RwLock<TriangleState>>,
     suzane_data: Arc<RwLock<SuzaneData>>,
-    triangle_widget: CustomState,
-    suzane_widget: CustomState,
+    triangle_widget: Custom,
+    suzane_widget: Custom,
 }
 
 impl<'a> State<'a> {
@@ -166,26 +166,26 @@ impl<'a> State<'a> {
             })
         };
         let slot_buttons = [
-            ButtonState::with_image("Slot 1", Some(Image::Slot(slots[0])), WidgetOption::NONE, WidgetFillOption::ALL),
-            ButtonState::with_slot("Slot 2 - Green", slots[1], green_paint, WidgetOption::NONE, WidgetFillOption::ALL),
-            ButtonState::with_image("Slot 3", Some(Image::Slot(slots[2])), WidgetOption::NONE, WidgetFillOption::ALL),
-            ButtonState::with_slot("Slot 2 - Random", slots[1], random_paint, WidgetOption::NONE, WidgetFillOption::ALL),
+            Button::with_image("Slot 1", Some(Image::Slot(slots[0])), WidgetOption::NONE, WidgetFillOption::ALL),
+            Button::with_slot("Slot 2 - Green", slots[1], green_paint, WidgetOption::NONE, WidgetFillOption::ALL),
+            Button::with_image("Slot 3", Some(Image::Slot(slots[2])), WidgetOption::NONE, WidgetFillOption::ALL),
+            Button::with_slot("Slot 2 - Random", slots[1], random_paint, WidgetOption::NONE, WidgetFillOption::ALL),
         ];
         let external_image_button = image_texture.map(|texture| {
-            ButtonState::with_image("External Image", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL)
+            Button::with_image("External Image", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL)
         });
         let style_color_sliders = std::array::from_fn(|_| {
-            SliderState::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)
+            Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)
         });
         let style_value_sliders = [
-            SliderState::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
-            SliderState::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
-            SliderState::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
-            SliderState::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
-            SliderState::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
+            Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
+            Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
+            Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
+            Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
+            Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
         ];
         let bg_sliders = std::array::from_fn(|_| {
-            SliderState::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)
+            Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)
         });
 
         Self {
@@ -249,13 +249,13 @@ impl<'a> State<'a> {
             style_value_sliders,
             logbuf: String::new(),
             logbuf_updated: false,
-            submit_buf: TextboxState::new(""),
+            submit_buf: Textbox::new(""),
             combo_state: None,
             combo_items: [
-                ListItemState::new("Apple"),
-                ListItemState::new("Banana"),
-                ListItemState::new("Cherry"),
-                ListItemState::new("Date"),
+                ListItem::new("Apple"),
+                ListItem::new("Banana"),
+                ListItem::new("Cherry"),
+                ListItem::new("Date"),
             ],
             style: Style::default(),
             demo_window: None,
@@ -268,52 +268,52 @@ impl<'a> State<'a> {
             dialog_window: None,
             fps: 0.0,
             last_frame: Instant::now(),
-            window_header: NodeState::new("Window Info", NodeStateValue::Closed),
-            test_buttons_header: NodeState::new("Test Buttons", NodeStateValue::Expanded),
-            background_header: NodeState::new("Background Color", NodeStateValue::Expanded),
-            tree_and_text_header: NodeState::new("Tree and Text", NodeStateValue::Expanded),
-            slot_header: NodeState::new("Slots", NodeStateValue::Expanded),
-            combo_header: NodeState::new("Combo Box", NodeStateValue::Expanded),
-            test1_tn: NodeState::new("Test 1", NodeStateValue::Closed),
-            test1a_tn: NodeState::new("Test 1a", NodeStateValue::Closed),
-            test1b_tn: NodeState::new("Test 1b", NodeStateValue::Closed),
-            test2_tn: NodeState::new("Test 2", NodeStateValue::Closed),
-            test3_tn: NodeState::new("Test 3", NodeStateValue::Closed),
-            submit_button: ButtonState::with_opt("Submit", WidgetOption::ALIGN_CENTER),
+            window_header: Node::new("Window Info", NodeStateValue::Closed),
+            test_buttons_header: Node::new("Test Buttons", NodeStateValue::Expanded),
+            background_header: Node::new("Background Color", NodeStateValue::Expanded),
+            tree_and_text_header: Node::new("Tree and Text", NodeStateValue::Expanded),
+            slot_header: Node::new("Slots", NodeStateValue::Expanded),
+            combo_header: Node::new("Combo Box", NodeStateValue::Expanded),
+            test1_tn: Node::new("Test 1", NodeStateValue::Closed),
+            test1a_tn: Node::new("Test 1a", NodeStateValue::Closed),
+            test1b_tn: Node::new("Test 1b", NodeStateValue::Closed),
+            test2_tn: Node::new("Test 2", NodeStateValue::Closed),
+            test3_tn: Node::new("Test 3", NodeStateValue::Closed),
+            submit_button: Button::with_opt("Submit", WidgetOption::ALIGN_CENTER),
             test_buttons: [
-                ButtonState::with_opt("Button 1", WidgetOption::ALIGN_CENTER),
-                ButtonState::with_opt("Button 2", WidgetOption::ALIGN_CENTER),
-                ButtonState::with_opt("Button 3", WidgetOption::ALIGN_CENTER),
-                ButtonState::with_opt("Popup", WidgetOption::ALIGN_CENTER),
-                ButtonState::with_opt("Button 4", WidgetOption::ALIGN_CENTER),
-                ButtonState::with_opt("Dialog", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Button 1", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Button 2", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Button 3", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Popup", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Button 4", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Dialog", WidgetOption::ALIGN_CENTER),
             ],
             tree_buttons: [
-                ButtonState::with_opt("Button 1", WidgetOption::ALIGN_CENTER),
-                ButtonState::with_opt("Button 2", WidgetOption::ALIGN_CENTER),
-                ButtonState::with_opt("Button 3", WidgetOption::ALIGN_CENTER),
-                ButtonState::with_opt("Button 4", WidgetOption::ALIGN_CENTER),
-                ButtonState::with_opt("Button 5", WidgetOption::ALIGN_CENTER),
-                ButtonState::with_opt("Button 6", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Button 1", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Button 2", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Button 3", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Button 4", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Button 5", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Button 6", WidgetOption::ALIGN_CENTER),
             ],
             popup_buttons: [
-                ButtonState::with_opt("Hello", WidgetOption::ALIGN_CENTER),
-                ButtonState::with_opt("World", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Hello", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("World", WidgetOption::ALIGN_CENTER),
             ],
             slot_buttons,
             external_image_button,
             checkboxes: [
-                CheckboxState::new("Checkbox 1", false),
-                CheckboxState::new("Checkbox 2", true),
-                CheckboxState::new("Checkbox 3", false),
+                Checkbox::new("Checkbox 1", false),
+                Checkbox::new("Checkbox 2", true),
+                Checkbox::new("Checkbox 3", false),
             ],
             open_popup: false,
             open_dialog: false,
             white_uv,
             triangle_data,
             suzane_data,
-            triangle_widget: CustomState::with_opt("Triangle", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::NONE),
-            suzane_widget: CustomState::with_opt("Suzane", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::GRAB_SCROLL),
+            triangle_widget: Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::NONE),
+            suzane_widget: Custom::with_opt("Suzane", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::GRAB_SCROLL),
         }
     }
 
@@ -327,7 +327,7 @@ impl<'a> State<'a> {
         self.logbuf_updated = true;
     }
 
-    fn u8_slider(value: &mut u8, slider: &mut SliderState, ctx: &mut Container) -> ResourceState {
+    fn u8_slider(value: &mut u8, slider: &mut Slider, ctx: &mut Container) -> ResourceState {
         slider.value = *value as Real;
         let res = ctx.slider_ex(slider);
         *value = slider.value as u8;
@@ -335,7 +335,7 @@ impl<'a> State<'a> {
         res
     }
 
-    fn i32_slider(value: &mut i32, slider: &mut SliderState, ctx: &mut Container) -> ResourceState {
+    fn i32_slider(value: &mut i32, slider: &mut Slider, ctx: &mut Container) -> ResourceState {
         slider.value = *value as Real;
         let res = ctx.slider_ex(slider);
         *value = slider.value as i32;
@@ -343,7 +343,7 @@ impl<'a> State<'a> {
         res
     }
 
-    fn real_slider(value: &mut Real, slider: &mut SliderState, ctx: &mut Container) -> ResourceState {
+    fn real_slider(value: &mut Real, slider: &mut Slider, ctx: &mut Container) -> ResourceState {
         slider.value = *value;
         let res = ctx.slider_ex(slider);
         *value = slider.value;
@@ -892,7 +892,7 @@ fn main() {
         state.log_window = Some(ctx.new_window("Log Window", rect(350, 40, 300, 200)));
         state.style_window = Some(ctx.new_window("Style Editor", rect(350, 250, 300, 240)));
         state.popup_window = Some(ctx.new_popup("Test Popup"));
-        state.combo_state = Some(ComboState::new(ctx.new_popup("Combo Box Popup")));
+        state.combo_state = Some(Combo::new(ctx.new_popup("Combo Box Popup")));
         state.log_output = Some(ctx.new_panel("Log Output"));
         state.dialog_window = Some(FileDialogState::new(ctx));
         state.triangle_window = Some(ctx.new_window("Triangle Window", rect(200, 100, 200, 200)));

@@ -178,15 +178,15 @@ pub struct Container {
     /// Tracks whether focus changed this frame.
     pub updated_focus: bool,
     /// Internal state for the window title bar.
-    pub(crate) title_state: InternalState,
+    pub(crate) title_state: Internal,
     /// Internal state for the window close button.
-    pub(crate) close_state: InternalState,
+    pub(crate) close_state: Internal,
     /// Internal state for the window resize handle.
-    pub(crate) resize_state: InternalState,
+    pub(crate) resize_state: Internal,
     /// Internal state for the vertical scrollbar.
-    pub(crate) scrollbar_y_state: InternalState,
+    pub(crate) scrollbar_y_state: Internal,
     /// Internal state for the horizontal scrollbar.
-    pub(crate) scrollbar_x_state: InternalState,
+    pub(crate) scrollbar_x_state: Internal,
     /// Shared access to the input state.
     pub input: Rc<RefCell<Input>>,
     /// Whether this container is the current hover root.
@@ -217,11 +217,11 @@ impl Container {
             focus: None,
             updated_focus: false,
             layout: LayoutManager::default(),
-            title_state: InternalState::new("!title"),
-            close_state: InternalState::new("!close"),
-            resize_state: InternalState::new("!resize"),
-            scrollbar_y_state: InternalState::new("!scrollbary"),
-            scrollbar_x_state: InternalState::new("!scrollbarx"),
+            title_state: Internal::new("!title"),
+            close_state: Internal::new("!close"),
+            resize_state: Internal::new("!resize"),
+            scrollbar_y_state: Internal::new("!scrollbary"),
+            scrollbar_x_state: Internal::new("!scrollbarx"),
             popup_just_opened: false,
             in_hover_root: false,
             input: input,
@@ -430,7 +430,7 @@ impl Container {
 
     #[inline(never)]
     /// Updates hover/focus state for the widget described by `id` and optionally consumes scroll.
-    pub fn update_control<W: WidgetState>(&mut self, id: Id, rect: Recti, state: &W) -> ControlState {
+    pub fn update_control<W: Widget>(&mut self, id: Id, rect: Recti, state: &W) -> ControlState {
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
         let in_hover_root = self.in_hover_root;
@@ -532,7 +532,7 @@ impl Container {
     }
 
     #[inline(never)]
-    fn node(&mut self, state: &mut NodeState, is_treenode: bool) -> NodeStateValue {
+    fn node(&mut self, state: &mut Node, is_treenode: bool) -> NodeStateValue {
         let id: Id = state.get_id();
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let mut r = self.layout.next();
@@ -560,7 +560,7 @@ impl Container {
     }
 
     /// Builds a collapsible header row that executes `f` when expanded.
-    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut NodeState, f: F) -> NodeStateValue {
+    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
         let new_state = self.node(state, false);
         if new_state.is_expanded() {
             f(self);
@@ -569,7 +569,7 @@ impl Container {
     }
 
     /// Builds a tree node with automatic indentation while expanded.
-    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut NodeState, f: F) -> NodeStateValue {
+    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
         let res = self.node(state, true);
         if res.is_expanded() {
             let indent = self.style.indent;
@@ -844,7 +844,7 @@ impl Container {
 
     #[inline(never)]
     /// Draws a button using the provided persistent state.
-    pub fn button(&mut self, state: &mut ButtonState) -> ResourceState {
+    pub fn button(&mut self, state: &mut Button) -> ResourceState {
         let id = state.get_id();
         let rect = self.layout.next();
         let control = self.update_control(id, rect, state);
@@ -854,14 +854,14 @@ impl Container {
 
     #[inline(never)]
     /// Compatibility shim for state-based buttons that render text and optional icons.
-    pub fn button_ex(&mut self, state: &mut ButtonState) -> ResourceState { self.button(state) }
+    pub fn button_ex(&mut self, state: &mut Button) -> ResourceState { self.button(state) }
 
     #[inline(never)]
     /// Compatibility shim for state-based buttons that render images.
-    pub fn button_ex2(&mut self, state: &mut ButtonState) -> ResourceState { self.button(state) }
+    pub fn button_ex2(&mut self, state: &mut Button) -> ResourceState { self.button(state) }
 
     /// Renders a list entry that only highlights while hovered or active.
-    pub fn list_item(&mut self, state: &mut ListItemState) -> ResourceState {
+    pub fn list_item(&mut self, state: &mut ListItem) -> ResourceState {
         let id = state.get_id();
         let rect = self.layout.next();
         let control = self.update_control(id, rect, state);
@@ -871,7 +871,7 @@ impl Container {
 
     #[inline(never)]
     /// Shim for list boxes that only fills on hover or click.
-    pub fn list_box(&mut self, state: &mut ListBoxState) -> ResourceState {
+    pub fn list_box(&mut self, state: &mut ListBox) -> ResourceState {
         let id = state.get_id();
         let rect = self.layout.next();
         let control = self.update_control(id, rect, state);
@@ -881,7 +881,7 @@ impl Container {
 
     #[inline(never)]
     /// Draws a combo box that opens a popup listing `items` and writes back the selected index.
-    pub fn combo_box<S: AsRef<str>>(&mut self, state: &mut ComboState, items: &[S]) -> (Recti, bool, ResourceState) {
+    pub fn combo_box<S: AsRef<str>>(&mut self, state: &mut Combo, items: &[S]) -> (Recti, bool, ResourceState) {
         let mut res = ResourceState::NONE;
 
         // Keep the selected index within bounds so we never index past the slice.
@@ -936,11 +936,11 @@ impl Container {
 
     #[inline(never)]
     /// Compatibility shim for state-based buttons that render atlas slots.
-    pub fn button_ex3(&mut self, state: &mut ButtonState) -> ResourceState { self.button(state) }
+    pub fn button_ex3(&mut self, state: &mut Button) -> ResourceState { self.button(state) }
 
     #[inline(never)]
     /// Draws a checkbox labeled with `label` and toggles `state` when clicked.
-    pub fn checkbox(&mut self, state: &mut CheckboxState) -> ResourceState {
+    pub fn checkbox(&mut self, state: &mut Checkbox) -> ResourceState {
         let id = state.get_id();
         let rect = self.layout.next();
         let control = self.update_control(id, rect, state);
@@ -975,7 +975,7 @@ impl Container {
     /// Allocates a widget cell and hands rendering control to user code.
     pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(
         &mut self,
-        state: &mut CustomState,
+        state: &mut Custom,
         f: F,
     ) {
         let id: Id = state.get_id();
@@ -1008,7 +1008,7 @@ impl Container {
     }
 
     /// Draws a textbox in the provided rectangle using the supplied state.
-    pub fn textbox_raw(&mut self, state: &mut TextboxState, r: Recti) -> ResourceState {
+    pub fn textbox_raw(&mut self, state: &mut Textbox, r: Recti) -> ResourceState {
         let id = state.get_id();
         let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.bopt);
         let control = self.update_control(id, r, &control_state);
@@ -1018,14 +1018,14 @@ impl Container {
     }
 
     /// Draws a textbox using the next available layout cell.
-    pub fn textbox_ex(&mut self, state: &mut TextboxState) -> ResourceState {
+    pub fn textbox_ex(&mut self, state: &mut Textbox) -> ResourceState {
         let r: Recti = self.layout.next();
         self.textbox_raw(state, r)
     }
 
     #[inline(never)]
     /// Draws a horizontal slider bound to `state`.
-    pub fn slider_ex(&mut self, state: &mut SliderState) -> ResourceState {
+    pub fn slider_ex(&mut self, state: &mut Slider) -> ResourceState {
         let id = state.get_id();
         let rect = self.layout.next();
         let mut opt = state.opt;
@@ -1041,7 +1041,7 @@ impl Container {
 
     #[inline(never)]
     /// Draws a numeric input that can be edited via keyboard or by dragging.
-    pub fn number_ex(&mut self, state: &mut NumberState) -> ResourceState {
+    pub fn number_ex(&mut self, state: &mut Number) -> ResourceState {
         let id = state.get_id();
         let rect = self.layout.next();
         let mut opt = state.opt;
@@ -1129,7 +1129,7 @@ mod tests {
     fn textbox_left_moves_over_multibyte() {
         let mut container = make_container();
         let input = container.input.clone();
-        let mut state = TextboxState::new("a\u{1F600}b");
+        let mut state = Textbox::new("a\u{1F600}b");
         let id = state.get_id();
         container.set_focus(Some(id));
         state.cursor = 5;
@@ -1150,7 +1150,7 @@ mod tests {
     fn textbox_backspace_removes_multibyte() {
         let mut container = make_container();
         let input = container.input.clone();
-        let mut state = TextboxState::new("a\u{1F600}b");
+        let mut state = Textbox::new("a\u{1F600}b");
         let id = state.get_id();
         container.set_focus(Some(id));
         state.cursor = 5;

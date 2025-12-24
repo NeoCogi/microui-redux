@@ -40,7 +40,7 @@ Widgets take an `Image` enum, which can reference either a slot **or** an upload
 
 ```rust
 let texture = ctx.load_image_from(ImageSource::Png { bytes: include_bytes!("assets/IMAGE.png") })?;
-let mut image_button = ButtonState::with_image(
+let mut image_button = Button::with_image(
     "External Image",
     Some(Image::Texture(texture)),
     WidgetOption::NONE,
