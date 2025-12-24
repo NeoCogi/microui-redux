@@ -240,6 +240,7 @@ impl ComboState {
 impl WidgetState for ComboState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
 impl Container {

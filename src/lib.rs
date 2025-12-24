@@ -355,14 +355,9 @@ impl WidgetBehaviourOption {
     pub fn is_no_scroll(self) -> bool { matches!(self, Self::NoScroll) }
 }
 
-/// Trait implemented by persistent widget state structures.
-pub trait WidgetState {
-    /// Returns the widget options for this state.
-    fn widget_opt(&self) -> &WidgetOption;
-    /// Returns the behaviour options for this state.
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption;
-    /// Returns the widget identifier for this state.
-    fn get_id(&self) -> Id { Id::from_ptr(self) }
+/// Context passed to widget handlers.
+pub struct WidgetCtx<'a> {
+    _marker: std::marker::PhantomData<&'a mut ()>,
 }
 
 #[derive(Copy, Clone, Default, Debug)]
@@ -380,9 +375,22 @@ pub struct ControlState {
     pub scroll_delta: Option<Vec2i>,
 }
 
+/// Trait implemented by persistent widget state structures.
+pub trait WidgetState {
+    /// Returns the widget options for this state.
+    fn widget_opt(&self) -> &WidgetOption;
+    /// Returns the behaviour options for this state.
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption;
+    /// Returns the widget identifier for this state.
+    fn get_id(&self) -> Id { Id::from_ptr(self) }
+    /// Handles widget interaction and rendering for the current frame.
+    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
+}
+
 impl WidgetState for (WidgetOption, WidgetBehaviourOption) {
     fn widget_opt(&self) -> &WidgetOption { &self.0 }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.1 }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
 #[derive(Clone, Copy)]
@@ -446,6 +454,7 @@ impl NodeState {
 impl WidgetState for NodeState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
 #[derive(Clone)]
@@ -540,6 +549,7 @@ impl ButtonState {
 impl WidgetState for ButtonState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
 #[derive(Clone)]
@@ -580,6 +590,7 @@ impl ListItemState {
 impl WidgetState for ListItemState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
 #[derive(Clone)]
@@ -610,6 +621,7 @@ impl ListBoxState {
 impl WidgetState for ListBoxState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
 #[derive(Clone)]
@@ -640,6 +652,7 @@ impl CheckboxState {
 impl WidgetState for CheckboxState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
 #[derive(Clone)]
@@ -668,6 +681,7 @@ impl TextboxState {
 impl WidgetState for TextboxState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
 #[derive(Clone)]
@@ -720,6 +734,7 @@ impl SliderState {
 impl WidgetState for SliderState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
 #[derive(Clone)]
@@ -752,6 +767,7 @@ impl NumberState {
 impl WidgetState for NumberState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
 #[derive(Clone)]
@@ -784,6 +800,7 @@ impl CustomState {
 impl WidgetState for CustomState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
 #[derive(Clone)]
@@ -811,6 +828,7 @@ impl InternalState {
 impl WidgetState for InternalState {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
 impl ContainerOption {
