@@ -370,7 +370,7 @@ pub struct ControlState {
     pub scroll_delta: Option<Vec2i>,
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 /// Snapshot of the per-frame input state for widgets that need it.
 pub struct InputSnapshot {
     /// Absolute mouse position in screen coordinates.
@@ -387,6 +387,20 @@ pub struct InputSnapshot {
     pub key_codes: KeyCode,
     /// UTF-8 text input collected this frame.
     pub text_input: String,
+}
+
+impl Default for InputSnapshot {
+    fn default() -> Self {
+        Self {
+            mouse_pos: Vec2i::default(),
+            mouse_delta: Vec2i::default(),
+            mouse_down: MouseButton::NONE,
+            mouse_pressed: MouseButton::NONE,
+            key_mods: KeyMode::NONE,
+            key_codes: KeyCode::NONE,
+            text_input: String::new(),
+        }
+    }
 }
 
 /// Trait implemented by persistent widget state structures.
