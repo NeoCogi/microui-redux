@@ -772,7 +772,8 @@ pub enum ImageSource<'a> {
         pixels: &'a [u8],
     },
     #[cfg(any(feature = "builder", feature = "png_source"))]
-    /// PNG-compressed byte slice (requires the `png` feature).
+    /// PNG-compressed byte slice (requires the `png` feature). Grayscale and RGB
+    /// images are expanded to opaque RGBA (alpha = 255).
     Png {
         /// Compressed PNG payload.
         bytes: &'a [u8],
