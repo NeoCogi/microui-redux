@@ -86,6 +86,7 @@ pub struct WidgetCtx<'a> {
     atlas: &'a AtlasHandle,
     focus: &'a mut Option<Id>,
     updated_focus: &'a mut bool,
+    input: Option<InputSnapshot>,
 }
 
 impl<'a> WidgetCtx<'a> {
@@ -99,6 +100,7 @@ impl<'a> WidgetCtx<'a> {
         atlas: &'a AtlasHandle,
         focus: &'a mut Option<Id>,
         updated_focus: &'a mut bool,
+        input: Option<InputSnapshot>,
     ) -> Self {
         Self {
             id,
@@ -109,6 +111,7 @@ impl<'a> WidgetCtx<'a> {
             atlas,
             focus,
             updated_focus,
+            input,
         }
     }
 
@@ -117,6 +120,9 @@ impl<'a> WidgetCtx<'a> {
 
     /// Returns the widget rectangle.
     pub fn rect(&self) -> Recti { self.rect }
+
+    /// Returns the input snapshot for this widget, if provided.
+    pub fn input(&self) -> Option<&InputSnapshot> { self.input.as_ref() }
 
     /// Sets focus to this widget for the current frame.
     pub fn set_focus(&mut self) {
