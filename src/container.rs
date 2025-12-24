@@ -153,7 +153,7 @@ impl Default for Command {
 pub struct Container {
     pub(crate) atlas: AtlasHandle,
     /// Style used when drawing widgets in the container.
-    pub style: Style,
+    pub style: Rc<Style>,
     /// Human-readable name for the container.
     pub name: String,
     /// Outer rectangle including frame and title.
@@ -201,10 +201,10 @@ pub struct Container {
 }
 
 impl Container {
-    pub(crate) fn new(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>) -> Self {
+    pub(crate) fn new(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>) -> Self {
         Self {
             name: name.to_string(),
-            style: style.clone(),
+            style,
             atlas: atlas,
             rect: Recti::default(),
             body: Recti::default(),
@@ -296,7 +296,7 @@ impl Container {
     }
 
     fn draw_ctx(&mut self) -> DrawCtx<'_> {
-        DrawCtx::new(&mut self.command_list, &mut self.clip_stack, &self.style, &self.atlas)
+        DrawCtx::new(&mut self.command_list, &mut self.clip_stack, self.style.as_ref(), &self.atlas)
     }
 
     /// Pushes a new clip rectangle combined with the previous clip.
@@ -354,8 +354,9 @@ impl Container {
     /// The block is rendered inside an internal column with zero spacing so consecutive
     /// lines sit back-to-back while the outer widget spacing/padding remains intact.
     pub fn text_with_wrap(&mut self, text: &str, wrap: TextWrap) {
-        let font = self.style.font;
-        let color = self.style.colors[ControlColor::Text as usize];
+        let style = self.style.as_ref();
+        let font = style.font;
+        let color = style.colors[ControlColor::Text as usize];
         let line_height = self.atlas.get_font_height(font) as i32;
         let baseline = self.atlas.get_font_baseline(font);
         let saved_spacing = self.layout.style.spacing;
@@ -514,7 +515,7 @@ impl Container {
             rect,
             &mut self.command_list,
             &mut self.clip_stack,
-            &self.style,
+            self.style.as_ref(),
             &self.atlas,
             &mut self.focus,
             &mut self.updated_focus,
@@ -533,6 +534,7 @@ impl Container {
 
     #[inline(never)]
     fn node(&mut self, state: &mut Node, is_treenode: bool) -> NodeStateValue {
+        let style = self.style.as_ref();
         let id: Id = state.get_id();
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let mut r = self.layout.next();
@@ -547,10 +549,10 @@ impl Container {
         } else {
             self.draw_widget_frame(id, r, ControlColor::Button, opt);
         }
-        let color = self.style.colors[ControlColor::Text as usize];
+        let color = style.colors[ControlColor::Text as usize];
         self.draw_icon(if expanded { COLLAPSE_ICON } else { EXPAND_ICON }, rect(r.x, r.y, r.height, r.height), color);
-        r.x += r.height - self.style.padding;
-        r.width -= r.height - self.style.padding;
+        r.x += r.height - style.padding;
+        r.width -= r.height - style.padding;
         self.draw_control_text(state.label.as_str(), r, ControlColor::Text, opt);
         {
             let mut ctx = self.widget_ctx(id, node_rect, None);
@@ -572,7 +574,7 @@ impl Container {
     pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
         let res = self.node(state, true);
         if res.is_expanded() {
-            let indent = self.style.indent;
+            let indent = self.style.as_ref().indent;
             self.layout.adjust_indent(indent);
             f(self);
             self.layout.adjust_indent(-indent);
@@ -609,7 +611,7 @@ impl Container {
         let mut consumed = false;
         let mut scroll = self.scroll;
         let mut content_size = self.content_size;
-        let padding = self.style.padding * 2;
+        let padding = self.style.as_ref().padding * 2;
         content_size.x += padding;
         content_size.y += padding;
         let body = self.body;
@@ -640,10 +642,11 @@ impl Container {
 
     #[inline(never)]
     fn scrollbars(&mut self, body: &mut Recti) {
-        let sz = self.style.scrollbar_size;
+        let style = self.style.as_ref();
+        let sz = style.scrollbar_size;
         let mut cs: Vec2i = self.content_size;
-        cs.x += self.style.padding * 2;
-        cs.y += self.style.padding * 2;
+        cs.x += style.padding * 2;
+        cs.y += style.padding * 2;
         let base_body = *body;
         self.push_clip_rect(body.clone());
         if cs.y > base_body.height {
@@ -658,7 +661,7 @@ impl Container {
             let id: Id = self.scrollbar_y_state.get_id();
             let mut base = body;
             base.x = body.x + body.width;
-            base.width = self.style.scrollbar_size;
+            base.width = style.scrollbar_size;
             let control_state = (self.scrollbar_y_state.opt, self.scrollbar_y_state.bopt);
             let control = self.update_control(id, base, &control_state);
             {
@@ -667,7 +670,7 @@ impl Container {
                     base,
                     &mut self.command_list,
                     &mut self.clip_stack,
-                    &self.style,
+                    style,
                     &self.atlas,
                     &mut self.focus,
                     &mut self.updated_focus,
@@ -682,8 +685,8 @@ impl Container {
 
             self.draw_frame(base, ControlColor::ScrollBase);
             let mut thumb = base;
-            thumb.height = if self.style.thumb_size > base.height * body.height / cs.y {
-                self.style.thumb_size
+            thumb.height = if style.thumb_size > base.height * body.height / cs.y {
+                style.thumb_size
             } else {
                 base.height * body.height / cs.y
             };
@@ -698,7 +701,7 @@ impl Container {
             let id_0: Id = self.scrollbar_x_state.get_id();
             let mut base_0 = body;
             base_0.y = body.y + body.height;
-            base_0.height = self.style.scrollbar_size;
+            base_0.height = style.scrollbar_size;
             let control_state = (self.scrollbar_x_state.opt, self.scrollbar_x_state.bopt);
             let control = self.update_control(id_0, base_0, &control_state);
             {
@@ -707,7 +710,7 @@ impl Container {
                     base_0,
                     &mut self.command_list,
                     &mut self.clip_stack,
-                    &self.style,
+                    style,
                     &self.atlas,
                     &mut self.focus,
                     &mut self.updated_focus,
@@ -722,8 +725,8 @@ impl Container {
 
             self.draw_frame(base_0, ControlColor::ScrollBase);
             let mut thumb_0 = base_0;
-            thumb_0.width = if self.style.thumb_size > base_0.width * body.width / cs.x {
-                self.style.thumb_size
+            thumb_0.width = if style.thumb_size > base_0.width * body.width / cs.x {
+                style.thumb_size
             } else {
                 base_0.width * body.width / cs.x
             };
@@ -743,13 +746,13 @@ impl Container {
         if self.scroll_enabled {
             self.scrollbars(&mut body);
         }
-        let style = self.style;
+        let style = self.style.as_ref();
         let padding = -style.padding;
         let scroll = self.scroll;
         self.layout.reset(expand_rect(body, padding), scroll);
-        self.layout.style = self.style.clone();
-        let font_height = self.atlas.get_font_height(self.style.font) as i32;
-        let vertical_pad = Self::vertical_text_padding(self.style.padding);
+        self.layout.style = (*self.style).clone();
+        let font_height = self.atlas.get_font_height(style.font) as i32;
+        let vertical_pad = Self::vertical_text_padding(style.padding);
         let icon_height = self.atlas.get_icon_size(EXPAND_DOWN_ICON).height;
         let default_height = max(font_height + vertical_pad * 2, icon_height);
         self.layout.set_default_cell_height(default_height);
@@ -774,6 +777,7 @@ impl Container {
         let rect = self.layout.next();
         let container = &mut panel.inner_mut();
         container.prepare();
+        container.style = self.style.clone();
 
         container.rect = rect;
         if !opt.has_no_frame() {
@@ -832,10 +836,10 @@ impl Container {
     pub fn next_cell(&mut self) -> Recti { self.layout.next() }
 
     /// Replaces the container's style.
-    pub fn set_style(&mut self, style: Style) { self.style = style; }
+    pub fn set_style(&mut self, style: Style) { self.style = Rc::new(style); }
 
     /// Returns a copy of the current style.
-    pub fn get_style(&self) -> Style { self.style.clone() }
+    pub fn get_style(&self) -> Style { (*self.style).clone() }
 
     /// Displays static text using the default text color.
     pub fn label(&mut self, text: &str) {
@@ -924,7 +928,7 @@ impl Container {
         text_rect.width = (text_rect.width - reserved_width).max(0);
         self.draw_control_text(label, text_rect, ControlColor::Text, state.opt);
         self.draw_widget_frame(id, indicator, ControlColor::Button, state.opt);
-        let icon_color = self.style.colors[ControlColor::Text as usize];
+        let icon_color = self.style.as_ref().colors[ControlColor::Text as usize];
         self.draw_icon(EXPAND_DOWN_ICON, indicator, icon_color);
 
         if popup_open {
@@ -1120,7 +1124,7 @@ mod tests {
     fn make_container() -> Container {
         let atlas = make_test_atlas();
         let input = Rc::new(RefCell::new(Input::default()));
-        let mut container = Container::new("test", atlas, &Style::default(), input);
+        let mut container = Container::new("test", atlas, Rc::new(Style::default()), input);
         container.in_hover_root = true;
         container.push_container_body(rect(0, 0, 100, 30), ContainerOption::NONE, WidgetBehaviourOption::NONE);
         container
