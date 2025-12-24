@@ -77,7 +77,7 @@ pub(crate) struct Window {
 
 impl Window {
     /// Creates a dialog window that starts closed.
-    pub fn dialog(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+    pub fn dialog(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.rect = initial_rect;
 
@@ -89,7 +89,7 @@ impl Window {
     }
 
     /// Creates a standard window that starts open.
-    pub fn window(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+    pub fn window(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.rect = initial_rect;
 
@@ -101,7 +101,7 @@ impl Window {
     }
 
     /// Creates a popup window that starts closed.
-    pub fn popup(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+    pub fn popup(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.rect = initial_rect;
 
@@ -133,10 +133,11 @@ impl Window {
             let mut tr: Recti = r;
             // Guard against a too-small title bar: enforce enough room for the font plus padding so
             // the title text/close button stay visible even if the style is set to zero.
-            let font_height = container.atlas.get_font_height(container.style.font) as i32;
-            let padding = container.style.padding.max(0);
+            let style = container.style.as_ref();
+            let font_height = container.atlas.get_font_height(style.font) as i32;
+            let padding = style.padding.max(0);
             let min_title_h = font_height + (padding / 2).max(1) * 2;
-            tr.height = container.style.title_height.max(min_title_h);
+            tr.height = style.title_height.max(min_title_h);
             container.draw_frame(tr, ControlColor::TitleBG);
 
             // TODO: Is this necessary?
@@ -150,7 +151,7 @@ impl Window {
                         tr,
                         &mut container.command_list,
                         &mut container.clip_stack,
-                        &container.style,
+                        style,
                         &container.atlas,
                         &mut container.focus,
                         &mut container.updated_focus,
@@ -172,7 +173,7 @@ impl Window {
                 let id = container.close_state.get_id();
                 let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
                 tr.width -= r.width;
-                let color = container.style.colors[ControlColor::TitleText as usize];
+                let color = style.colors[ControlColor::TitleText as usize];
                 container.draw_icon(CLOSE_ICON, r, color);
                 let control_state = (container.close_state.opt, container.close_state.bopt);
                 let control = container.update_control(id, r, &control_state);
@@ -182,7 +183,7 @@ impl Window {
                         r,
                         &mut container.command_list,
                         &mut container.clip_stack,
-                        &container.style,
+                        style,
                         &container.atlas,
                         &mut container.focus,
                         &mut container.updated_focus,
@@ -198,7 +199,7 @@ impl Window {
         }
         container.push_container_body(body, opt, bopt);
         if !opt.is_auto_sizing() {
-            let sz = container.style.title_height;
+            let sz = container.style.as_ref().title_height;
             let id_2 = container.resize_state.get_id();
             let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
             let control_state = (container.resize_state.opt, container.resize_state.bopt);
@@ -209,7 +210,7 @@ impl Window {
                     r_0,
                     &mut container.command_list,
                     &mut container.clip_stack,
-                    &container.style,
+                    container.style.as_ref(),
                     &container.atlas,
                     &mut container.focus,
                     &mut container.updated_focus,
@@ -258,15 +259,15 @@ impl Window {
 pub struct WindowHandle(Rc<RefCell<Window>>);
 
 impl WindowHandle {
-    pub(crate) fn window(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+    pub(crate) fn window(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         Self(Rc::new(RefCell::new(Window::window(name, atlas, style, input, initial_rect))))
     }
 
-    pub(crate) fn dialog(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+    pub(crate) fn dialog(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         Self(Rc::new(RefCell::new(Window::dialog(name, atlas, style, input, initial_rect))))
     }
 
-    pub(crate) fn popup(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>) -> Self {
+    pub(crate) fn popup(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>) -> Self {
         Self(Rc::new(RefCell::new(Window::popup(name, atlas, style, input, Recti::new(0, 0, 0, 0)))))
     }
 

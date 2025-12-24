@@ -849,7 +849,7 @@ impl ContainerHandle {
 /// Primary entry point used to drive the UI over a renderer implementation.
 pub struct Context<R: Renderer> {
     canvas: Canvas<R>,
-    style: Style,
+    style: Rc<Style>,
 
     last_zindex: i32,
     frame: usize,
@@ -868,7 +868,7 @@ impl<R: Renderer> Context<R> {
     pub fn new(renderer: RendererHandle<R>, dim: Dimensioni) -> Self {
         Self {
             canvas: Canvas::from(renderer, dim),
-            style: Style::default(),
+            style: Rc::new(Style::default()),
             last_zindex: 0,
             frame: 0,
             hover_root: None,
@@ -951,22 +951,22 @@ impl<R: Renderer> Context<R> {
 
     /// Creates a new movable window rooted at the provided rectangle.
     pub fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
-        let mut window = WindowHandle::window(name, self.canvas.get_atlas(), &self.style, self.input.clone(), initial_rect);
+        let mut window = WindowHandle::window(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone(), initial_rect);
         self.bring_to_front(&mut window);
         window
     }
 
     /// Creates a modal dialog window.
     pub fn new_dialog(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
-        WindowHandle::dialog(name, self.canvas.get_atlas(), &self.style, self.input.clone(), initial_rect)
+        WindowHandle::dialog(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone(), initial_rect)
     }
 
     /// Creates a popup window that appears under the mouse cursor.
-    pub fn new_popup(&mut self, name: &str) -> WindowHandle { WindowHandle::popup(name, self.canvas.get_atlas(), &self.style, self.input.clone()) }
+    pub fn new_popup(&mut self, name: &str) -> WindowHandle { WindowHandle::popup(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone()) }
 
     /// Creates a standalone panel that can be embedded inside other windows.
     pub fn new_panel(&mut self, name: &str) -> ContainerHandle {
-        ContainerHandle::new(Container::new(name, self.canvas.get_atlas(), &self.style, self.input.clone()))
+        ContainerHandle::new(Container::new(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone()))
     }
 
     /// Bumps the window's Z order so it renders above others.
@@ -1134,7 +1134,7 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Replaces the current UI style.
-    pub fn set_style(&mut self, style: &Style) { self.style = style.clone() }
+    pub fn set_style(&mut self, style: &Style) { self.style = Rc::new(style.clone()) }
 
     /// Returns the underlying canvas used for rendering.
     pub fn canvas(&self) -> &Canvas<R> { &self.canvas }
