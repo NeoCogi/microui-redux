@@ -76,6 +76,79 @@ pub struct CustomRenderArgs {
     pub text_input: String,
 }
 
+/// Shared context passed to widget handlers.
+pub struct WidgetCtx<'a> {
+    id: Id,
+    rect: Recti,
+    commands: &'a mut Vec<Command>,
+    clip_stack: &'a mut Vec<Recti>,
+    style: &'a Style,
+    atlas: &'a AtlasHandle,
+    focus: &'a mut Option<Id>,
+    updated_focus: &'a mut bool,
+}
+
+impl<'a> WidgetCtx<'a> {
+    /// Creates a widget context for the given widget ID and rectangle.
+    pub(crate) fn new(
+        id: Id,
+        rect: Recti,
+        commands: &'a mut Vec<Command>,
+        clip_stack: &'a mut Vec<Recti>,
+        style: &'a Style,
+        atlas: &'a AtlasHandle,
+        focus: &'a mut Option<Id>,
+        updated_focus: &'a mut bool,
+    ) -> Self {
+        Self {
+            id,
+            rect,
+            commands,
+            clip_stack,
+            style,
+            atlas,
+            focus,
+            updated_focus,
+        }
+    }
+
+    /// Returns the widget identifier.
+    pub fn id(&self) -> Id { self.id }
+
+    /// Returns the widget rectangle.
+    pub fn rect(&self) -> Recti { self.rect }
+
+    /// Sets focus to this widget for the current frame.
+    pub fn set_focus(&mut self) {
+        *self.focus = Some(self.id);
+        *self.updated_focus = true;
+    }
+
+    /// Clears focus from the current widget.
+    pub fn clear_focus(&mut self) {
+        *self.focus = None;
+        *self.updated_focus = true;
+    }
+
+    /// Pushes a new clip rectangle onto the stack.
+    pub fn push_clip_rect(&mut self, rect: Recti) {
+        let last = self.current_clip_rect();
+        self.clip_stack.push(rect.intersect(&last).unwrap_or_default());
+    }
+
+    /// Pops the current clip rectangle.
+    pub fn pop_clip_rect(&mut self) { self.clip_stack.pop(); }
+
+    /// Executes `f` with the provided clip rect applied.
+    pub fn with_clip<F: FnOnce(&mut Self)>(&mut self, rect: Recti, f: F) {
+        self.push_clip_rect(rect);
+        f(self);
+        self.pop_clip_rect();
+    }
+
+    fn current_clip_rect(&self) -> Recti { self.clip_stack.last().copied().unwrap_or(UNCLIPPED_RECT) }
+}
+
 /// Controls how text should wrap when rendered inside a container.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TextWrap {
