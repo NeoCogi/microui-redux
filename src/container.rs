@@ -511,39 +511,6 @@ pub struct Container {
     panels: Vec<ContainerHandle>,
 }
 
-/// Persistent state used by `combo_box` to track popup and selection.
-#[derive(Clone)]
-pub struct ComboState {
-    /// Popup window backing the dropdown list.
-    pub popup: WindowHandle,
-    /// Currently selected item index.
-    pub selected: usize,
-    /// Whether the combo popup should be open.
-    pub open: bool,
-    /// Widget options applied to the combo header.
-    pub opt: WidgetOption,
-    /// Behaviour options applied to the combo header.
-    pub bopt: WidgetBehaviourOption,
-}
-
-impl ComboState {
-    /// Creates a new combo state with the provided popup handle.
-    pub fn new(popup: WindowHandle) -> Self {
-        Self { popup, selected: 0, open: false, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
-    }
-
-    /// Creates a new combo state with explicit widget options.
-    pub fn with_opt(popup: WindowHandle, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self {
-        Self { popup, selected: 0, open: false, opt, bopt }
-    }
-}
-
-impl WidgetState for ComboState {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
-}
-
 impl Container {
     pub(crate) fn new(name: &str, atlas: AtlasHandle, style: &Style, input: Rc<RefCell<Input>>) -> Self {
         Self {
