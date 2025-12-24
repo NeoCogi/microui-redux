@@ -35,17 +35,17 @@ use crate::*;
 pub struct FileDialogState {
     current_working_directory: String,
     file_name: Option<String>,
-    tmp_file_name: TextboxState,
+    tmp_file_name: Textbox,
     selected_folder: Option<String>,
     win: WindowHandle,
     folder_panel: ContainerHandle,
     file_panel: ContainerHandle,
     folders: Vec<String>,
     files: Vec<String>,
-    folder_items: Vec<ListItemState>,
-    file_items: Vec<ListItemState>,
-    ok_button: ButtonState,
-    cancel_button: ButtonState,
+    folder_items: Vec<ListItem>,
+    file_items: Vec<ListItem>,
+    ok_button: Button,
+    cancel_button: Button,
 }
 
 impl FileDialogState {
@@ -101,7 +101,7 @@ impl FileDialogState {
             } else {
                 CLOSED_FOLDER_16_ICON
             };
-            let mut state = ListItemState::new(label);
+            let mut state = ListItem::new(label);
             state.icon = Some(icon);
             self.folder_items.push(state);
         }
@@ -109,7 +109,7 @@ impl FileDialogState {
         self.file_items.clear();
         self.file_items.reserve(self.files.len());
         for f in &self.files {
-            let mut state = ListItemState::new(f.as_str());
+            let mut state = ListItem::new(f.as_str());
             state.icon = Some(FILE_16_ICON);
             self.file_items.push(state);
         }
@@ -124,7 +124,7 @@ impl FileDialogState {
         let mut dialog = Self {
             current_working_directory,
             file_name: None,
-            tmp_file_name: TextboxState::new(""),
+            tmp_file_name: Textbox::new(""),
             selected_folder: None,
             win: ctx.new_dialog("File Dialog", Recti::new(50, 50, 500, 500)),
             folder_panel: ctx.new_panel("folders"),
@@ -133,8 +133,8 @@ impl FileDialogState {
             files: Vec::new(),
             folder_items: Vec::new(),
             file_items: Vec::new(),
-            ok_button: ButtonState::new("Ok"),
-            cancel_button: ButtonState::new("Cancel"),
+            ok_button: Button::new("Ok"),
+            cancel_button: Button::new("Cancel"),
         };
         dialog.refresh_entries();
         dialog

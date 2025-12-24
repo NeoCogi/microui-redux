@@ -7,7 +7,7 @@ use microui_redux::*;
 
 struct State {
     window: WindowHandle,
-    hello_button: ButtonState,
+    hello_button: Button,
 }
 
 fn main() {
@@ -15,7 +15,7 @@ fn main() {
     let atlas = atlas_assets::load_atlas(&slots);
     let mut fw = Application::new(atlas.clone(), move |_gl, ctx| State {
         window: ctx.new_window("Hello Window", rect(40, 40, 300, 450)),
-        hello_button: ButtonState::with_opt("Hello World!", WidgetOption::ALIGN_CENTER),
+        hello_button: Button::with_opt("Hello World!", WidgetOption::ALIGN_CENTER),
     })
     .unwrap();
 

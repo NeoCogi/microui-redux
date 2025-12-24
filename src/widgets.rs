@@ -208,7 +208,7 @@ impl NodeStateValue {
 
 #[derive(Clone)]
 /// Persistent state for headers and tree nodes.
-pub struct NodeState {
+pub struct Node {
     /// Label displayed for the node.
     pub label: String,
     /// Current expansion state.
@@ -219,7 +219,7 @@ pub struct NodeState {
     pub bopt: WidgetBehaviourOption,
 }
 
-impl NodeState {
+impl Node {
     /// Creates a node state with the default widget options.
     pub fn new(label: impl Into<String>, state: NodeStateValue) -> Self {
         Self { label: label.into(), state, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
@@ -237,7 +237,7 @@ impl NodeState {
     pub fn is_closed(&self) -> bool { self.state.is_closed() }
 }
 
-impl WidgetState for NodeState {
+impl Widget for Node {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
     fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -296,7 +296,7 @@ pub enum ButtonContent {
 
 #[derive(Clone)]
 /// Persistent state for button widgets.
-pub struct ButtonState {
+pub struct Button {
     /// Content rendered inside the button.
     pub content: ButtonContent,
     /// Widget options applied to the button.
@@ -307,7 +307,7 @@ pub struct ButtonState {
     pub fill: WidgetFillOption,
 }
 
-impl ButtonState {
+impl Button {
     /// Creates a text button with default options.
     pub fn new(label: impl Into<String>) -> Self {
         Self {
@@ -355,7 +355,7 @@ impl ButtonState {
     }
 }
 
-impl WidgetState for ButtonState {
+impl Widget for Button {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -402,7 +402,7 @@ impl WidgetState for ButtonState {
 
 #[derive(Clone)]
 /// Persistent state for list items.
-pub struct ListItemState {
+pub struct ListItem {
     /// Label displayed for the list item.
     pub label: String,
     /// Optional atlas icon rendered alongside the label.
@@ -413,7 +413,7 @@ pub struct ListItemState {
     pub bopt: WidgetBehaviourOption,
 }
 
-impl ListItemState {
+impl ListItem {
     /// Creates a list item with default widget options.
     pub fn new(label: impl Into<String>) -> Self {
         Self { label: label.into(), icon: None, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
@@ -435,7 +435,7 @@ impl ListItemState {
     }
 }
 
-impl WidgetState for ListItemState {
+impl Widget for ListItem {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -479,7 +479,7 @@ impl WidgetState for ListItemState {
 
 #[derive(Clone)]
 /// Persistent state for list boxes.
-pub struct ListBoxState {
+pub struct ListBox {
     /// Label displayed for the list box.
     pub label: String,
     /// Optional image rendered alongside the label.
@@ -490,7 +490,7 @@ pub struct ListBoxState {
     pub bopt: WidgetBehaviourOption,
 }
 
-impl ListBoxState {
+impl ListBox {
     /// Creates a list box with default widget options.
     pub fn new(label: impl Into<String>, image: Option<Image>) -> Self {
         Self { label: label.into(), image, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
@@ -502,7 +502,7 @@ impl ListBoxState {
     }
 }
 
-impl WidgetState for ListBoxState {
+impl Widget for ListBox {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -529,7 +529,7 @@ impl WidgetState for ListBoxState {
 
 #[derive(Clone)]
 /// Persistent state for checkbox widgets.
-pub struct CheckboxState {
+pub struct Checkbox {
     /// Label displayed for the checkbox.
     pub label: String,
     /// Current value of the checkbox.
@@ -540,7 +540,7 @@ pub struct CheckboxState {
     pub bopt: WidgetBehaviourOption,
 }
 
-impl CheckboxState {
+impl Checkbox {
     /// Creates a checkbox with default widget options.
     pub fn new(label: impl Into<String>, value: bool) -> Self {
         Self { label: label.into(), value, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
@@ -552,7 +552,7 @@ impl CheckboxState {
     }
 }
 
-impl WidgetState for CheckboxState {
+impl Widget for Checkbox {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -578,7 +578,7 @@ impl WidgetState for CheckboxState {
 
 #[derive(Clone)]
 /// Persistent state for textbox widgets.
-pub struct TextboxState {
+pub struct Textbox {
     /// Buffer edited by the textbox.
     pub buf: String,
     /// Current cursor position within the buffer (byte index).
@@ -589,7 +589,7 @@ pub struct TextboxState {
     pub bopt: WidgetBehaviourOption,
 }
 
-impl TextboxState {
+impl Textbox {
     /// Creates a textbox with default widget options.
     pub fn new(buf: impl Into<String>) -> Self {
         let buf = buf.into();
@@ -732,7 +732,7 @@ fn textbox_handle(
     res
 }
 
-impl WidgetState for TextboxState {
+impl Widget for Textbox {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -742,7 +742,7 @@ impl WidgetState for TextboxState {
 
 #[derive(Clone)]
 /// Persistent state for slider widgets.
-pub struct SliderState {
+pub struct Slider {
     /// Current slider value.
     pub value: Real,
     /// Lower bound of the slider range.
@@ -761,7 +761,7 @@ pub struct SliderState {
     pub edit: NumberEditState,
 }
 
-impl SliderState {
+impl Slider {
     /// Creates a slider with default widget options.
     pub fn new(value: Real, low: Real, high: Real) -> Self {
         Self {
@@ -822,7 +822,7 @@ fn number_textbox_handle(
     ResourceState::NONE
 }
 
-impl WidgetState for SliderState {
+impl Widget for Slider {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -876,7 +876,7 @@ impl WidgetState for SliderState {
 
 #[derive(Clone)]
 /// Persistent state for number input widgets.
-pub struct NumberState {
+pub struct Number {
     /// Current number value.
     pub value: Real,
     /// Step applied when dragging.
@@ -902,7 +902,7 @@ pub struct NumberEditState {
     pub cursor: usize,
 }
 
-impl NumberState {
+impl Number {
     /// Creates a number input with default widget options.
     pub fn new(value: Real, step: Real, precision: usize) -> Self {
         Self {
@@ -928,7 +928,7 @@ impl NumberState {
     }
 }
 
-impl WidgetState for NumberState {
+impl Widget for Number {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -956,7 +956,7 @@ impl WidgetState for NumberState {
 
 #[derive(Clone)]
 /// Persistent state for custom render widgets.
-pub struct CustomState {
+pub struct Custom {
     /// Label used for debugging or inspection.
     pub name: String,
     /// Widget options applied to the custom widget.
@@ -965,7 +965,7 @@ pub struct CustomState {
     pub bopt: WidgetBehaviourOption,
 }
 
-impl CustomState {
+impl Custom {
     /// Creates a custom widget state with default options.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
@@ -981,7 +981,7 @@ impl CustomState {
     }
 }
 
-impl WidgetState for CustomState {
+impl Widget for Custom {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
     fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
@@ -989,7 +989,7 @@ impl WidgetState for CustomState {
 
 #[derive(Clone)]
 /// Persistent state for internal window/container controls.
-pub struct InternalState {
+pub struct Internal {
     /// Stable tag describing the internal control.
     pub tag: &'static str,
     /// Widget options applied to the internal control.
@@ -998,7 +998,7 @@ pub struct InternalState {
     pub bopt: WidgetBehaviourOption,
 }
 
-impl InternalState {
+impl Internal {
     /// Creates an internal control state with a stable tag.
     pub fn new(tag: &'static str) -> Self {
         Self {
@@ -1009,7 +1009,7 @@ impl InternalState {
     }
 }
 
-impl WidgetState for InternalState {
+impl Widget for Internal {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
     fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
@@ -1017,7 +1017,7 @@ impl WidgetState for InternalState {
 
 /// Persistent state used by `combo_box` to track popup and selection.
 #[derive(Clone)]
-pub struct ComboState {
+pub struct Combo {
     /// Popup window backing the dropdown list.
     pub popup: WindowHandle,
     /// Currently selected item index.
@@ -1030,7 +1030,7 @@ pub struct ComboState {
     pub bopt: WidgetBehaviourOption,
 }
 
-impl ComboState {
+impl Combo {
     /// Creates a new combo state with the provided popup handle.
     pub fn new(popup: WindowHandle) -> Self {
         Self { popup, selected: 0, open: false, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
@@ -1042,7 +1042,7 @@ impl ComboState {
     }
 }
 
-impl WidgetState for ComboState {
+impl Widget for Combo {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
     fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }

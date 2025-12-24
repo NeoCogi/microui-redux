@@ -370,7 +370,7 @@ impl WidgetBehaviourOption {
 
 #[derive(Copy, Clone, Default, Debug)]
 /// Captures the interaction state for a widget during the current frame.
-/// Produced by `Container::update_control` and passed into `WidgetState::handle`.
+/// Produced by `Container::update_control` and passed into `Widget::handle`.
 pub struct ControlState {
     /// Cursor is hovering the widget.
     pub hovered: bool,
@@ -426,7 +426,7 @@ impl Default for InputSnapshot {
 /// Trait implemented by persistent widget state structures.
 /// `handle` is invoked with a `WidgetCtx` and precomputed `ControlState`.
 /// The default ID is derived from the state address, so the state must live at a stable address.
-pub trait WidgetState {
+pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
     /// Returns the behaviour options for this state.
@@ -437,7 +437,7 @@ pub trait WidgetState {
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
 }
 
-impl WidgetState for (WidgetOption, WidgetBehaviourOption) {
+impl Widget for (WidgetOption, WidgetBehaviourOption) {
     fn widget_opt(&self) -> &WidgetOption { &self.0 }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.1 }
     fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
