@@ -52,6 +52,9 @@ impl FileDialogState {
     /// Returns the selected file name if the dialog completed successfully.
     pub fn file_name(&self) -> &Option<String> { &self.file_name }
 
+    /// Returns `true` if the dialog window is currently open.
+    pub fn is_open(&self) -> bool { self.win.is_open() }
+
     fn list_folders_files(p: &Path, folders: &mut Vec<String>, files: &mut Vec<String>) {
         folders.clear();
         files.clear();
