@@ -85,6 +85,7 @@ pub struct WidgetCtx<'a> {
     atlas: &'a AtlasHandle,
     focus: &'a mut Option<Id>,
     updated_focus: &'a mut bool,
+    in_hover_root: bool,
     input: Option<InputSnapshot>,
 }
 
@@ -99,6 +100,7 @@ impl<'a> WidgetCtx<'a> {
         atlas: &'a AtlasHandle,
         focus: &'a mut Option<Id>,
         updated_focus: &'a mut bool,
+        in_hover_root: bool,
         input: Option<InputSnapshot>,
     ) -> Self {
         Self {
@@ -110,6 +112,7 @@ impl<'a> WidgetCtx<'a> {
             atlas,
             focus,
             updated_focus,
+            in_hover_root,
             input,
         }
     }
@@ -152,6 +155,180 @@ impl<'a> WidgetCtx<'a> {
     }
 
     fn current_clip_rect(&self) -> Recti { self.clip_stack.last().copied().unwrap_or(UNCLIPPED_RECT) }
+
+    pub(crate) fn style(&self) -> &Style { self.style }
+
+    pub(crate) fn atlas(&self) -> &AtlasHandle { self.atlas }
+
+    pub(crate) fn push_command(&mut self, cmd: Command) { self.commands.push(cmd); }
+
+    pub(crate) fn set_clip(&mut self, rect: Recti) { self.push_command(Command::Clip { rect }); }
+
+    pub(crate) fn check_clip(&self, r: Recti) -> Clip {
+        let cr = self.current_clip_rect();
+        if r.x > cr.x + cr.width || r.x + r.width < cr.x || r.y > cr.y + cr.height || r.y + r.height < cr.y {
+            return Clip::All;
+        }
+        if r.x >= cr.x && r.x + r.width <= cr.x + cr.width && r.y >= cr.y && r.y + r.height <= cr.y + cr.height {
+            return Clip::None;
+        }
+        Clip::Part
+    }
+
+    pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
+        let rect = rect.intersect(&self.current_clip_rect()).unwrap_or_default();
+        if rect.width > 0 && rect.height > 0 {
+            self.push_command(Command::Recti { rect, color });
+        }
+    }
+
+    pub(crate) fn draw_box(&mut self, r: Recti, color: Color) {
+        self.draw_rect(rect(r.x + 1, r.y, r.width - 2, 1), color);
+        self.draw_rect(rect(r.x + 1, r.y + r.height - 1, r.width - 2, 1), color);
+        self.draw_rect(rect(r.x, r.y, 1, r.height), color);
+        self.draw_rect(rect(r.x + r.width - 1, r.y, 1, r.height), color);
+    }
+
+    pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
+        let tsize = self.atlas.get_text_size(font, text);
+        let rect = rect(pos.x, pos.y, tsize.width, tsize.height);
+        let clipped = self.check_clip(rect);
+        match clipped {
+            Clip::All => return,
+            Clip::Part => {
+                let clip = self.current_clip_rect();
+                self.set_clip(clip)
+            }
+            _ => (),
+        }
+
+        self.push_command(Command::Text {
+            text: String::from(text),
+            pos,
+            color,
+            font,
+        });
+        if clipped != Clip::None {
+            self.set_clip(UNCLIPPED_RECT);
+        }
+    }
+
+    pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
+        let clipped = self.check_clip(rect);
+        match clipped {
+            Clip::All => return,
+            Clip::Part => {
+                let clip = self.current_clip_rect();
+                self.set_clip(clip)
+            }
+            _ => (),
+        }
+        self.push_command(Command::Icon { id, rect, color });
+        if clipped != Clip::None {
+            self.set_clip(UNCLIPPED_RECT);
+        }
+    }
+
+    pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
+        let clipped = self.check_clip(rect);
+        match clipped {
+            Clip::All => return,
+            Clip::Part => {
+                let clip = self.current_clip_rect();
+                self.set_clip(clip)
+            }
+            _ => (),
+        }
+        self.push_command(Command::Image { image, rect, color });
+        if clipped != Clip::None {
+            self.set_clip(UNCLIPPED_RECT);
+        }
+    }
+
+    pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
+        let clipped = self.check_clip(rect);
+        match clipped {
+            Clip::All => return,
+            Clip::Part => {
+                let clip = self.current_clip_rect();
+                self.set_clip(clip)
+            }
+            _ => (),
+        }
+        self.push_command(Command::SlotRedraw { id, rect, color, payload: f });
+        if clipped != Clip::None {
+            self.set_clip(UNCLIPPED_RECT);
+        }
+    }
+
+    pub(crate) fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
+        let color = self.style.colors[colorid as usize];
+        self.draw_rect(rect, color);
+        if colorid == ControlColor::ScrollBase || colorid == ControlColor::ScrollThumb || colorid == ControlColor::TitleBG {
+            return;
+        }
+        let border_color = self.style.colors[ControlColor::Border as usize];
+        if border_color.a != 0 {
+            self.draw_box(expand_rect(rect, 1), border_color);
+        }
+    }
+
+    pub(crate) fn draw_widget_frame(&mut self, control: &ControlState, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
+        if opt.has_no_frame() {
+            return;
+        }
+        if control.focused {
+            colorid.focus()
+        } else if control.hovered {
+            colorid.hover()
+        }
+        self.draw_frame(rect, colorid);
+    }
+
+    pub(crate) fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        let mut pos = Vec2i { x: 0, y: 0 };
+        let font = self.style.font;
+        let tsize = self.atlas.get_text_size(font, text);
+        let padding = self.style.padding;
+        let color = self.style.colors[colorid as usize];
+        let line_height = self.atlas.get_font_height(font) as i32;
+        let baseline = self.atlas.get_font_baseline(font);
+
+        self.push_clip_rect(rect);
+        pos.y = Self::baseline_aligned_top(rect, line_height, baseline);
+        if opt.is_aligned_center() {
+            pos.x = rect.x + (rect.width - tsize.width) / 2;
+        } else if opt.is_aligned_right() {
+            pos.x = rect.x + rect.width - tsize.width - padding;
+        } else {
+            pos.x = rect.x + padding;
+        }
+        self.draw_text(font, text, pos, color);
+        self.pop_clip_rect();
+    }
+
+    fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32) -> i32 {
+        if rect.height >= line_height {
+            return rect.y + (rect.height - line_height) / 2;
+        }
+
+        let baseline_center = rect.y + rect.height / 2;
+        let min_top = rect.y + rect.height - line_height;
+        let max_top = rect.y;
+        Container::clamp(baseline_center - baseline, min_top, max_top)
+    }
+
+    pub(crate) fn mouse_over(&self, rect: Recti) -> bool {
+        let input = match self.input.as_ref() {
+            Some(input) => input,
+            None => return false,
+        };
+        if !self.in_hover_root {
+            return false;
+        }
+        let clip_rect = self.current_clip_rect();
+        rect.contains(&input.mouse_pos) && clip_rect.contains(&input.mouse_pos)
+    }
 }
 
 /// Controls how text should wrap when rendered inside a container.
@@ -598,22 +775,6 @@ impl Container {
         self.draw_frame(rect, colorid);
     }
 
-    fn widget_fill_color(&self, id: Id, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
-        if self.focus == Some(id) && fill.fill_click() {
-            let mut color = base;
-            color.focus();
-            Some(color)
-        } else if self.hover == Some(id) && fill.fill_hover() {
-            let mut color = base;
-            color.hover();
-            Some(color)
-        } else if fill.fill_normal() {
-            Some(base)
-        } else {
-            None
-        }
-    }
-
     /// Draws a container frame, skipping rendering when the option disables it.
     pub fn draw_container_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, opt: ContainerOption) {
         if opt.has_no_frame() {
@@ -723,6 +884,36 @@ impl Container {
         }
     }
 
+    fn snapshot_input(&self) -> InputSnapshot {
+        let input = self.input.borrow();
+        InputSnapshot {
+            mouse_pos: input.mouse_pos,
+            mouse_delta: input.mouse_delta,
+            mouse_down: input.mouse_down,
+            mouse_pressed: input.mouse_pressed,
+            key_mods: input.key_down,
+            key_pressed: input.key_pressed,
+            key_codes: input.key_code_down,
+            key_code_pressed: input.key_code_pressed,
+            text_input: input.input_text.clone(),
+        }
+    }
+
+    pub(crate) fn widget_ctx(&mut self, id: Id, rect: Recti, input: Option<InputSnapshot>) -> WidgetCtx<'_> {
+        WidgetCtx::new(
+            id,
+            rect,
+            &mut self.command_list,
+            &mut self.clip_stack,
+            &self.style,
+            &self.atlas,
+            &mut self.focus,
+            &mut self.updated_focus,
+            self.in_hover_root,
+            input,
+        )
+    }
+
     /// Resets transient per-frame state after widgets have been processed.
     pub fn finish(&mut self) {
         if !self.updated_focus {
@@ -736,14 +927,12 @@ impl Container {
         let id: Id = state.get_id();
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let mut r = self.layout.next();
+        let node_rect = r;
         let opt = state.opt;
-        let _ = self.update_control(id, r, state);
-
+        let control = self.update_control(id, r, state);
         let expanded = state.state.is_expanded();
-        let active = expanded ^ (self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id));
-
         if is_treenode {
-            if self.hover == Some(id) {
+            if control.hovered {
                 self.draw_frame(r, ControlColor::ButtonHover);
             }
         } else {
@@ -754,9 +943,11 @@ impl Container {
         r.x += r.height - self.style.padding;
         r.width -= r.height - self.style.padding;
         self.draw_control_text(state.label.as_str(), r, ControlColor::Text, opt);
-        let new_state = if active { NodeStateValue::Expanded } else { NodeStateValue::Closed };
-        state.state = new_state;
-        new_state
+        {
+            let mut ctx = self.widget_ctx(id, node_rect, None);
+            let _ = state.handle(&mut ctx, &control);
+        }
+        state.state
     }
 
     /// Builds a collapsible header row that executes `f` when expanded.
@@ -858,9 +1049,24 @@ impl Container {
             let mut base = body;
             base.x = body.x + body.width;
             base.width = self.style.scrollbar_size;
-            let scroll_state = (self.scrollbar_y_state.opt, self.scrollbar_y_state.bopt);
-            let _ = self.update_control(id, base, &scroll_state);
-            if self.focus == Some(id) && self.input.borrow().mouse_down.is_left() {
+            let control_state = (self.scrollbar_y_state.opt, self.scrollbar_y_state.bopt);
+            let control = self.update_control(id, base, &control_state);
+            {
+                let mut ctx = WidgetCtx::new(
+                    id,
+                    base,
+                    &mut self.command_list,
+                    &mut self.clip_stack,
+                    &self.style,
+                    &self.atlas,
+                    &mut self.focus,
+                    &mut self.updated_focus,
+                    self.in_hover_root,
+                    None,
+                );
+                let _ = self.scrollbar_y_state.handle(&mut ctx, &control);
+            }
+            if control.active {
                 self.scroll.y += self.input.borrow().mouse_delta.y * cs.y / base.height;
             }
 
@@ -883,9 +1089,24 @@ impl Container {
             let mut base_0 = body;
             base_0.y = body.y + body.height;
             base_0.height = self.style.scrollbar_size;
-            let scroll_state = (self.scrollbar_x_state.opt, self.scrollbar_x_state.bopt);
-            let _ = self.update_control(id_0, base_0, &scroll_state);
-            if self.focus == Some(id_0) && self.input.borrow().mouse_down.is_left() {
+            let control_state = (self.scrollbar_x_state.opt, self.scrollbar_x_state.bopt);
+            let control = self.update_control(id_0, base_0, &control_state);
+            {
+                let mut ctx = WidgetCtx::new(
+                    id_0,
+                    base_0,
+                    &mut self.command_list,
+                    &mut self.clip_stack,
+                    &self.style,
+                    &self.atlas,
+                    &mut self.focus,
+                    &mut self.updated_focus,
+                    self.in_hover_root,
+                    None,
+                );
+                let _ = self.scrollbar_x_state.handle(&mut ctx, &control);
+            }
+            if control.active {
                 self.scroll.x += self.input.borrow().mouse_delta.x * cs.x / base_0.width;
             }
 
@@ -1015,46 +1236,11 @@ impl Container {
     #[inline(never)]
     /// Draws a button using the provided persistent state.
     pub fn button(&mut self, state: &mut ButtonState) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let id: Id = state.get_id();
-        let r: Recti = self.layout.next();
-        let _ = self.update_control(id, r, state);
-        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
-            res |= ResourceState::SUBMIT;
-        }
-        if !state.opt.has_no_frame() {
-            if let Some(colorid) = self.widget_fill_color(id, ControlColor::Button, state.fill) {
-                self.draw_frame(r, colorid);
-            }
-        }
-        match &state.content {
-            ButtonContent::Text { label, icon } => {
-                if !label.is_empty() {
-                    self.draw_control_text(label, r, ControlColor::Text, state.opt);
-                }
-                if let Some(icon) = icon {
-                    let color = self.style.colors[ControlColor::Text as usize];
-                    self.draw_icon(*icon, r, color);
-                }
-            }
-            ButtonContent::Image { label, image } => {
-                if !label.is_empty() {
-                    self.draw_control_text(label, r, ControlColor::Text, state.opt);
-                }
-                if let Some(image) = *image {
-                    let color = self.style.colors[ControlColor::Text as usize];
-                    self.push_image(image, r, color);
-                }
-            }
-            ButtonContent::Slot { label, slot, paint } => {
-                if !label.is_empty() {
-                    self.draw_control_text(label, r, ControlColor::Text, state.opt);
-                }
-                let color = self.style.colors[ControlColor::Text as usize];
-                self.draw_slot_with_function(*slot, r, color, paint.clone());
-            }
-        }
-        res
+        let id = state.get_id();
+        let rect = self.layout.next();
+        let control = self.update_control(id, rect, state);
+        let mut ctx = self.widget_ctx(id, rect, None);
+        state.handle(&mut ctx, &control)
     }
 
     #[inline(never)]
@@ -1067,68 +1253,21 @@ impl Container {
 
     /// Renders a list entry that only highlights while hovered or active.
     pub fn list_item(&mut self, state: &mut ListItemState) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let id: Id = state.get_id();
-        let item_rect = self.layout.next();
-        let _ = self.update_control(id, item_rect, state);
-        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
-            res |= ResourceState::SUBMIT;
-        }
-
-        if self.focus == Some(id) || self.hover == Some(id) {
-            let mut color = ControlColor::Button;
-            if self.focus == Some(id) {
-                color.focus();
-            } else {
-                color.hover();
-            }
-            let fill = self.style.colors[color as usize];
-            self.draw_rect(item_rect, fill);
-        }
-
-        let mut text_rect = item_rect;
-        if let Some(icon) = state.icon {
-            let padding = self.style.padding.max(0);
-            let icon_size = self.atlas.get_icon_size(icon);
-            let icon_x = item_rect.x + padding;
-            let icon_y = item_rect.y + ((item_rect.height - icon_size.height) / 2).max(0);
-            let icon_rect = rect(icon_x, icon_y, icon_size.width, icon_size.height);
-            let consumed = icon_size.width + padding * 2;
-            text_rect.x += consumed;
-            text_rect.width = (text_rect.width - consumed).max(0);
-            let color = self.style.colors[ControlColor::Text as usize];
-            self.draw_icon(icon, icon_rect, color);
-        }
-
-        if !state.label.is_empty() {
-            self.draw_control_text(&state.label, text_rect, ControlColor::Text, state.opt);
-        }
-        res
+        let id = state.get_id();
+        let rect = self.layout.next();
+        let control = self.update_control(id, rect, state);
+        let mut ctx = self.widget_ctx(id, rect, None);
+        state.handle(&mut ctx, &control)
     }
 
     #[inline(never)]
     /// Shim for list boxes that only fills on hover or click.
     pub fn list_box(&mut self, state: &mut ListBoxState) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let id: Id = state.get_id();
-        let r: Recti = self.layout.next();
-        let _ = self.update_control(id, r, state);
-        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
-            res |= ResourceState::SUBMIT;
-        }
-        if !state.opt.has_no_frame() {
-            if let Some(colorid) = self.widget_fill_color(id, ControlColor::Button, WidgetFillOption::HOVER | WidgetFillOption::CLICK) {
-                self.draw_frame(r, colorid);
-            }
-        }
-        if !state.label.is_empty() {
-            self.draw_control_text(&state.label, r, ControlColor::Text, state.opt);
-        }
-        if let Some(image) = state.image {
-            let color = self.style.colors[ControlColor::Text as usize];
-            self.push_image(image, r, color);
-        }
-        res
+        let id = state.get_id();
+        let rect = self.layout.next();
+        let control = self.update_control(id, rect, state);
+        let mut ctx = self.widget_ctx(id, rect, None);
+        state.handle(&mut ctx, &control)
     }
 
     #[inline(never)]
@@ -1149,9 +1288,13 @@ impl Container {
 
         let id: Id = state.get_id();
         let header: Recti = self.layout.next();
-        let _ = self.update_control(id, header, state);
+        let control = self.update_control(id, header, state);
+        {
+            let mut ctx = self.widget_ctx(id, header, None);
+            let _ = state.handle(&mut ctx, &control);
+        }
 
-        let header_clicked = self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id);
+        let header_clicked = control.clicked;
         let popup_open = state.popup.is_open();
 
         // Toggle the popup when the header is clicked.
@@ -1205,23 +1348,11 @@ impl Container {
     #[inline(never)]
     /// Draws a checkbox labeled with `label` and toggles `state` when clicked.
     pub fn checkbox(&mut self, state: &mut CheckboxState) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let id: Id = state.get_id();
-        let mut r: Recti = self.layout.next();
-        let box_0: Recti = rect(r.x, r.y, r.height, r.height);
-        let _ = self.update_control(id, r, state);
-        if self.input.borrow().mouse_pressed.is_left() && self.focus == Some(id) {
-            res |= ResourceState::CHANGE;
-            state.value = !state.value;
-        }
-        self.draw_widget_frame(id, box_0, ControlColor::Base, state.opt);
-        if state.value {
-            let color = self.style.colors[ControlColor::Text as usize];
-            self.draw_icon(CHECK_ICON, box_0, color);
-        }
-        r = rect(r.x + box_0.width, r.y, r.width - box_0.width, r.height);
-        self.draw_control_text(&state.label, r, ControlColor::Text, state.opt);
-        return res;
+        let id = state.get_id();
+        let rect = self.layout.next();
+        let control = self.update_control(id, rect, state);
+        let mut ctx = self.widget_ctx(id, rect, None);
+        state.handle(&mut ctx, &control)
     }
 
     #[inline(never)]
@@ -1259,6 +1390,10 @@ impl Container {
         let id: Id = state.get_id();
         let rect: Recti = self.layout.next();
         let control = self.update_control(id, rect, state);
+        {
+            let mut ctx = self.widget_ctx(id, rect, None);
+            let _ = state.handle(&mut ctx, &control);
+        }
 
         let mouse_event = self.input_to_mouse_event(id, &rect);
 
@@ -1282,283 +1417,52 @@ impl Container {
         self.command_list.push(Command::CustomRender(cra, Box::new(f)));
     }
 
-    #[inline(never)]
-    /// Internal textbox helper operating on a fixed rectangle.
-    fn textbox_raw_with_id(
-        &mut self,
-        buf: &mut String,
-        cursor: &mut usize,
-        id: Id,
-        r: Recti,
-        opt: WidgetOption,
-        bopt: WidgetBehaviourOption,
-    ) -> ResourceState {
-        // Track submit/change flags and keep the widget focused while active.
-        let mut res = ResourceState::NONE;
-        let control_state = (opt | WidgetOption::HOLD_FOCUS, bopt);
-        let _ = self.update_control(id, r, &control_state);
-
-        // Cursor position is stored per textbox so we can edit at arbitrary positions.
-        if self.focus != Some(id) {
-            *cursor = buf.len();
-        }
-        let mut cursor_pos = (*cursor).min(buf.len());
-
-        // Snapshot the current frame's input so we only borrow the RefCell once.
-        let input_text = { self.input.borrow().input_text.clone() };
-        let (key_pressed, key_codes, mouse_pressed, mouse_pos) = {
-            let input = self.input.borrow();
-            (input.key_pressed, input.key_code_pressed, input.mouse_pressed, input.mouse_pos)
-        };
-
-        if self.focus == Some(id) {
-            // Insert any typed characters at the cursor position.
-            if !input_text.is_empty() {
-                let insert_at = cursor_pos.min(buf.len());
-                buf.insert_str(insert_at, input_text.as_str());
-                cursor_pos = insert_at + input_text.len();
-                res |= ResourceState::CHANGE;
-            }
-
-            // Handle backspace, making sure we don't cut UTF-8 graphemes in half.
-            if key_pressed.is_backspace() && cursor_pos > 0 && !buf.is_empty() {
-                let mut new_cursor = cursor_pos.min(buf.len());
-                new_cursor -= 1;
-                while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
-                    new_cursor -= 1;
-                }
-                buf.replace_range(new_cursor..cursor_pos, "");
-                cursor_pos = new_cursor;
-                res |= ResourceState::CHANGE;
-            }
-
-            // Left/right arrows move by grapheme.
-            if key_codes.is_left() && cursor_pos > 0 {
-                let mut new_cursor = cursor_pos - 1;
-                while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
-                    new_cursor -= 1;
-                }
-                cursor_pos = new_cursor;
-            }
-
-            if key_codes.is_right() && cursor_pos < buf.len() {
-                let mut new_cursor = cursor_pos + 1;
-                while new_cursor < buf.len() && !buf.is_char_boundary(new_cursor) {
-                    new_cursor += 1;
-                }
-                cursor_pos = new_cursor;
-            }
-
-            if key_pressed.is_return() {
-                self.set_focus(None);
-                res |= ResourceState::SUBMIT;
-            }
-        }
-
-        self.draw_widget_frame(id, r, ControlColor::Base, opt);
-
-        let font = self.style.font;
-        let line_height = self.atlas.get_font_height(font) as i32;
-        let baseline = self.atlas.get_font_baseline(font);
-        let descent = (line_height - baseline).max(0);
-
-        // Center the line height around the cell midpoint. This ensures the baseline sits in the
-        // middle (unless the cell is shorter than the font metrics, in which case we clamp).
-        let mut texty = r.y + r.height / 2 - line_height / 2;
-        if texty < r.y {
-            texty = r.y;
-        }
-        let max_texty = (r.y + r.height - line_height).max(r.y);
-        if texty > max_texty {
-            texty = max_texty;
-        }
-        let baseline_y = texty + line_height - descent;
-
-        // // Debug overlay: green = cell, red = baseline, blue = line-height box.
-        // self.draw_box(r, color(0, 255, 0, 64));
-        // self.draw_rect(rect(r.x, baseline_y, r.width, 1), color(255, 0, 0, 255));
-        // println!("rect: {:?} - baseline {}", r, baseline_y);
-        // self.draw_box(rect(r.x, texty, r.width, line_height), color(0, 0, 255, 64));
-
-        let text_metrics = self.atlas.get_text_size(font, buf.as_str());
-        let padding = self.style.padding;
-        let ofx = r.width - padding - text_metrics.width - 1;
-        let textx = r.x + if ofx < padding { ofx } else { padding };
-
-        if self.focus == Some(id) && mouse_pressed.is_left() && self.mouse_over(r, self.in_hover_root) {
-            let click_x = mouse_pos.x - textx;
-            if click_x <= 0 {
-                cursor_pos = 0;
-            } else {
-                let mut last_width = 0;
-                let mut new_cursor = buf.len();
-                for (idx, ch) in buf.char_indices() {
-                    let next = idx + ch.len_utf8();
-                    let width = self.atlas.get_text_size(font, &buf[..next]).width;
-                    if click_x < width {
-                        if click_x < (last_width + width) / 2 {
-                            new_cursor = idx;
-                        } else {
-                            new_cursor = next;
-                        }
-                        break;
-                    }
-                    last_width = width;
-                }
-                cursor_pos = new_cursor.min(buf.len());
-            }
-        }
-
-        cursor_pos = cursor_pos.min(buf.len());
-        *cursor = cursor_pos;
-
-        let caret_offset = if cursor_pos == 0 {
-            0
-        } else {
-            self.atlas.get_text_size(font, &buf[..cursor_pos]).width
-        };
-
-        if self.focus == Some(id) {
-            let color = self.style.colors[ControlColor::Text as usize];
-            self.push_clip_rect(r);
-            // Render text at the top of the content area. The baseline is `texty + baseline`.
-            self.draw_text(font, buf.as_str(), vec2(textx, texty), color);
-            let caret_top = (baseline_y - baseline + 2).max(r.y).min(r.y + r.height);
-            let caret_bottom = (baseline_y + descent - 2).max(r.y).min(r.y + r.height);
-            let caret_height = (caret_bottom - caret_top).max(1);
-            self.draw_rect(rect(textx + caret_offset, caret_top, 1, caret_height), color);
-            self.pop_clip_rect();
-        } else {
-            self.draw_control_text(buf.as_str(), r, ControlColor::Text, opt);
-        }
-        res
-    }
-
     /// Draws a textbox in the provided rectangle using the supplied state.
     pub fn textbox_raw(&mut self, state: &mut TextboxState, r: Recti) -> ResourceState {
         let id = state.get_id();
-        self.textbox_raw_with_id(&mut state.buf, &mut state.cursor, id, r, state.opt, state.bopt)
-    }
-
-    #[inline(never)]
-    fn number_textbox(
-        &mut self,
-        edit: &mut NumberEditState,
-        precision: usize,
-        value: &mut Real,
-        r: Recti,
-        id: Id,
-    ) -> ResourceState {
-        let start_edit = {
-            let input = self.input.borrow();
-            input.mouse_pressed.is_left() && input.key_state().is_shift() && self.hover == Some(id)
-        };
-
-        if start_edit {
-            edit.editing = true;
-            edit.buf.clear();
-            edit.buf.push_str(format!("{:.*}", precision, value).as_str());
-            edit.cursor = edit.buf.len();
-        }
-
-        if edit.editing {
-            let mut temp = edit.buf.clone();
-            let mut cursor = edit.cursor;
-            let res =
-                self.textbox_raw_with_id(&mut temp, &mut cursor, id, r, WidgetOption::NONE, WidgetBehaviourOption::NONE);
-            edit.cursor = cursor;
-            edit.buf = temp;
-            if res.is_submitted() || self.focus != Some(id) {
-                if let Ok(v) = edit.buf.parse::<f32>() {
-                    *value = v as Real;
-                }
-                edit.editing = false;
-                edit.cursor = 0;
-            } else {
-                return ResourceState::ACTIVE;
-            }
-        }
-        ResourceState::NONE
+        let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.bopt);
+        let control = self.update_control(id, r, &control_state);
+        let input = self.snapshot_input();
+        let mut ctx = self.widget_ctx(id, r, Some(input));
+        state.handle(&mut ctx, &control)
     }
 
     /// Draws a textbox using the next available layout cell.
     pub fn textbox_ex(&mut self, state: &mut TextboxState) -> ResourceState {
         let r: Recti = self.layout.next();
-        return self.textbox_raw(state, r);
+        self.textbox_raw(state, r)
     }
 
     #[inline(never)]
     /// Draws a horizontal slider bound to `state`.
     pub fn slider_ex(&mut self, state: &mut SliderState) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let last = state.value;
-        let mut v = last;
         let id = state.get_id();
-        let base = self.layout.next();
-        if !self.number_textbox(&mut state.edit, state.precision, &mut v, base, id).is_none() {
-            return res;
+        let rect = self.layout.next();
+        let mut opt = state.opt;
+        if state.edit.editing {
+            opt |= WidgetOption::HOLD_FOCUS;
         }
-        let control = self.update_control(id, base, state);
-        if let Some(delta) = control.scroll_delta {
-            let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
-            if wheel != 0 {
-                let step_amount = if state.step != 0. { state.step } else { (state.high - state.low) / 100.0 };
-                v += wheel as Real * step_amount;
-                if state.step != 0. {
-                    v = (v + state.step / 2 as Real) / state.step * state.step;
-                }
-            }
-        }
-        if self.focus == Some(id) && (!self.input.borrow().mouse_down.is_none() | self.input.borrow().mouse_pressed.is_left()) {
-            v = state.low + (self.input.borrow().mouse_pos.x - base.x) as Real * (state.high - state.low) / base.width as Real;
-            if state.step != 0. {
-                v = (v + state.step / 2 as Real) / state.step * state.step;
-            }
-        }
-        v = if state.high < (if state.low > v { state.low } else { v }) {
-            state.high
-        } else if state.low > v {
-            state.low
-        } else {
-            v
-        };
-        state.value = v;
-        if last != v {
-            res |= ResourceState::CHANGE;
-        }
-        self.draw_widget_frame(id, base, ControlColor::Base, state.opt);
-        let w = self.style.thumb_size;
-        let x = ((v - state.low) * (base.width - w) as Real / (state.high - state.low)) as i32;
-        let thumb = rect(base.x + x, base.y, w, base.height);
-        self.draw_widget_frame(id, thumb, ControlColor::Button, state.opt);
-        let mut buff = String::new();
-        buff.push_str(format!("{:.*}", state.precision, state.value).as_str());
-        self.draw_control_text(buff.as_str(), base, ControlColor::Text, state.opt);
-        return res;
+        let control_state = (opt, state.bopt);
+        let control = self.update_control(id, rect, &control_state);
+        let input = self.snapshot_input();
+        let mut ctx = self.widget_ctx(id, rect, Some(input));
+        state.handle(&mut ctx, &control)
     }
 
     #[inline(never)]
     /// Draws a numeric input that can be edited via keyboard or by dragging.
     pub fn number_ex(&mut self, state: &mut NumberState) -> ResourceState {
-        let mut res = ResourceState::NONE;
-        let id: Id = state.get_id();
-        let base: Recti = self.layout.next();
-        let last: Real = state.value;
-        if !self.number_textbox(&mut state.edit, state.precision, &mut state.value, base, id).is_none() {
-            return res;
+        let id = state.get_id();
+        let rect = self.layout.next();
+        let mut opt = state.opt;
+        if state.edit.editing {
+            opt |= WidgetOption::HOLD_FOCUS;
         }
-        let _ = self.update_control(id, base, state);
-        if self.focus == Some(id) && self.input.borrow().mouse_down.is_left() {
-            state.value += self.input.borrow().mouse_delta.x as Real * state.step;
-        }
-        if state.value != last {
-            res |= ResourceState::CHANGE;
-        }
-        self.draw_widget_frame(id, base, ControlColor::Base, state.opt);
-        let mut buff = String::new();
-        buff.push_str(format!("{:.*}", state.precision, state.value).as_str());
-        self.draw_control_text(buff.as_str(), base, ControlColor::Text, state.opt);
-        return res;
+        let control_state = (opt, state.bopt);
+        let control = self.update_control(id, rect, &control_state);
+        let input = self.snapshot_input();
+        let mut ctx = self.widget_ctx(id, rect, Some(input));
+        state.handle(&mut ctx, &control)
     }
 }
 
