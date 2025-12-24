@@ -75,96 +75,41 @@ pub struct CustomRenderArgs {
     pub text_input: String,
 }
 
-/// Shared context passed to widget handlers.
-pub struct WidgetCtx<'a> {
-    id: Id,
-    rect: Recti,
+struct DrawCtx<'a> {
     commands: &'a mut Vec<Command>,
     clip_stack: &'a mut Vec<Recti>,
     style: &'a Style,
     atlas: &'a AtlasHandle,
-    focus: &'a mut Option<Id>,
-    updated_focus: &'a mut bool,
-    in_hover_root: bool,
-    input: Option<InputSnapshot>,
 }
 
-impl<'a> WidgetCtx<'a> {
-    /// Creates a widget context for the given widget ID and rectangle.
-    pub(crate) fn new(
-        id: Id,
-        rect: Recti,
-        commands: &'a mut Vec<Command>,
-        clip_stack: &'a mut Vec<Recti>,
-        style: &'a Style,
-        atlas: &'a AtlasHandle,
-        focus: &'a mut Option<Id>,
-        updated_focus: &'a mut bool,
-        in_hover_root: bool,
-        input: Option<InputSnapshot>,
-    ) -> Self {
+impl<'a> DrawCtx<'a> {
+    fn new(commands: &'a mut Vec<Command>, clip_stack: &'a mut Vec<Recti>, style: &'a Style, atlas: &'a AtlasHandle) -> Self {
         Self {
-            id,
-            rect,
             commands,
             clip_stack,
             style,
             atlas,
-            focus,
-            updated_focus,
-            in_hover_root,
-            input,
         }
     }
 
-    /// Returns the widget identifier.
-    pub fn id(&self) -> Id { self.id }
+    fn style(&self) -> &Style { self.style }
 
-    /// Returns the widget rectangle.
-    pub fn rect(&self) -> Recti { self.rect }
+    fn atlas(&self) -> &AtlasHandle { self.atlas }
 
-    /// Returns the input snapshot for this widget, if provided.
-    pub fn input(&self) -> Option<&InputSnapshot> { self.input.as_ref() }
+    fn current_clip_rect(&self) -> Recti { self.clip_stack.last().copied().unwrap_or(UNCLIPPED_RECT) }
 
-    /// Sets focus to this widget for the current frame.
-    pub fn set_focus(&mut self) {
-        *self.focus = Some(self.id);
-        *self.updated_focus = true;
-    }
-
-    /// Clears focus from the current widget.
-    pub fn clear_focus(&mut self) {
-        *self.focus = None;
-        *self.updated_focus = true;
-    }
-
-    /// Pushes a new clip rectangle onto the stack.
-    pub fn push_clip_rect(&mut self, rect: Recti) {
+    fn push_clip_rect(&mut self, rect: Recti) {
         let last = self.current_clip_rect();
         self.clip_stack.push(rect.intersect(&last).unwrap_or_default());
     }
 
-    /// Pops the current clip rectangle.
-    pub fn pop_clip_rect(&mut self) { self.clip_stack.pop(); }
+    fn pop_clip_rect(&mut self) { self.clip_stack.pop(); }
 
-    /// Executes `f` with the provided clip rect applied.
-    pub fn with_clip<F: FnOnce(&mut Self)>(&mut self, rect: Recti, f: F) {
-        self.push_clip_rect(rect);
-        f(self);
-        self.pop_clip_rect();
-    }
+    fn push_command(&mut self, cmd: Command) { self.commands.push(cmd); }
 
-    fn current_clip_rect(&self) -> Recti { self.clip_stack.last().copied().unwrap_or(UNCLIPPED_RECT) }
+    fn set_clip(&mut self, rect: Recti) { self.push_command(Command::Clip { rect }); }
 
-    pub(crate) fn style(&self) -> &Style { self.style }
-
-    pub(crate) fn atlas(&self) -> &AtlasHandle { self.atlas }
-
-    pub(crate) fn push_command(&mut self, cmd: Command) { self.commands.push(cmd); }
-
-    pub(crate) fn set_clip(&mut self, rect: Recti) { self.push_command(Command::Clip { rect }); }
-
-    pub(crate) fn check_clip(&self, r: Recti) -> Clip {
+    fn check_clip(&self, r: Recti) -> Clip {
         let cr = self.current_clip_rect();
         if r.x > cr.x + cr.width || r.x + r.width < cr.x || r.y > cr.y + cr.height || r.y + r.height < cr.y {
             return Clip::All;
@@ -175,21 +120,21 @@ impl<'a> WidgetCtx<'a> {
         Clip::Part
     }
 
-    pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
+    fn draw_rect(&mut self, rect: Recti, color: Color) {
         let rect = rect.intersect(&self.current_clip_rect()).unwrap_or_default();
         if rect.width > 0 && rect.height > 0 {
             self.push_command(Command::Recti { rect, color });
         }
     }
 
-    pub(crate) fn draw_box(&mut self, r: Recti, color: Color) {
+    fn draw_box(&mut self, r: Recti, color: Color) {
         self.draw_rect(rect(r.x + 1, r.y, r.width - 2, 1), color);
         self.draw_rect(rect(r.x + 1, r.y + r.height - 1, r.width - 2, 1), color);
         self.draw_rect(rect(r.x, r.y, 1, r.height), color);
         self.draw_rect(rect(r.x + r.width - 1, r.y, 1, r.height), color);
     }
 
-    pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
+    fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
         let tsize = self.atlas.get_text_size(font, text);
         let rect = rect(pos.x, pos.y, tsize.width, tsize.height);
         let clipped = self.check_clip(rect);
@@ -213,7 +158,7 @@ impl<'a> WidgetCtx<'a> {
         }
     }
 
-    pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
+    fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
         let clipped = self.check_clip(rect);
         match clipped {
             Clip::All => return,
@@ -229,7 +174,7 @@ impl<'a> WidgetCtx<'a> {
         }
     }
 
-    pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
+    fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
         let clipped = self.check_clip(rect);
         match clipped {
             Clip::All => return,
@@ -245,7 +190,7 @@ impl<'a> WidgetCtx<'a> {
         }
     }
 
-    pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
+    fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
         let clipped = self.check_clip(rect);
         match clipped {
             Clip::All => return,
@@ -261,7 +206,7 @@ impl<'a> WidgetCtx<'a> {
         }
     }
 
-    pub(crate) fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
+    fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
         let color = self.style.colors[colorid as usize];
         self.draw_rect(rect, color);
         if colorid == ControlColor::ScrollBase || colorid == ControlColor::ScrollThumb || colorid == ControlColor::TitleBG {
@@ -273,19 +218,19 @@ impl<'a> WidgetCtx<'a> {
         }
     }
 
-    pub(crate) fn draw_widget_frame(&mut self, control: &ControlState, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
+    fn draw_widget_frame(&mut self, focused: bool, hovered: bool, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
         if opt.has_no_frame() {
             return;
         }
-        if control.focused {
+        if focused {
             colorid.focus()
-        } else if control.hovered {
+        } else if hovered {
             colorid.hover()
         }
         self.draw_frame(rect, colorid);
     }
 
-    pub(crate) fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+    fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let mut pos = Vec2i { x: 0, y: 0 };
         let font = self.style.font;
         let tsize = self.atlas.get_text_size(font, text);
@@ -315,7 +260,118 @@ impl<'a> WidgetCtx<'a> {
         let baseline_center = rect.y + rect.height / 2;
         let min_top = rect.y + rect.height - line_height;
         let max_top = rect.y;
-        Container::clamp(baseline_center - baseline, min_top, max_top)
+        Self::clamp(baseline_center - baseline, min_top, max_top)
+    }
+
+    fn clamp(x: i32, a: i32, b: i32) -> i32 { min(b, max(a, x)) }
+}
+
+/// Shared context passed to widget handlers.
+pub struct WidgetCtx<'a> {
+    id: Id,
+    rect: Recti,
+    draw: DrawCtx<'a>,
+    focus: &'a mut Option<Id>,
+    updated_focus: &'a mut bool,
+    in_hover_root: bool,
+    input: Option<InputSnapshot>,
+}
+
+impl<'a> WidgetCtx<'a> {
+    /// Creates a widget context for the given widget ID and rectangle.
+    pub(crate) fn new(
+        id: Id,
+        rect: Recti,
+        commands: &'a mut Vec<Command>,
+        clip_stack: &'a mut Vec<Recti>,
+        style: &'a Style,
+        atlas: &'a AtlasHandle,
+        focus: &'a mut Option<Id>,
+        updated_focus: &'a mut bool,
+        in_hover_root: bool,
+        input: Option<InputSnapshot>,
+    ) -> Self {
+        Self {
+            id,
+            rect,
+            draw: DrawCtx::new(commands, clip_stack, style, atlas),
+            focus,
+            updated_focus,
+            in_hover_root,
+            input,
+        }
+    }
+
+    /// Returns the widget identifier.
+    pub fn id(&self) -> Id { self.id }
+
+    /// Returns the widget rectangle.
+    pub fn rect(&self) -> Recti { self.rect }
+
+    /// Returns the input snapshot for this widget, if provided.
+    pub fn input(&self) -> Option<&InputSnapshot> { self.input.as_ref() }
+
+    /// Sets focus to this widget for the current frame.
+    pub fn set_focus(&mut self) {
+        *self.focus = Some(self.id);
+        *self.updated_focus = true;
+    }
+
+    /// Clears focus from the current widget.
+    pub fn clear_focus(&mut self) {
+        *self.focus = None;
+        *self.updated_focus = true;
+    }
+
+    /// Pushes a new clip rectangle onto the stack.
+    pub fn push_clip_rect(&mut self, rect: Recti) { self.draw.push_clip_rect(rect); }
+
+    /// Pops the current clip rectangle.
+    pub fn pop_clip_rect(&mut self) { self.draw.pop_clip_rect(); }
+
+    /// Executes `f` with the provided clip rect applied.
+    pub fn with_clip<F: FnOnce(&mut Self)>(&mut self, rect: Recti, f: F) {
+        self.push_clip_rect(rect);
+        f(self);
+        self.pop_clip_rect();
+    }
+
+    fn current_clip_rect(&self) -> Recti { self.draw.current_clip_rect() }
+
+    pub(crate) fn style(&self) -> &Style { self.draw.style() }
+
+    pub(crate) fn atlas(&self) -> &AtlasHandle { self.draw.atlas() }
+
+    pub(crate) fn push_command(&mut self, cmd: Command) { self.draw.push_command(cmd); }
+
+    pub(crate) fn set_clip(&mut self, rect: Recti) { self.draw.set_clip(rect); }
+
+    pub(crate) fn check_clip(&self, r: Recti) -> Clip { self.draw.check_clip(r) }
+
+    pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) { self.draw.draw_rect(rect, color); }
+
+    pub(crate) fn draw_box(&mut self, r: Recti, color: Color) { self.draw.draw_box(r, color); }
+
+    pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
+        self.draw.draw_text(font, text, pos, color);
+    }
+
+    pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) { self.draw.draw_icon(id, rect, color); }
+
+    pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) { self.draw.push_image(image, rect, color); }
+
+    pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
+        self.draw.draw_slot_with_function(id, rect, color, f);
+    }
+
+    pub(crate) fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) { self.draw.draw_frame(rect, colorid); }
+
+    pub(crate) fn draw_widget_frame(&mut self, control: &ControlState, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        self.draw.draw_widget_frame(control.focused, control.hovered, rect, colorid, opt);
+    }
+
+    pub(crate) fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        self.draw.draw_control_text(text, rect, colorid, opt);
     }
 
     pub(crate) fn mouse_over(&self, rect: Recti) -> bool {
@@ -583,40 +639,27 @@ impl Container {
         }
     }
 
-    /// Pushes a new clip rectangle combined with the previous clip.
-    pub fn push_clip_rect(&mut self, rect: Recti) {
-        let last = self.get_clip_rect();
-        self.clip_stack.push(rect.intersect(&last).unwrap_or_default());
+    fn draw_ctx(&mut self) -> DrawCtx<'_> {
+        DrawCtx::new(&mut self.command_list, &mut self.clip_stack, &self.style, &self.atlas)
     }
+
+    /// Pushes a new clip rectangle combined with the previous clip.
+    pub fn push_clip_rect(&mut self, rect: Recti) { self.draw_ctx().push_clip_rect(rect); }
 
     /// Restores the previous clip rectangle from the stack.
-    pub fn pop_clip_rect(&mut self) { self.clip_stack.pop(); }
+    pub fn pop_clip_rect(&mut self) { self.draw_ctx().pop_clip_rect(); }
 
     /// Returns the active clip rectangle, or an unclipped rect when the stack is empty.
-    pub fn get_clip_rect(&mut self) -> Recti {
-        match self.clip_stack.last() {
-            Some(r) => *r,
-            None => UNCLIPPED_RECT,
-        }
-    }
+    pub fn get_clip_rect(&mut self) -> Recti { self.draw_ctx().current_clip_rect() }
 
     /// Determines whether `r` is fully visible, partially visible, or completely clipped.
-    pub fn check_clip(&mut self, r: Recti) -> Clip {
-        let cr = self.get_clip_rect();
-        if r.x > cr.x + cr.width || r.x + r.width < cr.x || r.y > cr.y + cr.height || r.y + r.height < cr.y {
-            return Clip::All;
-        }
-        if r.x >= cr.x && r.x + r.width <= cr.x + cr.width && r.y >= cr.y && r.y + r.height <= cr.y + cr.height {
-            return Clip::None;
-        }
-        return Clip::Part;
-    }
+    pub fn check_clip(&mut self, r: Recti) -> Clip { self.draw_ctx().check_clip(r) }
 
     /// Enqueues a draw command to be consumed during rendering.
-    pub fn push_command(&mut self, cmd: Command) { self.command_list.push(cmd); }
+    pub fn push_command(&mut self, cmd: Command) { self.draw_ctx().push_command(cmd); }
 
     /// Adjusts the current clip rectangle.
-    pub fn set_clip(&mut self, rect: Recti) { self.push_command(Command::Clip { rect }); }
+    pub fn set_clip(&mut self, rect: Recti) { self.draw_ctx().set_clip(rect); }
 
     /// Manually updates which widget owns focus.
     pub fn set_focus(&mut self, id: Option<Id>) {
@@ -625,81 +668,25 @@ impl Container {
     }
 
     /// Records a filled rectangle draw command.
-    pub fn draw_rect(&mut self, mut rect: Recti, color: Color) {
-        rect = rect.intersect(&self.get_clip_rect()).unwrap_or_default();
-        if rect.width > 0 && rect.height > 0 {
-            self.push_command(Command::Recti { rect, color });
-        }
-    }
+    pub fn draw_rect(&mut self, rect: Recti, color: Color) { self.draw_ctx().draw_rect(rect, color); }
 
     /// Records a rectangle outline.
-    pub fn draw_box(&mut self, r: Recti, color: Color) {
-        self.draw_rect(rect(r.x + 1, r.y, r.width - 2, 1), color);
-        self.draw_rect(rect(r.x + 1, r.y + r.height - 1, r.width - 2, 1), color);
-        self.draw_rect(rect(r.x, r.y, 1, r.height), color);
-        self.draw_rect(rect(r.x + r.width - 1, r.y, 1, r.height), color);
-    }
+    pub fn draw_box(&mut self, r: Recti, color: Color) { self.draw_ctx().draw_box(r, color); }
 
     /// Records a text draw command.
     pub fn draw_text(&mut self, font: FontId, str: &str, pos: Vec2i, color: Color) {
-        let tsize = self.atlas.get_text_size(font, str);
-        let rect: Recti = rect(pos.x, pos.y, tsize.width, tsize.height);
-        let clipped = self.check_clip(rect);
-        match clipped {
-            Clip::All => return,
-            Clip::Part => {
-                let clip = self.get_clip_rect();
-                self.set_clip(clip)
-            }
-            _ => (),
-        }
-
-        self.push_command(Command::Text {
-            text: String::from(str),
-            pos,
-            color,
-            font,
-        });
-        if clipped != Clip::None {
-            self.set_clip(UNCLIPPED_RECT);
-        }
+        self.draw_ctx().draw_text(font, str, pos, color);
     }
 
     /// Records an icon draw command.
-    pub fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
-        let clipped = self.check_clip(rect);
-        match clipped {
-            Clip::All => return,
-            Clip::Part => {
-                let clip = self.get_clip_rect();
-                self.set_clip(clip)
-            }
-            _ => (),
-        }
-        self.push_command(Command::Icon { id, rect, color });
-        if clipped != Clip::None {
-            self.set_clip(UNCLIPPED_RECT);
-        }
-    }
+    pub fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) { self.draw_ctx().draw_icon(id, rect, color); }
 
     /// Records a slot draw command.
-    pub fn draw_slot(&mut self, id: SlotId, rect: Recti, color: Color) { self.push_image(Image::Slot(id), rect, color); }
+    pub fn draw_slot(&mut self, id: SlotId, rect: Recti, color: Color) { self.draw_ctx().push_image(Image::Slot(id), rect, color); }
 
     /// Records a slot redraw that uses a callback to fill pixels.
     pub fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        let clipped = self.check_clip(rect);
-        match clipped {
-            Clip::All => return,
-            Clip::Part => {
-                let clip = self.get_clip_rect();
-                self.set_clip(clip)
-            }
-            _ => (),
-        }
-        self.push_command(Command::SlotRedraw { id, rect, color, payload: f });
-        if clipped != Clip::None {
-            self.set_clip(UNCLIPPED_RECT);
-        }
+        self.draw_ctx().draw_slot_with_function(id, rect, color, f);
     }
 
     #[inline(never)]
@@ -750,29 +737,13 @@ impl Container {
     }
 
     /// Draws a frame and optional border using the specified color.
-    pub fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
-        let color = self.style.colors[colorid as usize];
-        self.draw_rect(rect, color);
-        if colorid == ControlColor::ScrollBase || colorid == ControlColor::ScrollThumb || colorid == ControlColor::TitleBG {
-            return;
-        }
-        let border_color = self.style.colors[ControlColor::Border as usize];
-        if border_color.a != 0 {
-            self.draw_box(expand_rect(rect, 1), border_color);
-        }
-    }
+    pub fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) { self.draw_ctx().draw_frame(rect, colorid); }
 
     /// Draws a widget background, applying hover/focus accents when needed.
-    pub fn draw_widget_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
-        if opt.has_no_frame() {
-            return;
-        }
-        if self.focus == Some(id) {
-            colorid.focus()
-        } else if self.hover == Some(id) {
-            colorid.hover()
-        }
-        self.draw_frame(rect, colorid);
+    pub fn draw_widget_frame(&mut self, id: Id, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        let focused = self.focus == Some(id);
+        let hovered = self.hover == Some(id);
+        self.draw_ctx().draw_widget_frame(focused, hovered, rect, colorid, opt);
     }
 
     /// Draws a container frame, skipping rendering when the option disables it.
@@ -786,31 +757,13 @@ impl Container {
         } else if self.hover == Some(id) {
             colorid.hover()
         }
-        self.draw_frame(rect, colorid);
+        self.draw_ctx().draw_frame(rect, colorid);
     }
 
     #[inline(never)]
     /// Draws widget text with the appropriate alignment flags.
     pub fn draw_control_text(&mut self, str: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let mut pos: Vec2i = Vec2i { x: 0, y: 0 };
-        let font = self.style.font;
-        let tsize = self.atlas.get_text_size(font, str);
-        let padding = self.style.padding;
-        let color = self.style.colors[colorid as usize];
-        let line_height = self.atlas.get_font_height(font) as i32;
-        let baseline = self.atlas.get_font_baseline(font);
-
-        self.push_clip_rect(rect);
-        pos.y = Self::baseline_aligned_top(rect, line_height, baseline);
-        if opt.is_aligned_center() {
-            pos.x = rect.x + (rect.width - tsize.width) / 2;
-        } else if opt.is_aligned_right() {
-            pos.x = rect.x + rect.width - tsize.width - padding;
-        } else {
-            pos.x = rect.x + padding;
-        }
-        self.draw_text(font, str, pos, color);
-        self.pop_clip_rect();
+        self.draw_ctx().draw_control_text(str, rect, colorid, opt);
     }
 
     /// Returns `true` if the cursor is inside `rect` and the container owns the hover root.
@@ -1323,22 +1276,6 @@ impl Container {
 
         let anchor = rect(header.x, header.y + header.height, header.width, 1);
         (anchor, header_clicked, res)
-    }
-
-    fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
-        let clipped = self.check_clip(rect);
-        match clipped {
-            Clip::All => return,
-            Clip::Part => {
-                let clip = self.get_clip_rect();
-                self.set_clip(clip)
-            }
-            _ => (),
-        }
-        self.push_command(Command::Image { image, rect, color });
-        if clipped != Clip::None {
-            self.set_clip(UNCLIPPED_RECT);
-        }
     }
 
     #[inline(never)]
