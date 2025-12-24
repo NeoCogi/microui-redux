@@ -74,7 +74,6 @@ mod canvas;
 mod draw_context;
 mod container;
 mod file_dialog;
-mod idmngr;
 mod layout;
 mod rect_packer;
 mod window;
@@ -83,7 +82,6 @@ mod widgets;
 pub use atlas::*;
 pub use canvas::*;
 pub use container::*;
-pub use idmngr::*;
 pub use layout::SizePolicy;
 pub use rect_packer::*;
 pub use rs_math3d::*;
@@ -126,6 +124,18 @@ pub enum MouseEvent {
     },
     /// The pointer moved to a new coordinate without interacting.
     Move(Vec2i),
+}
+
+#[derive(Default, Copy, Clone, Eq, PartialEq, Hash, Debug)]
+/// Numeric identifier assigned to widgets and containers.
+pub struct Id(usize);
+
+impl Id {
+    /// Creates an ID from the address of a stable state object.
+    pub fn from_ptr<T: ?Sized>(value: &T) -> Self { Self(value as *const T as *const () as usize) }
+
+    /// Returns the raw pointer value wrapped by this ID.
+    pub fn raw(self) -> usize { self.0 }
 }
 
 /// Trait implemented by render backends used by the UI context.
