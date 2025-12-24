@@ -68,7 +68,7 @@ use std::{collections::HashMap, convert::TryFrom, ffi::CString, io::Cursor, mem,
 
 use ash::{khr, util::read_spv, vk, Entry};
 use microui_redux::*;
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use sdl2::video::Window;
 
 type Result<T> = std::result::Result<T, String>;
@@ -1635,8 +1635,10 @@ impl VulkanContext {
         let app_name = CString::new("microui-redux-examples").unwrap();
         let engine_name = CString::new("microui-redux").unwrap();
 
-        let display_handle = window.raw_display_handle().map_err(|err| format!("failed to get display handle: {err:?}"))?;
-        let window_handle = window.raw_window_handle().map_err(|err| format!("failed to get window handle: {err:?}"))?;
+        let display_handle = window.display_handle().map_err(|err| format!("failed to get display handle: {err:?}"))?;
+        let window_handle = window.window_handle().map_err(|err| format!("failed to get window handle: {err:?}"))?;
+        let raw_display_handle = display_handle.into();
+        let raw_window_handle = window_handle.into();
 
         let app_info = vk::ApplicationInfo::builder()
             .application_name(&app_name)
@@ -1644,7 +1646,7 @@ impl VulkanContext {
             .api_version(vk::API_VERSION_1_1)
             .build();
 
-        let mut extension_names = ash_window_handle::enumerate_required_extensions(display_handle)
+        let mut extension_names = ash_window_handle::enumerate_required_extensions(raw_display_handle)
             .map_err(|err| format!("enumerate_required_extensions failed: {err:?}"))?
             .to_vec();
         let surface_extension = khr::surface::NAME.as_ptr();
@@ -1658,7 +1660,7 @@ impl VulkanContext {
             .build();
         let instance = unsafe { entry.create_instance(&instance_info, None) }.map_err(|err| format!("create_instance failed: {err:?}"))?;
 
-        let surface = unsafe { ash_window_handle::create_surface(&entry, &instance, display_handle, window_handle, None) }
+        let surface = unsafe { ash_window_handle::create_surface(&entry, &instance, raw_display_handle, raw_window_handle, None) }
             .map_err(|err| format!("create_surface failed: {err:?}"))?;
         let surface_loader = Surface::new(&entry, &instance);
 
@@ -2105,7 +2107,7 @@ impl VulkanContext {
         vertices: &[Vertex],
         width: u32,
         height: u32,
-        frame_index: u64,
+        _frame_index: u64,
         commands: &mut Vec<FrameCommand>,
     ) -> Result<()> {
         self.logical_width = width.max(1);
@@ -2151,7 +2153,7 @@ impl VulkanContext {
         }
 
         let command_buffer = self.command_buffers[image_index as usize];
-        self.record_command_buffer(command_buffer, image_index, clear_value, vertices, width, height, frame_index, commands)?;
+        self.record_command_buffer(command_buffer, image_index, clear_value, vertices, width, height, _frame_index, commands)?;
         let transfer_semaphore = self.submit_transfer_commands()?;
 
         let mut wait_semaphores = vec![self.image_available_semaphores[self.current_frame]];
@@ -2220,7 +2222,7 @@ impl VulkanContext {
         vertices: &[Vertex],
         width: u32,
         height: u32,
-        frame_index: u64,
+        _frame_index: u64,
         commands: &mut Vec<FrameCommand>,
     ) -> Result<()> {
         let begin_info = vk::CommandBufferBeginInfo::builder();
