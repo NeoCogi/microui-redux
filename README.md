@@ -19,14 +19,16 @@ $ cargo run --example demo-full --features example-glow     # Glow backend
 - **Context**: owns the atlas, renderer handle, user input and root windows. Each frame starts by feeding input into the context, then calling `context.window(...)` for every visible window or popup.
 - **Container**: describes one layout surface. Every window, panel, popup or custom widget receives a mutable `Container` that exposes high-level widgets (buttons, sliders, etc.) and lower-level drawing helpers.
 - **Layout manager**: controls how cells are sized. `Container::with_row` lets you scope a set of widgets to a row of `SizePolicy`s, while nested columns can be created with `container.column(|ui| { ... })`.
+- **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). These structs hold interaction state and supply stable IDs.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
 
 ```rust
+let mut name = Textbox::new("");
 ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, |ui| {
     let widths = [SizePolicy::Fixed(120), SizePolicy::Remainder(0)];
     ui.with_row(&widths, SizePolicy::Auto, |ui| {
         ui.label("Name");
-        ui.textbox_ex(&mut self.name);
+        ui.textbox_ex(&mut name);
     });
 });
 ```
