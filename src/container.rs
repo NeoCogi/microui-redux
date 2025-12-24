@@ -644,11 +644,12 @@ impl Container {
         let mut cs: Vec2i = self.content_size;
         cs.x += self.style.padding * 2;
         cs.y += self.style.padding * 2;
+        let base_body = *body;
         self.push_clip_rect(body.clone());
-        if cs.y > self.body.height {
+        if cs.y > base_body.height {
             body.width -= sz;
         }
-        if cs.x > self.body.width {
+        if cs.x > base_body.width {
             body.height -= sz;
         }
         let body = *body;
