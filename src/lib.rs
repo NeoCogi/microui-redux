@@ -359,6 +359,7 @@ impl WidgetBehaviourOption {
 
 #[derive(Copy, Clone, Default, Debug)]
 /// Captures the interaction state for a widget during the current frame.
+/// Produced by `Container::update_control` and passed into `WidgetState::handle`.
 pub struct ControlState {
     /// Cursor is hovering the widget.
     pub hovered: bool,
@@ -412,6 +413,8 @@ impl Default for InputSnapshot {
 }
 
 /// Trait implemented by persistent widget state structures.
+/// `handle` is invoked with a `WidgetCtx` and precomputed `ControlState`.
+/// The default ID is derived from the state address, so the state must live at a stable address.
 pub trait WidgetState {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
@@ -419,7 +422,7 @@ pub trait WidgetState {
     fn behaviour_opt(&self) -> &WidgetBehaviourOption;
     /// Returns the widget identifier for this state.
     fn get_id(&self) -> Id { Id::from_ptr(self) }
-    /// Handles widget interaction and rendering for the current frame.
+    /// Handles widget interaction and rendering for the current frame using the provided context.
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
 }
 

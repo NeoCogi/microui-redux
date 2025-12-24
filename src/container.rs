@@ -1447,7 +1447,11 @@ mod tests {
 
         input.borrow_mut().keydown_code(KeyCode::LEFT);
         let rect = container.layout.next();
-        container.textbox_raw(&mut state, rect);
+        let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.bopt);
+        let control = container.update_control(id, rect, &control_state);
+        let input = container.snapshot_input();
+        let mut ctx = container.widget_ctx(id, rect, Some(input));
+        state.handle(&mut ctx, &control);
 
         let cursor = state.cursor;
         assert_eq!(cursor, 1);
@@ -1464,7 +1468,11 @@ mod tests {
 
         input.borrow_mut().keydown(KeyMode::BACKSPACE);
         let rect = container.layout.next();
-        container.textbox_raw(&mut state, rect);
+        let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.bopt);
+        let control = container.update_control(id, rect, &control_state);
+        let input = container.snapshot_input();
+        let mut ctx = container.widget_ctx(id, rect, Some(input));
+        state.handle(&mut ctx, &control);
 
         let cursor = state.cursor;
         assert_eq!(state.buf, "ab");
