@@ -340,14 +340,21 @@ mod tests {
         fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
     }
 
+    fn assert_rect_eq(actual: Recti, expected: Recti) {
+        assert_eq!(
+            (actual.x, actual.y, actual.width, actual.height),
+            (expected.x, expected.y, expected.width, expected.height)
+        );
+    }
+
     #[test]
     fn clip_rect_passthrough() {
         let dst = Recti::new(0, 0, 10, 10);
         let src = Recti::new(5, 5, 10, 10);
         let clip = Recti::new(0, 0, 20, 20);
         let res = Canvas::<NoopRenderer>::clip_rect(dst, src, clip).unwrap();
-        assert_eq!(res.0, dst);
-        assert_eq!(res.1, src);
+        assert_rect_eq(res.0, dst);
+        assert_rect_eq(res.1, src);
     }
 
     #[test]
@@ -356,8 +363,8 @@ mod tests {
         let src = Recti::new(0, 0, 50, 50);
         let clip = Recti::new(20, 20, 40, 40);
         let res = Canvas::<NoopRenderer>::clip_rect(dst, src, clip).unwrap();
-        assert_eq!(res.0, Recti::new(20, 20, 40, 40));
-        assert_eq!(res.1, Recti::new(10, 10, 20, 20));
+        assert_rect_eq(res.0, Recti::new(20, 20, 40, 40));
+        assert_rect_eq(res.1, Recti::new(10, 10, 20, 20));
     }
 
     #[test]
