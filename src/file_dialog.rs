@@ -223,7 +223,9 @@ impl FileDialogState {
                 let bottom_row_widths = [left_column, SizePolicy::Remainder(0)];
                 cont.with_row(&bottom_row_widths, SizePolicy::Remainder(0), |cont| {
                     if cont.button(ok_button).is_submitted() {
-                        if !tmp_file_name.buf.is_empty() {
+                        if tmp_file_name.buf.is_empty() {
+                            *file_name = None;
+                        } else {
                             *file_name = Some(tmp_file_name.buf.clone());
                         }
                         dialog_state = WindowState::Closed;
