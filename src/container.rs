@@ -52,7 +52,6 @@
 //
 use super::*;
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 /// Arguments forwarded to custom rendering callbacks.
 pub struct CustomRenderArgs {
@@ -162,11 +161,6 @@ pub enum TextWrap {
     None,
     /// Wrap text at word boundaries when it exceeds the cell width.
     Word,
-}
-
-#[derive(Default)]
-struct TextEditState {
-    cursor: usize,
 }
 
 /// Draw commands recorded during container traversal.
@@ -279,9 +273,10 @@ pub struct Container {
     pub number_edit_buf: String,
     /// ID of the number widget currently in edit mode, if any.
     pub number_edit: Option<Id>,
+    /// Cursor position used while editing a number widget.
+    pub number_edit_cursor: usize,
     /// Tracks whether a popup was just opened this frame to avoid instant auto-close.
     pub popup_just_opened: bool,
-    text_states: HashMap<Id, TextEditState>,
     pending_scroll: Option<Vec2i>,
     /// Determines whether container scrollbars and scroll consumption are enabled.
     scroll_enabled: bool,
@@ -346,10 +341,10 @@ impl Container {
             scrollbar_x_state: InternalState::new("!scrollbarx"),
             number_edit_buf: String::default(),
             number_edit: None,
+            number_edit_cursor: 0,
             popup_just_opened: false,
             in_hover_root: false,
             input: input,
-            text_states: HashMap::new(),
             pending_scroll: None,
             scroll_enabled: true,
 
@@ -362,7 +357,6 @@ impl Container {
         self.focus = None;
         self.updated_focus = false;
         self.in_hover_root = false;
-        self.text_states.clear();
         self.pending_scroll = None;
         self.scroll_enabled = true;
     }
@@ -1299,20 +1293,25 @@ impl Container {
 
     #[inline(never)]
     /// Internal textbox helper operating on a fixed rectangle.
-    fn textbox_raw_with_id(&mut self, buf: &mut String, id: Id, r: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ResourceState {
+    fn textbox_raw_with_id(
+        &mut self,
+        buf: &mut String,
+        cursor: &mut usize,
+        id: Id,
+        r: Recti,
+        opt: WidgetOption,
+        bopt: WidgetBehaviourOption,
+    ) -> ResourceState {
         // Track submit/change flags and keep the widget focused while active.
         let mut res = ResourceState::NONE;
         let control_state = (opt | WidgetOption::HOLD_FOCUS, bopt);
         let _ = self.update_control(id, r, &control_state);
 
         // Cursor position is stored per textbox so we can edit at arbitrary positions.
-        let mut cursor = {
-            let entry = self.text_states.entry(id).or_insert_with(|| TextEditState { cursor: buf.len() });
-            if self.focus != Some(id) {
-                entry.cursor = buf.len();
-            }
-            entry.cursor
-        };
+        if self.focus != Some(id) {
+            *cursor = buf.len();
+        }
+        let mut cursor_pos = (*cursor).min(buf.len());
 
         // Snapshot the current frame's input so we only borrow the RefCell once.
         let input_text = { self.input.borrow().input_text.clone() };
@@ -1324,39 +1323,39 @@ impl Container {
         if self.focus == Some(id) {
             // Insert any typed characters at the cursor position.
             if !input_text.is_empty() {
-                let insert_at = cursor.min(buf.len());
+                let insert_at = cursor_pos.min(buf.len());
                 buf.insert_str(insert_at, input_text.as_str());
-                cursor = insert_at + input_text.len();
+                cursor_pos = insert_at + input_text.len();
                 res |= ResourceState::CHANGE;
             }
 
             // Handle backspace, making sure we don't cut UTF-8 graphemes in half.
-            if key_pressed.is_backspace() && cursor > 0 && !buf.is_empty() {
-                let mut new_cursor = cursor.min(buf.len());
+            if key_pressed.is_backspace() && cursor_pos > 0 && !buf.is_empty() {
+                let mut new_cursor = cursor_pos.min(buf.len());
                 new_cursor -= 1;
                 while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
                     new_cursor -= 1;
                 }
-                buf.replace_range(new_cursor..cursor, "");
-                cursor = new_cursor;
+                buf.replace_range(new_cursor..cursor_pos, "");
+                cursor_pos = new_cursor;
                 res |= ResourceState::CHANGE;
             }
 
             // Left/right arrows move by grapheme.
-            if key_codes.is_left() && cursor > 0 {
-                let mut new_cursor = cursor - 1;
+            if key_codes.is_left() && cursor_pos > 0 {
+                let mut new_cursor = cursor_pos - 1;
                 while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
                     new_cursor -= 1;
                 }
-                cursor = new_cursor;
+                cursor_pos = new_cursor;
             }
 
-            if key_codes.is_right() && cursor < buf.len() {
-                let mut new_cursor = cursor + 1;
+            if key_codes.is_right() && cursor_pos < buf.len() {
+                let mut new_cursor = cursor_pos + 1;
                 while new_cursor < buf.len() && !buf.is_char_boundary(new_cursor) {
                     new_cursor += 1;
                 }
-                cursor = new_cursor;
+                cursor_pos = new_cursor;
             }
 
             if key_pressed.is_return() {
@@ -1398,7 +1397,7 @@ impl Container {
         if self.focus == Some(id) && mouse_pressed.is_left() && self.mouse_over(r, self.in_hover_root) {
             let click_x = mouse_pos.x - textx;
             if click_x <= 0 {
-                cursor = 0;
+                cursor_pos = 0;
             } else {
                 let mut last_width = 0;
                 let mut new_cursor = buf.len();
@@ -1415,19 +1414,17 @@ impl Container {
                     }
                     last_width = width;
                 }
-                cursor = new_cursor.min(buf.len());
+                cursor_pos = new_cursor.min(buf.len());
             }
         }
 
-        cursor = cursor.min(buf.len());
-        if let Some(entry) = self.text_states.get_mut(&id) {
-            entry.cursor = cursor;
-        }
+        cursor_pos = cursor_pos.min(buf.len());
+        *cursor = cursor_pos;
 
-        let caret_offset = if cursor == 0 {
+        let caret_offset = if cursor_pos == 0 {
             0
         } else {
-            self.atlas.get_text_size(font, &buf[..cursor]).width
+            self.atlas.get_text_size(font, &buf[..cursor_pos]).width
         };
 
         if self.focus == Some(id) {
@@ -1449,7 +1446,7 @@ impl Container {
     /// Draws a textbox in the provided rectangle using the supplied state.
     pub fn textbox_raw(&mut self, state: &mut TextboxState, r: Recti) -> ResourceState {
         let id = state.get_id();
-        self.textbox_raw_with_id(&mut state.buf, id, r, state.opt, state.bopt)
+        self.textbox_raw_with_id(&mut state.buf, &mut state.cursor, id, r, state.opt, state.bopt)
     }
 
     #[inline(never)]
@@ -1458,21 +1455,27 @@ impl Container {
             self.number_edit = Some(id);
             self.number_edit_buf.clear();
             self.number_edit_buf.push_str(format!("{:.*}", precision, value).as_str());
+            self.number_edit_cursor = self.number_edit_buf.len();
         }
 
         if self.number_edit == Some(id) {
             let mut temp = self.number_edit_buf.clone();
-            let res: ResourceState = self.textbox_raw_with_id(&mut temp, id, r, WidgetOption::NONE, WidgetBehaviourOption::NONE);
+            let mut cursor = self.number_edit_cursor;
+            let res: ResourceState =
+                self.textbox_raw_with_id(&mut temp, &mut cursor, id, r, WidgetOption::NONE, WidgetBehaviourOption::NONE);
+            self.number_edit_cursor = cursor;
             self.number_edit_buf = temp;
             if res.is_submitted() || self.focus != Some(id) {
                 match self.number_edit_buf.parse::<f32>() {
                     Ok(v) => {
                         *value = v as Real;
                         self.number_edit = None;
+                        self.number_edit_cursor = 0;
                     }
                     _ => (),
                 }
                 self.number_edit = None;
+                self.number_edit_cursor = 0;
             } else {
                 return ResourceState::ACTIVE;
             }
@@ -1637,13 +1640,13 @@ mod tests {
         let mut state = TextboxState::new("a\u{1F600}b");
         let id = state.get_id();
         container.set_focus(Some(id));
-        container.text_states.insert(id, TextEditState { cursor: 5 });
+        state.cursor = 5;
 
         input.borrow_mut().keydown_code(KeyCode::LEFT);
         let rect = container.layout.next();
         container.textbox_raw(&mut state, rect);
 
-        let cursor = container.text_states.get(&id).unwrap().cursor;
+        let cursor = state.cursor;
         assert_eq!(cursor, 1);
     }
 
@@ -1654,13 +1657,13 @@ mod tests {
         let mut state = TextboxState::new("a\u{1F600}b");
         let id = state.get_id();
         container.set_focus(Some(id));
-        container.text_states.insert(id, TextEditState { cursor: 5 });
+        state.cursor = 5;
 
         input.borrow_mut().keydown(KeyMode::BACKSPACE);
         let rect = container.layout.next();
         container.textbox_raw(&mut state, rect);
 
-        let cursor = container.text_states.get(&id).unwrap().cursor;
+        let cursor = state.cursor;
         assert_eq!(state.buf, "ab");
         assert_eq!(cursor, 1);
     }
