@@ -188,7 +188,12 @@ fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Colo
     let mut img_data = vec![0; buf_size];
     let info = reader.next_frame(&mut img_data)?;
 
-    assert_eq!(info.bit_depth, BitDepth::Eight);
+    if info.bit_depth != BitDepth::Eight {
+        return Err(Error::new(
+            ErrorKind::Other,
+            format!("Unsupported PNG bit depth: {:?}", info.bit_depth),
+        ));
+    }
 
     let pixel_size = match info.color_type {
         ColorType::Grayscale => 1,
@@ -215,7 +220,9 @@ fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Colo
                     let a = line[xx + 1];
                     color4b(c, c, c, a)
                 }
-                ColorType::Indexed => todo!(),
+                ColorType::Indexed => {
+                    return Err(Error::new(ErrorKind::Other, "Indexed PNGs are not supported"));
+                }
                 ColorType::Rgb => color4b(line[xx], line[xx + 1], line[xx + 2], 0xFF),
                 ColorType::Rgba => {
                     let r = line[xx];
@@ -529,8 +536,7 @@ pub struct AtlasSource<'a> {
 }
 
 impl AtlasHandle {
-    /// Reconstructs an atlas from a serialized [`AtlasSource`].
-    pub fn from<'a>(source: &AtlasSource<'a>) -> Self {
+    fn from_parts<'a>(source: &AtlasSource<'a>, pixels: Vec<Color4b>) -> Self {
         let icons: Vec<(String, Icon)> = source
             .icons
             .iter()
@@ -550,22 +556,6 @@ impl AtlasHandle {
             })
             .collect();
         let slots: Vec<Recti> = source.slots.iter().map(|p| *p).collect();
-        let pixels = match source.format {
-            SourceFormat::Raw => {
-                let mut v = Vec::new();
-                for i in 0..source.pixels.len() / 4 {
-                    v.push(color4b(
-                        source.pixels[i * 4],
-                        source.pixels[i * 4 + 1],
-                        source.pixels[i * 4 + 2],
-                        source.pixels[i * 4 + 3],
-                    ));
-                }
-                v
-            }
-            #[cfg(feature = "png_source")]
-            SourceFormat::Png => load_image_bytes(ImageSource::Png { bytes: source.pixels }).unwrap().2,
-        };
 
         Self(Rc::new(RefCell::new(Atlas {
             width: source.width,
@@ -576,6 +566,50 @@ impl AtlasHandle {
             pixels,
             last_update_id: 0,
         })))
+    }
+
+    /// Reconstructs an atlas from a serialized [`AtlasSource`].
+    /// If image decoding fails, a blank atlas is returned; use [`AtlasHandle::try_from`]
+    /// to handle errors explicitly.
+    pub fn from<'a>(source: &AtlasSource<'a>) -> Self {
+        match Self::try_from(source) {
+            Ok(atlas) => atlas,
+            Err(err) => {
+                debug_assert!(false, "Atlas decode failed: {}", err);
+                let pixel_count = source.width.saturating_mul(source.height);
+                Self::from_parts(source, vec![Color4b::default(); pixel_count])
+            }
+        }
+    }
+
+    /// Attempts to reconstruct an atlas from a serialized [`AtlasSource`].
+    pub fn try_from<'a>(source: &AtlasSource<'a>) -> std::io::Result<Self> {
+        let width = i32::try_from(source.width)
+            .map_err(|_| Error::new(ErrorKind::Other, "Atlas width exceeds i32::MAX"))?;
+        let height = i32::try_from(source.height)
+            .map_err(|_| Error::new(ErrorKind::Other, "Atlas height exceeds i32::MAX"))?;
+        let pixels = match source.format {
+            SourceFormat::Raw => {
+                let (raw_width, raw_height, pixels) = load_image_bytes(ImageSource::Raw {
+                    width,
+                    height,
+                    pixels: source.pixels,
+                })?;
+                if raw_width != source.width || raw_height != source.height {
+                    return Err(Error::new(ErrorKind::Other, "Atlas dimensions do not match raw data"));
+                }
+                pixels
+            }
+            #[cfg(feature = "png_source")]
+            SourceFormat::Png => {
+                let (png_width, png_height, pixels) = load_image_bytes(ImageSource::Png { bytes: source.pixels })?;
+                if png_width != source.width || png_height != source.height {
+                    return Err(Error::new(ErrorKind::Other, "Atlas dimensions do not match PNG data"));
+                }
+                pixels
+            }
+        };
+        Ok(Self::from_parts(source, pixels))
     }
 
     #[cfg(feature = "save-to-rust")]
