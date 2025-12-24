@@ -342,15 +342,19 @@ impl<'a> WidgetCtx<'a> {
 
     pub(crate) fn atlas(&self) -> &AtlasHandle { self.draw.atlas() }
 
-    pub(crate) fn push_command(&mut self, cmd: Command) { self.draw.push_command(cmd); }
+    /// Pushes a raw draw command into the command buffer.
+    pub fn push_command(&mut self, cmd: Command) { self.draw.push_command(cmd); }
 
-    pub(crate) fn set_clip(&mut self, rect: Recti) { self.draw.set_clip(rect); }
+    /// Sets the current clip rectangle for subsequent draw commands.
+    pub fn set_clip(&mut self, rect: Recti) { self.draw.set_clip(rect); }
 
-    pub(crate) fn check_clip(&self, r: Recti) -> Clip { self.draw.check_clip(r) }
+    /// Returns the clipping relation between `r` and the current clip rect.
+    pub fn check_clip(&self, r: Recti) -> Clip { self.draw.check_clip(r) }
 
     pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) { self.draw.draw_rect(rect, color); }
 
-    pub(crate) fn draw_box(&mut self, r: Recti, color: Color) { self.draw.draw_box(r, color); }
+    /// Draws a 1-pixel box outline using the supplied color.
+    pub fn draw_box(&mut self, r: Recti, color: Color) { self.draw.draw_box(r, color); }
 
     pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
         self.draw.draw_text(font, text, pos, color);
@@ -1047,7 +1051,7 @@ impl Container {
     }
 
     /// Configures layout state for the container's client area, handling scrollbars when necessary.
-    pub fn push_container_body(&mut self, body: Recti, opt: ContainerOption, bopt: WidgetBehaviourOption) {
+    pub fn push_container_body(&mut self, body: Recti, _opt: ContainerOption, bopt: WidgetBehaviourOption) {
         let mut body = body;
         self.scroll_enabled = !bopt.is_no_scroll();
         if self.scroll_enabled {

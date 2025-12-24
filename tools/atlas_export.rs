@@ -1,6 +1,6 @@
 #![cfg(all(feature = "builder", feature = "save-to-rust"))]
 
-use microui_redux::{builder, Dimensioni, SourceFormat};
+use microui_redux::SourceFormat;
 use std::{env, error::Error, path::PathBuf};
 
 #[path = "../examples/common/atlas_assets.rs"]
@@ -28,9 +28,7 @@ fn parse_output_arg() -> Result<PathBuf, Box<dyn Error>> {
 
 fn export_atlas(path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let slots = atlas_assets::default_slots();
-    let config = atlas_assets::atlas_config(&slots);
-    let mut builder = builder::Builder::from_config(&config)?;
-    let atlas = builder.to_atlas();
+    let atlas = atlas_assets::load_atlas(&slots);
     atlas.to_rust_files("PREBUILT_ATLAS", SourceFormat::Raw, path.to_str().unwrap())?;
     Ok(())
 }
