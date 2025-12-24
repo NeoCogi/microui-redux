@@ -830,7 +830,27 @@ impl<'a> State<'a> {
             self.write_log("Open dialog!");
         }
 
-        self.dialog_window.as_mut().unwrap().eval(ctx);
+        let dialog_result = {
+            let dialog = self.dialog_window.as_mut().unwrap();
+            let was_open = dialog.is_open();
+            dialog.eval(ctx);
+            if was_open && !dialog.is_open() {
+                Some(dialog.file_name().clone())
+            } else {
+                None
+            }
+        };
+        if let Some(result) = dialog_result {
+            match result {
+                Some(name) => {
+                    let mut msg = String::new();
+                    msg.push_str("Selected file: ");
+                    msg.push_str(name.as_str());
+                    self.write_log(msg.as_str());
+                }
+                None => self.write_log("File dialog canceled"),
+            }
+        }
     }
 
     fn process_frame(&mut self, ctx: &mut Context<BackendRenderer>) {
