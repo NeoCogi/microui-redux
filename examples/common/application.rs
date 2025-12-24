@@ -78,10 +78,7 @@ type MicroUI = microui::Context<RendererBackend>;
 #[cfg(feature = "example-glow")]
 pub type BackendInitContext = Arc<glow::Context>;
 #[cfg(feature = "example-vulkan")]
-pub struct BackendInitContext {
-    #[allow(dead_code)]
-    pub renderer: RendererHandle<vulkan_renderer::VulkanRenderer>,
-}
+pub struct BackendInitContext;
 
 pub struct Application<S> {
     state: S,
@@ -89,7 +86,7 @@ pub struct Application<S> {
     _sdl_vid: VideoSubsystem,
     window: Window,
     ctx: MicroUI,
-    #[cfg_attr(not(feature = "example-glow"), allow(dead_code))]
+    #[cfg(feature = "example-glow")]
     backend: BackendData,
 }
 
@@ -98,7 +95,10 @@ impl<S> Application<S> {
         let sdl_ctx = sdl2::init().map_err(|err| err.to_string())?;
         let video = sdl_ctx.video().map_err(|err| err.to_string())?;
         let (bundle, init_ctx) = init_backend(&video, atlas)?;
+        #[cfg(feature = "example-glow")]
         let BackendBundle { window, backend, renderer, size } = bundle;
+        #[cfg(not(feature = "example-glow"))]
+        let BackendBundle { window, renderer, size } = bundle;
 
         let mut ctx = microui::Context::new(renderer, Dimensioni::new(size.0 as i32, size.1 as i32));
         Ok(Self {
@@ -107,6 +107,7 @@ impl<S> Application<S> {
             _sdl_vid: video,
             window,
             ctx,
+            #[cfg(feature = "example-glow")]
             backend,
         })
     }
@@ -237,12 +238,11 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
     let window = video.window("Window", 800, 600).resizable().vulkan().build().map_err(|err| err.to_string())?;
     let (width, height) = window.size();
     let renderer = RendererHandle::new(vulkan_renderer::VulkanRenderer::new(&window, atlas, width, height)?);
-    let init_ctx = BackendInitContext { renderer: renderer.clone() };
+    let init_ctx = BackendInitContext;
 
     Ok((
         BackendBundle {
             window,
-            backend: BackendData,
             renderer,
             size: (width, height),
         },
@@ -252,6 +252,7 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
 
 struct BackendBundle {
     window: Window,
+    #[cfg(feature = "example-glow")]
     backend: BackendData,
     renderer: RendererHandle<RendererBackend>,
     size: (u32, u32),
@@ -261,6 +262,3 @@ struct BackendBundle {
 struct BackendData {
     gl_ctx: GLContext,
 }
-
-#[cfg(feature = "example-vulkan")]
-struct BackendData;
