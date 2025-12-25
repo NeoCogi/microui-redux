@@ -1134,6 +1134,41 @@ mod tests {
     }
 
     #[test]
+    fn scrollbars_use_current_body() {
+        let mut container = make_container();
+        let mut style = Style::default();
+        style.padding = 0;
+        style.scrollbar_size = 10;
+        container.style = Rc::new(style);
+
+        container.body = rect(0, 0, 1, 1);
+        container.content_size = Vec2i::new(0, 0);
+
+        let mut body = rect(0, 0, 100, 100);
+        container.scrollbars(&mut body);
+
+        assert_eq!(body.width, 100);
+        assert_eq!(body.height, 100);
+    }
+
+    #[test]
+    fn scrollbars_shrink_body_when_needed() {
+        let mut container = make_container();
+        let mut style = Style::default();
+        style.padding = 0;
+        style.scrollbar_size = 10;
+        container.style = Rc::new(style);
+
+        container.content_size = Vec2i::new(200, 200);
+
+        let mut body = rect(0, 0, 100, 100);
+        container.scrollbars(&mut body);
+
+        assert_eq!(body.width, 90);
+        assert_eq!(body.height, 90);
+    }
+
+    #[test]
     fn textbox_left_moves_over_multibyte() {
         let mut container = make_container();
         let input = container.input.clone();
