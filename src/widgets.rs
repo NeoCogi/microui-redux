@@ -52,6 +52,7 @@
 //
 use super::*;
 use crate::draw_context::DrawCtx;
+use std::fmt::Write;
 use std::rc::Rc;
 
 /// Shared context passed to widget handlers.
@@ -817,7 +818,7 @@ fn number_textbox_handle(
     if shift_click {
         edit.editing = true;
         edit.buf.clear();
-        edit.buf.push_str(format!("{:.*}", precision, value).as_str());
+        let _ = write!(edit.buf, "{:.*}", precision, value);
         edit.cursor = edit.buf.len();
     }
 
@@ -893,9 +894,9 @@ impl Widget for Slider {
         };
         let thumb = rect(base.x + x, base.y, w, base.height);
         ctx.draw_widget_frame(control, thumb, ControlColor::Button, self.opt);
-        let mut buff = String::new();
-        buff.push_str(format!("{:.*}", self.precision, self.value).as_str());
-        ctx.draw_control_text(buff.as_str(), base, ControlColor::Text, self.opt);
+        self.edit.buf.clear();
+        let _ = write!(self.edit.buf, "{:.*}", self.precision, self.value);
+        ctx.draw_control_text(self.edit.buf.as_str(), base, ControlColor::Text, self.opt);
         res
     }
 }
@@ -973,9 +974,9 @@ impl Widget for Number {
             res |= ResourceState::CHANGE;
         }
         ctx.draw_widget_frame(control, base, ControlColor::Base, self.opt);
-        let mut buff = String::new();
-        buff.push_str(format!("{:.*}", self.precision, self.value).as_str());
-        ctx.draw_control_text(buff.as_str(), base, ControlColor::Text, self.opt);
+        self.edit.buf.clear();
+        let _ = write!(self.edit.buf, "{:.*}", self.precision, self.value);
+        ctx.draw_control_text(self.edit.buf.as_str(), base, ControlColor::Text, self.opt);
         res
     }
 }
