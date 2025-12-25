@@ -868,14 +868,6 @@ impl Container {
         state.handle(&mut ctx, &control)
     }
 
-    #[inline(never)]
-    /// Compatibility shim for state-based buttons that render text and optional icons.
-    pub fn button_ex(&mut self, state: &mut Button) -> ResourceState { self.button(state) }
-
-    #[inline(never)]
-    /// Compatibility shim for state-based buttons that render images.
-    pub fn button_ex2(&mut self, state: &mut Button) -> ResourceState { self.button(state) }
-
     /// Renders a list entry that only highlights while hovered or active.
     pub fn list_item(&mut self, state: &mut ListItem) -> ResourceState {
         let id = state.get_id();
@@ -950,9 +942,6 @@ impl Container {
         (anchor, header_clicked, res)
     }
 
-    #[inline(never)]
-    /// Compatibility shim for state-based buttons that render atlas slots.
-    pub fn button_ex3(&mut self, state: &mut Button) -> ResourceState { self.button(state) }
 
     #[inline(never)]
     /// Draws a checkbox labeled with `label` and toggles `state` when clicked.
