@@ -671,9 +671,7 @@ impl Input {
 
     /// Appends UTF-8 text to the input buffer.
     pub fn text(&mut self, text: &str) {
-        for c in text.chars() {
-            self.input_text.push(c);
-        }
+        self.input_text.push_str(text);
     }
 
     fn prelude(&mut self) {
