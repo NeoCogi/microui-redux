@@ -177,12 +177,6 @@ pub struct Container {
     pub focus: Option<Id>,
     /// Tracks whether focus changed this frame.
     pub updated_focus: bool,
-    /// Internal state for the window title bar.
-    pub(crate) title_state: Internal,
-    /// Internal state for the window close button.
-    pub(crate) close_state: Internal,
-    /// Internal state for the window resize handle.
-    pub(crate) resize_state: Internal,
     /// Internal state for the vertical scrollbar.
     pub(crate) scrollbar_y_state: Internal,
     /// Internal state for the horizontal scrollbar.
@@ -217,9 +211,6 @@ impl Container {
             focus: None,
             updated_focus: false,
             layout: LayoutManager::default(),
-            title_state: Internal::new("!title"),
-            close_state: Internal::new("!close"),
-            resize_state: Internal::new("!resize"),
             scrollbar_y_state: Internal::new("!scrollbary"),
             scrollbar_x_state: Internal::new("!scrollbarx"),
             popup_just_opened: false,
