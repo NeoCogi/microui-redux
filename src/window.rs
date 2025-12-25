@@ -73,6 +73,12 @@ pub(crate) struct Window {
     pub(crate) ty: Type,
     pub(crate) win_state: WindowState,
     pub(crate) main: Container,
+    /// Internal state for the window title bar.
+    pub(crate) title_state: Internal,
+    /// Internal state for the window close button.
+    pub(crate) close_state: Internal,
+    /// Internal state for the window resize handle.
+    pub(crate) resize_state: Internal,
 }
 
 impl Window {
@@ -85,6 +91,9 @@ impl Window {
             ty: Type::Dialog,
             win_state: WindowState::Closed,
             main,
+            title_state: Internal::new("!title"),
+            close_state: Internal::new("!close"),
+            resize_state: Internal::new("!resize"),
         }
     }
 
@@ -97,6 +106,9 @@ impl Window {
             ty: Type::Window,
             win_state: WindowState::Open,
             main,
+            title_state: Internal::new("!title"),
+            close_state: Internal::new("!close"),
+            resize_state: Internal::new("!resize"),
         }
     }
 
@@ -109,6 +121,9 @@ impl Window {
             ty: Type::Popup,
             win_state: WindowState::Closed,
             main,
+            title_state: Internal::new("!title"),
+            close_state: Internal::new("!close"),
+            resize_state: Internal::new("!resize"),
         }
     }
 
@@ -123,7 +138,14 @@ impl Window {
     #[inline(never)]
     fn begin_window(&mut self, opt: ContainerOption, bopt: WidgetBehaviourOption) {
         let is_popup = self.is_popup();
-        let container = &mut self.main;
+        let Window {
+            win_state,
+            main: container,
+            title_state,
+            close_state,
+            resize_state,
+            ..
+        } = self;
         let mut body = container.rect;
         let r = body;
         if !opt.has_no_frame() {
@@ -144,23 +166,12 @@ impl Window {
 
             // TODO: Is this necessary?
             if !opt.has_no_title() {
-                let id = container.title_state.get_id();
-                let control_state = (container.title_state.opt, container.title_state.bopt);
+                let id = title_state.get_id();
+                let control_state = (title_state.opt, title_state.bopt);
                 let control = container.update_control(id, tr, &control_state);
                 {
-                    let mut ctx = WidgetCtx::new(
-                        id,
-                        tr,
-                        &mut container.command_list,
-                        &mut container.clip_stack,
-                        container.style.as_ref(),
-                        &container.atlas,
-                        &mut container.focus,
-                        &mut container.updated_focus,
-                        container.in_hover_root,
-                        None,
-                    );
-                    let _ = container.title_state.handle(&mut ctx, &control);
+                    let mut ctx = container.widget_ctx(id, tr, None);
+                    let _ = title_state.handle(&mut ctx, &control);
                 }
                 let name = container.name.clone(); // Necessary due to borrow checker limitations
                 container.draw_control_text(&name, tr, ControlColor::TitleText, WidgetOption::NONE);
@@ -172,54 +183,32 @@ impl Window {
                 body.height -= tr.height;
             }
             if !opt.has_no_close() {
-                let id = container.close_state.get_id();
+                let id = close_state.get_id();
                 let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
                 tr.width -= r.width;
                 let color = title_text_color;
                 container.draw_icon(CLOSE_ICON, r, color);
-                let control_state = (container.close_state.opt, container.close_state.bopt);
+                let control_state = (close_state.opt, close_state.bopt);
                 let control = container.update_control(id, r, &control_state);
                 {
-                    let mut ctx = WidgetCtx::new(
-                        id,
-                        r,
-                        &mut container.command_list,
-                        &mut container.clip_stack,
-                        container.style.as_ref(),
-                        &container.atlas,
-                        &mut container.focus,
-                        &mut container.updated_focus,
-                        container.in_hover_root,
-                        None,
-                    );
-                    let _ = container.close_state.handle(&mut ctx, &control);
+                    let mut ctx = container.widget_ctx(id, r, None);
+                    let _ = close_state.handle(&mut ctx, &control);
                 }
                 if control.clicked {
-                    self.win_state = WindowState::Closed;
+                    *win_state = WindowState::Closed;
                 }
             }
         }
         container.push_container_body(body, opt, bopt);
         if !opt.is_auto_sizing() {
             let sz = container.style.as_ref().title_height;
-            let id_2 = container.resize_state.get_id();
+            let id_2 = resize_state.get_id();
             let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
-            let control_state = (container.resize_state.opt, container.resize_state.bopt);
+            let control_state = (resize_state.opt, resize_state.bopt);
             let control = container.update_control(id_2, r_0, &control_state);
             {
-                let mut ctx = WidgetCtx::new(
-                    id_2,
-                    r_0,
-                    &mut container.command_list,
-                    &mut container.clip_stack,
-                    container.style.as_ref(),
-                    &container.atlas,
-                    &mut container.focus,
-                    &mut container.updated_focus,
-                    container.in_hover_root,
-                    None,
-                );
-                let _ = container.resize_state.handle(&mut ctx, &control);
+                let mut ctx = container.widget_ctx(id_2, r_0, None);
+                let _ = resize_state.handle(&mut ctx, &control);
             }
             if control.active {
                 container.rect.width = if 96 > container.rect.width + container.input.borrow().mouse_delta.x {
@@ -244,7 +233,7 @@ impl Window {
             // Skip the auto-close check on the same frame the popup is opened.
             container.popup_just_opened = false;
         } else if is_popup && !container.input.borrow().mouse_pressed.is_none() && !container.in_hover_root {
-            self.win_state = WindowState::Closed;
+            *win_state = WindowState::Closed;
         }
         let body = container.body;
         container.push_clip_rect(body);
