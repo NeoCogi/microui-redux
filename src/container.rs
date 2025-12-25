@@ -183,6 +183,8 @@ pub struct Container {
     pub(crate) scrollbar_x_state: Internal,
     /// Shared access to the input state.
     pub input: Rc<RefCell<Input>>,
+    /// Cached per-frame input snapshot for widgets that need it.
+    input_snapshot: Option<Rc<InputSnapshot>>,
     /// Whether this container is the current hover root.
     pub in_hover_root: bool,
     /// Tracks whether a popup was just opened this frame to avoid instant auto-close.
@@ -216,6 +218,7 @@ impl Container {
             popup_just_opened: false,
             in_hover_root: false,
             input: input,
+            input_snapshot: None,
             pending_scroll: None,
             scroll_enabled: true,
 
@@ -228,6 +231,7 @@ impl Container {
         self.focus = None;
         self.updated_focus = false;
         self.in_hover_root = false;
+        self.input_snapshot = None;
         self.pending_scroll = None;
         self.scroll_enabled = true;
     }
@@ -236,6 +240,7 @@ impl Container {
         self.command_list.clear();
         assert!(self.clip_stack.len() == 0);
         self.panels.clear();
+        self.input_snapshot = None;
         self.pending_scroll = None;
         self.scroll_enabled = true;
     }
@@ -485,9 +490,13 @@ impl Container {
         }
     }
 
-    fn snapshot_input(&self) -> InputSnapshot {
+    fn snapshot_input(&mut self) -> Rc<InputSnapshot> {
+        if let Some(snapshot) = &self.input_snapshot {
+            return snapshot.clone();
+        }
+
         let input = self.input.borrow();
-        InputSnapshot {
+        let snapshot = Rc::new(InputSnapshot {
             mouse_pos: input.mouse_pos,
             mouse_delta: input.mouse_delta,
             mouse_down: input.mouse_down,
@@ -497,10 +506,12 @@ impl Container {
             key_codes: input.key_code_down,
             key_code_pressed: input.key_code_pressed,
             text_input: input.input_text.clone(),
-        }
+        });
+        self.input_snapshot = Some(snapshot.clone());
+        snapshot
     }
 
-    pub(crate) fn widget_ctx(&mut self, id: Id, rect: Recti, input: Option<InputSnapshot>) -> WidgetCtx<'_> {
+    pub(crate) fn widget_ctx(&mut self, id: Id, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'_> {
         WidgetCtx::new(
             id,
             rect,
@@ -983,12 +994,13 @@ impl Container {
         }
 
         let input = self.snapshot_input();
-        let mouse_event = self.input_to_mouse_event(&control, &input, rect);
+        let input_ref = input.as_ref();
+        let mouse_event = self.input_to_mouse_event(&control, input_ref, rect);
 
         let active = control.focused && self.in_hover_root;
-        let key_mods = if active { input.key_mods } else { KeyMode::NONE };
-        let key_codes = if active { input.key_codes } else { KeyCode::NONE };
-        let text_input = if active { input.text_input } else { String::new() };
+        let key_mods = if active { input_ref.key_mods } else { KeyMode::NONE };
+        let key_codes = if active { input_ref.key_codes } else { KeyCode::NONE };
+        let text_input = if active { input_ref.text_input.clone() } else { String::new() };
         let cra = CustomRenderArgs {
             content_area: rect,
             view: self.get_clip_rect(),

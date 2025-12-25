@@ -62,7 +62,7 @@ pub struct WidgetCtx<'a> {
     focus: &'a mut Option<Id>,
     updated_focus: &'a mut bool,
     in_hover_root: bool,
-    input: Option<InputSnapshot>,
+    input: Option<Rc<InputSnapshot>>,
 }
 
 impl<'a> WidgetCtx<'a> {
@@ -77,7 +77,7 @@ impl<'a> WidgetCtx<'a> {
         focus: &'a mut Option<Id>,
         updated_focus: &'a mut bool,
         in_hover_root: bool,
-        input: Option<InputSnapshot>,
+        input: Option<Rc<InputSnapshot>>,
     ) -> Self {
         Self {
             id,
@@ -97,7 +97,7 @@ impl<'a> WidgetCtx<'a> {
     pub fn rect(&self) -> Recti { self.rect }
 
     /// Returns the input snapshot for this widget, if provided.
-    pub fn input(&self) -> Option<&InputSnapshot> { self.input.as_ref() }
+    pub fn input(&self) -> Option<&InputSnapshot> { self.input.as_deref() }
 
     /// Sets focus to this widget for the current frame.
     pub fn set_focus(&mut self) {
@@ -619,47 +619,57 @@ fn textbox_handle(
     }
     let mut cursor_pos = (*cursor).min(buf.len());
 
-    let input = ctx.input().cloned().unwrap_or_default();
+    let (mouse_pressed, mouse_pos, should_submit) = {
+        let default_input = InputSnapshot::default();
+        let input = ctx.input().unwrap_or(&default_input);
+        let mut should_submit = false;
 
-    if control.focused {
-        if !input.text_input.is_empty() {
-            let insert_at = cursor_pos.min(buf.len());
-            buf.insert_str(insert_at, input.text_input.as_str());
-            cursor_pos = insert_at + input.text_input.len();
-            res |= ResourceState::CHANGE;
-        }
+        if control.focused {
+            if !input.text_input.is_empty() {
+                let insert_at = cursor_pos.min(buf.len());
+                buf.insert_str(insert_at, input.text_input.as_str());
+                cursor_pos = insert_at + input.text_input.len();
+                res |= ResourceState::CHANGE;
+            }
 
-        if input.key_pressed.is_backspace() && cursor_pos > 0 && !buf.is_empty() {
-            let mut new_cursor = cursor_pos.min(buf.len());
-            new_cursor -= 1;
-            while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
+            if input.key_pressed.is_backspace() && cursor_pos > 0 && !buf.is_empty() {
+                let mut new_cursor = cursor_pos.min(buf.len());
                 new_cursor -= 1;
+                while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
+                    new_cursor -= 1;
+                }
+                buf.replace_range(new_cursor..cursor_pos, "");
+                cursor_pos = new_cursor;
+                res |= ResourceState::CHANGE;
             }
-            buf.replace_range(new_cursor..cursor_pos, "");
-            cursor_pos = new_cursor;
-            res |= ResourceState::CHANGE;
+
+            if input.key_code_pressed.is_left() && cursor_pos > 0 {
+                let mut new_cursor = cursor_pos - 1;
+                while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
+                    new_cursor -= 1;
+                }
+                cursor_pos = new_cursor;
+            }
+
+            if input.key_code_pressed.is_right() && cursor_pos < buf.len() {
+                let mut new_cursor = cursor_pos + 1;
+                while new_cursor < buf.len() && !buf.is_char_boundary(new_cursor) {
+                    new_cursor += 1;
+                }
+                cursor_pos = new_cursor;
+            }
+
+            if input.key_pressed.is_return() {
+                should_submit = true;
+            }
         }
 
-        if input.key_code_pressed.is_left() && cursor_pos > 0 {
-            let mut new_cursor = cursor_pos - 1;
-            while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
-                new_cursor -= 1;
-            }
-            cursor_pos = new_cursor;
-        }
+        (input.mouse_pressed, input.mouse_pos, should_submit)
+    };
 
-        if input.key_code_pressed.is_right() && cursor_pos < buf.len() {
-            let mut new_cursor = cursor_pos + 1;
-            while new_cursor < buf.len() && !buf.is_char_boundary(new_cursor) {
-                new_cursor += 1;
-            }
-            cursor_pos = new_cursor;
-        }
-
-        if input.key_pressed.is_return() {
-            ctx.clear_focus();
-            res |= ResourceState::SUBMIT;
-        }
+    if should_submit {
+        ctx.clear_focus();
+        res |= ResourceState::SUBMIT;
     }
 
     ctx.draw_widget_frame(control, r, ControlColor::Base, opt);
@@ -684,8 +694,8 @@ fn textbox_handle(
     let ofx = r.width - padding - text_metrics.width - 1;
     let textx = r.x + if ofx < padding { ofx } else { padding };
 
-    if control.focused && input.mouse_pressed.is_left() && ctx.mouse_over(r) {
-        let click_x = input.mouse_pos.x - textx;
+    if control.focused && mouse_pressed.is_left() && ctx.mouse_over(r) {
+        let click_x = mouse_pos.x - textx;
         if click_x <= 0 {
             cursor_pos = 0;
         } else {
@@ -798,9 +808,13 @@ fn number_textbox_handle(
     precision: usize,
     value: &mut Real,
 ) -> ResourceState {
-    let input = ctx.input().cloned().unwrap_or_default();
+    let shift_click = {
+        let default_input = InputSnapshot::default();
+        let input = ctx.input().unwrap_or(&default_input);
+        input.mouse_pressed.is_left() && input.key_mods.is_shift() && control.hovered
+    };
 
-    if input.mouse_pressed.is_left() && input.key_mods.is_shift() && control.hovered {
+    if shift_click {
         edit.editing = true;
         edit.buf.clear();
         edit.buf.push_str(format!("{:.*}", precision, value).as_str());
