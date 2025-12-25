@@ -1074,3 +1074,112 @@ impl Widget for Combo {
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
     fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AtlasSource, FontEntry, SourceFormat};
+
+    const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
+
+    fn make_test_atlas() -> AtlasHandle {
+        let pixels: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+        let icons: Vec<(&str, Recti)> = ICON_NAMES
+            .iter()
+            .map(|name| (*name, Recti::new(0, 0, 1, 1)))
+            .collect();
+        let entries = vec![
+            (
+                '_',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+            (
+                'a',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+            (
+                'b',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+        ];
+        let fonts = vec![(
+            "default",
+            FontEntry {
+                line_size: 10,
+                baseline: 8,
+                font_size: 10,
+                entries: &entries,
+            },
+        )];
+        let source = AtlasSource {
+            width: 1,
+            height: 1,
+            pixels: &pixels,
+            icons: &icons,
+            fonts: &fonts,
+            format: SourceFormat::Raw,
+            slots: &[],
+        };
+        AtlasHandle::from(&source)
+    }
+
+    #[test]
+    fn slider_zero_range_keeps_value() {
+        let atlas = make_test_atlas();
+        let style = Style::default();
+        let mut commands = Vec::new();
+        let mut clip_stack = Vec::new();
+        let mut focus = None;
+        let mut updated_focus = false;
+
+        let mut slider = Slider::new(5.0, 5.0, 5.0);
+        let id = slider.get_id();
+        let rect = rect(0, 0, 100, 20);
+        let text_input = String::new();
+        let input = Rc::new(InputSnapshot {
+            mouse_pos: vec2(50, 10),
+            mouse_delta: vec2(5, 0),
+            mouse_down: MouseButton::LEFT,
+            mouse_pressed: MouseButton::LEFT,
+            text_input,
+            ..Default::default()
+        });
+        let mut ctx = WidgetCtx::new(
+            id,
+            rect,
+            &mut commands,
+            &mut clip_stack,
+            &style,
+            &atlas,
+            &mut focus,
+            &mut updated_focus,
+            true,
+            Some(input),
+        );
+        let control = ControlState {
+            hovered: true,
+            focused: true,
+            clicked: false,
+            active: true,
+            scroll_delta: None,
+        };
+
+        let res = slider.handle(&mut ctx, &control);
+
+        assert!(res.is_none());
+        assert!(slider.value.is_finite());
+        assert_eq!(slider.value, 5.0);
+    }
+}
