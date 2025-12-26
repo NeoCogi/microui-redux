@@ -139,13 +139,16 @@ impl Camera {
         let near_prev = Self::unproject(&pv_mat, &near_prev_proj);
         let far_prev_proj = Vec3f::new(from.x, from.y, 1.0);
         let far_prev = Self::unproject(&pv_mat, &far_prev_proj);
-        let prev_center = p.intersect_ray(&Ray3f::new(&near_prev, &(far_prev - near_prev)));
+        let epsilon = 1.0e-6;
+        let prev_center = Ray3f::new(&near_prev, &(far_prev - near_prev), epsilon)
+            .and_then(|ray| p.intersect_ray(&ray, epsilon));
 
         let near_curr_proj = Vec3f::new(to.x, to.y, -1.0);
         let near_curr = Self::unproject(&pv_mat, &near_curr_proj);
         let far_curr_proj = Vec3f::new(to.x, to.y, 1.0);
         let far_curr = Self::unproject(&pv_mat, &far_curr_proj);
-        let curr_center = p.intersect_ray(&Ray3f::new(&near_curr, &(far_curr - near_curr)));
+        let curr_center = Ray3f::new(&near_curr, &(far_curr - near_curr), epsilon)
+            .and_then(|ray| p.intersect_ray(&ray, epsilon));
 
         match (prev_center, curr_center) {
             (Some(p), Some(c)) => Self::new(

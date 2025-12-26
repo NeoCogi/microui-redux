@@ -68,6 +68,20 @@ Disabling default features leaves only the raw RGBA upload path (`ImageSource::R
 - `Container::text_with_wrap` supports explicit wrapping modes (`TextWrap::None` or `TextWrap::Word`) and renders wrapped lines back-to-back inside an internal column, so the block keeps the outer padding without adding extra spacing between lines.
 - Custom drawing code can call `Container::draw_text` directly when precise placement is required, or use `draw_control_text` to get automatic alignment/clip handling.
 
+### Version 0.4
+- [x] Stateful widgets
+    - [x] Stateful widgets for core controls (button, list item, checkbox, textbox, slider, number, custom).
+    - [x] Pointer-based widget IDs; InputSnapshot threaded through widgets and cached per frame.
+    - [x] IdManager removed; widget IDs now derive from state pointers.
+    - [x] Widget API redesign requires stateful widget instances; trait/type renames applied.
+    - [x] Legacy `button_ex*` shims removed.
+    - [x] DrawCtx extracted into its own module and shared via WidgetCtx.
+    - [x] WidgetState/WidgetCtx pipeline with ControlState returned from `update_control`.
+- [x] File dialog UX fixes (close on OK/cancel, path-aware browsing).
+- [x] Expanded unit tests for scrollbars, sliders, and PNG decoding paths.
+- [x] Style shared via `Rc<Style>` across containers/panels; window chrome state moved into `Window`.
+- [x] `Container::style` now uses `Rc<Style>`.
+
 ### Version 0.3
 - [x] Use `std` (`Vec`, `parse`, ...)
 - [x] Containers contain clip stack and command list

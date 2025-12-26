@@ -342,7 +342,7 @@ impl Container {
     }
 
     #[inline(never)]
-    /// Draws multi-line text within the container using automatic wrapping.
+    /// Draws multi-line text within the container without wrapping.
     pub fn text(&mut self, text: &str) { self.text_with_wrap(text, TextWrap::None); }
 
     #[inline(never)]
@@ -890,7 +890,8 @@ impl Container {
     }
 
     #[inline(never)]
-    /// Draws a combo box that opens a popup listing `items` and writes back the selected index.
+    /// Draws the combo box header, clamps the selected index, and returns the popup anchor.
+    /// The caller is responsible for opening the popup and updating `state.selected` from its list.
     pub fn combo_box<S: AsRef<str>>(&mut self, state: &mut Combo, items: &[S]) -> (Recti, bool, ResourceState) {
         let mut res = ResourceState::NONE;
 
