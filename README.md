@@ -1,9 +1,9 @@
 # Rxi's Microui Port to Idiomatic Rust
 [![Crate](https://img.shields.io/crates/v/microui-redux.svg)](https://crates.io/crates/microui-redux)
 
-This was originally a port of Rxi's MicroUI to Rust language. We used C2Rust to create the initial code and iterated > 60 times to make microui-rs. This (microui-redux) builds on top of that by much more like custom rendering widget for 3D, dialogs, file dialog!
+This project started as a C2Rust conversion of Rxi's MicroUI and has since grown into a Rust-first UI toolkit. It preserves the immediate-mode feel while using stateful widget structs with stable IDs, a row/column layout helper API, and backend-agnostic rendering hooks.
 
-While we tried to keep the usage pattern as close to the original as possible, we wanted also to make it as idiomatic to Rust as possible (closures, safety, ...). In contrast with ![microui-rs](https://github.com/neocogi/microui-rs), this version uses the standard library to give us more flexibity and switch to closures for all container related operations (Window, Panel, Columns, ...).
+Compared to [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces std types, closure-based window/panel/column scopes, and richer widgets such as custom rendering callbacks, dialogs, and a file dialog.
 
 ## Demo
 Clone and build the demo (enable exactly one backend feature):
@@ -16,7 +16,7 @@ $ cargo run --example demo-full --features example-glow     # Glow backend
 ![random](https://github.com/NeoCogi/microui-redux/raw/master/res/microui.png)
 
 ## Key Concepts
-- **Context**: owns the atlas, renderer handle, user input and root windows. Each frame starts by feeding input into the context, then calling `context.window(...)` for every visible window or popup.
+- **Context**: owns the renderer handle, user input, and root windows. The atlas is provided by the renderer and accessed through the context. Each frame starts by feeding input into the context, then calling `context.window(...)` for every visible window or popup.
 - **Container**: describes one layout surface. Every window, panel, popup or custom widget receives a mutable `Container` that exposes high-level widgets (buttons, sliders, etc.) and lower-level drawing helpers.
 - **Layout manager**: controls how cells are sized. `Container::with_row` lets you scope a set of widgets to a row of `SizePolicy`s, while nested columns can be created with `container.column(|ui| { ... })`.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). These structs hold interaction state and supply stable IDs.
@@ -38,7 +38,7 @@ for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widg
 `WidgetBehaviourOption::NONE` for default behavior. Custom widgets receive consumed scroll in `CustomRenderArgs::scroll_delta`.
 
 ## Images and textures
-Widgets take an `Image` enum, which can reference either a slot **or** an uploaded texture at runtime:
+Some widgets can render an `Image`, which can reference either a slot **or** an uploaded texture at runtime:
 
 ```rust
 let texture = ctx.load_image_from(ImageSource::Png { bytes: include_bytes!("assets/IMAGE.png") })?;
@@ -52,7 +52,7 @@ ui.button(&mut image_button);
 ```
 
 - `Image::Slot` renders an entry from the atlas and benefits from batching.
-- `Image::Texture` targets renderer-owned textures. The command list flushes before drawing the texture so the backend can bind the correct resource.
+- `Image::Texture` targets renderer-owned textures (the backend handles binding when drawing).
 - `WidgetFillOption` controls which interaction states draw a filled background; use `WidgetFillOption::ALL` to keep the default normal/hover/click fills.
 - Use `Context::load_image_rgba`/`load_image_from` and `Context::free_image` to manage the lifetime of external textures.
 
