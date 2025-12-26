@@ -27,7 +27,7 @@ example-vulkan = ["example-backend"]
 [dependencies]
 fontdue = { version = "0.9.2", optional = true }
 bitflags = "2.4.1"
-rs-math3d = "0.9.23"
+rs-math3d = "0.10"
 png = { version = "0.18", optional = true }
 
 [dev-dependencies]

@@ -306,7 +306,7 @@ bitflags! {
         const NO_RESIZE = 16;
         /// Hides the outer frame.
         const NO_FRAME = 8;
-        /// Disables hit testing for the container.
+        /// Reserved for future use (currently unused by the container).
         const NO_INTERACT = 4;
         /// No special options.
         const NONE = 0;
@@ -770,8 +770,8 @@ pub enum ImageSource<'a> {
         pixels: &'a [u8],
     },
     #[cfg(any(feature = "builder", feature = "png_source"))]
-    /// PNG-compressed byte slice (requires the `png` feature). Grayscale and RGB
-    /// images are expanded to opaque RGBA (alpha = 255).
+    /// PNG-compressed byte slice (requires the `builder` or `png_source` feature).
+    /// Grayscale and RGB images are expanded to opaque RGBA (alpha = 255).
     Png {
         /// Compressed PNG payload.
         bytes: &'a [u8],
@@ -881,10 +881,10 @@ impl<R: Renderer> Context<R> {
 }
 
 impl<R: Renderer> Context<R> {
-    /// Begins a new UI frame and prepares the canvas for drawing.
+    /// Begins a new draw pass on the underlying canvas.
     pub fn begin(&mut self, width: i32, height: i32, clr: Color) { self.canvas.begin(width, height, clr); }
 
-    /// Finishes the UI frame and emits all draw commands to the renderer.
+    /// Flushes recorded draw commands to the renderer and ends the draw pass.
     pub fn end(&mut self) {
         for r in &mut self.root_list {
             r.render(&mut self.canvas);
@@ -937,7 +937,8 @@ impl<R: Renderer> Context<R> {
         self.root_list.sort_by(|a, b| a.zindex().cmp(&b.zindex()));
     }
 
-    /// Runs the UI for a single frame by wrapping begin/end calls.
+    /// Runs the UI for a single frame by wrapping input/layout bookkeeping.
+    /// Rendering still requires calling [`Context::begin`] and [`Context::end`].
     pub fn frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
         self.frame_begin();
 
