@@ -59,9 +59,16 @@ ui.button(&mut image_button);
 ## Cargo features
 - `builder` *(default)* – enables the runtime atlas builder and PNG decoding helpers used by the examples.
 - `png_source` – allows serialized atlases and `ImageSource::Png { .. }` uploads to stay compressed.
-- `save-to-rust` – emits the current atlas as Rust code so it can be embedded in your binary.
+- `save-to-rust` – enables `AtlasHandle::to_rust_files` to emit the current atlas as Rust code for embedding.
 
-Disabling default features leaves only the raw RGBA upload path (`ImageSource::Raw { .. }`). The demos require `builder`, so run them with `--features builder` if you build with `--no-default-features`.
+Disabling default features leaves only the raw RGBA upload path (`ImageSource::Raw { .. }`):
+`cargo build --no-default-features`
+
+The demos require `builder`, so run them with `--no-default-features` plus `builder`:
+`cargo run --example demo-full --no-default-features --features "example-vulkan builder"`
+
+To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for PNG bytes) and call `AtlasHandle::to_rust_files`, or use the helper binary:
+`cargo run --bin atlas_export --features "builder save-to-rust" -- --output path/to/atlas.rs`
 
 ## Text rendering and layout
 - Container text widgets automatically center the font’s **baseline** inside each cell, and every line gets a small vertical pad so glyphs never touch the widget borders.
