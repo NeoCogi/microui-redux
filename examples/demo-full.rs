@@ -122,7 +122,7 @@ struct State<'a> {
 }
 
 impl<'a> State<'a> {
-    pub fn new(_backend: BackendInitContext, renderer: RendererHandle<BackendRenderer>, slots: Vec<SlotId>, ctx: &mut Context<BackendRenderer>) -> Self {
+    pub fn new(_backend: BackendInitContext, renderer: RendererHandle<BackendRenderer>, slots: Vec<SlotId>, _ctx: &mut Context<BackendRenderer>) -> Self {
         #[cfg(any(feature = "builder", feature = "png_source"))]
         let image_texture = ctx.load_image_from(ImageSource::Png { bytes: include_bytes!("./FACEPALM.png") }).ok();
         #[cfg(not(any(feature = "builder", feature = "png_source")))]
