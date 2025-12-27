@@ -666,11 +666,17 @@ impl AtlasHandle {
         font_meta.push_str(format!("slots: {},\n", slots).as_str());
         let (source_pixels, source_format) = match format {
             SourceFormat::Raw => (
-                self.0.borrow().pixels.iter().map(|p| [p.x, p.y, p.z, p.w]).flatten().collect::<Vec<_>>(),
+                self.0
+                    .borrow()
+                    .pixels
+                    .iter()
+                    .map(|p| [p.x, p.y, p.z, p.w])
+                    .flatten()
+                    .collect::<Vec<_>>(),
                 "SourceFormat::Raw",
             ),
             #[cfg(feature = "png_source")]
-            SourceFormat::Png => (builder::Builder::png_image_bytes(self.clone()).unwrap(), "SourceFormat::Png"),
+            SourceFormat::Png => (self.png_image_bytes()?, "SourceFormat::Png"),
         };
 
         let mut pixels = String::from_str("&[\n").unwrap();
@@ -683,6 +689,27 @@ impl AtlasHandle {
         font_meta.push_str("};");
         let mut f = File::create(path).unwrap();
         write!(f, "{}", font_meta)
+    }
+
+    #[cfg(all(feature = "save-to-rust", feature = "png_source"))]
+    fn png_image_bytes(&self) -> Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        let pixels = self
+            .0
+            .borrow()
+            .pixels
+            .iter()
+            .map(|c| [c.x, c.y, c.z, c.w])
+            .flatten()
+            .collect::<Vec<_>>();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, self.width() as _, self.height() as _);
+            encoder.set_color(ColorType::Rgba);
+            encoder.set_depth(BitDepth::Eight);
+            let mut writer = encoder.write_header()?;
+            writer.write_image_data(pixels.as_slice())?;
+        }
+        Ok(bytes)
     }
 
     /// Returns the atlas texture width in pixels.
