@@ -893,54 +893,13 @@ impl Container {
     /// Draws the combo box header, clamps the selected index, and returns the popup anchor.
     /// The caller is responsible for opening the popup and updating `state.selected` from its list.
     pub fn combo_box<S: AsRef<str>>(&mut self, state: &mut Combo, items: &[S]) -> (Recti, bool, ResourceState) {
-        let mut res = ResourceState::NONE;
-
-        // Keep the selected index within bounds so we never index past the slice.
-        if state.selected >= items.len() {
-            if !items.is_empty() {
-                state.selected = items.len() - 1;
-                res |= ResourceState::CHANGE;
-            } else if state.selected != 0 {
-                state.selected = 0;
-                res |= ResourceState::CHANGE;
-            }
-        }
-
+        state.update_items(items);
         let id: Id = state.get_id();
         let header: Recti = self.layout.next();
         let control = self.update_control(id, header, state);
-        {
-            let mut ctx = self.widget_ctx(id, header, None);
-            let _ = state.handle(&mut ctx, &control);
-        }
-
-        let header_clicked = control.clicked;
-        let popup_open = state.popup.is_open();
-
-        // Toggle the popup when the header is clicked.
-        if header_clicked {
-            res |= ResourceState::ACTIVE;
-        }
-
-        self.draw_widget_frame(id, header, ControlColor::Button, state.opt);
-        let label = items.get(state.selected).map(|s| s.as_ref()).unwrap_or("");
-        let indicator_size = self.atlas.get_icon_size(EXPAND_DOWN_ICON);
-        let indicator_x = header.x + header.width - indicator_size.width;
-        let indicator_y = header.y + ((header.height - indicator_size.height) / 2).max(0);
-        let indicator = rect(indicator_x, indicator_y, indicator_size.width, indicator_size.height);
-
-        let mut text_rect = header;
-        let reserved_width = indicator_size.width;
-        text_rect.width = (text_rect.width - reserved_width).max(0);
-        self.draw_control_text(label, text_rect, ControlColor::Text, state.opt);
-        self.draw_widget_frame(id, indicator, ControlColor::Button, state.opt);
-        let icon_color = self.style.as_ref().colors[ControlColor::Text as usize];
-        self.draw_icon(EXPAND_DOWN_ICON, indicator, icon_color);
-
-        if popup_open {
-            res |= ResourceState::ACTIVE;
-        }
-
+        let mut ctx = self.widget_ctx(id, header, None);
+        let res = state.handle(&mut ctx, &control);
+        let header_clicked = res.is_submitted();
         let anchor = rect(header.x, header.y + header.height, header.width, 1);
         (anchor, header_clicked, res)
     }

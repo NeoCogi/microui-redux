@@ -524,22 +524,95 @@ pub struct Combo {
     pub opt: WidgetOption,
     /// Behaviour options applied to the combo header.
     pub bopt: WidgetBehaviourOption,
+    label: String,
+    clamped: bool,
 }
 
 impl Combo {
     /// Creates a new combo state with the provided popup handle.
     pub fn new(popup: WindowHandle) -> Self {
-        Self { popup, selected: 0, open: false, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
+        Self {
+            popup,
+            selected: 0,
+            open: false,
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+            label: String::new(),
+            clamped: false,
+        }
     }
 
     /// Creates a new combo state with explicit widget options.
     pub fn with_opt(popup: WindowHandle, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self {
-        Self { popup, selected: 0, open: false, opt, bopt }
+        Self {
+            popup,
+            selected: 0,
+            open: false,
+            opt,
+            bopt,
+            label: String::new(),
+            clamped: false,
+        }
+    }
+
+    /// Updates the cached label and clamps the selected index to the provided items.
+    pub fn update_items<S: AsRef<str>>(&mut self, items: &[S]) {
+        self.clamped = false;
+        if items.is_empty() {
+            if self.selected != 0 {
+                self.selected = 0;
+                self.clamped = true;
+            }
+            self.label.clear();
+            return;
+        }
+
+        if self.selected >= items.len() {
+            self.selected = items.len() - 1;
+            self.clamped = true;
+        }
+
+        self.label.clear();
+        if let Some(label) = items.get(self.selected) {
+            self.label.push_str(label.as_ref());
+        }
     }
 }
 
 impl Widget for Combo {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
+    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let mut res = ResourceState::NONE;
+        if self.clamped {
+            res |= ResourceState::CHANGE;
+            self.clamped = false;
+        }
+
+        if control.clicked {
+            res |= ResourceState::SUBMIT | ResourceState::ACTIVE;
+        }
+        if self.popup.is_open() {
+            res |= ResourceState::ACTIVE;
+        }
+
+        let header = ctx.rect();
+        ctx.draw_widget_frame(control, header, ControlColor::Button, self.opt);
+
+        let indicator_size = ctx.atlas().get_icon_size(EXPAND_DOWN_ICON);
+        let indicator_x = header.x + header.width - indicator_size.width;
+        let indicator_y = header.y + ((header.height - indicator_size.height) / 2).max(0);
+        let indicator = rect(indicator_x, indicator_y, indicator_size.width, indicator_size.height);
+
+        let mut text_rect = header;
+        let reserved_width = indicator_size.width;
+        text_rect.width = (text_rect.width - reserved_width).max(0);
+        ctx.draw_control_text(self.label.as_str(), text_rect, ControlColor::Text, self.opt);
+
+        ctx.draw_widget_frame(control, indicator, ControlColor::Button, self.opt);
+        let icon_color = ctx.style().colors[ControlColor::Text as usize];
+        ctx.draw_icon(EXPAND_DOWN_ICON, indicator, icon_color);
+
+        res
+    }
 }
