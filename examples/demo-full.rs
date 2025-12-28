@@ -78,6 +78,7 @@ struct State<'a> {
     logbuf: String,
     logbuf_updated: bool,
     submit_buf: Textbox,
+    text_area: TextArea,
     combo_state: Option<Combo>,
     combo_items: [ListItem; 4],
     style: Style,
@@ -98,6 +99,7 @@ struct State<'a> {
     test_buttons_header: Node,
     background_header: Node,
     tree_and_text_header: Node,
+    text_area_header: Node,
     slot_header: Node,
     combo_header: Node,
     test1_tn: Node,
@@ -122,7 +124,7 @@ struct State<'a> {
 }
 
 impl<'a> State<'a> {
-    pub fn new(_backend: BackendInitContext, renderer: RendererHandle<BackendRenderer>, slots: Vec<SlotId>, _ctx: &mut Context<BackendRenderer>) -> Self {
+    pub fn new(_backend: BackendInitContext, renderer: RendererHandle<BackendRenderer>, slots: Vec<SlotId>, ctx: &mut Context<BackendRenderer>) -> Self {
         #[cfg(any(feature = "builder", feature = "png_source"))]
         let image_texture = ctx.load_image_from(ImageSource::Png { bytes: include_bytes!("./FACEPALM.png") }).ok();
         #[cfg(not(any(feature = "builder", feature = "png_source")))]
@@ -187,6 +189,10 @@ impl<'a> State<'a> {
         let bg_sliders = std::array::from_fn(|_| {
             Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)
         });
+        let mut text_area = TextArea::new(
+            "This is a multi-line TextArea.\nYou can type, scroll, and resize the window.\n\nTry adding more lines to see the scrollbars.",
+        );
+        text_area.wrap = TextWrap::Word;
 
         Self {
             renderer,
@@ -250,6 +256,7 @@ impl<'a> State<'a> {
             logbuf: String::new(),
             logbuf_updated: false,
             submit_buf: Textbox::new(""),
+            text_area,
             combo_state: None,
             combo_items: [
                 ListItem::new("Apple"),
@@ -272,6 +279,7 @@ impl<'a> State<'a> {
             test_buttons_header: Node::new("Test Buttons", NodeStateValue::Expanded),
             background_header: Node::new("Background Color", NodeStateValue::Expanded),
             tree_and_text_header: Node::new("Tree and Text", NodeStateValue::Expanded),
+            text_area_header: Node::new("TextArea", NodeStateValue::Expanded),
             slot_header: Node::new("Slots", NodeStateValue::Expanded),
             combo_header: Node::new("Combo Box", NodeStateValue::Expanded),
             test1_tn: Node::new("Test 1", NodeStateValue::Closed),
@@ -708,6 +716,16 @@ impl<'a> State<'a> {
             }
             for msg in tree_logs {
                 self.write_log(msg);
+            }
+
+            {
+                let text_area_header = &mut self.text_area_header;
+                let text_area = &mut self.text_area;
+                container.header(text_area_header, |container| {
+                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(120), |container| {
+                        container.textarea_ex(text_area);
+                    });
+                });
             }
 
             {
