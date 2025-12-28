@@ -133,6 +133,7 @@ impl<S> Application<S> {
 
             fn map_keymode(sdl_kc: Option<sdl2::keyboard::Keycode>) -> microui::KeyMode {
                 match sdl_kc {
+                    Some(sdl2::keyboard::Keycode::Delete) => microui::KeyMode::DELETE,
                     Some(sdl2::keyboard::Keycode::Backspace) => microui::KeyMode::BACKSPACE,
                     Some(sdl2::keyboard::Keycode::Return) => microui::KeyMode::RETURN,
                     Some(sdl2::keyboard::Keycode::LAlt) | Some(sdl2::keyboard::Keycode::RAlt) => microui::KeyMode::ALT,
@@ -144,6 +145,8 @@ impl<S> Application<S> {
 
             fn map_keycode(sdl_kc: Option<sdl2::keyboard::Keycode>) -> microui::KeyCode {
                 match sdl_kc {
+                    Some(sdl2::keyboard::Keycode::Delete) => microui::KeyCode::DELETE,
+                    Some(sdl2::keyboard::Keycode::End) => microui::KeyCode::END,
                     Some(sdl2::keyboard::Keycode::Up) => microui::KeyCode::UP,
                     Some(sdl2::keyboard::Keycode::Down) => microui::KeyCode::DOWN,
                     Some(sdl2::keyboard::Keycode::Left) => microui::KeyCode::LEFT,

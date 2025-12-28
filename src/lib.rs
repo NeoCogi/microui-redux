@@ -517,6 +517,8 @@ bitflags! {
     #[derive(Copy, Clone, Debug)]
     /// Modifier key state tracked by the input system.
     pub struct KeyMode : u32 {
+        /// Delete key held.
+        const DELETE = 32;
         /// Return/Enter key held.
         const RETURN = 16;
         /// Backspace key held.
@@ -535,6 +537,8 @@ bitflags! {
 impl KeyMode {
     /// Returns `true` if no modifiers are active.
     pub fn is_none(&self) -> bool { self.bits() == 0 }
+    /// Returns `true` if Delete is held.
+    pub fn is_delete(&self) -> bool { self.intersects(Self::DELETE) }
     /// Returns `true` if Return/Enter is held.
     pub fn is_return(&self) -> bool { self.intersects(Self::RETURN) }
     /// Returns `true` if Backspace is held.
@@ -551,6 +555,10 @@ bitflags! {
     #[derive(Copy, Clone, Debug)]
     /// Logical navigation keys handled by the UI.
     pub struct KeyCode : u32 {
+        /// Delete key.
+        const DELETE = 32;
+        /// End key.
+        const END = 16;
         /// Right arrow key.
         const RIGHT = 8;
         /// Left arrow key.
@@ -567,6 +575,10 @@ bitflags! {
 impl KeyCode {
     /// Returns `true` if no navigation key is pressed.
     pub fn is_none(&self) -> bool { self.bits() == 0 }
+    /// Returns `true` if Delete is pressed.
+    pub fn is_delete(&self) -> bool { self.intersects(Self::DELETE) }
+    /// Returns `true` if End is pressed.
+    pub fn is_end(&self) -> bool { self.intersects(Self::END) }
     /// Returns `true` if up is pressed.
     pub fn is_up(&self) -> bool { self.intersects(Self::UP) }
     /// Returns `true` if down is pressed.

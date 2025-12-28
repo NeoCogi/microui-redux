@@ -1032,6 +1032,22 @@ impl Container {
         self.textbox_raw(state, r)
     }
 
+    /// Draws a multi-line text area in the provided rectangle using the supplied state.
+    pub fn textarea_raw(&mut self, state: &mut TextArea, r: Recti) -> ResourceState {
+        let id = state.get_id();
+        let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.bopt);
+        let control = self.update_control(id, r, &control_state);
+        let input = self.snapshot_input();
+        let mut ctx = self.widget_ctx(id, r, Some(input));
+        state.handle(&mut ctx, &control)
+    }
+
+    /// Draws a multi-line text area using the next available layout cell.
+    pub fn textarea_ex(&mut self, state: &mut TextArea) -> ResourceState {
+        let r: Recti = self.layout.next();
+        self.textarea_raw(state, r)
+    }
+
     #[inline(never)]
     /// Draws a horizontal slider bound to `state`.
     pub fn slider_ex(&mut self, state: &mut Slider) -> ResourceState {
