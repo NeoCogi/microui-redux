@@ -534,6 +534,40 @@ impl Container {
         self.updated_focus = false;
     }
 
+    /// Builds a collapsible header row that executes `f` when expanded.
+    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
+        state.set_header_kind();
+        let id: Id = state.get_id();
+        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
+        let r = self.layout.next();
+        let control = self.update_control(id, r, state);
+        let mut ctx = self.widget_ctx(id, r, None);
+        let _ = state.handle(&mut ctx, &control);
+        if state.state.is_expanded() {
+            f(self);
+        }
+        state.state
+    }
+
+    /// Builds a tree node with automatic indentation while expanded.
+    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
+        state.set_tree_kind();
+        let id: Id = state.get_id();
+        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
+        let r = self.layout.next();
+        let control = self.update_control(id, r, state);
+        let mut ctx = self.widget_ctx(id, r, None);
+        let _ = state.handle(&mut ctx, &control);
+        if state.state.is_expanded() {
+            let indent = self.style.as_ref().indent;
+            self.layout.adjust_indent(indent);
+            f(self);
+            self.layout.adjust_indent(-indent);
+        }
+
+        state.state
+    }
+
     fn clamp(x: i32, a: i32, b: i32) -> i32 { min(b, max(a, x)) }
 
     /// Returns the y coordinate where a line of text should start so its baseline sits at the control midpoint.
