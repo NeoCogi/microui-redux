@@ -607,13 +607,11 @@ impl Container {
 
     /// Builds a collapsible header row that executes `f` when expanded.
     pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
-        state.set_header_kind();
         self.node_scope(state, false, f)
     }
 
     /// Builds a tree node with automatic indentation while expanded.
     pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
-        state.set_tree_kind();
         self.node_scope(state, true, f)
     }
 
