@@ -86,7 +86,7 @@ pub enum TextWrap {
 }
 
 /// Draw commands recorded during container traversal.
-pub enum Command {
+pub(crate) enum Command {
     /// Pushes or pops a clip rectangle.
     Clip {
         /// Rect to clip against.
@@ -306,9 +306,6 @@ impl Container {
 
     /// Determines whether `r` is fully visible, partially visible, or completely clipped.
     pub fn check_clip(&mut self, r: Recti) -> Clip { self.draw_ctx().check_clip(r) }
-
-    /// Enqueues a draw command to be consumed during rendering.
-    pub fn push_command(&mut self, cmd: Command) { self.draw_ctx().push_command(cmd); }
 
     /// Adjusts the current clip rectangle.
     pub fn set_clip(&mut self, rect: Recti) { self.draw_ctx().set_clip(rect); }

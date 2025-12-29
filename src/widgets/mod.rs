@@ -143,9 +143,6 @@ impl<'a> WidgetCtx<'a> {
 
     pub(crate) fn atlas(&self) -> &AtlasHandle { self.draw.atlas() }
 
-    /// Pushes a raw draw command into the command buffer.
-    pub fn push_command(&mut self, cmd: Command) { self.draw.push_command(cmd); }
-
     /// Sets the current clip rectangle for subsequent draw commands.
     pub fn set_clip(&mut self, rect: Recti) { self.draw.set_clip(rect); }
 
