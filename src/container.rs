@@ -52,6 +52,7 @@
 //
 use super::*;
 use crate::draw_context::DrawCtx;
+use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::text_layout::build_text_lines;
 use std::cell::RefCell;
 
@@ -689,14 +690,11 @@ impl Container {
             body.height -= sz;
         }
         let body = *body;
-        let maxscroll = cs.y - body.height;
+        let maxscroll = scrollbar_max_scroll(cs.y, body.height);
         if maxscroll > 0 && body.height > 0 {
             let id: Id = self.scrollbar_y_state.get_id();
-            let mut base = body;
-            base.x = body.x + body.width;
-            base.width = scrollbar_size;
-            let control_state = (self.scrollbar_y_state.opt, self.scrollbar_y_state.bopt);
-            let control = self.update_control(id, base, &control_state);
+            let base = scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size);
+            let control = self.update_control_with_opts(id, base, self.scrollbar_y_state.opt, self.scrollbar_y_state.bopt);
             {
                 let mut ctx = WidgetCtx::new(
                     id,
@@ -713,30 +711,21 @@ impl Container {
                 let _ = self.scrollbar_y_state.handle(&mut ctx, &control);
             }
             if control.active {
-                self.scroll.y += self.input.borrow().mouse_delta.y * cs.y / base.height;
+                let delta = scrollbar_drag_delta(ScrollAxis::Vertical, self.input.borrow().mouse_delta, cs.y, base);
+                self.scroll.y += delta;
             }
-
-            self.draw_frame(base, ControlColor::ScrollBase);
-            let mut thumb = base;
-            thumb.height = if thumb_size > base.height * body.height / cs.y {
-                thumb_size
-            } else {
-                base.height * body.height / cs.y
-            };
-            thumb.y += self.scroll.y * (base.height - thumb.height) / maxscroll;
-            self.draw_frame(thumb, ControlColor::ScrollThumb);
             self.scroll.y = Self::clamp(self.scroll.y, 0, maxscroll);
+            self.draw_frame(base, ControlColor::ScrollBase);
+            let thumb = scrollbar_thumb(ScrollAxis::Vertical, base, body.height, cs.y, self.scroll.y, thumb_size);
+            self.draw_frame(thumb, ControlColor::ScrollThumb);
         } else {
             self.scroll.y = 0;
         }
-        let maxscroll_0 = cs.x - body.width;
+        let maxscroll_0 = scrollbar_max_scroll(cs.x, body.width);
         if maxscroll_0 > 0 && body.width > 0 {
             let id_0: Id = self.scrollbar_x_state.get_id();
-            let mut base_0 = body;
-            base_0.y = body.y + body.height;
-            base_0.height = scrollbar_size;
-            let control_state = (self.scrollbar_x_state.opt, self.scrollbar_x_state.bopt);
-            let control = self.update_control(id_0, base_0, &control_state);
+            let base_0 = scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size);
+            let control = self.update_control_with_opts(id_0, base_0, self.scrollbar_x_state.opt, self.scrollbar_x_state.bopt);
             {
                 let mut ctx = WidgetCtx::new(
                     id_0,
@@ -753,19 +742,13 @@ impl Container {
                 let _ = self.scrollbar_x_state.handle(&mut ctx, &control);
             }
             if control.active {
-                self.scroll.x += self.input.borrow().mouse_delta.x * cs.x / base_0.width;
+                let delta = scrollbar_drag_delta(ScrollAxis::Horizontal, self.input.borrow().mouse_delta, cs.x, base_0);
+                self.scroll.x += delta;
             }
-
-            self.draw_frame(base_0, ControlColor::ScrollBase);
-            let mut thumb_0 = base_0;
-            thumb_0.width = if thumb_size > base_0.width * body.width / cs.x {
-                thumb_size
-            } else {
-                base_0.width * body.width / cs.x
-            };
-            thumb_0.x += self.scroll.x * (base_0.width - thumb_0.width) / maxscroll_0;
-            self.draw_frame(thumb_0, ControlColor::ScrollThumb);
             self.scroll.x = Self::clamp(self.scroll.x, 0, maxscroll_0);
+            self.draw_frame(base_0, ControlColor::ScrollBase);
+            let thumb_0 = scrollbar_thumb(ScrollAxis::Horizontal, base_0, body.width, cs.x, self.scroll.x, thumb_size);
+            self.draw_frame(thumb_0, ControlColor::ScrollThumb);
         } else {
             self.scroll.x = 0;
         }

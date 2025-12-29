@@ -72,6 +72,7 @@ mod container;
 mod file_dialog;
 mod layout;
 mod rect_packer;
+mod scrollbar;
 mod text_layout;
 mod window;
 mod widgets;
