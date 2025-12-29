@@ -52,7 +52,6 @@
 //
 use super::*;
 use crate::draw_context::DrawCtx;
-use crate::draw_ops::{DrawCtxAccess, DrawOps};
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::text_layout::build_text_lines;
 use std::cell::RefCell;
@@ -299,19 +298,28 @@ impl Container {
     }
 
     /// Pushes a new clip rectangle combined with the previous clip.
-    pub fn push_clip_rect(&mut self, rect: Recti) { DrawOps::push_clip_rect(self, rect); }
+    pub fn push_clip_rect(&mut self, rect: Recti) {
+        let mut draw = self.draw_ctx();
+        draw.push_clip_rect(rect);
+    }
 
     /// Restores the previous clip rectangle from the stack.
-    pub fn pop_clip_rect(&mut self) { DrawOps::pop_clip_rect(self); }
+    pub fn pop_clip_rect(&mut self) {
+        let mut draw = self.draw_ctx();
+        draw.pop_clip_rect();
+    }
 
     /// Returns the active clip rectangle, or an unclipped rect when the stack is empty.
-    pub fn get_clip_rect(&mut self) -> Recti { DrawOps::current_clip_rect(self) }
+    pub fn get_clip_rect(&mut self) -> Recti { self.draw_ctx().current_clip_rect() }
 
     /// Determines whether `r` is fully visible, partially visible, or completely clipped.
-    pub fn check_clip(&mut self, r: Recti) -> Clip { DrawOps::check_clip(self, r) }
+    pub fn check_clip(&mut self, r: Recti) -> Clip { self.draw_ctx().check_clip(r) }
 
     /// Adjusts the current clip rectangle.
-    pub fn set_clip(&mut self, rect: Recti) { DrawOps::set_clip(self, rect); }
+    pub fn set_clip(&mut self, rect: Recti) {
+        let mut draw = self.draw_ctx();
+        draw.set_clip(rect);
+    }
 
     /// Manually updates which widget owns focus.
     pub fn set_focus(&mut self, id: Option<Id>) {
@@ -320,27 +328,39 @@ impl Container {
     }
 
     /// Records a filled rectangle draw command.
-    pub fn draw_rect(&mut self, rect: Recti, color: Color) { DrawOps::draw_rect(self, rect, color); }
+    pub fn draw_rect(&mut self, rect: Recti, color: Color) {
+        let mut draw = self.draw_ctx();
+        draw.draw_rect(rect, color);
+    }
 
     /// Records a rectangle outline.
-    pub fn draw_box(&mut self, r: Recti, color: Color) { DrawOps::draw_box(self, r, color); }
+    pub fn draw_box(&mut self, r: Recti, color: Color) {
+        let mut draw = self.draw_ctx();
+        draw.draw_box(r, color);
+    }
 
     /// Records a text draw command.
     pub fn draw_text(&mut self, font: FontId, str: &str, pos: Vec2i, color: Color) {
-        DrawOps::draw_text(self, font, str, pos, color);
+        let mut draw = self.draw_ctx();
+        draw.draw_text(font, str, pos, color);
     }
 
     /// Records an icon draw command.
-    pub fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) { DrawOps::draw_icon(self, id, rect, color); }
+    pub fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
+        let mut draw = self.draw_ctx();
+        draw.draw_icon(id, rect, color);
+    }
 
     /// Records a slot draw command.
     pub fn draw_slot(&mut self, id: SlotId, rect: Recti, color: Color) {
-        DrawOps::push_image(self, Image::Slot(id), rect, color);
+        let mut draw = self.draw_ctx();
+        draw.push_image(Image::Slot(id), rect, color);
     }
 
     /// Records a slot redraw that uses a callback to fill pixels.
     pub fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        DrawOps::draw_slot_with_function(self, id, rect, color, f);
+        let mut draw = self.draw_ctx();
+        draw.draw_slot_with_function(id, rect, color, f);
     }
 
     #[inline(never)]
@@ -387,13 +407,17 @@ impl Container {
     }
 
     /// Draws a frame and optional border using the specified color.
-    pub fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) { DrawOps::draw_frame(self, rect, colorid); }
+    pub fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
+        let mut draw = self.draw_ctx();
+        draw.draw_frame(rect, colorid);
+    }
 
     /// Draws a widget background, applying hover/focus accents when needed.
     pub fn draw_widget_frame(&mut self, id: Id, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let focused = self.focus == Some(id);
         let hovered = self.hover == Some(id);
-        DrawOps::draw_widget_frame(self, focused, hovered, rect, colorid, opt);
+        let mut draw = self.draw_ctx();
+        draw.draw_widget_frame(focused, hovered, rect, colorid, opt);
     }
 
     /// Draws a container frame, skipping rendering when the option disables it.
@@ -407,13 +431,15 @@ impl Container {
         } else if self.hover == Some(id) {
             colorid.hover()
         }
-        DrawOps::draw_frame(self, rect, colorid);
+        let mut draw = self.draw_ctx();
+        draw.draw_frame(rect, colorid);
     }
 
     #[inline(never)]
     /// Draws widget text with the appropriate alignment flags.
     pub fn draw_control_text(&mut self, str: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        DrawOps::draw_control_text(self, str, rect, colorid, opt);
+        let mut draw = self.draw_ctx();
+        draw.draw_control_text(str, rect, colorid, opt);
     }
 
     /// Returns `true` if the cursor is inside `rect` and the container owns the hover root.
@@ -1009,16 +1035,6 @@ impl Container {
         }
         let input = self.snapshot_input();
         self.handle_widget_in_rect(state, rect, Some(input), opt, state.bopt)
-    }
-}
-
-impl DrawCtxAccess for Container {
-    fn with_draw_ctx<F, R>(&mut self, f: F) -> R
-    where
-        F: FnOnce(&mut DrawCtx<'_>) -> R,
-    {
-        let mut draw = self.draw_ctx();
-        f(&mut draw)
     }
 }
 
