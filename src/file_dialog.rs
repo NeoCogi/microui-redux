@@ -163,7 +163,7 @@ impl FileDialogState {
 
             ctx.dialog(win, ContainerOption::NONE, WidgetBehaviourOption::NONE, |cont| {
                 let mut dialog_state = WindowState::Open;
-                let half_width = cont.body.width / 2;
+                let half_width = cont.body().width / 2;
                 cont.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |cont| {
                     cont.label(current_working_directory.as_str());
                     cont.textbox_ex(tmp_file_name);

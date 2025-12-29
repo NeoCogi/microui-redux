@@ -360,7 +360,7 @@ impl<'a> State<'a> {
 
     fn style_window(&mut self, ctx: &mut Context<BackendRenderer>) {
         ctx.window(&mut self.style_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
-            let sw = (container.body.width as f64 * 0.14) as i32;
+            let sw = (container.body().width as f64 * 0.14) as i32;
             let color_row = [
                 SizePolicy::Fixed(80),
                 SizePolicy::Fixed(sw),
@@ -418,14 +418,14 @@ impl<'a> State<'a> {
                     WidgetBehaviourOption::NONE,
                     |container_handle| {
                         let container = &mut container_handle.inner_mut();
-                        let mut scroll = container.scroll;
-                        let content_size = container.content_size;
+                        let mut scroll = container.scroll();
+                        let content_size = container.content_size();
                         container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
                             container.text(self.logbuf.as_str());
 
                             if self.logbuf_updated {
                                 scroll.y = content_size.y;
-                                container.scroll = scroll;
+                                container.set_scroll(scroll);
                                 self.logbuf_updated = false;
                             }
                         });
@@ -558,11 +558,11 @@ impl<'a> State<'a> {
         let mut combo_changed = false;
 
         ctx.window(&mut self.demo_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
-            let mut win = container.rect;
+            let mut win = container.rect();
             win.width = win.width.max(240);
             win.height = win.height.max(300);
 
-            container.rect = win;
+            container.set_rect(win);
 
             let mut buff = String::new();
             let fps = self.fps;
@@ -570,7 +570,7 @@ impl<'a> State<'a> {
             {
                 let window_header = &mut self.window_header;
                 container.header(window_header, |container| {
-                    let win_0 = container.rect;
+                    let win_0 = container.rect();
                     let row_widths = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
                     container.with_row(&row_widths, SizePolicy::Auto, |container| {
                         container.label("Position:");
