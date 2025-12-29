@@ -586,36 +586,35 @@ impl Container {
     /// Returns the content size derived from layout traversal.
     pub fn content_size(&self) -> Vec2i { self.content_size }
 
-    /// Builds a collapsible header row that executes `f` when expanded.
-    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
-        state.set_header_kind();
+    fn node_scope<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, indent: bool, f: F) -> NodeStateValue {
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let r = self.layout.next();
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
         let _ = self.handle_widget_in_rect(state, r, None, opt, bopt);
         if state.state.is_expanded() {
-            f(self);
+            if indent {
+                let indent_size = self.style.as_ref().indent;
+                self.layout.adjust_indent(indent_size);
+                f(self);
+                self.layout.adjust_indent(-indent_size);
+            } else {
+                f(self);
+            }
         }
         state.state
+    }
+
+    /// Builds a collapsible header row that executes `f` when expanded.
+    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
+        state.set_header_kind();
+        self.node_scope(state, false, f)
     }
 
     /// Builds a tree node with automatic indentation while expanded.
     pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
         state.set_tree_kind();
-        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        let r = self.layout.next();
-        let opt = *state.widget_opt();
-        let bopt = *state.behaviour_opt();
-        let _ = self.handle_widget_in_rect(state, r, None, opt, bopt);
-        if state.state.is_expanded() {
-            let indent = self.style.as_ref().indent;
-            self.layout.adjust_indent(indent);
-            f(self);
-            self.layout.adjust_indent(-indent);
-        }
-
-        state.state
+        self.node_scope(state, true, f)
     }
 
     fn clamp(x: i32, a: i32, b: i32) -> i32 { min(b, max(a, x)) }
