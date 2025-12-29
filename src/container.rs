@@ -52,6 +52,7 @@
 //
 use super::*;
 use crate::draw_context::DrawCtx;
+use crate::text_layout::build_text_lines;
 use std::cell::RefCell;
 
 /// Arguments forwarded to custom rendering callbacks.
@@ -347,6 +348,9 @@ impl Container {
     /// The block is rendered inside an internal column with zero spacing so consecutive
     /// lines sit back-to-back while the outer widget spacing/padding remains intact.
     pub fn text_with_wrap(&mut self, text: &str, wrap: TextWrap) {
+        if text.is_empty() {
+            return;
+        }
         let style = self.style.as_ref();
         let font = style.font;
         let color = style.colors[ControlColor::Text as usize];
@@ -356,30 +360,22 @@ impl Container {
         self.layout.style.spacing = 0;
         self.column(|ui| {
             ui.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(line_height));
-
-            for line in text.lines() {
-                match wrap {
-                    TextWrap::None => {
-                        let r = ui.layout.next();
-                        let line_top = Self::baseline_aligned_top(r, line_height, baseline);
-                        ui.draw_text(font, line, vec2(r.x, line_top), color);
+            let first_rect = ui.layout.next();
+            let max_width = first_rect.width;
+            let mut lines = build_text_lines(text, wrap, max_width, font, &ui.atlas);
+            if text.ends_with('\n') {
+                if let Some(last) = lines.last() {
+                    if last.start == text.len() && last.end == text.len() {
+                        lines.pop();
                     }
-                    TextWrap::Word => {
-                        let mut r = ui.layout.next();
-                        let mut rx = r.x;
-                        let mut line_top = Self::baseline_aligned_top(r, line_height, baseline);
-                        let words = line.split_inclusive(' ');
-                        for w in words {
-                            let tw = ui.atlas.get_text_size(font, w).width;
-                            if tw + rx > r.x + r.width && rx > r.x {
-                                r = ui.layout.next();
-                                rx = r.x;
-                                line_top = Self::baseline_aligned_top(r, line_height, baseline);
-                            }
-                            ui.draw_text(font, w, vec2(rx, line_top), color);
-                            rx += tw;
-                        }
-                    }
+                }
+            }
+            for (idx, line) in lines.iter().enumerate() {
+                let r = if idx == 0 { first_rect } else { ui.layout.next() };
+                let line_top = Self::baseline_aligned_top(r, line_height, baseline);
+                let slice = &text[line.start..line.end];
+                if !slice.is_empty() {
+                    ui.draw_text(font, slice, vec2(r.x, line_top), color);
                 }
             }
         });

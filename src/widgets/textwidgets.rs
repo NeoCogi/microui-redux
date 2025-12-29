@@ -51,6 +51,7 @@
 // IN THE SOFTWARE.
 //
 use crate::*;
+use crate::text_layout::{build_text_lines, TextLine};
 
 
 #[derive(Clone)]
@@ -352,102 +353,6 @@ impl TextArea {
     }
 }
 
-#[derive(Clone, Copy)]
-struct TextLine {
-    start: usize,
-    end: usize,
-    width: i32,
-}
-
-fn push_wrapped_line(
-    lines: &mut Vec<TextLine>,
-    buf: &str,
-    line_start: usize,
-    line_end: usize,
-    wrap: TextWrap,
-    max_width: i32,
-    font: FontId,
-    atlas: &AtlasHandle,
-) {
-    let line = &buf[line_start..line_end];
-    if line.is_empty() {
-        lines.push(TextLine {
-            start: line_start,
-            end: line_start,
-            width: 0,
-        });
-        return;
-    }
-
-    if wrap != TextWrap::Word || max_width <= 0 {
-        let width = atlas.get_text_size(font, line).width;
-        lines.push(TextLine {
-            start: line_start,
-            end: line_end,
-            width,
-        });
-        return;
-    }
-
-    let mut offset = 0;
-    let mut seg_start = 0;
-    let mut seg_width = 0;
-    for word in line.split_inclusive(' ') {
-        let word_len = word.len();
-        let word_width = atlas.get_text_size(font, word).width;
-        if seg_width > 0 && seg_width + word_width > max_width {
-            let seg_end = offset;
-            lines.push(TextLine {
-                start: line_start + seg_start,
-                end: line_start + seg_end,
-                width: seg_width,
-            });
-            seg_start = offset;
-            seg_width = 0;
-        }
-        seg_width += word_width;
-        offset += word_len;
-    }
-
-    lines.push(TextLine {
-        start: line_start + seg_start,
-        end: line_start + line.len(),
-        width: seg_width,
-    });
-}
-
-fn build_text_lines(buf: &str, wrap: TextWrap, max_width: i32, font: FontId, atlas: &AtlasHandle) -> Vec<TextLine> {
-    let mut lines = Vec::new();
-    if buf.is_empty() {
-        lines.push(TextLine {
-            start: 0,
-            end: 0,
-            width: 0,
-        });
-        return lines;
-    }
-
-    let mut line_start = 0;
-    for (idx, ch) in buf.char_indices() {
-        if ch == '\n' {
-            push_wrapped_line(&mut lines, buf, line_start, idx, wrap, max_width, font, atlas);
-            line_start = idx + ch.len_utf8();
-        }
-    }
-
-    if line_start <= buf.len() {
-        push_wrapped_line(&mut lines, buf, line_start, buf.len(), wrap, max_width, font, atlas);
-    }
-
-    if lines.is_empty() {
-        lines.push(TextLine {
-            start: 0,
-            end: 0,
-            width: 0,
-        });
-    }
-    lines
-}
 
 fn line_index_for_cursor(lines: &[TextLine], cursor: usize) -> usize {
     for (idx, line) in lines.iter().enumerate() {
