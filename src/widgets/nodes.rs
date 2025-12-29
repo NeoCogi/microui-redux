@@ -97,6 +97,7 @@ pub struct Node {
     /// Behaviour options applied to the node.
     pub bopt: WidgetBehaviourOption,
     kind: NodeKind,
+    id: Option<Id>,
 }
 
 impl Node {
@@ -108,6 +109,7 @@ impl Node {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Header,
+            id: None,
         }
     }
 
@@ -119,6 +121,7 @@ impl Node {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Header,
+            id: None,
         }
     }
 
@@ -128,6 +131,12 @@ impl Node {
     /// Returns `true` when the node is closed.
     pub fn is_closed(&self) -> bool { self.state.is_closed() }
 
+    /// Returns a copy of the node with an explicit ID.
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
+    }
+
     pub(crate) fn set_header_kind(&mut self) { self.kind = NodeKind::Header; }
 
     pub(crate) fn set_tree_kind(&mut self) { self.kind = NodeKind::Tree; }
@@ -136,6 +145,7 @@ impl Node {
 impl Widget for Node {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let expanded = self.state.is_expanded();
