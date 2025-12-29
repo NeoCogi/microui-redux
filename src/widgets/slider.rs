@@ -123,8 +123,7 @@ fn number_textbox_handle(
     value: &mut Real,
 ) -> ResourceState {
     let shift_click = {
-        let default_input = InputSnapshot::default();
-        let input = ctx.input().unwrap_or(&default_input);
+        let input = ctx.input_or_default();
         input.mouse_pressed.is_left() && input.key_mods.is_shift() && control.hovered
     };
 
@@ -175,8 +174,7 @@ impl Widget for Slider {
                 }
             }
         }
-        let default_input = InputSnapshot::default();
-        let input = ctx.input().unwrap_or(&default_input);
+        let input = ctx.input_or_default();
         let range = self.high - self.low;
         if control.focused && (!input.mouse_down.is_none() || input.mouse_pressed.is_left()) && base.width > 0 && range != 0.0 {
             v = self.low + (input.mouse_pos.x - base.x) as Real * range / base.width as Real;
@@ -289,8 +287,7 @@ impl Widget for Number {
         if !number_textbox_handle(ctx, control, &mut self.edit, self.precision, &mut self.value).is_none() {
             return res;
         }
-        let default_input = InputSnapshot::default();
-        let input = ctx.input().unwrap_or(&default_input);
+        let input = ctx.input_or_default();
         if control.focused && input.mouse_down.is_left() {
             self.value += input.mouse_delta.x as Real * self.step;
         }

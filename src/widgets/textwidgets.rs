@@ -240,8 +240,7 @@ pub(crate) fn textbox_handle(
     }
     let mut cursor_pos = (*cursor).min(buf.len());
 
-    let default_input = InputSnapshot::default();
-    let input = ctx.input().unwrap_or(&default_input);
+    let input = ctx.input_or_default();
     let mouse_pressed = input.mouse_pressed;
     let mouse_pos = input.mouse_pos;
     if control.focused {
@@ -456,8 +455,7 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     }
     let mut cursor_pos = state.cursor.min(state.buf.len());
 
-    let default_input = InputSnapshot::default();
-    let input = ctx.input().unwrap_or(&default_input);
+    let input = ctx.input_or_default();
     let mut ensure_visible = false;
     let mut reset_preferred = false;
     let mut vertical_moved = false;

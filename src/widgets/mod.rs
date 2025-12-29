@@ -76,6 +76,7 @@ pub struct WidgetCtx<'a> {
     updated_focus: &'a mut bool,
     in_hover_root: bool,
     input: Option<Rc<InputSnapshot>>,
+    default_input: InputSnapshot,
 }
 
 impl<'a> WidgetCtx<'a> {
@@ -100,6 +101,7 @@ impl<'a> WidgetCtx<'a> {
             updated_focus,
             in_hover_root,
             input,
+            default_input: InputSnapshot::default(),
         }
     }
 
@@ -111,6 +113,8 @@ impl<'a> WidgetCtx<'a> {
 
     /// Returns the input snapshot for this widget, if provided.
     pub fn input(&self) -> Option<&InputSnapshot> { self.input.as_deref() }
+
+    pub(crate) fn input_or_default(&self) -> &InputSnapshot { self.input.as_deref().unwrap_or(&self.default_input) }
 
     /// Sets focus to this widget for the current frame.
     pub fn set_focus(&mut self) {
