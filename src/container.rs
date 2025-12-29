@@ -153,42 +153,42 @@ impl Default for Command {
 pub struct Container {
     pub(crate) atlas: AtlasHandle,
     /// Style used when drawing widgets in the container.
-    pub style: Rc<Style>,
+    pub(crate) style: Rc<Style>,
     /// Human-readable name for the container.
-    pub name: String,
+    pub(crate) name: String,
     /// Outer rectangle including frame and title.
-    pub rect: Recti,
+    pub(crate) rect: Recti,
     /// Inner rectangle excluding frame/title.
-    pub body: Recti,
+    pub(crate) body: Recti,
     /// Size of the content region based on layout traversal.
-    pub content_size: Vec2i,
+    pub(crate) content_size: Vec2i,
     /// Accumulated scroll offset.
-    pub scroll: Vec2i,
+    pub(crate) scroll: Vec2i,
     /// Z-index used to order overlapping windows.
-    pub zindex: i32,
+    pub(crate) zindex: i32,
     /// Recorded draw commands for this frame.
-    pub command_list: Vec<Command>,
+    pub(crate) command_list: Vec<Command>,
     /// Stack of clip rectangles applied while drawing.
-    pub clip_stack: Vec<Recti>,
+    pub(crate) clip_stack: Vec<Recti>,
     pub(crate) layout: LayoutManager,
     /// ID of the widget currently hovered, if any.
-    pub hover: Option<Id>,
+    pub(crate) hover: Option<Id>,
     /// ID of the widget currently focused, if any.
-    pub focus: Option<Id>,
+    pub(crate) focus: Option<Id>,
     /// Tracks whether focus changed this frame.
-    pub updated_focus: bool,
+    pub(crate) updated_focus: bool,
     /// Internal state for the vertical scrollbar.
     pub(crate) scrollbar_y_state: Internal,
     /// Internal state for the horizontal scrollbar.
     pub(crate) scrollbar_x_state: Internal,
     /// Shared access to the input state.
-    pub input: Rc<RefCell<Input>>,
+    pub(crate) input: Rc<RefCell<Input>>,
     /// Cached per-frame input snapshot for widgets that need it.
     input_snapshot: Option<Rc<InputSnapshot>>,
     /// Whether this container is the current hover root.
-    pub in_hover_root: bool,
+    pub(crate) in_hover_root: bool,
     /// Tracks whether a popup was just opened this frame to avoid instant auto-close.
-    pub popup_just_opened: bool,
+    pub(crate) popup_just_opened: bool,
     pending_scroll: Option<Vec2i>,
     /// Determines whether container scrollbars and scroll consumption are enabled.
     scroll_enabled: bool,
@@ -533,6 +533,24 @@ impl Container {
         }
         self.updated_focus = false;
     }
+
+    /// Returns the outer container rectangle.
+    pub fn rect(&self) -> Recti { self.rect }
+
+    /// Sets the outer container rectangle.
+    pub fn set_rect(&mut self, rect: Recti) { self.rect = rect; }
+
+    /// Returns the inner container body rectangle.
+    pub fn body(&self) -> Recti { self.body }
+
+    /// Returns the current scroll offset.
+    pub fn scroll(&self) -> Vec2i { self.scroll }
+
+    /// Sets the current scroll offset.
+    pub fn set_scroll(&mut self, scroll: Vec2i) { self.scroll = scroll; }
+
+    /// Returns the content size derived from layout traversal.
+    pub fn content_size(&self) -> Vec2i { self.content_size }
 
     /// Builds a collapsible header row that executes `f` when expanded.
     pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
