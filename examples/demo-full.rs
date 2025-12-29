@@ -412,26 +412,27 @@ impl<'a> State<'a> {
     fn log_window(&mut self, ctx: &mut Context<BackendRenderer>) {
         ctx.window(&mut self.log_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
             container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(24), |container| {
-                container.panel(
-                    self.log_output.as_mut().unwrap(),
-                    ContainerOption::NONE,
-                    WidgetBehaviourOption::NONE,
-                    |container_handle| {
-                        let container = &mut container_handle.inner_mut();
-                        let mut scroll = container.scroll();
-                        let content_size = container.content_size();
-                        container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
-                            container.text(self.logbuf.as_str());
+                    container.panel(
+                        self.log_output.as_mut().unwrap(),
+                        ContainerOption::NONE,
+                        WidgetBehaviourOption::NONE,
+                        |container_handle| {
+                        container_handle.with_mut(|container| {
+                            let mut scroll = container.scroll();
+                            let content_size = container.content_size();
+                            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                                container.text(self.logbuf.as_str());
 
-                            if self.logbuf_updated {
-                                scroll.y = content_size.y;
-                                container.set_scroll(scroll);
-                                self.logbuf_updated = false;
-                            }
+                                if self.logbuf_updated {
+                                    scroll.y = content_size.y;
+                                    container.set_scroll(scroll);
+                                    self.logbuf_updated = false;
+                                }
+                            });
                         });
-                    },
-                );
-            });
+                        },
+                    );
+                });
             let mut submitted = false;
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             container.with_row(&submit_row, SizePolicy::Auto, |container| {

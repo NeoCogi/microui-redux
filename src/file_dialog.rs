@@ -176,47 +176,47 @@ impl FileDialogState {
                 let top_row_widths = [left_column, SizePolicy::Remainder(0)];
                 cont.with_row(&top_row_widths, SizePolicy::Remainder(24), |cont| {
                     cont.panel(folder_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
-                        let container = &mut container_handle.inner_mut();
-
-                        container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                            let mut refresh = false;
-                            for index in 0..folder_items.len() {
-                                let submitted = {
-                                    let item = &mut folder_items[index];
-                                    container.list_item(item).is_submitted()
-                                };
-                                if submitted {
-                                    if let Some(path) = folders.get(index) {
-                                        *current_working_directory = path.to_string();
-                                        *selected_folder = Some(path.to_string());
-                                    }
-                                    refresh = true;
-                                }
-                            }
-                            if refresh {
-                                needs_refresh = true;
-                            }
-                        });
-                    });
-                    cont.panel(file_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
-                        let container = &mut container_handle.inner_mut();
-
-                        container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                            if !file_items.is_empty() {
-                                for index in 0..file_items.len() {
+                        container_handle.with_mut(|container| {
+                            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                                let mut refresh = false;
+                                for index in 0..folder_items.len() {
                                     let submitted = {
-                                        let item = &mut file_items[index];
+                                        let item = &mut folder_items[index];
                                         container.list_item(item).is_submitted()
                                     };
                                     if submitted {
-                                        if let Some(name) = files.get(index) {
-                                            tmp_file_name.buf = name.to_string();
+                                        if let Some(path) = folders.get(index) {
+                                            *current_working_directory = path.to_string();
+                                            *selected_folder = Some(path.to_string());
                                         }
+                                        refresh = true;
                                     }
                                 }
-                            } else {
-                                container.label("No Files");
-                            }
+                                if refresh {
+                                    needs_refresh = true;
+                                }
+                            });
+                        });
+                    });
+                    cont.panel(file_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
+                        container_handle.with_mut(|container| {
+                            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                                if !file_items.is_empty() {
+                                    for index in 0..file_items.len() {
+                                        let submitted = {
+                                            let item = &mut file_items[index];
+                                            container.list_item(item).is_submitted()
+                                        };
+                                        if submitted {
+                                            if let Some(name) = files.get(index) {
+                                                tmp_file_name.buf = name.to_string();
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    container.label("No Files");
+                                }
+                            });
                         });
                     });
                 });

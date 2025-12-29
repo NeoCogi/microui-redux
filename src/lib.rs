@@ -59,6 +59,7 @@ use std::{
     cell::{Ref, RefCell, RefMut},
     f32,
     hash::Hash,
+    ops::{Deref, DerefMut},
     rc::Rc,
     sync::Arc,
 };
@@ -840,14 +841,62 @@ pub fn expand_rect(r: Recti, n: i32) -> Recti { rect(r.x - n, r.y - n, r.width +
 /// Shared handle to a container that can be embedded inside windows or panels.
 pub struct ContainerHandle(Rc<RefCell<Container>>);
 
+/// Read-only view into a container borrowed from a handle.
+pub struct ContainerView<'a> {
+    inner: &'a Container,
+}
+
+impl<'a> ContainerView<'a> {
+    fn new(inner: &'a Container) -> Self { Self { inner } }
+}
+
+impl<'a> Deref for ContainerView<'a> {
+    type Target = Container;
+
+    fn deref(&self) -> &Self::Target { self.inner }
+}
+
+/// Mutable view into a container borrowed from a handle.
+pub struct ContainerViewMut<'a> {
+    inner: &'a mut Container,
+}
+
+impl<'a> ContainerViewMut<'a> {
+    fn new(inner: &'a mut Container) -> Self { Self { inner } }
+}
+
+impl<'a> Deref for ContainerViewMut<'a> {
+    type Target = Container;
+
+    fn deref(&self) -> &Self::Target { self.inner }
+}
+
+impl<'a> DerefMut for ContainerViewMut<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target { self.inner }
+}
+
 impl ContainerHandle {
     pub(crate) fn new(container: Container) -> Self { Self(Rc::new(RefCell::new(container))) }
 
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) { self.0.borrow_mut().render(canvas) }
 
     /// Returns an immutable borrow of the underlying container.
-    pub fn inner<'a>(&'a self) -> Ref<'a, Container> { self.0.borrow() }
+    pub(crate) fn inner<'a>(&'a self) -> Ref<'a, Container> { self.0.borrow() }
 
     /// Returns a mutable borrow of the underlying container.
-    pub fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Container> { self.0.borrow_mut() }
+    pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Container> { self.0.borrow_mut() }
+
+    /// Executes `f` with a read-only view into the container.
+    pub fn with<R>(&self, f: impl FnOnce(&ContainerView<'_>) -> R) -> R {
+        let container = self.0.borrow();
+        let view = ContainerView::new(&container);
+        f(&view)
+    }
+
+    /// Executes `f` with a mutable view into the container.
+    pub fn with_mut<R>(&mut self, f: impl FnOnce(&mut ContainerViewMut<'_>) -> R) -> R {
+        let mut container = self.0.borrow_mut();
+        let mut view = ContainerViewMut::new(&mut container);
+        f(&mut view)
+    }
 }
