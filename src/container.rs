@@ -534,63 +534,6 @@ impl Container {
         self.updated_focus = false;
     }
 
-    #[inline(never)]
-    fn node(&mut self, state: &mut Node, is_treenode: bool) -> NodeStateValue {
-        let (padding, text_color) = {
-            let style = self.style.as_ref();
-            (style.padding, style.colors[ControlColor::Text as usize])
-        };
-        let id: Id = state.get_id();
-        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        let mut r = self.layout.next();
-        let node_rect = r;
-        let opt = state.opt;
-        let control = self.update_control(id, r, state);
-        let expanded = state.state.is_expanded();
-        if is_treenode {
-            if control.hovered {
-                self.draw_frame(r, ControlColor::ButtonHover);
-            }
-        } else {
-            self.draw_widget_frame(id, r, ControlColor::Button, opt);
-        }
-        self.draw_icon(
-            if expanded { COLLAPSE_ICON } else { EXPAND_ICON },
-            rect(r.x, r.y, r.height, r.height),
-            text_color,
-        );
-        r.x += r.height - padding;
-        r.width -= r.height - padding;
-        self.draw_control_text(state.label.as_str(), r, ControlColor::Text, opt);
-        {
-            let mut ctx = self.widget_ctx(id, node_rect, None);
-            let _ = state.handle(&mut ctx, &control);
-        }
-        state.state
-    }
-
-    /// Builds a collapsible header row that executes `f` when expanded.
-    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
-        let new_state = self.node(state, false);
-        if new_state.is_expanded() {
-            f(self);
-        }
-        new_state
-    }
-
-    /// Builds a tree node with automatic indentation while expanded.
-    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
-        let res = self.node(state, true);
-        if res.is_expanded() {
-            let indent = self.style.as_ref().indent;
-            self.layout.adjust_indent(indent);
-            f(self);
-            self.layout.adjust_indent(-indent);
-        }
-
-        res
-    }
-
     fn clamp(x: i32, a: i32, b: i32) -> i32 { min(b, max(a, x)) }
 
     /// Returns the y coordinate where a line of text should start so its baseline sits at the control midpoint.
