@@ -422,11 +422,7 @@ impl Container {
         rect.contains(&self.input.borrow().mouse_pos) && clip_rect.contains(&self.input.borrow().mouse_pos) && in_hover_root
     }
 
-    #[inline(never)]
-    /// Updates hover/focus state for the widget described by `id` and optionally consumes scroll.
-    pub fn update_control<W: Widget>(&mut self, id: Id, rect: Recti, state: &W) -> ControlState {
-        let opt = *state.widget_opt();
-        let bopt = *state.behaviour_opt();
+    fn update_control_with_opts(&mut self, id: Id, rect: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ControlState {
         let in_hover_root = self.in_hover_root;
         let mouseover = self.mouse_over(rect, in_hover_root);
         if self.focus == Some(id) {
@@ -487,6 +483,12 @@ impl Container {
         }
     }
 
+    #[inline(never)]
+    /// Updates hover/focus state for the widget described by `id` and optionally consumes scroll.
+    pub fn update_control<W: Widget>(&mut self, id: Id, rect: Recti, state: &W) -> ControlState {
+        self.update_control_with_opts(id, rect, *state.widget_opt(), *state.behaviour_opt())
+    }
+
     fn snapshot_input(&mut self) -> Rc<InputSnapshot> {
         if let Some(snapshot) = &self.input_snapshot {
             return snapshot.clone();
@@ -523,6 +525,41 @@ impl Container {
         )
     }
 
+    fn run_widget<W: Widget>(
+        &mut self,
+        state: &mut W,
+        rect: Recti,
+        input: Option<Rc<InputSnapshot>>,
+        opt: WidgetOption,
+        bopt: WidgetBehaviourOption,
+    ) -> (ControlState, ResourceState) {
+        let id = state.get_id();
+        let control = self.update_control_with_opts(id, rect, opt, bopt);
+        let mut ctx = self.widget_ctx(id, rect, input);
+        let res = state.handle(&mut ctx, &control);
+        (control, res)
+    }
+
+    fn handle_widget<W: Widget>(&mut self, state: &mut W, input: Option<Rc<InputSnapshot>>) -> ResourceState {
+        let rect = self.layout.next();
+        let opt = *state.widget_opt();
+        let bopt = *state.behaviour_opt();
+        let (_, res) = self.run_widget(state, rect, input, opt, bopt);
+        res
+    }
+
+    fn handle_widget_in_rect<W: Widget>(
+        &mut self,
+        state: &mut W,
+        rect: Recti,
+        input: Option<Rc<InputSnapshot>>,
+        opt: WidgetOption,
+        bopt: WidgetBehaviourOption,
+    ) -> ResourceState {
+        let (_, res) = self.run_widget(state, rect, input, opt, bopt);
+        res
+    }
+
     /// Resets transient per-frame state after widgets have been processed.
     pub fn finish(&mut self) {
         if !self.updated_focus {
@@ -552,12 +589,11 @@ impl Container {
     /// Builds a collapsible header row that executes `f` when expanded.
     pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
         state.set_header_kind();
-        let id: Id = state.get_id();
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let r = self.layout.next();
-        let control = self.update_control(id, r, state);
-        let mut ctx = self.widget_ctx(id, r, None);
-        let _ = state.handle(&mut ctx, &control);
+        let opt = *state.widget_opt();
+        let bopt = *state.behaviour_opt();
+        let _ = self.handle_widget_in_rect(state, r, None, opt, bopt);
         if state.state.is_expanded() {
             f(self);
         }
@@ -567,12 +603,11 @@ impl Container {
     /// Builds a tree node with automatic indentation while expanded.
     pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
         state.set_tree_kind();
-        let id: Id = state.get_id();
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let r = self.layout.next();
-        let control = self.update_control(id, r, state);
-        let mut ctx = self.widget_ctx(id, r, None);
-        let _ = state.handle(&mut ctx, &control);
+        let opt = *state.widget_opt();
+        let bopt = *state.behaviour_opt();
+        let _ = self.handle_widget_in_rect(state, r, None, opt, bopt);
         if state.state.is_expanded() {
             let indent = self.style.as_ref().indent;
             self.layout.adjust_indent(indent);
@@ -855,30 +890,18 @@ impl Container {
     #[inline(never)]
     /// Draws a button using the provided persistent state.
     pub fn button(&mut self, state: &mut Button) -> ResourceState {
-        let id = state.get_id();
-        let rect = self.layout.next();
-        let control = self.update_control(id, rect, state);
-        let mut ctx = self.widget_ctx(id, rect, None);
-        state.handle(&mut ctx, &control)
+        self.handle_widget(state, None)
     }
 
     /// Renders a list entry that only highlights while hovered or active.
     pub fn list_item(&mut self, state: &mut ListItem) -> ResourceState {
-        let id = state.get_id();
-        let rect = self.layout.next();
-        let control = self.update_control(id, rect, state);
-        let mut ctx = self.widget_ctx(id, rect, None);
-        state.handle(&mut ctx, &control)
+        self.handle_widget(state, None)
     }
 
     #[inline(never)]
     /// Shim for list boxes that only fills on hover or click.
     pub fn list_box(&mut self, state: &mut ListBox) -> ResourceState {
-        let id = state.get_id();
-        let rect = self.layout.next();
-        let control = self.update_control(id, rect, state);
-        let mut ctx = self.widget_ctx(id, rect, None);
-        state.handle(&mut ctx, &control)
+        self.handle_widget(state, None)
     }
 
     #[inline(never)]
@@ -886,11 +909,10 @@ impl Container {
     /// The caller is responsible for opening the popup and updating `state.selected` from its list.
     pub fn combo_box<S: AsRef<str>>(&mut self, state: &mut Combo, items: &[S]) -> (Recti, bool, ResourceState) {
         state.update_items(items);
-        let id: Id = state.get_id();
-        let header: Recti = self.layout.next();
-        let control = self.update_control(id, header, state);
-        let mut ctx = self.widget_ctx(id, header, None);
-        let res = state.handle(&mut ctx, &control);
+        let header = self.layout.next();
+        let opt = *state.widget_opt();
+        let bopt = *state.behaviour_opt();
+        let res = self.handle_widget_in_rect(state, header, None, opt, bopt);
         let header_clicked = res.is_submitted();
         let anchor = rect(header.x, header.y + header.height, header.width, 1);
         (anchor, header_clicked, res)
@@ -900,11 +922,7 @@ impl Container {
     #[inline(never)]
     /// Draws a checkbox labeled with `label` and toggles `state` when clicked.
     pub fn checkbox(&mut self, state: &mut Checkbox) -> ResourceState {
-        let id = state.get_id();
-        let rect = self.layout.next();
-        let control = self.update_control(id, rect, state);
-        let mut ctx = self.widget_ctx(id, rect, None);
-        state.handle(&mut ctx, &control)
+        self.handle_widget(state, None)
     }
 
     #[inline(never)]
@@ -937,13 +955,10 @@ impl Container {
         state: &mut Custom,
         f: F,
     ) {
-        let id: Id = state.get_id();
-        let rect: Recti = self.layout.next();
-        let control = self.update_control(id, rect, state);
-        {
-            let mut ctx = self.widget_ctx(id, rect, None);
-            let _ = state.handle(&mut ctx, &control);
-        }
+        let rect = self.layout.next();
+        let opt = *state.widget_opt();
+        let bopt = *state.behaviour_opt();
+        let (control, _) = self.run_widget(state, rect, None, opt, bopt);
 
         let input = self.snapshot_input();
         let input_ref = input.as_ref();
@@ -969,12 +984,9 @@ impl Container {
 
     /// Draws a textbox in the provided rectangle using the supplied state.
     pub fn textbox_raw(&mut self, state: &mut Textbox, r: Recti) -> ResourceState {
-        let id = state.get_id();
-        let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.bopt);
-        let control = self.update_control(id, r, &control_state);
         let input = self.snapshot_input();
-        let mut ctx = self.widget_ctx(id, r, Some(input));
-        state.handle(&mut ctx, &control)
+        let opt = state.opt | WidgetOption::HOLD_FOCUS;
+        self.handle_widget_in_rect(state, r, Some(input), opt, state.bopt)
     }
 
     /// Draws a textbox using the next available layout cell.
@@ -985,12 +997,9 @@ impl Container {
 
     /// Draws a multi-line text area in the provided rectangle using the supplied state.
     pub fn textarea_raw(&mut self, state: &mut TextArea, r: Recti) -> ResourceState {
-        let id = state.get_id();
-        let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.bopt);
-        let control = self.update_control(id, r, &control_state);
         let input = self.snapshot_input();
-        let mut ctx = self.widget_ctx(id, r, Some(input));
-        state.handle(&mut ctx, &control)
+        let opt = state.opt | WidgetOption::HOLD_FOCUS;
+        self.handle_widget_in_rect(state, r, Some(input), opt, state.bopt)
     }
 
     /// Draws a multi-line text area using the next available layout cell.
@@ -1002,33 +1011,25 @@ impl Container {
     #[inline(never)]
     /// Draws a horizontal slider bound to `state`.
     pub fn slider_ex(&mut self, state: &mut Slider) -> ResourceState {
-        let id = state.get_id();
         let rect = self.layout.next();
         let mut opt = state.opt;
         if state.edit.editing {
             opt |= WidgetOption::HOLD_FOCUS;
         }
-        let control_state = (opt, state.bopt);
-        let control = self.update_control(id, rect, &control_state);
         let input = self.snapshot_input();
-        let mut ctx = self.widget_ctx(id, rect, Some(input));
-        state.handle(&mut ctx, &control)
+        self.handle_widget_in_rect(state, rect, Some(input), opt, state.bopt)
     }
 
     #[inline(never)]
     /// Draws a numeric input that can be edited via keyboard or by dragging.
     pub fn number_ex(&mut self, state: &mut Number) -> ResourceState {
-        let id = state.get_id();
         let rect = self.layout.next();
         let mut opt = state.opt;
         if state.edit.editing {
             opt |= WidgetOption::HOLD_FOCUS;
         }
-        let control_state = (opt, state.bopt);
-        let control = self.update_control(id, rect, &control_state);
         let input = self.snapshot_input();
-        let mut ctx = self.widget_ctx(id, rect, Some(input));
-        state.handle(&mut ctx, &control)
+        self.handle_widget_in_rect(state, rect, Some(input), opt, state.bopt)
     }
 }
 
