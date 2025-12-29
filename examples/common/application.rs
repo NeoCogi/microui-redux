@@ -158,38 +158,38 @@ impl<S> Application<S> {
                 match event {
                     Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
                     Event::Window { win_event: WindowEvent::Close, .. } => break 'running,
-                    Event::MouseMotion { x, y, .. } => self.ctx.input.borrow_mut().mousemove(x, y),
-                    Event::MouseWheel { y, .. } => self.ctx.input.borrow_mut().scroll(0, y * -30),
+                    Event::MouseMotion { x, y, .. } => self.ctx.mousemove(x, y),
+                    Event::MouseWheel { y, .. } => self.ctx.scroll(0, y * -30),
                     Event::MouseButtonDown { x, y, mouse_btn, .. } => {
                         let mb = map_mouse_button(mouse_btn);
-                        self.ctx.input.borrow_mut().mousedown(x, y, mb);
+                        self.ctx.mousedown(x, y, mb);
                     }
                     Event::MouseButtonUp { x, y, mouse_btn, .. } => {
                         let mb = map_mouse_button(mouse_btn);
-                        self.ctx.input.borrow_mut().mouseup(x, y, mb);
+                        self.ctx.mouseup(x, y, mb);
                     }
                     Event::KeyDown { keycode, .. } => {
                         let km = map_keymode(keycode);
                         if !km.is_none() {
-                            self.ctx.input.borrow_mut().keydown(km);
+                            self.ctx.keydown(km);
                         }
                         let kc = map_keycode(keycode);
                         if !kc.is_none() {
-                            self.ctx.input.borrow_mut().keydown_code(kc);
+                            self.ctx.keydown_code(kc);
                         }
                     }
                     Event::KeyUp { keycode, .. } => {
                         let km = map_keymode(keycode);
                         if !km.is_none() {
-                            self.ctx.input.borrow_mut().keyup(km);
+                            self.ctx.keyup(km);
                         }
                         let kc = map_keycode(keycode);
                         if !kc.is_none() {
-                            self.ctx.input.borrow_mut().keyup_code(kc);
+                            self.ctx.keyup_code(kc);
                         }
                     }
                     Event::TextInput { text, .. } => {
-                        self.ctx.input.borrow_mut().text(text.as_str());
+                        self.ctx.text(text.as_str());
                     }
 
                     _ => {}
