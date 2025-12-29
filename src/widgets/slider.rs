@@ -53,7 +53,7 @@
 use crate::*;
 use std::fmt::Write;
 
-use super::textwidgets::textbox_handle;
+use super::textbox::textbox_handle;
 
 #[derive(Clone)]
 /// Persistent state for slider widgets.
