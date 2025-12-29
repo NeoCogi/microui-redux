@@ -51,10 +51,12 @@
 // IN THE SOFTWARE.
 //
 mod core_widgets;
+mod nodes;
 mod slider;
 mod textwidgets;
 
 pub use core_widgets::*;
+pub use nodes::*;
 pub use slider::*;
 pub use textwidgets::*;
 
