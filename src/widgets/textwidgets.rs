@@ -51,6 +51,7 @@
 // IN THE SOFTWARE.
 //
 use crate::*;
+use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::text_layout::{build_text_lines, TextLine};
 
 
@@ -532,8 +533,8 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     }
 
     let cs = vec2(content_width + padding * 2, content_height + padding * 2);
-    let maxscroll_y = (cs.y - body.height).max(0);
-    let maxscroll_x = (cs.x - body.width).max(0);
+    let maxscroll_y = scrollbar_max_scroll(cs.y, body.height);
+    let maxscroll_x = scrollbar_max_scroll(cs.x, body.width);
 
     if let Some(delta) = control.scroll_delta {
         if maxscroll_y > 0 {
@@ -554,28 +555,24 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     let mut hscroll_base = bounds;
 
     if needs_v && maxscroll_y > 0 && body.height > 0 {
-        vscroll_base = body;
-        vscroll_base.x = body.x + body.width;
-        vscroll_base.width = scrollbar_size;
+        vscroll_base = scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size);
         if input.mouse_pressed.is_left() && vscroll_base.contains(&input.mouse_pos) {
             state.dragging_y = true;
             clicked_scrollbar = true;
         }
-        if state.dragging_y && vscroll_base.height > 0 {
-            state.scroll.y += input.mouse_delta.y * cs.y / vscroll_base.height;
+        if state.dragging_y {
+            state.scroll.y += scrollbar_drag_delta(ScrollAxis::Vertical, input.mouse_delta, cs.y, vscroll_base);
         }
     }
 
     if needs_h && maxscroll_x > 0 && body.width > 0 {
-        hscroll_base = body;
-        hscroll_base.y = body.y + body.height;
-        hscroll_base.height = scrollbar_size;
+        hscroll_base = scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size);
         if input.mouse_pressed.is_left() && hscroll_base.contains(&input.mouse_pos) {
             state.dragging_x = true;
             clicked_scrollbar = true;
         }
-        if state.dragging_x && hscroll_base.width > 0 {
-            state.scroll.x += input.mouse_delta.x * cs.x / hscroll_base.width;
+        if state.dragging_x {
+            state.scroll.x += scrollbar_drag_delta(ScrollAxis::Horizontal, input.mouse_delta, cs.x, hscroll_base);
         }
     }
 
@@ -691,25 +688,13 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
 
     if needs_v && maxscroll_y > 0 && body.height > 0 {
         ctx.draw_frame(vscroll_base, ControlColor::ScrollBase);
-        let mut thumb = vscroll_base;
-        thumb.height = if thumb_size > vscroll_base.height * body.height / cs.y {
-            thumb_size
-        } else {
-            vscroll_base.height * body.height / cs.y
-        };
-        thumb.y += state.scroll.y * (vscroll_base.height - thumb.height) / maxscroll_y;
+        let thumb = scrollbar_thumb(ScrollAxis::Vertical, vscroll_base, body.height, cs.y, state.scroll.y, thumb_size);
         ctx.draw_frame(thumb, ControlColor::ScrollThumb);
     }
 
     if needs_h && maxscroll_x > 0 && body.width > 0 {
         ctx.draw_frame(hscroll_base, ControlColor::ScrollBase);
-        let mut thumb = hscroll_base;
-        thumb.width = if thumb_size > hscroll_base.width * body.width / cs.x {
-            thumb_size
-        } else {
-            hscroll_base.width * body.width / cs.x
-        };
-        thumb.x += state.scroll.x * (hscroll_base.width - thumb.width) / maxscroll_x;
+        let thumb = scrollbar_thumb(ScrollAxis::Horizontal, hscroll_base, body.width, cs.x, state.scroll.x, thumb_size);
         ctx.draw_frame(thumb, ControlColor::ScrollThumb);
     }
 
