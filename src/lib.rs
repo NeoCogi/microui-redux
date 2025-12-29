@@ -68,6 +68,7 @@ mod atlas;
 mod canvas;
 mod context;
 mod draw_context;
+mod draw_ops;
 mod container;
 mod file_dialog;
 mod layout;
