@@ -53,12 +53,15 @@
 mod core_widgets;
 mod nodes;
 mod slider;
-mod textwidgets;
+mod text_area;
+mod text_edit;
+mod textbox;
 
 pub use core_widgets::*;
 pub use nodes::*;
 pub use slider::*;
-pub use textwidgets::*;
+pub use text_area::*;
+pub use textbox::*;
 
 use crate::draw_context::DrawCtx;
 use crate::{
