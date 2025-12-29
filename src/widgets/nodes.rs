@@ -101,8 +101,13 @@ pub struct Node {
 }
 
 impl Node {
-    /// Creates a node state with the default widget options.
+    /// Creates a header node state with the default widget options.
     pub fn new(label: impl Into<String>, state: NodeStateValue) -> Self {
+        Self::header(label, state)
+    }
+
+    /// Creates a header node state with the default widget options.
+    pub fn header(label: impl Into<String>, state: NodeStateValue) -> Self {
         Self {
             label: label.into(),
             state,
@@ -113,8 +118,25 @@ impl Node {
         }
     }
 
-    /// Creates a node state with explicit widget options.
+    /// Creates a tree node state with the default widget options.
+    pub fn tree(label: impl Into<String>, state: NodeStateValue) -> Self {
+        Self {
+            label: label.into(),
+            state,
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+            kind: NodeKind::Tree,
+            id: None,
+        }
+    }
+
+    /// Creates a header node state with explicit widget options.
     pub fn with_opt(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self {
+        Self::with_opt_header(label, state, opt)
+    }
+
+    /// Creates a header node state with explicit widget options.
+    pub fn with_opt_header(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self {
         Self {
             label: label.into(),
             state,
@@ -125,21 +147,35 @@ impl Node {
         }
     }
 
+    /// Creates a tree node state with explicit widget options.
+    pub fn with_opt_tree(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self {
+        Self {
+            label: label.into(),
+            state,
+            opt,
+            bopt: WidgetBehaviourOption::NONE,
+            kind: NodeKind::Tree,
+            id: None,
+        }
+    }
+
     /// Returns `true` when the node is expanded.
     pub fn is_expanded(&self) -> bool { self.state.is_expanded() }
 
     /// Returns `true` when the node is closed.
     pub fn is_closed(&self) -> bool { self.state.is_closed() }
 
+    /// Returns `true` when this node is configured as a tree node.
+    pub fn is_tree(&self) -> bool { matches!(self.kind, NodeKind::Tree) }
+
+    /// Returns `true` when this node is configured as a header node.
+    pub fn is_header(&self) -> bool { matches!(self.kind, NodeKind::Header) }
+
     /// Returns a copy of the node with an explicit ID.
     pub fn with_id(mut self, id: Id) -> Self {
         self.id = Some(id);
         self
     }
-
-    pub(crate) fn set_header_kind(&mut self) { self.kind = NodeKind::Header; }
-
-    pub(crate) fn set_tree_kind(&mut self) { self.kind = NodeKind::Tree; }
 }
 
 impl Widget for Node {
