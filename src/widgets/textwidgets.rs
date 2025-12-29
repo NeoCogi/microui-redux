@@ -155,6 +155,76 @@ fn move_right(buf: &str, cursor: usize) -> usize {
     new_cursor
 }
 
+enum ReturnBehavior {
+    Submit,
+    Newline { submit_on_ctrl: bool },
+}
+
+struct TextEditOutcome {
+    cursor: usize,
+    changed: bool,
+    moved: bool,
+    submit: bool,
+}
+
+fn apply_text_input(
+    buf: &mut String,
+    cursor: usize,
+    input: &InputSnapshot,
+    allow_leading_newline: bool,
+    return_behavior: ReturnBehavior,
+) -> TextEditOutcome {
+    let mut cursor_pos = cursor.min(buf.len());
+    let mut changed = false;
+    let mut moved = false;
+    let mut submit = false;
+
+    if insert_text(buf, &mut cursor_pos, input.text_input.as_str()) {
+        changed = true;
+    }
+
+    if input.key_pressed.is_backspace() && delete_prev(buf, &mut cursor_pos, allow_leading_newline) {
+        changed = true;
+    }
+
+    let delete_pressed = input.key_pressed.is_delete() || input.key_code_pressed.is_delete();
+    if delete_pressed && delete_next(buf, cursor_pos) {
+        changed = true;
+    }
+
+    if input.key_code_pressed.is_left() && cursor_pos > 0 {
+        cursor_pos = move_left(buf.as_str(), cursor_pos);
+        moved = true;
+    }
+
+    if input.key_code_pressed.is_right() && cursor_pos < buf.len() {
+        cursor_pos = move_right(buf.as_str(), cursor_pos);
+        moved = true;
+    }
+
+    if input.key_pressed.is_return() {
+        match return_behavior {
+            ReturnBehavior::Submit => {
+                submit = true;
+            }
+            ReturnBehavior::Newline { submit_on_ctrl } => {
+                if submit_on_ctrl && input.key_mods.is_ctrl() {
+                    submit = true;
+                } else if insert_text(buf, &mut cursor_pos, "\n") {
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    TextEditOutcome {
+        cursor: cursor_pos,
+        changed,
+        moved,
+        submit,
+    }
+}
+
 pub(crate) fn textbox_handle(
     ctx: &mut WidgetCtx<'_>,
     control: &ControlState,
@@ -169,44 +239,20 @@ pub(crate) fn textbox_handle(
     }
     let mut cursor_pos = (*cursor).min(buf.len());
 
-    let (mouse_pressed, mouse_pos, should_submit) = {
-        let default_input = InputSnapshot::default();
-        let input = ctx.input().unwrap_or(&default_input);
-        let mut should_submit = false;
-
-        if control.focused {
-            if insert_text(buf, &mut cursor_pos, input.text_input.as_str()) {
-                res |= ResourceState::CHANGE;
-            }
-
-            if input.key_pressed.is_backspace() && delete_prev(buf, &mut cursor_pos, false) {
-                res |= ResourceState::CHANGE;
-            }
-
-            let delete_pressed = input.key_pressed.is_delete() || input.key_code_pressed.is_delete();
-            if delete_pressed && delete_next(buf, cursor_pos) {
-                res |= ResourceState::CHANGE;
-            }
-
-            if input.key_code_pressed.is_left() && cursor_pos > 0 {
-                cursor_pos = move_left(buf, cursor_pos);
-            }
-
-            if input.key_code_pressed.is_right() && cursor_pos < buf.len() {
-                cursor_pos = move_right(buf, cursor_pos);
-            }
-
-            if input.key_pressed.is_return() {
-                should_submit = true;
-            }
+    let default_input = InputSnapshot::default();
+    let input = ctx.input().unwrap_or(&default_input);
+    let mouse_pressed = input.mouse_pressed;
+    let mouse_pos = input.mouse_pos;
+    if control.focused {
+        let edit = apply_text_input(buf, cursor_pos, input, false, ReturnBehavior::Submit);
+        cursor_pos = edit.cursor;
+        if edit.changed {
+            res |= ResourceState::CHANGE;
         }
-
-        (input.mouse_pressed, input.mouse_pos, should_submit)
-    };
-
-    if should_submit {
-        ctx.clear_focus();
-        res |= ResourceState::SUBMIT;
+        if edit.submit {
+            ctx.clear_focus();
+            res |= ResourceState::SUBMIT;
+        }
     }
 
     ctx.draw_widget_frame(control, r, ControlColor::Base, opt);
@@ -417,47 +463,25 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     let mut preferred_x = state.preferred_x;
 
     if control.focused {
-        if insert_text(&mut state.buf, &mut cursor_pos, input.text_input.as_str()) {
+        let edit = apply_text_input(
+            &mut state.buf,
+            cursor_pos,
+            input,
+            true,
+            ReturnBehavior::Newline { submit_on_ctrl: true },
+        );
+        cursor_pos = edit.cursor;
+        if edit.changed {
             res |= ResourceState::CHANGE;
             ensure_visible = true;
             reset_preferred = true;
         }
-
-        if input.key_pressed.is_backspace() && delete_prev(&mut state.buf, &mut cursor_pos, true) {
-            res |= ResourceState::CHANGE;
+        if edit.moved {
             ensure_visible = true;
             reset_preferred = true;
         }
-
-        let delete_pressed = input.key_pressed.is_delete() || input.key_code_pressed.is_delete();
-        if delete_pressed && delete_next(&mut state.buf, cursor_pos) {
-            res |= ResourceState::CHANGE;
-            ensure_visible = true;
-            reset_preferred = true;
-        }
-
-        if input.key_code_pressed.is_left() && cursor_pos > 0 {
-            cursor_pos = move_left(&state.buf, cursor_pos);
-            ensure_visible = true;
-            reset_preferred = true;
-        }
-
-        if input.key_code_pressed.is_right() && cursor_pos < state.buf.len() {
-            cursor_pos = move_right(&state.buf, cursor_pos);
-            ensure_visible = true;
-            reset_preferred = true;
-        }
-
-        if input.key_pressed.is_return() {
-            if input.key_mods.is_ctrl() {
-                res |= ResourceState::SUBMIT;
-            } else {
-                if insert_text(&mut state.buf, &mut cursor_pos, "\n") {
-                    res |= ResourceState::CHANGE;
-                    ensure_visible = true;
-                    reset_preferred = true;
-                }
-            }
+        if edit.submit {
+            res |= ResourceState::SUBMIT;
         }
     }
 
