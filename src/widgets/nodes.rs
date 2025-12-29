@@ -127,6 +127,10 @@ impl Node {
 
     /// Returns `true` when the node is closed.
     pub fn is_closed(&self) -> bool { self.state.is_closed() }
+
+    pub(crate) fn set_header_kind(&mut self) { self.kind = NodeKind::Header; }
+
+    pub(crate) fn set_tree_kind(&mut self) { self.kind = NodeKind::Tree; }
 }
 
 impl Widget for Node {
@@ -165,41 +169,5 @@ impl Widget for Node {
             res |= ResourceState::CHANGE;
         }
         res
-    }
-}
-
-impl Container {
-    /// Builds a collapsible header row that executes `f` when expanded.
-    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
-        state.kind = NodeKind::Header;
-        let id: Id = state.get_id();
-        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        let r = self.layout.next();
-        let control = self.update_control(id, r, state);
-        let mut ctx = self.widget_ctx(id, r, None);
-        let _ = state.handle(&mut ctx, &control);
-        if state.state.is_expanded() {
-            f(self);
-        }
-        state.state
-    }
-
-    /// Builds a tree node with automatic indentation while expanded.
-    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
-        state.kind = NodeKind::Tree;
-        let id: Id = state.get_id();
-        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        let r = self.layout.next();
-        let control = self.update_control(id, r, state);
-        let mut ctx = self.widget_ctx(id, r, None);
-        let _ = state.handle(&mut ctx, &control);
-        if state.state.is_expanded() {
-            let indent = self.style.as_ref().indent;
-            self.layout.adjust_indent(indent);
-            f(self);
-            self.layout.adjust_indent(-indent);
-        }
-
-        state.state
     }
 }
