@@ -74,6 +74,7 @@ pub struct Slider {
     pub bopt: WidgetBehaviourOption,
     /// Text editing state for shift-click numeric entry.
     pub edit: NumberEditState,
+    id: Option<Id>,
 }
 
 impl Slider {
@@ -88,6 +89,7 @@ impl Slider {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
             edit: NumberEditState::default(),
+            id: None,
         }
     }
 
@@ -102,7 +104,14 @@ impl Slider {
             opt,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
             edit: NumberEditState::default(),
+            id: None,
         }
+    }
+
+    /// Returns a copy of the slider with an explicit ID.
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
@@ -144,6 +153,7 @@ fn number_textbox_handle(
 impl Widget for Slider {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let base = ctx.rect();
@@ -220,6 +230,7 @@ pub struct Number {
     pub bopt: WidgetBehaviourOption,
     /// Text editing state for shift-click numeric entry.
     pub edit: NumberEditState,
+    id: Option<Id>,
 }
 
 #[derive(Clone, Default)]
@@ -243,6 +254,7 @@ impl Number {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             edit: NumberEditState::default(),
+            id: None,
         }
     }
 
@@ -255,13 +267,21 @@ impl Number {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             edit: NumberEditState::default(),
+            id: None,
         }
+    }
+
+    /// Returns a copy of the number input with an explicit ID.
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
 impl Widget for Number {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let base = ctx.rect();

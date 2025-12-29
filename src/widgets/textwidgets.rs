@@ -64,6 +64,7 @@ pub struct Textbox {
     pub opt: WidgetOption,
     /// Behaviour options applied to the textbox.
     pub bopt: WidgetBehaviourOption,
+    id: Option<Id>,
 }
 
 impl Textbox {
@@ -71,14 +72,20 @@ impl Textbox {
     pub fn new(buf: impl Into<String>) -> Self {
         let buf = buf.into();
         let cursor = buf.len();
-        Self { buf, cursor, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
+        Self { buf, cursor, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE, id: None }
     }
 
     /// Creates a textbox with explicit widget options.
     pub fn with_opt(buf: impl Into<String>, opt: WidgetOption) -> Self {
         let buf = buf.into();
         let cursor = buf.len();
-        Self { buf, cursor, opt, bopt: WidgetBehaviourOption::NONE }
+        Self { buf, cursor, opt, bopt: WidgetBehaviourOption::NONE, id: None }
+    }
+
+    /// Returns a copy of the textbox with an explicit ID.
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
@@ -274,6 +281,7 @@ pub(crate) fn textbox_handle(
 impl Widget for Textbox {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         textbox_handle(ctx, control, &mut self.buf, &mut self.cursor, self.opt)
     }
@@ -297,6 +305,7 @@ pub struct TextArea {
     preferred_x: Option<i32>,
     dragging_y: bool,
     dragging_x: bool,
+    id: Option<Id>,
 }
 
 impl TextArea {
@@ -314,6 +323,7 @@ impl TextArea {
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
+            id: None,
         }
     }
 
@@ -331,7 +341,14 @@ impl TextArea {
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
+            id: None,
         }
+    }
+
+    /// Returns a copy of the text area with an explicit ID.
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
@@ -773,6 +790,7 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
 impl Widget for TextArea {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         textarea_handle(ctx, control, self)
     }

@@ -108,6 +108,7 @@ pub struct Button {
     pub bopt: WidgetBehaviourOption,
     /// Fill behavior for the button background.
     pub fill: WidgetFillOption,
+    id: Option<Id>,
 }
 
 impl Button {
@@ -118,6 +119,7 @@ impl Button {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             fill: WidgetFillOption::ALL,
+            id: None,
         }
     }
 
@@ -128,6 +130,7 @@ impl Button {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             fill: WidgetFillOption::ALL,
+            id: None,
         }
     }
 
@@ -138,6 +141,7 @@ impl Button {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             fill,
+            id: None,
         }
     }
 
@@ -154,13 +158,21 @@ impl Button {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             fill,
+            id: None,
         }
+    }
+
+    /// Returns a copy of the button with an explicit ID.
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
 impl Widget for Button {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         if control.clicked {
@@ -214,33 +226,41 @@ pub struct ListItem {
     pub opt: WidgetOption,
     /// Behaviour options applied to the list item.
     pub bopt: WidgetBehaviourOption,
+    id: Option<Id>,
 }
 
 impl ListItem {
     /// Creates a list item with default widget options.
     pub fn new(label: impl Into<String>) -> Self {
-        Self { label: label.into(), icon: None, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
+        Self { label: label.into(), icon: None, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE, id: None }
     }
 
     /// Creates a list item with explicit widget options.
     pub fn with_opt(label: impl Into<String>, opt: WidgetOption) -> Self {
-        Self { label: label.into(), icon: None, opt, bopt: WidgetBehaviourOption::NONE }
+        Self { label: label.into(), icon: None, opt, bopt: WidgetBehaviourOption::NONE, id: None }
     }
 
     /// Creates a list item with an icon and default widget options.
     pub fn with_icon(label: impl Into<String>, icon: IconId) -> Self {
-        Self { label: label.into(), icon: Some(icon), opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
+        Self { label: label.into(), icon: Some(icon), opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE, id: None }
     }
 
     /// Creates a list item with an icon and explicit widget options.
     pub fn with_icon_opt(label: impl Into<String>, icon: IconId, opt: WidgetOption) -> Self {
-        Self { label: label.into(), icon: Some(icon), opt, bopt: WidgetBehaviourOption::NONE }
+        Self { label: label.into(), icon: Some(icon), opt, bopt: WidgetBehaviourOption::NONE, id: None }
+    }
+
+    /// Returns a copy of the list item with an explicit ID.
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
 impl Widget for ListItem {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let bounds = ctx.rect();
@@ -291,23 +311,31 @@ pub struct ListBox {
     pub opt: WidgetOption,
     /// Behaviour options applied to the list box.
     pub bopt: WidgetBehaviourOption,
+    id: Option<Id>,
 }
 
 impl ListBox {
     /// Creates a list box with default widget options.
     pub fn new(label: impl Into<String>, image: Option<Image>) -> Self {
-        Self { label: label.into(), image, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
+        Self { label: label.into(), image, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE, id: None }
     }
 
     /// Creates a list box with explicit widget options.
     pub fn with_opt(label: impl Into<String>, image: Option<Image>, opt: WidgetOption) -> Self {
-        Self { label: label.into(), image, opt, bopt: WidgetBehaviourOption::NONE }
+        Self { label: label.into(), image, opt, bopt: WidgetBehaviourOption::NONE, id: None }
+    }
+
+    /// Returns a copy of the list box with an explicit ID.
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
 impl Widget for ListBox {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let rect = ctx.rect();
@@ -341,23 +369,31 @@ pub struct Checkbox {
     pub opt: WidgetOption,
     /// Behaviour options applied to the checkbox.
     pub bopt: WidgetBehaviourOption,
+    id: Option<Id>,
 }
 
 impl Checkbox {
     /// Creates a checkbox with default widget options.
     pub fn new(label: impl Into<String>, value: bool) -> Self {
-        Self { label: label.into(), value, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE }
+        Self { label: label.into(), value, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE, id: None }
     }
 
     /// Creates a checkbox with explicit widget options.
     pub fn with_opt(label: impl Into<String>, value: bool, opt: WidgetOption) -> Self {
-        Self { label: label.into(), value, opt, bopt: WidgetBehaviourOption::NONE }
+        Self { label: label.into(), value, opt, bopt: WidgetBehaviourOption::NONE, id: None }
+    }
+
+    /// Returns a copy of the checkbox with an explicit ID.
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
 impl Widget for Checkbox {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let bounds = ctx.rect();
@@ -388,6 +424,7 @@ pub struct Custom {
     pub opt: WidgetOption,
     /// Behaviour options applied to the custom widget.
     pub bopt: WidgetBehaviourOption,
+    id: Option<Id>,
 }
 
 impl Custom {
@@ -397,18 +434,26 @@ impl Custom {
             name: name.into(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
+            id: None,
         }
     }
 
     /// Creates a custom widget state with explicit options.
     pub fn with_opt(name: impl Into<String>, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self {
-        Self { name: name.into(), opt, bopt }
+        Self { name: name.into(), opt, bopt, id: None }
+    }
+
+    /// Returns a copy of the custom widget with an explicit ID.
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
 impl Widget for Custom {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
     fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
@@ -421,6 +466,7 @@ pub struct Internal {
     pub opt: WidgetOption,
     /// Behaviour options applied to the internal control.
     pub bopt: WidgetBehaviourOption,
+    id: Option<Id>,
 }
 
 impl Internal {
@@ -430,13 +476,21 @@ impl Internal {
             tag,
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
+            id: None,
         }
+    }
+
+    /// Returns a copy of the internal control with an explicit ID.
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
 impl Widget for Internal {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
     fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
@@ -455,6 +509,7 @@ pub struct Combo {
     pub bopt: WidgetBehaviourOption,
     label: String,
     clamped: bool,
+    id: Option<Id>,
 }
 
 impl Combo {
@@ -468,6 +523,7 @@ impl Combo {
             bopt: WidgetBehaviourOption::NONE,
             label: String::new(),
             clamped: false,
+            id: None,
         }
     }
 
@@ -481,7 +537,14 @@ impl Combo {
             bopt,
             label: String::new(),
             clamped: false,
+            id: None,
         }
+    }
+
+    /// Returns a copy of the combo with an explicit ID.
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
     }
 
     /// Updates the cached label and clamps the selected index to the provided items.
@@ -511,6 +574,7 @@ impl Combo {
 impl Widget for Combo {
     fn widget_opt(&self) -> &WidgetOption { &self.opt }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         if self.clamped {

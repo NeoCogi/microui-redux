@@ -129,7 +129,25 @@ pub struct Id(usize);
 
 impl Id {
     /// Creates an ID from the address of a stable state object.
+    /// If the object can move (for example, stored in a growing `Vec`), prefer
+    /// [`Id::new`] or [`Id::from_str`] and store it on the widget state via `with_id`.
     pub fn from_ptr<T: ?Sized>(value: &T) -> Self { Self(value as *const T as *const () as usize) }
+
+    /// Creates an ID from a caller-supplied numeric value.
+    /// On 32-bit platforms the value is truncated to fit in a `usize`.
+    pub fn new(value: u64) -> Self { Self(value as usize) }
+
+    /// Creates a stable ID from a string label using FNV-1a hashing.
+    pub fn from_str(label: &str) -> Self {
+        const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+        const FNV_PRIME: u64 = 0x100000001b3;
+        let mut hash = FNV_OFFSET_BASIS;
+        for byte in label.as_bytes() {
+            hash ^= *byte as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        Self::new(hash)
+    }
 
     /// Returns the raw pointer value wrapped by this ID.
     pub fn raw(self) -> usize { self.0 }
@@ -423,6 +441,8 @@ impl Default for InputSnapshot {
 /// Trait implemented by persistent widget state structures.
 /// `handle` is invoked with a `WidgetCtx` and precomputed `ControlState`.
 /// The default ID is derived from the state address, so the state must live at a stable address.
+/// If the state can move (for example, stored in a `Vec` that can grow/shrink), give it a
+/// stable ID (for example `Button::new("Ok").with_id(Id::from_str("dialog/ok"))`).
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
