@@ -176,13 +176,8 @@ impl Node {
         self.id = Some(id);
         self
     }
-}
 
-impl Widget for Node {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let expanded = self.state.is_expanded();
         let style = ctx.style();
@@ -217,3 +212,5 @@ impl Widget for Node {
         res
     }
 }
+
+implement_widget!(Node, handle_widget);

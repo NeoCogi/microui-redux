@@ -50,6 +50,19 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+macro_rules! implement_widget {
+    ($ty:ty, $handle:ident) => {
+        impl Widget for $ty {
+            fn widget_opt(&self) -> &WidgetOption { &self.opt }
+            fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+            fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
+            fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+                self.$handle(ctx, control)
+            }
+        }
+    };
+}
+
 mod core_widgets;
 mod nodes;
 mod slider;

@@ -113,47 +113,8 @@ impl Slider {
         self.id = Some(id);
         self
     }
-}
 
-fn number_textbox_handle(
-    ctx: &mut WidgetCtx<'_>,
-    control: &ControlState,
-    edit: &mut NumberEditState,
-    precision: usize,
-    value: &mut Real,
-) -> ResourceState {
-    let shift_click = {
-        let input = ctx.input_or_default();
-        input.mouse_pressed.is_left() && input.key_mods.is_shift() && control.hovered
-    };
-
-    if shift_click {
-        edit.editing = true;
-        edit.buf.clear();
-        let _ = write!(edit.buf, "{:.*}", precision, value);
-        edit.cursor = edit.buf.len();
-    }
-
-    if edit.editing {
-        let res = textbox_handle(ctx, control, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE);
-        if res.is_submitted() || !control.focused {
-            if let Ok(v) = edit.buf.parse::<f32>() {
-                *value = v as Real;
-            }
-            edit.editing = false;
-            edit.cursor = 0;
-        } else {
-            return ResourceState::ACTIVE;
-        }
-    }
-    ResourceState::NONE
-}
-
-impl Widget for Slider {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let base = ctx.rect();
         let last = self.value;
@@ -212,6 +173,42 @@ impl Widget for Slider {
         res
     }
 }
+
+fn number_textbox_handle(
+    ctx: &mut WidgetCtx<'_>,
+    control: &ControlState,
+    edit: &mut NumberEditState,
+    precision: usize,
+    value: &mut Real,
+) -> ResourceState {
+    let shift_click = {
+        let input = ctx.input_or_default();
+        input.mouse_pressed.is_left() && input.key_mods.is_shift() && control.hovered
+    };
+
+    if shift_click {
+        edit.editing = true;
+        edit.buf.clear();
+        let _ = write!(edit.buf, "{:.*}", precision, value);
+        edit.cursor = edit.buf.len();
+    }
+
+    if edit.editing {
+        let res = textbox_handle(ctx, control, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE);
+        if res.is_submitted() || !control.focused {
+            if let Ok(v) = edit.buf.parse::<f32>() {
+                *value = v as Real;
+            }
+            edit.editing = false;
+            edit.cursor = 0;
+        } else {
+            return ResourceState::ACTIVE;
+        }
+    }
+    ResourceState::NONE
+}
+
+implement_widget!(Slider, handle_widget);
 
 #[derive(Clone)]
 /// Persistent state for number input widgets.
@@ -274,13 +271,8 @@ impl Number {
         self.id = Some(id);
         self
     }
-}
 
-impl Widget for Number {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let base = ctx.rect();
         let last = self.value;
@@ -301,6 +293,8 @@ impl Widget for Number {
         res
     }
 }
+
+implement_widget!(Number, handle_widget);
 
 #[cfg(test)]
 mod tests {

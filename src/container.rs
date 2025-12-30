@@ -56,6 +56,22 @@ use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scrol
 use crate::text_layout::build_text_lines;
 use std::cell::RefCell;
 
+macro_rules! widget_layout {
+    ($(#[$meta:meta])* $name:ident, $state:ty, $builder:expr) => {
+        $(#[$meta])*
+        pub fn $name(&mut self, state: &mut $state) -> ResourceState {
+            let rect = self.layout.next();
+            ($builder)(self, state, rect)
+        }
+    };
+    ($(#[$meta:meta])* $name:ident, $state:ty) => {
+        $(#[$meta])*
+        pub fn $name(&mut self, state: &mut $state) -> ResourceState {
+            self.handle_widget(state, None)
+        }
+    };
+}
+
 /// Arguments forwarded to custom rendering callbacks.
 pub struct CustomRenderArgs {
     /// Rectangle describing the widget's content area.
@@ -892,22 +908,25 @@ impl Container {
         self.draw_control_text(text, layout, ControlColor::Text, WidgetOption::NONE);
     }
 
-    #[inline(never)]
-    /// Draws a button using the provided persistent state.
-    pub fn button(&mut self, state: &mut Button) -> ResourceState {
-        self.handle_widget(state, None)
-    }
+    widget_layout!(
+        #[inline(never)]
+        /// Draws a button using the provided persistent state.
+        button,
+        Button
+    );
 
-    /// Renders a list entry that only highlights while hovered or active.
-    pub fn list_item(&mut self, state: &mut ListItem) -> ResourceState {
-        self.handle_widget(state, None)
-    }
+    widget_layout!(
+        /// Renders a list entry that only highlights while hovered or active.
+        list_item,
+        ListItem
+    );
 
-    #[inline(never)]
-    /// Shim for list boxes that only fills on hover or click.
-    pub fn list_box(&mut self, state: &mut ListBox) -> ResourceState {
-        self.handle_widget(state, None)
-    }
+    widget_layout!(
+        #[inline(never)]
+        /// Shim for list boxes that only fills on hover or click.
+        list_box,
+        ListBox
+    );
 
     #[inline(never)]
     /// Draws the combo box header, clamps the selected index, and returns the popup anchor.
@@ -924,11 +943,12 @@ impl Container {
     }
 
 
-    #[inline(never)]
-    /// Draws a checkbox labeled with `label` and toggles `state` when clicked.
-    pub fn checkbox(&mut self, state: &mut Checkbox) -> ResourceState {
-        self.handle_widget(state, None)
-    }
+    widget_layout!(
+        #[inline(never)]
+        /// Draws a checkbox labeled with `label` and toggles `state` when clicked.
+        checkbox,
+        Checkbox
+    );
 
     #[inline(never)]
     fn input_to_mouse_event(&self, control: &ControlState, input: &InputSnapshot, rect: Recti) -> MouseEvent {
@@ -987,45 +1007,57 @@ impl Container {
         self.command_list.push(Command::CustomRender(cra, Box::new(f)));
     }
 
-    /// Draws a textbox using the next available layout cell.
-    pub fn textbox(&mut self, state: &mut Textbox) -> ResourceState {
-        let r: Recti = self.layout.next();
-        let input = self.snapshot_input();
-        let opt = state.opt | WidgetOption::HOLD_FOCUS;
-        self.handle_widget_in_rect(state, r, Some(input), opt, state.bopt)
-    }
-
-    /// Draws a multi-line text area using the next available layout cell.
-    pub fn textarea(&mut self, state: &mut TextArea) -> ResourceState {
-        let r: Recti = self.layout.next();
-        let input = self.snapshot_input();
-        let opt = state.opt | WidgetOption::HOLD_FOCUS;
-        self.handle_widget_in_rect(state, r, Some(input), opt, state.bopt)
-    }
-
-    #[inline(never)]
-    /// Draws a horizontal slider bound to `state`.
-    pub fn slider(&mut self, state: &mut Slider) -> ResourceState {
-        let rect = self.layout.next();
-        let mut opt = state.opt;
-        if state.edit.editing {
-            opt |= WidgetOption::HOLD_FOCUS;
+    widget_layout!(
+        /// Draws a textbox using the next available layout cell.
+        textbox,
+        Textbox,
+        |this: &mut Self, state: &mut Textbox, rect: Recti| {
+            let input = Some(this.snapshot_input());
+            let opt = state.opt | WidgetOption::HOLD_FOCUS;
+            this.handle_widget_in_rect(state, rect, input, opt, state.bopt)
         }
-        let input = self.snapshot_input();
-        self.handle_widget_in_rect(state, rect, Some(input), opt, state.bopt)
-    }
+    );
 
-    #[inline(never)]
-    /// Draws a numeric input that can be edited via keyboard or by dragging.
-    pub fn number(&mut self, state: &mut Number) -> ResourceState {
-        let rect = self.layout.next();
-        let mut opt = state.opt;
-        if state.edit.editing {
-            opt |= WidgetOption::HOLD_FOCUS;
+    widget_layout!(
+        /// Draws a multi-line text area using the next available layout cell.
+        textarea,
+        TextArea,
+        |this: &mut Self, state: &mut TextArea, rect: Recti| {
+            let input = Some(this.snapshot_input());
+            let opt = state.opt | WidgetOption::HOLD_FOCUS;
+            this.handle_widget_in_rect(state, rect, input, opt, state.bopt)
         }
-        let input = self.snapshot_input();
-        self.handle_widget_in_rect(state, rect, Some(input), opt, state.bopt)
-    }
+    );
+
+    widget_layout!(
+        #[inline(never)]
+        /// Draws a horizontal slider bound to `state`.
+        slider,
+        Slider,
+        |this: &mut Self, state: &mut Slider, rect: Recti| {
+            let mut opt = state.opt;
+            if state.edit.editing {
+                opt |= WidgetOption::HOLD_FOCUS;
+            }
+            let input = Some(this.snapshot_input());
+            this.handle_widget_in_rect(state, rect, input, opt, state.bopt)
+        }
+    );
+
+    widget_layout!(
+        #[inline(never)]
+        /// Draws a numeric input that can be edited via keyboard or by dragging.
+        number,
+        Number,
+        |this: &mut Self, state: &mut Number, rect: Recti| {
+            let mut opt = state.opt;
+            if state.edit.editing {
+                opt |= WidgetOption::HOLD_FOCUS;
+            }
+            let input = Some(this.snapshot_input());
+            this.handle_widget_in_rect(state, rect, input, opt, state.bopt)
+        }
+    );
 }
 
 #[cfg(test)]
