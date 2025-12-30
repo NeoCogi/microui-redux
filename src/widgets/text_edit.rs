@@ -226,10 +226,4 @@ pub(crate) fn cursor_from_x(line: &TextLine, buf: &str, target_x: i32, font: Fon
     line.end
 }
 
-pub(crate) fn clamp_scroll(value: i32, max_value: i32) -> i32 {
-    if max_value <= 0 {
-        0
-    } else {
-        value.clamp(0, max_value)
-    }
-}
+pub(crate) fn clamp_scroll(value: i32, max_value: i32) -> i32 { if max_value <= 0 { 0 } else { value.clamp(0, max_value) } }

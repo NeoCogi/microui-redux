@@ -189,10 +189,7 @@ fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Colo
     let info = reader.next_frame(&mut img_data)?;
 
     if info.bit_depth != BitDepth::Eight {
-        return Err(Error::new(
-            ErrorKind::Other,
-            format!("Unsupported PNG bit depth: {:?}", info.bit_depth),
-        ));
+        return Err(Error::new(ErrorKind::Other, format!("Unsupported PNG bit depth: {:?}", info.bit_depth)));
     }
 
     let pixel_size = match info.color_type {
@@ -584,17 +581,11 @@ impl AtlasHandle {
 
     /// Attempts to reconstruct an atlas from a serialized [`AtlasSource`].
     pub fn try_from<'a>(source: &AtlasSource<'a>) -> std::io::Result<Self> {
-        let width = i32::try_from(source.width)
-            .map_err(|_| Error::new(ErrorKind::Other, "Atlas width exceeds i32::MAX"))?;
-        let height = i32::try_from(source.height)
-            .map_err(|_| Error::new(ErrorKind::Other, "Atlas height exceeds i32::MAX"))?;
+        let width = i32::try_from(source.width).map_err(|_| Error::new(ErrorKind::Other, "Atlas width exceeds i32::MAX"))?;
+        let height = i32::try_from(source.height).map_err(|_| Error::new(ErrorKind::Other, "Atlas height exceeds i32::MAX"))?;
         let pixels = match source.format {
             SourceFormat::Raw => {
-                let (raw_width, raw_height, pixels) = load_image_bytes(ImageSource::Raw {
-                    width,
-                    height,
-                    pixels: source.pixels,
-                })?;
+                let (raw_width, raw_height, pixels) = load_image_bytes(ImageSource::Raw { width, height, pixels: source.pixels })?;
                 if raw_width != source.width || raw_height != source.height {
                     return Err(Error::new(ErrorKind::Other, "Atlas dimensions do not match raw data"));
                 }
@@ -666,13 +657,7 @@ impl AtlasHandle {
         font_meta.push_str(format!("slots: {},\n", slots).as_str());
         let (source_pixels, source_format) = match format {
             SourceFormat::Raw => (
-                self.0
-                    .borrow()
-                    .pixels
-                    .iter()
-                    .map(|p| [p.x, p.y, p.z, p.w])
-                    .flatten()
-                    .collect::<Vec<_>>(),
+                self.0.borrow().pixels.iter().map(|p| [p.x, p.y, p.z, p.w]).flatten().collect::<Vec<_>>(),
                 "SourceFormat::Raw",
             ),
             #[cfg(feature = "png_source")]
@@ -694,14 +679,7 @@ impl AtlasHandle {
     #[cfg(all(feature = "save-to-rust", feature = "png_source"))]
     fn png_image_bytes(&self) -> Result<Vec<u8>> {
         let mut bytes = Vec::new();
-        let pixels = self
-            .0
-            .borrow()
-            .pixels
-            .iter()
-            .map(|c| [c.x, c.y, c.z, c.w])
-            .flatten()
-            .collect::<Vec<_>>();
+        let pixels = self.0.borrow().pixels.iter().map(|c| [c.x, c.y, c.z, c.w]).flatten().collect::<Vec<_>>();
         {
             let mut encoder = png::Encoder::new(&mut bytes, self.width() as _, self.height() as _);
             encoder.set_color(ColorType::Rgba);

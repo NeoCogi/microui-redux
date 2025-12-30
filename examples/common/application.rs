@@ -243,14 +243,7 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
     let renderer = RendererHandle::new(vulkan_renderer::VulkanRenderer::new(&window, atlas, width, height)?);
     let init_ctx = BackendInitContext;
 
-    Ok((
-        BackendBundle {
-            window,
-            renderer,
-            size: (width, height),
-        },
-        init_ctx,
-    ))
+    Ok((BackendBundle { window, renderer, size: (width, height) }, init_ctx))
 }
 
 struct BackendBundle {

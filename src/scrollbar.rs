@@ -73,9 +73,7 @@ pub(crate) fn scrollbar_base(axis: ScrollAxis, body: Recti, scrollbar_size: i32)
     base
 }
 
-pub(crate) fn scrollbar_max_scroll(content_len: i32, view_len: i32) -> i32 {
-    (content_len - view_len).max(0)
-}
+pub(crate) fn scrollbar_max_scroll(content_len: i32, view_len: i32) -> i32 { (content_len - view_len).max(0) }
 
 pub(crate) fn scrollbar_drag_delta(axis: ScrollAxis, delta: Vec2i, content_len: i32, base: Recti) -> i32 {
     let base_len = match axis {
@@ -92,14 +90,7 @@ pub(crate) fn scrollbar_drag_delta(axis: ScrollAxis, delta: Vec2i, content_len: 
     axis_delta.saturating_mul(content_len) / base_len
 }
 
-pub(crate) fn scrollbar_thumb(
-    axis: ScrollAxis,
-    base: Recti,
-    view_len: i32,
-    content_len: i32,
-    scroll: i32,
-    thumb_size: i32,
-) -> Recti {
+pub(crate) fn scrollbar_thumb(axis: ScrollAxis, base: Recti, view_len: i32, content_len: i32, scroll: i32, thumb_size: i32) -> Recti {
     let mut thumb = base;
     let base_len = match axis {
         ScrollAxis::Vertical => base.height,

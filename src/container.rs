@@ -309,9 +309,7 @@ impl Container {
         }
     }
 
-    fn draw_ctx(&mut self) -> DrawCtx<'_> {
-        DrawCtx::new(&mut self.command_list, &mut self.clip_stack, self.style.as_ref(), &self.atlas)
-    }
+    fn draw_ctx(&mut self) -> DrawCtx<'_> { DrawCtx::new(&mut self.command_list, &mut self.clip_stack, self.style.as_ref(), &self.atlas) }
 
     /// Pushes a new clip rectangle combined with the previous clip.
     pub fn push_clip_rect(&mut self, rect: Recti) {
@@ -648,14 +646,10 @@ impl Container {
     }
 
     /// Builds a collapsible header row that executes `f` when expanded.
-    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
-        self.node_scope(state, false, f)
-    }
+    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue { self.node_scope(state, false, f) }
 
     /// Builds a tree node with automatic indentation while expanded.
-    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
-        self.node_scope(state, true, f)
-    }
+    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue { self.node_scope(state, true, f) }
 
     fn clamp(x: i32, a: i32, b: i32) -> i32 { min(b, max(a, x)) }
 
@@ -942,7 +936,6 @@ impl Container {
         (anchor, header_clicked, res)
     }
 
-
     widget_layout!(
         #[inline(never)]
         /// Draws a checkbox labeled with `label` and toggles `state` when clicked.
@@ -975,11 +968,7 @@ impl Container {
 
     #[inline(never)]
     /// Allocates a widget cell and hands rendering control to user code.
-    pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(
-        &mut self,
-        state: &mut Custom,
-        f: F,
-    ) {
+    pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, state: &mut Custom, f: F) {
         let rect = self.layout.next();
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
@@ -1069,10 +1058,7 @@ mod tests {
 
     fn make_test_atlas() -> AtlasHandle {
         let pixels: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
-        let icons: Vec<(&str, Recti)> = ICON_NAMES
-            .iter()
-            .map(|name| (*name, Recti::new(0, 0, 1, 1)))
-            .collect();
+        let icons: Vec<(&str, Recti)> = ICON_NAMES.iter().map(|name| (*name, Recti::new(0, 0, 1, 1))).collect();
         let entries = vec![
             (
                 '_',

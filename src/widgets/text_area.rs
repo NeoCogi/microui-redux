@@ -54,9 +54,7 @@ use crate::*;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::text_layout::{build_text_lines, TextLine};
 
-use super::text_edit::{
-    apply_text_input, clamp_scroll, cursor_from_x, cursor_x_in_line, line_index_for_cursor, ReturnBehavior,
-};
+use super::text_edit::{apply_text_input, clamp_scroll, cursor_from_x, cursor_x_in_line, line_index_for_cursor, ReturnBehavior};
 
 #[derive(Clone)]
 /// Persistent state for multi-line text area widgets.
@@ -122,9 +120,7 @@ impl TextArea {
         self
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        textarea_handle(ctx, control, self)
-    }
+    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState { textarea_handle(ctx, control, self) }
 }
 
 fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea) -> ResourceState {
@@ -143,13 +139,7 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     let mut preferred_x = state.preferred_x;
 
     if control.focused {
-        let edit = apply_text_input(
-            &mut state.buf,
-            cursor_pos,
-            input,
-            true,
-            ReturnBehavior::Newline { submit_on_ctrl: true },
-        );
+        let edit = apply_text_input(&mut state.buf, cursor_pos, input, true, ReturnBehavior::Newline { submit_on_ctrl: true });
         cursor_pos = edit.cursor;
         if edit.changed {
             res |= ResourceState::CHANGE;
@@ -204,11 +194,7 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     }
 
     if lines.is_empty() {
-        lines.push(TextLine {
-            start: 0,
-            end: 0,
-            width: 0,
-        });
+        lines.push(TextLine { start: 0, end: 0, width: 0 });
     }
 
     let cs = vec2(content_width + padding * 2, content_height + padding * 2);

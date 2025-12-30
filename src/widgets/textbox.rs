@@ -73,14 +73,26 @@ impl Textbox {
     pub fn new(buf: impl Into<String>) -> Self {
         let buf = buf.into();
         let cursor = buf.len();
-        Self { buf, cursor, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE, id: None }
+        Self {
+            buf,
+            cursor,
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+            id: None,
+        }
     }
 
     /// Creates a textbox with explicit widget options.
     pub fn with_opt(buf: impl Into<String>, opt: WidgetOption) -> Self {
         let buf = buf.into();
         let cursor = buf.len();
-        Self { buf, cursor, opt, bopt: WidgetBehaviourOption::NONE, id: None }
+        Self {
+            buf,
+            cursor,
+            opt,
+            bopt: WidgetBehaviourOption::NONE,
+            id: None,
+        }
     }
 
     /// Returns a copy of the textbox with an explicit ID.
@@ -94,13 +106,7 @@ impl Textbox {
     }
 }
 
-pub(crate) fn textbox_handle(
-    ctx: &mut WidgetCtx<'_>,
-    control: &ControlState,
-    buf: &mut String,
-    cursor: &mut usize,
-    opt: WidgetOption,
-) -> ResourceState {
+pub(crate) fn textbox_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, buf: &mut String, cursor: &mut usize, opt: WidgetOption) -> ResourceState {
     let mut res = ResourceState::NONE;
     let r = ctx.rect();
     if !control.focused {
