@@ -66,16 +66,16 @@ use std::{
 
 mod atlas;
 mod canvas;
+mod container;
 mod context;
 mod draw_context;
-mod container;
 mod file_dialog;
 mod layout;
 mod rect_packer;
 mod scrollbar;
 mod text_layout;
-mod window;
 mod widgets;
+mod window;
 
 pub use atlas::*;
 pub use canvas::*;
@@ -701,9 +701,7 @@ impl Input {
     pub fn keyup_code(&mut self, code: KeyCode) { self.key_code_down &= !code; }
 
     /// Appends UTF-8 text to the input buffer.
-    pub fn text(&mut self, text: &str) {
-        self.input_text.push_str(text);
-    }
+    pub fn text(&mut self, text: &str) { self.input_text.push_str(text); }
 
     fn prelude(&mut self) {
         self.mouse_delta.x = self.mouse_pos.x - self.last_mouse_pos.x;

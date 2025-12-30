@@ -63,12 +63,7 @@ pub(crate) struct DrawCtx<'a> {
 
 impl<'a> DrawCtx<'a> {
     pub(crate) fn new(commands: &'a mut Vec<Command>, clip_stack: &'a mut Vec<Recti>, style: &'a Style, atlas: &'a AtlasHandle) -> Self {
-        Self {
-            commands,
-            clip_stack,
-            style,
-            atlas,
-        }
+        Self { commands, clip_stack, style, atlas }
     }
 
     pub(crate) fn style(&self) -> &Style { self.style }

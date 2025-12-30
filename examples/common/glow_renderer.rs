@@ -601,10 +601,7 @@ impl GLRenderer {
             }
 
             if valid {
-                tris.push(Tri {
-                    depth: depth_acc / 3.0,
-                    verts,
-                });
+                tris.push(Tri { depth: depth_acc / 3.0, verts });
             }
         }
 

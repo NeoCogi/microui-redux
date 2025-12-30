@@ -102,9 +102,7 @@ pub struct Node {
 
 impl Node {
     /// Creates a header node state with the default widget options.
-    pub fn new(label: impl Into<String>, state: NodeStateValue) -> Self {
-        Self::header(label, state)
-    }
+    pub fn new(label: impl Into<String>, state: NodeStateValue) -> Self { Self::header(label, state) }
 
     /// Creates a header node state with the default widget options.
     pub fn header(label: impl Into<String>, state: NodeStateValue) -> Self {
@@ -131,9 +129,7 @@ impl Node {
     }
 
     /// Creates a header node state with explicit widget options.
-    pub fn with_opt(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self {
-        Self::with_opt_header(label, state, opt)
-    }
+    pub fn with_opt(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self { Self::with_opt_header(label, state, opt) }
 
     /// Creates a header node state with explicit widget options.
     pub fn with_opt_header(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self {

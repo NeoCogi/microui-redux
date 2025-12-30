@@ -146,13 +146,7 @@ impl Button {
     }
 
     /// Creates a slot button that repaints via the provided callback.
-    pub fn with_slot(
-        label: impl Into<String>,
-        slot: SlotId,
-        paint: Rc<dyn Fn(usize, usize) -> Color4b>,
-        opt: WidgetOption,
-        fill: WidgetFillOption,
-    ) -> Self {
+    pub fn with_slot(label: impl Into<String>, slot: SlotId, paint: Rc<dyn Fn(usize, usize) -> Color4b>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::Slot { label: label.into(), slot, paint },
             opt,
@@ -229,22 +223,46 @@ pub struct ListItem {
 impl ListItem {
     /// Creates a list item with default widget options.
     pub fn new(label: impl Into<String>) -> Self {
-        Self { label: label.into(), icon: None, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE, id: None }
+        Self {
+            label: label.into(),
+            icon: None,
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+            id: None,
+        }
     }
 
     /// Creates a list item with explicit widget options.
     pub fn with_opt(label: impl Into<String>, opt: WidgetOption) -> Self {
-        Self { label: label.into(), icon: None, opt, bopt: WidgetBehaviourOption::NONE, id: None }
+        Self {
+            label: label.into(),
+            icon: None,
+            opt,
+            bopt: WidgetBehaviourOption::NONE,
+            id: None,
+        }
     }
 
     /// Creates a list item with an icon and default widget options.
     pub fn with_icon(label: impl Into<String>, icon: IconId) -> Self {
-        Self { label: label.into(), icon: Some(icon), opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE, id: None }
+        Self {
+            label: label.into(),
+            icon: Some(icon),
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+            id: None,
+        }
     }
 
     /// Creates a list item with an icon and explicit widget options.
     pub fn with_icon_opt(label: impl Into<String>, icon: IconId, opt: WidgetOption) -> Self {
-        Self { label: label.into(), icon: Some(icon), opt, bopt: WidgetBehaviourOption::NONE, id: None }
+        Self {
+            label: label.into(),
+            icon: Some(icon),
+            opt,
+            bopt: WidgetBehaviourOption::NONE,
+            id: None,
+        }
     }
 
     /// Returns a copy of the list item with an explicit ID.
@@ -311,12 +329,24 @@ pub struct ListBox {
 impl ListBox {
     /// Creates a list box with default widget options.
     pub fn new(label: impl Into<String>, image: Option<Image>) -> Self {
-        Self { label: label.into(), image, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE, id: None }
+        Self {
+            label: label.into(),
+            image,
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+            id: None,
+        }
     }
 
     /// Creates a list box with explicit widget options.
     pub fn with_opt(label: impl Into<String>, image: Option<Image>, opt: WidgetOption) -> Self {
-        Self { label: label.into(), image, opt, bopt: WidgetBehaviourOption::NONE, id: None }
+        Self {
+            label: label.into(),
+            image,
+            opt,
+            bopt: WidgetBehaviourOption::NONE,
+            id: None,
+        }
     }
 
     /// Returns a copy of the list box with an explicit ID.
@@ -366,12 +396,24 @@ pub struct Checkbox {
 impl Checkbox {
     /// Creates a checkbox with default widget options.
     pub fn new(label: impl Into<String>, value: bool) -> Self {
-        Self { label: label.into(), value, opt: WidgetOption::NONE, bopt: WidgetBehaviourOption::NONE, id: None }
+        Self {
+            label: label.into(),
+            value,
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+            id: None,
+        }
     }
 
     /// Creates a checkbox with explicit widget options.
     pub fn with_opt(label: impl Into<String>, value: bool, opt: WidgetOption) -> Self {
-        Self { label: label.into(), value, opt, bopt: WidgetBehaviourOption::NONE, id: None }
+        Self {
+            label: label.into(),
+            value,
+            opt,
+            bopt: WidgetBehaviourOption::NONE,
+            id: None,
+        }
     }
 
     /// Returns a copy of the checkbox with an explicit ID.
@@ -427,9 +469,7 @@ impl Custom {
     }
 
     /// Creates a custom widget state with explicit options.
-    pub fn with_opt(name: impl Into<String>, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self {
-        Self { name: name.into(), opt, bopt, id: None }
-    }
+    pub fn with_opt(name: impl Into<String>, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self { Self { name: name.into(), opt, bopt, id: None } }
 
     /// Returns a copy of the custom widget with an explicit ID.
     pub fn with_id(mut self, id: Id) -> Self {

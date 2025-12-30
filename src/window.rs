@@ -157,7 +157,12 @@ impl Window {
             // the title text/close button stay visible even if the style is set to zero.
             let (font, padding, title_height, title_text_color) = {
                 let style = container.style.as_ref();
-                (style.font, style.padding.max(0), style.title_height, style.colors[ControlColor::TitleText as usize])
+                (
+                    style.font,
+                    style.padding.max(0),
+                    style.title_height,
+                    style.colors[ControlColor::TitleText as usize],
+                )
             };
             let font_height = container.atlas.get_font_height(font) as i32;
             let min_title_h = font_height + (padding / 2).max(1) * 2;

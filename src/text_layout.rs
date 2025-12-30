@@ -81,11 +81,7 @@ fn push_wrapped_line(
 
     if wrap != TextWrap::Word || max_width <= 0 {
         let width = atlas.get_text_size(font, line).width;
-        lines.push(TextLine {
-            start: line_start,
-            end: line_end,
-            width,
-        });
+        lines.push(TextLine { start: line_start, end: line_end, width });
         return;
     }
 
@@ -119,11 +115,7 @@ fn push_wrapped_line(
 pub(crate) fn build_text_lines(buf: &str, wrap: TextWrap, max_width: i32, font: FontId, atlas: &AtlasHandle) -> Vec<TextLine> {
     let mut lines = Vec::new();
     if buf.is_empty() {
-        lines.push(TextLine {
-            start: 0,
-            end: 0,
-            width: 0,
-        });
+        lines.push(TextLine { start: 0, end: 0, width: 0 });
         return lines;
     }
 
@@ -140,11 +132,7 @@ pub(crate) fn build_text_lines(buf: &str, wrap: TextWrap, max_width: i32, font: 
     }
 
     if lines.is_empty() {
-        lines.push(TextLine {
-            start: 0,
-            end: 0,
-            width: 0,
-        });
+        lines.push(TextLine { start: 0, end: 0, width: 0 });
     }
     lines
 }

@@ -56,9 +56,7 @@ macro_rules! implement_widget {
             fn widget_opt(&self) -> &WidgetOption { &self.opt }
             fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
             fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-            fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-                self.$handle(ctx, control)
-            }
+            fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState { self.$handle(ctx, control) }
         }
     };
 }
@@ -78,8 +76,7 @@ pub use textbox::*;
 
 use crate::draw_context::DrawCtx;
 use crate::{
-    AtlasHandle, Clip, Color, Color4b, Command, ControlColor, ControlState, FontId, IconId, Id, Image, InputSnapshot, Recti,
-    SlotId, Style, Vec2i, WidgetOption,
+    AtlasHandle, Clip, Color, Color4b, Command, ControlColor, ControlState, FontId, IconId, Id, Image, InputSnapshot, Recti, SlotId, Style, Vec2i, WidgetOption,
 };
 use std::rc::Rc;
 
@@ -174,17 +171,11 @@ impl<'a> WidgetCtx<'a> {
     /// Draws a 1-pixel box outline using the supplied color.
     pub fn draw_box(&mut self, r: Recti, color: Color) { self.draw.draw_box(r, color); }
 
-    pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
-        self.draw.draw_text(font, text, pos, color);
-    }
+    pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) { self.draw.draw_text(font, text, pos, color); }
 
-    pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
-        self.draw.draw_icon(id, rect, color);
-    }
+    pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) { self.draw.draw_icon(id, rect, color); }
 
-    pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
-        self.draw.push_image(image, rect, color);
-    }
+    pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) { self.draw.push_image(image, rect, color); }
 
     pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
         self.draw.draw_slot_with_function(id, rect, color, f);

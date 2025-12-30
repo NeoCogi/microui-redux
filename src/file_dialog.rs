@@ -81,9 +81,7 @@ impl FileDialogState {
     }
 
     fn rebuild_item_states(&mut self) {
-        let parent_path = Path::new(&self.current_working_directory)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string());
+        let parent_path = Path::new(&self.current_working_directory).parent().map(|p| p.to_string_lossy().to_string());
 
         self.folder_items.clear();
         self.folder_items.reserve(self.folders.len());
@@ -91,10 +89,7 @@ impl FileDialogState {
             let label = if parent_path.as_deref() == Some(f.as_str()) {
                 ".."
             } else {
-                Path::new(f)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or(f.as_str())
+                Path::new(f).file_name().and_then(|name| name.to_str()).unwrap_or(f.as_str())
             };
             let icon = if self.selected_folder.as_deref() == Some(f.as_str()) {
                 OPEN_FOLDER_16_ICON

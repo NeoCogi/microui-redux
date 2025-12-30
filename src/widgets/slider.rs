@@ -174,13 +174,7 @@ impl Slider {
     }
 }
 
-fn number_textbox_handle(
-    ctx: &mut WidgetCtx<'_>,
-    control: &ControlState,
-    edit: &mut NumberEditState,
-    precision: usize,
-    value: &mut Real,
-) -> ResourceState {
+fn number_textbox_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, edit: &mut NumberEditState, precision: usize, value: &mut Real) -> ResourceState {
     let shift_click = {
         let input = ctx.input_or_default();
         input.mouse_pressed.is_left() && input.key_mods.is_shift() && control.hovered
@@ -306,10 +300,7 @@ mod tests {
 
     fn make_test_atlas() -> AtlasHandle {
         let pixels: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
-        let icons: Vec<(&str, Recti)> = ICON_NAMES
-            .iter()
-            .map(|name| (*name, Recti::new(0, 0, 1, 1)))
-            .collect();
+        let icons: Vec<(&str, Recti)> = ICON_NAMES.iter().map(|name| (*name, Recti::new(0, 0, 1, 1))).collect();
         let entries = vec![
             (
                 '_',

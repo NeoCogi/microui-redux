@@ -6,15 +6,7 @@ compile_error!("Enable only one of `example-glow` or `example-vulkan` for demo-f
 #[cfg(not(any(feature = "example-glow", feature = "example-vulkan")))]
 compile_error!("Enable one of `example-glow` or `example-vulkan` to build demo-full.");
 
-use common::{
-    application::Application,
-    application::BackendInitContext,
-    atlas_assets,
-    camera::Camera,
-    obj_loader::Obj,
-    polymesh::PolyMesh,
-    view3d::View3D,
-};
+use common::{application::Application, application::BackendInitContext, atlas_assets, camera::Camera, obj_loader::Obj, polymesh::PolyMesh, view3d::View3D};
 #[cfg(feature = "example-glow")]
 use common::glow_renderer::{CustomRenderArea, GLRenderer as BackendRenderer, MeshBuffers, MeshSubmission, MeshVertex};
 #[cfg(feature = "example-vulkan")]
@@ -173,12 +165,9 @@ impl<'a> State<'a> {
             Button::with_image("Slot 3", Some(Image::Slot(slots[2])), WidgetOption::NONE, WidgetFillOption::ALL),
             Button::with_slot("Slot 2 - Random", slots[1], random_paint, WidgetOption::NONE, WidgetFillOption::ALL),
         ];
-        let external_image_button = image_texture.map(|texture| {
-            Button::with_image("External Image", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL)
-        });
-        let style_color_sliders = std::array::from_fn(|_| {
-            Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)
-        });
+        let external_image_button =
+            image_texture.map(|texture| Button::with_image("External Image", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL));
+        let style_color_sliders = std::array::from_fn(|_| Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER));
         let style_value_sliders = [
             Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
             Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
@@ -186,12 +175,9 @@ impl<'a> State<'a> {
             Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
             Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
         ];
-        let bg_sliders = std::array::from_fn(|_| {
-            Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)
-        });
-        let mut text_area = TextArea::new(
-            "This is a multi-line TextArea.\nYou can type, scroll, and resize the window.\n\nTry adding more lines to see the scrollbars.",
-        );
+        let bg_sliders = std::array::from_fn(|_| Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER));
+        let mut text_area =
+            TextArea::new("This is a multi-line TextArea.\nYou can type, scroll, and resize the window.\n\nTry adding more lines to see the scrollbars.");
         text_area.wrap = TextWrap::Word;
 
         Self {
@@ -258,12 +244,7 @@ impl<'a> State<'a> {
             submit_buf: Textbox::new(""),
             text_area,
             combo_state: None,
-            combo_items: [
-                ListItem::new("Apple"),
-                ListItem::new("Banana"),
-                ListItem::new("Cherry"),
-                ListItem::new("Date"),
-            ],
+            combo_items: [ListItem::new("Apple"), ListItem::new("Banana"), ListItem::new("Cherry"), ListItem::new("Date")],
             style: Style::default(),
             demo_window: None,
             style_window: None,
@@ -359,99 +340,109 @@ impl<'a> State<'a> {
     }
 
     fn style_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        ctx.window(&mut self.style_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
-            let sw = (container.body().width as f64 * 0.14) as i32;
-            let color_row = [
-                SizePolicy::Fixed(80),
-                SizePolicy::Fixed(sw),
-                SizePolicy::Fixed(sw),
-                SizePolicy::Fixed(sw),
-                SizePolicy::Fixed(sw),
-                SizePolicy::Remainder(0),
-            ];
-            container.with_row(&color_row, SizePolicy::Auto, |container| {
-                let mut i = 0;
-                while self.label_colors[i].label.len() > 0 {
-                    container.label(self.label_colors[i].label);
-                    unsafe {
-                        let color = self.style.colors.as_mut_ptr().offset(i as isize);
-                        let slider_base = i * 4;
-                        Self::u8_slider(&mut (*color).r, &mut self.style_color_sliders[slider_base], container);
-                        Self::u8_slider(&mut (*color).g, &mut self.style_color_sliders[slider_base + 1], container);
-                        Self::u8_slider(&mut (*color).b, &mut self.style_color_sliders[slider_base + 2], container);
-                        Self::u8_slider(&mut (*color).a, &mut self.style_color_sliders[slider_base + 3], container);
+        ctx.window(
+            &mut self.style_window.as_mut().unwrap().clone(),
+            ContainerOption::NONE,
+            WidgetBehaviourOption::NONE,
+            |container| {
+                let sw = (container.body().width as f64 * 0.14) as i32;
+                let color_row = [
+                    SizePolicy::Fixed(80),
+                    SizePolicy::Fixed(sw),
+                    SizePolicy::Fixed(sw),
+                    SizePolicy::Fixed(sw),
+                    SizePolicy::Fixed(sw),
+                    SizePolicy::Remainder(0),
+                ];
+                container.with_row(&color_row, SizePolicy::Auto, |container| {
+                    let mut i = 0;
+                    while self.label_colors[i].label.len() > 0 {
+                        container.label(self.label_colors[i].label);
+                        unsafe {
+                            let color = self.style.colors.as_mut_ptr().offset(i as isize);
+                            let slider_base = i * 4;
+                            Self::u8_slider(&mut (*color).r, &mut self.style_color_sliders[slider_base], container);
+                            Self::u8_slider(&mut (*color).g, &mut self.style_color_sliders[slider_base + 1], container);
+                            Self::u8_slider(&mut (*color).b, &mut self.style_color_sliders[slider_base + 2], container);
+                            Self::u8_slider(&mut (*color).a, &mut self.style_color_sliders[slider_base + 3], container);
+                        }
+                        let next_layout = container.next_cell();
+                        let color = self.style.colors[i];
+                        container.draw_rect(next_layout, color);
+                        i += 1;
                     }
-                    let next_layout = container.next_cell();
-                    let color = self.style.colors[i];
-                    container.draw_rect(next_layout, color);
-                    i += 1;
-                }
-            });
-            let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Fixed(sw)];
-            container.with_row(&metrics_row, SizePolicy::Auto, |container| {
-                container.label("padding");
-                Self::i32_slider(&mut self.style.padding, &mut self.style_value_sliders[0], container);
+                });
+                let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Fixed(sw)];
+                container.with_row(&metrics_row, SizePolicy::Auto, |container| {
+                    container.label("padding");
+                    Self::i32_slider(&mut self.style.padding, &mut self.style_value_sliders[0], container);
 
-                container.label("spacing");
-                Self::i32_slider(&mut self.style.spacing, &mut self.style_value_sliders[1], container);
+                    container.label("spacing");
+                    Self::i32_slider(&mut self.style.spacing, &mut self.style_value_sliders[1], container);
 
-                container.label("title height");
-                Self::i32_slider(&mut self.style.title_height, &mut self.style_value_sliders[2], container);
+                    container.label("title height");
+                    Self::i32_slider(&mut self.style.title_height, &mut self.style_value_sliders[2], container);
 
-                container.label("thumb size");
-                Self::i32_slider(&mut self.style.thumb_size, &mut self.style_value_sliders[3], container);
+                    container.label("thumb size");
+                    Self::i32_slider(&mut self.style.thumb_size, &mut self.style_value_sliders[3], container);
 
-                container.label("scroll size");
-                Self::i32_slider(&mut self.style.scrollbar_size, &mut self.style_value_sliders[4], container);
-            });
-            WindowState::Open
-        });
+                    container.label("scroll size");
+                    Self::i32_slider(&mut self.style.scrollbar_size, &mut self.style_value_sliders[4], container);
+                });
+                WindowState::Open
+            },
+        );
         ctx.set_style(&self.style);
     }
 
     fn log_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        ctx.window(&mut self.log_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
-            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(24), |container| {
+        ctx.window(
+            &mut self.log_window.as_mut().unwrap().clone(),
+            ContainerOption::NONE,
+            WidgetBehaviourOption::NONE,
+            |container| {
+                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(24), |container| {
                     container.panel(
                         self.log_output.as_mut().unwrap(),
                         ContainerOption::NONE,
                         WidgetBehaviourOption::NONE,
                         |container_handle| {
-                        container_handle.with_mut(|container| {
-                            let mut scroll = container.scroll();
-                            let content_size = container.content_size();
-                            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
-                                container.text(self.logbuf.as_str());
+                            container_handle.with_mut(|container| {
+                                let mut scroll = container.scroll();
+                                let content_size = container.content_size();
+                                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                                    container.text(self.logbuf.as_str());
 
-                                if self.logbuf_updated {
-                                    scroll.y = content_size.y;
-                                    container.set_scroll(scroll);
-                                    self.logbuf_updated = false;
-                                }
+                                    if self.logbuf_updated {
+                                        scroll.y = content_size.y;
+                                        container.set_scroll(scroll);
+                                        self.logbuf_updated = false;
+                                    }
+                                });
                             });
-                        });
                         },
                     );
                 });
-            let mut submitted = false;
-            let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
-            container.with_row(&submit_row, SizePolicy::Auto, |container| {
-                if container.textbox(&mut self.submit_buf).is_submitted() {
-                    container.set_focus(Some(self.submit_buf.get_id()));
-                    submitted = true;
+                let mut submitted = false;
+                let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
+                container.with_row(&submit_row, SizePolicy::Auto, |container| {
+                    if container.textbox(&mut self.submit_buf).is_submitted() {
+                        container.set_focus(Some(self.submit_buf.get_id()));
+                        submitted = true;
+                    }
+                    if container.button(&mut self.submit_button).is_submitted() {
+                        submitted = true;
+                    }
+                });
+                if submitted {
+                    let mut buf = String::new();
+                    buf.push_str(self.submit_buf.buf.as_str());
+                    self.write_log(buf.as_str());
+                    self.submit_buf.buf.clear();
                 }
-                if container.button(&mut self.submit_button).is_submitted() {
-                    submitted = true;
-                }
-            });
-            if submitted {
-                let mut buf = String::new();
-                buf.push_str(self.submit_buf.buf.as_str());
-                self.write_log(buf.as_str());
-                self.submit_buf.buf.clear();
-            }
-            WindowState::Open
-        });
+                WindowState::Open
+            },
+        );
     }
 
     fn triangle_window(&mut self, ctx: &mut Context<BackendRenderer>) {
@@ -462,25 +453,30 @@ impl<'a> State<'a> {
         let tri_state = self.triangle_data.clone();
         let white_uv = self.white_uv;
         let triangle_widget = &mut self.triangle_widget;
-        ctx.window(&mut self.triangle_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
-            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
-                container.custom_render_widget(triangle_widget, move |_dim, cra| {
-                    if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
-                        return;
-                    }
-                    let area = area_from_args(&cra);
-                    if let Ok(mut tri) = tri_state.write() {
-                        tri.angle = (tri.angle + 0.02) % (std::f32::consts::PI * 2.0);
-                        let mut verts = build_triangle_vertices(area.rect, white_uv, tri.angle);
-                        renderer.scope_mut(move |vk| {
-                            let verts_local = std::mem::take(&mut verts);
-                            vk.enqueue_colored_vertices(area, verts_local);
-                        });
-                    }
+        ctx.window(
+            &mut self.triangle_window.as_mut().unwrap().clone(),
+            ContainerOption::NONE,
+            WidgetBehaviourOption::NONE,
+            |container| {
+                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                    container.custom_render_widget(triangle_widget, move |_dim, cra| {
+                        if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
+                            return;
+                        }
+                        let area = area_from_args(&cra);
+                        if let Ok(mut tri) = tri_state.write() {
+                            tri.angle = (tri.angle + 0.02) % (std::f32::consts::PI * 2.0);
+                            let mut verts = build_triangle_vertices(area.rect, white_uv, tri.angle);
+                            renderer.scope_mut(move |vk| {
+                                let verts_local = std::mem::take(&mut verts);
+                                vk.enqueue_colored_vertices(area, verts_local);
+                            });
+                        }
+                    });
                 });
-            });
-            WindowState::Open
-        });
+                WindowState::Open
+            },
+        );
     }
 
     fn suzane_window(&mut self, ctx: &mut Context<BackendRenderer>) {
@@ -490,68 +486,73 @@ impl<'a> State<'a> {
         let mut renderer = self.renderer.clone();
         let suzane_state = self.suzane_data.clone();
         let suzane_widget = &mut self.suzane_widget;
-        ctx.window(&mut self.suzane_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
-            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
-                container.custom_render_widget(suzane_widget, move |_dim, cra| {
-                    if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
-                        return;
-                    }
-                    if let Ok(mut suzane) = suzane_state.write() {
-                        suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
-                        let _ = suzane.view_3d.update(cra.mouse_event);
-                        if let Some(delta) = cra.scroll_delta {
-                            let axis = if delta.y != 0 { delta.y } else { delta.x };
-                            if axis != 0 {
-                                suzane.view_3d.apply_scroll(axis as f32);
-                            }
+        ctx.window(
+            &mut self.suzane_window.as_mut().unwrap().clone(),
+            ContainerOption::NONE,
+            WidgetBehaviourOption::NONE,
+            |container| {
+                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                    container.custom_render_widget(suzane_widget, move |_dim, cra| {
+                        if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
+                            return;
                         }
-                        if !matches!(cra.mouse_event, MouseEvent::Drag { .. }) && cra.scroll_delta.is_none() {
-                            let step = 20;
-                            let mut delta = Vec2i::new(0, 0);
-                            if cra.key_codes.is_left() {
-                                delta.x -= step;
-                            }
-                            if cra.key_codes.is_right() {
-                                delta.x += step;
-                            }
-                            if cra.key_codes.is_up() {
-                                delta.y -= step;
-                            }
-                            if cra.key_codes.is_down() {
-                                delta.y += step;
-                            }
-                            if delta.x != 0 || delta.y != 0 {
-                                let center = Vec2i::new(cra.content_area.width / 2, cra.content_area.height / 2);
-                                let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
-                                suzane.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
-                            }
-                            for ch in cra.text_input.chars() {
-                                match ch {
-                                    'w' | 'W' => {
-                                        suzane.view_3d.apply_scroll(-0.5);
-                                    }
-                                    's' | 'S' => {
-                                        suzane.view_3d.apply_scroll(0.5);
-                                    }
-                                    _ => {}
+                        if let Ok(mut suzane) = suzane_state.write() {
+                            suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
+                            let _ = suzane.view_3d.update(cra.mouse_event);
+                            if let Some(delta) = cra.scroll_delta {
+                                let axis = if delta.y != 0 { delta.y } else { delta.x };
+                                if axis != 0 {
+                                    suzane.view_3d.apply_scroll(axis as f32);
                                 }
                             }
-                        }
+                            if !matches!(cra.mouse_event, MouseEvent::Drag { .. }) && cra.scroll_delta.is_none() {
+                                let step = 20;
+                                let mut delta = Vec2i::new(0, 0);
+                                if cra.key_codes.is_left() {
+                                    delta.x -= step;
+                                }
+                                if cra.key_codes.is_right() {
+                                    delta.x += step;
+                                }
+                                if cra.key_codes.is_up() {
+                                    delta.y -= step;
+                                }
+                                if cra.key_codes.is_down() {
+                                    delta.y += step;
+                                }
+                                if delta.x != 0 || delta.y != 0 {
+                                    let center = Vec2i::new(cra.content_area.width / 2, cra.content_area.height / 2);
+                                    let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
+                                    suzane.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
+                                }
+                                for ch in cra.text_input.chars() {
+                                    match ch {
+                                        'w' | 'W' => {
+                                            suzane.view_3d.apply_scroll(-0.5);
+                                        }
+                                        's' | 'S' => {
+                                            suzane.view_3d.apply_scroll(0.5);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
 
-                        let area = area_from_args(&cra);
-                        let submission = MeshSubmission {
-                            mesh: suzane.mesh.clone(),
-                            pvm: suzane.view_3d.pvm(),
-                            view_model: suzane.view_3d.view_matrix(),
-                        };
-                        renderer.scope_mut(|r| {
-                            r.enqueue_mesh_draw(area, submission.clone());
-                        });
-                    }
+                            let area = area_from_args(&cra);
+                            let submission = MeshSubmission {
+                                mesh: suzane.mesh.clone(),
+                                pvm: suzane.view_3d.pvm(),
+                                view_model: suzane.view_3d.view_matrix(),
+                            };
+                            renderer.scope_mut(|r| {
+                                r.enqueue_mesh_draw(area, submission.clone());
+                            });
+                        }
+                    });
                 });
-            });
-            WindowState::Open
-        });
+                WindowState::Open
+            },
+        );
     }
 
     fn test_window(&mut self, ctx: &mut Context<BackendRenderer>) {
@@ -797,11 +798,7 @@ impl<'a> State<'a> {
                         }
                     }
                 });
-                if combo_changed {
-                    WindowState::Closed
-                } else {
-                    WindowState::Open
-                }
+                if combo_changed { WindowState::Closed } else { WindowState::Open }
             });
 
             if !popup.is_open() {

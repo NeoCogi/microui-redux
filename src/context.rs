@@ -59,9 +59,8 @@ use std::io::Cursor;
 use png::{ColorType, Decoder};
 
 use crate::{
-    rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, ImageSource, Input, Recti, Renderer,
-    KeyCode, KeyMode, MouseButton, RendererHandle, Style, TextureId, UNCLIPPED_RECT, Vec2i, WidgetBehaviourOption,
-    WindowHandle, WindowState,
+    rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, ImageSource, Input, Recti, Renderer, KeyCode, KeyMode, MouseButton,
+    RendererHandle, Style, TextureId, UNCLIPPED_RECT, Vec2i, WidgetBehaviourOption, WindowHandle, WindowState,
 };
 
 /// Primary entry point used to drive the UI over a renderer implementation.
@@ -274,13 +273,7 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Opens a window, executes the provided UI builder, and closes the window.
-    pub fn window<F: FnOnce(&mut Container) -> WindowState>(
-        &mut self,
-        window: &mut WindowHandle,
-        opt: ContainerOption,
-        bopt: WidgetBehaviourOption,
-        f: F,
-    ) {
+    pub fn window<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, f: F) {
         // call the window function if the window is open
         if self.begin_window(window, opt, bopt) {
             window.inner_mut().main.style = self.style.clone();
@@ -301,13 +294,7 @@ impl<R: Renderer> Context<R> {
     pub fn open_dialog(&mut self, window: &mut WindowHandle) { window.inner_mut().win_state = WindowState::Open; }
 
     /// Renders a dialog window if it is currently open.
-    pub fn dialog<F: FnOnce(&mut Container) -> WindowState>(
-        &mut self,
-        window: &mut WindowHandle,
-        opt: ContainerOption,
-        bopt: WidgetBehaviourOption,
-        f: F,
-    ) {
+    pub fn dialog<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, f: F) {
         if window.is_open() {
             self.next_hover_root = Some(window.clone());
             self.hover_root = self.next_hover_root.clone();
@@ -369,12 +356,7 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Opens a popup window with default options.
-    pub fn popup<F: FnOnce(&mut Container) -> WindowState>(
-        &mut self,
-        window: &mut WindowHandle,
-        bopt: WidgetBehaviourOption,
-        f: F,
-    ) {
+    pub fn popup<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, bopt: WidgetBehaviourOption, f: F) {
         let opt = ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE;
         self.window(window, opt, bopt, f);
     }
