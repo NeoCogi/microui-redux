@@ -166,7 +166,7 @@ impl FileDialogState {
                 let half_width = cont.body().width / 2;
                 cont.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |cont| {
                     cont.label(current_working_directory.as_str());
-                    cont.textbox_ex(tmp_file_name);
+                    cont.textbox(tmp_file_name);
                 });
                 let left_column = if half_width > 0 {
                     SizePolicy::Remainder(half_width - 1)
