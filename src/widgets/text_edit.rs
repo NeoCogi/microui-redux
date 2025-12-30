@@ -150,7 +150,7 @@ pub(crate) fn apply_text_input(
         changed = true;
     }
 
-    let delete_pressed = input.key_pressed.is_delete() || input.key_code_pressed.is_delete() || input.key_codes.is_delete();
+    let delete_pressed = input.key_pressed.is_delete() || input.key_code_pressed.is_delete();
     if delete_pressed && delete_next(buf, cursor_pos) {
         changed = true;
     }
