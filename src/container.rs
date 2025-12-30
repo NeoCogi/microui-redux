@@ -987,35 +987,25 @@ impl Container {
         self.command_list.push(Command::CustomRender(cra, Box::new(f)));
     }
 
-    /// Draws a textbox in the provided rectangle using the supplied state.
-    pub fn textbox_raw(&mut self, state: &mut Textbox, r: Recti) -> ResourceState {
-        let input = self.snapshot_input();
-        let opt = state.opt | WidgetOption::HOLD_FOCUS;
-        self.handle_widget_in_rect(state, r, Some(input), opt, state.bopt)
-    }
-
     /// Draws a textbox using the next available layout cell.
-    pub fn textbox_ex(&mut self, state: &mut Textbox) -> ResourceState {
+    pub fn textbox(&mut self, state: &mut Textbox) -> ResourceState {
         let r: Recti = self.layout.next();
-        self.textbox_raw(state, r)
-    }
-
-    /// Draws a multi-line text area in the provided rectangle using the supplied state.
-    pub fn textarea_raw(&mut self, state: &mut TextArea, r: Recti) -> ResourceState {
         let input = self.snapshot_input();
         let opt = state.opt | WidgetOption::HOLD_FOCUS;
         self.handle_widget_in_rect(state, r, Some(input), opt, state.bopt)
     }
 
     /// Draws a multi-line text area using the next available layout cell.
-    pub fn textarea_ex(&mut self, state: &mut TextArea) -> ResourceState {
+    pub fn textarea(&mut self, state: &mut TextArea) -> ResourceState {
         let r: Recti = self.layout.next();
-        self.textarea_raw(state, r)
+        let input = self.snapshot_input();
+        let opt = state.opt | WidgetOption::HOLD_FOCUS;
+        self.handle_widget_in_rect(state, r, Some(input), opt, state.bopt)
     }
 
     #[inline(never)]
     /// Draws a horizontal slider bound to `state`.
-    pub fn slider_ex(&mut self, state: &mut Slider) -> ResourceState {
+    pub fn slider(&mut self, state: &mut Slider) -> ResourceState {
         let rect = self.layout.next();
         let mut opt = state.opt;
         if state.edit.editing {
@@ -1027,7 +1017,7 @@ impl Container {
 
     #[inline(never)]
     /// Draws a numeric input that can be edited via keyboard or by dragging.
-    pub fn number_ex(&mut self, state: &mut Number) -> ResourceState {
+    pub fn number(&mut self, state: &mut Number) -> ResourceState {
         let rect = self.layout.next();
         let mut opt = state.opt;
         if state.edit.editing {

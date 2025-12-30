@@ -337,7 +337,7 @@ impl<'a> State<'a> {
 
     fn u8_slider(value: &mut u8, slider: &mut Slider, ctx: &mut Container) -> ResourceState {
         slider.value = *value as Real;
-        let res = ctx.slider_ex(slider);
+        let res = ctx.slider(slider);
         *value = slider.value as u8;
         slider.value = *value as Real;
         res
@@ -345,7 +345,7 @@ impl<'a> State<'a> {
 
     fn i32_slider(value: &mut i32, slider: &mut Slider, ctx: &mut Container) -> ResourceState {
         slider.value = *value as Real;
-        let res = ctx.slider_ex(slider);
+        let res = ctx.slider(slider);
         *value = slider.value as i32;
         slider.value = *value as Real;
         res
@@ -353,7 +353,7 @@ impl<'a> State<'a> {
 
     fn real_slider(value: &mut Real, slider: &mut Slider, ctx: &mut Container) -> ResourceState {
         slider.value = *value;
-        let res = ctx.slider_ex(slider);
+        let res = ctx.slider(slider);
         *value = slider.value;
         res
     }
@@ -436,7 +436,7 @@ impl<'a> State<'a> {
             let mut submitted = false;
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             container.with_row(&submit_row, SizePolicy::Auto, |container| {
-                if container.textbox_ex(&mut self.submit_buf).is_submitted() {
+                if container.textbox(&mut self.submit_buf).is_submitted() {
                     container.set_focus(Some(self.submit_buf.get_id()));
                     submitted = true;
                 }
@@ -724,7 +724,7 @@ impl<'a> State<'a> {
                 let text_area = &mut self.text_area;
                 container.header(text_area_header, |container| {
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(120), |container| {
-                        container.textarea_ex(text_area);
+                        container.textarea(text_area);
                     });
                 });
             }
