@@ -121,6 +121,10 @@ impl TextArea {
         self.id = Some(id);
         self
     }
+
+    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        textarea_handle(ctx, control, self)
+    }
 }
 
 fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea) -> ResourceState {
@@ -376,11 +380,4 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     res
 }
 
-impl Widget for TextArea {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        textarea_handle(ctx, control, self)
-    }
-}
+implement_widget!(TextArea, handle_widget);

@@ -88,6 +88,10 @@ impl Textbox {
         self.id = Some(id);
         self
     }
+
+    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        textbox_handle(ctx, control, &mut self.buf, &mut self.cursor, self.opt)
+    }
 }
 
 pub(crate) fn textbox_handle(
@@ -204,11 +208,4 @@ pub(crate) fn textbox_handle(
     res
 }
 
-impl Widget for Textbox {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        textbox_handle(ctx, control, &mut self.buf, &mut self.cursor, self.opt)
-    }
-}
+implement_widget!(Textbox, handle_widget);

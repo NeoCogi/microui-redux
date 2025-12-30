@@ -167,13 +167,8 @@ impl Button {
         self.id = Some(id);
         self
     }
-}
 
-impl Widget for Button {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         if control.clicked {
             res |= ResourceState::SUBMIT;
@@ -215,6 +210,8 @@ impl Widget for Button {
     }
 }
 
+implement_widget!(Button, handle_widget);
+
 #[derive(Clone)]
 /// Persistent state for list items.
 pub struct ListItem {
@@ -255,13 +252,8 @@ impl ListItem {
         self.id = Some(id);
         self
     }
-}
 
-impl Widget for ListItem {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let bounds = ctx.rect();
         if control.clicked {
@@ -300,6 +292,8 @@ impl Widget for ListItem {
     }
 }
 
+implement_widget!(ListItem, handle_widget);
+
 #[derive(Clone)]
 /// Persistent state for list boxes.
 pub struct ListBox {
@@ -330,13 +324,8 @@ impl ListBox {
         self.id = Some(id);
         self
     }
-}
 
-impl Widget for ListBox {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let rect = ctx.rect();
         if control.clicked {
@@ -357,6 +346,8 @@ impl Widget for ListBox {
         res
     }
 }
+
+implement_widget!(ListBox, handle_widget);
 
 #[derive(Clone)]
 /// Persistent state for checkbox widgets.
@@ -388,13 +379,8 @@ impl Checkbox {
         self.id = Some(id);
         self
     }
-}
 
-impl Widget for Checkbox {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let bounds = ctx.rect();
         let box_rect = rect(bounds.x, bounds.y, bounds.height, bounds.height);
@@ -414,6 +400,8 @@ impl Widget for Checkbox {
         res
     }
 }
+
+implement_widget!(Checkbox, handle_widget);
 
 #[derive(Clone)]
 /// Persistent state for custom render widgets.
@@ -448,14 +436,11 @@ impl Custom {
         self.id = Some(id);
         self
     }
+
+    fn handle_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
-impl Widget for Custom {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
-}
+implement_widget!(Custom, handle_widget);
 
 #[derive(Clone)]
 /// Persistent state for internal window/container controls.
@@ -485,14 +470,11 @@ impl Internal {
         self.id = Some(id);
         self
     }
+
+    fn handle_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
-impl Widget for Internal {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
-}
+implement_widget!(Internal, handle_widget);
 
 /// Persistent state used by `combo_box` to track popup and selection.
 #[derive(Clone)]
@@ -569,13 +551,8 @@ impl Combo {
             self.label.push_str(label.as_ref());
         }
     }
-}
 
-impl Widget for Combo {
-    fn widget_opt(&self) -> &WidgetOption { &self.opt }
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-    fn get_id(&self) -> Id { self.id.unwrap_or_else(|| Id::from_ptr(self)) }
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         if self.clamped {
             res |= ResourceState::CHANGE;
@@ -609,3 +586,5 @@ impl Widget for Combo {
         res
     }
 }
+
+implement_widget!(Combo, handle_widget);
