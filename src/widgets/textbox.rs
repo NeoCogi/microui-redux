@@ -104,19 +104,34 @@ pub(crate) fn textbox_handle(
     }
     let mut cursor_pos = (*cursor).min(buf.len());
 
-    let input = ctx.input_or_default();
-    let mouse_pressed = input.mouse_pressed;
-    let mouse_pos = input.mouse_pos;
+    let (mouse_pressed, mouse_pos, end_pressed, edit) = {
+        let input = ctx.input_or_default();
+        let edit = if control.focused {
+            apply_text_input(buf, cursor_pos, input, false, ReturnBehavior::Submit)
+        } else {
+            super::text_edit::TextEditOutcome {
+                cursor: cursor_pos,
+                changed: false,
+                moved: false,
+                submit: false,
+            }
+        };
+        (input.mouse_pressed, input.mouse_pos, input.key_code_pressed.is_end(), edit)
+    };
     if control.focused {
-        let edit = apply_text_input(buf, cursor_pos, input, false, ReturnBehavior::Submit);
         cursor_pos = edit.cursor;
         if edit.changed {
             res |= ResourceState::CHANGE;
         }
         if edit.submit {
-            ctx.clear_focus();
             res |= ResourceState::SUBMIT;
         }
+        if end_pressed {
+            cursor_pos = buf.len();
+        }
+    }
+    if edit.submit {
+        ctx.clear_focus();
     }
 
     ctx.draw_widget_frame(control, r, ControlColor::Base, opt);
