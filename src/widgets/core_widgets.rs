@@ -108,7 +108,6 @@ pub struct Button {
     pub bopt: WidgetBehaviourOption,
     /// Fill behavior for the button background.
     pub fill: WidgetFillOption,
-    id: Option<Id>,
 }
 
 impl Button {
@@ -119,7 +118,6 @@ impl Button {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             fill: WidgetFillOption::ALL,
-            id: None,
         }
     }
 
@@ -130,7 +128,6 @@ impl Button {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             fill: WidgetFillOption::ALL,
-            id: None,
         }
     }
 
@@ -141,7 +138,6 @@ impl Button {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             fill,
-            id: None,
         }
     }
 
@@ -152,14 +148,7 @@ impl Button {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             fill,
-            id: None,
         }
-    }
-
-    /// Returns a copy of the button with an explicit ID.
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -217,7 +206,6 @@ pub struct ListItem {
     pub opt: WidgetOption,
     /// Behaviour options applied to the list item.
     pub bopt: WidgetBehaviourOption,
-    id: Option<Id>,
 }
 
 impl ListItem {
@@ -228,7 +216,6 @@ impl ListItem {
             icon: None,
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
-            id: None,
         }
     }
 
@@ -239,7 +226,6 @@ impl ListItem {
             icon: None,
             opt,
             bopt: WidgetBehaviourOption::NONE,
-            id: None,
         }
     }
 
@@ -250,7 +236,6 @@ impl ListItem {
             icon: Some(icon),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
-            id: None,
         }
     }
 
@@ -261,14 +246,7 @@ impl ListItem {
             icon: Some(icon),
             opt,
             bopt: WidgetBehaviourOption::NONE,
-            id: None,
         }
-    }
-
-    /// Returns a copy of the list item with an explicit ID.
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -323,7 +301,6 @@ pub struct ListBox {
     pub opt: WidgetOption,
     /// Behaviour options applied to the list box.
     pub bopt: WidgetBehaviourOption,
-    id: Option<Id>,
 }
 
 impl ListBox {
@@ -334,7 +311,6 @@ impl ListBox {
             image,
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
-            id: None,
         }
     }
 
@@ -345,14 +321,7 @@ impl ListBox {
             image,
             opt,
             bopt: WidgetBehaviourOption::NONE,
-            id: None,
         }
-    }
-
-    /// Returns a copy of the list box with an explicit ID.
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -390,7 +359,6 @@ pub struct Checkbox {
     pub opt: WidgetOption,
     /// Behaviour options applied to the checkbox.
     pub bopt: WidgetBehaviourOption,
-    id: Option<Id>,
 }
 
 impl Checkbox {
@@ -401,7 +369,6 @@ impl Checkbox {
             value,
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
-            id: None,
         }
     }
 
@@ -412,14 +379,7 @@ impl Checkbox {
             value,
             opt,
             bopt: WidgetBehaviourOption::NONE,
-            id: None,
         }
-    }
-
-    /// Returns a copy of the checkbox with an explicit ID.
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -454,7 +414,6 @@ pub struct Custom {
     pub opt: WidgetOption,
     /// Behaviour options applied to the custom widget.
     pub bopt: WidgetBehaviourOption,
-    id: Option<Id>,
 }
 
 impl Custom {
@@ -464,18 +423,11 @@ impl Custom {
             name: name.into(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
-            id: None,
         }
     }
 
     /// Creates a custom widget state with explicit options.
-    pub fn with_opt(name: impl Into<String>, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self { Self { name: name.into(), opt, bopt, id: None } }
-
-    /// Returns a copy of the custom widget with an explicit ID.
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
-    }
+    pub fn with_opt(name: impl Into<String>, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self { Self { name: name.into(), opt, bopt } }
 
     fn handle_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
@@ -491,7 +443,6 @@ pub struct Internal {
     pub opt: WidgetOption,
     /// Behaviour options applied to the internal control.
     pub bopt: WidgetBehaviourOption,
-    id: Option<Id>,
 }
 
 impl Internal {
@@ -501,14 +452,7 @@ impl Internal {
             tag,
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
-            id: None,
         }
-    }
-
-    /// Returns a copy of the internal control with an explicit ID.
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
     }
 
     fn handle_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
@@ -531,7 +475,6 @@ pub struct Combo {
     pub bopt: WidgetBehaviourOption,
     label: String,
     clamped: bool,
-    id: Option<Id>,
 }
 
 impl Combo {
@@ -545,7 +488,6 @@ impl Combo {
             bopt: WidgetBehaviourOption::NONE,
             label: String::new(),
             clamped: false,
-            id: None,
         }
     }
 
@@ -559,14 +501,7 @@ impl Combo {
             bopt,
             label: String::new(),
             clamped: false,
-            id: None,
         }
-    }
-
-    /// Returns a copy of the combo with an explicit ID.
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
     }
 
     /// Updates the cached label and clamps the selected index to the provided items.

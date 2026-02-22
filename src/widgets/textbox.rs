@@ -65,7 +65,6 @@ pub struct Textbox {
     pub opt: WidgetOption,
     /// Behaviour options applied to the textbox.
     pub bopt: WidgetBehaviourOption,
-    id: Option<Id>,
 }
 
 impl Textbox {
@@ -78,7 +77,6 @@ impl Textbox {
             cursor,
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
-            id: None,
         }
     }
 
@@ -91,14 +89,7 @@ impl Textbox {
             cursor,
             opt,
             bopt: WidgetBehaviourOption::NONE,
-            id: None,
         }
-    }
-
-    /// Returns a copy of the textbox with an explicit ID.
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {

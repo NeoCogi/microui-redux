@@ -74,7 +74,6 @@ pub struct TextArea {
     preferred_x: Option<i32>,
     dragging_y: bool,
     dragging_x: bool,
-    id: Option<Id>,
 }
 
 impl TextArea {
@@ -92,7 +91,6 @@ impl TextArea {
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
-            id: None,
         }
     }
 
@@ -110,14 +108,7 @@ impl TextArea {
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
-            id: None,
         }
-    }
-
-    /// Returns a copy of the text area with an explicit ID.
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState { textarea_handle(ctx, control, self) }

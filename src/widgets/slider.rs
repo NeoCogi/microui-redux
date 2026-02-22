@@ -74,7 +74,6 @@ pub struct Slider {
     pub bopt: WidgetBehaviourOption,
     /// Text editing state for shift-click numeric entry.
     pub edit: NumberEditState,
-    id: Option<Id>,
 }
 
 impl Slider {
@@ -89,7 +88,6 @@ impl Slider {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
             edit: NumberEditState::default(),
-            id: None,
         }
     }
 
@@ -104,14 +102,7 @@ impl Slider {
             opt,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
             edit: NumberEditState::default(),
-            id: None,
         }
-    }
-
-    /// Returns a copy of the slider with an explicit ID.
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -219,7 +210,6 @@ pub struct Number {
     pub bopt: WidgetBehaviourOption,
     /// Text editing state for shift-click numeric entry.
     pub edit: NumberEditState,
-    id: Option<Id>,
 }
 
 #[derive(Clone, Default)]
@@ -243,7 +233,6 @@ impl Number {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             edit: NumberEditState::default(),
-            id: None,
         }
     }
 
@@ -256,14 +245,7 @@ impl Number {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             edit: NumberEditState::default(),
-            id: None,
         }
-    }
-
-    /// Returns a copy of the number input with an explicit ID.
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
