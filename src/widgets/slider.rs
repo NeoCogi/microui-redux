@@ -340,7 +340,7 @@ mod tests {
         let mut updated_focus = false;
 
         let mut slider = Slider::new(5.0, 5.0, 5.0);
-        let id = slider.get_id();
+        let slider_id = widget_id_of(&slider);
         let rect = rect(0, 0, 100, 20);
         let text_input = String::new();
         let input = Rc::new(InputSnapshot {
@@ -352,7 +352,7 @@ mod tests {
             ..Default::default()
         });
         let mut ctx = WidgetCtx::new(
-            id,
+            slider_id,
             rect,
             &mut commands,
             &mut clip_stack,

@@ -171,11 +171,11 @@ impl Window {
 
             // TODO: Is this necessary?
             if !opt.has_no_title() {
-                let id = title_state.get_id();
+                let title_id = widget_id_of(title_state);
                 let control_state = (title_state.opt, title_state.bopt);
-                let control = container.update_control(id, tr, &control_state);
+                let control = container.update_control(title_id, tr, &control_state);
                 {
-                    let mut ctx = container.widget_ctx(id, tr, None);
+                    let mut ctx = container.widget_ctx(title_id, tr, None);
                     let _ = title_state.handle(&mut ctx, &control);
                 }
                 let name = container.name.clone(); // Necessary due to borrow checker limitations
@@ -188,15 +188,15 @@ impl Window {
                 body.height -= tr.height;
             }
             if !opt.has_no_close() {
-                let id = close_state.get_id();
+                let close_id = widget_id_of(close_state);
                 let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
                 tr.width -= r.width;
                 let color = title_text_color;
                 container.draw_icon(CLOSE_ICON, r, color);
                 let control_state = (close_state.opt, close_state.bopt);
-                let control = container.update_control(id, r, &control_state);
+                let control = container.update_control(close_id, r, &control_state);
                 {
-                    let mut ctx = container.widget_ctx(id, r, None);
+                    let mut ctx = container.widget_ctx(close_id, r, None);
                     let _ = close_state.handle(&mut ctx, &control);
                 }
                 if control.clicked {
@@ -207,12 +207,12 @@ impl Window {
         container.push_container_body(body, opt, bopt);
         if !opt.is_auto_sizing() {
             let sz = container.style.as_ref().title_height;
-            let id_2 = resize_state.get_id();
+            let resize_id = widget_id_of(resize_state);
             let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
             let control_state = (resize_state.opt, resize_state.bopt);
-            let control = container.update_control(id_2, r_0, &control_state);
+            let control = container.update_control(resize_id, r_0, &control_state);
             {
-                let mut ctx = container.widget_ctx(id_2, r_0, None);
+                let mut ctx = container.widget_ctx(resize_id, r_0, None);
                 let _ = resize_state.handle(&mut ctx, &control);
             }
             if control.active {
