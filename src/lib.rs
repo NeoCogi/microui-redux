@@ -443,8 +443,6 @@ impl Default for InputSnapshot {
 /// Trait implemented by persistent widget state structures.
 /// `handle` is invoked with a `WidgetCtx` and precomputed `ControlState`.
 /// The default ID is derived from the state address, so the state must live at a stable address.
-/// If the state can move (for example, stored in a `Vec` that can grow/shrink), give it a
-/// stable ID (for example `Button::new("Ok").with_id(Id::from_str("dialog/ok"))`).
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;

@@ -22,7 +22,7 @@ Running with only `--features example-backend` will fail intentionally at compil
 - **Context**: owns the renderer handle, user input, and root windows. The atlas is provided by the renderer and accessed through the context. Each frame starts by feeding input into the context, then calling `context.window(...)` for every visible window or popup.
 - **Container**: describes one layout surface. Every window, panel, popup or custom widget receives a mutable `Container` that exposes high-level widgets (buttons, sliders, etc.) and lower-level drawing helpers.
 - **Layout manager**: controls how cells are sized. `Container::with_row` lets you scope a set of widgets to a row of `SizePolicy`s, while nested columns can be created with `container.column(|ui| { ... })`.
-- **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). These structs hold interaction state and supply stable IDs derived from their address; use `with_id` when the state can move.
+- **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). These structs hold interaction state and use pointer-derived IDs from their current address.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
 
 ```rust
@@ -37,12 +37,7 @@ ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE,
 ```
 
 ### Widget IDs
-Widget IDs default to the address of the widget state. This is stable as long as the state stays at a fixed address, but it can change if the state lives inside a `Vec` that grows/shrinks (reallocation moves items). In those cases, set explicit IDs on the widget state:
-
-```rust
-let mut row_button = Button::new("Row").with_id(Id::from_str("settings/row/0"));
-ui.button(&mut row_button);
-```
+Widget IDs default to the address of the widget state. This is stable as long as the state stays at a fixed address, but it can change if the state lives inside a `Vec` that grows/shrinks (reallocation moves items). If that happens, focus/hover continuity follows the new addresses.
 
 Window, dialog, and popup builders now accept a `WidgetBehaviourOption` to control scroll behavior. Use `WidgetBehaviourOption::NO_SCROLL`
 for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widgets that want to consume scroll, and

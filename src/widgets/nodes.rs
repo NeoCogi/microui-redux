@@ -97,7 +97,6 @@ pub struct Node {
     /// Behaviour options applied to the node.
     pub bopt: WidgetBehaviourOption,
     kind: NodeKind,
-    id: Option<Id>,
 }
 
 impl Node {
@@ -112,7 +111,6 @@ impl Node {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Header,
-            id: None,
         }
     }
 
@@ -124,7 +122,6 @@ impl Node {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Tree,
-            id: None,
         }
     }
 
@@ -139,7 +136,6 @@ impl Node {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Header,
-            id: None,
         }
     }
 
@@ -151,7 +147,6 @@ impl Node {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Tree,
-            id: None,
         }
     }
 
@@ -166,12 +161,6 @@ impl Node {
 
     /// Returns `true` when this node is configured as a header node.
     pub fn is_header(&self) -> bool { matches!(self.kind, NodeKind::Header) }
-
-    /// Returns a copy of the node with an explicit ID.
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = Some(id);
-        self
-    }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
