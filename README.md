@@ -1,7 +1,7 @@
 # Rxi's Microui Port to Idiomatic Rust
 [![Crate](https://img.shields.io/crates/v/microui-redux.svg)](https://crates.io/crates/microui-redux)
 
-This project started as a C2Rust conversion of Rxi's MicroUI and has since grown into a Rust-first UI toolkit. It preserves the immediate-mode feel while using stateful widget structs with stable IDs, a row/column layout helper API, and backend-agnostic rendering hooks.
+This project started as a C2Rust conversion of Rxi's MicroUI and has since grown into a Rust-first UI toolkit. It preserves the immediate-mode feel while using stateful widget structs with pointer-derived widget identity, a row/column layout helper API, and backend-agnostic rendering hooks.
 
 Compared to [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces std types, closure-based window/panel/column scopes, and richer widgets such as custom rendering callbacks, dialogs, and a file dialog.
 
@@ -38,6 +38,12 @@ ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE,
 
 ### Widget IDs
 Widget IDs default to the address of the widget state. This is stable as long as the state stays at a fixed address, but it can change if the state lives inside a `Vec` that grows/shrinks (reallocation moves items). If that happens, focus/hover continuity follows the new addresses.
+
+When setting focus manually, pass a widget pointer ID from `widget_id_of`:
+
+```rust
+ui.set_focus(Some(widget_id_of(&my_textbox)));
+```
 
 Window, dialog, and popup builders now accept a `WidgetBehaviourOption` to control scroll behavior. Use `WidgetBehaviourOption::NO_SCROLL`
 for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widgets that want to consume scroll, and

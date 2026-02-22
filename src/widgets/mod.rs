@@ -55,7 +55,6 @@ macro_rules! implement_widget {
         impl Widget for $ty {
             fn widget_opt(&self) -> &WidgetOption { &self.opt }
             fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
-            fn get_id(&self) -> Id { Id::from_ptr(self) }
             fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState { self.$handle(ctx, control) }
         }
     };
@@ -76,16 +75,17 @@ pub use textbox::*;
 
 use crate::draw_context::DrawCtx;
 use crate::{
-    AtlasHandle, Clip, Color, Color4b, Command, ControlColor, ControlState, FontId, IconId, Id, Image, InputSnapshot, Recti, SlotId, Style, Vec2i, WidgetOption,
+    AtlasHandle, Clip, Color, Color4b, Command, ControlColor, ControlState, FontId, IconId, Image, InputSnapshot, Recti, SlotId, Style, Vec2i, WidgetId,
+    WidgetOption,
 };
 use std::rc::Rc;
 
 /// Shared context passed to widget handlers.
 pub struct WidgetCtx<'a> {
-    id: Id,
+    id: WidgetId,
     rect: Recti,
     draw: DrawCtx<'a>,
-    focus: &'a mut Option<Id>,
+    focus: &'a mut Option<WidgetId>,
     updated_focus: &'a mut bool,
     in_hover_root: bool,
     input: Option<Rc<InputSnapshot>>,
@@ -95,13 +95,13 @@ pub struct WidgetCtx<'a> {
 impl<'a> WidgetCtx<'a> {
     /// Creates a widget context for the given widget ID and rectangle.
     pub(crate) fn new(
-        id: Id,
+        id: WidgetId,
         rect: Recti,
         commands: &'a mut Vec<Command>,
         clip_stack: &'a mut Vec<Recti>,
         style: &'a Style,
         atlas: &'a AtlasHandle,
-        focus: &'a mut Option<Id>,
+        focus: &'a mut Option<WidgetId>,
         updated_focus: &'a mut bool,
         in_hover_root: bool,
         input: Option<Rc<InputSnapshot>>,
@@ -118,8 +118,8 @@ impl<'a> WidgetCtx<'a> {
         }
     }
 
-    /// Returns the widget identifier.
-    pub fn id(&self) -> Id { self.id }
+    /// Returns the widget identity pointer.
+    pub fn id(&self) -> WidgetId { self.id }
 
     /// Returns the widget rectangle.
     pub fn rect(&self) -> Recti { self.rect }

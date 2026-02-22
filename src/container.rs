@@ -190,9 +190,9 @@ pub struct Container {
     pub(crate) clip_stack: Vec<Recti>,
     pub(crate) layout: LayoutManager,
     /// ID of the widget currently hovered, if any.
-    pub(crate) hover: Option<Id>,
+    pub(crate) hover: Option<WidgetId>,
     /// ID of the widget currently focused, if any.
-    pub(crate) focus: Option<Id>,
+    pub(crate) focus: Option<WidgetId>,
     /// Tracks whether focus changed this frame.
     pub(crate) updated_focus: bool,
     /// Internal state for the vertical scrollbar.
@@ -336,8 +336,8 @@ impl Container {
     }
 
     /// Manually updates which widget owns focus.
-    pub fn set_focus(&mut self, id: Option<Id>) {
-        self.focus = id;
+    pub fn set_focus(&mut self, widget_id: Option<WidgetId>) {
+        self.focus = widget_id;
         self.updated_focus = true;
     }
 
@@ -427,22 +427,22 @@ impl Container {
     }
 
     /// Draws a widget background, applying hover/focus accents when needed.
-    pub fn draw_widget_frame(&mut self, id: Id, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let focused = self.focus == Some(id);
-        let hovered = self.hover == Some(id);
+    pub fn draw_widget_frame(&mut self, widget_id: WidgetId, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        let focused = self.focus == Some(widget_id);
+        let hovered = self.hover == Some(widget_id);
         let mut draw = self.draw_ctx();
         draw.draw_widget_frame(focused, hovered, rect, colorid, opt);
     }
 
     /// Draws a container frame, skipping rendering when the option disables it.
-    pub fn draw_container_frame(&mut self, id: Id, rect: Recti, mut colorid: ControlColor, opt: ContainerOption) {
+    pub fn draw_container_frame(&mut self, widget_id: WidgetId, rect: Recti, mut colorid: ControlColor, opt: ContainerOption) {
         if opt.has_no_frame() {
             return;
         }
 
-        if self.focus == Some(id) {
+        if self.focus == Some(widget_id) {
             colorid.focus()
-        } else if self.hover == Some(id) {
+        } else if self.hover == Some(widget_id) {
             colorid.hover()
         }
         let mut draw = self.draw_ctx();
@@ -462,10 +462,10 @@ impl Container {
         rect.contains(&self.input.borrow().mouse_pos) && clip_rect.contains(&self.input.borrow().mouse_pos) && in_hover_root
     }
 
-    fn update_control_with_opts(&mut self, id: Id, rect: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ControlState {
+    fn update_control_with_opts(&mut self, widget_id: WidgetId, rect: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ControlState {
         let in_hover_root = self.in_hover_root;
         let mouseover = self.mouse_over(rect, in_hover_root);
-        if self.focus == Some(id) {
+        if self.focus == Some(widget_id) {
             // is this the same ID of the focused widget? by default set it to true unless otherwise
             self.updated_focus = true;
         }
@@ -473,9 +473,9 @@ impl Container {
             return ControlState::default();
         }
         if mouseover && self.input.borrow().mouse_down.is_none() {
-            self.hover = Some(id);
+            self.hover = Some(widget_id);
         }
-        if self.focus == Some(id) {
+        if self.focus == Some(widget_id) {
             if !self.input.borrow().mouse_pressed.is_none() && !mouseover {
                 self.set_focus(None);
             }
@@ -483,16 +483,16 @@ impl Container {
                 self.set_focus(None);
             }
         }
-        if self.hover == Some(id) {
+        if self.hover == Some(widget_id) {
             if !self.input.borrow().mouse_pressed.is_none() {
-                self.set_focus(Some(id));
+                self.set_focus(Some(widget_id));
             } else if !mouseover {
                 self.hover = None;
             }
         }
 
         let mut scroll = None;
-        if bopt.is_grab_scroll() && self.hover == Some(id) {
+        if bopt.is_grab_scroll() && self.hover == Some(widget_id) {
             if let Some(delta) = self.pending_scroll {
                 if delta.x != 0 || delta.y != 0 {
                     self.pending_scroll = None;
@@ -501,15 +501,15 @@ impl Container {
             }
         }
 
-        if self.focus == Some(id) {
+        if self.focus == Some(widget_id) {
             let mouse_pos = self.input.borrow().mouse_pos;
             let origin = vec2(self.body.x, self.body.y);
             self.input.borrow_mut().rel_mouse_pos = mouse_pos - origin;
         }
 
         let input = self.input.borrow();
-        let focused = self.focus == Some(id);
-        let hovered = self.hover == Some(id);
+        let focused = self.focus == Some(widget_id);
+        let hovered = self.hover == Some(widget_id);
         let clicked = focused && input.mouse_pressed.is_left();
         let active = focused && input.mouse_down.is_left();
         drop(input);
@@ -524,9 +524,9 @@ impl Container {
     }
 
     #[inline(never)]
-    /// Updates hover/focus state for the widget described by `id` and optionally consumes scroll.
-    pub fn update_control<W: Widget>(&mut self, id: Id, rect: Recti, state: &W) -> ControlState {
-        self.update_control_with_opts(id, rect, *state.widget_opt(), *state.behaviour_opt())
+    /// Updates hover/focus state for the widget described by `widget_id` and optionally consumes scroll.
+    pub fn update_control<W: Widget>(&mut self, widget_id: WidgetId, rect: Recti, state: &W) -> ControlState {
+        self.update_control_with_opts(widget_id, rect, *state.widget_opt(), *state.behaviour_opt())
     }
 
     fn snapshot_input(&mut self) -> Rc<InputSnapshot> {
@@ -550,9 +550,9 @@ impl Container {
         snapshot
     }
 
-    pub(crate) fn widget_ctx(&mut self, id: Id, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'_> {
+    pub(crate) fn widget_ctx(&mut self, widget_id: WidgetId, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'_> {
         WidgetCtx::new(
-            id,
+            widget_id,
             rect,
             &mut self.command_list,
             &mut self.clip_stack,
@@ -573,9 +573,9 @@ impl Container {
         opt: WidgetOption,
         bopt: WidgetBehaviourOption,
     ) -> (ControlState, ResourceState) {
-        let id = state.get_id();
-        let control = self.update_control_with_opts(id, rect, opt, bopt);
-        let mut ctx = self.widget_ctx(id, rect, input);
+        let widget_id = widget_id_of(state);
+        let control = self.update_control_with_opts(widget_id, rect, opt, bopt);
+        let mut ctx = self.widget_ctx(widget_id, rect, input);
         let res = state.handle(&mut ctx, &control);
         (control, res)
     }
@@ -729,12 +729,12 @@ impl Container {
         let body = *body;
         let maxscroll = scrollbar_max_scroll(cs.y, body.height);
         if maxscroll > 0 && body.height > 0 {
-            let id: Id = self.scrollbar_y_state.get_id();
+            let scrollbar_y_id = widget_id_of(&self.scrollbar_y_state);
             let base = scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size);
-            let control = self.update_control_with_opts(id, base, self.scrollbar_y_state.opt, self.scrollbar_y_state.bopt);
+            let control = self.update_control_with_opts(scrollbar_y_id, base, self.scrollbar_y_state.opt, self.scrollbar_y_state.bopt);
             {
                 let mut ctx = WidgetCtx::new(
-                    id,
+                    scrollbar_y_id,
                     base,
                     &mut self.command_list,
                     &mut self.clip_stack,
@@ -760,12 +760,12 @@ impl Container {
         }
         let maxscroll_0 = scrollbar_max_scroll(cs.x, body.width);
         if maxscroll_0 > 0 && body.width > 0 {
-            let id_0: Id = self.scrollbar_x_state.get_id();
+            let scrollbar_x_id = widget_id_of(&self.scrollbar_x_state);
             let base_0 = scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size);
-            let control = self.update_control_with_opts(id_0, base_0, self.scrollbar_x_state.opt, self.scrollbar_x_state.bopt);
+            let control = self.update_control_with_opts(scrollbar_x_id, base_0, self.scrollbar_x_state.opt, self.scrollbar_x_state.bopt);
             {
                 let mut ctx = WidgetCtx::new(
-                    id_0,
+                    scrollbar_x_id,
                     base_0,
                     &mut self.command_list,
                     &mut self.clip_stack,
@@ -1155,16 +1155,16 @@ mod tests {
         let mut container = make_container();
         let input = container.input.clone();
         let mut state = Textbox::new("a\u{1F600}b");
-        let id = state.get_id();
-        container.set_focus(Some(id));
+        let textbox_id = widget_id_of(&state);
+        container.set_focus(Some(textbox_id));
         state.cursor = 5;
 
         input.borrow_mut().keydown_code(KeyCode::LEFT);
         let rect = container.layout.next();
         let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.bopt);
-        let control = container.update_control(id, rect, &control_state);
+        let control = container.update_control(textbox_id, rect, &control_state);
         let input = container.snapshot_input();
-        let mut ctx = container.widget_ctx(id, rect, Some(input));
+        let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
         state.handle(&mut ctx, &control);
 
         let cursor = state.cursor;
@@ -1176,16 +1176,16 @@ mod tests {
         let mut container = make_container();
         let input = container.input.clone();
         let mut state = Textbox::new("a\u{1F600}b");
-        let id = state.get_id();
-        container.set_focus(Some(id));
+        let textbox_id = widget_id_of(&state);
+        container.set_focus(Some(textbox_id));
         state.cursor = 5;
 
         input.borrow_mut().keydown(KeyMode::BACKSPACE);
         let rect = container.layout.next();
         let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.bopt);
-        let control = container.update_control(id, rect, &control_state);
+        let control = container.update_control(textbox_id, rect, &control_state);
         let input = container.snapshot_input();
-        let mut ctx = container.widget_ctx(id, rect, Some(input));
+        let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
         state.handle(&mut ctx, &control);
 
         let cursor = state.cursor;
