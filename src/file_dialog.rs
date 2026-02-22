@@ -35,6 +35,7 @@ use crate::*;
 pub struct FileDialogState {
     current_working_directory: String,
     file_name: Option<String>,
+    file_path: Option<String>,
     tmp_file_name: Textbox,
     selected_folder: Option<String>,
     win: WindowHandle,
@@ -49,11 +50,23 @@ pub struct FileDialogState {
 }
 
 impl FileDialogState {
-    /// Returns the selected file name if the dialog completed successfully.
+    /// Returns the selected file name (basename only) if the dialog completed successfully.
     pub fn file_name(&self) -> &Option<String> { &self.file_name }
+
+    /// Returns the selected file path (absolute when possible) if the dialog completed successfully.
+    pub fn file_path(&self) -> &Option<String> { &self.file_path }
 
     /// Returns `true` if the dialog window is currently open.
     pub fn is_open(&self) -> bool { self.win.is_open() }
+
+    fn resolve_selected_path(cwd: &str, file_name: &str) -> String {
+        let path = Path::new(file_name);
+        if path.is_absolute() {
+            path.to_string_lossy().to_string()
+        } else {
+            Path::new(cwd).join(path).to_string_lossy().to_string()
+        }
+    }
 
     fn list_folders_files(p: &Path, folders: &mut Vec<String>, files: &mut Vec<String>) {
         folders.clear();
@@ -119,6 +132,7 @@ impl FileDialogState {
         let mut dialog = Self {
             current_working_directory,
             file_name: None,
+            file_path: None,
             tmp_file_name: Textbox::new(""),
             selected_folder: None,
             win: ctx.new_dialog("File Dialog", Recti::new(50, 50, 500, 500)),
@@ -155,6 +169,7 @@ impl FileDialogState {
             let ok_button = &mut self.ok_button;
             let cancel_button = &mut self.cancel_button;
             let file_name = &mut self.file_name;
+            let file_path = &mut self.file_path;
 
             ctx.dialog(win, ContainerOption::NONE, WidgetBehaviourOption::NONE, |cont| {
                 let mut dialog_state = WindowState::Open;
@@ -220,13 +235,22 @@ impl FileDialogState {
                     if cont.button(ok_button).is_submitted() {
                         if tmp_file_name.buf.is_empty() {
                             *file_name = None;
+                            *file_path = None;
                         } else {
-                            *file_name = Some(tmp_file_name.buf.clone());
+                            let selected_path = Self::resolve_selected_path(current_working_directory.as_str(), tmp_file_name.buf.as_str());
+                            let selected_name = Path::new(selected_path.as_str())
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .map(|name| name.to_string())
+                                .unwrap_or_else(|| tmp_file_name.buf.clone());
+                            *file_name = Some(selected_name);
+                            *file_path = Some(selected_path);
                         }
                         dialog_state = WindowState::Closed;
                     }
                     if cont.button(cancel_button).is_submitted() {
                         *file_name = None;
+                        *file_path = None;
                         dialog_state = WindowState::Closed;
                     }
                 });

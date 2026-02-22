@@ -60,6 +60,7 @@ pub struct Canvas<R: Renderer> {
     clip: Recti,
     next_texture_id: u32,
     textures: HashMap<TextureId, TextureInfo>,
+    rect_batch: Vec<(Recti, Recti, Color)>,
 }
 
 #[derive(Clone, Copy)]
@@ -77,6 +78,7 @@ impl<R: Renderer> Canvas<R> {
             clip: Recti::new(0, 0, dim.width, dim.height),
             next_texture_id: 1,
             textures: HashMap::new(),
+            rect_batch: Vec::new(),
         }
     }
 
@@ -123,12 +125,21 @@ impl<R: Renderer> Canvas<R> {
     #[inline(never)]
     /// Pushes a textured quad referencing the atlas to the renderer.
     pub fn push_rect(&mut self, dst: Recti, src: Recti, color: Color) {
-        let atlas_dim = self.renderer.scope(|r| r.get_atlas()).get_texture_dimension();
+        let rects = [(dst, src, color)];
+        self.push_rects(&rects);
+    }
 
+    #[inline(never)]
+    /// Pushes multiple textured quads referencing the atlas in one renderer lock scope.
+    pub fn push_rects(&mut self, rects: &[(Recti, Recti, Color)]) {
+        if rects.is_empty() {
+            return;
+        }
+        let atlas_dim = self.renderer.scope(|r| r.get_atlas()).get_texture_dimension();
         let clip = self.clip;
         self.renderer.scope_mut(move |r| {
-            match Self::clip_rect(dst, src, clip) {
-                Some((dst, src)) => {
+            for (dst, src, color) in rects {
+                if let Some((dst, src)) = Self::clip_rect(*dst, *src, clip) {
                     let x = src.x as f32 / atlas_dim.width as f32;
                     let y = src.y as f32 / atlas_dim.height as f32;
                     let w = src.width as f32 / atlas_dim.width as f32;
@@ -167,7 +178,6 @@ impl<R: Renderer> Canvas<R> {
 
                     r.push_quad_vertices(&v0, &v1, &v2, &v3);
                 }
-                None => (),
             }
         })
     }
@@ -182,10 +192,17 @@ impl<R: Renderer> Canvas<R> {
     /// Draws UTF-8 text using the supplied font.
     pub fn draw_chars(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
         let atlas = self.renderer.scope(|r| r.get_atlas());
-        atlas.draw_string(font, text, |_, _, dst, src| {
-            let dst = Rect::new(pos.x + dst.x, pos.y + dst.y, dst.width, dst.height);
-            self.push_rect(dst, src, color)
-        });
+        let mut rect_batch = std::mem::take(&mut self.rect_batch);
+        rect_batch.clear();
+        {
+            let rect_batch = &mut rect_batch;
+            atlas.draw_string(font, text, |_, _, dst, src| {
+                let dst = Rect::new(pos.x + dst.x, pos.y + dst.y, dst.width, dst.height);
+                rect_batch.push((dst, src, color));
+            });
+        }
+        self.push_rects(rect_batch.as_slice());
+        self.rect_batch = rect_batch;
     }
 
     /// Draws an icon centered inside the provided rectangle.
