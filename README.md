@@ -13,6 +13,9 @@ $ cargo run --example demo-full --features example-vulkan   # Vulkan backend
 $ cargo run --example demo-full --features example-glow     # Glow backend
 ```
 
+`example-backend` is only a shared gate for example code paths; it is **not** runnable by itself.
+Running with only `--features example-backend` will fail intentionally at compile time.
+
 ![random](https://github.com/NeoCogi/microui-redux/raw/master/res/microui.png)
 
 ## Key Concepts
@@ -68,12 +71,17 @@ ui.button(&mut image_button);
 - `builder` *(default)* – enables the runtime atlas builder and PNG decoding helpers used by the examples.
 - `png_source` – allows serialized atlases and `ImageSource::Png { .. }` uploads to stay compressed.
 - `save-to-rust` – enables `AtlasHandle::to_rust_files` to emit the current atlas as Rust code for embedding.
+- `example-backend` – shared internal gate used by examples; pair it with exactly one concrete backend.
+- `example-glow` / `example-vulkan` – concrete example backends; choose exactly one when running examples.
 
 Disabling default features leaves only the raw RGBA upload path (`ImageSource::Raw { .. }`):
 `cargo build --no-default-features`
 
 The demos require `builder`, so run them with `--no-default-features` plus `builder`:
 `cargo run --example demo-full --no-default-features --features "example-vulkan builder"`
+
+Equivalent command using the shared gate explicitly:
+`cargo run --example demo-full --no-default-features --features "example-backend example-vulkan builder"`
 
 To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for PNG bytes) and call `AtlasHandle::to_rust_files`, or use the helper binary:
 `cargo run --bin atlas_export --features "builder save-to-rust" -- --output path/to/atlas.rs`

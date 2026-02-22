@@ -566,9 +566,17 @@ impl AtlasHandle {
     }
 
     /// Reconstructs an atlas from a serialized [`AtlasSource`].
-    /// If image decoding fails, a blank atlas is returned; use [`AtlasHandle::try_from`]
-    /// to handle errors explicitly.
+    ///
+    /// This method panics when decoding fails. Use [`AtlasHandle::try_from`] to handle
+    /// failures explicitly, or [`AtlasHandle::from_lossy`] to preserve the previous
+    /// "blank atlas on error" fallback behavior.
     pub fn from<'a>(source: &AtlasSource<'a>) -> Self {
+        Self::try_from(source).unwrap_or_else(|err| panic!("Atlas decode failed: {}", err))
+    }
+
+    /// Reconstructs an atlas from a serialized [`AtlasSource`], falling back to a blank atlas
+    /// if decoding fails.
+    pub fn from_lossy<'a>(source: &AtlasSource<'a>) -> Self {
         match Self::try_from(source) {
             Ok(atlas) => atlas,
             Err(err) => {
@@ -672,7 +680,7 @@ impl AtlasHandle {
         font_meta.push_str(format!("format: {},\n", source_format).as_str());
         font_meta.push_str(format!("pixels: {},\n", pixels).as_str());
         font_meta.push_str("};");
-        let mut f = File::create(path).unwrap();
+        let mut f = File::create(path)?;
         write!(f, "{}", font_meta)
     }
 
