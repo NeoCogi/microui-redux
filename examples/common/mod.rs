@@ -52,18 +52,24 @@
 //
 use microui_redux::*;
 
-#[cfg(not(any(feature = "example-glow", feature = "example-vulkan")))]
-compile_error!("Enable either `example-glow` or `example-vulkan` feature to build the examples.");
-#[cfg(all(feature = "example-glow", feature = "example-vulkan"))]
+#[cfg(not(any(feature = "example-glow", feature = "example-vulkan", feature = "example-wgpu")))]
+compile_error!("Enable one of `example-glow`, `example-vulkan`, or `example-wgpu` to build the examples.");
+#[cfg(any(
+    all(feature = "example-glow", feature = "example-vulkan"),
+    all(feature = "example-glow", feature = "example-wgpu"),
+    all(feature = "example-vulkan", feature = "example-wgpu"),
+))]
 compile_error!("Only one example backend feature can be enabled at a time.");
 
-#[cfg(any(feature = "example-glow", feature = "example-vulkan"))]
+#[cfg(any(feature = "example-glow", feature = "example-vulkan", feature = "example-wgpu"))]
 pub mod application;
 pub mod atlas_assets;
 #[cfg(feature = "example-glow")]
 pub mod glow_renderer;
 #[cfg(feature = "example-vulkan")]
 pub mod vulkan_renderer;
+#[cfg(feature = "example-wgpu")]
+pub mod wgpu_renderer;
 
 pub mod camera;
 pub mod obj_loader;

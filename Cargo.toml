@@ -23,6 +23,7 @@ example-backend = []
 # [dev-dependencies], so the features simply toggle cfg-gated code.
 example-glow = ["example-backend"]
 example-vulkan = ["example-backend"]
+example-wgpu = ["example-backend"]
 
 [dependencies]
 fontdue = { version = "0.9.2", optional = true }
@@ -37,6 +38,8 @@ glow = { version = "0.16" }
 ash = { version = "0.38", default-features = false, features = ["linked"] }
 ash-window-handle = { package = "ash-window", version = "0.13" }
 raw-window-handle = { version = "0.6" }
+wgpu = { version = "0.20" }
+pollster = "0.4"
 
 [[bin]]
 name = "atlas_export"

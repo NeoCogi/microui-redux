@@ -11,6 +11,8 @@ Clone and build the demo (enable exactly one backend feature):
 $ cargo run --example demo-full --features example-vulkan   # Vulkan backend
 # or
 $ cargo run --example demo-full --features example-glow     # Glow backend
+# or
+$ cargo run --example demo-full --features example-wgpu     # WGPU backend
 ```
 
 `example-backend` is only a shared gate for example code paths; it is **not** runnable by itself.
@@ -79,7 +81,7 @@ ui.button(&mut image_button);
 - `png_source` – allows serialized atlases and `ImageSource::Png { .. }` uploads to stay compressed.
 - `save-to-rust` – enables `AtlasHandle::to_rust_files` to emit the current atlas as Rust code for embedding.
 - `example-backend` – shared internal gate used by examples; pair it with exactly one concrete backend.
-- `example-glow` / `example-vulkan` – concrete example backends; choose exactly one when running examples.
+- `example-glow` / `example-vulkan` / `example-wgpu` – concrete example backends; choose exactly one when running examples.
 
 Disabling default features leaves only the raw RGBA upload path (`ImageSource::Raw { .. }`):
 `cargo build --no-default-features`

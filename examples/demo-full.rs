@@ -1,16 +1,22 @@
 #[path = "./common/mod.rs"]
 mod common;
 
-#[cfg(all(feature = "example-glow", feature = "example-vulkan"))]
-compile_error!("Enable only one of `example-glow` or `example-vulkan` for demo-full.");
-#[cfg(not(any(feature = "example-glow", feature = "example-vulkan")))]
-compile_error!("Enable one of `example-glow` or `example-vulkan` to build demo-full.");
+#[cfg(any(
+    all(feature = "example-glow", feature = "example-vulkan"),
+    all(feature = "example-glow", feature = "example-wgpu"),
+    all(feature = "example-vulkan", feature = "example-wgpu"),
+))]
+compile_error!("Enable only one of `example-glow`, `example-vulkan`, or `example-wgpu` for demo-full.");
+#[cfg(not(any(feature = "example-glow", feature = "example-vulkan", feature = "example-wgpu")))]
+compile_error!("Enable one of `example-glow`, `example-vulkan`, or `example-wgpu` to build demo-full.");
 
 use common::{application::Application, application::BackendInitContext, atlas_assets, camera::Camera, obj_loader::Obj, polymesh::PolyMesh, view3d::View3D};
 #[cfg(feature = "example-glow")]
 use common::glow_renderer::{CustomRenderArea, GLRenderer as BackendRenderer, MeshBuffers, MeshSubmission, MeshVertex};
 #[cfg(feature = "example-vulkan")]
 use common::vulkan_renderer::{CustomRenderArea, MeshBuffers, MeshSubmission, MeshVertex, VulkanRenderer as BackendRenderer};
+#[cfg(feature = "example-wgpu")]
+use common::wgpu_renderer::{CustomRenderArea, MeshBuffers, MeshSubmission, MeshVertex, WgpuRenderer as BackendRenderer};
 #[cfg(feature = "builder")]
 use microui_redux::builder;
 use microui_redux::*;
