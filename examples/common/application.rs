@@ -61,6 +61,8 @@ use std::sync::Arc;
 use crate::common::glow_renderer;
 #[cfg(feature = "example-vulkan")]
 use crate::common::vulkan_renderer;
+#[cfg(feature = "example-wgpu")]
+use crate::common::wgpu_renderer;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 #[cfg(feature = "example-glow")]
@@ -72,12 +74,14 @@ use sdl2::{Sdl, VideoSubsystem};
 type RendererBackend = glow_renderer::GLRenderer;
 #[cfg(feature = "example-vulkan")]
 type RendererBackend = vulkan_renderer::VulkanRenderer;
+#[cfg(feature = "example-wgpu")]
+type RendererBackend = wgpu_renderer::WgpuRenderer;
 
 type MicroUI = microui::Context<RendererBackend>;
 
 #[cfg(feature = "example-glow")]
 pub type BackendInitContext = Arc<glow::Context>;
-#[cfg(feature = "example-vulkan")]
+#[cfg(any(feature = "example-vulkan", feature = "example-wgpu"))]
 pub struct BackendInitContext;
 
 pub struct Application<S> {
@@ -241,6 +245,16 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
     let window = video.window("Window", 800, 600).resizable().vulkan().build().map_err(|err| err.to_string())?;
     let (width, height) = window.size();
     let renderer = RendererHandle::new(vulkan_renderer::VulkanRenderer::new(&window, atlas, width, height)?);
+    let init_ctx = BackendInitContext;
+
+    Ok((BackendBundle { window, renderer, size: (width, height) }, init_ctx))
+}
+
+#[cfg(feature = "example-wgpu")]
+fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBundle, BackendInitContext), String> {
+    let window = video.window("Window", 800, 600).resizable().build().map_err(|err| err.to_string())?;
+    let (width, height) = window.size();
+    let renderer = RendererHandle::new(wgpu_renderer::WgpuRenderer::new(&window, atlas, width, height)?);
     let init_ctx = BackendInitContext;
 
     Ok((BackendBundle { window, renderer, size: (width, height) }, init_ctx))
