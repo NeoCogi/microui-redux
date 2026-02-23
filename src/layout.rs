@@ -238,12 +238,16 @@ impl LayoutManager {
         policy.resolve(default_height, available_height)
     }
 
-    pub fn next(&mut self) -> Recti {
+    pub fn next(&mut self) -> Recti { self.next_with_preferred(Dimensioni::new(0, 0)) }
+
+    pub fn next_with_preferred(&mut self, preferred: Dimensioni) -> Recti {
         let padding = self.style.padding;
         let spacing = self.style.spacing;
-        let default_width = self.style.default_cell_width + padding * 2;
+        let fallback_width = self.style.default_cell_width + padding * 2;
         let base_height = if self.default_cell_height > 0 { self.default_cell_height } else { 0 };
-        let default_height = if base_height > 0 { base_height } else { padding * 2 };
+        let fallback_height = if base_height > 0 { base_height } else { padding * 2 };
+        let default_width = if preferred.width > 0 { preferred.width } else { fallback_width };
+        let default_height = if preferred.height > 0 { preferred.height } else { fallback_height };
 
         let (row_len, current_index, height_policy) = {
             let layout = self.top();

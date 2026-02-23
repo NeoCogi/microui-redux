@@ -162,6 +162,18 @@ impl Node {
     /// Returns `true` when this node is configured as a header node.
     pub fn is_header(&self) -> bool { matches!(self.kind, NodeKind::Header) }
 
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        let padding = style.padding.max(0);
+        let vertical_pad = (padding / 2).max(1);
+        let font_height = atlas.get_font_height(style.font) as i32;
+        let icon = atlas.get_icon_size(EXPAND_ICON);
+        let text_w = if self.label.is_empty() { 0 } else { atlas.get_text_size(style.font, self.label.as_str()).width };
+        let height = (font_height.max(icon.height) + vertical_pad * 2).max(0);
+        let consumed = (height - padding).max(icon.width);
+        let width = (padding * 2 + consumed + text_w).max(0);
+        Dimensioni::new(width, height)
+    }
+
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let expanded = self.state.is_expanded();
@@ -198,4 +210,4 @@ impl Node {
     }
 }
 
-implement_widget!(Node, handle_widget);
+implement_widget!(Node, handle_widget, preferred_size_widget);

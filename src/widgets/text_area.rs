@@ -111,6 +111,28 @@ impl TextArea {
         }
     }
 
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        let padding = style.padding.max(0);
+        let max_width = if self.wrap == TextWrap::Word && avail.width > 0 {
+            (avail.width - padding * 2).max(1)
+        } else {
+            i32::MAX / 4
+        };
+        let lines = build_text_lines(self.buf.as_str(), self.wrap, max_width, style.font, atlas);
+        let text_w = lines.iter().map(|line| line.width).max().unwrap_or(0);
+        let line_count = (lines.len() as i32).max(1);
+        let line_height = atlas.get_font_height(style.font) as i32;
+        let mut width = text_w.saturating_add(padding * 2).max(0);
+        let mut height = line_height.saturating_mul(line_count).saturating_add(padding * 2).max(0);
+        if avail.width > 0 {
+            width = width.min(avail.width.max(0));
+        }
+        if avail.height > 0 {
+            height = height.min(avail.height.max(0));
+        }
+        Dimensioni::new(width, height)
+    }
+
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState { textarea_handle(ctx, control, self) }
 }
 
@@ -357,4 +379,4 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     res
 }
 
-implement_widget!(TextArea, handle_widget);
+implement_widget!(TextArea, handle_widget, preferred_size_widget);

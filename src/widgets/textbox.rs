@@ -92,6 +92,19 @@ impl Textbox {
         }
     }
 
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        let padding = style.padding.max(0);
+        let vertical_pad = (padding / 2).max(1);
+        let font_height = atlas.get_font_height(style.font) as i32;
+        let text_w = if self.buf.is_empty() { 0 } else { atlas.get_text_size(style.font, self.buf.as_str()).width };
+        let mut width = (text_w + padding * 2 + 1).max(0);
+        if avail.width > 0 {
+            width = width.min(avail.width.max(0));
+        }
+        let height = (font_height + vertical_pad * 2).max(0);
+        Dimensioni::new(width, height)
+    }
+
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         textbox_handle(ctx, control, &mut self.buf, &mut self.cursor, self.opt)
     }
@@ -205,4 +218,4 @@ pub(crate) fn textbox_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, bu
     res
 }
 
-implement_widget!(Textbox, handle_widget);
+implement_widget!(Textbox, handle_widget, preferred_size_widget);

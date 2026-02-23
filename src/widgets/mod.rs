@@ -51,10 +51,11 @@
 // IN THE SOFTWARE.
 //
 macro_rules! implement_widget {
-    ($ty:ty, $handle:ident) => {
+    ($ty:ty, $handle:ident, $preferred:ident) => {
         impl Widget for $ty {
             fn widget_opt(&self) -> &WidgetOption { &self.opt }
             fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.bopt }
+            fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni { self.$preferred(style, atlas, avail) }
             fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState { self.$handle(ctx, control) }
         }
     };

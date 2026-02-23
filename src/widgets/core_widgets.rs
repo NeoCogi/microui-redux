@@ -53,6 +53,14 @@
 use crate::*;
 use std::rc::Rc;
 
+fn text_size(style: &Style, atlas: &AtlasHandle, text: &str) -> Dimensioni { atlas.get_text_size(style.font, text) }
+
+fn content_height(style: &Style, atlas: &AtlasHandle, visual_height: i32) -> i32 {
+    let font_height = atlas.get_font_height(style.font) as i32;
+    let vertical_pad = (style.padding / 2).max(1);
+    (font_height.max(visual_height) + vertical_pad * 2).max(0)
+}
+
 fn widget_fill_color(control: &ControlState, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
     if control.focused && fill.fill_click() {
         let mut color = base;
@@ -151,6 +159,62 @@ impl Button {
         }
     }
 
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        let padding = style.padding.max(0);
+        let mut width = padding * 2;
+        let mut visual_w = 0;
+        let mut visual_h = 0;
+        let mut text_w = 0;
+        let mut has_text = false;
+
+        match &self.content {
+            ButtonContent::Text { label, icon } => {
+                if !label.is_empty() {
+                    has_text = true;
+                    text_w = text_size(style, atlas, label).width;
+                }
+                if let Some(icon) = icon {
+                    let size = atlas.get_icon_size(*icon);
+                    visual_w = size.width;
+                    visual_h = size.height;
+                }
+            }
+            ButtonContent::Image { label, image } => {
+                if !label.is_empty() {
+                    has_text = true;
+                    text_w = text_size(style, atlas, label).width;
+                }
+                if let Some(Image::Slot(slot)) = image {
+                    let size = atlas.get_slot_size(*slot);
+                    visual_w = size.width;
+                    visual_h = size.height;
+                }
+            }
+            ButtonContent::Slot { label, slot, .. } => {
+                if !label.is_empty() {
+                    has_text = true;
+                    text_w = text_size(style, atlas, label).width;
+                }
+                let size = atlas.get_slot_size(*slot);
+                visual_w = size.width;
+                visual_h = size.height;
+            }
+        }
+
+        if has_text {
+            width += text_w.max(0);
+        }
+        if visual_w > 0 {
+            width += visual_w.max(0);
+            if has_text {
+                width += padding;
+            }
+        }
+
+        let height = content_height(style, atlas, visual_h);
+        Dimensioni::new(width.max(0), height)
+    }
+
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         if control.clicked {
@@ -193,7 +257,7 @@ impl Button {
     }
 }
 
-implement_widget!(Button, handle_widget);
+implement_widget!(Button, handle_widget, preferred_size_widget);
 
 #[derive(Clone)]
 /// Persistent state for list items.
@@ -249,6 +313,22 @@ impl ListItem {
         }
     }
 
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        let padding = style.padding.max(0);
+        let mut width = padding * 2;
+        let mut visual_h = 0;
+        if let Some(icon) = self.icon {
+            let size = atlas.get_icon_size(icon);
+            width += size.width + padding;
+            visual_h = size.height;
+        }
+        if !self.label.is_empty() {
+            width += text_size(style, atlas, &self.label).width;
+        }
+        let height = content_height(style, atlas, visual_h);
+        Dimensioni::new(width.max(0), height)
+    }
+
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let bounds = ctx.rect();
@@ -288,7 +368,7 @@ impl ListItem {
     }
 }
 
-implement_widget!(ListItem, handle_widget);
+implement_widget!(ListItem, handle_widget, preferred_size_widget);
 
 #[derive(Clone)]
 /// Persistent state for list boxes.
@@ -324,6 +404,22 @@ impl ListBox {
         }
     }
 
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        let padding = style.padding.max(0);
+        let mut width = padding * 2;
+        let mut visual_h = 0;
+        if !self.label.is_empty() {
+            width += text_size(style, atlas, &self.label).width;
+        }
+        if let Some(Image::Slot(slot)) = self.image {
+            let size = atlas.get_slot_size(slot);
+            width = width.max(size.width + padding * 2);
+            visual_h = size.height;
+        }
+        let height = content_height(style, atlas, visual_h);
+        Dimensioni::new(width.max(0), height)
+    }
+
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let rect = ctx.rect();
@@ -346,7 +442,7 @@ impl ListBox {
     }
 }
 
-implement_widget!(ListBox, handle_widget);
+implement_widget!(ListBox, handle_widget, preferred_size_widget);
 
 #[derive(Clone)]
 /// Persistent state for checkbox widgets.
@@ -382,6 +478,17 @@ impl Checkbox {
         }
     }
 
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        let padding = style.padding.max(0);
+        let check_icon = atlas.get_icon_size(CHECK_ICON);
+        let height = content_height(style, atlas, check_icon.height);
+        let mut width = padding * 2 + height;
+        if !self.label.is_empty() {
+            width += text_size(style, atlas, &self.label).width + padding;
+        }
+        Dimensioni::new(width.max(0), height)
+    }
+
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let bounds = ctx.rect();
@@ -403,7 +510,7 @@ impl Checkbox {
     }
 }
 
-implement_widget!(Checkbox, handle_widget);
+implement_widget!(Checkbox, handle_widget, preferred_size_widget);
 
 #[derive(Clone)]
 /// Persistent state for custom render widgets.
@@ -429,10 +536,18 @@ impl Custom {
     /// Creates a custom widget state with explicit options.
     pub fn with_opt(name: impl Into<String>, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self { Self { name: name.into(), opt, bopt } }
 
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        let padding = style.padding.max(0);
+        let text_w = if self.name.is_empty() { 0 } else { text_size(style, atlas, self.name.as_str()).width };
+        let width = padding * 2 + text_w;
+        let height = content_height(style, atlas, 0);
+        Dimensioni::new(width.max(0), height)
+    }
+
     fn handle_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
-implement_widget!(Custom, handle_widget);
+implement_widget!(Custom, handle_widget, preferred_size_widget);
 
 #[derive(Clone)]
 /// Persistent state for internal window/container controls.
@@ -455,10 +570,18 @@ impl Internal {
         }
     }
 
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        let padding = style.padding.max(0);
+        let text_w = if self.tag.is_empty() { 0 } else { text_size(style, atlas, self.tag).width };
+        let width = padding * 2 + text_w;
+        let height = content_height(style, atlas, 0);
+        Dimensioni::new(width.max(0), height)
+    }
+
     fn handle_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 
-implement_widget!(Internal, handle_widget);
+implement_widget!(Internal, handle_widget, preferred_size_widget);
 
 /// Persistent state used by `combo_box` to track popup and selection.
 #[derive(Clone)]
@@ -502,6 +625,15 @@ impl Combo {
             label: String::new(),
             clamped: false,
         }
+    }
+
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        let padding = style.padding.max(0);
+        let text_w = if self.label.is_empty() { 0 } else { text_size(style, atlas, self.label.as_str()).width };
+        let indicator = atlas.get_icon_size(EXPAND_DOWN_ICON);
+        let width = (padding * 3 + text_w + indicator.width).max(0);
+        let height = content_height(style, atlas, indicator.height);
+        Dimensioni::new(width, height)
     }
 
     /// Updates the cached label and clamps the selected index to the provided items.
@@ -562,4 +694,4 @@ impl Combo {
     }
 }
 
-implement_widget!(Combo, handle_widget);
+implement_widget!(Combo, handle_widget, preferred_size_widget);

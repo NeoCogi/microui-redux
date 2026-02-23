@@ -105,6 +105,19 @@ impl Slider {
         }
     }
 
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        let mut label = String::new();
+        let _ = write!(label, "{:.*}", self.precision, self.value);
+        let text_w = atlas.get_text_size(style.font, label.as_str()).width;
+        let padding = style.padding.max(0);
+        let vertical_pad = (padding / 2).max(1);
+        let font_height = atlas.get_font_height(style.font) as i32;
+        let thumb_size = style.thumb_size.max(0);
+        let width = (text_w + padding * 2 + thumb_size).max(0);
+        let height = (font_height.max(thumb_size) + vertical_pad * 2).max(0);
+        Dimensioni::new(width, height)
+    }
+
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let base = ctx.rect();
@@ -193,7 +206,7 @@ fn number_textbox_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, edit: 
     ResourceState::NONE
 }
 
-implement_widget!(Slider, handle_widget);
+implement_widget!(Slider, handle_widget, preferred_size_widget);
 
 #[derive(Clone)]
 /// Persistent state for number input widgets.
@@ -248,6 +261,18 @@ impl Number {
         }
     }
 
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        let mut label = String::new();
+        let _ = write!(label, "{:.*}", self.precision, self.value);
+        let text_w = atlas.get_text_size(style.font, label.as_str()).width;
+        let padding = style.padding.max(0);
+        let vertical_pad = (padding / 2).max(1);
+        let font_height = atlas.get_font_height(style.font) as i32;
+        let width = (text_w + padding * 2).max(0);
+        let height = (font_height + vertical_pad * 2).max(0);
+        Dimensioni::new(width, height)
+    }
+
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let base = ctx.rect();
@@ -270,7 +295,7 @@ impl Number {
     }
 }
 
-implement_widget!(Number, handle_widget);
+implement_widget!(Number, handle_widget, preferred_size_widget);
 
 #[cfg(test)]
 mod tests {
