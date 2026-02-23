@@ -581,6 +581,7 @@ impl Container {
     }
 
     fn next_widget_rect<W: Widget>(&mut self, state: &W) -> Recti {
+        // Widget helpers measure before placing so Auto rows can follow each widget's intrinsic size.
         let body = self.layout.current_body();
         let avail = Dimensioni::new(body.width.max(0), body.height.max(0));
         let preferred = state.preferred_size(self.style.as_ref(), &self.atlas, avail);
@@ -894,7 +895,10 @@ impl Container {
         self.layout.end_column();
     }
 
-    /// Returns the next layout cell's rectangle.
+    /// Returns the next raw layout cell rectangle.
+    ///
+    /// Unlike widget helper methods (`button`, `textbox`, etc.), this does not consult
+    /// a widget's `preferred_size`; it uses only the current row/column policies.
     pub fn next_cell(&mut self) -> Recti { self.layout.next() }
 
     /// Replaces the container's style.
@@ -904,6 +908,8 @@ impl Container {
     pub fn get_style(&self) -> Style { (*self.style).clone() }
 
     /// Displays static text using the default text color.
+    ///
+    /// This helper consumes a raw layout cell directly and does not use widget preferred sizing.
     pub fn label(&mut self, text: &str) {
         let layout = self.layout.next();
         self.draw_control_text(text, layout, ControlColor::Text, WidgetOption::NONE);
@@ -974,7 +980,7 @@ impl Container {
     }
 
     #[inline(never)]
-    /// Allocates a widget cell and hands rendering control to user code.
+    /// Allocates a widget cell from `Custom` state preferred size and hands rendering control to user code.
     pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, state: &mut Custom, f: F) {
         let rect = self.next_widget_rect(state);
         let opt = *state.widget_opt();

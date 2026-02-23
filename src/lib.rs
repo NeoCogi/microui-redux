@@ -54,6 +54,8 @@
 //! `microui-redux` provides an immediate-mode GUI toolkit inspired by [rxi/microui](https://github.com/rxi/microui).
 //! The crate exposes the core context, container, layout, and renderer hooks necessary to embed a UI inside
 //! custom render backends while remaining allocator- and platform-agnostic.
+//! Built-in widget placement is driven by each widget's `preferred_size`, so auto-sized rows can use
+//! per-widget intrinsic text/icon metrics instead of a single shared control size.
 
 use std::{
     cell::{Ref, RefCell, RefMut},
@@ -447,6 +449,8 @@ pub trait Widget {
     fn behaviour_opt(&self) -> &WidgetBehaviourOption;
     /// Returns the preferred widget size for automatic layout resolution.
     ///
+    /// Called before [`Widget::handle`] each frame so the layout manager can allocate a cell.
+    /// `avail` reports the current container body size visible to the widget.
     /// Values less than or equal to zero are treated as "use layout defaults" for that axis.
     fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     /// Handles widget interaction and rendering for the current frame using the provided context.
@@ -761,7 +765,7 @@ pub trait Font {
 pub struct Style {
     /// Font used for all text rendering.
     pub font: FontId,
-    /// Default width used by layouts when no size policy overrides it.
+    /// Default width used by layouts when no preferred width is supplied.
     pub default_cell_width: i32,
     /// Inner padding applied to most widgets.
     pub padding: i32,
