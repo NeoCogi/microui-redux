@@ -445,6 +445,10 @@ pub trait Widget {
     fn widget_opt(&self) -> &WidgetOption;
     /// Returns the behaviour options for this state.
     fn behaviour_opt(&self) -> &WidgetBehaviourOption;
+    /// Returns the preferred widget size for automatic layout resolution.
+    ///
+    /// Values less than or equal to zero are treated as "use layout defaults" for that axis.
+    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     /// Handles widget interaction and rendering for the current frame using the provided context.
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
 }
@@ -459,6 +463,16 @@ pub fn widget_id_of<W: Widget>(widget: &W) -> WidgetId { widget as *const W as *
 impl Widget for (WidgetOption, WidgetBehaviourOption) {
     fn widget_opt(&self) -> &WidgetOption { &self.0 }
     fn behaviour_opt(&self) -> &WidgetBehaviourOption { &self.1 }
+    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        let padding = style.padding.max(0);
+        let vertical_pad = max(1, padding / 2);
+        let font_height = atlas.get_font_height(style.font) as i32;
+        let icon_height = atlas.get_icon_size(EXPAND_DOWN_ICON).height;
+        let content = max(font_height, icon_height);
+        let height = (content + vertical_pad * 2).max(0);
+        let width = (padding * 2 + content).max(0);
+        Dimensioni::new(width, height)
+    }
     fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
 }
 

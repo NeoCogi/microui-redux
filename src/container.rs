@@ -60,7 +60,7 @@ macro_rules! widget_layout {
     ($(#[$meta:meta])* $name:ident, $state:ty, $builder:expr) => {
         $(#[$meta])*
         pub fn $name(&mut self, state: &mut $state) -> ResourceState {
-            let rect = self.layout.next();
+            let rect = self.next_widget_rect(state);
             ($builder)(self, state, rect)
         }
     };
@@ -580,8 +580,15 @@ impl Container {
         (control, res)
     }
 
+    fn next_widget_rect<W: Widget>(&mut self, state: &W) -> Recti {
+        let body = self.layout.current_body();
+        let avail = Dimensioni::new(body.width.max(0), body.height.max(0));
+        let preferred = state.preferred_size(self.style.as_ref(), &self.atlas, avail);
+        self.layout.next_with_preferred(preferred)
+    }
+
     fn handle_widget<W: Widget>(&mut self, state: &mut W, input: Option<Rc<InputSnapshot>>) -> ResourceState {
-        let rect = self.layout.next();
+        let rect = self.next_widget_rect(state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
         let (_, res) = self.run_widget(state, rect, input, opt, bopt);
@@ -628,7 +635,7 @@ impl Container {
 
     fn node_scope<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, indent: bool, f: F) -> NodeStateValue {
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        let r = self.layout.next();
+        let r = self.next_widget_rect(state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
         let _ = self.handle_widget_in_rect(state, r, None, opt, bopt);
@@ -927,7 +934,7 @@ impl Container {
     /// The caller is responsible for opening the popup and updating `state.selected` from its list.
     pub fn combo_box<S: AsRef<str>>(&mut self, state: &mut Combo, items: &[S]) -> (Recti, bool, ResourceState) {
         state.update_items(items);
-        let header = self.layout.next();
+        let header = self.next_widget_rect(state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
         let res = self.handle_widget_in_rect(state, header, None, opt, bopt);
@@ -969,7 +976,7 @@ impl Container {
     #[inline(never)]
     /// Allocates a widget cell and hands rendering control to user code.
     pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, state: &mut Custom, f: F) {
-        let rect = self.layout.next();
+        let rect = self.next_widget_rect(state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
         let (control, _) = self.run_widget(state, rect, None, opt, bopt);
