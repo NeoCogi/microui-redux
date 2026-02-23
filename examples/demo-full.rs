@@ -815,7 +815,10 @@ impl<'a> State<'a> {
         }
 
         if self.open_popup {
-            ctx.open_popup(self.popup_window.as_mut().unwrap());
+            let popup_width = (self.style.default_cell_width + self.style.padding.max(0) * 2).max(80);
+            let popup = self.popup_window.as_mut().unwrap();
+            ctx.open_popup(popup);
+            popup.set_size(&Dimensioni::new(popup_width, 1));
             self.open_popup = false;
         }
 
@@ -823,12 +826,14 @@ impl<'a> State<'a> {
         {
             let popup_buttons = &mut self.popup_buttons;
             ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), WidgetBehaviourOption::NO_SCROLL, |ctx| {
-                if ctx.button(&mut popup_buttons[0]).is_submitted() {
-                    popup_logs.push("Hello")
-                }
-                if ctx.button(&mut popup_buttons[1]).is_submitted() {
-                    popup_logs.push("World")
-                }
+                ctx.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |ctx| {
+                    if ctx.button(&mut popup_buttons[0]).is_submitted() {
+                        popup_logs.push("Hello")
+                    }
+                    if ctx.button(&mut popup_buttons[1]).is_submitted() {
+                        popup_logs.push("World")
+                    }
+                });
                 WindowState::Open
             });
         }
