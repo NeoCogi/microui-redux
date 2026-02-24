@@ -87,6 +87,21 @@ impl Default for SizePolicy {
     }
 }
 
+/// Direction used by stack flows when emitting vertical cells.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum StackDirection {
+    /// Place cells from the current row start downward.
+    TopToBottom,
+    /// Place cells from the bottom of the current scope upward.
+    BottomToTop,
+}
+
+impl Default for StackDirection {
+    fn default() -> Self {
+        Self::TopToBottom
+    }
+}
+
 #[derive(Clone, Default)]
 struct ScopeState {
     // Scope rectangle expressed in local space (already offset by scroll).
@@ -192,6 +207,10 @@ struct StackFlow {
     width: SizePolicy,
     // Height policy used for every stacked item.
     height: SizePolicy,
+    // Vertical direction for cell emission.
+    direction: StackDirection,
+    // Offset consumed from the stack anchor (used by bottom-up stacks).
+    offset: i32,
 }
 
 impl Default for StackFlow {
@@ -199,33 +218,54 @@ impl Default for StackFlow {
         Self {
             width: SizePolicy::Remainder(0),
             height: SizePolicy::Auto,
+            direction: StackDirection::TopToBottom,
+            offset: 0,
         }
     }
 }
 
 impl StackFlow {
-    fn new(width: SizePolicy, height: SizePolicy) -> Self {
-        Self { width, height }
+    fn new(width: SizePolicy, height: SizePolicy, direction: StackDirection) -> Self {
+        Self { width, height, direction, offset: 0 }
+    }
+
+    fn apply_template(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection) {
+        self.width = width;
+        self.height = height;
+        self.direction = direction;
+        self.offset = 0;
     }
 }
 
 impl LayoutFlow for StackFlow {
     fn next_local(&mut self, scope: &mut ScopeState, ctx: ResolveCtx) -> Recti {
-        // Stack flow always emits one full line at a time from current `next_row`.
         let x = scope.indent;
-        let y = scope.next_row;
-
         let available_width = scope.body.width.saturating_sub(x);
-        let available_height = scope.body.height.saturating_sub(y);
         let width = self.width.resolve(ctx.default_width, available_width);
-        let height = self.height.resolve(ctx.default_height, available_height);
 
-        // Move directly to the next stacked row.
-        let next = y.saturating_add(height).saturating_add(ctx.spacing);
-        scope.next_row = next;
-        scope.cursor = vec2(scope.indent, next);
+        match self.direction {
+            StackDirection::TopToBottom => {
+                // Top-down stacks continue from the scope's row cursor.
+                let y = scope.next_row;
+                let available_height = scope.body.height.saturating_sub(y);
+                let height = self.height.resolve(ctx.default_height, available_height);
 
-        rect(x, y, width, height)
+                // Move directly to the next stacked row.
+                let next = y.saturating_add(height).saturating_add(ctx.spacing);
+                scope.next_row = next;
+                scope.cursor = vec2(scope.indent, next);
+
+                rect(x, y, width, height)
+            }
+            StackDirection::BottomToTop => {
+                // Bottom-up stacks are anchored to the scope bottom and use local offset.
+                let available_height = scope.body.height.saturating_sub(self.offset);
+                let height = self.height.resolve(ctx.default_height, available_height);
+                let y = scope.body.height.saturating_sub(self.offset).saturating_sub(height);
+                self.offset = self.offset.saturating_add(height).saturating_add(ctx.spacing);
+                rect(x, y, width, height)
+            }
+        }
     }
 }
 
@@ -251,7 +291,11 @@ impl FlowState {
                 widths: row.widths.clone(),
                 height: row.height,
             },
-            FlowState::Stack(stack) => FlowTemplate::Stack { width: stack.width, height: stack.height },
+            FlowState::Stack(stack) => FlowTemplate::Stack {
+                width: stack.width,
+                height: stack.height,
+                direction: stack.direction,
+            },
         }
     }
 
@@ -263,9 +307,12 @@ impl FlowState {
                     *self = FlowState::Row(RowFlow::new(widths.as_slice(), height));
                 }
             },
-            FlowTemplate::Stack { width, height } => {
-                *self = FlowState::Stack(StackFlow::new(width, height));
-            }
+            FlowTemplate::Stack { width, height, direction } => match self {
+                FlowState::Stack(stack) => stack.apply_template(width, height, direction),
+                _ => {
+                    *self = FlowState::Stack(StackFlow::new(width, height, direction));
+                }
+            },
         }
     }
 
@@ -406,8 +453,12 @@ impl LayoutEngine {
     }
 
     pub fn stack(&mut self, width: SizePolicy, height: SizePolicy) {
+        self.stack_with_direction(width, height, StackDirection::TopToBottom);
+    }
+
+    pub fn stack_with_direction(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection) {
         let frame = self.top_mut();
-        frame.flow = FlowState::Stack(StackFlow::new(width, height));
+        frame.flow = FlowState::Stack(StackFlow::new(width, height, direction));
         // Applying a new flow resets placement to the current line start.
         frame.scope.reset_cursor_for_next_row();
     }
@@ -461,9 +512,16 @@ impl LayoutEngine {
 #[derive(Clone)]
 enum FlowTemplate {
     // Snapshot for row flow configuration.
-    Row { widths: Vec<SizePolicy>, height: SizePolicy },
+    Row {
+        widths: Vec<SizePolicy>,
+        height: SizePolicy,
+    },
     // Snapshot for stack flow configuration.
-    Stack { width: SizePolicy, height: SizePolicy },
+    Stack {
+        width: SizePolicy,
+        height: SizePolicy,
+        direction: StackDirection,
+    },
 }
 
 pub(crate) struct FlowSnapshot {
@@ -536,5 +594,22 @@ mod tests {
 
         assert_eq!(first.width, body.width);
         assert_eq!(second.y, first.y + first.height + layout.style.spacing);
+    }
+
+    #[test]
+    fn stack_flow_bottom_to_top_anchors_to_scope_bottom() {
+        let mut layout = LayoutManager::default();
+        layout.style = Style::default();
+        let body = rect(0, 0, 120, 60);
+        layout.reset(body, vec2(0, 0));
+        layout.set_default_cell_height(10);
+        layout.stack_with_direction(SizePolicy::Remainder(0), SizePolicy::Fixed(10), StackDirection::BottomToTop);
+
+        let first = layout.next();
+        let second = layout.next();
+
+        assert_eq!(first.width, body.width);
+        assert_eq!(first.y, body.y + body.height - 10);
+        assert_eq!(second.y, first.y - (10 + layout.style.spacing));
     }
 }
