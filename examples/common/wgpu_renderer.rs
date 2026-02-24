@@ -28,7 +28,6 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
-// -----------------------------------------------------------------------------
 
 use std::{collections::HashMap, mem, slice, sync::Arc};
 
@@ -40,6 +39,7 @@ use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
+/// CPU-side vertex used by mesh submissions in the demo path.
 pub struct MeshVertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
@@ -47,6 +47,7 @@ pub struct MeshVertex {
 }
 
 #[derive(Clone)]
+/// Shared mesh storage so callers can cheaply clone submissions across frames.
 pub struct MeshBuffers {
     vertices: Arc<[MeshVertex]>,
     indices: Arc<[u32]>,
@@ -72,6 +73,7 @@ impl MeshBuffers {
 }
 
 #[derive(Clone)]
+/// A single mesh draw request transformed by caller-provided matrices.
 pub struct MeshSubmission {
     pub mesh: MeshBuffers,
     pub pvm: Mat4f,
@@ -79,6 +81,7 @@ pub struct MeshSubmission {
 }
 
 #[derive(Clone, Copy)]
+/// Target rectangle and clip rectangle for custom non-UI draws.
 pub struct CustomRenderArea {
     pub rect: Recti,
     pub clip: Recti,
@@ -113,16 +116,24 @@ struct Uniforms {
 }
 
 enum RenderCommand {
+    // Draw the queued UI vertices up to this index with the atlas texture.
     DrawUiTo(usize),
+    // Draw a textured quad using a user-managed texture id.
     DrawTexture { id: TextureId, vertices: Vec<GpuVertex> },
+    // Draw arbitrary colored triangles (still sampled from white atlas texel).
     DrawColored { area: CustomRenderArea, vertices: Vec<GpuVertex> },
 }
 
 struct GpuTexture {
+    // The texture must be kept alive as long as the bind group references its view.
     _texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
 }
 
+/// WGPU renderer backend for microui.
+///
+/// The renderer batches all per-frame geometry into a single staging vertex buffer and
+/// replays a lightweight command list (`RenderCommand`) to switch texture/scissor state.
 pub struct WgpuRenderer {
     atlas: AtlasHandle,
     atlas_last_update_id: usize,
@@ -155,6 +166,8 @@ pub struct WgpuRenderer {
 
 impl WgpuRenderer {
     fn white_uv_center(&self) -> Vec2f {
+        // Colored primitives sample the center of the white icon in the atlas and rely on
+        // vertex color for final shading.
         let rect = self.atlas.get_icon_rect(WHITE_ICON);
         let dim = self.atlas.get_texture_dimension();
         Vec2f::new(
@@ -164,10 +177,12 @@ impl WgpuRenderer {
     }
 
     fn as_bytes<T>(value: &T) -> &[u8] {
+        // SAFETY: `value` lives for the returned slice lifetime and we preserve size/alignment.
         unsafe { slice::from_raw_parts((value as *const T).cast::<u8>(), mem::size_of::<T>()) }
     }
 
     fn slice_as_bytes<T>(values: &[T]) -> &[u8] {
+        // SAFETY: same rationale as `as_bytes`, but for contiguous slices.
         unsafe { slice::from_raw_parts(values.as_ptr().cast::<u8>(), std::mem::size_of_val(values)) }
     }
 
@@ -185,6 +200,7 @@ impl WgpuRenderer {
             return Err("texture dimensions must be non-zero".into());
         }
 
+        // All UI/user textures share the same simple RGBA8 + nearest sampling setup.
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("microui.texture"),
             size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -197,6 +213,7 @@ impl WgpuRenderer {
         });
 
         if let Some(bytes) = pixels {
+            // Upload initial texel payload when provided; atlas bootstrap uses None then sync.
             queue.write_texture(
                 wgpu::ImageCopyTexture {
                     texture: &texture,
@@ -215,6 +232,7 @@ impl WgpuRenderer {
         }
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // Bind group also carries uniforms/sampler so draw calls only switch one handle.
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("microui.texture.bind_group"),
             layout: bind_group_layout,
@@ -238,6 +256,8 @@ impl WgpuRenderer {
     }
 
     fn flush_ui_batch(&mut self) {
+        // UI quads are appended continuously; this records a boundary in command order so
+        // later custom draws can interleave correctly.
         let end = self.ui_vertices.len();
         if end > self.current_batch_end {
             self.commands.push(RenderCommand::DrawUiTo(end));
@@ -246,12 +266,14 @@ impl WgpuRenderer {
     }
 
     fn sync_atlas(&mut self) {
+        // Atlas updates are tracked by monotonic id; skip GPU upload when unchanged.
         if self.atlas_last_update_id == self.atlas.get_last_update_id() {
             return;
         }
 
         self.atlas.apply_pixels(|width, height, pixels| {
             let pixel_ptr = pixels.as_ptr() as *const u8;
+            // Atlas stores `Color`; reinterpret as packed RGBA bytes for write_texture.
             let pixel_slice: &[u8] = unsafe { slice::from_raw_parts(pixel_ptr, pixels.len() * 4) };
             self.queue.write_texture(
                 wgpu::ImageCopyTexture {
@@ -283,6 +305,7 @@ impl WgpuRenderer {
         }
 
         if self.config.width != width || self.config.height != height {
+            // Surface reconfigure is required on resize before acquiring next frame.
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
@@ -294,6 +317,7 @@ impl WgpuRenderer {
             return;
         }
 
+        // Grow geometrically to avoid reallocating every frame with fluctuating counts.
         let target = byte_count.next_power_of_two().max(64 * 1024);
         self.staging_vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("microui.staging.vertices"),
@@ -305,6 +329,7 @@ impl WgpuRenderer {
     }
 
     fn clip_to_scissor(clip: Recti, surface_width: u32, surface_height: u32) -> Option<(u32, u32, u32, u32)> {
+        // Convert signed UI clip rect into a clamped, positive scissor rectangle.
         if clip.width <= 0 || clip.height <= 0 {
             return None;
         }
@@ -322,6 +347,7 @@ impl WgpuRenderer {
     }
 
     fn append_quad(dst: &mut Vec<GpuVertex>, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) {
+        // Expand quad into two triangles in clockwise draw order.
         dst.extend_from_slice(&[
             GpuVertex::from_vertex(v0),
             GpuVertex::from_vertex(v1),
@@ -333,6 +359,7 @@ impl WgpuRenderer {
     }
 
     fn create_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout, wgpu::Sampler) {
+        // One pipeline is enough for all UI/custom draws: position + uv + color, alpha blend.
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("microui.wgpu.shader"),
             source: wgpu::ShaderSource::Wgsl(UI_SHADER.into()),
@@ -459,6 +486,7 @@ impl WgpuRenderer {
             .map_err(|err| format!("failed to get raw display handle: {err}"))?
             .as_raw();
 
+        // We intentionally build from raw handles because the SDL window owns the native handles.
         let surface = unsafe {
             instance
                 .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle { raw_display_handle, raw_window_handle })
@@ -486,6 +514,7 @@ impl WgpuRenderer {
             .get_default_config(&adapter, width.max(1), height.max(1))
             .ok_or_else(|| "surface is not supported by adapter".to_string())?;
         if config.format.is_srgb() {
+            // Shader already outputs linearized UI colors; keep swapchain format non-sRGB.
             config.format = config.format.remove_srgb_suffix();
         }
         surface.configure(&device, &config);
@@ -549,6 +578,7 @@ impl WgpuRenderer {
             height,
             clear_color: color(0, 0, 0, 255),
         };
+        // Force first atlas upload.
         renderer.sync_atlas();
 
         Ok(renderer)
@@ -598,6 +628,7 @@ impl WgpuRenderer {
             let ab = Vec3f::new(b.x - a.x, b.y - a.y, b.z - a.z);
             let ac = Vec3f::new(c.x - a.x, c.y - a.y, c.z - a.z);
             let cross = Vec3f::cross(&ab, &ac);
+            // Simple back-face culling in clip space to reduce overdraw.
             if cross.z <= 0.0 {
                 continue;
             }
@@ -611,6 +642,7 @@ impl WgpuRenderer {
                     valid = false;
                     break;
                 }
+                // Manual viewport transform into the caller-provided render area.
                 let ndc = Vec3f::new(clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
                 depth_acc += ndc.z;
                 let sx = area.rect.x as f32 + (ndc.x * 0.5 + 0.5) * area.rect.width as f32;
@@ -631,6 +663,7 @@ impl WgpuRenderer {
             }
         }
 
+        // Painter's algorithm ordering, sufficient for demo meshes without depth buffer.
         tris.sort_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut verts: Vec<Vertex> = Vec::with_capacity(tris.len() * 3);
@@ -648,6 +681,7 @@ impl Renderer for WgpuRenderer {
     }
 
     fn begin(&mut self, width: i32, height: i32, clr: Color) {
+        // Reset per-frame CPU-side command/vertex queues.
         self.width = width.max(0) as u32;
         self.height = height.max(0) as u32;
         self.clear_color = clr;
@@ -658,6 +692,7 @@ impl Renderer for WgpuRenderer {
         self.configure_surface(self.width.max(1), self.height.max(1));
         self.sync_atlas();
 
+        // Keep screen-size uniform in sync for pixel->NDC conversion in vertex shader.
         let uniforms = Uniforms {
             screen_size: [self.width.max(1) as f32, self.height.max(1) as f32],
             _pad: [0.0, 0.0],
@@ -684,6 +719,7 @@ impl Renderer for WgpuRenderer {
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
+                // Resize/lost surface recovery path.
                 self.surface.configure(&self.device, &self.config);
                 match self.surface.get_current_texture() {
                     Ok(frame) => frame,
@@ -694,6 +730,7 @@ impl Renderer for WgpuRenderer {
                 }
             }
             Err(wgpu::SurfaceError::Timeout) => {
+                // Skip frame on transient timeout.
                 return;
             }
             Err(wgpu::SurfaceError::OutOfMemory) => {
@@ -754,6 +791,8 @@ impl Renderer for WgpuRenderer {
                 continue;
             }
 
+            // Pack every draw's vertex payload into one contiguous upload buffer so we only
+            // issue one queue.write_buffer call.
             let bytes = Self::slice_as_bytes(vertices);
             let vertex_offset = packed_upload.len() as u64;
             let vertex_size = bytes.len() as u64;
@@ -813,6 +852,7 @@ impl Renderer for WgpuRenderer {
                 };
 
                 pass.set_bind_group(0, bind_group, &[]);
+                // Each draw references its own sub-range inside the shared staging buffer.
                 pass.set_vertex_buffer(0, self.staging_vertex_buffer.slice(draw.vertex_offset..(draw.vertex_offset + draw.vertex_size)));
                 pass.draw(0..draw.vertex_count, 0..1);
             }
@@ -862,6 +902,8 @@ impl Renderer for WgpuRenderer {
     }
 }
 
+// Minimal shader: convert pixel positions into NDC, sample bound texture, then modulate by
+// per-vertex color (used both for regular UI and white-atlas colored primitives).
 const UI_SHADER: &str = r#"
 struct Uniforms {
     screen_size: vec2<f32>,

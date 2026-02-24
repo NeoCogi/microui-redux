@@ -804,11 +804,7 @@ impl<'a> State<'a> {
                         }
                     }
                 });
-                if combo_changed {
-                    WindowState::Closed
-                } else {
-                    WindowState::Open
-                }
+                if combo_changed { WindowState::Closed } else { WindowState::Open }
             });
 
             if !popup.is_open() {

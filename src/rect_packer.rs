@@ -318,11 +318,7 @@ impl DensePacker {
             }
         }
 
-        if let Some(index) = index {
-            Some((index, rect))
-        } else {
-            None
-        }
+        if let Some(index) = index { Some((index, rect)) } else { None }
     }
 
     fn split(&mut self, i: usize, rect: &Recti) {
