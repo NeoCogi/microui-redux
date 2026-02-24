@@ -52,6 +52,12 @@
 //
 use super::*;
 
+// Layout internals follow a two-layer model:
+// 1) `LayoutEngine` owns scope stack, coordinate transforms, and content extents.
+// 2) `LayoutFlow` implementations (`RowFlow`, `StackFlow`) decide how local cells are emitted.
+//
+// This keeps scroll/extent bookkeeping centralized while allowing specialized placement logic.
+
 /// Describes how a layout dimension should be resolved.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// Size policy used by rows and columns when resolving cells.
@@ -76,275 +82,406 @@ impl SizePolicy {
 }
 
 impl Default for SizePolicy {
-    fn default() -> Self { SizePolicy::Auto }
+    fn default() -> Self {
+        SizePolicy::Auto
+    }
 }
 
 #[derive(Clone, Default)]
-struct SpanState {
+struct ScopeState {
+    // Scope rectangle expressed in local space (already offset by scroll).
+    body: Recti,
+    // Current cursor in local coordinates.
+    cursor: Vec2i,
+    // Max absolute extent reached by generated cells (for scroll/content sizing).
+    max: Option<Vec2i>,
+    // Y coordinate where the next logical line should start.
+    next_row: i32,
+    // Horizontal indentation applied to the scope.
+    indent: i32,
+}
+
+impl ScopeState {
+    // Reset cursor to the start of the next line while preserving active indentation.
+    fn reset_cursor_for_next_row(&mut self) {
+        self.cursor = vec2(self.indent, self.next_row);
+    }
+}
+
+#[derive(Copy, Clone)]
+struct ResolveCtx {
+    // Global inter-cell spacing from style.
+    spacing: i32,
+    // Width fallback after preferred-size resolution.
+    default_width: i32,
+    // Height fallback after preferred-size resolution.
+    default_height: i32,
+}
+
+trait LayoutFlow {
+    // Produces the next local cell and advances scope-local cursors/state.
+    fn next_local(&mut self, scope: &mut ScopeState, ctx: ResolveCtx) -> Recti;
+}
+
+#[derive(Clone, Default)]
+struct RowFlow {
+    // Width policy for each slot in the active row pattern.
     widths: Vec<SizePolicy>,
+    // Height policy shared by all cells in the row pattern.
     height: SizePolicy,
+    // Current slot index in `widths`.
     item_index: usize,
 }
 
+impl RowFlow {
+    fn new(widths: &[SizePolicy], height: SizePolicy) -> Self {
+        Self {
+            widths: widths.to_vec(),
+            height,
+            item_index: 0,
+        }
+    }
+
+    fn apply_template(&mut self, widths: Vec<SizePolicy>, height: SizePolicy) {
+        self.widths = widths;
+        self.height = height;
+    }
+}
+
+impl LayoutFlow for RowFlow {
+    fn next_local(&mut self, scope: &mut ScopeState, ctx: ResolveCtx) -> Recti {
+        // Once all row slots are consumed, wrap to the next line and restart the pattern.
+        let row_len = self.widths.len();
+        if self.item_index == row_len {
+            self.item_index = 0;
+            scope.reset_cursor_for_next_row();
+        }
+
+        // Empty width patterns are treated as a single Auto slot.
+        let width_policy = if self.widths.is_empty() {
+            SizePolicy::Auto
+        } else {
+            self.widths.get(self.item_index).copied().unwrap_or(SizePolicy::Auto)
+        };
+
+        let x = scope.cursor.x;
+        let y = scope.cursor.y;
+
+        // Resolve dimensions from policy + remaining space inside scope bounds.
+        let available_width = scope.body.width.saturating_sub(x);
+        let available_height = scope.body.height.saturating_sub(y);
+        let width = width_policy.resolve(ctx.default_width, available_width);
+        let height = self.height.resolve(ctx.default_height, available_height);
+
+        if self.item_index < self.widths.len() {
+            self.item_index += 1;
+        }
+
+        // Advance cursor to the right and grow the next-line marker by the tallest seen cell.
+        scope.cursor.x = scope.cursor.x.saturating_add(width).saturating_add(ctx.spacing);
+        let line_end = y.saturating_add(height).saturating_add(ctx.spacing);
+        scope.next_row = max(scope.next_row, line_end);
+
+        rect(x, y, width, height)
+    }
+}
+
 #[derive(Clone)]
-enum LayoutDirection {
-    Row(SpanState),
-    Column(SpanState),
+struct StackFlow {
+    // Width policy used for every stacked item.
+    width: SizePolicy,
+    // Height policy used for every stacked item.
+    height: SizePolicy,
 }
 
-impl Default for LayoutDirection {
-    fn default() -> Self { LayoutDirection::Row(SpanState::default()) }
+impl Default for StackFlow {
+    fn default() -> Self {
+        Self {
+            width: SizePolicy::Remainder(0),
+            height: SizePolicy::Auto,
+        }
+    }
 }
 
-impl LayoutDirection {
-    fn row_state(&self) -> &SpanState {
+impl StackFlow {
+    fn new(width: SizePolicy, height: SizePolicy) -> Self {
+        Self { width, height }
+    }
+}
+
+impl LayoutFlow for StackFlow {
+    fn next_local(&mut self, scope: &mut ScopeState, ctx: ResolveCtx) -> Recti {
+        // Stack flow always emits one full line at a time from current `next_row`.
+        let x = scope.indent;
+        let y = scope.next_row;
+
+        let available_width = scope.body.width.saturating_sub(x);
+        let available_height = scope.body.height.saturating_sub(y);
+        let width = self.width.resolve(ctx.default_width, available_width);
+        let height = self.height.resolve(ctx.default_height, available_height);
+
+        // Move directly to the next stacked row.
+        let next = y.saturating_add(height).saturating_add(ctx.spacing);
+        scope.next_row = next;
+        scope.cursor = vec2(scope.indent, next);
+
+        rect(x, y, width, height)
+    }
+}
+
+#[derive(Clone)]
+enum FlowState {
+    // Repeating row pattern with N slots.
+    Row(RowFlow),
+    // One-cell-per-line vertical stack.
+    Stack(StackFlow),
+}
+
+impl Default for FlowState {
+    fn default() -> Self {
+        FlowState::Row(RowFlow::new(&[SizePolicy::Auto], SizePolicy::Auto))
+    }
+}
+
+impl FlowState {
+    // Store a flow as a lightweight template so scoped overrides can be restored later.
+    fn as_template(&self) -> FlowTemplate {
         match self {
-            LayoutDirection::Row(state) | LayoutDirection::Column(state) => state,
+            FlowState::Row(row) => FlowTemplate::Row {
+                widths: row.widths.clone(),
+                height: row.height,
+            },
+            FlowState::Stack(stack) => FlowTemplate::Stack { width: stack.width, height: stack.height },
         }
     }
 
-    fn row_state_mut(&mut self) -> &mut SpanState {
+    fn apply_template(&mut self, template: FlowTemplate) {
+        match template {
+            FlowTemplate::Row { widths, height } => match self {
+                FlowState::Row(row) => row.apply_template(widths, height),
+                _ => {
+                    *self = FlowState::Row(RowFlow::new(widths.as_slice(), height));
+                }
+            },
+            FlowTemplate::Stack { width, height } => {
+                *self = FlowState::Stack(StackFlow::new(width, height));
+            }
+        }
+    }
+
+    // Delegate cell generation to the active flow implementation.
+    fn next_local(&mut self, scope: &mut ScopeState, ctx: ResolveCtx) -> Recti {
         match self {
-            LayoutDirection::Row(state) | LayoutDirection::Column(state) => state,
+            FlowState::Row(flow) => flow.next_local(scope, ctx),
+            FlowState::Stack(flow) => flow.next_local(scope, ctx),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct LayoutFrame {
+    // Coordinates/cursors for one nested layout scope.
+    scope: ScopeState,
+    // Placement logic used for this scope.
+    flow: FlowState,
+}
+
+impl LayoutFrame {
+    fn new(body: Recti, scroll: Vec2i) -> Self {
+        Self {
+            scope: ScopeState {
+                // Scope body is shifted by scroll so local coordinates remain stable while content moves.
+                body: rect(body.x - scroll.x, body.y - scroll.y, body.width, body.height),
+                cursor: vec2(0, 0),
+                max: None,
+                next_row: 0,
+                indent: 0,
+            },
+            flow: FlowState::default(),
         }
     }
 }
 
 #[derive(Clone, Default)]
-struct Layout {
-    body: Recti,
-    position: Vec2i,
-    max: Option<Vec2i>,
-    next_row: i32,
-    indent: i32,
-    direction: LayoutDirection,
-}
-
-#[derive(Clone, Default)]
-pub(crate) struct LayoutManager {
+pub(crate) struct LayoutEngine {
+    // Style snapshot used by resolution rules (spacing/default widths/padding fallbacks).
     pub style: Style,
+    // Last emitted absolute rectangle.
     pub last_rect: Recti,
+    // Default control height seeded by container setup.
     default_cell_height: i32,
-    stack: Vec<Layout>,
+    // Nested scope stack (window body, columns, etc.).
+    stack: Vec<LayoutFrame>,
 }
 
-impl LayoutManager {
+impl LayoutEngine {
+    // Pushes a scope with an explicit flow (used by reset/column).
+    fn push_scope_with_flow(&mut self, body: Recti, scroll: Vec2i, flow: FlowState) {
+        let mut frame = LayoutFrame::new(body, scroll);
+        frame.flow = flow;
+        self.stack.push(frame);
+    }
+
+    fn top(&self) -> &LayoutFrame {
+        self.stack.last().expect("Layout stack should never be empty when accessed")
+    }
+
+    fn top_mut(&mut self) -> &mut LayoutFrame {
+        self.stack.last_mut().expect("Layout stack should never be empty when accessed")
+    }
+
+    fn fallback_dimensions(&self, preferred: Dimensioni) -> (i32, i32) {
+        let padding = self.style.padding;
+        // Width fallback mirrors legacy behavior: default width + horizontal padding.
+        let fallback_width = self.style.default_cell_width + padding * 2;
+        // Height fallback prefers container-provided default cell height, then padding-only fallback.
+        let base_height = if self.default_cell_height > 0 { self.default_cell_height } else { 0 };
+        let fallback_height = if base_height > 0 { base_height } else { padding * 2 };
+
+        let default_width = if preferred.width > 0 { preferred.width } else { fallback_width };
+        let default_height = if preferred.height > 0 { preferred.height } else { fallback_height };
+        (default_width, default_height)
+    }
+
     pub fn reset(&mut self, body: Recti, scroll: Vec2i) {
         self.stack.clear();
         self.last_rect = Recti::default();
-        self.push_layout(body, scroll);
+        // Root scope starts with default row flow.
+        self.push_scope_with_flow(body, scroll, FlowState::default());
     }
 
-    pub fn set_default_cell_height(&mut self, height: i32) { self.default_cell_height = height.max(0); }
-
-    fn push_layout(&mut self, body: Recti, scroll: Vec2i) {
-        let mut layout = Layout {
-            body: Recti { x: 0, y: 0, width: 0, height: 0 },
-            position: Vec2i { x: 0, y: 0 },
-            max: None,
-            next_row: 0,
-            indent: 0,
-            direction: LayoutDirection::default(),
-        };
-        layout.body = rect(body.x - scroll.x, body.y - scroll.y, body.width, body.height);
-
-        self.stack.push(layout);
-        self.row(&[SizePolicy::Auto], SizePolicy::Auto);
+    pub fn set_default_cell_height(&mut self, height: i32) {
+        self.default_cell_height = height.max(0);
     }
 
-    fn top(&self) -> &Layout { self.stack.last().expect("Layout stack should never be empty when accessed") }
+    pub fn current_body(&self) -> Recti {
+        self.top().scope.body
+    }
 
-    fn top_mut(&mut self) -> &mut Layout { self.stack.last_mut().expect("Layout stack should never be empty when accessed") }
+    pub fn current_max(&self) -> Option<Vec2i> {
+        self.top().scope.max
+    }
 
-    pub fn current_body(&self) -> Recti { self.top().body }
+    pub fn pop_scope(&mut self) {
+        self.stack.pop();
+    }
 
-    pub fn current_max(&self) -> Option<Vec2i> { self.top().max }
-
-    pub fn pop_scope(&mut self) { self.stack.pop(); }
-
-    pub fn adjust_indent(&mut self, delta: i32) { self.top_mut().indent += delta; }
+    pub fn adjust_indent(&mut self, delta: i32) {
+        self.top_mut().scope.indent += delta;
+    }
 
     pub fn begin_column(&mut self) {
+        // A column is allocated from the parent as one cell, then becomes a nested scope.
         let layout_rect = self.next();
-        self.push_layout(layout_rect, vec2(0, 0));
-        if let Some(top) = self.stack.last_mut() {
-            top.direction = LayoutDirection::Column(SpanState::default());
-        }
-        self.row(&[SizePolicy::Auto], SizePolicy::Auto);
+        self.push_scope_with_flow(layout_rect, vec2(0, 0), FlowState::Row(RowFlow::new(&[SizePolicy::Auto], SizePolicy::Auto)));
     }
 
     pub fn end_column(&mut self) {
         let finished = self.stack.pop().expect("cannot end column without an active child layout");
         let parent = self.top_mut();
 
-        parent.position.x = if parent.position.x > finished.position.x + finished.body.x - parent.body.x {
-            parent.position.x
-        } else {
-            finished.position.x + finished.body.x - parent.body.x
-        };
-        parent.next_row = if parent.next_row > finished.next_row + finished.body.y - parent.body.y {
-            parent.next_row
-        } else {
-            finished.next_row + finished.body.y - parent.body.y
-        };
+        // Merge child cursor/row extents back into parent-local space.
+        let child_position_x = finished.scope.cursor.x + finished.scope.body.x - parent.scope.body.x;
+        let child_next_row = finished.scope.next_row + finished.scope.body.y - parent.scope.body.y;
 
-        match (&mut parent.max, finished.max) {
+        parent.scope.cursor.x = max(parent.scope.cursor.x, child_position_x);
+        parent.scope.next_row = max(parent.scope.next_row, child_next_row);
+
+        // Merge absolute max extents for content-size/scroll calculations.
+        match (&mut parent.scope.max, finished.scope.max) {
             (None, None) => (),
             (Some(_), None) => (),
-            (None, Some(m)) => parent.max = Some(m),
+            (None, Some(m)) => parent.scope.max = Some(m),
             (Some(am), Some(bm)) => {
-                parent.max = Some(Vec2i::new(max(am.x, bm.x), max(am.y, bm.y)));
+                parent.scope.max = Some(Vec2i::new(max(am.x, bm.x), max(am.y, bm.y)));
             }
         }
-    }
-
-    fn row_for_layout(&mut self, height: SizePolicy) {
-        let layout = self.top_mut();
-        {
-            let state = layout.direction.row_state_mut();
-            state.height = height;
-            state.item_index = 0;
-        }
-        layout.position = vec2(layout.indent, layout.next_row);
     }
 
     pub fn row(&mut self, widths: &[SizePolicy], height: SizePolicy) {
-        let layout = self.top_mut();
-        {
-            let state = layout.direction.row_state_mut();
-            state.widths.clear();
-            state.widths.extend_from_slice(widths);
-            state.height = height;
-            state.item_index = 0;
-        }
-        layout.position = vec2(layout.indent, layout.next_row);
+        let frame = self.top_mut();
+        frame.flow = FlowState::Row(RowFlow::new(widths, height));
+        // Applying a new flow resets placement to the current line start.
+        frame.scope.reset_cursor_for_next_row();
     }
 
-    pub(crate) fn snapshot_row_state(&self) -> RowSnapshot { RowSnapshot::from_layout(self.top()) }
-
-    pub(crate) fn restore_row_state(&mut self, snapshot: RowSnapshot) { snapshot.apply(self.top_mut()); }
-
-    fn resolve_horizontal(&self, cursor_x: i32, policy: SizePolicy, default_width: i32) -> i32 {
-        // Amount of horizontal space left in the current scope after the cursor.
-        let available_width = self.top().body.width.saturating_sub(cursor_x);
-        // Let the policy (Auto/Fixed/Remainder) clamp that space to a final width.
-        policy.resolve(default_width, available_width)
+    pub fn stack(&mut self, width: SizePolicy, height: SizePolicy) {
+        let frame = self.top_mut();
+        frame.flow = FlowState::Stack(StackFlow::new(width, height));
+        // Applying a new flow resets placement to the current line start.
+        frame.scope.reset_cursor_for_next_row();
     }
 
-    fn resolve_vertical(&self, cursor_y: i32, policy: SizePolicy, default_height: i32) -> i32 {
-        // Amount of vertical space left in the current scope after the cursor.
-        let available_height = self.top().body.height.saturating_sub(cursor_y);
-        // Let the policy decide how tall this cell should be within the remaining room.
-        policy.resolve(default_height, available_height)
+    pub(crate) fn snapshot_flow_state(&self) -> FlowSnapshot {
+        FlowSnapshot::from_layout(self.top())
     }
 
-    pub fn next(&mut self) -> Recti { self.next_with_preferred(Dimensioni::new(0, 0)) }
+    pub(crate) fn restore_flow_state(&mut self, snapshot: FlowSnapshot) {
+        snapshot.apply(self.top_mut());
+    }
+
+    pub fn next(&mut self) -> Recti {
+        self.next_with_preferred(Dimensioni::new(0, 0))
+    }
 
     pub fn next_with_preferred(&mut self, preferred: Dimensioni) -> Recti {
-        let padding = self.style.padding;
         let spacing = self.style.spacing;
-        let fallback_width = self.style.default_cell_width + padding * 2;
-        let base_height = if self.default_cell_height > 0 { self.default_cell_height } else { 0 };
-        let fallback_height = if base_height > 0 { base_height } else { padding * 2 };
-        let default_width = if preferred.width > 0 { preferred.width } else { fallback_width };
-        let default_height = if preferred.height > 0 { preferred.height } else { fallback_height };
-
-        let (row_len, current_index, height_policy) = {
-            let layout = self.top();
-            let state = layout.direction.row_state();
-            let row_len = state.widths.len();
-            (row_len, state.item_index, state.height)
+        let (default_width, default_height) = self.fallback_dimensions(preferred);
+        let mut local = {
+            let frame = self.top_mut();
+            let ctx = ResolveCtx { spacing, default_width, default_height };
+            frame.flow.next_local(&mut frame.scope, ctx)
         };
 
-        // If we've consumed all cells for this span, reset the row cursor so we start a new row.
-        if current_index == row_len {
-            self.row_for_layout(height_policy);
-        }
-
-        // Determine the width policy for the current cell. This needs to run *after* the
-        // potential row reset so the first cell in a new row picks up the configured width.
-        let width_policy = {
-            let layout = self.top();
-            let state = layout.direction.row_state();
-            if state.widths.is_empty() {
-                SizePolicy::Auto
-            } else {
-                state.widths.get(state.item_index).copied().unwrap_or(SizePolicy::Auto)
-            }
+        // Convert local cell coordinates into absolute container coordinates.
+        let origin = {
+            let frame = self.top();
+            vec2(frame.scope.body.x, frame.scope.body.y)
         };
 
-        let mut res: Recti = Recti { x: 0, y: 0, width: 0, height: 0 };
+        local.x += origin.x;
+        local.y += origin.y;
 
-        // Snapshot the current cursor; this is the top-left corner of the cell before sizing.
         {
-            let layout = self.top();
-            res.x = layout.position.x;
-            res.y = layout.position.y;
-        }
-
-        // Resolve the actual width/height using the active policies and remaining space.
-        res.width = self.resolve_horizontal(res.x, width_policy, default_width);
-        res.height = self.resolve_vertical(res.y, height_policy, default_height);
-
-        // Advance the span index so the next call fetches the next column.
-        {
-            let layout = self.top_mut();
-            let state = layout.direction.row_state_mut();
-            if state.item_index < state.widths.len() {
-                state.item_index += 1;
+            let frame = self.top_mut();
+            // Track absolute max extent reached by emitted content.
+            match frame.scope.max {
+                None => frame.scope.max = Some(Vec2i::new(local.x + local.width, local.y + local.height)),
+                Some(am) => {
+                    frame.scope.max = Some(Vec2i::new(max(am.x, local.x + local.width), max(am.y, local.y + local.height)));
+                }
             }
         }
 
-        // Move the horizontal cursor to the end of this cell plus spacing, and update
-        // `next_row` to track the tallest cell seen so far (so we know where to drop down).
-        {
-            let layout = self.top_mut();
-            layout.position.x = layout.position.x.saturating_add(res.width).saturating_add(spacing);
-            layout.next_row = if layout.next_row > res.y + res.height + spacing {
-                layout.next_row
-            } else {
-                res.y + res.height + spacing
-            };
-        }
-
-        // Convert from local coordinates (relative to the layout scope) to absolute coordinates.
-        res.x += self.top().body.x;
-        res.y += self.top().body.y;
-
-        // Track the maximum extent reached so scrolling/auto-sizing can use it later.
-        {
-            let layout = self.top_mut();
-            match layout.max {
-                None => layout.max = Some(Vec2i::new(res.x + res.width, res.y + res.height)),
-                Some(am) => layout.max = Some(Vec2i::new(max(am.x, res.x + res.width), max(am.y, res.y + res.height))),
-            }
-        }
-
-        self.last_rect = res;
+        self.last_rect = local;
         self.last_rect
     }
 }
 
-pub(crate) struct RowSnapshot {
-    widths: Vec<SizePolicy>,
-    height: SizePolicy,
+#[derive(Clone)]
+enum FlowTemplate {
+    // Snapshot for row flow configuration.
+    Row { widths: Vec<SizePolicy>, height: SizePolicy },
+    // Snapshot for stack flow configuration.
+    Stack { width: SizePolicy, height: SizePolicy },
 }
 
-impl RowSnapshot {
-    fn from_layout(layout: &Layout) -> Self {
-        let state = layout.direction.row_state();
-        Self {
-            widths: state.widths.clone(),
-            height: state.height,
-        }
+pub(crate) struct FlowSnapshot {
+    // Captures active flow configuration for scoped overrides.
+    flow: FlowTemplate,
+}
+
+impl FlowSnapshot {
+    fn from_layout(layout: &LayoutFrame) -> Self {
+        Self { flow: layout.flow.as_template() }
     }
 
-    fn apply(self, layout: &mut Layout) {
-        let state = layout.direction.row_state_mut();
-        state.widths = self.widths;
-        state.height = self.height;
+    fn apply(self, layout: &mut LayoutFrame) {
+        layout.flow.apply_template(self.flow);
     }
 }
+
+pub(crate) type LayoutManager = LayoutEngine;
 
 #[cfg(test)]
 mod tests {
@@ -383,5 +520,21 @@ mod tests {
         let cell = layout.next();
         assert_eq!(cell.width, body.width);
         assert_eq!(cell.height, 10);
+    }
+
+    #[test]
+    fn stack_flow_uses_full_width_by_default() {
+        let mut layout = LayoutManager::default();
+        layout.style = Style::default();
+        let body = rect(0, 0, 120, 60);
+        layout.reset(body, vec2(0, 0));
+        layout.set_default_cell_height(10);
+        layout.stack(SizePolicy::Remainder(0), SizePolicy::Auto);
+
+        let first = layout.next();
+        let second = layout.next();
+
+        assert_eq!(first.width, body.width);
+        assert_eq!(second.y, first.y + first.height + layout.style.spacing);
     }
 }
