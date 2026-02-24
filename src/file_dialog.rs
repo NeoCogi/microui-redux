@@ -36,6 +36,7 @@ pub struct FileDialogState {
     current_working_directory: String,
     file_name: Option<String>,
     file_path: Option<String>,
+    path_box: Textbox,
     tmp_file_name: Textbox,
     selected_folder: Option<String>,
     win: WindowHandle,
@@ -45,19 +46,28 @@ pub struct FileDialogState {
     files: Vec<String>,
     folder_items: Vec<ListItem>,
     file_items: Vec<ListItem>,
+    up_button: Button,
+    home_button: Button,
+    go_button: Button,
     ok_button: Button,
     cancel_button: Button,
 }
 
 impl FileDialogState {
     /// Returns the selected file name (basename only) if the dialog completed successfully.
-    pub fn file_name(&self) -> &Option<String> { &self.file_name }
+    pub fn file_name(&self) -> &Option<String> {
+        &self.file_name
+    }
 
     /// Returns the selected file path (absolute when possible) if the dialog completed successfully.
-    pub fn file_path(&self) -> &Option<String> { &self.file_path }
+    pub fn file_path(&self) -> &Option<String> {
+        &self.file_path
+    }
 
     /// Returns `true` if the dialog window is currently open.
-    pub fn is_open(&self) -> bool { self.win.is_open() }
+    pub fn is_open(&self) -> bool {
+        self.win.is_open()
+    }
 
     fn resolve_selected_path(cwd: &str, file_name: &str) -> String {
         let path = Path::new(file_name);
@@ -66,6 +76,33 @@ impl FileDialogState {
         } else {
             Path::new(cwd).join(path).to_string_lossy().to_string()
         }
+    }
+
+    fn resolve_directory_path(cwd: &str, input: &str) -> Option<String> {
+        if input.trim().is_empty() {
+            return None;
+        }
+        let raw = Path::new(input.trim());
+        let candidate = if raw.is_absolute() { raw.to_path_buf() } else { Path::new(cwd).join(raw) };
+        if candidate.is_dir() {
+            Some(candidate.to_string_lossy().to_string())
+        } else {
+            None
+        }
+    }
+
+    fn home_dir() -> Option<String> {
+        if let Ok(home) = std::env::var("HOME") {
+            if !home.is_empty() {
+                return Some(home);
+            }
+        }
+        if let Ok(home) = std::env::var("USERPROFILE") {
+            if !home.is_empty() {
+                return Some(home);
+            }
+        }
+        None
     }
 
     fn list_folders_files(p: &Path, folders: &mut Vec<String>, files: &mut Vec<String>) {
@@ -133,24 +170,31 @@ impl FileDialogState {
             current_working_directory,
             file_name: None,
             file_path: None,
+            path_box: Textbox::new(""),
             tmp_file_name: Textbox::new(""),
             selected_folder: None,
-            win: ctx.new_dialog("File Dialog", Recti::new(50, 50, 500, 500)),
+            win: ctx.new_dialog("Open File", Recti::new(50, 50, 720, 520)),
             folder_panel: ctx.new_panel("folders"),
             file_panel: ctx.new_panel("files"),
             folders: Vec::new(),
             files: Vec::new(),
             folder_items: Vec::new(),
             file_items: Vec::new(),
-            ok_button: Button::new("Ok"),
+            up_button: Button::new("Up"),
+            home_button: Button::new("Home"),
+            go_button: Button::new("Go"),
+            ok_button: Button::new("Open"),
             cancel_button: Button::new("Cancel"),
         };
+        dialog.path_box.buf = dialog.current_working_directory.clone();
         dialog.refresh_entries();
         dialog
     }
 
     /// Marks the dialog as open for the next frame.
-    pub fn open<R: Renderer>(&mut self, ctx: &mut Context<R>) { ctx.open_dialog(&mut self.win); }
+    pub fn open<R: Renderer>(&mut self, ctx: &mut Context<R>) {
+        ctx.open_dialog(&mut self.win);
+    }
 
     /// Renders the dialog and updates the selected file when confirmed.
     pub fn eval<R: Renderer>(&mut self, ctx: &mut Context<R>) {
@@ -164,29 +208,82 @@ impl FileDialogState {
             let folder_items = &mut self.folder_items;
             let file_items = &mut self.file_items;
             let current_working_directory = &mut self.current_working_directory;
+            let path_box = &mut self.path_box;
             let tmp_file_name = &mut self.tmp_file_name;
             let selected_folder = &mut self.selected_folder;
+            let up_button = &mut self.up_button;
+            let home_button = &mut self.home_button;
+            let go_button = &mut self.go_button;
             let ok_button = &mut self.ok_button;
             let cancel_button = &mut self.cancel_button;
             let file_name = &mut self.file_name;
             let file_path = &mut self.file_path;
 
-            ctx.dialog(win, ContainerOption::NONE, WidgetBehaviourOption::NONE, |cont| {
+            ctx.dialog(win, ContainerOption::NONE, WidgetBehaviourOption::NO_SCROLL, |cont| {
                 let mut dialog_state = WindowState::Open;
-                let half_width = cont.body().width / 2;
-                cont.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |cont| {
-                    cont.label(current_working_directory.as_str());
-                    cont.textbox(tmp_file_name);
+
+                if path_box.buf != *current_working_directory {
+                    path_box.buf = current_working_directory.clone();
+                }
+
+                let toolbar_widths = [SizePolicy::Fixed(56), SizePolicy::Fixed(56), SizePolicy::Remainder(72), SizePolicy::Fixed(56)];
+                cont.with_row(&toolbar_widths, SizePolicy::Auto, |cont| {
+                    if cont.button(up_button).is_submitted() {
+                        if let Some(parent) = Path::new(current_working_directory.as_str()).parent() {
+                            let parent_path = parent.to_string_lossy().to_string();
+                            if !parent_path.is_empty() && parent_path != *current_working_directory {
+                                *current_working_directory = parent_path;
+                                *selected_folder = None;
+                                path_box.buf = current_working_directory.clone();
+                                needs_refresh = true;
+                            }
+                        }
+                    }
+                    if cont.button(home_button).is_submitted() {
+                        if let Some(home) = Self::home_dir() {
+                            if home != *current_working_directory && Path::new(home.as_str()).is_dir() {
+                                *current_working_directory = home;
+                                *selected_folder = None;
+                                path_box.buf = current_working_directory.clone();
+                                needs_refresh = true;
+                            }
+                        }
+                    }
+
+                    let submitted_path = cont.textbox(path_box).is_submitted();
+                    let clicked_go = cont.button(go_button).is_submitted();
+                    if submitted_path || clicked_go {
+                        if let Some(path) = Self::resolve_directory_path(current_working_directory.as_str(), path_box.buf.as_str()) {
+                            if path != *current_working_directory {
+                                *current_working_directory = path;
+                                *selected_folder = None;
+                                path_box.buf = current_working_directory.clone();
+                                needs_refresh = true;
+                            }
+                        }
+                    }
                 });
-                let left_column = if half_width > 0 {
-                    SizePolicy::Remainder(half_width - 1)
-                } else {
-                    SizePolicy::Auto
-                };
-                let top_row_widths = [left_column, SizePolicy::Remainder(0)];
-                cont.with_row(&top_row_widths, SizePolicy::Remainder(24), |cont| {
+
+                let style = cont.get_style();
+                let spacing = style.spacing.max(0);
+                let padding = style.padding.max(0);
+                let font_height = cont.atlas.get_font_height(style.font) as i32;
+                let vertical_pad = (padding / 2).max(1);
+                let control_height = font_height.saturating_add(vertical_pad.saturating_mul(2)).max(0);
+                // Reserve only enough space for "File name" row + action row + inter-row spacing.
+                let footer_reserve = control_height
+                    .saturating_mul(2)
+                    .saturating_add(spacing.saturating_mul(3))
+                    .saturating_add(padding);
+
+                let sidebar_width = (cont.body().width / 3).clamp(160, 260);
+                let pane_widths = [SizePolicy::Fixed(sidebar_width), SizePolicy::Remainder(0)];
+                cont.with_row(&pane_widths, SizePolicy::Remainder(footer_reserve), |cont| {
                     cont.panel(folder_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
                         container_handle.with_mut(|container| {
+                            container.stack(SizePolicy::Auto, |container| {
+                                container.label("Folders");
+                            });
                             container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
                                 let mut refresh = false;
                                 for index in 0..folder_items.len() {
@@ -198,9 +295,13 @@ impl FileDialogState {
                                         if let Some(path) = folders.get(index) {
                                             *current_working_directory = path.to_string();
                                             *selected_folder = Some(path.to_string());
+                                            path_box.buf = current_working_directory.clone();
                                         }
                                         refresh = true;
                                     }
+                                }
+                                if folder_items.is_empty() {
+                                    container.label("No folders");
                                 }
                                 if refresh {
                                     needs_refresh = true;
@@ -210,6 +311,9 @@ impl FileDialogState {
                     });
                     cont.panel(file_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
                         container_handle.with_mut(|container| {
+                            container.stack(SizePolicy::Auto, |container| {
+                                container.label("Files");
+                            });
                             container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
                                 if !file_items.is_empty() {
                                     for index in 0..file_items.len() {
@@ -230,8 +334,28 @@ impl FileDialogState {
                         });
                     });
                 });
-                let bottom_row_widths = [left_column, SizePolicy::Remainder(0)];
-                cont.with_row(&bottom_row_widths, SizePolicy::Remainder(0), |cont| {
+
+                let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
+                cont.with_row(&filename_widths, SizePolicy::Auto, |cont| {
+                    cont.label("File name:");
+                    cont.textbox(tmp_file_name);
+                });
+
+                let button_width = 96;
+                let spacing = cont.get_style().spacing.max(0);
+                let trailing_buttons = button_width * 2 + spacing * 2;
+                let action_widths = [
+                    SizePolicy::Remainder(trailing_buttons),
+                    SizePolicy::Fixed(button_width),
+                    SizePolicy::Fixed(button_width),
+                ];
+                cont.with_row(&action_widths, SizePolicy::Auto, |cont| {
+                    let _ = cont.next_cell();
+                    if cont.button(cancel_button).is_submitted() {
+                        *file_name = None;
+                        *file_path = None;
+                        dialog_state = WindowState::Closed;
+                    }
                     if cont.button(ok_button).is_submitted() {
                         if tmp_file_name.buf.is_empty() {
                             *file_name = None;
@@ -246,11 +370,6 @@ impl FileDialogState {
                             *file_name = Some(selected_name);
                             *file_path = Some(selected_path);
                         }
-                        dialog_state = WindowState::Closed;
-                    }
-                    if cont.button(cancel_button).is_submitted() {
-                        *file_name = None;
-                        *file_path = None;
                         dialog_state = WindowState::Closed;
                     }
                 });
