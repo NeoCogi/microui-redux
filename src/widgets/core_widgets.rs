@@ -53,7 +53,9 @@
 use crate::*;
 use std::rc::Rc;
 
-fn text_size(style: &Style, atlas: &AtlasHandle, text: &str) -> Dimensioni { atlas.get_text_size(style.font, text) }
+fn text_size(style: &Style, atlas: &AtlasHandle, text: &str) -> Dimensioni {
+    atlas.get_text_size(style.font, text)
+}
 
 fn content_height(style: &Style, atlas: &AtlasHandle, visual_height: i32) -> i32 {
     let font_height = atlas.get_font_height(style.font) as i32;
@@ -534,17 +536,25 @@ impl Custom {
     }
 
     /// Creates a custom widget state with explicit options.
-    pub fn with_opt(name: impl Into<String>, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self { Self { name: name.into(), opt, bopt } }
+    pub fn with_opt(name: impl Into<String>, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self {
+        Self { name: name.into(), opt, bopt }
+    }
 
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
-        let text_w = if self.name.is_empty() { 0 } else { text_size(style, atlas, self.name.as_str()).width };
+        let text_w = if self.name.is_empty() {
+            0
+        } else {
+            text_size(style, atlas, self.name.as_str()).width
+        };
         let width = padding * 2 + text_w;
         let height = content_height(style, atlas, 0);
         Dimensioni::new(width.max(0), height)
     }
 
-    fn handle_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
+    fn handle_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+        ResourceState::NONE
+    }
 }
 
 implement_widget!(Custom, handle_widget, preferred_size_widget);
@@ -578,7 +588,9 @@ impl Internal {
         Dimensioni::new(width.max(0), height)
     }
 
-    fn handle_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState { ResourceState::NONE }
+    fn handle_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+        ResourceState::NONE
+    }
 }
 
 implement_widget!(Internal, handle_widget, preferred_size_widget);
@@ -629,7 +641,11 @@ impl Combo {
 
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
-        let text_w = if self.label.is_empty() { 0 } else { text_size(style, atlas, self.label.as_str()).width };
+        let text_w = if self.label.is_empty() {
+            0
+        } else {
+            text_size(style, atlas, self.label.as_str()).width
+        };
         let indicator = atlas.get_icon_size(EXPAND_DOWN_ICON);
         let width = (padding * 3 + text_w + indicator.width).max(0);
         let height = content_height(style, atlas, indicator.height);

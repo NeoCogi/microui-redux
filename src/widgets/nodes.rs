@@ -101,7 +101,9 @@ pub struct Node {
 
 impl Node {
     /// Creates a header node state with the default widget options.
-    pub fn new(label: impl Into<String>, state: NodeStateValue) -> Self { Self::header(label, state) }
+    pub fn new(label: impl Into<String>, state: NodeStateValue) -> Self {
+        Self::header(label, state)
+    }
 
     /// Creates a header node state with the default widget options.
     pub fn header(label: impl Into<String>, state: NodeStateValue) -> Self {
@@ -126,7 +128,9 @@ impl Node {
     }
 
     /// Creates a header node state with explicit widget options.
-    pub fn with_opt(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self { Self::with_opt_header(label, state, opt) }
+    pub fn with_opt(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self {
+        Self::with_opt_header(label, state, opt)
+    }
 
     /// Creates a header node state with explicit widget options.
     pub fn with_opt_header(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self {
@@ -151,23 +155,35 @@ impl Node {
     }
 
     /// Returns `true` when the node is expanded.
-    pub fn is_expanded(&self) -> bool { self.state.is_expanded() }
+    pub fn is_expanded(&self) -> bool {
+        self.state.is_expanded()
+    }
 
     /// Returns `true` when the node is closed.
-    pub fn is_closed(&self) -> bool { self.state.is_closed() }
+    pub fn is_closed(&self) -> bool {
+        self.state.is_closed()
+    }
 
     /// Returns `true` when this node is configured as a tree node.
-    pub fn is_tree(&self) -> bool { matches!(self.kind, NodeKind::Tree) }
+    pub fn is_tree(&self) -> bool {
+        matches!(self.kind, NodeKind::Tree)
+    }
 
     /// Returns `true` when this node is configured as a header node.
-    pub fn is_header(&self) -> bool { matches!(self.kind, NodeKind::Header) }
+    pub fn is_header(&self) -> bool {
+        matches!(self.kind, NodeKind::Header)
+    }
 
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
         let font_height = atlas.get_font_height(style.font) as i32;
         let icon = atlas.get_icon_size(EXPAND_ICON);
-        let text_w = if self.label.is_empty() { 0 } else { atlas.get_text_size(style.font, self.label.as_str()).width };
+        let text_w = if self.label.is_empty() {
+            0
+        } else {
+            atlas.get_text_size(style.font, self.label.as_str()).width
+        };
         let height = (font_height.max(icon.height) + vertical_pad * 2).max(0);
         let consumed = (height - padding).max(icon.width);
         let width = (padding * 2 + consumed + text_w).max(0);

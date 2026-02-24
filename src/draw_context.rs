@@ -66,22 +66,34 @@ impl<'a> DrawCtx<'a> {
         Self { commands, clip_stack, style, atlas }
     }
 
-    pub(crate) fn style(&self) -> &Style { self.style }
+    pub(crate) fn style(&self) -> &Style {
+        self.style
+    }
 
-    pub(crate) fn atlas(&self) -> &AtlasHandle { self.atlas }
+    pub(crate) fn atlas(&self) -> &AtlasHandle {
+        self.atlas
+    }
 
-    pub(crate) fn current_clip_rect(&self) -> Recti { self.clip_stack.last().copied().unwrap_or(UNCLIPPED_RECT) }
+    pub(crate) fn current_clip_rect(&self) -> Recti {
+        self.clip_stack.last().copied().unwrap_or(UNCLIPPED_RECT)
+    }
 
     pub(crate) fn push_clip_rect(&mut self, rect: Recti) {
         let last = self.current_clip_rect();
         self.clip_stack.push(rect.intersect(&last).unwrap_or_default());
     }
 
-    pub(crate) fn pop_clip_rect(&mut self) { self.clip_stack.pop(); }
+    pub(crate) fn pop_clip_rect(&mut self) {
+        self.clip_stack.pop();
+    }
 
-    pub(crate) fn push_command(&mut self, cmd: Command) { self.commands.push(cmd); }
+    pub(crate) fn push_command(&mut self, cmd: Command) {
+        self.commands.push(cmd);
+    }
 
-    pub(crate) fn set_clip(&mut self, rect: Recti) { self.push_command(Command::Clip { rect }); }
+    pub(crate) fn set_clip(&mut self, rect: Recti) {
+        self.push_command(Command::Clip { rect });
+    }
 
     pub(crate) fn check_clip(&self, r: Recti) -> Clip {
         let cr = self.current_clip_rect();
@@ -237,5 +249,7 @@ impl<'a> DrawCtx<'a> {
         Self::clamp(baseline_center - baseline, min_top, max_top)
     }
 
-    fn clamp(x: i32, a: i32, b: i32) -> i32 { min(b, max(a, x)) }
+    fn clamp(x: i32, a: i32, b: i32) -> i32 {
+        min(b, max(a, x))
+    }
 }

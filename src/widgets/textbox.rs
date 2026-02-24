@@ -96,7 +96,11 @@ impl Textbox {
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
         let font_height = atlas.get_font_height(style.font) as i32;
-        let text_w = if self.buf.is_empty() { 0 } else { atlas.get_text_size(style.font, self.buf.as_str()).width };
+        let text_w = if self.buf.is_empty() {
+            0
+        } else {
+            atlas.get_text_size(style.font, self.buf.as_str()).width
+        };
         let mut width = (text_w + padding * 2 + 1).max(0);
         if avail.width > 0 {
             width = width.min(avail.width.max(0));

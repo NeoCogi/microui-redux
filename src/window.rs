@@ -275,21 +275,37 @@ impl WindowHandle {
         }
     }
 
-    pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Window> { self.0.borrow_mut() }
+    pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Window> {
+        self.0.borrow_mut()
+    }
 
-    pub(crate) fn inner<'a>(&'a self) -> Ref<'a, Window> { self.0.borrow() }
+    pub(crate) fn inner<'a>(&'a self) -> Ref<'a, Window> {
+        self.0.borrow()
+    }
 
-    pub(crate) fn prepare(&mut self) { self.inner_mut().main.prepare() }
+    pub(crate) fn prepare(&mut self) {
+        self.inner_mut().main.prepare()
+    }
 
-    pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) { self.0.borrow_mut().main.render(canvas) }
+    pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
+        self.0.borrow_mut().main.render(canvas)
+    }
 
-    pub(crate) fn finish(&mut self) { self.inner_mut().main.finish() }
+    pub(crate) fn finish(&mut self) {
+        self.inner_mut().main.finish()
+    }
 
-    pub(crate) fn zindex(&self) -> i32 { self.0.borrow().main.zindex }
+    pub(crate) fn zindex(&self) -> i32 {
+        self.0.borrow().main.zindex
+    }
 
-    pub(crate) fn begin_window(&mut self, opt: ContainerOption, bopt: WidgetBehaviourOption) { self.0.borrow_mut().begin_window(opt, bopt) }
+    pub(crate) fn begin_window(&mut self, opt: ContainerOption, bopt: WidgetBehaviourOption) {
+        self.0.borrow_mut().begin_window(opt, bopt)
+    }
 
-    pub(crate) fn end_window(&mut self) { self.inner_mut().end_window() }
+    pub(crate) fn end_window(&mut self) {
+        self.inner_mut().end_window()
+    }
 
     /// Resizes the underlying window rectangle.
     pub fn set_size(&mut self, size: &Dimensioni) {

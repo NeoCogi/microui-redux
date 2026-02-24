@@ -81,9 +81,15 @@ impl MeshBuffers {
         }
     }
 
-    pub fn vertices(&self) -> &[MeshVertex] { &self.vertices }
-    pub fn indices(&self) -> &[u32] { &self.indices }
-    pub fn is_empty(&self) -> bool { self.vertices.is_empty() || self.indices.is_empty() }
+    pub fn vertices(&self) -> &[MeshVertex] {
+        &self.vertices
+    }
+    pub fn indices(&self) -> &[u32] {
+        &self.indices
+    }
+    pub fn is_empty(&self) -> bool {
+        self.vertices.is_empty() || self.indices.is_empty()
+    }
 }
 
 #[derive(Clone)]
@@ -258,7 +264,9 @@ impl GLRenderer {
 }
 
 impl Renderer for GLRenderer {
-    fn get_atlas(&self) -> AtlasHandle { self.atlas.clone() }
+    fn get_atlas(&self) -> AtlasHandle {
+        self.atlas.clone()
+    }
 
     fn flush(&mut self) {
         self.update_atlas();
@@ -381,7 +389,9 @@ impl Renderer for GLRenderer {
         }
     }
 
-    fn end(&mut self) { self.flush(); }
+    fn end(&mut self) {
+        self.flush();
+    }
 
     fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) {
         let gl = &self.gl;

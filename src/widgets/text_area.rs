@@ -133,7 +133,9 @@ impl TextArea {
         Dimensioni::new(width, height)
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState { textarea_handle(ctx, control, self) }
+    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        textarea_handle(ctx, control, self)
+    }
 }
 
 fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea) -> ResourceState {

@@ -29,27 +29,6 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 // -----------------------------------------------------------------------------
-// Ported to rust from https://github.com/rxi/microui/ and the original license
-//
-// Copyright (c) 2020 rxi
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to
-// deal in the Software without restriction, including without limitation the
-// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-// sell copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-// IN THE SOFTWARE.
 //
 // Vulkan renderer optimizations (current status):
 // - UI and custom geometry uploads go through per-frame staging/device buffers that grow with
@@ -80,7 +59,9 @@ mod vk_builder {
 
     pub trait BuilderExt: Sized {
         fn builder() -> Self;
-        fn build(self) -> Self { self }
+        fn build(self) -> Self {
+            self
+        }
     }
 
     macro_rules! impl_lifetime {
@@ -276,7 +257,9 @@ impl VulkanRenderer {
 }
 
 impl Renderer for VulkanRenderer {
-    fn get_atlas(&self) -> AtlasHandle { self.atlas.clone() }
+    fn get_atlas(&self) -> AtlasHandle {
+        self.atlas.clone()
+    }
 
     fn begin(&mut self, width: i32, height: i32, clr: Color) {
         self.frame_index = self.frame_index.wrapping_add(1);
@@ -295,7 +278,9 @@ impl Renderer for VulkanRenderer {
         self.sync_atlas();
     }
 
-    fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) { self.vertices.extend_from_slice(&[*v0, *v1, *v2, *v0, *v2, *v3]); }
+    fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) {
+        self.vertices.extend_from_slice(&[*v0, *v1, *v2, *v0, *v2, *v3]);
+    }
 
     fn flush(&mut self) {
         // Match the GL renderer expectation: turn buffered UI vertices into a draw command before
@@ -429,9 +414,13 @@ impl MappedBuffer {
         Ok(Self { buffer, ptr })
     }
 
-    fn size(&self) -> vk::DeviceSize { self.buffer.size }
+    fn size(&self) -> vk::DeviceSize {
+        self.buffer.size
+    }
 
-    fn vk_buffer(&self) -> vk::Buffer { self.buffer.buffer }
+    fn vk_buffer(&self) -> vk::Buffer {
+        self.buffer.buffer
+    }
 
     fn write(&self, offset: vk::DeviceSize, data: &[u8]) -> Result<()> {
         if data.is_empty() {
@@ -499,9 +488,15 @@ impl MeshBuffers {
         }
     }
 
-    pub fn vertices(&self) -> &[MeshVertex] { &self.vertices }
-    pub fn indices(&self) -> &[u32] { &self.indices }
-    pub fn is_empty(&self) -> bool { self.vertices.is_empty() || self.indices.is_empty() }
+    pub fn vertices(&self) -> &[MeshVertex] {
+        &self.vertices
+    }
+    pub fn indices(&self) -> &[u32] {
+        &self.indices
+    }
+    pub fn is_empty(&self) -> bool {
+        self.vertices.is_empty() || self.indices.is_empty()
+    }
 }
 
 #[derive(Clone)]
@@ -527,9 +522,13 @@ struct CustomRenderJob {
     callback: Box<dyn VulkanCustomRenderer>,
 }
 
-fn vk_trace_enabled() -> bool { false }
+fn vk_trace_enabled() -> bool {
+    false
+}
 
-fn vk_dump_enabled() -> bool { false }
+fn vk_dump_enabled() -> bool {
+    false
+}
 
 // No-op toggles removed; keep environment helpers minimal.
 
@@ -1183,7 +1182,9 @@ impl UiResources {
         ]
     }
 
-    fn matrix_bytes(matrix: &[f32; 16]) -> &[u8] { unsafe { std::slice::from_raw_parts(matrix.as_ptr() as *const u8, mem::size_of::<[f32; 16]>()) } }
+    fn matrix_bytes(matrix: &[f32; 16]) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(matrix.as_ptr() as *const u8, mem::size_of::<[f32; 16]>()) }
+    }
 }
 
 struct MeshResources {
@@ -2334,9 +2335,15 @@ impl VulkanContext {
         }
     }
 
-    fn extent(&self) -> vk::Extent2D { self.extent }
-    fn swapchain_generation(&self) -> u64 { self.swapchain_generation }
-    fn ui_has_atlas(&self) -> bool { self.ui.as_ref().map(|ui| ui.atlas.is_some()).unwrap_or(false) }
+    fn extent(&self) -> vk::Extent2D {
+        self.extent
+    }
+    fn swapchain_generation(&self) -> u64 {
+        self.swapchain_generation
+    }
+    fn ui_has_atlas(&self) -> bool {
+        self.ui.as_ref().map(|ui| ui.atlas.is_some()).unwrap_or(false)
+    }
 
     fn upload_atlas(&mut self, atlas: &AtlasHandle) -> Result<()> {
         if let Some(mut ui) = self.ui.take() {
@@ -2348,7 +2355,9 @@ impl VulkanContext {
         }
     }
 
-    fn ui_descriptor_set(&self) -> Option<vk::DescriptorSet> { self.ui.as_ref().map(|ui| ui.descriptor_set) }
+    fn ui_descriptor_set(&self) -> Option<vk::DescriptorSet> {
+        self.ui.as_ref().map(|ui| ui.descriptor_set)
+    }
 
     fn draw_custom_vertices(
         &mut self,
@@ -2422,7 +2431,9 @@ impl VulkanContext {
         Ok(Buffer { buffer, memory, size })
     }
 
-    fn write_buffer(&self, buffer: &Buffer, data: &[u8]) -> Result<()> { self.write_buffer_offset(buffer, 0, data) }
+    fn write_buffer(&self, buffer: &Buffer, data: &[u8]) -> Result<()> {
+        self.write_buffer_offset(buffer, 0, data)
+    }
 
     fn write_buffer_offset(&self, buffer: &Buffer, offset: vk::DeviceSize, data: &[u8]) -> Result<()> {
         if data.is_empty() {
@@ -2554,7 +2565,9 @@ impl VulkanContext {
         })
     }
 
-    fn has_stencil_component(format: vk::Format) -> bool { matches!(format, vk::Format::D32_SFLOAT_S8_UINT | vk::Format::D24_UNORM_S8_UINT) }
+    fn has_stencil_component(format: vk::Format) -> bool {
+        matches!(format, vk::Format::D32_SFLOAT_S8_UINT | vk::Format::D24_UNORM_S8_UINT)
+    }
 
     fn copy_buffer_to_image(&self, buffer: &Buffer, image: &mut ImageResource) -> Result<()> {
         self.single_time_commands(|cmd| {
@@ -2890,5 +2903,7 @@ struct QueueFamilyIndices {
     present_family: u32,
 }
 impl VulkanContext {
-    fn scale_rect(&self, rect: Recti) -> Recti { scale_rect_to_surface(rect, self.logical_width, self.logical_height, self.extent.width, self.extent.height) }
+    fn scale_rect(&self, rect: Recti) -> Recti {
+        scale_rect_to_surface(rect, self.logical_width, self.logical_height, self.extent.width, self.extent.height)
+    }
 }

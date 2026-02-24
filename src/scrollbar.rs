@@ -73,7 +73,9 @@ pub(crate) fn scrollbar_base(axis: ScrollAxis, body: Recti, scrollbar_size: i32)
     base
 }
 
-pub(crate) fn scrollbar_max_scroll(content_len: i32, view_len: i32) -> i32 { (content_len - view_len).max(0) }
+pub(crate) fn scrollbar_max_scroll(content_len: i32, view_len: i32) -> i32 {
+    (content_len - view_len).max(0)
+}
 
 pub(crate) fn scrollbar_drag_delta(axis: ScrollAxis, delta: Vec2i, content_len: i32, base: Recti) -> i32 {
     let base_len = match axis {
