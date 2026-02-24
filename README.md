@@ -108,6 +108,20 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
 - `Container::text_with_wrap` supports explicit wrapping modes (`TextWrap::None` or `TextWrap::Word`) and renders wrapped lines back-to-back inside an internal column, so the block keeps the outer padding without adding extra spacing between lines.
 - Custom drawing code can call `Container::draw_text` directly when precise placement is required, or use `draw_control_text` to get automatic alignment/clip handling.
 
+### Version 0.5
+- [x] Widget identity moved fully to pointer-based IDs.
+    - [x] Removed `with_id`; focus/hover now use widget trait-object/state pointers.
+- [x] Layout refactor: introduced `LayoutEngine` + specialized flows (`RowFlow`, `StackFlow`) instead of a one-size-fits-all manager.
+    - [x] Preferred sizing pipeline: widget helpers now call `Widget::preferred_size` before rectangle allocation.
+    - [x] Directional stack support: `StackDirection::{TopToBottom, BottomToTop}` plus `stack_direction` and `stack_with_width_direction`.
+- [x] Context/container API cleanup: `Context` module split, input forwarding helpers, container state encapsulation, and handle views.
+- [x] Widget internals cleanup: helper macroization/simplification, node/widget scaffolding unification, and text widget module split.
+- [x] Text and input fixes: shared text layout/edit paths, textbox delete/end fixes, centralized widget input fallback.
+- [x] Scrollbar behavior cleanup: unified sizing, layout, and drag handling.
+- [x] File dialog and atlas fixes, including file dialog layout redesign and footer/button spacing corrections.
+- [x] Added WGPU example backend and migrated demo-full to new layout flow APIs.
+- [x] Added directional stack demo window and expanded documentation/comments for layout and WGPU renderer.
+
 ### Version 0.4
 - [x] Stateful widgets
     - [x] Stateful widgets for core controls (button, list item, checkbox, textbox, slider, number, custom).
