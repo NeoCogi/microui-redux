@@ -407,7 +407,7 @@ impl<'a> State<'a> {
             ContainerOption::NONE,
             WidgetBehaviourOption::NONE,
             |container| {
-                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(24), |container| {
+                container.stack(SizePolicy::Remainder(24), |container| {
                     container.panel(
                         self.log_output.as_mut().unwrap(),
                         ContainerOption::NONE,
@@ -416,7 +416,7 @@ impl<'a> State<'a> {
                             container_handle.with_mut(|container| {
                                 let mut scroll = container.scroll();
                                 let content_size = container.content_size();
-                                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                                container.stack(SizePolicy::Remainder(0), |container| {
                                     container.text(self.logbuf.as_str());
 
                                     if self.logbuf_updated {
@@ -464,7 +464,7 @@ impl<'a> State<'a> {
             ContainerOption::NONE,
             WidgetBehaviourOption::NONE,
             |container| {
-                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                container.stack(SizePolicy::Remainder(0), |container| {
                     container.custom_render_widget(triangle_widget, move |_dim, cra| {
                         if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                             return;
@@ -497,7 +497,7 @@ impl<'a> State<'a> {
             ContainerOption::NONE,
             WidgetBehaviourOption::NONE,
             |container| {
-                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                container.stack(SizePolicy::Remainder(0), |container| {
                     container.custom_render_widget(suzane_widget, move |_dim, cra| {
                         if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                             return;
@@ -650,7 +650,7 @@ impl<'a> State<'a> {
                     self.combo_items[3].label.as_str(),
                 ];
                 container.header(combo_header, |container| {
-                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                    container.stack(SizePolicy::Auto, |container| {
                         let (anchor, toggled, _) = container.combo_box(combo_state, &combo_labels);
                         combo_anchor = Some(anchor);
                         if toggled {
@@ -712,7 +712,7 @@ impl<'a> State<'a> {
                             });
                         });
                         container.column(|container| {
-                            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                            container.stack(SizePolicy::Auto, |container| {
                                 container.text_with_wrap(
                                     "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.",
                                     TextWrap::Word,
@@ -730,7 +730,7 @@ impl<'a> State<'a> {
                 let text_area_header = &mut self.text_area_header;
                 let text_area = &mut self.text_area;
                 container.header(text_area_header, |container| {
-                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(120), |container| {
+                    container.stack(SizePolicy::Fixed(120), |container| {
                         container.textarea(text_area);
                     });
                 });
@@ -768,17 +768,17 @@ impl<'a> State<'a> {
                 let slot_buttons = &mut self.slot_buttons;
                 let external_image_button = &mut self.external_image_button;
                 container.header(slot_header, |container| {
-                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67), |container| {
+                    container.stack(SizePolicy::Fixed(67), |container| {
                         container.button(&mut slot_buttons[0]);
                         container.button(&mut slot_buttons[1]);
                         container.button(&mut slot_buttons[2]);
                         if let Some(button) = external_image_button.as_mut() {
-                            container.with_row(&[SizePolicy::Fixed(256)], SizePolicy::Fixed(256), |ctx| {
+                            container.stack_with_width(SizePolicy::Fixed(256), SizePolicy::Fixed(256), |ctx| {
                                 ctx.button(button);
                             });
                         }
                     });
-                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(67), |container| {
+                    container.stack(SizePolicy::Fixed(67), |container| {
                         container.button(&mut slot_buttons[3]);
                     });
                 });
@@ -795,7 +795,7 @@ impl<'a> State<'a> {
             }
 
             ctx.popup(popup, WidgetBehaviourOption::NO_SCROLL, |dropdown| {
-                dropdown.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |dropdown| {
+                dropdown.stack(SizePolicy::Auto, |dropdown| {
                     for (idx, item) in combo_items.iter_mut().enumerate() {
                         if dropdown.list_item(item).is_submitted() {
                             combo_state.selected = idx;
@@ -804,7 +804,11 @@ impl<'a> State<'a> {
                         }
                     }
                 });
-                if combo_changed { WindowState::Closed } else { WindowState::Open }
+                if combo_changed {
+                    WindowState::Closed
+                } else {
+                    WindowState::Open
+                }
             });
 
             if !popup.is_open() {
@@ -832,7 +836,7 @@ impl<'a> State<'a> {
         {
             let popup_buttons = &mut self.popup_buttons;
             ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), WidgetBehaviourOption::NO_SCROLL, |ctx| {
-                ctx.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |ctx| {
+                ctx.stack(SizePolicy::Auto, |ctx| {
                     if ctx.button(&mut popup_buttons[0]).is_submitted() {
                         popup_logs.push("Hello")
                     }

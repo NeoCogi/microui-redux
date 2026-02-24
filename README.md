@@ -23,7 +23,7 @@ Running with only `--features example-backend` will fail intentionally at compil
 ## Key Concepts
 - **Context**: owns the renderer handle, user input, and root windows. The atlas is provided by the renderer and accessed through the context. Each frame starts by feeding input into the context, then calling `context.window(...)` for every visible window or popup.
 - **Container**: describes one layout surface. Every window, panel, popup or custom widget receives a mutable `Container` that exposes high-level widgets (buttons, sliders, etc.) and lower-level drawing helpers.
-- **Layout manager**: controls how cells are sized. `Container::with_row` lets you scope a set of widgets to a row of `SizePolicy`s, while nested columns can be created with `container.column(|ui| { ... })`. Widget helpers (`button`, `textbox`, `slider`, etc.) query each widget's `preferred_size` before allocating the cell, so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
+- **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. Use `Container::with_row` for row tracks, `Container::stack` for one-item-per-line sections, and `container.column(|ui| { ... })` for nested scopes. Widget helpers (`button`, `textbox`, `slider`, etc.) query each widget's `preferred_size` before allocating the cell, so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). These structs hold interaction state and use pointer-derived IDs from their current address.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
 
@@ -33,7 +33,7 @@ ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE,
     let widths = [SizePolicy::Fixed(120), SizePolicy::Remainder(0)];
     ui.with_row(&widths, SizePolicy::Auto, |ui| {
         ui.label("Name");
-        ui.textbox_ex(&mut name);
+        ui.textbox(&mut name);
     });
 });
 ```
@@ -55,7 +55,13 @@ for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widg
 - Every built-in widget now reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
 - `Container` widget helpers call `Widget::preferred_size` first, then allocate the widget rectangle, then call `Widget::handle`.
 - Returning `<= 0` for either axis still means "use layout fallback/defaults" for that axis.
-- Raw layout helpers like `next_cell()` and `label()` do not run widget preferred sizing.
+- `next_cell()` is the raw layout helper that does not run widget preferred sizing.
+
+### Flow helpers
+- `with_row(widths, height, ...)` configures an explicit multi-slot row track.
+- `stack(height, ...)` configures a vertical one-slot flow with width `SizePolicy::Remainder(0)`.
+- `stack_with_width(width, height, ...)` is the same as `stack`, but with explicit width policy.
+- `column(...)` starts a nested scope; inside it you can choose row or stack flow independently.
 
 ## Images and textures
 Some widgets can render an `Image`, which can reference either a slot **or** an uploaded texture at runtime:

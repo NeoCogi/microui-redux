@@ -164,7 +164,9 @@ pub(crate) enum Command {
 }
 
 impl Default for Command {
-    fn default() -> Self { Command::None }
+    fn default() -> Self {
+        Command::None
+    }
 }
 
 /// Core UI building block that records commands and hosts layouts.
@@ -263,7 +265,9 @@ impl Container {
         self.scroll_enabled = true;
     }
 
-    pub(crate) fn seed_pending_scroll(&mut self, delta: Option<Vec2i>) { self.pending_scroll = delta; }
+    pub(crate) fn seed_pending_scroll(&mut self, delta: Option<Vec2i>) {
+        self.pending_scroll = delta;
+    }
 
     #[inline(never)]
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
@@ -309,7 +313,9 @@ impl Container {
         }
     }
 
-    fn draw_ctx(&mut self) -> DrawCtx<'_> { DrawCtx::new(&mut self.command_list, &mut self.clip_stack, self.style.as_ref(), &self.atlas) }
+    fn draw_ctx(&mut self) -> DrawCtx<'_> {
+        DrawCtx::new(&mut self.command_list, &mut self.clip_stack, self.style.as_ref(), &self.atlas)
+    }
 
     /// Pushes a new clip rectangle combined with the previous clip.
     pub fn push_clip_rect(&mut self, rect: Recti) {
@@ -324,10 +330,14 @@ impl Container {
     }
 
     /// Returns the active clip rectangle, or an unclipped rect when the stack is empty.
-    pub fn get_clip_rect(&mut self) -> Recti { self.draw_ctx().current_clip_rect() }
+    pub fn get_clip_rect(&mut self) -> Recti {
+        self.draw_ctx().current_clip_rect()
+    }
 
     /// Determines whether `r` is fully visible, partially visible, or completely clipped.
-    pub fn check_clip(&mut self, r: Recti) -> Clip { self.draw_ctx().check_clip(r) }
+    pub fn check_clip(&mut self, r: Recti) -> Clip {
+        self.draw_ctx().check_clip(r)
+    }
 
     /// Adjusts the current clip rectangle.
     pub fn set_clip(&mut self, rect: Recti) {
@@ -379,7 +389,9 @@ impl Container {
 
     #[inline(never)]
     /// Draws multi-line text within the container without wrapping.
-    pub fn text(&mut self, text: &str) { self.text_with_wrap(text, TextWrap::None); }
+    pub fn text(&mut self, text: &str) {
+        self.text_with_wrap(text, TextWrap::None);
+    }
 
     #[inline(never)]
     /// Draws multi-line text within the container using the provided wrapping mode.
@@ -617,22 +629,34 @@ impl Container {
     }
 
     /// Returns the outer container rectangle.
-    pub fn rect(&self) -> Recti { self.rect }
+    pub fn rect(&self) -> Recti {
+        self.rect
+    }
 
     /// Sets the outer container rectangle.
-    pub fn set_rect(&mut self, rect: Recti) { self.rect = rect; }
+    pub fn set_rect(&mut self, rect: Recti) {
+        self.rect = rect;
+    }
 
     /// Returns the inner container body rectangle.
-    pub fn body(&self) -> Recti { self.body }
+    pub fn body(&self) -> Recti {
+        self.body
+    }
 
     /// Returns the current scroll offset.
-    pub fn scroll(&self) -> Vec2i { self.scroll }
+    pub fn scroll(&self) -> Vec2i {
+        self.scroll
+    }
 
     /// Sets the current scroll offset.
-    pub fn set_scroll(&mut self, scroll: Vec2i) { self.scroll = scroll; }
+    pub fn set_scroll(&mut self, scroll: Vec2i) {
+        self.scroll = scroll;
+    }
 
     /// Returns the content size derived from layout traversal.
-    pub fn content_size(&self) -> Vec2i { self.content_size }
+    pub fn content_size(&self) -> Vec2i {
+        self.content_size
+    }
 
     fn node_scope<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, indent: bool, f: F) -> NodeStateValue {
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
@@ -654,12 +678,18 @@ impl Container {
     }
 
     /// Builds a collapsible header row that executes `f` when expanded.
-    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue { self.node_scope(state, false, f) }
+    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
+        self.node_scope(state, false, f)
+    }
 
     /// Builds a tree node with automatic indentation while expanded.
-    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue { self.node_scope(state, true, f) }
+    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
+        self.node_scope(state, true, f)
+    }
 
-    fn clamp(x: i32, a: i32, b: i32) -> i32 { min(b, max(a, x)) }
+    fn clamp(x: i32, a: i32, b: i32) -> i32 {
+        min(b, max(a, x))
+    }
 
     /// Returns the y coordinate where a line of text should start so its baseline sits at the control midpoint.
     fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32) -> i32 {
@@ -673,7 +703,9 @@ impl Container {
         Self::clamp(baseline_center - baseline, min_top, max_top)
     }
 
-    fn vertical_text_padding(padding: i32) -> i32 { max(1, padding / 2) }
+    fn vertical_text_padding(padding: i32) -> i32 {
+        max(1, padding / 2)
+    }
 
     pub(crate) fn consume_pending_scroll(&mut self) {
         if !self.scroll_enabled {
@@ -882,10 +914,26 @@ impl Container {
 
     /// Temporarily overrides the row definition and restores it after `f` executes.
     pub fn with_row<F: FnOnce(&mut Self)>(&mut self, widths: &[SizePolicy], height: SizePolicy, f: F) {
-        let snapshot = self.layout.snapshot_row_state();
+        let snapshot = self.layout.snapshot_flow_state();
         self.layout.row(widths, height);
         f(self);
-        self.layout.restore_row_state(snapshot);
+        self.layout.restore_flow_state(snapshot);
+    }
+
+    /// Temporarily uses a vertical stack flow and restores the previous flow after `f` executes.
+    ///
+    /// Each `next_cell`/widget call in the scope gets a dedicated row using `height`.
+    /// Width defaults to `Remainder(0)` so cells fill available horizontal space.
+    pub fn stack<F: FnOnce(&mut Self)>(&mut self, height: SizePolicy, f: F) {
+        self.stack_with_width(SizePolicy::Remainder(0), height, f);
+    }
+
+    /// Same as [`Container::stack`], but allows overriding the stack cell width policy.
+    pub fn stack_with_width<F: FnOnce(&mut Self)>(&mut self, width: SizePolicy, height: SizePolicy, f: F) {
+        let snapshot = self.layout.snapshot_flow_state();
+        self.layout.stack(width, height);
+        f(self);
+        self.layout.restore_flow_state(snapshot);
     }
 
     /// Creates a nested column scope where each call to `next_cell` yields a single column.
@@ -899,19 +947,40 @@ impl Container {
     ///
     /// Unlike widget helper methods (`button`, `textbox`, etc.), this does not consult
     /// a widget's `preferred_size`; it uses only the current row/column policies.
-    pub fn next_cell(&mut self) -> Recti { self.layout.next() }
+    pub fn next_cell(&mut self) -> Recti {
+        self.layout.next()
+    }
 
     /// Replaces the container's style.
-    pub fn set_style(&mut self, style: Style) { self.style = Rc::new(style); }
+    pub fn set_style(&mut self, style: Style) {
+        self.style = Rc::new(style);
+    }
 
     /// Returns a copy of the current style.
-    pub fn get_style(&self) -> Style { (*self.style).clone() }
+    pub fn get_style(&self) -> Style {
+        (*self.style).clone()
+    }
 
     /// Displays static text using the default text color.
     ///
-    /// This helper consumes a raw layout cell directly and does not use widget preferred sizing.
+    /// This helper uses intrinsic text metrics to request a preferred cell size.
     pub fn label(&mut self, text: &str) {
-        let layout = self.layout.next();
+        let (font, padding) = {
+            let style = self.style.as_ref();
+            (style.font, style.padding.max(0))
+        };
+        let text_width = if text.is_empty() {
+            0
+        } else {
+            self.atlas.get_text_size(font, text).width.max(0)
+        };
+        let line_height = self.atlas.get_font_height(font) as i32;
+        let vertical_pad = Self::vertical_text_padding(padding);
+        let preferred = Dimensioni::new(
+            text_width.saturating_add(padding.saturating_mul(2)),
+            line_height.saturating_add(vertical_pad.saturating_mul(2)),
+        );
+        let layout = self.layout.next_with_preferred(preferred);
         self.draw_control_text(text, layout, ControlColor::Text, WidgetOption::NONE);
     }
 
