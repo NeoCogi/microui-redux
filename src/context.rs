@@ -101,7 +101,9 @@ impl<R: Renderer> Context<R> {
 
 impl<R: Renderer> Context<R> {
     /// Begins a new draw pass on the underlying canvas.
-    pub fn begin(&mut self, width: i32, height: i32, clr: Color) { self.canvas.begin(width, height, clr); }
+    pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
+        self.canvas.begin(width, height, clr);
+    }
 
     /// Flushes recorded draw commands to the renderer and ends the draw pass.
     pub fn end(&mut self) {
@@ -112,34 +114,54 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Returns a handle to the underlying renderer.
-    pub fn renderer_handle(&self) -> RendererHandle<R> { self.canvas.renderer_handle() }
+    pub fn renderer_handle(&self) -> RendererHandle<R> {
+        self.canvas.renderer_handle()
+    }
 
     /// Updates the current mouse pointer position.
-    pub fn mousemove(&mut self, x: i32, y: i32) { self.input.borrow_mut().mousemove(x, y); }
+    pub fn mousemove(&mut self, x: i32, y: i32) {
+        self.input.borrow_mut().mousemove(x, y);
+    }
 
     /// Records that the specified mouse button was pressed.
-    pub fn mousedown(&mut self, x: i32, y: i32, btn: MouseButton) { self.input.borrow_mut().mousedown(x, y, btn); }
+    pub fn mousedown(&mut self, x: i32, y: i32, btn: MouseButton) {
+        self.input.borrow_mut().mousedown(x, y, btn);
+    }
 
     /// Records that the specified mouse button was released.
-    pub fn mouseup(&mut self, x: i32, y: i32, btn: MouseButton) { self.input.borrow_mut().mouseup(x, y, btn); }
+    pub fn mouseup(&mut self, x: i32, y: i32, btn: MouseButton) {
+        self.input.borrow_mut().mouseup(x, y, btn);
+    }
 
     /// Accumulates scroll wheel movement.
-    pub fn scroll(&mut self, x: i32, y: i32) { self.input.borrow_mut().scroll(x, y); }
+    pub fn scroll(&mut self, x: i32, y: i32) {
+        self.input.borrow_mut().scroll(x, y);
+    }
 
     /// Records that a modifier key was pressed.
-    pub fn keydown(&mut self, key: KeyMode) { self.input.borrow_mut().keydown(key); }
+    pub fn keydown(&mut self, key: KeyMode) {
+        self.input.borrow_mut().keydown(key);
+    }
 
     /// Records that a modifier key was released.
-    pub fn keyup(&mut self, key: KeyMode) { self.input.borrow_mut().keyup(key); }
+    pub fn keyup(&mut self, key: KeyMode) {
+        self.input.borrow_mut().keyup(key);
+    }
 
     /// Records that a navigation key was pressed.
-    pub fn keydown_code(&mut self, code: KeyCode) { self.input.borrow_mut().keydown_code(code); }
+    pub fn keydown_code(&mut self, code: KeyCode) {
+        self.input.borrow_mut().keydown_code(code);
+    }
 
     /// Records that a navigation key was released.
-    pub fn keyup_code(&mut self, code: KeyCode) { self.input.borrow_mut().keyup_code(code); }
+    pub fn keyup_code(&mut self, code: KeyCode) {
+        self.input.borrow_mut().keyup_code(code);
+    }
 
     /// Appends UTF-8 text to the input buffer.
-    pub fn text(&mut self, text: &str) { self.input.borrow_mut().text(text); }
+    pub fn text(&mut self, text: &str) {
+        self.input.borrow_mut().text(text);
+    }
 
     #[inline(never)]
     fn frame_begin(&mut self) {
@@ -207,7 +229,9 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Creates a popup window that appears under the mouse cursor.
-    pub fn new_popup(&mut self, name: &str) -> WindowHandle { WindowHandle::popup(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone()) }
+    pub fn new_popup(&mut self, name: &str) -> WindowHandle {
+        WindowHandle::popup(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone())
+    }
 
     /// Creates a standalone panel that can be embedded inside other windows.
     pub fn new_panel(&mut self, name: &str) -> ContainerHandle {
@@ -291,7 +315,9 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Marks a dialog window as open for the next frame.
-    pub fn open_dialog(&mut self, window: &mut WindowHandle) { window.inner_mut().win_state = WindowState::Open; }
+    pub fn open_dialog(&mut self, window: &mut WindowHandle) {
+        window.inner_mut().win_state = WindowState::Open;
+    }
 
     /// Renders a dialog window if it is currently open.
     pub fn dialog<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, f: F) {
@@ -362,16 +388,24 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Replaces the current UI style.
-    pub fn set_style(&mut self, style: &Style) { self.style = Rc::new(style.clone()) }
+    pub fn set_style(&mut self, style: &Style) {
+        self.style = Rc::new(style.clone())
+    }
 
     /// Returns the underlying canvas used for rendering.
-    pub fn canvas(&self) -> &Canvas<R> { &self.canvas }
+    pub fn canvas(&self) -> &Canvas<R> {
+        &self.canvas
+    }
 
     /// Uploads an RGBA image to the renderer and returns its [`TextureId`].
-    pub fn load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId { self.canvas.load_texture_rgba(width, height, pixels) }
+    pub fn load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId {
+        self.canvas.load_texture_rgba(width, height, pixels)
+    }
 
     /// Deletes a previously uploaded texture.
-    pub fn free_image(&mut self, id: TextureId) { self.canvas.free_texture(id); }
+    pub fn free_image(&mut self, id: TextureId) {
+        self.canvas.free_texture(id);
+    }
 
     /// Uploads texture data described by `source`. PNG decoding is only available when the
     /// `png_source` (or `builder`) feature is enabled.

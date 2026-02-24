@@ -41,16 +41,24 @@ pub struct Vertex {
 
 impl Vertex {
     /// Creates a vertex with the provided position, texture coordinate, and color.
-    pub fn new(pos: Vec2f, tex: Vec2f, color: Color4b) -> Self { Self { pos, tex, color } }
+    pub fn new(pos: Vec2f, tex: Vec2f, color: Color4b) -> Self {
+        Self { pos, tex, color }
+    }
 
     /// Returns the position of the vertex in screen space.
-    pub fn position(&self) -> Vec2f { self.pos }
+    pub fn position(&self) -> Vec2f {
+        self.pos
+    }
 
     /// Returns the texture coordinates associated with the vertex.
-    pub fn tex_coord(&self) -> Vec2f { self.tex }
+    pub fn tex_coord(&self) -> Vec2f {
+        self.tex
+    }
 
     /// Returns the vertex color.
-    pub fn color(&self) -> Color4b { self.color }
+    pub fn color(&self) -> Color4b {
+        self.color
+    }
 }
 
 /// High-level drawing helper that batches draw commands for a renderer.
@@ -83,7 +91,9 @@ impl<R: Renderer> Canvas<R> {
     }
 
     /// Returns the atlas associated with the renderer.
-    pub fn get_atlas(&self) -> AtlasHandle { self.renderer.scope(|r| r.get_atlas()) }
+    pub fn get_atlas(&self) -> AtlasHandle {
+        self.renderer.scope(|r| r.get_atlas())
+    }
 
     #[inline(never)]
     /// Computes the clipped destination/source rectangles for rendering.
@@ -232,10 +242,14 @@ impl<R: Renderer> Canvas<R> {
     }
 
     /// Sets the clip rectangle used for subsequent draw calls.
-    pub fn set_clip_rect(&mut self, rect: Recti) { self.clip = rect; }
+    pub fn set_clip_rect(&mut self, rect: Recti) {
+        self.clip = rect;
+    }
 
     /// Returns the clip rectangle currently applied to draw commands.
-    pub fn current_clip_rect(&self) -> Recti { self.clip }
+    pub fn current_clip_rect(&self) -> Recti {
+        self.clip
+    }
 
     /// Begins a new drawing pass and resets the clip rectangle.
     pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
@@ -245,16 +259,24 @@ impl<R: Renderer> Canvas<R> {
     }
 
     /// Ends the current drawing pass.
-    pub fn end(&mut self) { self.renderer.scope_mut(|r| r.end()) }
+    pub fn end(&mut self) {
+        self.renderer.scope_mut(|r| r.end())
+    }
 
     /// Flushes any buffered geometry without ending the frame.
-    pub fn flush(&mut self) { self.renderer.scope_mut(|r| r.flush()) }
+    pub fn flush(&mut self) {
+        self.renderer.scope_mut(|r| r.flush())
+    }
 
     /// Returns the last viewport dimensions passed to [`Canvas::begin`].
-    pub fn current_dimension(&self) -> Dimensioni { self.current_dim }
+    pub fn current_dimension(&self) -> Dimensioni {
+        self.current_dim
+    }
 
     /// Returns a clone of the underlying renderer handle.
-    pub fn renderer_handle(&self) -> RendererHandle<R> { self.renderer.clone() }
+    pub fn renderer_handle(&self) -> RendererHandle<R> {
+        self.renderer.clone()
+    }
 
     /// Uploads raw RGBA pixels as a renderer-owned texture.
     pub fn load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId {
@@ -347,7 +369,9 @@ mod tests {
     struct NoopRenderer;
 
     impl Renderer for NoopRenderer {
-        fn get_atlas(&self) -> AtlasHandle { unimplemented!() }
+        fn get_atlas(&self) -> AtlasHandle {
+            unimplemented!()
+        }
         fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
         fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {}
         fn flush(&mut self) {}

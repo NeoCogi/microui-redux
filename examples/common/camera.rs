@@ -206,34 +206,56 @@ impl Camera {
         self.projection = perspective(self.fov, self.aspect, self.near_plane, self.far_plane);
     }
 
-    pub fn position(&self) -> Vec3f { self.pos }
-    pub fn rotation(&self) -> Quatf { self.rotation }
-    pub fn up(&self) -> Vec3f { self.up }
-    pub fn direction(&self) -> Vec3f { self.direction }
-    pub fn distance(&self) -> f32 { self.distance }
-    pub fn target(&self) -> Vec3f { self.target }
-    pub fn view_matrix(&self) -> &Mat4f { &self.view }
-    pub fn projection_matrix(&self) -> &Mat4f { &self.projection }
+    pub fn position(&self) -> Vec3f {
+        self.pos
+    }
+    pub fn rotation(&self) -> Quatf {
+        self.rotation
+    }
+    pub fn up(&self) -> Vec3f {
+        self.up
+    }
+    pub fn direction(&self) -> Vec3f {
+        self.direction
+    }
+    pub fn distance(&self) -> f32 {
+        self.distance
+    }
+    pub fn target(&self) -> Vec3f {
+        self.target
+    }
+    pub fn view_matrix(&self) -> &Mat4f {
+        &self.view
+    }
+    pub fn projection_matrix(&self) -> &Mat4f {
+        &self.projection
+    }
     pub fn with_aspect(mut self, aspect: f32) -> Self {
         self.aspect = aspect;
         self.update_matrices();
         self
     }
-    pub fn fov(&self) -> f32 { self.fov }
+    pub fn fov(&self) -> f32 {
+        self.fov
+    }
     pub fn with_fov(mut self, fov: f32) -> Self {
         self.fov = fov;
         self.projection = perspective(self.fov, self.aspect, self.near_plane, self.far_plane);
         self
     }
 
-    pub fn near_plane(&self) -> f32 { self.near_plane }
+    pub fn near_plane(&self) -> f32 {
+        self.near_plane
+    }
     pub fn with_near_plane(mut self, np: f32) -> Self {
         self.near_plane = np;
         self.update_matrices();
         self
     }
 
-    pub fn far_plane(&self) -> f32 { self.far_plane }
+    pub fn far_plane(&self) -> f32 {
+        self.far_plane
+    }
     pub fn with_far_plane(mut self, fp: f32) -> Self {
         self.far_plane = fp;
         self.update_matrices();
