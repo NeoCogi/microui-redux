@@ -925,13 +925,27 @@ impl Container {
     /// Each `next_cell`/widget call in the scope gets a dedicated row using `height`.
     /// Width defaults to `Remainder(0)` so cells fill available horizontal space.
     pub fn stack<F: FnOnce(&mut Self)>(&mut self, height: SizePolicy, f: F) {
-        self.stack_with_width(SizePolicy::Remainder(0), height, f);
+        self.stack_with_width_direction(SizePolicy::Remainder(0), height, StackDirection::TopToBottom, f);
+    }
+
+    /// Same as [`Container::stack`], but controls whether items are emitted top-down or bottom-up.
+    pub fn stack_direction<F: FnOnce(&mut Self)>(&mut self, height: SizePolicy, direction: StackDirection, f: F) {
+        self.stack_with_width_direction(SizePolicy::Remainder(0), height, direction, f);
     }
 
     /// Same as [`Container::stack`], but allows overriding the stack cell width policy.
     pub fn stack_with_width<F: FnOnce(&mut Self)>(&mut self, width: SizePolicy, height: SizePolicy, f: F) {
+        self.stack_with_width_direction(width, height, StackDirection::TopToBottom, f);
+    }
+
+    /// Same as [`Container::stack_with_width`], but controls whether items are emitted top-down or bottom-up.
+    pub fn stack_with_width_direction<F: FnOnce(&mut Self)>(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: F) {
         let snapshot = self.layout.snapshot_flow_state();
-        self.layout.stack(width, height);
+        if direction == StackDirection::TopToBottom {
+            self.layout.stack(width, height);
+        } else {
+            self.layout.stack_with_direction(width, height, direction);
+        }
         f(self);
         self.layout.restore_flow_state(snapshot);
     }

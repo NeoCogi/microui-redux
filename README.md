@@ -23,7 +23,7 @@ Running with only `--features example-backend` will fail intentionally at compil
 ## Key Concepts
 - **Context**: owns the renderer handle, user input, and root windows. The atlas is provided by the renderer and accessed through the context. Each frame starts by feeding input into the context, then calling `context.window(...)` for every visible window or popup.
 - **Container**: describes one layout surface. Every window, panel, popup or custom widget receives a mutable `Container` that exposes high-level widgets (buttons, sliders, etc.) and lower-level drawing helpers.
-- **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. Use `Container::with_row` for row tracks, `Container::stack` for one-item-per-line sections, and `container.column(|ui| { ... })` for nested scopes. Widget helpers (`button`, `textbox`, `slider`, etc.) query each widget's `preferred_size` before allocating the cell, so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
+- **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. Use `Container::with_row` for row tracks, `Container::stack`/`Container::stack_direction` for one-item-per-line sections, and `container.column(|ui| { ... })` for nested scopes. Widget helpers (`button`, `textbox`, `slider`, etc.) query each widget's `preferred_size` before allocating the cell, so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). These structs hold interaction state and use pointer-derived IDs from their current address.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
 
@@ -60,7 +60,9 @@ for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widg
 ### Flow helpers
 - `with_row(widths, height, ...)` configures an explicit multi-slot row track.
 - `stack(height, ...)` configures a vertical one-slot flow with width `SizePolicy::Remainder(0)`.
+- `stack_direction(height, direction, ...)` is the same as `stack`, but allows `StackDirection::BottomToTop`.
 - `stack_with_width(width, height, ...)` is the same as `stack`, but with explicit width policy.
+- `stack_with_width_direction(width, height, direction, ...)` combines explicit width policy with directional stacking.
 - `column(...)` starts a nested scope; inside it you can choose row or stack flow independently.
 
 ## Images and textures

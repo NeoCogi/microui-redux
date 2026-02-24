@@ -88,6 +88,7 @@ struct State<'a> {
     log_output: Option<ContainerHandle>,
     triangle_window: Option<WindowHandle>,
     suzane_window: Option<WindowHandle>,
+    stack_direction_window: Option<WindowHandle>,
     dialog_window: Option<FileDialogState>,
 
     fps: f32,
@@ -110,6 +111,7 @@ struct State<'a> {
     tree_buttons: [Button; 6],
     popup_buttons: [Button; 2],
     slot_buttons: [Button; 4],
+    stack_direction_buttons: [Button; 6],
     external_image_button: Option<Button>,
     checkboxes: [Checkbox; 3],
     open_popup: bool,
@@ -259,6 +261,7 @@ impl<'a> State<'a> {
             log_output: None,
             triangle_window: None,
             suzane_window: None,
+            stack_direction_window: None,
             dialog_window: None,
             fps: 0.0,
             last_frame: Instant::now(),
@@ -296,6 +299,14 @@ impl<'a> State<'a> {
                 Button::with_opt("World", WidgetOption::ALIGN_CENTER),
             ],
             slot_buttons,
+            stack_direction_buttons: [
+                Button::with_opt("Call 1", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Call 2", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Call 3", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Call 1", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Call 2", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("Call 3", WidgetOption::ALIGN_CENTER),
+            ],
             external_image_button,
             checkboxes: [
                 Checkbox::new("Checkbox 1", false),
@@ -559,6 +570,65 @@ impl<'a> State<'a> {
                 WindowState::Open
             },
         );
+    }
+
+    fn stack_direction_window(&mut self, ctx: &mut Context<BackendRenderer>) {
+        if self.stack_direction_window.is_none() {
+            return;
+        }
+
+        let buttons = &mut self.stack_direction_buttons;
+        let mut logs: Vec<&'static str> = Vec::new();
+        ctx.window(
+            &mut self.stack_direction_window.as_mut().unwrap().clone(),
+            ContainerOption::NONE,
+            WidgetBehaviourOption::NONE,
+            |container| {
+                let spacing = container.get_style().spacing.max(0);
+                let body_width = container.body().width.max(1);
+                let left_width = body_width.saturating_sub(spacing).max(2) / 2;
+                let columns = [SizePolicy::Fixed(left_width), SizePolicy::Remainder(0)];
+
+                container.with_row(&columns, SizePolicy::Auto, |container| {
+                    container.label("Top -> Bottom");
+                    container.label("Bottom -> Top");
+                });
+
+                container.with_row(&columns, SizePolicy::Fixed(120), |container| {
+                    container.column(|container| {
+                        container.stack_direction(SizePolicy::Fixed(28), StackDirection::TopToBottom, |container| {
+                            if container.button(&mut buttons[0]).is_submitted() {
+                                logs.push("Top->Bottom: call 1");
+                            }
+                            if container.button(&mut buttons[1]).is_submitted() {
+                                logs.push("Top->Bottom: call 2");
+                            }
+                            if container.button(&mut buttons[2]).is_submitted() {
+                                logs.push("Top->Bottom: call 3");
+                            }
+                        });
+                    });
+                    container.column(|container| {
+                        container.stack_direction(SizePolicy::Fixed(28), StackDirection::BottomToTop, |container| {
+                            if container.button(&mut buttons[3]).is_submitted() {
+                                logs.push("Bottom->Top: call 1");
+                            }
+                            if container.button(&mut buttons[4]).is_submitted() {
+                                logs.push("Bottom->Top: call 2");
+                            }
+                            if container.button(&mut buttons[5]).is_submitted() {
+                                logs.push("Bottom->Top: call 3");
+                            }
+                        });
+                    });
+                });
+                WindowState::Open
+            },
+        );
+
+        for msg in logs {
+            self.write_log(msg);
+        }
     }
 
     fn test_window(&mut self, ctx: &mut Context<BackendRenderer>) {
@@ -895,6 +965,7 @@ impl<'a> State<'a> {
             self.test_window(ctx);
             self.triangle_window(ctx);
             self.suzane_window(ctx);
+            self.stack_direction_window(ctx);
         })
     }
 }
@@ -924,6 +995,7 @@ fn main() {
         state.dialog_window = Some(FileDialogState::new(ctx));
         state.triangle_window = Some(ctx.new_window("Triangle Window", rect(200, 100, 200, 200)));
         state.suzane_window = Some(ctx.new_window("Suzane Window", rect(220, 220, 300, 300)));
+        state.stack_direction_window = Some(ctx.new_window("Stack Direction Demo", rect(530, 40, 280, 220)));
         state
     })
     .unwrap();

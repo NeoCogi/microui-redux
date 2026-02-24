@@ -85,7 +85,7 @@ pub use atlas::*;
 pub use canvas::*;
 pub use container::*;
 pub use context::Context;
-pub use layout::SizePolicy;
+pub use layout::{SizePolicy, StackDirection};
 pub use rect_packer::*;
 pub use rs_math3d::*;
 pub use window::*;
