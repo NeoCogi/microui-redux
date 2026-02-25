@@ -163,37 +163,77 @@ trait LayoutFlow {
     fn next_local(&mut self, scope: &mut ScopeState, ctx: ResolveCtx) -> Recti;
 }
 
+#[derive(Clone)]
+enum RowHeights {
+    Uniform(SizePolicy),
+    Tracks(Vec<SizePolicy>),
+}
+
+impl Default for RowHeights {
+    fn default() -> Self {
+        Self::Uniform(SizePolicy::Auto)
+    }
+}
+
 #[derive(Clone, Default)]
 struct RowFlow {
     // Width policy for each slot in the active row pattern.
     widths: Vec<SizePolicy>,
-    // Height policy shared by all cells in the row pattern.
-    height: SizePolicy,
+    // Height policy shared by all cells in the row pattern, or one policy per row track.
+    heights: RowHeights,
     // Current slot index in `widths`.
     item_index: usize,
+    // Current row index in the active pattern.
+    row_index: usize,
 }
 
 impl RowFlow {
     fn new(widths: &[SizePolicy], height: SizePolicy) -> Self {
+        Self::from_parts(widths.to_vec(), RowHeights::Uniform(height))
+    }
+
+    fn new_grid(widths: &[SizePolicy], heights: &[SizePolicy]) -> Self {
+        Self::from_parts(widths.to_vec(), RowHeights::Tracks(heights.to_vec()))
+    }
+
+    fn from_parts(widths: Vec<SizePolicy>, heights: RowHeights) -> Self {
         Self {
-            widths: widths.to_vec(),
-            height,
+            widths,
+            heights,
             item_index: 0,
+            row_index: 0,
         }
     }
 
-    fn apply_template(&mut self, widths: Vec<SizePolicy>, height: SizePolicy) {
+    fn apply_template(&mut self, widths: Vec<SizePolicy>, heights: RowHeights) {
         self.widths = widths;
-        self.height = height;
+        self.heights = heights;
+        self.item_index = 0;
+        self.row_index = 0;
+    }
+
+    fn current_height_policy(&self) -> (SizePolicy, Option<i32>) {
+        match &self.heights {
+            RowHeights::Uniform(policy) => (*policy, None),
+            RowHeights::Tracks(policies) => {
+                if policies.is_empty() {
+                    (SizePolicy::Auto, Some(1))
+                } else {
+                    let idx = self.row_index % policies.len();
+                    (policies[idx], Some(policies.len() as i32))
+                }
+            }
+        }
     }
 }
 
 impl LayoutFlow for RowFlow {
     fn next_local(&mut self, scope: &mut ScopeState, ctx: ResolveCtx) -> Recti {
         // Once all row slots are consumed, wrap to the next line and restart the pattern.
-        let row_len = self.widths.len();
-        if self.item_index == row_len {
+        let slot_count = self.widths.len().max(1);
+        if self.item_index >= slot_count {
             self.item_index = 0;
+            self.row_index = self.row_index.saturating_add(1);
             scope.reset_cursor_for_next_row();
         }
 
@@ -203,22 +243,25 @@ impl LayoutFlow for RowFlow {
         } else {
             self.widths.get(self.item_index).copied().unwrap_or(SizePolicy::Auto)
         };
+        let (height_policy, row_count_hint) = self.current_height_policy();
 
         let x = scope.cursor.x;
         let y = scope.cursor.y;
-        let slot_count = self.widths.len().max(1) as i32;
+        let slot_count = slot_count as i32;
         let row_spacing = ctx.spacing.saturating_mul(slot_count.saturating_sub(1));
         let row_reference_width = scope.body.width.saturating_sub(scope.indent).saturating_sub(row_spacing);
+        let row_reference_height = match row_count_hint {
+            Some(row_count) => scope.body.height.saturating_sub(ctx.spacing.saturating_mul(row_count.saturating_sub(1))),
+            None => scope.body.height,
+        };
 
         // Resolve dimensions from policy + remaining space inside scope bounds.
         let available_width = scope.body.width.saturating_sub(x);
         let available_height = scope.body.height.saturating_sub(y);
         let width = width_policy.resolve_with_reference(ctx.default_width, available_width, row_reference_width);
-        let height = self.height.resolve_with_reference(ctx.default_height, available_height, scope.body.height);
+        let height = height_policy.resolve_with_reference(ctx.default_height, available_height, row_reference_height);
 
-        if self.item_index < self.widths.len() {
-            self.item_index += 1;
-        }
+        self.item_index = self.item_index.saturating_add(1);
 
         // Advance cursor to the right and grow the next-line marker by the tallest seen cell.
         scope.cursor.x = scope.cursor.x.saturating_add(width).saturating_add(ctx.spacing);
@@ -317,7 +360,7 @@ impl FlowState {
         match self {
             FlowState::Row(row) => FlowTemplate::Row {
                 widths: row.widths.clone(),
-                height: row.height,
+                heights: row.heights.clone(),
             },
             FlowState::Stack(stack) => FlowTemplate::Stack {
                 width: stack.width,
@@ -329,10 +372,10 @@ impl FlowState {
 
     fn apply_template(&mut self, template: FlowTemplate) {
         match template {
-            FlowTemplate::Row { widths, height } => match self {
-                FlowState::Row(row) => row.apply_template(widths, height),
+            FlowTemplate::Row { widths, heights } => match self {
+                FlowState::Row(row) => row.apply_template(widths, heights),
                 _ => {
-                    *self = FlowState::Row(RowFlow::new(widths.as_slice(), height));
+                    *self = FlowState::Row(RowFlow::from_parts(widths, heights));
                 }
             },
             FlowTemplate::Stack { width, height, direction } => match self {
@@ -480,6 +523,13 @@ impl LayoutEngine {
         frame.scope.reset_cursor_for_next_row();
     }
 
+    pub fn grid(&mut self, widths: &[SizePolicy], heights: &[SizePolicy]) {
+        let frame = self.top_mut();
+        frame.flow = FlowState::Row(RowFlow::new_grid(widths, heights));
+        // Applying a new flow resets placement to the current line start.
+        frame.scope.reset_cursor_for_next_row();
+    }
+
     pub fn stack(&mut self, width: SizePolicy, height: SizePolicy) {
         self.stack_with_direction(width, height, StackDirection::TopToBottom);
     }
@@ -542,7 +592,7 @@ enum FlowTemplate {
     // Snapshot for row flow configuration.
     Row {
         widths: Vec<SizePolicy>,
-        height: SizePolicy,
+        heights: RowHeights,
     },
     // Snapshot for stack flow configuration.
     Stack {
@@ -687,5 +737,36 @@ mod tests {
         assert_eq!(first.height, 15);
         assert_eq!(second.width, 60);
         assert_eq!(second.height, 15);
+    }
+
+    #[test]
+    fn grid_percent_is_symmetric_across_axes() {
+        let mut layout = LayoutManager::default();
+        layout.style = Style::default();
+        let body = rect(0, 0, 200, 100);
+        layout.reset(body, vec2(0, 0));
+        layout.set_default_cell_height(10);
+        layout.grid(
+            &[SizePolicy::Percent(50.0), SizePolicy::Percent(50.0)],
+            &[SizePolicy::Percent(50.0), SizePolicy::Percent(50.0)],
+        );
+
+        let a = layout.next();
+        let b = layout.next();
+        let c = layout.next();
+        let d = layout.next();
+
+        let expected_width = (body.width - layout.style.spacing) / 2;
+        let expected_height = (body.height - layout.style.spacing) / 2;
+
+        assert_eq!(a.width, expected_width);
+        assert_eq!(b.width, expected_width);
+        assert_eq!(c.width, expected_width);
+        assert_eq!(d.width, expected_width);
+
+        assert_eq!(a.height, expected_height);
+        assert_eq!(b.height, expected_height);
+        assert_eq!(c.height, expected_height);
+        assert_eq!(d.height, expected_height);
     }
 }

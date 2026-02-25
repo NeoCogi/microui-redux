@@ -18,6 +18,21 @@ $ cargo run --example demo-full --features example-wgpu     # WGPU backend
 `example-backend` is only a shared gate for example code paths; it is **not** runnable by itself.
 Running with only `--features example-backend` will fail intentionally at compile time.
 
+`demo-full` now loads `examples/FACEPALM.png` and `assets/suzane.obj` from disk at runtime (no `include_bytes!` for those files).
+
+For a smaller release executable, use nightly + rebuilt `std`:
+```bash
+RUSTFLAGS="-C strip=symbols -C link-arg=-s -Zlocation-detail=none -Zfmt-debug=none" \
+cargo +nightly build \
+  --release \
+  -Z build-std=std,panic_abort \
+  -Z build-std-features=optimize_for_size \
+  --example demo-full \
+  --no-default-features \
+  --features "example-wgpu png_source"
+```
+Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
+
 ![random](https://github.com/NeoCogi/microui-redux/raw/master/res/microui.png)
 
 ## Key Concepts
@@ -59,6 +74,7 @@ for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widg
 
 ### Flow helpers
 - `with_row(widths, height, ...)` configures an explicit multi-slot row track.
+- `with_grid(widths, heights, ...)` configures an explicit row/column track matrix and emits cells row-major.
 - `stack(height, ...)` configures a vertical one-slot flow with width `SizePolicy::Remainder(0)`.
 - `stack_direction(height, direction, ...)` is the same as `stack`, but allows `StackDirection::BottomToTop`.
 - `stack_with_width(width, height, ...)` is the same as `stack`, but with explicit width policy.
