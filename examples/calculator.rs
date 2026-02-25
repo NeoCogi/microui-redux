@@ -7,21 +7,7 @@ use microui_redux::*;
 
 const DISPLAY_MAX_LEN: usize = 24;
 const DISPLAY_HEIGHT_PERCENT: f32 = 20.0;
-const KEYPAD_ROW_HEIGHT_PERCENT: f32 = 16.0;
-const VERTICAL_TRACK_COUNT: i32 = 6;
-
-fn scaled_vertical_percent(container: &Container, percent: f32) -> f32 {
-    let style = container.get_style();
-    let padding = style.padding.max(0);
-    let spacing = style.spacing.max(0);
-    // Percent sizing uses the layout body, which is body minus style padding.
-    let layout_height = container.body().height.saturating_sub(padding.saturating_mul(2)).max(1);
-    // Row flow advances `next_row` by `height + spacing` for every emitted row.
-    let spacing_budget = spacing.saturating_mul(VERTICAL_TRACK_COUNT.max(1));
-    let usable_height = layout_height.saturating_sub(spacing_budget).max(0);
-    let scale = usable_height as f32 / layout_height as f32;
-    percent * scale
-}
+const KEYPAD_ROW_HEIGHT_PERCENT: f32 = 20.0;
 
 #[derive(Copy, Clone)]
 enum Operator {
@@ -346,33 +332,33 @@ fn main() {
                 |container| {
                     state.display.buf = state.calculator.display_text().to_string();
                     state.display.cursor = state.display.buf.len();
-                    let display_height_percent = scaled_vertical_percent(container, DISPLAY_HEIGHT_PERCENT);
-                    let keypad_row_height_percent = scaled_vertical_percent(container, KEYPAD_ROW_HEIGHT_PERCENT);
 
-                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Percent(display_height_percent), |container| {
+                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Percent(DISPLAY_HEIGHT_PERCENT), |container| {
                         container.textbox(&mut state.display);
                     });
 
-                    let columns = [
-                        SizePolicy::Percent(25.0),
-                        SizePolicy::Percent(25.0),
-                        SizePolicy::Percent(25.0),
-                        SizePolicy::Percent(25.0),
-                    ];
-                    for row in 0..5 {
-                        container.with_row(&columns, SizePolicy::Percent(keypad_row_height_percent), |container| {
-                            for col in 0..4 {
-                                let idx = row * 4 + col;
-                                let (clicked, action) = {
-                                    let button = &mut state.buttons[idx];
-                                    (container.button(&mut button.widget).is_submitted(), button.action)
-                                };
-                                if clicked {
-                                    state.calculator.apply(action);
+                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                        container.column(|container| {
+                            let columns = [
+                                SizePolicy::Percent(25.0),
+                                SizePolicy::Percent(25.0),
+                                SizePolicy::Percent(25.0),
+                                SizePolicy::Percent(25.0),
+                            ];
+                            let rows = [SizePolicy::Percent(KEYPAD_ROW_HEIGHT_PERCENT); 5];
+                            container.with_grid(&columns, &rows, |container| {
+                                for idx in 0..state.buttons.len() {
+                                    let (clicked, action) = {
+                                        let button = &mut state.buttons[idx];
+                                        (container.button(&mut button.widget).is_submitted(), button.action)
+                                    };
+                                    if clicked {
+                                        state.calculator.apply(action);
+                                    }
                                 }
-                            }
+                            });
                         });
-                    }
+                    });
 
                     WindowState::Open
                 },

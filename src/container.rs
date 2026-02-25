@@ -920,6 +920,16 @@ impl Container {
         self.layout.restore_flow_state(snapshot);
     }
 
+    /// Temporarily overrides the layout with explicit column and row tracks and restores it after `f`.
+    ///
+    /// Widgets are emitted row-major within the provided track matrix.
+    pub fn with_grid<F: FnOnce(&mut Self)>(&mut self, widths: &[SizePolicy], heights: &[SizePolicy], f: F) {
+        let snapshot = self.layout.snapshot_flow_state();
+        self.layout.grid(widths, heights);
+        f(self);
+        self.layout.restore_flow_state(snapshot);
+    }
+
     /// Temporarily uses a vertical stack flow and restores the previous flow after `f` executes.
     ///
     /// Each `next_cell`/widget call in the scope gets a dedicated row using `height`.
