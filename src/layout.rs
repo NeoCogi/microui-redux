@@ -59,23 +59,48 @@ use super::*;
 // This keeps scroll/extent bookkeeping centralized while allowing specialized placement logic.
 
 /// Describes how a layout dimension should be resolved.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 /// Size policy used by rows and columns when resolving cells.
 pub enum SizePolicy {
     /// Uses the default cell size defined by the style.
     Auto,
     /// Reserves a fixed number of pixels.
     Fixed(i32),
+    /// Uses a percentage of the current row/column size.
+    Percent(f32),
     /// Consumes the remaining space with an optional margin.
     Remainder(i32),
 }
 
 impl SizePolicy {
+    fn clamp_percent(value: f32) -> f32 {
+        if value.is_finite() {
+            value.clamp(0.0, 100.0)
+        } else {
+            0.0
+        }
+    }
+
+    fn resolve_percent(percent: f32, reference_space: i32) -> i32 {
+        let pct = Self::clamp_percent(percent);
+        let reference = reference_space.max(0) as f32;
+        (reference * (pct / 100.0)).floor() as i32
+    }
+
     fn resolve(self, default_size: i32, available_space: i32) -> i32 {
         let resolved = match self {
             SizePolicy::Auto => default_size,
             SizePolicy::Fixed(value) => value,
+            SizePolicy::Percent(percent) => Self::resolve_percent(percent, available_space),
             SizePolicy::Remainder(margin) => available_space.saturating_sub(margin),
+        };
+        resolved.max(0)
+    }
+
+    fn resolve_with_reference(self, default_size: i32, available_space: i32, reference_space: i32) -> i32 {
+        let resolved = match self {
+            SizePolicy::Percent(percent) => Self::resolve_percent(percent, reference_space),
+            _ => self.resolve(default_size, available_space),
         };
         resolved.max(0)
     }
@@ -181,12 +206,15 @@ impl LayoutFlow for RowFlow {
 
         let x = scope.cursor.x;
         let y = scope.cursor.y;
+        let slot_count = self.widths.len().max(1) as i32;
+        let row_spacing = ctx.spacing.saturating_mul(slot_count.saturating_sub(1));
+        let row_reference_width = scope.body.width.saturating_sub(scope.indent).saturating_sub(row_spacing);
 
         // Resolve dimensions from policy + remaining space inside scope bounds.
         let available_width = scope.body.width.saturating_sub(x);
         let available_height = scope.body.height.saturating_sub(y);
-        let width = width_policy.resolve(ctx.default_width, available_width);
-        let height = self.height.resolve(ctx.default_height, available_height);
+        let width = width_policy.resolve_with_reference(ctx.default_width, available_width, row_reference_width);
+        let height = self.height.resolve_with_reference(ctx.default_height, available_height, scope.body.height);
 
         if self.item_index < self.widths.len() {
             self.item_index += 1;
@@ -241,14 +269,14 @@ impl LayoutFlow for StackFlow {
     fn next_local(&mut self, scope: &mut ScopeState, ctx: ResolveCtx) -> Recti {
         let x = scope.indent;
         let available_width = scope.body.width.saturating_sub(x);
-        let width = self.width.resolve(ctx.default_width, available_width);
+        let width = self.width.resolve_with_reference(ctx.default_width, available_width, available_width);
 
         match self.direction {
             StackDirection::TopToBottom => {
                 // Top-down stacks continue from the scope's row cursor.
                 let y = scope.next_row;
                 let available_height = scope.body.height.saturating_sub(y);
-                let height = self.height.resolve(ctx.default_height, available_height);
+                let height = self.height.resolve_with_reference(ctx.default_height, available_height, scope.body.height);
 
                 // Move directly to the next stacked row.
                 let next = y.saturating_add(height).saturating_add(ctx.spacing);
@@ -260,7 +288,7 @@ impl LayoutFlow for StackFlow {
             StackDirection::BottomToTop => {
                 // Bottom-up stacks are anchored to the scope bottom and use local offset.
                 let available_height = scope.body.height.saturating_sub(self.offset);
-                let height = self.height.resolve(ctx.default_height, available_height);
+                let height = self.height.resolve_with_reference(ctx.default_height, available_height, scope.body.height);
                 let y = scope.body.height.saturating_sub(self.offset).saturating_sub(height);
                 self.offset = self.offset.saturating_add(height).saturating_add(ctx.spacing);
                 rect(x, y, width, height)
@@ -611,5 +639,53 @@ mod tests {
         assert_eq!(first.width, body.width);
         assert_eq!(first.y, body.y + body.height - 10);
         assert_eq!(second.y, first.y - (10 + layout.style.spacing));
+    }
+
+    #[test]
+    fn row_percent_divides_usable_row_space() {
+        let mut layout = LayoutManager::default();
+        layout.style = Style::default();
+        let body = rect(0, 0, 200, 80);
+        layout.reset(body, vec2(0, 0));
+        layout.set_default_cell_height(10);
+        layout.row(
+            &[
+                SizePolicy::Percent(25.0),
+                SizePolicy::Percent(25.0),
+                SizePolicy::Percent(25.0),
+                SizePolicy::Percent(25.0),
+            ],
+            SizePolicy::Fixed(10),
+        );
+
+        let a = layout.next();
+        let b = layout.next();
+        let c = layout.next();
+        let d = layout.next();
+        let expected = (body.width - layout.style.spacing * 3) / 4;
+
+        assert_eq!(a.width, expected);
+        assert_eq!(b.width, expected);
+        assert_eq!(c.width, expected);
+        assert_eq!(d.width, expected);
+        assert_eq!(d.x + d.width, body.x + body.width);
+    }
+
+    #[test]
+    fn stack_percent_uses_scope_dimensions() {
+        let mut layout = LayoutManager::default();
+        layout.style = Style::default();
+        let body = rect(0, 0, 120, 60);
+        layout.reset(body, vec2(0, 0));
+        layout.set_default_cell_height(10);
+        layout.stack(SizePolicy::Percent(50.0), SizePolicy::Percent(25.0));
+
+        let first = layout.next();
+        let second = layout.next();
+
+        assert_eq!(first.width, 60);
+        assert_eq!(first.height, 15);
+        assert_eq!(second.width, 60);
+        assert_eq!(second.height, 15);
     }
 }
