@@ -24,6 +24,8 @@ use rand::{rng, Rng};
 use std::{
     cell::RefCell,
     f32::consts::PI,
+    fs,
+    path::PathBuf,
     rc::Rc,
     sync::{Arc, RwLock},
     time::Instant,
@@ -89,6 +91,7 @@ struct State<'a> {
     triangle_window: Option<WindowHandle>,
     suzane_window: Option<WindowHandle>,
     stack_direction_window: Option<WindowHandle>,
+    weight_window: Option<WindowHandle>,
     dialog_window: Option<FileDialogState>,
 
     fps: f32,
@@ -112,6 +115,7 @@ struct State<'a> {
     popup_buttons: [Button; 2],
     slot_buttons: [Button; 4],
     stack_direction_buttons: [Button; 6],
+    weight_buttons: [Button; 9],
     external_image_button: Option<Button>,
     checkboxes: [Checkbox; 3],
     open_popup: bool,
@@ -126,7 +130,7 @@ struct State<'a> {
 impl<'a> State<'a> {
     pub fn new(_backend: BackendInitContext, renderer: RendererHandle<BackendRenderer>, slots: Vec<SlotId>, ctx: &mut Context<BackendRenderer>) -> Self {
         #[cfg(any(feature = "builder", feature = "png_source"))]
-        let image_texture = ctx.load_image_from(ImageSource::Png { bytes: include_bytes!("./FACEPALM.png") }).ok();
+        let image_texture = load_external_image_texture(ctx);
         #[cfg(not(any(feature = "builder", feature = "png_source")))]
         let image_texture = None;
         let white_uv = renderer.scope(|r| {
@@ -140,7 +144,11 @@ impl<'a> State<'a> {
         });
 
         let triangle_data = Arc::new(RwLock::new(TriangleState { angle: 0.0 }));
-        let pm_suzane = Obj::from_byte_stream(SUZANE).unwrap().to_polymesh();
+        let suzane_path = demo_asset_path("assets/suzane.obj");
+        let suzane_bytes = fs::read(&suzane_path).unwrap_or_else(|err| panic!("Failed to read {}: {err}", suzane_path.display()));
+        let pm_suzane = Obj::from_byte_stream(suzane_bytes.as_slice())
+            .unwrap_or_else(|err| panic!("Failed to parse {}: {err}", suzane_path.display()))
+            .to_polymesh();
         let bounds = pm_suzane.calculate_bounding_box();
         let mesh_buffers = build_mesh_buffers(&pm_suzane);
         let view_3d = View3D::new(
@@ -262,6 +270,7 @@ impl<'a> State<'a> {
             triangle_window: None,
             suzane_window: None,
             stack_direction_window: None,
+            weight_window: None,
             dialog_window: None,
             fps: 0.0,
             last_frame: Instant::now(),
@@ -306,6 +315,17 @@ impl<'a> State<'a> {
                 Button::with_opt("Call 1", WidgetOption::ALIGN_CENTER),
                 Button::with_opt("Call 2", WidgetOption::ALIGN_CENTER),
                 Button::with_opt("Call 3", WidgetOption::ALIGN_CENTER),
+            ],
+            weight_buttons: [
+                Button::with_opt("w1", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("w2", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("w3", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("g1", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("g2", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("g3", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("g4", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("g5", WidgetOption::ALIGN_CENTER),
+                Button::with_opt("g6", WidgetOption::ALIGN_CENTER),
             ],
             external_image_button,
             checkboxes: [
@@ -631,6 +651,72 @@ impl<'a> State<'a> {
         }
     }
 
+    fn weight_window(&mut self, ctx: &mut Context<BackendRenderer>) {
+        if self.weight_window.is_none() {
+            return;
+        }
+
+        let buttons = &mut self.weight_buttons;
+        let mut logs: Vec<&'static str> = Vec::new();
+        ctx.window(
+            &mut self.weight_window.as_mut().unwrap().clone(),
+            ContainerOption::NONE,
+            WidgetBehaviourOption::NONE,
+            |container| {
+                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                    container.label("Row weights 1 : 2 : 3");
+                });
+                let row = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0), SizePolicy::Weight(3.0)];
+                container.with_row(&row, SizePolicy::Fixed(28), |container| {
+                    if container.button(&mut buttons[0]).is_submitted() {
+                        logs.push("Weight row: 1");
+                    }
+                    if container.button(&mut buttons[1]).is_submitted() {
+                        logs.push("Weight row: 2");
+                    }
+                    if container.button(&mut buttons[2]).is_submitted() {
+                        logs.push("Weight row: 3");
+                    }
+                });
+
+                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                    container.label("Grid weights rows 1 : 2");
+                });
+                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                    container.column(|container| {
+                        let cols = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
+                        let rows = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
+                        container.with_grid(&cols, &rows, |container| {
+                            if container.button(&mut buttons[3]).is_submitted() {
+                                logs.push("Weight grid: 1");
+                            }
+                            if container.button(&mut buttons[4]).is_submitted() {
+                                logs.push("Weight grid: 2");
+                            }
+                            if container.button(&mut buttons[5]).is_submitted() {
+                                logs.push("Weight grid: 3");
+                            }
+                            if container.button(&mut buttons[6]).is_submitted() {
+                                logs.push("Weight grid: 4");
+                            }
+                            if container.button(&mut buttons[7]).is_submitted() {
+                                logs.push("Weight grid: 5");
+                            }
+                            if container.button(&mut buttons[8]).is_submitted() {
+                                logs.push("Weight grid: 6");
+                            }
+                        });
+                    });
+                });
+                WindowState::Open
+            },
+        );
+
+        for msg in logs {
+            self.write_log(msg);
+        }
+    }
+
     fn test_window(&mut self, ctx: &mut Context<BackendRenderer>) {
         let mut combo_anchor = None;
         let mut combo_changed = false;
@@ -874,7 +960,11 @@ impl<'a> State<'a> {
                         }
                     }
                 });
-                if combo_changed { WindowState::Closed } else { WindowState::Open }
+                if combo_changed {
+                    WindowState::Closed
+                } else {
+                    WindowState::Open
+                }
             });
 
             if !popup.is_open() {
@@ -966,6 +1056,7 @@ impl<'a> State<'a> {
             self.triangle_window(ctx);
             self.suzane_window(ctx);
             self.stack_direction_window(ctx);
+            self.weight_window(ctx);
         })
     }
 }
@@ -996,6 +1087,7 @@ fn main() {
         state.triangle_window = Some(ctx.new_window("Triangle Window", rect(200, 100, 200, 200)));
         state.suzane_window = Some(ctx.new_window("Suzane Window", rect(220, 220, 300, 300)));
         state.stack_direction_window = Some(ctx.new_window("Stack Direction Demo", rect(530, 40, 280, 220)));
+        state.weight_window = Some(ctx.new_window("Weight Demo", rect(530, 270, 280, 260)));
         state
     })
     .unwrap();
@@ -1059,4 +1151,25 @@ fn build_mesh_buffers(mesh: &PolyMesh) -> MeshBuffers {
     MeshBuffers::from_vecs(vertices, indices)
 }
 
-const SUZANE: &[u8; 63204] = include_bytes!("../assets/suzane.obj");
+fn demo_asset_path(relative: &str) -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
+}
+
+#[cfg(any(feature = "builder", feature = "png_source"))]
+fn load_external_image_texture(ctx: &mut Context<BackendRenderer>) -> Option<TextureId> {
+    let image_path = demo_asset_path("examples/FACEPALM.png");
+    let png_bytes = match fs::read(&image_path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("Failed to read {}: {err}", image_path.display());
+            return None;
+        }
+    };
+    match ctx.load_image_from(ImageSource::Png { bytes: png_bytes.as_slice() }) {
+        Ok(texture) => Some(texture),
+        Err(err) => {
+            eprintln!("Failed to decode {}: {err}", image_path.display());
+            None
+        }
+    }
+}

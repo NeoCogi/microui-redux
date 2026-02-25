@@ -75,6 +75,7 @@ for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widg
 ### Flow helpers
 - `with_row(widths, height, ...)` configures an explicit multi-slot row track.
 - `with_grid(widths, heights, ...)` configures an explicit row/column track matrix and emits cells row-major.
+- `SizePolicy::Weight(value)` distributes available track space by sibling weight ratio (spacing accounted for). In single-track flows, it uses a `0..=100` scale.
 - `stack(height, ...)` configures a vertical one-slot flow with width `SizePolicy::Remainder(0)`.
 - `stack_direction(height, direction, ...)` is the same as `stack`, but allows `StackDirection::BottomToTop`.
 - `stack_with_width(width, height, ...)` is the same as `stack`, but with explicit width policy.
