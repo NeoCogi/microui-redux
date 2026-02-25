@@ -6,8 +6,8 @@ use common::{atlas_assets, *};
 use microui_redux::*;
 
 const DISPLAY_MAX_LEN: usize = 24;
-const DISPLAY_HEIGHT_PERCENT: f32 = 20.0;
-const KEYPAD_ROW_HEIGHT_PERCENT: f32 = 20.0;
+const DISPLAY_HEIGHT_WEIGHT: f32 = 20.0;
+const KEYPAD_ROW_HEIGHT_WEIGHT: f32 = 20.0;
 
 #[derive(Copy, Clone)]
 enum Operator {
@@ -333,19 +333,19 @@ fn main() {
                     state.display.buf = state.calculator.display_text().to_string();
                     state.display.cursor = state.display.buf.len();
 
-                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Percent(DISPLAY_HEIGHT_PERCENT), |container| {
+                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Weight(DISPLAY_HEIGHT_WEIGHT), |container| {
                         container.textbox(&mut state.display);
                     });
 
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
                         container.column(|container| {
                             let columns = [
-                                SizePolicy::Percent(25.0),
-                                SizePolicy::Percent(25.0),
-                                SizePolicy::Percent(25.0),
-                                SizePolicy::Percent(25.0),
+                                SizePolicy::Weight(1.0),
+                                SizePolicy::Weight(1.0),
+                                SizePolicy::Weight(1.0),
+                                SizePolicy::Weight(1.0),
                             ];
-                            let rows = [SizePolicy::Percent(KEYPAD_ROW_HEIGHT_PERCENT); 5];
+                            let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
                             container.with_grid(&columns, &rows, |container| {
                                 for idx in 0..state.buttons.len() {
                                     let (clicked, action) = {

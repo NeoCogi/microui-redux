@@ -66,40 +66,68 @@ pub enum SizePolicy {
     Auto,
     /// Reserves a fixed number of pixels.
     Fixed(i32),
-    /// Uses a percentage of the current row/column size.
-    Percent(f32),
+    /// Uses weighted distribution of the current row/column size.
+    ///
+    /// When multiple sibling tracks use `Weight`, each track receives
+    /// `weight / total_weight` of the available track space.
+    /// When no sibling weight context exists (single-track flows),
+    /// values are interpreted on a `0..=100` scale.
+    Weight(f32),
     /// Consumes the remaining space with an optional margin.
     Remainder(i32),
 }
 
 impl SizePolicy {
-    fn clamp_percent(value: f32) -> f32 {
+    fn clamp_weight(value: f32) -> f32 {
         if value.is_finite() {
-            value.clamp(0.0, 100.0)
+            value.max(0.0)
         } else {
             0.0
         }
     }
 
-    fn resolve_percent(percent: f32, reference_space: i32) -> i32 {
-        let pct = Self::clamp_percent(percent);
+    fn resolve_weight(weight: f32, reference_space: i32, total_weight: Option<f32>) -> i32 {
+        let w = Self::clamp_weight(weight);
+        if w <= 0.0 {
+            return 0;
+        }
+
+        let denom = match total_weight {
+            Some(total) if total.is_finite() && total > 0.0 => total,
+            _ => 100.0,
+        };
         let reference = reference_space.max(0) as f32;
-        (reference * (pct / 100.0)).floor() as i32
+        (reference * (w / denom)).floor() as i32
+    }
+
+    fn total_weight(policies: &[SizePolicy]) -> Option<f32> {
+        let total = policies
+            .iter()
+            .map(|policy| match policy {
+                SizePolicy::Weight(value) => Self::clamp_weight(*value),
+                _ => 0.0,
+            })
+            .sum::<f32>();
+        if total > 0.0 {
+            Some(total)
+        } else {
+            None
+        }
     }
 
     fn resolve(self, default_size: i32, available_space: i32) -> i32 {
         let resolved = match self {
             SizePolicy::Auto => default_size,
             SizePolicy::Fixed(value) => value,
-            SizePolicy::Percent(percent) => Self::resolve_percent(percent, available_space),
+            SizePolicy::Weight(weight) => Self::resolve_weight(weight, available_space, None),
             SizePolicy::Remainder(margin) => available_space.saturating_sub(margin),
         };
         resolved.max(0)
     }
 
-    fn resolve_with_reference(self, default_size: i32, available_space: i32, reference_space: i32) -> i32 {
+    fn resolve_with_reference(self, default_size: i32, available_space: i32, reference_space: i32, total_weight: Option<f32>) -> i32 {
         let resolved = match self {
-            SizePolicy::Percent(percent) => Self::resolve_percent(percent, reference_space),
+            SizePolicy::Weight(weight) => Self::resolve_weight(weight, reference_space, total_weight),
             _ => self.resolve(default_size, available_space),
         };
         resolved.max(0)
@@ -250,16 +278,21 @@ impl LayoutFlow for RowFlow {
         let slot_count = slot_count as i32;
         let row_spacing = ctx.spacing.saturating_mul(slot_count.saturating_sub(1));
         let row_reference_width = scope.body.width.saturating_sub(scope.indent).saturating_sub(row_spacing);
+        let row_width_weight = SizePolicy::total_weight(&self.widths);
         let row_reference_height = match row_count_hint {
             Some(row_count) => scope.body.height.saturating_sub(ctx.spacing.saturating_mul(row_count.saturating_sub(1))),
             None => scope.body.height,
+        };
+        let row_height_weight = match &self.heights {
+            RowHeights::Tracks(policies) => SizePolicy::total_weight(policies),
+            RowHeights::Uniform(_) => None,
         };
 
         // Resolve dimensions from policy + remaining space inside scope bounds.
         let available_width = scope.body.width.saturating_sub(x);
         let available_height = scope.body.height.saturating_sub(y);
-        let width = width_policy.resolve_with_reference(ctx.default_width, available_width, row_reference_width);
-        let height = height_policy.resolve_with_reference(ctx.default_height, available_height, row_reference_height);
+        let width = width_policy.resolve_with_reference(ctx.default_width, available_width, row_reference_width, row_width_weight);
+        let height = height_policy.resolve_with_reference(ctx.default_height, available_height, row_reference_height, row_height_weight);
 
         self.item_index = self.item_index.saturating_add(1);
 
@@ -312,14 +345,16 @@ impl LayoutFlow for StackFlow {
     fn next_local(&mut self, scope: &mut ScopeState, ctx: ResolveCtx) -> Recti {
         let x = scope.indent;
         let available_width = scope.body.width.saturating_sub(x);
-        let width = self.width.resolve_with_reference(ctx.default_width, available_width, available_width);
+        let width = self.width.resolve_with_reference(ctx.default_width, available_width, available_width, None);
 
         match self.direction {
             StackDirection::TopToBottom => {
                 // Top-down stacks continue from the scope's row cursor.
                 let y = scope.next_row;
                 let available_height = scope.body.height.saturating_sub(y);
-                let height = self.height.resolve_with_reference(ctx.default_height, available_height, scope.body.height);
+                let height = self
+                    .height
+                    .resolve_with_reference(ctx.default_height, available_height, scope.body.height, None);
 
                 // Move directly to the next stacked row.
                 let next = y.saturating_add(height).saturating_add(ctx.spacing);
@@ -331,7 +366,9 @@ impl LayoutFlow for StackFlow {
             StackDirection::BottomToTop => {
                 // Bottom-up stacks are anchored to the scope bottom and use local offset.
                 let available_height = scope.body.height.saturating_sub(self.offset);
-                let height = self.height.resolve_with_reference(ctx.default_height, available_height, scope.body.height);
+                let height = self
+                    .height
+                    .resolve_with_reference(ctx.default_height, available_height, scope.body.height, None);
                 let y = scope.body.height.saturating_sub(self.offset).saturating_sub(height);
                 self.offset = self.offset.saturating_add(height).saturating_add(ctx.spacing);
                 rect(x, y, width, height)
@@ -692,7 +729,7 @@ mod tests {
     }
 
     #[test]
-    fn row_percent_divides_usable_row_space() {
+    fn row_weight_divides_usable_row_space() {
         let mut layout = LayoutManager::default();
         layout.style = Style::default();
         let body = rect(0, 0, 200, 80);
@@ -700,10 +737,10 @@ mod tests {
         layout.set_default_cell_height(10);
         layout.row(
             &[
-                SizePolicy::Percent(25.0),
-                SizePolicy::Percent(25.0),
-                SizePolicy::Percent(25.0),
-                SizePolicy::Percent(25.0),
+                SizePolicy::Weight(1.0),
+                SizePolicy::Weight(1.0),
+                SizePolicy::Weight(1.0),
+                SizePolicy::Weight(1.0),
             ],
             SizePolicy::Fixed(10),
         );
@@ -722,13 +759,13 @@ mod tests {
     }
 
     #[test]
-    fn stack_percent_uses_scope_dimensions() {
+    fn stack_weight_without_siblings_uses_100_scale() {
         let mut layout = LayoutManager::default();
         layout.style = Style::default();
         let body = rect(0, 0, 120, 60);
         layout.reset(body, vec2(0, 0));
         layout.set_default_cell_height(10);
-        layout.stack(SizePolicy::Percent(50.0), SizePolicy::Percent(25.0));
+        layout.stack(SizePolicy::Weight(50.0), SizePolicy::Weight(25.0));
 
         let first = layout.next();
         let second = layout.next();
@@ -740,15 +777,15 @@ mod tests {
     }
 
     #[test]
-    fn grid_percent_is_symmetric_across_axes() {
+    fn grid_weight_is_symmetric_across_axes() {
         let mut layout = LayoutManager::default();
         layout.style = Style::default();
         let body = rect(0, 0, 200, 100);
         layout.reset(body, vec2(0, 0));
         layout.set_default_cell_height(10);
         layout.grid(
-            &[SizePolicy::Percent(50.0), SizePolicy::Percent(50.0)],
-            &[SizePolicy::Percent(50.0), SizePolicy::Percent(50.0)],
+            &[SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)],
+            &[SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)],
         );
 
         let a = layout.next();
