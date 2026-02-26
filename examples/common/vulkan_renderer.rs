@@ -274,7 +274,6 @@ impl Renderer for VulkanRenderer {
             eprintln!("[microui-redux][vulkan] failed to resize swapchain: {err}");
         }
         self.handle_swapchain_updates();
-        self.context.reset_ui_offset();
         self.sync_atlas();
     }
 
@@ -702,11 +701,10 @@ struct UiResources {
     descriptor_pool: vk::DescriptorPool,
     descriptor_set: vk::DescriptorSet,
     vertex_buffer: Option<Buffer>,        // GPU-local
-    staging_buffer: Option<MappedBuffer>, // CPU-visible
+    staging_buffers: Vec<Option<MappedBuffer>>, // CPU-visible, one slot per frame-in-flight
     atlas: Option<ImageResource>,
     vertex_offset: vk::DeviceSize,
-    staging_offset: vk::DeviceSize,
-    retired_staging_buffers: Vec<MappedBuffer>,
+    staging_offsets: Vec<vk::DeviceSize>,
 }
 
 impl UiResources {
@@ -743,11 +741,10 @@ impl UiResources {
             descriptor_pool,
             descriptor_set,
             vertex_buffer: None,
-            staging_buffer: None,
+            staging_buffers: (0..ctx.max_frames_in_flight).map(|_| None).collect(),
             atlas: None,
             vertex_offset: 0,
-            staging_offset: 0,
-            retired_staging_buffers: Vec::new(),
+            staging_offsets: vec![0; ctx.max_frames_in_flight],
         })
     }
 
@@ -755,11 +752,10 @@ impl UiResources {
         if let Some(mut buffer) = self.vertex_buffer.take() {
             buffer.destroy(device);
         }
-        if let Some(mut buffer) = self.staging_buffer.take() {
-            buffer.destroy(device);
-        }
-        for mut buffer in self.retired_staging_buffers.drain(..) {
-            buffer.destroy(device);
+        for slot in &mut self.staging_buffers {
+            if let Some(mut buffer) = slot.take() {
+                buffer.destroy(device);
+            }
         }
         if let Some(mut atlas) = self.atlas.take() {
             atlas.destroy(device);
@@ -1036,13 +1032,16 @@ impl UiResources {
         Ok(())
     }
 
-    fn ensure_staging_buffer(&mut self, ctx: &VulkanContext, required_total: vk::DeviceSize) -> Result<()> {
-        let current_capacity = self.staging_buffer.as_ref().map(|buf| buf.size());
+    fn ensure_staging_buffer(&mut self, ctx: &VulkanContext, frame: usize, required_total: vk::DeviceSize) -> Result<()> {
+        if frame >= self.staging_buffers.len() {
+            return Err(format!("invalid frame index for UI staging buffer: {}", frame));
+        }
+        let current_capacity = self.staging_buffers[frame].as_ref().map(|buf| buf.size());
         let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
         if needs_realloc {
             let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_STAGING_CAPACITY);
-            if let Some(buffer) = self.staging_buffer.take() {
-                self.retired_staging_buffers.push(buffer);
+            if let Some(mut buffer) = self.staging_buffers[frame].take() {
+                buffer.destroy(&ctx.device);
             }
             let buffer = ctx.create_buffer(
                 new_capacity,
@@ -1050,15 +1049,16 @@ impl UiResources {
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             )?;
             let mapped = MappedBuffer::new(buffer, &ctx.device)?;
-            self.staging_buffer = Some(mapped);
-            self.staging_offset = 0;
+            self.staging_buffers[frame] = Some(mapped);
+            self.staging_offsets[frame] = 0;
         }
         Ok(())
     }
 
-    fn cleanup_retired_staging(&mut self, device: &ash::Device) {
-        for mut buffer in self.retired_staging_buffers.drain(..) {
-            buffer.destroy(device);
+    fn reset_frame_offsets(&mut self, frame: usize) {
+        self.vertex_offset = 0;
+        if let Some(offset) = self.staging_offsets.get_mut(frame) {
+            *offset = 0;
         }
     }
 
@@ -1098,16 +1098,22 @@ impl UiResources {
         if vertices.is_empty() {
             return Ok(());
         }
+        let frame = ctx.current_frame;
+        let frame_staging_offset = match self.staging_offsets.get(frame).copied() {
+            Some(offset) => offset,
+            None => return Err(format!("invalid frame index for UI upload offset: {}", frame)),
+        };
         let vertex_bytes = unsafe { std::slice::from_raw_parts(vertices.as_ptr() as *const u8, vertices.len() * std::mem::size_of::<Vertex>()) };
         let copy_size = vertex_bytes.len() as u64;
         let dst_offset = self.vertex_offset;
-        self.ensure_staging_buffer(ctx, self.staging_offset + copy_size)?;
+        self.ensure_staging_buffer(ctx, frame, frame_staging_offset + copy_size)?;
         self.ensure_vertex_buffer(ctx, dst_offset + copy_size)?;
-        if let (Some(staging), Some(buffer)) = (self.staging_buffer.as_ref(), self.vertex_buffer.as_ref()) {
-            staging.write(self.staging_offset, vertex_bytes)?;
+        let staging = self.staging_buffers.get(frame).and_then(|slot| slot.as_ref());
+        if let (Some(staging), Some(buffer)) = (staging, self.vertex_buffer.as_ref()) {
+            staging.write(frame_staging_offset, vertex_bytes)?;
             ctx.record_transfer_copy(
                 staging.vk_buffer(),
-                self.staging_offset,
+                frame_staging_offset,
                 buffer.buffer,
                 dst_offset,
                 copy_size,
@@ -1156,7 +1162,9 @@ impl UiResources {
                 ctx.device.cmd_draw(command_buffer, vertices.len() as u32, 1, 0, 0);
             }
             self.vertex_offset += copy_size;
-            self.staging_offset += copy_size;
+            if let Some(offset) = self.staging_offsets.get_mut(frame) {
+                *offset += copy_size;
+            }
         }
         Ok(())
     }
@@ -1703,7 +1711,7 @@ impl VulkanContext {
             transfer_recording: Vec::new(),
             transfer_has_work: Vec::new(),
             current_frame: 0,
-            max_frames_in_flight: 1,
+            max_frames_in_flight: 2,
             ui: None,
             depth_images: Vec::new(),
             mesh: None,
@@ -2121,9 +2129,7 @@ impl VulkanContext {
         }
 
         self.reset_transfer_state(self.current_frame)?;
-        if let Some(ref mut ui) = self.ui {
-            ui.cleanup_retired_staging(&self.device);
-        }
+        self.reset_ui_offset();
         if let Some(ref mut mesh) = self.mesh {
             mesh.reset_upload_state(&self.device);
         }
@@ -2385,8 +2391,7 @@ impl VulkanContext {
 
     fn reset_ui_offset(&mut self) {
         if let Some(ref mut ui) = self.ui {
-            ui.vertex_offset = 0;
-            ui.staging_offset = 0;
+            ui.reset_frame_offsets(self.current_frame);
         }
     }
 
