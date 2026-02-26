@@ -150,7 +150,11 @@ impl<'a> PolyMesh {
     }
 
     pub fn vertex_uv(&self, index: usize) -> Vec2f {
-        if self.v_tex.len() > index { self.v_tex[index] } else { Vec2f::zero() }
+        if self.v_tex.len() > index {
+            self.v_tex[index]
+        } else {
+            Vec2f::zero()
+        }
     }
 }
 
@@ -220,7 +224,11 @@ impl<'a> PolymeshTrait for &'a PolyMesh {
     }
 
     fn get_vertex_uv(&self, index: usize) -> Vec2f {
-        if self.v_tex.len() > index { self.v_tex[index] } else { Vec2f::zero() }
+        if self.v_tex.len() > index {
+            self.v_tex[index]
+        } else {
+            Vec2f::zero()
+        }
     }
 }
 
