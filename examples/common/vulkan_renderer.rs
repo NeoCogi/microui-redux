@@ -1703,7 +1703,7 @@ impl VulkanContext {
             transfer_recording: Vec::new(),
             transfer_has_work: Vec::new(),
             current_frame: 0,
-            max_frames_in_flight: 2,
+            max_frames_in_flight: 1,
             ui: None,
             depth_images: Vec::new(),
             mesh: None,

@@ -679,10 +679,10 @@ impl<'a> State<'a> {
                     }
                 });
 
-                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
+                container.with_row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |container| {
                     container.label("Grid weights rows 1 : 2");
                 });
-                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
+                container.with_row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |container| {
                     container.column(|container| {
                         let cols = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
                         let rows = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
@@ -960,11 +960,7 @@ impl<'a> State<'a> {
                         }
                     }
                 });
-                if combo_changed {
-                    WindowState::Closed
-                } else {
-                    WindowState::Open
-                }
+                if combo_changed { WindowState::Closed } else { WindowState::Open }
             });
 
             if !popup.is_open() {

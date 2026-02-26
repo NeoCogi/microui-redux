@@ -481,13 +481,13 @@ pub trait Widget {
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
 }
 
-/// Raw trait-object pointer identity used for widget hover/focus tracking.
-pub type WidgetId = *const dyn Widget;
+/// Raw pointer identity used for widget hover/focus tracking.
+pub type WidgetId = *const ();
 
 /// Returns the pointer identity for a widget state object.
 /// Use this when calling APIs such as `Container::set_focus`.
-pub fn widget_id_of<W: Widget>(widget: &W) -> WidgetId {
-    widget as *const W as *const dyn Widget
+pub fn widget_id_of<W: Widget + ?Sized>(widget: &W) -> WidgetId {
+    widget as *const W as *const ()
 }
 
 impl Widget for (WidgetOption, WidgetBehaviourOption) {
