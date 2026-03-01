@@ -23,7 +23,12 @@ fn main() {
         ctx.frame(|ctx| {
             ctx.window(&mut state.window.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
                 container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                    container.widget_dyn(&mut state.hello_button);
+                    let _ = {
+                        let mut __out = ResourceState::NONE;
+                        let mut __runs = [widget_raw(&mut state.hello_button, &mut __out)];
+                        container.widgets(&mut __runs);
+                        __out
+                    };
                 });
                 WindowState::Open
             });

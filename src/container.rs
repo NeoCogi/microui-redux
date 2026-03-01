@@ -620,7 +620,7 @@ impl Container {
         res
     }
 
-    fn handle_widget_dyn(&mut self, state: &mut dyn Widget) -> ResourceState {
+    fn handle_widget_raw<W: Widget + ?Sized>(&mut self, state: &mut W) -> ResourceState {
         let rect = self.next_widget_rect(state);
         let opt = state.effective_widget_opt();
         let bopt = state.effective_behaviour_opt();
@@ -999,52 +999,46 @@ impl Container {
         self.layout.next()
     }
 
-    /// Runs a trait-object widget through the standard layout + interaction pipeline.
-    pub fn widget_dyn(&mut self, widget: &mut dyn Widget) -> ResourceState {
-        self.handle_widget_dyn(widget)
-    }
-
-    /// Runs a trait-object widget in an explicit rectangle.
-    pub fn widget_dyn_in_rect(&mut self, widget: &mut dyn Widget, rect: Recti) -> ResourceState {
+    /// Runs a widget in an explicit rectangle.
+    pub fn widget_in_rect<W: Widget + ?Sized>(&mut self, widget: &mut W, rect: Recti) -> ResourceState {
         let opt = widget.effective_widget_opt();
         let bopt = widget.effective_behaviour_opt();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         self.handle_widget_in_rect(widget, rect, input, opt, bopt)
     }
 
+    /// Evaluates each raw `(widget_state, output_slot)` tuple using the current flow.
+    pub fn widgets(&mut self, runs: &mut [WidgetRaw<'_>]) {
+        for (widget, out) in runs.iter_mut() {
+            **out = self.handle_widget_raw(&mut **widget);
+        }
+    }
+
     /// Emits a row flow and evaluates each widget run in order.
-    pub fn row_widgets(&mut self, widths: &[SizePolicy], height: SizePolicy, runs: &mut [WidgetRun<'_>]) {
+    pub fn row_widgets(&mut self, widths: &[SizePolicy], height: SizePolicy, runs: &mut [WidgetRaw<'_>]) {
         self.with_row(widths, height, |container| {
-            for run in runs.iter_mut() {
-                *run.out = container.widget_dyn(run.widget);
-            }
+            container.widgets(runs);
         });
     }
 
     /// Emits a grid flow and evaluates each widget run in row-major order.
-    pub fn grid_widgets(&mut self, widths: &[SizePolicy], heights: &[SizePolicy], runs: &mut [WidgetRun<'_>]) {
+    pub fn grid_widgets(&mut self, widths: &[SizePolicy], heights: &[SizePolicy], runs: &mut [WidgetRaw<'_>]) {
         self.with_grid(widths, heights, |container| {
-            for run in runs.iter_mut() {
-                *run.out = container.widget_dyn(run.widget);
-            }
+            container.widgets(runs);
         });
     }
 
     /// Emits a nested column scope and evaluates each widget run in order.
-    pub fn column_widgets(&mut self, runs: &mut [WidgetRun<'_>]) {
+    pub fn column_widgets(&mut self, runs: &mut [WidgetRaw<'_>]) {
         self.column(|container| {
-            for run in runs.iter_mut() {
-                *run.out = container.widget_dyn(run.widget);
-            }
+            container.widgets(runs);
         });
     }
 
     /// Emits a stack flow and evaluates each widget run in order.
-    pub fn stack_widgets(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection, runs: &mut [WidgetRun<'_>]) {
+    pub fn stack_widgets(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection, runs: &mut [WidgetRaw<'_>]) {
         self.stack_with_width_direction(width, height, direction, |container| {
-            for run in runs.iter_mut() {
-                *run.out = container.widget_dyn(run.widget);
-            }
+            container.widgets(runs);
         });
     }
 
@@ -1148,12 +1142,12 @@ impl Container {
     #[inline(never)]
     /// Allocates a widget cell from `Custom` state preferred size and hands rendering control to user code.
     pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, state: &mut Custom, f: F) {
-        self.widget_dyn_custom_render(state, f);
+        self.widget_custom_render(state, f);
     }
 
     #[inline(never)]
-    /// Runs a trait-object widget and records a custom render callback with the resulting interaction context.
-    pub fn widget_dyn_custom_render<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, widget: &mut dyn Widget, f: F) {
+    /// Runs a widget and records a custom render callback with the resulting interaction context.
+    pub fn widget_custom_render<W: Widget + ?Sized, F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, widget: &mut W, f: F) {
         let rect = self.next_widget_rect(widget);
         let opt = widget.effective_widget_opt();
         let bopt = widget.effective_behaviour_opt();
@@ -1380,7 +1374,7 @@ mod tests {
     }
 
     #[test]
-    fn widget_dyn_textbox_backspace_removes_multibyte() {
+    fn widget_textbox_backspace_removes_multibyte() {
         let mut container = make_container();
         let input = container.input.clone();
         let mut state = Textbox::new("a\u{1F600}b");
@@ -1388,7 +1382,9 @@ mod tests {
         state.cursor = 5;
 
         input.borrow_mut().keydown(KeyMode::BACKSPACE);
-        let res = container.widget_dyn(&mut state);
+        let mut res = ResourceState::NONE;
+        let mut runs = [widget_raw(&mut state, &mut res)];
+        container.widgets(&mut runs);
 
         assert!(res.is_changed());
         assert_eq!(state.buf, "ab");
@@ -1402,7 +1398,7 @@ mod tests {
         let mut button_b = Button::new("B");
         let mut out_a = ResourceState::SUBMIT;
         let mut out_b = ResourceState::ACTIVE;
-        let mut runs = [WidgetRun::new(&mut button_a, &mut out_a), WidgetRun::new(&mut button_b, &mut out_b)];
+        let mut runs = [widget_raw(&mut button_a, &mut out_a), widget_raw(&mut button_b, &mut out_b)];
 
         container.row_widgets(&[SizePolicy::Auto, SizePolicy::Auto], SizePolicy::Auto, &mut runs);
 

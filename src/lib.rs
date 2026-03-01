@@ -495,19 +495,12 @@ pub trait Widget {
     }
 }
 
-/// Couples one widget state object with an output slot receiving the frame result.
-pub struct WidgetRun<'a> {
-    /// Widget state to run.
-    pub widget: &'a mut dyn Widget,
-    /// Output slot overwritten with the widget frame result.
-    pub out: &'a mut ResourceState,
-}
+/// Raw widget dispatch pair `(widget_state, output_slot)` used by batch APIs.
+pub type WidgetRaw<'a> = (&'a mut dyn Widget, &'a mut ResourceState);
 
-impl<'a> WidgetRun<'a> {
-    /// Creates a run pair from a widget and output state slot.
-    pub fn new(widget: &'a mut dyn Widget, out: &'a mut ResourceState) -> Self {
-        Self { widget, out }
-    }
+/// Creates a [`WidgetRaw`] tuple from one widget state and one output slot.
+pub fn widget_raw<'a, W: Widget>(widget: &'a mut W, out: &'a mut ResourceState) -> WidgetRaw<'a> {
+    (widget as &mut dyn Widget, out)
 }
 
 /// Raw pointer identity used for widget hover/focus tracking.
