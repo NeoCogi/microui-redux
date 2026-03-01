@@ -51,6 +51,12 @@ pub struct FileDialogState {
     go_button: Button,
     ok_button: Button,
     cancel_button: Button,
+    folders_label: ListItem,
+    no_folders_label: ListItem,
+    files_label: ListItem,
+    no_files_label: ListItem,
+    file_name_label: ListItem,
+    spacer_label: ListItem,
 }
 
 impl FileDialogState {
@@ -185,6 +191,12 @@ impl FileDialogState {
             go_button: Button::new("Go"),
             ok_button: Button::new("Open"),
             cancel_button: Button::new("Cancel"),
+            folders_label: ListItem::with_opt("Folders", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME),
+            no_folders_label: ListItem::with_opt("No folders", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME),
+            files_label: ListItem::with_opt("Files", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME),
+            no_files_label: ListItem::with_opt("No Files", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME),
+            file_name_label: ListItem::with_opt("File name:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME),
+            spacer_label: ListItem::with_opt("", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME),
         };
         dialog.path_box.buf = dialog.current_working_directory.clone();
         dialog.refresh_entries();
@@ -218,6 +230,12 @@ impl FileDialogState {
             let cancel_button = &mut self.cancel_button;
             let file_name = &mut self.file_name;
             let file_path = &mut self.file_path;
+            let folders_label = &mut self.folders_label;
+            let no_folders_label = &mut self.no_folders_label;
+            let files_label = &mut self.files_label;
+            let no_files_label = &mut self.no_files_label;
+            let file_name_label = &mut self.file_name_label;
+            let spacer_label = &mut self.spacer_label;
 
             ctx.dialog(win, ContainerOption::NONE, WidgetBehaviourOption::NO_SCROLL, |cont| {
                 let mut dialog_state = WindowState::Open;
@@ -289,9 +307,8 @@ impl FileDialogState {
                     cont.panel(folder_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
                         container_handle.with_mut(|container| {
                             container.stack(SizePolicy::Auto, |container| {
-                                let mut __label = ListItem::with_opt("Folders", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
                                 let mut __label_out = ResourceState::NONE;
-                                let mut __label_runs = [widget_raw(&mut __label, &mut __label_out)];
+                                let mut __label_runs = [widget_raw(folders_label, &mut __label_out)];
                                 container.widgets(&mut __label_runs);
                             });
                             container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
@@ -317,12 +334,9 @@ impl FileDialogState {
                                     }
                                 }
                                 if folder_items.is_empty() {
-                                    {
-                                        let mut __label = ListItem::with_opt("No folders", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                                        let mut __label_out = ResourceState::NONE;
-                                        let mut __label_runs = [widget_raw(&mut __label, &mut __label_out)];
-                                        container.widgets(&mut __label_runs);
-                                    }
+                                    let mut __label_out = ResourceState::NONE;
+                                    let mut __label_runs = [widget_raw(no_folders_label, &mut __label_out)];
+                                    container.widgets(&mut __label_runs);
                                 }
                                 if refresh {
                                     needs_refresh = true;
@@ -333,9 +347,8 @@ impl FileDialogState {
                     cont.panel(file_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
                         container_handle.with_mut(|container| {
                             container.stack(SizePolicy::Auto, |container| {
-                                let mut __label = ListItem::with_opt("Files", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
                                 let mut __label_out = ResourceState::NONE;
-                                let mut __label_runs = [widget_raw(&mut __label, &mut __label_out)];
+                                let mut __label_runs = [widget_raw(files_label, &mut __label_out)];
                                 container.widgets(&mut __label_runs);
                             });
                             container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
@@ -358,12 +371,9 @@ impl FileDialogState {
                                         }
                                     }
                                 } else {
-                                    {
-                                        let mut __label = ListItem::with_opt("No Files", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                                        let mut __label_out = ResourceState::NONE;
-                                        let mut __label_runs = [widget_raw(&mut __label, &mut __label_out)];
-                                        container.widgets(&mut __label_runs);
-                                    }
+                                    let mut __label_out = ResourceState::NONE;
+                                    let mut __label_runs = [widget_raw(no_files_label, &mut __label_out)];
+                                    container.widgets(&mut __label_runs);
                                 }
                             });
                         });
@@ -371,11 +381,10 @@ impl FileDialogState {
                 });
 
                 let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
-                let mut filename_label = ListItem::with_opt("File name:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
                 let mut out_filename_label = ResourceState::NONE;
                 let mut out_filename = ResourceState::NONE;
                 let mut filename_runs = [
-                    widget_raw(&mut filename_label, &mut out_filename_label),
+                    widget_raw(file_name_label, &mut out_filename_label),
                     widget_raw(tmp_file_name, &mut out_filename),
                 ];
                 cont.row_widgets(&filename_widths, SizePolicy::Auto, &mut filename_runs);
@@ -388,12 +397,11 @@ impl FileDialogState {
                     SizePolicy::Fixed(button_width),
                     SizePolicy::Fixed(button_width),
                 ];
-                let mut spacer = ListItem::with_opt("", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
                 let mut out_spacer = ResourceState::NONE;
                 let mut out_cancel = ResourceState::NONE;
                 let mut out_ok = ResourceState::NONE;
                 let mut action_runs = [
-                    widget_raw(&mut spacer, &mut out_spacer),
+                    widget_raw(spacer_label, &mut out_spacer),
                     widget_raw(cancel_button, &mut out_cancel),
                     widget_raw(ok_button, &mut out_ok),
                 ];

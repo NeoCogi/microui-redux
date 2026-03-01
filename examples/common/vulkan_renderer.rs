@@ -163,6 +163,7 @@ pub struct VulkanRenderer {
     width: u32,
     height: u32,
     frame_index: u64,
+    device_lost: bool,
 }
 
 impl VulkanRenderer {
@@ -191,6 +192,7 @@ impl VulkanRenderer {
             width,
             height,
             frame_index: 0,
+            device_lost: false,
         })
     }
 
@@ -232,6 +234,7 @@ impl VulkanRenderer {
             area,
             kind: "custom",
             callback: Box::new(cmd),
+            budget: FrameResourceBudget::default(),
         }));
     }
 
@@ -245,6 +248,9 @@ impl VulkanRenderer {
     }
 
     fn sync_atlas(&mut self) {
+        if self.device_lost {
+            return;
+        }
         let needs_upload = self.last_atlas_update_id != self.atlas.get_last_update_id() || !self.context.ui_has_atlas();
         if needs_upload {
             if let Err(err) = self.context.upload_atlas(&self.atlas) {
@@ -269,6 +275,9 @@ impl Renderer for VulkanRenderer {
         self.vertices.clear();
         self.commands.clear();
         self.current_batch_end = 0;
+        if self.device_lost {
+            return;
+        }
 
         if let Err(err) = self.ensure_swapchain_extent(self.width, self.height) {
             eprintln!("[microui-redux][vulkan] failed to resize swapchain: {err}");
@@ -289,6 +298,12 @@ impl Renderer for VulkanRenderer {
 
     fn end(&mut self) {
         self.flush_ui_batch();
+        if self.device_lost {
+            self.commands.clear();
+            self.vertices.clear();
+            self.current_batch_end = 0;
+            return;
+        }
         let mut commands = std::mem::take(&mut self.commands);
         if let Err(err) = self.context.draw_frame(
             Self::color_to_vk_clear(self.clear_color),
@@ -299,6 +314,10 @@ impl Renderer for VulkanRenderer {
             &mut commands,
         ) {
             eprintln!("[microui-redux][vulkan] draw_frame failed: {err}");
+            if self.context.is_device_lost() {
+                self.device_lost = true;
+                eprintln!("[microui-redux][vulkan] device lost; disabling Vulkan rendering for the rest of this run");
+            }
         }
         commands.clear();
         self.commands = commands;
@@ -307,6 +326,9 @@ impl Renderer for VulkanRenderer {
     }
 
     fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) {
+        if self.device_lost {
+            return;
+        }
         match self.context.create_texture_resource(width, height, pixels) {
             Ok(texture) => {
                 self.textures.insert(id, texture);
@@ -322,6 +344,9 @@ impl Renderer for VulkanRenderer {
     }
 
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
+        if self.device_lost {
+            return;
+        }
         let descriptor = match self.textures.get(&id).map(|tex| tex.descriptor_set) {
             Some(desc) => desc,
             None => return,
@@ -341,12 +366,20 @@ impl Renderer for VulkanRenderer {
                 vertices: quad,
                 descriptor_set: descriptor,
             }),
+            budget: FrameResourceBudget {
+                ui_vertices: 6,
+                mesh_vertices: 0,
+                mesh_indices: 0,
+            },
         }));
     }
 }
 
 impl VulkanRenderer {
     pub fn enqueue_colored_vertices(&mut self, area: CustomRenderArea, vertices: Vec<Vertex>) {
+        if self.device_lost {
+            return;
+        }
         if vertices.is_empty() {
             return;
         }
@@ -355,22 +388,38 @@ impl VulkanRenderer {
             None => return,
         };
         self.flush_ui_batch();
+        let ui_vertices = vertices.len();
         self.commands.push(FrameCommand::Custom(CustomRenderJob {
             area,
             kind: "colored",
             callback: Box::new(ColoredVerticesCommand { vertices, descriptor_set }),
+            budget: FrameResourceBudget {
+                ui_vertices,
+                mesh_vertices: 0,
+                mesh_indices: 0,
+            },
         }));
     }
 
     pub fn enqueue_mesh_draw(&mut self, area: CustomRenderArea, submission: MeshSubmission) {
+        if self.device_lost {
+            return;
+        }
         if submission.mesh.is_empty() {
             return;
         }
+        let mesh_vertices = submission.mesh.vertices().len();
+        let mesh_indices = submission.mesh.indices().len();
         self.flush_ui_batch();
         self.commands.push(FrameCommand::Custom(CustomRenderJob {
             area,
             kind: "mesh",
             callback: Box::new(MeshDrawCommand { submission }),
+            budget: FrameResourceBudget {
+                ui_vertices: 0,
+                mesh_vertices,
+                mesh_indices,
+            },
         }));
     }
 }
@@ -515,10 +564,18 @@ pub(crate) trait VulkanCustomRenderer: Send {
     fn record(&mut self, ctx: &mut VulkanContext, command_buffer: vk::CommandBuffer, extent: vk::Extent2D, area: &CustomRenderArea);
 }
 
+#[derive(Clone, Copy, Default)]
+struct FrameResourceBudget {
+    ui_vertices: usize,
+    mesh_vertices: usize,
+    mesh_indices: usize,
+}
+
 struct CustomRenderJob {
     area: CustomRenderArea,
     kind: &'static str,
     callback: Box<dyn VulkanCustomRenderer>,
+    budget: FrameResourceBudget,
 }
 
 fn vk_trace_enabled() -> bool {
@@ -705,6 +762,8 @@ struct UiResources {
     atlas: Option<ImageResource>,
     vertex_offset: vk::DeviceSize,
     staging_offsets: Vec<vk::DeviceSize>,
+    retired_vertex_buffers: Vec<Vec<Buffer>>,
+    retired_staging_buffers: Vec<Vec<MappedBuffer>>,
 }
 
 impl UiResources {
@@ -745,6 +804,8 @@ impl UiResources {
             atlas: None,
             vertex_offset: 0,
             staging_offsets: vec![0; ctx.max_frames_in_flight],
+            retired_vertex_buffers: (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect(),
+            retired_staging_buffers: (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect(),
         })
     }
 
@@ -754,6 +815,16 @@ impl UiResources {
         }
         for slot in &mut self.staging_buffers {
             if let Some(mut buffer) = slot.take() {
+                buffer.destroy(device);
+            }
+        }
+        for frame in &mut self.retired_vertex_buffers {
+            for mut buffer in frame.drain(..) {
+                buffer.destroy(device);
+            }
+        }
+        for frame in &mut self.retired_staging_buffers {
+            for mut buffer in frame.drain(..) {
                 buffer.destroy(device);
             }
         }
@@ -1013,13 +1084,16 @@ impl UiResources {
         }
     }
 
-    fn ensure_vertex_buffer(&mut self, ctx: &VulkanContext, required: vk::DeviceSize) -> Result<()> {
+    fn ensure_vertex_buffer(&mut self, ctx: &VulkanContext, frame: usize, required: vk::DeviceSize) -> Result<()> {
         let current_capacity = self.vertex_buffer.as_ref().map(|buf| buf.size);
         let needs_realloc = current_capacity.map(|cap| cap < required).unwrap_or(true);
         if needs_realloc {
+            if frame >= self.retired_vertex_buffers.len() {
+                return Err(format!("invalid frame index for UI retired vertex buffers: {}", frame));
+            }
             let new_capacity = Self::grow_capacity(current_capacity, required, Self::MIN_VERTEX_CAPACITY);
-            if let Some(mut buffer) = self.vertex_buffer.take() {
-                buffer.destroy(&ctx.device);
+            if let Some(buffer) = self.vertex_buffer.take() {
+                self.retired_vertex_buffers[frame].push(buffer);
             }
             let buffer = ctx.create_buffer(
                 new_capacity,
@@ -1040,8 +1114,8 @@ impl UiResources {
         let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
         if needs_realloc {
             let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_STAGING_CAPACITY);
-            if let Some(mut buffer) = self.staging_buffers[frame].take() {
-                buffer.destroy(&ctx.device);
+            if let Some(buffer) = self.staging_buffers[frame].take() {
+                self.retired_staging_buffers[frame].push(buffer);
             }
             let buffer = ctx.create_buffer(
                 new_capacity,
@@ -1053,6 +1127,19 @@ impl UiResources {
             self.staging_offsets[frame] = 0;
         }
         Ok(())
+    }
+
+    fn cleanup_retired(&mut self, frame: usize, device: &ash::Device) {
+        if let Some(bins) = self.retired_vertex_buffers.get_mut(frame) {
+            for mut buffer in bins.drain(..) {
+                buffer.destroy(device);
+            }
+        }
+        if let Some(bins) = self.retired_staging_buffers.get_mut(frame) {
+            for mut buffer in bins.drain(..) {
+                buffer.destroy(device);
+            }
+        }
     }
 
     fn reset_frame_offsets(&mut self, frame: usize) {
@@ -1107,7 +1194,7 @@ impl UiResources {
         let copy_size = vertex_bytes.len() as u64;
         let dst_offset = self.vertex_offset;
         self.ensure_staging_buffer(ctx, frame, frame_staging_offset + copy_size)?;
-        self.ensure_vertex_buffer(ctx, dst_offset + copy_size)?;
+        self.ensure_vertex_buffer(ctx, frame, dst_offset + copy_size)?;
         let staging = self.staging_buffers.get(frame).and_then(|slot| slot.as_ref());
         if let (Some(staging), Some(buffer)) = (staging, self.vertex_buffer.as_ref()) {
             staging.write(frame_staging_offset, vertex_bytes)?;
@@ -1169,6 +1256,12 @@ impl UiResources {
         Ok(())
     }
 
+    fn prepare_frame(&mut self, ctx: &VulkanContext, frame: usize, ui_vertex_bytes: vk::DeviceSize) -> Result<()> {
+        self.ensure_staging_buffer(ctx, frame, ui_vertex_bytes)?;
+        self.ensure_vertex_buffer(ctx, frame, ui_vertex_bytes)?;
+        Ok(())
+    }
+
     fn ortho_matrix(width: f32, height: f32) -> [f32; 16] {
         [
             2.0 / width,
@@ -1206,8 +1299,10 @@ struct MeshResources {
     vertex_staging_offset: vk::DeviceSize,
     index_offset: vk::DeviceSize,
     index_staging_offset: vk::DeviceSize,
-    retired_vertex_staging: Vec<MappedBuffer>,
-    retired_index_staging: Vec<MappedBuffer>,
+    retired_vertex_buffers: Vec<Vec<Buffer>>,
+    retired_index_buffers: Vec<Vec<Buffer>>,
+    retired_vertex_staging: Vec<Vec<MappedBuffer>>,
+    retired_index_staging: Vec<Vec<MappedBuffer>>,
     depth_enabled: bool,
 }
 
@@ -1351,8 +1446,10 @@ impl MeshResources {
             vertex_staging_offset: 0,
             index_offset: 0,
             index_staging_offset: 0,
-            retired_vertex_staging: Vec::new(),
-            retired_index_staging: Vec::new(),
+            retired_vertex_buffers: (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect(),
+            retired_index_buffers: (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect(),
+            retired_vertex_staging: (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect(),
+            retired_index_staging: (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect(),
             depth_enabled,
         })
     }
@@ -1370,11 +1467,25 @@ impl MeshResources {
         if let Some(mut buffer) = self.index_staging.take() {
             buffer.destroy(device);
         }
-        for mut buffer in self.retired_vertex_staging.drain(..) {
-            buffer.destroy(device);
+        for frame in &mut self.retired_vertex_buffers {
+            for mut buffer in frame.drain(..) {
+                buffer.destroy(device);
+            }
         }
-        for mut buffer in self.retired_index_staging.drain(..) {
-            buffer.destroy(device);
+        for frame in &mut self.retired_index_buffers {
+            for mut buffer in frame.drain(..) {
+                buffer.destroy(device);
+            }
+        }
+        for frame in &mut self.retired_vertex_staging {
+            for mut buffer in frame.drain(..) {
+                buffer.destroy(device);
+            }
+        }
+        for frame in &mut self.retired_index_staging {
+            for mut buffer in frame.drain(..) {
+                buffer.destroy(device);
+            }
         }
         unsafe {
             device.destroy_pipeline(self.pipeline, None);
@@ -1384,13 +1495,16 @@ impl MeshResources {
         self.pipeline_layout = vk::PipelineLayout::null();
     }
 
-    fn ensure_vertex_buffer(&mut self, ctx: &VulkanContext, required_total: vk::DeviceSize) -> Result<()> {
+    fn ensure_vertex_buffer(&mut self, ctx: &VulkanContext, frame: usize, required_total: vk::DeviceSize) -> Result<()> {
         let current_capacity = self.vertex_buffer.as_ref().map(|buf| buf.size);
         let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
         if needs_realloc {
+            if frame >= self.retired_vertex_buffers.len() {
+                return Err(format!("invalid frame index for mesh retired vertex buffers: {}", frame));
+            }
             let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_VERTEX_CAPACITY);
-            if let Some(mut buffer) = self.vertex_buffer.take() {
-                buffer.destroy(&ctx.device);
+            if let Some(buffer) = self.vertex_buffer.take() {
+                self.retired_vertex_buffers[frame].push(buffer);
             }
             let buffer = ctx.create_buffer(
                 new_capacity,
@@ -1403,13 +1517,16 @@ impl MeshResources {
         Ok(())
     }
 
-    fn ensure_index_buffer(&mut self, ctx: &VulkanContext, required_total: vk::DeviceSize) -> Result<()> {
+    fn ensure_index_buffer(&mut self, ctx: &VulkanContext, frame: usize, required_total: vk::DeviceSize) -> Result<()> {
         let current_capacity = self.index_buffer.as_ref().map(|buf| buf.size);
         let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
         if needs_realloc {
+            if frame >= self.retired_index_buffers.len() {
+                return Err(format!("invalid frame index for mesh retired index buffers: {}", frame));
+            }
             let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_INDEX_CAPACITY);
-            if let Some(mut buffer) = self.index_buffer.take() {
-                buffer.destroy(&ctx.device);
+            if let Some(buffer) = self.index_buffer.take() {
+                self.retired_index_buffers[frame].push(buffer);
             }
             let buffer = ctx.create_buffer(
                 new_capacity,
@@ -1422,13 +1539,16 @@ impl MeshResources {
         Ok(())
     }
 
-    fn ensure_vertex_staging_buffer(&mut self, ctx: &VulkanContext, required_total: vk::DeviceSize) -> Result<()> {
+    fn ensure_vertex_staging_buffer(&mut self, ctx: &VulkanContext, frame: usize, required_total: vk::DeviceSize) -> Result<()> {
         let current_capacity = self.vertex_staging.as_ref().map(|buf| buf.size());
         let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
         if needs_realloc {
+            if frame >= self.retired_vertex_staging.len() {
+                return Err(format!("invalid frame index for mesh retired vertex staging buffers: {}", frame));
+            }
             let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_VERTEX_STAGING_CAPACITY);
             if let Some(buffer) = self.vertex_staging.take() {
-                self.retired_vertex_staging.push(buffer);
+                self.retired_vertex_staging[frame].push(buffer);
             }
             let buffer = ctx.create_buffer(
                 new_capacity,
@@ -1442,13 +1562,16 @@ impl MeshResources {
         Ok(())
     }
 
-    fn ensure_index_staging_buffer(&mut self, ctx: &VulkanContext, required_total: vk::DeviceSize) -> Result<()> {
+    fn ensure_index_staging_buffer(&mut self, ctx: &VulkanContext, frame: usize, required_total: vk::DeviceSize) -> Result<()> {
         let current_capacity = self.index_staging.as_ref().map(|buf| buf.size());
         let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
         if needs_realloc {
+            if frame >= self.retired_index_staging.len() {
+                return Err(format!("invalid frame index for mesh retired index staging buffers: {}", frame));
+            }
             let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_INDEX_STAGING_CAPACITY);
             if let Some(buffer) = self.index_staging.take() {
-                self.retired_index_staging.push(buffer);
+                self.retired_index_staging[frame].push(buffer);
             }
             let buffer = ctx.create_buffer(
                 new_capacity,
@@ -1462,21 +1585,49 @@ impl MeshResources {
         Ok(())
     }
 
-    fn cleanup_retired_staging(&mut self, device: &ash::Device) {
-        for mut buffer in self.retired_vertex_staging.drain(..) {
-            buffer.destroy(device);
+    fn cleanup_retired(&mut self, frame: usize, device: &ash::Device) {
+        if let Some(buffers) = self.retired_vertex_buffers.get_mut(frame) {
+            for mut buffer in buffers.drain(..) {
+                buffer.destroy(device);
+            }
         }
-        for mut buffer in self.retired_index_staging.drain(..) {
-            buffer.destroy(device);
+        if let Some(buffers) = self.retired_index_buffers.get_mut(frame) {
+            for mut buffer in buffers.drain(..) {
+                buffer.destroy(device);
+            }
+        }
+        if let Some(buffers) = self.retired_vertex_staging.get_mut(frame) {
+            for mut buffer in buffers.drain(..) {
+                buffer.destroy(device);
+            }
+        }
+        if let Some(buffers) = self.retired_index_staging.get_mut(frame) {
+            for mut buffer in buffers.drain(..) {
+                buffer.destroy(device);
+            }
         }
     }
 
-    fn reset_upload_state(&mut self, device: &ash::Device) {
+    fn reset_upload_state(&mut self, frame: usize, device: &ash::Device) {
         self.vertex_offset = 0;
         self.vertex_staging_offset = 0;
         self.index_offset = 0;
         self.index_staging_offset = 0;
-        self.cleanup_retired_staging(device);
+        self.cleanup_retired(frame, device);
+    }
+
+    fn prepare_frame(
+        &mut self,
+        ctx: &VulkanContext,
+        frame: usize,
+        required_vertex_bytes: vk::DeviceSize,
+        required_index_bytes: vk::DeviceSize,
+    ) -> Result<()> {
+        self.ensure_vertex_buffer(ctx, frame, required_vertex_bytes)?;
+        self.ensure_index_buffer(ctx, frame, required_index_bytes)?;
+        self.ensure_vertex_staging_buffer(ctx, frame, required_vertex_bytes)?;
+        self.ensure_index_staging_buffer(ctx, frame, required_index_bytes)?;
+        Ok(())
     }
 
     fn record(&mut self, ctx: &mut VulkanContext, command_buffer: vk::CommandBuffer, submission: &MeshSubmission, area: &CustomRenderArea) -> Result<()> {
@@ -1503,14 +1654,15 @@ impl MeshResources {
                 submission.mesh.indices().len() * std::mem::size_of::<u32>(),
             )
         };
+        let frame = ctx.current_frame;
         let vertex_copy_size = vertex_bytes.len() as u64;
         let index_copy_size = index_bytes.len() as u64;
         let vertex_dst_offset = self.vertex_offset;
         let index_dst_offset = self.index_offset;
-        self.ensure_vertex_buffer(ctx, vertex_dst_offset + vertex_copy_size)?;
-        self.ensure_index_buffer(ctx, index_dst_offset + index_copy_size)?;
-        self.ensure_vertex_staging_buffer(ctx, self.vertex_staging_offset + vertex_copy_size)?;
-        self.ensure_index_staging_buffer(ctx, self.index_staging_offset + index_copy_size)?;
+        self.ensure_vertex_buffer(ctx, frame, vertex_dst_offset + vertex_copy_size)?;
+        self.ensure_index_buffer(ctx, frame, index_dst_offset + index_copy_size)?;
+        self.ensure_vertex_staging_buffer(ctx, frame, self.vertex_staging_offset + vertex_copy_size)?;
+        self.ensure_index_staging_buffer(ctx, frame, self.index_staging_offset + index_copy_size)?;
 
         if let (Some(staging), Some(buffer)) = (self.vertex_staging.as_ref(), self.vertex_buffer.as_ref()) {
             staging.write(self.vertex_staging_offset, vertex_bytes)?;
@@ -1636,6 +1788,7 @@ pub(crate) struct VulkanContext {
     depth_images: Vec<ImageResource>,
     mesh: Option<MeshResources>,
     swapchain_generation: u64,
+    device_lost: bool,
 }
 
 impl VulkanContext {
@@ -1718,6 +1871,7 @@ impl VulkanContext {
             logical_width: width,
             logical_height: height,
             swapchain_generation: 0,
+            device_lost: false,
         };
 
         ctx.command_pool = ctx.create_command_pool()?;
@@ -1808,12 +1962,17 @@ impl VulkanContext {
     }
 
     fn recreate_swapchain(&mut self, width: u32, height: u32) -> Result<()> {
+        if self.device_lost {
+            return Err("cannot recreate swapchain: device is lost".into());
+        }
         if width == 0 || height == 0 {
             return Ok(());
         }
 
         unsafe {
-            self.device.device_wait_idle().map_err(|err| format!("device_wait_idle failed: {err:?}"))?;
+            self.device
+                .device_wait_idle()
+                .map_err(|err| self.handle_vk_error("device_wait_idle", err))?;
         }
 
         self.cleanup_swapchain();
@@ -2119,26 +2278,31 @@ impl VulkanContext {
         _frame_index: u64,
         commands: &mut Vec<FrameCommand>,
     ) -> Result<()> {
+        if self.device_lost {
+            return Err("device is lost; VulkanContext is disabled".into());
+        }
         self.logical_width = width.max(1);
         self.logical_height = height.max(1);
-        let fence = self.in_flight_fences[self.current_frame];
+        let frame = self.current_frame;
+        let fence = self.in_flight_fences[frame];
         unsafe {
             self.device
                 .wait_for_fences(&[fence], true, u64::MAX)
-                .map_err(|err| format!("wait_for_fences failed: {err:?}"))?;
+                .map_err(|err| self.handle_vk_error("wait_for_fences", err))?;
         }
 
-        self.reset_transfer_state(self.current_frame)?;
-        self.reset_ui_offset();
+        self.reset_transfer_state(frame)?;
+        self.reset_ui_offset(frame);
         if let Some(ref mut mesh) = self.mesh {
-            mesh.reset_upload_state(&self.device);
+            mesh.reset_upload_state(frame, &self.device);
         }
+        self.preflight_frame_resources(vertices, commands.as_slice())?;
 
         let mut swapchain_needs_recreate = false;
 
         let (image_index, suboptimal) = match unsafe {
             self.swapchain_loader
-                .acquire_next_image(self.swapchain, u64::MAX, self.image_available_semaphores[self.current_frame], vk::Fence::null())
+                .acquire_next_image(self.swapchain, u64::MAX, self.image_available_semaphores[frame], vk::Fence::null())
         } {
             Ok((index, suboptimal)) => (index, suboptimal),
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
@@ -2149,27 +2313,29 @@ impl VulkanContext {
                 self.recreate_swapchain(width, height)?;
                 return Ok(());
             }
-            Err(err) => return Err(format!("acquire_next_image failed: {err:?}")),
+            Err(err) => return Err(self.handle_vk_error("acquire_next_image", err)),
         };
         if suboptimal {
             swapchain_needs_recreate = true;
         }
 
         unsafe {
-            self.device.reset_fences(&[fence]).map_err(|err| format!("reset_fences failed: {err:?}"))?;
+            self.device
+                .reset_fences(&[fence])
+                .map_err(|err| self.handle_vk_error("reset_fences", err))?;
         }
 
         let command_buffer = self.command_buffers[image_index as usize];
         self.record_command_buffer(command_buffer, image_index, clear_value, vertices, width, height, _frame_index, commands)?;
         let transfer_semaphore = self.submit_transfer_commands()?;
 
-        let mut wait_semaphores = vec![self.image_available_semaphores[self.current_frame]];
+        let mut wait_semaphores = vec![self.image_available_semaphores[frame]];
         let mut wait_stages = vec![vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         if let Some(semaphore) = transfer_semaphore {
             wait_semaphores.push(semaphore);
             wait_stages.push(vk::PipelineStageFlags::VERTEX_INPUT);
         }
-        let signal_semaphores = [self.render_finished_semaphores[self.current_frame]];
+        let signal_semaphores = [self.render_finished_semaphores[frame]];
 
         let submit_info = vk::SubmitInfo::builder()
             .wait_semaphores(&wait_semaphores)
@@ -2181,7 +2347,7 @@ impl VulkanContext {
         unsafe {
             self.device
                 .queue_submit(self.graphics_queue, &submit_infos, fence)
-                .map_err(|err| format!("queue_submit failed: {err:?}"))?;
+                .map_err(|err| self.handle_vk_error("queue_submit", err))?;
         }
 
         let swapchains = [self.swapchain];
@@ -2209,7 +2375,7 @@ impl VulkanContext {
                 self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
                 return Ok(());
             }
-            Err(err) => return Err(format!("queue_present failed: {err:?}")),
+            Err(err) => return Err(self.handle_vk_error("queue_present", err)),
         }
 
         if swapchain_needs_recreate {
@@ -2217,6 +2383,59 @@ impl VulkanContext {
         }
 
         self.current_frame = (self.current_frame + 1) % self.max_frames_in_flight;
+
+        Ok(())
+    }
+
+    fn preflight_frame_resources(&mut self, vertices: &[Vertex], commands: &[FrameCommand]) -> Result<()> {
+        let mut budget = FrameResourceBudget::default();
+        let mut cursor = 0usize;
+        for command in commands {
+            match command {
+                FrameCommand::DrawTo(end_index) => {
+                    let end = (*end_index).min(vertices.len());
+                    if end > cursor {
+                        budget.ui_vertices = budget.ui_vertices.saturating_add(end - cursor);
+                    }
+                    cursor = end;
+                }
+                FrameCommand::Custom(job) => {
+                    budget.ui_vertices = budget.ui_vertices.saturating_add(job.budget.ui_vertices);
+                    budget.mesh_vertices = budget.mesh_vertices.saturating_add(job.budget.mesh_vertices);
+                    budget.mesh_indices = budget.mesh_indices.saturating_add(job.budget.mesh_indices);
+                }
+            }
+        }
+        if cursor < vertices.len() {
+            budget.ui_vertices = budget.ui_vertices.saturating_add(vertices.len() - cursor);
+        }
+
+        let to_bytes = |count: usize, element_size: usize| -> Result<vk::DeviceSize> {
+            let bytes = count
+                .checked_mul(element_size)
+                .ok_or_else(|| "frame upload size overflow".to_string())?;
+            u64::try_from(bytes).map_err(|_| "frame upload size exceeds device address range".to_string())
+        };
+
+        let frame = self.current_frame;
+        let ui_bytes = to_bytes(budget.ui_vertices, std::mem::size_of::<Vertex>())?;
+        if let Some(mut ui) = self.ui.take() {
+            let result = ui.prepare_frame(self, frame, ui_bytes);
+            self.ui = Some(ui);
+            result?;
+        }
+
+        if budget.mesh_vertices > 0 && budget.mesh_indices > 0 {
+            let mesh_vertex_bytes = to_bytes(budget.mesh_vertices, std::mem::size_of::<MeshVertex>())?;
+            let mesh_index_bytes = to_bytes(budget.mesh_indices, std::mem::size_of::<u32>())?;
+            let mut mesh = match self.mesh.take() {
+                Some(existing) => existing,
+                None => MeshResources::new(self)?,
+            };
+            let result = mesh.prepare_frame(self, frame, mesh_vertex_bytes, mesh_index_bytes);
+            self.mesh = Some(mesh);
+            result?;
+        }
 
         Ok(())
     }
@@ -2341,6 +2560,19 @@ impl VulkanContext {
         }
     }
 
+    fn handle_vk_error(&mut self, op: &str, err: vk::Result) -> String {
+        if err == vk::Result::ERROR_DEVICE_LOST {
+            self.device_lost = true;
+            format!("{op} failed: {err:?} (device lost)")
+        } else {
+            format!("{op} failed: {err:?}")
+        }
+    }
+
+    fn is_device_lost(&self) -> bool {
+        self.device_lost
+    }
+
     fn extent(&self) -> vk::Extent2D {
         self.extent
     }
@@ -2389,9 +2621,10 @@ impl VulkanContext {
         result
     }
 
-    fn reset_ui_offset(&mut self) {
+    fn reset_ui_offset(&mut self, frame: usize) {
         if let Some(ref mut ui) = self.ui {
-            ui.reset_frame_offsets(self.current_frame);
+            ui.reset_frame_offsets(frame);
+            ui.cleanup_retired(frame, &self.device);
         }
     }
 

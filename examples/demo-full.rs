@@ -61,16 +61,12 @@ struct SuzaneData {
     mesh: MeshBuffers,
 }
 
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct LabelColor<'a> {
-    pub label: &'a str,
-    pub idx: ControlColor,
+fn static_label(text: impl Into<String>) -> ListItem {
+    ListItem::with_opt(text, WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)
 }
 
-struct State<'a> {
+struct State {
     renderer: RendererHandle<BackendRenderer>,
-    label_colors: [LabelColor<'a>; 15],
     bg: [Real; 3],
     bg_sliders: [Slider; 3],
     style_color_sliders: [Slider; 60],
@@ -81,6 +77,15 @@ struct State<'a> {
     text_area: TextArea,
     combo_state: Option<Combo>,
     combo_items: [ListItem; 4],
+    style_color_labels: [ListItem; 14],
+    style_metric_labels: [ListItem; 5],
+    stack_direction_labels: [ListItem; 2],
+    weight_labels: [ListItem; 2],
+    window_info_labels: [ListItem; 3],
+    window_info_values: [ListItem; 3],
+    test_button_labels: [ListItem; 3],
+    tree_labels: [ListItem; 2],
+    background_labels: [ListItem; 3],
     style: Style,
 
     demo_window: Option<WindowHandle>,
@@ -127,7 +132,7 @@ struct State<'a> {
     suzane_widget: Custom,
 }
 
-impl<'a> State<'a> {
+impl State {
     pub fn new(_backend: BackendInitContext, renderer: RendererHandle<BackendRenderer>, slots: Vec<SlotId>, ctx: &mut Context<BackendRenderer>) -> Self {
         #[cfg(any(feature = "builder", feature = "png_source"))]
         let image_texture = load_external_image_texture(ctx);
@@ -198,59 +203,6 @@ impl<'a> State<'a> {
 
         Self {
             renderer,
-            label_colors: [
-                LabelColor { label: "text", idx: ControlColor::Text },
-                LabelColor {
-                    label: "border:",
-                    idx: ControlColor::Border,
-                },
-                LabelColor {
-                    label: "windowbg:",
-                    idx: ControlColor::WindowBG,
-                },
-                LabelColor {
-                    label: "titlebg:",
-                    idx: ControlColor::TitleBG,
-                },
-                LabelColor {
-                    label: "titletext:",
-                    idx: ControlColor::TitleText,
-                },
-                LabelColor {
-                    label: "panelbg:",
-                    idx: ControlColor::PanelBG,
-                },
-                LabelColor {
-                    label: "button:",
-                    idx: ControlColor::Button,
-                },
-                LabelColor {
-                    label: "buttonhover:",
-                    idx: ControlColor::ButtonHover,
-                },
-                LabelColor {
-                    label: "buttonfocus:",
-                    idx: ControlColor::ButtonFocus,
-                },
-                LabelColor { label: "base:", idx: ControlColor::Base },
-                LabelColor {
-                    label: "basehover:",
-                    idx: ControlColor::BaseHover,
-                },
-                LabelColor {
-                    label: "basefocus:",
-                    idx: ControlColor::BaseFocus,
-                },
-                LabelColor {
-                    label: "scrollbase:",
-                    idx: ControlColor::ScrollBase,
-                },
-                LabelColor {
-                    label: "scrollthumb:",
-                    idx: ControlColor::ScrollThumb,
-                },
-                LabelColor { label: "", idx: ControlColor::Text },
-            ],
             bg: [90.0, 95.0, 100.0],
             bg_sliders,
             style_color_sliders,
@@ -261,6 +213,40 @@ impl<'a> State<'a> {
             text_area,
             combo_state: None,
             combo_items: [ListItem::new("Apple"), ListItem::new("Banana"), ListItem::new("Cherry"), ListItem::new("Date")],
+            style_color_labels: [
+                static_label("text"),
+                static_label("border:"),
+                static_label("windowbg:"),
+                static_label("titlebg:"),
+                static_label("titletext:"),
+                static_label("panelbg:"),
+                static_label("button:"),
+                static_label("buttonhover:"),
+                static_label("buttonfocus:"),
+                static_label("base:"),
+                static_label("basehover:"),
+                static_label("basefocus:"),
+                static_label("scrollbase:"),
+                static_label("scrollthumb:"),
+            ],
+            style_metric_labels: [
+                static_label("padding"),
+                static_label("spacing"),
+                static_label("title height"),
+                static_label("thumb size"),
+                static_label("scroll size"),
+            ],
+            stack_direction_labels: [static_label("Top -> Bottom"), static_label("Bottom -> Top")],
+            weight_labels: [static_label("Row weights 1 : 2 : 3"), static_label("Grid weights rows 1 : 2")],
+            window_info_labels: [static_label("Position:"), static_label("Size:"), static_label("FPS:")],
+            window_info_values: [static_label(""), static_label(""), static_label("")],
+            test_button_labels: [
+                static_label("Test buttons 1:"),
+                static_label("Test buttons 2:"),
+                static_label("Test buttons 3:"),
+            ],
+            tree_labels: [static_label("Hello"), static_label("world")],
+            background_labels: [static_label("Red:"), static_label("Green:"), static_label("Blue:")],
             style: Style::default(),
             demo_window: None,
             style_window: None,
@@ -407,6 +393,11 @@ impl<'a> State<'a> {
     }
 
     fn style_window(&mut self, ctx: &mut Context<BackendRenderer>) {
+        let style_color_labels = &mut self.style_color_labels;
+        let style_metric_labels = &mut self.style_metric_labels;
+        let style_color_sliders = &mut self.style_color_sliders;
+        let style_value_sliders = &mut self.style_value_sliders;
+        let style = &mut self.style;
         ctx.window(
             &mut self.style_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
@@ -422,74 +413,42 @@ impl<'a> State<'a> {
                     SizePolicy::Remainder(0),
                 ];
                 container.with_row(&color_row, SizePolicy::Auto, |container| {
-                    let mut i = 0;
-                    while self.label_colors[i].label.len() > 0 {
-                        {
-                            let mut __label = ListItem::with_opt(self.label_colors[i].label, WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                            let mut __label_out = ResourceState::NONE;
-                            let mut __label_runs = [widget_raw(&mut __label, &mut __label_out)];
-                            container.widgets(&mut __label_runs);
-                        }
+                    for (i, label) in style_color_labels.iter_mut().enumerate() {
+                        let mut out_label = ResourceState::NONE;
+                        let mut label_runs = [widget_raw(label, &mut out_label)];
+                        container.widgets(&mut label_runs);
                         unsafe {
-                            let color = self.style.colors.as_mut_ptr().offset(i as isize);
+                            let color = style.colors.as_mut_ptr().offset(i as isize);
                             let slider_base = i * 4;
-                            Self::u8_slider(&mut (*color).r, &mut self.style_color_sliders[slider_base], container);
-                            Self::u8_slider(&mut (*color).g, &mut self.style_color_sliders[slider_base + 1], container);
-                            Self::u8_slider(&mut (*color).b, &mut self.style_color_sliders[slider_base + 2], container);
-                            Self::u8_slider(&mut (*color).a, &mut self.style_color_sliders[slider_base + 3], container);
+                            Self::u8_slider(&mut (*color).r, &mut style_color_sliders[slider_base], container);
+                            Self::u8_slider(&mut (*color).g, &mut style_color_sliders[slider_base + 1], container);
+                            Self::u8_slider(&mut (*color).b, &mut style_color_sliders[slider_base + 2], container);
+                            Self::u8_slider(&mut (*color).a, &mut style_color_sliders[slider_base + 3], container);
                         }
                         let next_layout = container.next_cell();
-                        let color = self.style.colors[i];
+                        let color = style.colors[i];
                         container.draw_rect(next_layout, color);
-                        i += 1;
                     }
                 });
                 let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Fixed(sw)];
                 container.with_row(&metrics_row, SizePolicy::Auto, |container| {
-                    {
-                        let mut __label = ListItem::with_opt("padding", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                        let mut __label_out = ResourceState::NONE;
-                        let mut __label_runs = [widget_raw(&mut __label, &mut __label_out)];
-                        container.widgets(&mut __label_runs);
+                    for (idx, label) in style_metric_labels.iter_mut().enumerate() {
+                        let mut out_label = ResourceState::NONE;
+                        let mut label_runs = [widget_raw(label, &mut out_label)];
+                        container.widgets(&mut label_runs);
+                        match idx {
+                            0 => Self::i32_slider(&mut style.padding, &mut style_value_sliders[0], container),
+                            1 => Self::i32_slider(&mut style.spacing, &mut style_value_sliders[1], container),
+                            2 => Self::i32_slider(&mut style.title_height, &mut style_value_sliders[2], container),
+                            3 => Self::i32_slider(&mut style.thumb_size, &mut style_value_sliders[3], container),
+                            _ => Self::i32_slider(&mut style.scrollbar_size, &mut style_value_sliders[4], container),
+                        };
                     }
-                    Self::i32_slider(&mut self.style.padding, &mut self.style_value_sliders[0], container);
-
-                    {
-                        let mut __label = ListItem::with_opt("spacing", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                        let mut __label_out = ResourceState::NONE;
-                        let mut __label_runs = [widget_raw(&mut __label, &mut __label_out)];
-                        container.widgets(&mut __label_runs);
-                    }
-                    Self::i32_slider(&mut self.style.spacing, &mut self.style_value_sliders[1], container);
-
-                    {
-                        let mut __label = ListItem::with_opt("title height", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                        let mut __label_out = ResourceState::NONE;
-                        let mut __label_runs = [widget_raw(&mut __label, &mut __label_out)];
-                        container.widgets(&mut __label_runs);
-                    }
-                    Self::i32_slider(&mut self.style.title_height, &mut self.style_value_sliders[2], container);
-
-                    {
-                        let mut __label = ListItem::with_opt("thumb size", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                        let mut __label_out = ResourceState::NONE;
-                        let mut __label_runs = [widget_raw(&mut __label, &mut __label_out)];
-                        container.widgets(&mut __label_runs);
-                    }
-                    Self::i32_slider(&mut self.style.thumb_size, &mut self.style_value_sliders[3], container);
-
-                    {
-                        let mut __label = ListItem::with_opt("scroll size", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                        let mut __label_out = ResourceState::NONE;
-                        let mut __label_runs = [widget_raw(&mut __label, &mut __label_out)];
-                        container.widgets(&mut __label_runs);
-                    }
-                    Self::i32_slider(&mut self.style.scrollbar_size, &mut self.style_value_sliders[4], container);
                 });
                 WindowState::Open
             },
         );
-        ctx.set_style(&self.style);
+        ctx.set_style(style);
     }
 
     fn log_window(&mut self, ctx: &mut Context<BackendRenderer>) {
@@ -663,6 +622,7 @@ impl<'a> State<'a> {
         }
 
         let buttons = &mut self.stack_direction_buttons;
+        let stack_direction_labels = &mut self.stack_direction_labels;
         let mut logs: Vec<&'static str> = Vec::new();
         ctx.window(
             &mut self.stack_direction_window.as_mut().unwrap().clone(),
@@ -675,12 +635,11 @@ impl<'a> State<'a> {
                 let columns = [SizePolicy::Fixed(left_width), SizePolicy::Remainder(0)];
 
                 let [button_top_0, button_top_1, button_top_2, button_bottom_0, button_bottom_1, button_bottom_2] = buttons;
+                let [label_top, label_bottom] = stack_direction_labels;
                 container.with_row(&columns, SizePolicy::Auto, |container| {
-                    let mut label_top = ListItem::with_opt("Top -> Bottom", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                    let mut label_bottom = ListItem::with_opt("Bottom -> Top", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
                     let mut out_top = ResourceState::NONE;
                     let mut out_bottom = ResourceState::NONE;
-                    let mut runs = [widget_raw(&mut label_top, &mut out_top), widget_raw(&mut label_bottom, &mut out_bottom)];
+                    let mut runs = [widget_raw(label_top, &mut out_top), widget_raw(label_bottom, &mut out_bottom)];
                     container.widgets(&mut runs);
                 });
 
@@ -741,6 +700,7 @@ impl<'a> State<'a> {
         }
 
         let buttons = &mut self.weight_buttons;
+        let weight_labels = &mut self.weight_labels;
         let mut logs: Vec<&'static str> = Vec::new();
         ctx.window(
             &mut self.weight_window.as_mut().unwrap().clone(),
@@ -758,11 +718,11 @@ impl<'a> State<'a> {
                     button_grid_4,
                     button_grid_5,
                 ] = buttons;
+                let [row_weight_label, grid_weight_label] = weight_labels;
 
                 container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                    let mut __label = ListItem::with_opt("Row weights 1 : 2 : 3", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
                     let mut __label_out = ResourceState::NONE;
-                    let mut __label_runs = [widget_raw(&mut __label, &mut __label_out)];
+                    let mut __label_runs = [widget_raw(row_weight_label, &mut __label_out)];
                     container.widgets(&mut __label_runs);
                 });
                 let row = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0), SizePolicy::Weight(3.0)];
@@ -786,9 +746,8 @@ impl<'a> State<'a> {
                 }
 
                 container.with_row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |container| {
-                    let mut __label = ListItem::with_opt("Grid weights rows 1 : 2", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
                     let mut __label_out = ResourceState::NONE;
-                    let mut __label_runs = [widget_raw(&mut __label, &mut __label_out)];
+                    let mut __label_runs = [widget_raw(grid_weight_label, &mut __label_out)];
                     container.widgets(&mut __label_runs);
                 });
                 container.with_row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |container| {
@@ -855,34 +814,38 @@ impl<'a> State<'a> {
 
             {
                 let window_header = &mut self.window_header;
+                let window_info_labels = &mut self.window_info_labels;
+                let window_info_values = &mut self.window_info_values;
                 Self::section(container, window_header, |container| {
+                    let [label_pos, label_size, label_fps] = window_info_labels;
+                    let [value_pos, value_size, value_fps] = window_info_values;
                     let win_0 = container.rect();
                     let row_widths = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
                     buff.clear();
                     buff.push_str(format!("{}, {}", win_0.x, win_0.y).as_str());
-                    let mut label_pos = ListItem::with_opt("Position:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                    let mut value_pos = ListItem::with_opt(buff.as_str(), WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
+                    value_pos.label.clear();
+                    value_pos.label.push_str(buff.as_str());
                     let mut out_pos = ResourceState::NONE;
                     let mut out_pos_value = ResourceState::NONE;
-                    let mut runs = [widget_raw(&mut label_pos, &mut out_pos), widget_raw(&mut value_pos, &mut out_pos_value)];
+                    let mut runs = [widget_raw(label_pos, &mut out_pos), widget_raw(value_pos, &mut out_pos_value)];
                     container.row_widgets(&row_widths, SizePolicy::Auto, &mut runs);
 
                     buff.clear();
                     buff.push_str(format!("{}, {}", win_0.width, win_0.height).as_str());
-                    let mut label_size = ListItem::with_opt("Size:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                    let mut value_size = ListItem::with_opt(buff.as_str(), WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
+                    value_size.label.clear();
+                    value_size.label.push_str(buff.as_str());
                     let mut out_size = ResourceState::NONE;
                     let mut out_size_value = ResourceState::NONE;
-                    let mut runs = [widget_raw(&mut label_size, &mut out_size), widget_raw(&mut value_size, &mut out_size_value)];
+                    let mut runs = [widget_raw(label_size, &mut out_size), widget_raw(value_size, &mut out_size_value)];
                     container.row_widgets(&row_widths, SizePolicy::Auto, &mut runs);
 
                     buff.clear();
                     buff.push_str(format!("{:.1}", fps).as_str());
-                    let mut label_fps = ListItem::with_opt("FPS:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                    let mut value_fps = ListItem::with_opt(buff.as_str(), WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
+                    value_fps.label.clear();
+                    value_fps.label.push_str(buff.as_str());
                     let mut out_fps = ResourceState::NONE;
                     let mut out_fps_value = ResourceState::NONE;
-                    let mut runs = [widget_raw(&mut label_fps, &mut out_fps), widget_raw(&mut value_fps, &mut out_fps_value)];
+                    let mut runs = [widget_raw(label_fps, &mut out_fps), widget_raw(value_fps, &mut out_fps_value)];
                     container.row_widgets(&row_widths, SizePolicy::Auto, &mut runs);
                 });
             }
@@ -890,14 +853,13 @@ impl<'a> State<'a> {
             {
                 let test_buttons_header = &mut self.test_buttons_header;
                 let test_buttons = &mut self.test_buttons;
+                let test_button_labels = &mut self.test_button_labels;
                 let open_popup = &mut self.open_popup;
                 let open_dialog = &mut self.open_dialog;
                 Self::section(container, test_buttons_header, |container| {
                     let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
                     let [button0, button1, button2, button3, button4, button5] = test_buttons;
-                    let mut label0 = ListItem::with_opt("Test buttons 1:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                    let mut label1 = ListItem::with_opt("Test buttons 2:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                    let mut label2 = ListItem::with_opt("Test buttons 3:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
+                    let [label0, label1, label2] = test_button_labels;
                     let mut out_label0 = ResourceState::NONE;
                     let mut out_btn0 = ResourceState::NONE;
                     let mut out_btn1 = ResourceState::NONE;
@@ -908,13 +870,13 @@ impl<'a> State<'a> {
                     let mut out_btn4 = ResourceState::NONE;
                     let mut out_btn5 = ResourceState::NONE;
                     let mut runs = [
-                        widget_raw(&mut label0, &mut out_label0),
+                        widget_raw(label0, &mut out_label0),
                         widget_raw(button0, &mut out_btn0),
                         widget_raw(button1, &mut out_btn1),
-                        widget_raw(&mut label1, &mut out_label1),
+                        widget_raw(label1, &mut out_label1),
                         widget_raw(button2, &mut out_btn2),
                         widget_raw(button3, &mut out_btn3),
-                        widget_raw(&mut label2, &mut out_label2),
+                        widget_raw(label2, &mut out_label2),
                         widget_raw(button4, &mut out_btn4),
                         widget_raw(button5, &mut out_btn5),
                     ];
@@ -975,17 +937,17 @@ impl<'a> State<'a> {
                 let test3_tn = &mut self.test3_tn;
                 let tree_buttons = &mut self.tree_buttons;
                 let checkboxes = &mut self.checkboxes;
+                let tree_labels = &mut self.tree_labels;
                 Self::section(container, tree_and_text_header, |container| {
                     let widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
                     container.with_row(&widths, SizePolicy::Auto, |container| {
                         container.column(|container| {
                             Self::tree_section(container, test1_tn, |container| {
                                 Self::tree_section(container, test1a_tn, |container| {
-                                    let mut label_hello = ListItem::with_opt("Hello", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                                    let mut label_world = ListItem::with_opt("world", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
+                                    let [label_hello, label_world] = tree_labels;
                                     let mut out_hello = ResourceState::NONE;
                                     let mut out_world = ResourceState::NONE;
-                                    let mut runs = [widget_raw(&mut label_hello, &mut out_hello), widget_raw(&mut label_world, &mut out_world)];
+                                    let mut runs = [widget_raw(label_hello, &mut out_hello), widget_raw(label_world, &mut out_world)];
                                     container.widgets(&mut runs);
                                 });
                                 Self::tree_section(container, test1b_tn, |container| {
@@ -1084,6 +1046,7 @@ impl<'a> State<'a> {
                 let background_header = &mut self.background_header;
                 let bg = &mut self.bg;
                 let bg_sliders = &mut self.bg_sliders;
+                let background_labels = &mut self.background_labels;
                 Self::section(container, background_header, |container| {
                     let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
                     container.with_row(&background_widths, SizePolicy::Fixed(74), |container| {
@@ -1094,9 +1057,7 @@ impl<'a> State<'a> {
                                 let (mid, tail) = tail.split_at_mut(1);
                                 (&mut head[0], &mut mid[0], &mut tail[0])
                             };
-                            let mut label_red = ListItem::with_opt("Red:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                            let mut label_green = ListItem::with_opt("Green:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
-                            let mut label_blue = ListItem::with_opt("Blue:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME);
+                            let [label_red, label_green, label_blue] = background_labels;
 
                             slider_red.value = bg[0];
                             slider_green.value = bg[1];
@@ -1109,11 +1070,11 @@ impl<'a> State<'a> {
                             let mut out_label_blue = ResourceState::NONE;
                             let mut out_slider_blue = ResourceState::NONE;
                             let mut runs = [
-                                widget_raw(&mut label_red, &mut out_label_red),
+                                widget_raw(label_red, &mut out_label_red),
                                 widget_raw(slider_red, &mut out_slider_red),
-                                widget_raw(&mut label_green, &mut out_label_green),
+                                widget_raw(label_green, &mut out_label_green),
                                 widget_raw(slider_green, &mut out_slider_green),
-                                widget_raw(&mut label_blue, &mut out_label_blue),
+                                widget_raw(label_blue, &mut out_label_blue),
                                 widget_raw(slider_blue, &mut out_slider_blue),
                             ];
                             container.row_widgets(&slider_row, SizePolicy::Auto, &mut runs);
