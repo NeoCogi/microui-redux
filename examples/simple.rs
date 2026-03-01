@@ -23,7 +23,7 @@ fn main() {
         ctx.frame(|ctx| {
             ctx.window(&mut state.window.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
                 container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                    container.button(&mut state.hello_button);
+                    container.widget_dyn(&mut state.hello_button);
                 });
                 WindowState::Open
             });

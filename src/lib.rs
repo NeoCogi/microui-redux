@@ -479,6 +479,35 @@ pub trait Widget {
     fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     /// Handles widget interaction and rendering for the current frame using the provided context.
     fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
+    /// Returns the effective widget options used by generic dispatch.
+    ///
+    /// Widgets can override this to apply dynamic option adjustments (for example `HOLD_FOCUS`).
+    fn effective_widget_opt(&self) -> WidgetOption {
+        *self.widget_opt()
+    }
+    /// Returns the effective behavior options used by generic dispatch.
+    fn effective_behaviour_opt(&self) -> WidgetBehaviourOption {
+        *self.behaviour_opt()
+    }
+    /// Returns whether this widget needs per-frame input snapshots.
+    fn needs_input_snapshot(&self) -> bool {
+        false
+    }
+}
+
+/// Couples one widget state object with an output slot receiving the frame result.
+pub struct WidgetRun<'a> {
+    /// Widget state to run.
+    pub widget: &'a mut dyn Widget,
+    /// Output slot overwritten with the widget frame result.
+    pub out: &'a mut ResourceState,
+}
+
+impl<'a> WidgetRun<'a> {
+    /// Creates a run pair from a widget and output state slot.
+    pub fn new(widget: &'a mut dyn Widget, out: &'a mut ResourceState) -> Self {
+        Self { widget, out }
+    }
 }
 
 /// Raw pointer identity used for widget hover/focus tracking.

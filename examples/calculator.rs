@@ -326,7 +326,7 @@ fn main() {
                     state.display.cursor = state.display.buf.len();
 
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Weight(DISPLAY_HEIGHT_WEIGHT), |container| {
-                        container.textbox(&mut state.display);
+                        container.widget_dyn(&mut state.display);
                     });
 
                     container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
@@ -342,7 +342,7 @@ fn main() {
                                 for idx in 0..state.buttons.len() {
                                     let (clicked, action) = {
                                         let button = &mut state.buttons[idx];
-                                        (container.button(&mut button.widget).is_submitted(), button.action)
+                                        (container.widget_dyn(&mut button.widget).is_submitted(), button.action)
                                     };
                                     if clicked {
                                         state.calculator.apply(action);

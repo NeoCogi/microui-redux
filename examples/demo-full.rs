@@ -355,7 +355,7 @@ impl<'a> State<'a> {
 
     fn u8_slider(value: &mut u8, slider: &mut Slider, ctx: &mut Container) -> ResourceState {
         slider.value = *value as Real;
-        let res = ctx.slider(slider);
+        let res = ctx.widget_dyn(slider);
         *value = slider.value as u8;
         slider.value = *value as Real;
         res
@@ -363,7 +363,7 @@ impl<'a> State<'a> {
 
     fn i32_slider(value: &mut i32, slider: &mut Slider, ctx: &mut Container) -> ResourceState {
         slider.value = *value as Real;
-        let res = ctx.slider(slider);
+        let res = ctx.widget_dyn(slider);
         *value = slider.value as i32;
         slider.value = *value as Real;
         res
@@ -371,9 +371,26 @@ impl<'a> State<'a> {
 
     fn real_slider(value: &mut Real, slider: &mut Slider, ctx: &mut Container) -> ResourceState {
         slider.value = *value;
-        let res = ctx.slider(slider);
+        let res = ctx.widget_dyn(slider);
         *value = slider.value;
         res
+    }
+
+    fn section<F: FnOnce(&mut Container)>(container: &mut Container, node: &mut Node, f: F) {
+        container.set_row_flow(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
+        container.widget_dyn(node);
+        if node.is_expanded() {
+            f(container);
+        }
+    }
+
+    fn tree_section<F: FnOnce(&mut Container)>(container: &mut Container, node: &mut Node, f: F) {
+        container.set_row_flow(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
+        container.widget_dyn(node);
+        if node.is_expanded() {
+            let indent = container.get_style().indent;
+            container.with_indent(indent, f);
+        }
     }
 
     fn style_window(&mut self, ctx: &mut Context<BackendRenderer>) {
@@ -463,11 +480,11 @@ impl<'a> State<'a> {
                 let mut submitted = false;
                 let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
                 container.with_row(&submit_row, SizePolicy::Auto, |container| {
-                    if container.textbox(&mut self.submit_buf).is_submitted() {
+                    if container.widget_dyn(&mut self.submit_buf).is_submitted() {
                         container.set_focus(Some(widget_id_of(&self.submit_buf)));
                         submitted = true;
                     }
-                    if container.button(&mut self.submit_button).is_submitted() {
+                    if container.widget_dyn(&mut self.submit_button).is_submitted() {
                         submitted = true;
                     }
                 });
@@ -496,7 +513,7 @@ impl<'a> State<'a> {
             WidgetBehaviourOption::NONE,
             |container| {
                 container.stack(SizePolicy::Remainder(0), |container| {
-                    container.custom_render_widget(triangle_widget, move |_dim, cra| {
+                    container.widget_dyn_custom_render(triangle_widget, move |_dim, cra| {
                         if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                             return;
                         }
@@ -529,7 +546,7 @@ impl<'a> State<'a> {
             WidgetBehaviourOption::NONE,
             |container| {
                 container.stack(SizePolicy::Remainder(0), |container| {
-                    container.custom_render_widget(suzane_widget, move |_dim, cra| {
+                    container.widget_dyn_custom_render(suzane_widget, move |_dim, cra| {
                         if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                             return;
                         }
@@ -617,26 +634,26 @@ impl<'a> State<'a> {
                 container.with_row(&columns, SizePolicy::Fixed(120), |container| {
                     container.column(|container| {
                         container.stack_direction(SizePolicy::Fixed(28), StackDirection::TopToBottom, |container| {
-                            if container.button(&mut buttons[0]).is_submitted() {
+                            if container.widget_dyn(&mut buttons[0]).is_submitted() {
                                 logs.push("Top->Bottom: call 1");
                             }
-                            if container.button(&mut buttons[1]).is_submitted() {
+                            if container.widget_dyn(&mut buttons[1]).is_submitted() {
                                 logs.push("Top->Bottom: call 2");
                             }
-                            if container.button(&mut buttons[2]).is_submitted() {
+                            if container.widget_dyn(&mut buttons[2]).is_submitted() {
                                 logs.push("Top->Bottom: call 3");
                             }
                         });
                     });
                     container.column(|container| {
                         container.stack_direction(SizePolicy::Fixed(28), StackDirection::BottomToTop, |container| {
-                            if container.button(&mut buttons[3]).is_submitted() {
+                            if container.widget_dyn(&mut buttons[3]).is_submitted() {
                                 logs.push("Bottom->Top: call 1");
                             }
-                            if container.button(&mut buttons[4]).is_submitted() {
+                            if container.widget_dyn(&mut buttons[4]).is_submitted() {
                                 logs.push("Bottom->Top: call 2");
                             }
-                            if container.button(&mut buttons[5]).is_submitted() {
+                            if container.widget_dyn(&mut buttons[5]).is_submitted() {
                                 logs.push("Bottom->Top: call 3");
                             }
                         });
@@ -668,13 +685,13 @@ impl<'a> State<'a> {
                 });
                 let row = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0), SizePolicy::Weight(3.0)];
                 container.with_row(&row, SizePolicy::Fixed(28), |container| {
-                    if container.button(&mut buttons[0]).is_submitted() {
+                    if container.widget_dyn(&mut buttons[0]).is_submitted() {
                         logs.push("Weight row: 1");
                     }
-                    if container.button(&mut buttons[1]).is_submitted() {
+                    if container.widget_dyn(&mut buttons[1]).is_submitted() {
                         logs.push("Weight row: 2");
                     }
-                    if container.button(&mut buttons[2]).is_submitted() {
+                    if container.widget_dyn(&mut buttons[2]).is_submitted() {
                         logs.push("Weight row: 3");
                     }
                 });
@@ -687,22 +704,22 @@ impl<'a> State<'a> {
                         let cols = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
                         let rows = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
                         container.with_grid(&cols, &rows, |container| {
-                            if container.button(&mut buttons[3]).is_submitted() {
+                            if container.widget_dyn(&mut buttons[3]).is_submitted() {
                                 logs.push("Weight grid: 1");
                             }
-                            if container.button(&mut buttons[4]).is_submitted() {
+                            if container.widget_dyn(&mut buttons[4]).is_submitted() {
                                 logs.push("Weight grid: 2");
                             }
-                            if container.button(&mut buttons[5]).is_submitted() {
+                            if container.widget_dyn(&mut buttons[5]).is_submitted() {
                                 logs.push("Weight grid: 3");
                             }
-                            if container.button(&mut buttons[6]).is_submitted() {
+                            if container.widget_dyn(&mut buttons[6]).is_submitted() {
                                 logs.push("Weight grid: 4");
                             }
-                            if container.button(&mut buttons[7]).is_submitted() {
+                            if container.widget_dyn(&mut buttons[7]).is_submitted() {
                                 logs.push("Weight grid: 5");
                             }
-                            if container.button(&mut buttons[8]).is_submitted() {
+                            if container.widget_dyn(&mut buttons[8]).is_submitted() {
                                 logs.push("Weight grid: 6");
                             }
                         });
@@ -733,7 +750,7 @@ impl<'a> State<'a> {
 
             {
                 let window_header = &mut self.window_header;
-                container.header(window_header, |container| {
+                Self::section(container, window_header, |container| {
                     let win_0 = container.rect();
                     let row_widths = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
                     container.with_row(&row_widths, SizePolicy::Auto, |container| {
@@ -764,29 +781,29 @@ impl<'a> State<'a> {
                 let test_buttons = &mut self.test_buttons;
                 let open_popup = &mut self.open_popup;
                 let open_dialog = &mut self.open_dialog;
-                container.header(test_buttons_header, |container| {
+                Self::section(container, test_buttons_header, |container| {
                     let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
                     container.with_row(&button_widths, SizePolicy::Auto, |container| {
                         container.label("Test buttons 1:");
-                        if container.button(&mut test_buttons[0]).is_submitted() {
+                        if container.widget_dyn(&mut test_buttons[0]).is_submitted() {
                             button_logs.push("Pressed button 1");
                         }
-                        if container.button(&mut test_buttons[1]).is_submitted() {
+                        if container.widget_dyn(&mut test_buttons[1]).is_submitted() {
                             button_logs.push("Pressed button 2");
                         }
                         container.label("Test buttons 2:");
-                        if container.button(&mut test_buttons[2]).is_submitted() {
+                        if container.widget_dyn(&mut test_buttons[2]).is_submitted() {
                             button_logs.push("Pressed button 3");
                         }
-                        if container.button(&mut test_buttons[3]).is_submitted() {
+                        if container.widget_dyn(&mut test_buttons[3]).is_submitted() {
                             *open_popup = true;
                         }
 
                         container.label("Test buttons 3:");
-                        if container.button(&mut test_buttons[4]).is_submitted() {
+                        if container.widget_dyn(&mut test_buttons[4]).is_submitted() {
                             button_logs.push("Pressed button 4");
                         }
-                        if container.button(&mut test_buttons[5]).is_submitted() {
+                        if container.widget_dyn(&mut test_buttons[5]).is_submitted() {
                             *open_dialog = true;
                         }
                     });
@@ -805,11 +822,12 @@ impl<'a> State<'a> {
                     self.combo_items[2].label.as_str(),
                     self.combo_items[3].label.as_str(),
                 ];
-                container.header(combo_header, |container| {
+                Self::section(container, combo_header, |container| {
                     container.stack(SizePolicy::Auto, |container| {
-                        let (anchor, toggled, _) = container.combo_box(combo_state, &combo_labels);
-                        combo_anchor = Some(anchor);
-                        if toggled {
+                        combo_state.update_items(&combo_labels);
+                        let res = container.widget_dyn(combo_state);
+                        combo_anchor = Some(combo_state.anchor());
+                        if res.is_submitted() {
                             combo_state.open = !combo_state.open;
                         }
                     });
@@ -826,45 +844,45 @@ impl<'a> State<'a> {
                 let test3_tn = &mut self.test3_tn;
                 let tree_buttons = &mut self.tree_buttons;
                 let checkboxes = &mut self.checkboxes;
-                container.header(tree_and_text_header, |container| {
+                Self::section(container, tree_and_text_header, |container| {
                     let widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
                     container.with_row(&widths, SizePolicy::Auto, |container| {
                         container.column(|container| {
-                            container.treenode(test1_tn, |container| {
-                                container.treenode(test1a_tn, |container| {
+                            Self::tree_section(container, test1_tn, |container| {
+                                Self::tree_section(container, test1a_tn, |container| {
                                     container.label("Hello");
                                     container.label("world");
                                 });
-                                container.treenode(test1b_tn, |container| {
-                                    if container.button(&mut tree_buttons[0]).is_submitted() {
+                                Self::tree_section(container, test1b_tn, |container| {
+                                    if container.widget_dyn(&mut tree_buttons[0]).is_submitted() {
                                         tree_logs.push("Pressed button 1");
                                     }
-                                    if container.button(&mut tree_buttons[1]).is_submitted() {
+                                    if container.widget_dyn(&mut tree_buttons[1]).is_submitted() {
                                         tree_logs.push("Pressed button 2");
                                     }
                                 });
                             });
-                            container.treenode(test2_tn, |container| {
+                            Self::tree_section(container, test2_tn, |container| {
                                 let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
                                 container.with_row(&tree_button_widths, SizePolicy::Auto, |container| {
-                                    if container.button(&mut tree_buttons[2]).is_submitted() {
+                                    if container.widget_dyn(&mut tree_buttons[2]).is_submitted() {
                                         tree_logs.push("Pressed button 3");
                                     }
-                                    if container.button(&mut tree_buttons[3]).is_submitted() {
+                                    if container.widget_dyn(&mut tree_buttons[3]).is_submitted() {
                                         tree_logs.push("Pressed button 4");
                                     }
-                                    if container.button(&mut tree_buttons[4]).is_submitted() {
+                                    if container.widget_dyn(&mut tree_buttons[4]).is_submitted() {
                                         tree_logs.push("Pressed button 5");
                                     }
-                                    if container.button(&mut tree_buttons[5]).is_submitted() {
+                                    if container.widget_dyn(&mut tree_buttons[5]).is_submitted() {
                                         tree_logs.push("Pressed button 6");
                                     }
                                 });
                             });
-                            container.treenode(test3_tn, |container| {
-                                container.checkbox(&mut checkboxes[0]);
-                                container.checkbox(&mut checkboxes[1]);
-                                container.checkbox(&mut checkboxes[2]);
+                            Self::tree_section(container, test3_tn, |container| {
+                                container.widget_dyn(&mut checkboxes[0]);
+                                container.widget_dyn(&mut checkboxes[1]);
+                                container.widget_dyn(&mut checkboxes[2]);
                             });
                         });
                         container.column(|container| {
@@ -885,9 +903,9 @@ impl<'a> State<'a> {
             {
                 let text_area_header = &mut self.text_area_header;
                 let text_area = &mut self.text_area;
-                container.header(text_area_header, |container| {
+                Self::section(container, text_area_header, |container| {
                     container.stack(SizePolicy::Fixed(120), |container| {
-                        container.textarea(text_area);
+                        container.widget_dyn(text_area);
                     });
                 });
             }
@@ -896,7 +914,7 @@ impl<'a> State<'a> {
                 let background_header = &mut self.background_header;
                 let bg = &mut self.bg;
                 let bg_sliders = &mut self.bg_sliders;
-                container.header(background_header, |container| {
+                Self::section(container, background_header, |container| {
                     let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
                     container.with_row(&background_widths, SizePolicy::Fixed(74), |container| {
                         let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
@@ -923,19 +941,19 @@ impl<'a> State<'a> {
                 let slot_header = &mut self.slot_header;
                 let slot_buttons = &mut self.slot_buttons;
                 let external_image_button = &mut self.external_image_button;
-                container.header(slot_header, |container| {
+                Self::section(container, slot_header, |container| {
                     container.stack(SizePolicy::Fixed(67), |container| {
-                        container.button(&mut slot_buttons[0]);
-                        container.button(&mut slot_buttons[1]);
-                        container.button(&mut slot_buttons[2]);
+                        container.widget_dyn(&mut slot_buttons[0]);
+                        container.widget_dyn(&mut slot_buttons[1]);
+                        container.widget_dyn(&mut slot_buttons[2]);
                         if let Some(button) = external_image_button.as_mut() {
                             container.stack_with_width(SizePolicy::Fixed(256), SizePolicy::Fixed(256), |ctx| {
-                                ctx.button(button);
+                                ctx.widget_dyn(button);
                             });
                         }
                     });
                     container.stack(SizePolicy::Fixed(67), |container| {
-                        container.button(&mut slot_buttons[3]);
+                        container.widget_dyn(&mut slot_buttons[3]);
                     });
                 });
             }
@@ -953,7 +971,7 @@ impl<'a> State<'a> {
             ctx.popup(popup, WidgetBehaviourOption::NO_SCROLL, |dropdown| {
                 dropdown.stack(SizePolicy::Auto, |dropdown| {
                     for (idx, item) in combo_items.iter_mut().enumerate() {
-                        if dropdown.list_item(item).is_submitted() {
+                        if dropdown.widget_dyn(item).is_submitted() {
                             combo_state.selected = idx;
                             combo_changed = true;
                             dropdown.set_focus(None);
@@ -989,10 +1007,10 @@ impl<'a> State<'a> {
             let popup_buttons = &mut self.popup_buttons;
             ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), WidgetBehaviourOption::NO_SCROLL, |ctx| {
                 ctx.stack(SizePolicy::Auto, |ctx| {
-                    if ctx.button(&mut popup_buttons[0]).is_submitted() {
+                    if ctx.widget_dyn(&mut popup_buttons[0]).is_submitted() {
                         popup_logs.push("Hello")
                     }
-                    if ctx.button(&mut popup_buttons[1]).is_submitted() {
+                    if ctx.widget_dyn(&mut popup_buttons[1]).is_submitted() {
                         popup_logs.push("World")
                     }
                 });

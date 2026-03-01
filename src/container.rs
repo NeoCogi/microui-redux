@@ -537,7 +537,7 @@ impl Container {
 
     #[inline(never)]
     /// Updates hover/focus state for the widget described by `widget_id` and optionally consumes scroll.
-    pub fn update_control<W: Widget>(&mut self, widget_id: WidgetId, rect: Recti, state: &W) -> ControlState {
+    pub fn update_control<W: Widget + ?Sized>(&mut self, widget_id: WidgetId, rect: Recti, state: &W) -> ControlState {
         self.update_control_with_opts(widget_id, rect, *state.widget_opt(), *state.behaviour_opt())
     }
 
@@ -577,7 +577,7 @@ impl Container {
         )
     }
 
-    fn run_widget<W: Widget>(
+    fn run_widget<W: Widget + ?Sized>(
         &mut self,
         state: &mut W,
         rect: Recti,
@@ -592,7 +592,7 @@ impl Container {
         (control, res)
     }
 
-    fn next_widget_rect<W: Widget>(&mut self, state: &W) -> Recti {
+    fn next_widget_rect<W: Widget + ?Sized>(&mut self, state: &W) -> Recti {
         // Widget helpers measure before placing so Auto rows can follow each widget's intrinsic size.
         let body = self.layout.current_body();
         let avail = Dimensioni::new(body.width.max(0), body.height.max(0));
@@ -600,7 +600,7 @@ impl Container {
         self.layout.next_with_preferred(preferred)
     }
 
-    fn handle_widget<W: Widget>(&mut self, state: &mut W, input: Option<Rc<InputSnapshot>>) -> ResourceState {
+    fn handle_widget<W: Widget + ?Sized>(&mut self, state: &mut W, input: Option<Rc<InputSnapshot>>) -> ResourceState {
         let rect = self.next_widget_rect(state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
@@ -608,7 +608,7 @@ impl Container {
         res
     }
 
-    fn handle_widget_in_rect<W: Widget>(
+    fn handle_widget_in_rect<W: Widget + ?Sized>(
         &mut self,
         state: &mut W,
         rect: Recti,
@@ -616,6 +616,15 @@ impl Container {
         opt: WidgetOption,
         bopt: WidgetBehaviourOption,
     ) -> ResourceState {
+        let (_, res) = self.run_widget(state, rect, input, opt, bopt);
+        res
+    }
+
+    fn handle_widget_dyn(&mut self, state: &mut dyn Widget) -> ResourceState {
+        let rect = self.next_widget_rect(state);
+        let opt = state.effective_widget_opt();
+        let bopt = state.effective_behaviour_opt();
+        let input = if state.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let (_, res) = self.run_widget(state, rect, input, opt, bopt);
         res
     }
@@ -920,6 +929,14 @@ impl Container {
         self.layout.restore_flow_state(snapshot);
     }
 
+    /// Sets the active row flow without restoring the previous flow.
+    ///
+    /// This matches legacy header/tree behavior where flow changes persist for
+    /// subsequent layout calls in the current scope.
+    pub fn set_row_flow(&mut self, widths: &[SizePolicy], height: SizePolicy) {
+        self.layout.row(widths, height);
+    }
+
     /// Temporarily overrides the layout with explicit column and row tracks and restores it after `f`.
     ///
     /// Widgets are emitted row-major within the provided track matrix.
@@ -967,12 +984,68 @@ impl Container {
         self.layout.end_column();
     }
 
+    /// Temporarily applies horizontal indentation for nested scopes.
+    pub fn with_indent<F: FnOnce(&mut Self)>(&mut self, delta: i32, f: F) {
+        self.layout.adjust_indent(delta);
+        f(self);
+        self.layout.adjust_indent(-delta);
+    }
+
     /// Returns the next raw layout cell rectangle.
     ///
     /// Unlike widget helper methods (`button`, `textbox`, etc.), this does not consult
     /// a widget's `preferred_size`; it uses only the current row/column policies.
     pub fn next_cell(&mut self) -> Recti {
         self.layout.next()
+    }
+
+    /// Runs a trait-object widget through the standard layout + interaction pipeline.
+    pub fn widget_dyn(&mut self, widget: &mut dyn Widget) -> ResourceState {
+        self.handle_widget_dyn(widget)
+    }
+
+    /// Runs a trait-object widget in an explicit rectangle.
+    pub fn widget_dyn_in_rect(&mut self, widget: &mut dyn Widget, rect: Recti) -> ResourceState {
+        let opt = widget.effective_widget_opt();
+        let bopt = widget.effective_behaviour_opt();
+        let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
+        self.handle_widget_in_rect(widget, rect, input, opt, bopt)
+    }
+
+    /// Emits a row flow and evaluates each widget run in order.
+    pub fn row_widgets(&mut self, widths: &[SizePolicy], height: SizePolicy, runs: &mut [WidgetRun<'_>]) {
+        self.with_row(widths, height, |container| {
+            for run in runs.iter_mut() {
+                *run.out = container.widget_dyn(run.widget);
+            }
+        });
+    }
+
+    /// Emits a grid flow and evaluates each widget run in row-major order.
+    pub fn grid_widgets(&mut self, widths: &[SizePolicy], heights: &[SizePolicy], runs: &mut [WidgetRun<'_>]) {
+        self.with_grid(widths, heights, |container| {
+            for run in runs.iter_mut() {
+                *run.out = container.widget_dyn(run.widget);
+            }
+        });
+    }
+
+    /// Emits a nested column scope and evaluates each widget run in order.
+    pub fn column_widgets(&mut self, runs: &mut [WidgetRun<'_>]) {
+        self.column(|container| {
+            for run in runs.iter_mut() {
+                *run.out = container.widget_dyn(run.widget);
+            }
+        });
+    }
+
+    /// Emits a stack flow and evaluates each widget run in order.
+    pub fn stack_widgets(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection, runs: &mut [WidgetRun<'_>]) {
+        self.stack_with_width_direction(width, height, direction, |container| {
+            for run in runs.iter_mut() {
+                *run.out = container.widget_dyn(run.widget);
+            }
+        });
     }
 
     /// Replaces the container's style.
@@ -1075,13 +1148,20 @@ impl Container {
     #[inline(never)]
     /// Allocates a widget cell from `Custom` state preferred size and hands rendering control to user code.
     pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, state: &mut Custom, f: F) {
-        let rect = self.next_widget_rect(state);
-        let opt = *state.widget_opt();
-        let bopt = *state.behaviour_opt();
-        let (control, _) = self.run_widget(state, rect, None, opt, bopt);
+        self.widget_dyn_custom_render(state, f);
+    }
 
-        let input = self.snapshot_input();
-        let input_ref = input.as_ref();
+    #[inline(never)]
+    /// Runs a trait-object widget and records a custom render callback with the resulting interaction context.
+    pub fn widget_dyn_custom_render<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, widget: &mut dyn Widget, f: F) {
+        let rect = self.next_widget_rect(widget);
+        let opt = widget.effective_widget_opt();
+        let bopt = widget.effective_behaviour_opt();
+        let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
+        let (control, _) = self.run_widget(widget, rect, input, opt, bopt);
+
+        let snapshot = self.snapshot_input();
+        let input_ref = snapshot.as_ref();
         let mouse_event = self.input_to_mouse_event(&control, input_ref, rect);
 
         let active = control.focused && self.in_hover_root;
@@ -1093,8 +1173,8 @@ impl Container {
             view: self.get_clip_rect(),
             mouse_event,
             scroll_delta: control.scroll_delta,
-            widget_opt: state.opt,
-            behaviour_opt: state.bopt,
+            widget_opt: opt,
+            behaviour_opt: bopt,
             key_mods,
             key_codes,
             text_input,
@@ -1297,5 +1377,36 @@ mod tests {
         let cursor = state.cursor;
         assert_eq!(state.buf, "ab");
         assert_eq!(cursor, 1);
+    }
+
+    #[test]
+    fn widget_dyn_textbox_backspace_removes_multibyte() {
+        let mut container = make_container();
+        let input = container.input.clone();
+        let mut state = Textbox::new("a\u{1F600}b");
+        container.set_focus(Some(widget_id_of(&state)));
+        state.cursor = 5;
+
+        input.borrow_mut().keydown(KeyMode::BACKSPACE);
+        let res = container.widget_dyn(&mut state);
+
+        assert!(res.is_changed());
+        assert_eq!(state.buf, "ab");
+        assert_eq!(state.cursor, 1);
+    }
+
+    #[test]
+    fn row_widgets_overwrite_output_slots() {
+        let mut container = make_container();
+        let mut button_a = Button::new("A");
+        let mut button_b = Button::new("B");
+        let mut out_a = ResourceState::SUBMIT;
+        let mut out_b = ResourceState::ACTIVE;
+        let mut runs = [WidgetRun::new(&mut button_a, &mut out_a), WidgetRun::new(&mut button_b, &mut out_b)];
+
+        container.row_widgets(&[SizePolicy::Auto, SizePolicy::Auto], SizePolicy::Auto, &mut runs);
+
+        assert!(out_a.is_none());
+        assert!(out_b.is_none());
     }
 }

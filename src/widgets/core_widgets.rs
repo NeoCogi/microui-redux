@@ -610,6 +610,7 @@ pub struct Combo {
     pub bopt: WidgetBehaviourOption,
     label: String,
     clamped: bool,
+    last_anchor: Recti,
 }
 
 impl Combo {
@@ -623,6 +624,7 @@ impl Combo {
             bopt: WidgetBehaviourOption::NONE,
             label: String::new(),
             clamped: false,
+            last_anchor: Recti::default(),
         }
     }
 
@@ -636,7 +638,13 @@ impl Combo {
             bopt,
             label: String::new(),
             clamped: false,
+            last_anchor: Recti::default(),
         }
+    }
+
+    /// Returns the popup anchor computed during the latest combo draw.
+    pub fn anchor(&self) -> Recti {
+        self.last_anchor
     }
 
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
@@ -690,6 +698,7 @@ impl Combo {
         }
 
         let header = ctx.rect();
+        self.last_anchor = rect(header.x, header.y + header.height, header.width, 1);
         ctx.draw_widget_frame(control, header, ControlColor::Button, self.opt);
 
         let indicator_size = ctx.atlas().get_icon_size(EXPAND_DOWN_ICON);

@@ -222,4 +222,28 @@ pub(crate) fn textbox_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, bu
     res
 }
 
-implement_widget!(Textbox, handle_widget, preferred_size_widget);
+impl Widget for Textbox {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
+        &self.bopt
+    }
+
+    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+
+    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        self.handle_widget(ctx, control)
+    }
+
+    fn effective_widget_opt(&self) -> WidgetOption {
+        self.opt | WidgetOption::HOLD_FOCUS
+    }
+
+    fn needs_input_snapshot(&self) -> bool {
+        true
+    }
+}

@@ -228,7 +228,7 @@ impl FileDialogState {
 
                 let toolbar_widths = [SizePolicy::Fixed(56), SizePolicy::Fixed(56), SizePolicy::Remainder(72), SizePolicy::Fixed(56)];
                 cont.with_row(&toolbar_widths, SizePolicy::Auto, |cont| {
-                    if cont.button(up_button).is_submitted() {
+                    if cont.widget_dyn(up_button).is_submitted() {
                         if let Some(parent) = Path::new(current_working_directory.as_str()).parent() {
                             let parent_path = parent.to_string_lossy().to_string();
                             if !parent_path.is_empty() && parent_path != *current_working_directory {
@@ -239,7 +239,7 @@ impl FileDialogState {
                             }
                         }
                     }
-                    if cont.button(home_button).is_submitted() {
+                    if cont.widget_dyn(home_button).is_submitted() {
                         if let Some(home) = Self::home_dir() {
                             if home != *current_working_directory && Path::new(home.as_str()).is_dir() {
                                 *current_working_directory = home;
@@ -250,8 +250,8 @@ impl FileDialogState {
                         }
                     }
 
-                    let submitted_path = cont.textbox(path_box).is_submitted();
-                    let clicked_go = cont.button(go_button).is_submitted();
+                    let submitted_path = cont.widget_dyn(path_box).is_submitted();
+                    let clicked_go = cont.widget_dyn(go_button).is_submitted();
                     if submitted_path || clicked_go {
                         if let Some(path) = Self::resolve_directory_path(current_working_directory.as_str(), path_box.buf.as_str()) {
                             if path != *current_working_directory {
@@ -289,7 +289,7 @@ impl FileDialogState {
                                 for index in 0..folder_items.len() {
                                     let submitted = {
                                         let item = &mut folder_items[index];
-                                        container.list_item(item).is_submitted()
+                                        container.widget_dyn(item).is_submitted()
                                     };
                                     if submitted {
                                         if let Some(path) = folders.get(index) {
@@ -319,7 +319,7 @@ impl FileDialogState {
                                     for index in 0..file_items.len() {
                                         let submitted = {
                                             let item = &mut file_items[index];
-                                            container.list_item(item).is_submitted()
+                                            container.widget_dyn(item).is_submitted()
                                         };
                                         if submitted {
                                             if let Some(name) = files.get(index) {
@@ -338,7 +338,7 @@ impl FileDialogState {
                 let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
                 cont.with_row(&filename_widths, SizePolicy::Auto, |cont| {
                     cont.label("File name:");
-                    cont.textbox(tmp_file_name);
+                    cont.widget_dyn(tmp_file_name);
                 });
 
                 let button_width = 96;
@@ -351,12 +351,12 @@ impl FileDialogState {
                 ];
                 cont.with_row(&action_widths, SizePolicy::Auto, |cont| {
                     let _ = cont.next_cell();
-                    if cont.button(cancel_button).is_submitted() {
+                    if cont.widget_dyn(cancel_button).is_submitted() {
                         *file_name = None;
                         *file_path = None;
                         dialog_state = WindowState::Closed;
                     }
-                    if cont.button(ok_button).is_submitted() {
+                    if cont.widget_dyn(ok_button).is_submitted() {
                         if tmp_file_name.buf.is_empty() {
                             *file_name = None;
                             *file_path = None;
