@@ -251,11 +251,7 @@ impl Calculator {
             }
         };
 
-        if result.is_finite() {
-            Some(result)
-        } else {
-            None
-        }
+        if result.is_finite() { Some(result) } else { None }
     }
 
     fn format_value(value: f64) -> String {
@@ -266,11 +262,7 @@ impl Calculator {
         if out.ends_with('.') {
             out.pop();
         }
-        if out == "-0" || out.is_empty() {
-            "0".to_string()
-        } else {
-            out
-        }
+        if out == "-0" || out.is_empty() { "0".to_string() } else { out }
     }
 
     fn set_error(&mut self) {

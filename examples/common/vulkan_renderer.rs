@@ -700,7 +700,7 @@ struct UiResources {
     sampler: vk::Sampler,
     descriptor_pool: vk::DescriptorPool,
     descriptor_set: vk::DescriptorSet,
-    vertex_buffer: Option<Buffer>,        // GPU-local
+    vertex_buffer: Option<Buffer>,              // GPU-local
     staging_buffers: Vec<Option<MappedBuffer>>, // CPU-visible, one slot per frame-in-flight
     atlas: Option<ImageResource>,
     vertex_offset: vk::DeviceSize,
