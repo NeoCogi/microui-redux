@@ -79,11 +79,7 @@ pub enum SizePolicy {
 
 impl SizePolicy {
     fn clamp_weight(value: f32) -> f32 {
-        if value.is_finite() {
-            value.max(0.0)
-        } else {
-            0.0
-        }
+        if value.is_finite() { value.max(0.0) } else { 0.0 }
     }
 
     fn resolve_weight(weight: f32, reference_space: i32, total_weight: Option<f32>) -> i32 {
@@ -108,11 +104,7 @@ impl SizePolicy {
                 _ => 0.0,
             })
             .sum::<f32>();
-        if total > 0.0 {
-            Some(total)
-        } else {
-            None
-        }
+        if total > 0.0 { Some(total) } else { None }
     }
 
     fn resolve(self, default_size: i32, available_space: i32) -> i32 {
