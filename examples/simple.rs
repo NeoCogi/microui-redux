@@ -21,14 +21,10 @@ fn main() {
 
     fw.event_loop(|ctx, state| {
         ctx.frame(|ctx| {
-            ctx.window(&mut state.window.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container| {
+            ctx.window(&mut state.window.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container, results| {
                 container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                    let _ = {
-                        let mut __out = ResourceState::NONE;
-                        let mut __runs = [widget_raw(&mut state.hello_button, &mut __out)];
-                        container.widgets(&mut __runs);
-                        __out
-                    };
+                    let mut __runs = [widget_ref(&mut state.hello_button)];
+                    container.widgets(results, &mut __runs);
                 });
                 WindowState::Open
             });

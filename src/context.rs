@@ -60,7 +60,7 @@ use png::{ColorType, Decoder};
 
 use crate::{
     rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, ImageSource, Input, Recti, Renderer, KeyCode, KeyMode, MouseButton,
-    RendererHandle, Style, TextureId, UNCLIPPED_RECT, Vec2i, WidgetBehaviourOption, WindowHandle, WindowState,
+    RendererHandle, Style, TextureId, UNCLIPPED_RECT, Vec2i, WidgetBehaviourOption, WindowHandle, WindowState, FrameResults,
 };
 
 /// Primary entry point used to drive the UI over a renderer implementation.
@@ -75,6 +75,7 @@ pub struct Context<R: Renderer> {
     scroll_target: Option<WindowHandle>,
 
     root_list: Vec<WindowHandle>,
+    frame_results: FrameResults,
 
     /// Shared pointer to the input state driving this context.
     pub input: Rc<RefCell<Input>>,
@@ -93,6 +94,7 @@ impl<R: Renderer> Context<R> {
             scroll_target: None,
 
             root_list: Vec::default(),
+            frame_results: FrameResults::default(),
 
             input: Rc::new(RefCell::new(Input::default())),
         }
@@ -166,6 +168,7 @@ impl<R: Renderer> Context<R> {
     #[inline(never)]
     fn frame_begin(&mut self) {
         self.scroll_target = None;
+        self.frame_results.begin_frame();
         self.input.borrow_mut().prelude();
         for r in &mut self.root_list {
             r.prepare();
@@ -297,11 +300,17 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Opens a window, executes the provided UI builder, and closes the window.
-    pub fn window<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, f: F) {
+    pub fn window<F: FnOnce(&mut Container, &mut FrameResults) -> WindowState>(
+        &mut self,
+        window: &mut WindowHandle,
+        opt: ContainerOption,
+        bopt: WidgetBehaviourOption,
+        f: F,
+    ) {
         // call the window function if the window is open
         if self.begin_window(window, opt, bopt) {
             window.inner_mut().main.style = self.style.clone();
-            let state = f(&mut window.inner_mut().main);
+            let state = f(&mut window.inner_mut().main, &mut self.frame_results);
             self.end_window(window);
             if window.is_open() {
                 window.inner_mut().win_state = state;
@@ -320,7 +329,13 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Renders a dialog window if it is currently open.
-    pub fn dialog<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, f: F) {
+    pub fn dialog<F: FnOnce(&mut Container, &mut FrameResults) -> WindowState>(
+        &mut self,
+        window: &mut WindowHandle,
+        opt: ContainerOption,
+        bopt: WidgetBehaviourOption,
+        f: F,
+    ) {
         if window.is_open() {
             self.next_hover_root = Some(window.clone());
             self.hover_root = self.next_hover_root.clone();
@@ -382,9 +397,19 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Opens a popup window with default options.
-    pub fn popup<F: FnOnce(&mut Container) -> WindowState>(&mut self, window: &mut WindowHandle, bopt: WidgetBehaviourOption, f: F) {
+    pub fn popup<F: FnOnce(&mut Container, &mut FrameResults) -> WindowState>(
+        &mut self,
+        window: &mut WindowHandle,
+        bopt: WidgetBehaviourOption,
+        f: F,
+    ) {
         let opt = ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE;
         self.window(window, opt, bopt, f);
+    }
+
+    /// Returns the current frame's widget interaction results.
+    pub fn frame_results(&self) -> &FrameResults {
+        &self.frame_results
     }
 
     /// Replaces the current UI style.

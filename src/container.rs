@@ -59,15 +59,15 @@ use std::cell::RefCell;
 macro_rules! widget_layout {
     ($(#[$meta:meta])* $name:ident, $state:ty, $builder:expr) => {
         $(#[$meta])*
-        pub fn $name(&mut self, state: &mut $state) -> ResourceState {
+        pub fn $name(&mut self, results: &mut FrameResults, state: &mut $state) -> ResourceState {
             let rect = self.next_widget_rect(state);
-            ($builder)(self, state, rect)
+            ($builder)(self, results, state, rect)
         }
     };
     ($(#[$meta:meta])* $name:ident, $state:ty) => {
         $(#[$meta])*
-        pub fn $name(&mut self, state: &mut $state) -> ResourceState {
-            self.handle_widget(state, None)
+        pub fn $name(&mut self, results: &mut FrameResults, state: &mut $state) -> ResourceState {
+            self.handle_widget(results, state, None)
         }
     };
 }
@@ -488,18 +488,21 @@ impl Container {
             self.hover = Some(widget_id);
         }
         if self.focus == Some(widget_id) {
-            if !self.input.borrow().mouse_pressed.is_none() && !mouseover {
-                self.set_focus(None);
-            }
-            if self.input.borrow().mouse_down.is_none() && !opt.is_holding_focus() {
+            let should_clear_focus = {
+                let input = self.input.borrow();
+                let pressed_outside = !input.mouse_pressed.is_none() && !mouseover;
+                let released_without_hold_focus = input.mouse_down.is_none() && !opt.is_holding_focus();
+                pressed_outside || released_without_hold_focus
+            };
+            if should_clear_focus {
                 self.set_focus(None);
             }
         }
         if self.hover == Some(widget_id) {
-            if !self.input.borrow().mouse_pressed.is_none() {
-                self.set_focus(Some(widget_id));
-            } else if !mouseover {
+            if !mouseover {
                 self.hover = None;
+            } else if !self.input.borrow().mouse_pressed.is_none() {
+                self.set_focus(Some(widget_id));
             }
         }
 
@@ -519,12 +522,12 @@ impl Container {
             self.input.borrow_mut().rel_mouse_pos = mouse_pos - origin;
         }
 
-        let input = self.input.borrow();
         let focused = self.focus == Some(widget_id);
         let hovered = self.hover == Some(widget_id);
-        let clicked = focused && input.mouse_pressed.is_left();
-        let active = focused && input.mouse_down.is_left();
-        drop(input);
+        let (clicked, active) = {
+            let input = self.input.borrow();
+            (focused && input.mouse_pressed.is_left(), focused && input.mouse_down.is_left())
+        };
 
         ControlState {
             hovered,
@@ -579,6 +582,7 @@ impl Container {
 
     fn run_widget<W: Widget + ?Sized>(
         &mut self,
+        results: &mut FrameResults,
         state: &mut W,
         rect: Recti,
         input: Option<Rc<InputSnapshot>>,
@@ -589,6 +593,7 @@ impl Container {
         let control = self.update_control_with_opts(widget_id, rect, opt, bopt);
         let mut ctx = self.widget_ctx(widget_id, rect, input);
         let res = state.handle(&mut ctx, &control);
+        results.record(widget_id, res);
         (control, res)
     }
 
@@ -600,32 +605,33 @@ impl Container {
         self.layout.next_with_preferred(preferred)
     }
 
-    fn handle_widget<W: Widget + ?Sized>(&mut self, state: &mut W, input: Option<Rc<InputSnapshot>>) -> ResourceState {
+    fn handle_widget<W: Widget + ?Sized>(&mut self, results: &mut FrameResults, state: &mut W, input: Option<Rc<InputSnapshot>>) -> ResourceState {
         let rect = self.next_widget_rect(state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
-        let (_, res) = self.run_widget(state, rect, input, opt, bopt);
+        let (_, res) = self.run_widget(results, state, rect, input, opt, bopt);
         res
     }
 
     fn handle_widget_in_rect<W: Widget + ?Sized>(
         &mut self,
+        results: &mut FrameResults,
         state: &mut W,
         rect: Recti,
         input: Option<Rc<InputSnapshot>>,
         opt: WidgetOption,
         bopt: WidgetBehaviourOption,
     ) -> ResourceState {
-        let (_, res) = self.run_widget(state, rect, input, opt, bopt);
+        let (_, res) = self.run_widget(results, state, rect, input, opt, bopt);
         res
     }
 
-    fn handle_widget_raw<W: Widget + ?Sized>(&mut self, state: &mut W) -> ResourceState {
+    fn handle_widget_raw<W: Widget + ?Sized>(&mut self, results: &mut FrameResults, state: &mut W) -> ResourceState {
         let rect = self.next_widget_rect(state);
         let opt = state.effective_widget_opt();
         let bopt = state.effective_behaviour_opt();
         let input = if state.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
-        let (_, res) = self.run_widget(state, rect, input, opt, bopt);
+        let (_, res) = self.run_widget(results, state, rect, input, opt, bopt);
         res
     }
 
@@ -667,12 +673,12 @@ impl Container {
         self.content_size
     }
 
-    fn node_scope<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, indent: bool, f: F) -> NodeStateValue {
+    fn node_scope<F: FnOnce(&mut Self)>(&mut self, results: &mut FrameResults, state: &mut Node, indent: bool, f: F) -> NodeStateValue {
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let r = self.next_widget_rect(state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
-        let _ = self.handle_widget_in_rect(state, r, None, opt, bopt);
+        let _ = self.handle_widget_in_rect(results, state, r, None, opt, bopt);
         if state.state.is_expanded() {
             if indent {
                 let indent_size = self.style.as_ref().indent;
@@ -687,13 +693,13 @@ impl Container {
     }
 
     /// Builds a collapsible header row that executes `f` when expanded.
-    pub fn header<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
-        self.node_scope(state, false, f)
+    pub fn header<F: FnOnce(&mut Self)>(&mut self, results: &mut FrameResults, state: &mut Node, f: F) -> NodeStateValue {
+        self.node_scope(results, state, false, f)
     }
 
     /// Builds a tree node with automatic indentation while expanded.
-    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, state: &mut Node, f: F) -> NodeStateValue {
-        self.node_scope(state, true, f)
+    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, results: &mut FrameResults, state: &mut Node, f: F) -> NodeStateValue {
+        self.node_scope(results, state, true, f)
     }
 
     fn clamp(x: i32, a: i32, b: i32) -> i32 {
@@ -1000,45 +1006,52 @@ impl Container {
     }
 
     /// Runs a widget in an explicit rectangle.
-    pub fn widget_in_rect<W: Widget + ?Sized>(&mut self, widget: &mut W, rect: Recti) -> ResourceState {
+    pub fn widget_in_rect<W: Widget + ?Sized>(&mut self, results: &mut FrameResults, widget: &mut W, rect: Recti) -> ResourceState {
         let opt = widget.effective_widget_opt();
         let bopt = widget.effective_behaviour_opt();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
-        self.handle_widget_in_rect(widget, rect, input, opt, bopt)
+        self.handle_widget_in_rect(results, widget, rect, input, opt, bopt)
     }
 
-    /// Evaluates each raw `(widget_state, output_slot)` tuple using the current flow.
-    pub fn widgets(&mut self, runs: &mut [WidgetRaw<'_>]) {
-        for (widget, out) in runs.iter_mut() {
-            **out = self.handle_widget_raw(&mut **widget);
+    /// Evaluates each widget state using the current flow.
+    pub fn widgets(&mut self, results: &mut FrameResults, runs: &mut [WidgetRef<'_>]) {
+        for widget in runs.iter_mut() {
+            let _ = self.handle_widget_raw(results, &mut **widget);
         }
     }
 
     /// Emits a row flow and evaluates each widget run in order.
-    pub fn row_widgets(&mut self, widths: &[SizePolicy], height: SizePolicy, runs: &mut [WidgetRaw<'_>]) {
+    pub fn row_widgets(&mut self, results: &mut FrameResults, widths: &[SizePolicy], height: SizePolicy, runs: &mut [WidgetRef<'_>]) {
         self.with_row(widths, height, |container| {
-            container.widgets(runs);
+            container.widgets(results, runs);
         });
     }
 
     /// Emits a grid flow and evaluates each widget run in row-major order.
-    pub fn grid_widgets(&mut self, widths: &[SizePolicy], heights: &[SizePolicy], runs: &mut [WidgetRaw<'_>]) {
+    pub fn grid_widgets(&mut self, results: &mut FrameResults, widths: &[SizePolicy], heights: &[SizePolicy], runs: &mut [WidgetRef<'_>]) {
         self.with_grid(widths, heights, |container| {
-            container.widgets(runs);
+            container.widgets(results, runs);
         });
     }
 
     /// Emits a nested column scope and evaluates each widget run in order.
-    pub fn column_widgets(&mut self, runs: &mut [WidgetRaw<'_>]) {
+    pub fn column_widgets(&mut self, results: &mut FrameResults, runs: &mut [WidgetRef<'_>]) {
         self.column(|container| {
-            container.widgets(runs);
+            container.widgets(results, runs);
         });
     }
 
     /// Emits a stack flow and evaluates each widget run in order.
-    pub fn stack_widgets(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection, runs: &mut [WidgetRaw<'_>]) {
+    pub fn stack_widgets(
+        &mut self,
+        results: &mut FrameResults,
+        width: SizePolicy,
+        height: SizePolicy,
+        direction: StackDirection,
+        runs: &mut [WidgetRef<'_>],
+    ) {
         self.stack_with_width_direction(width, height, direction, |container| {
-            container.widgets(runs);
+            container.widgets(results, runs);
         });
     }
 
@@ -1098,12 +1111,12 @@ impl Container {
     #[inline(never)]
     /// Draws the combo box header, clamps the selected index, and returns the popup anchor.
     /// The caller is responsible for opening the popup and updating `state.selected` from its list.
-    pub fn combo_box<S: AsRef<str>>(&mut self, state: &mut Combo, items: &[S]) -> (Recti, bool, ResourceState) {
+    pub fn combo_box<S: AsRef<str>>(&mut self, results: &mut FrameResults, state: &mut Combo, items: &[S]) -> (Recti, bool, ResourceState) {
         state.update_items(items);
         let header = self.next_widget_rect(state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
-        let res = self.handle_widget_in_rect(state, header, None, opt, bopt);
+        let res = self.handle_widget_in_rect(results, state, header, None, opt, bopt);
         let header_clicked = res.is_submitted();
         let anchor = rect(header.x, header.y + header.height, header.width, 1);
         (anchor, header_clicked, res)
@@ -1141,18 +1154,28 @@ impl Container {
 
     #[inline(never)]
     /// Allocates a widget cell from `Custom` state preferred size and hands rendering control to user code.
-    pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, state: &mut Custom, f: F) {
-        self.widget_custom_render(state, f);
+    pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(
+        &mut self,
+        results: &mut FrameResults,
+        state: &mut Custom,
+        f: F,
+    ) {
+        self.widget_custom_render(results, state, f);
     }
 
     #[inline(never)]
     /// Runs a widget and records a custom render callback with the resulting interaction context.
-    pub fn widget_custom_render<W: Widget + ?Sized, F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, widget: &mut W, f: F) {
+    pub fn widget_custom_render<W: Widget + ?Sized, F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(
+        &mut self,
+        results: &mut FrameResults,
+        widget: &mut W,
+        f: F,
+    ) {
         let rect = self.next_widget_rect(widget);
         let opt = widget.effective_widget_opt();
         let bopt = widget.effective_behaviour_opt();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
-        let (control, _) = self.run_widget(widget, rect, input, opt, bopt);
+        let (control, _) = self.run_widget(results, widget, rect, input, opt, bopt);
 
         let snapshot = self.snapshot_input();
         let input_ref = snapshot.as_ref();
@@ -1180,10 +1203,10 @@ impl Container {
         /// Draws a textbox using the next available layout cell.
         textbox,
         Textbox,
-        |this: &mut Self, state: &mut Textbox, rect: Recti| {
+        |this: &mut Self, results: &mut FrameResults, state: &mut Textbox, rect: Recti| {
             let input = Some(this.snapshot_input());
             let opt = state.opt | WidgetOption::HOLD_FOCUS;
-            this.handle_widget_in_rect(state, rect, input, opt, state.bopt)
+            this.handle_widget_in_rect(results, state, rect, input, opt, state.bopt)
         }
     );
 
@@ -1191,10 +1214,10 @@ impl Container {
         /// Draws a multi-line text area using the next available layout cell.
         textarea,
         TextArea,
-        |this: &mut Self, state: &mut TextArea, rect: Recti| {
+        |this: &mut Self, results: &mut FrameResults, state: &mut TextArea, rect: Recti| {
             let input = Some(this.snapshot_input());
             let opt = state.opt | WidgetOption::HOLD_FOCUS;
-            this.handle_widget_in_rect(state, rect, input, opt, state.bopt)
+            this.handle_widget_in_rect(results, state, rect, input, opt, state.bopt)
         }
     );
 
@@ -1203,13 +1226,13 @@ impl Container {
         /// Draws a horizontal slider bound to `state`.
         slider,
         Slider,
-        |this: &mut Self, state: &mut Slider, rect: Recti| {
+        |this: &mut Self, results: &mut FrameResults, state: &mut Slider, rect: Recti| {
             let mut opt = state.opt;
             if state.edit.editing {
                 opt |= WidgetOption::HOLD_FOCUS;
             }
             let input = Some(this.snapshot_input());
-            this.handle_widget_in_rect(state, rect, input, opt, state.bopt)
+            this.handle_widget_in_rect(results, state, rect, input, opt, state.bopt)
         }
     );
 
@@ -1218,13 +1241,13 @@ impl Container {
         /// Draws a numeric input that can be edited via keyboard or by dragging.
         number,
         Number,
-        |this: &mut Self, state: &mut Number, rect: Recti| {
+        |this: &mut Self, results: &mut FrameResults, state: &mut Number, rect: Recti| {
             let mut opt = state.opt;
             if state.edit.editing {
                 opt |= WidgetOption::HOLD_FOCUS;
             }
             let input = Some(this.snapshot_input());
-            this.handle_widget_in_rect(state, rect, input, opt, state.bopt)
+            this.handle_widget_in_rect(results, state, rect, input, opt, state.bopt)
         }
     );
 }
@@ -1380,29 +1403,57 @@ mod tests {
         let mut state = Textbox::new("a\u{1F600}b");
         container.set_focus(Some(widget_id_of(&state)));
         state.cursor = 5;
+        let mut results = FrameResults::default();
+        let state_id = widget_id_of(&state);
 
         input.borrow_mut().keydown(KeyMode::BACKSPACE);
-        let mut res = ResourceState::NONE;
-        let mut runs = [widget_raw(&mut state, &mut res)];
-        container.widgets(&mut runs);
+        let mut runs = [widget_ref(&mut state)];
+        container.widgets(&mut results, &mut runs);
 
-        assert!(res.is_changed());
+        assert!(results.state(state_id).is_changed());
         assert_eq!(state.buf, "ab");
         assert_eq!(state.cursor, 1);
     }
 
     #[test]
-    fn row_widgets_overwrite_output_slots() {
+    fn clicking_away_does_not_refocus_stale_hover_widget() {
+        let mut container = make_container();
+        let input = container.input.clone();
+        let button = Button::new("A");
+        let button_id = widget_id_of(&button);
+        let button_rect = rect(0, 0, 50, 20);
+
+        // Frame N: hover the button once so hover state is established.
+        input.borrow_mut().mousemove(10, 10);
+        let control = container.update_control(button_id, button_rect, &button);
+        assert!(control.hovered);
+        assert!(!control.focused);
+
+        // Frame N+1: click elsewhere. The stale hover entry must not grab focus.
+        {
+            let mut i = input.borrow_mut();
+            i.mousemove(80, 10);
+            i.mousedown(80, 10, MouseButton::LEFT);
+            i.mouseup(80, 10, MouseButton::LEFT);
+        }
+        let control = container.update_control(button_id, button_rect, &button);
+        assert!(!control.hovered);
+        assert!(!control.focused);
+    }
+
+    #[test]
+    fn row_widgets_record_states() {
         let mut container = make_container();
         let mut button_a = Button::new("A");
         let mut button_b = Button::new("B");
-        let mut out_a = ResourceState::SUBMIT;
-        let mut out_b = ResourceState::ACTIVE;
-        let mut runs = [widget_raw(&mut button_a, &mut out_a), widget_raw(&mut button_b, &mut out_b)];
+        let mut results = FrameResults::default();
+        let button_a_id = widget_id_of(&button_a);
+        let button_b_id = widget_id_of(&button_b);
+        let mut runs = [widget_ref(&mut button_a), widget_ref(&mut button_b)];
 
-        container.row_widgets(&[SizePolicy::Auto, SizePolicy::Auto], SizePolicy::Auto, &mut runs);
+        container.row_widgets(&mut results, &[SizePolicy::Auto, SizePolicy::Auto], SizePolicy::Auto, &mut runs);
 
-        assert!(out_a.is_none());
-        assert!(out_b.is_none());
+        assert!(results.state(button_a_id).is_none());
+        assert!(results.state(button_b_id).is_none());
     }
 }

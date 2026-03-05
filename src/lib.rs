@@ -61,6 +61,7 @@
 
 use std::{
     cell::{Ref, RefCell, RefMut},
+    collections::HashMap,
     f32,
     hash::Hash,
     ops::{Deref, DerefMut},
@@ -297,6 +298,7 @@ impl ControlColor {
 }
 
 bitflags! {
+    #[derive(Copy, Clone, Debug)]
     /// State bits returned by widgets to describe their interaction outcome.
     pub struct ResourceState : u32 {
         /// Indicates that the widget's data changed.
@@ -495,12 +497,12 @@ pub trait Widget {
     }
 }
 
-/// Raw widget dispatch pair `(widget_state, output_slot)` used by batch APIs.
-pub type WidgetRaw<'a> = (&'a mut dyn Widget, &'a mut ResourceState);
+/// Raw widget dispatch reference used by batch APIs.
+pub type WidgetRef<'a> = &'a mut dyn Widget;
 
-/// Creates a [`WidgetRaw`] tuple from one widget state and one output slot.
-pub fn widget_raw<'a, W: Widget>(widget: &'a mut W, out: &'a mut ResourceState) -> WidgetRaw<'a> {
-    (widget as &mut dyn Widget, out)
+/// Creates a [`WidgetRef`] from a widget state reference.
+pub fn widget_ref<'a, W: Widget>(widget: &'a mut W) -> WidgetRef<'a> {
+    widget as &mut dyn Widget
 }
 
 /// Raw pointer identity used for widget hover/focus tracking.
@@ -510,6 +512,44 @@ pub type WidgetId = *const ();
 /// Use this when calling APIs such as `Container::set_focus`.
 pub fn widget_id_of<W: Widget + ?Sized>(widget: &W) -> WidgetId {
     widget as *const W as *const ()
+}
+
+/// Per-frame widget interaction results keyed by [`WidgetId`].
+///
+/// A single widget state is expected to be dispatched once per frame.
+/// Duplicate dispatches with the same ID trigger a debug assertion.
+#[derive(Default)]
+pub struct FrameResults {
+    states: HashMap<WidgetId, ResourceState>,
+}
+
+impl FrameResults {
+    /// Clears all recorded widget states for a new frame.
+    ///
+    /// This preserves internal capacity to avoid repeated reallocations.
+    pub fn begin_frame(&mut self) {
+        self.states.clear();
+    }
+
+    /// Records a widget state under `widget_id`.
+    pub fn record(&mut self, widget_id: WidgetId, state: ResourceState) {
+        let prev = self.states.insert(widget_id, state);
+        debug_assert!(prev.is_none(), "Widget {:?} was dispatched more than once in the same frame", widget_id);
+    }
+
+    /// Returns the recorded state for `widget_id` in the current frame.
+    ///
+    /// Returns [`ResourceState::NONE`] when no state is recorded.
+    pub fn state(&self, widget_id: WidgetId) -> ResourceState {
+        self.states.get(&widget_id).copied().unwrap_or(ResourceState::NONE)
+    }
+
+    /// Returns the recorded state for `widget` in the current frame.
+    ///
+    /// Returns [`ResourceState::NONE`] when no state is recorded.
+    pub fn state_of<W: Widget + ?Sized>(&self, widget: &W) -> ResourceState {
+        self.state(widget_id_of(widget))
+    }
 }
 
 impl Widget for (WidgetOption, WidgetBehaviourOption) {
