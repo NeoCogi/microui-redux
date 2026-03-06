@@ -508,10 +508,16 @@ pub fn widget_ref<'a, W: Widget>(widget: &'a mut W) -> WidgetRef<'a> {
 /// Raw pointer identity used for widget hover/focus tracking.
 pub type WidgetId = *const ();
 
+pub(crate) type ContainerId = *const ();
+
 /// Returns the pointer identity for a widget state object.
 /// Use this when calling APIs such as `Container::set_focus`.
 pub fn widget_id_of<W: Widget + ?Sized>(widget: &W) -> WidgetId {
     widget as *const W as *const ()
+}
+
+pub(crate) fn container_id_of(handle: &ContainerHandle) -> ContainerId {
+    Rc::as_ptr(&handle.0) as *const ()
 }
 
 /// Per-frame widget interaction results keyed by [`WidgetId`].
@@ -1116,6 +1122,10 @@ impl ContainerHandle {
 
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
         self.0.borrow_mut().render(canvas)
+    }
+
+    pub(crate) fn finish(&mut self) {
+        self.0.borrow_mut().finish()
     }
 
     /// Returns an immutable borrow of the underlying container.

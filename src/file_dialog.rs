@@ -249,12 +249,7 @@ impl FileDialogState {
                 let home_id = widget_id_of(&*home_button);
                 let path_id = widget_id_of(&*path_box);
                 let go_id = widget_id_of(&*go_button);
-                let mut toolbar_runs = [
-                    widget_ref(up_button),
-                    widget_ref(home_button),
-                    widget_ref(path_box),
-                    widget_ref(go_button),
-                ];
+                let mut toolbar_runs = [widget_ref(up_button), widget_ref(home_button), widget_ref(path_box), widget_ref(go_button)];
                 cont.row_widgets(results, &toolbar_widths, SizePolicy::Auto, &mut toolbar_runs);
 
                 if results.state(up_id).is_submitted() {
@@ -371,10 +366,7 @@ impl FileDialogState {
                 });
 
                 let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
-                let mut filename_runs = [
-                    widget_ref(file_name_label),
-                    widget_ref(tmp_file_name),
-                ];
+                let mut filename_runs = [widget_ref(file_name_label), widget_ref(tmp_file_name)];
                 cont.row_widgets(results, &filename_widths, SizePolicy::Auto, &mut filename_runs);
 
                 let button_width = 96;
@@ -387,11 +379,7 @@ impl FileDialogState {
                 ];
                 let cancel_id = widget_id_of(&*cancel_button);
                 let ok_id = widget_id_of(&*ok_button);
-                let mut action_runs = [
-                    widget_ref(spacer_label),
-                    widget_ref(cancel_button),
-                    widget_ref(ok_button),
-                ];
+                let mut action_runs = [widget_ref(spacer_label), widget_ref(cancel_button), widget_ref(ok_button)];
                 cont.row_widgets(results, &action_widths, SizePolicy::Auto, &mut action_runs);
                 if results.state(cancel_id).is_submitted() {
                     *file_name = None;

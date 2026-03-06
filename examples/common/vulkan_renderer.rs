@@ -1616,13 +1616,7 @@ impl MeshResources {
         self.cleanup_retired(frame, device);
     }
 
-    fn prepare_frame(
-        &mut self,
-        ctx: &VulkanContext,
-        frame: usize,
-        required_vertex_bytes: vk::DeviceSize,
-        required_index_bytes: vk::DeviceSize,
-    ) -> Result<()> {
+    fn prepare_frame(&mut self, ctx: &VulkanContext, frame: usize, required_vertex_bytes: vk::DeviceSize, required_index_bytes: vk::DeviceSize) -> Result<()> {
         self.ensure_vertex_buffer(ctx, frame, required_vertex_bytes)?;
         self.ensure_index_buffer(ctx, frame, required_index_bytes)?;
         self.ensure_vertex_staging_buffer(ctx, frame, required_vertex_bytes)?;
@@ -1970,9 +1964,7 @@ impl VulkanContext {
         }
 
         unsafe {
-            self.device
-                .device_wait_idle()
-                .map_err(|err| self.handle_vk_error("device_wait_idle", err))?;
+            self.device.device_wait_idle().map_err(|err| self.handle_vk_error("device_wait_idle", err))?;
         }
 
         self.cleanup_swapchain();
@@ -2320,9 +2312,7 @@ impl VulkanContext {
         }
 
         unsafe {
-            self.device
-                .reset_fences(&[fence])
-                .map_err(|err| self.handle_vk_error("reset_fences", err))?;
+            self.device.reset_fences(&[fence]).map_err(|err| self.handle_vk_error("reset_fences", err))?;
         }
 
         let command_buffer = self.command_buffers[image_index as usize];
@@ -2411,9 +2401,7 @@ impl VulkanContext {
         }
 
         let to_bytes = |count: usize, element_size: usize| -> Result<vk::DeviceSize> {
-            let bytes = count
-                .checked_mul(element_size)
-                .ok_or_else(|| "frame upload size overflow".to_string())?;
+            let bytes = count.checked_mul(element_size).ok_or_else(|| "frame upload size overflow".to_string())?;
             u64::try_from(bytes).map_err(|_| "frame upload size exceeds device address range".to_string())
         };
 

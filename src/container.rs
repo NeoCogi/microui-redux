@@ -195,6 +195,14 @@ pub struct Container {
     pub(crate) hover: Option<WidgetId>,
     /// ID of the widget currently focused, if any.
     pub(crate) focus: Option<WidgetId>,
+    /// Child container that currently owns pointer routing inside this container.
+    hover_root_child: Option<ContainerId>,
+    /// Rectangle occupied by the child container that currently owns pointer routing.
+    hover_root_child_rect: Option<Recti>,
+    /// Child container selected to own pointer routing on the next frame.
+    next_hover_root_child: Option<ContainerId>,
+    /// Rectangle for the child container selected to own pointer routing on the next frame.
+    next_hover_root_child_rect: Option<Recti>,
     /// Tracks whether focus changed this frame.
     pub(crate) updated_focus: bool,
     /// Internal state for the vertical scrollbar.
@@ -231,6 +239,10 @@ impl Container {
             clip_stack: Vec::default(),
             hover: None,
             focus: None,
+            hover_root_child: None,
+            hover_root_child_rect: None,
+            next_hover_root_child: None,
+            next_hover_root_child_rect: None,
             updated_focus: false,
             layout: LayoutManager::default(),
             scrollbar_y_state: Internal::new("!scrollbary"),
@@ -249,6 +261,10 @@ impl Container {
     pub(crate) fn reset(&mut self) {
         self.hover = None;
         self.focus = None;
+        self.hover_root_child = None;
+        self.hover_root_child_rect = None;
+        self.next_hover_root_child = None;
+        self.next_hover_root_child_rect = None;
         self.updated_focus = false;
         self.in_hover_root = false;
         self.input_snapshot = None;
@@ -261,6 +277,8 @@ impl Container {
         assert!(self.clip_stack.len() == 0);
         self.panels.clear();
         self.input_snapshot = None;
+        self.next_hover_root_child = None;
+        self.next_hover_root_child_rect = None;
         self.pending_scroll = None;
         self.scroll_enabled = true;
     }
@@ -468,10 +486,21 @@ impl Container {
         draw.draw_control_text(str, rect, colorid, opt);
     }
 
-    /// Returns `true` if the cursor is inside `rect` and the container owns the hover root.
-    pub fn mouse_over(&mut self, rect: Recti, in_hover_root: bool) -> bool {
+    fn hit_test_rect(&mut self, rect: Recti, in_hover_root: bool) -> bool {
         let clip_rect = self.get_clip_rect();
         rect.contains(&self.input.borrow().mouse_pos) && clip_rect.contains(&self.input.borrow().mouse_pos) && in_hover_root
+    }
+
+    fn pointer_blocked_by_child(&self) -> bool {
+        match self.hover_root_child_rect {
+            Some(rect) => rect.contains(&self.input.borrow().mouse_pos),
+            None => false,
+        }
+    }
+
+    /// Returns `true` if the cursor is inside `rect` and the container can currently own hover there.
+    pub fn mouse_over(&mut self, rect: Recti, in_hover_root: bool) -> bool {
+        self.hit_test_rect(rect, in_hover_root && !self.pointer_blocked_by_child())
     }
 
     fn update_control_with_opts(&mut self, widget_id: WidgetId, rect: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ControlState {
@@ -637,10 +666,17 @@ impl Container {
 
     /// Resets transient per-frame state after widgets have been processed.
     pub fn finish(&mut self) {
+        for panel in &mut self.panels {
+            panel.finish();
+        }
         if !self.updated_focus {
             self.focus = None;
         }
         self.updated_focus = false;
+        self.hover_root_child = self.next_hover_root_child;
+        self.hover_root_child_rect = self.next_hover_root_child_rect;
+        self.next_hover_root_child = None;
+        self.next_hover_root_child_rect = None;
     }
 
     /// Returns the outer container rectangle.
@@ -885,6 +921,11 @@ impl Container {
     #[inline(never)]
     fn begin_panel(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, bopt: WidgetBehaviourOption) {
         let rect = self.layout.next();
+        let panel_id = container_id_of(panel);
+        if self.hit_test_rect(rect, self.in_hover_root) {
+            self.next_hover_root_child = Some(panel_id);
+            self.next_hover_root_child_rect = Some(rect);
+        }
         let container = &mut panel.inner_mut();
         container.prepare();
         container.style = self.style.clone();
@@ -894,8 +935,8 @@ impl Container {
             self.draw_frame(rect, ControlColor::PanelBG);
         }
 
-        container.in_hover_root = self.in_hover_root;
-        if self.pending_scroll.is_some() && self.mouse_over(rect, self.in_hover_root) {
+        container.in_hover_root = self.in_hover_root && self.hover_root_child == Some(panel_id);
+        if self.pending_scroll.is_some() && container.in_hover_root {
             container.pending_scroll = self.pending_scroll.take();
         }
         container.push_container_body(rect, opt, bopt);
@@ -1042,14 +1083,7 @@ impl Container {
     }
 
     /// Emits a stack flow and evaluates each widget run in order.
-    pub fn stack_widgets(
-        &mut self,
-        results: &mut FrameResults,
-        width: SizePolicy,
-        height: SizePolicy,
-        direction: StackDirection,
-        runs: &mut [WidgetRef<'_>],
-    ) {
+    pub fn stack_widgets(&mut self, results: &mut FrameResults, width: SizePolicy, height: SizePolicy, direction: StackDirection, runs: &mut [WidgetRef<'_>]) {
         self.stack_with_width_direction(width, height, direction, |container| {
             container.widgets(results, runs);
         });
@@ -1154,12 +1188,7 @@ impl Container {
 
     #[inline(never)]
     /// Allocates a widget cell from `Custom` state preferred size and hands rendering control to user code.
-    pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(
-        &mut self,
-        results: &mut FrameResults,
-        state: &mut Custom,
-        f: F,
-    ) {
+    pub fn custom_render_widget<F: FnMut(Dimensioni, &CustomRenderArgs) + 'static>(&mut self, results: &mut FrameResults, state: &mut Custom, f: F) {
         self.widget_custom_render(results, state, f);
     }
 
@@ -1318,6 +1347,17 @@ mod tests {
         container
     }
 
+    fn begin_test_frame(container: &mut Container, body: Recti) {
+        container.prepare();
+        container.rect = body;
+        container.content_size = Vec2i::default();
+        container.push_container_body(body, ContainerOption::NONE, WidgetBehaviourOption::NONE);
+    }
+
+    fn make_panel_handle(container: &Container, name: &str) -> ContainerHandle {
+        ContainerHandle::new(Container::new(name, container.atlas.clone(), container.style.clone(), container.input.clone()))
+    }
+
     #[test]
     fn scrollbars_use_current_body() {
         let mut container = make_container();
@@ -1455,5 +1495,98 @@ mod tests {
 
         assert!(results.state(button_a_id).is_none());
         assert!(results.state(button_b_id).is_none());
+    }
+
+    #[test]
+    fn panel_hover_root_switches_between_siblings_on_next_frame() {
+        let mut parent = make_container();
+        let input = parent.input.clone();
+        let mut left = make_panel_handle(&parent, "left");
+        let mut right = make_panel_handle(&parent, "right");
+
+        input.borrow_mut().mousemove(75, 10);
+        begin_test_frame(&mut parent, rect(0, 0, 100, 20));
+        parent.with_row(&[SizePolicy::Fixed(50), SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |container| {
+            container.panel(&mut left, ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
+            container.panel(&mut right, ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
+        });
+        assert!(!left.inner().in_hover_root);
+        assert!(!right.inner().in_hover_root);
+        parent.finish();
+
+        let mut left_active = false;
+        let mut right_active = false;
+        begin_test_frame(&mut parent, rect(0, 0, 100, 20));
+        parent.with_row(&[SizePolicy::Fixed(50), SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |container| {
+            container.panel(&mut left, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
+                left_active = panel.inner().in_hover_root;
+            });
+            container.panel(&mut right, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
+                right_active = panel.inner().in_hover_root;
+            });
+        });
+        assert!(!left_active);
+        assert!(right_active);
+        parent.finish();
+
+        input.borrow_mut().mousemove(25, 10);
+        left_active = false;
+        right_active = false;
+        begin_test_frame(&mut parent, rect(0, 0, 100, 20));
+        parent.with_row(&[SizePolicy::Fixed(50), SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |container| {
+            container.panel(&mut left, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
+                left_active = panel.inner().in_hover_root;
+            });
+            container.panel(&mut right, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
+                right_active = panel.inner().in_hover_root;
+            });
+        });
+        assert!(!left_active);
+        assert!(right_active);
+        parent.finish();
+
+        left_active = false;
+        right_active = false;
+        begin_test_frame(&mut parent, rect(0, 0, 100, 20));
+        parent.with_row(&[SizePolicy::Fixed(50), SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |container| {
+            container.panel(&mut left, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
+                left_active = panel.inner().in_hover_root;
+            });
+            container.panel(&mut right, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
+                right_active = panel.inner().in_hover_root;
+            });
+        });
+        assert!(left_active);
+        assert!(!right_active);
+    }
+
+    #[test]
+    fn parent_widgets_are_only_blocked_while_mouse_is_inside_active_child_rect() {
+        let mut parent = make_container();
+        let input = parent.input.clone();
+        let mut panel = make_panel_handle(&parent, "panel");
+
+        input.borrow_mut().mousemove(10, 10);
+        begin_test_frame(&mut parent, rect(0, 0, 100, 20));
+        parent.with_row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |container| {
+            container.panel(&mut panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
+        });
+        parent.finish();
+
+        let blocked_button = Button::new("blocked");
+        input.borrow_mut().mousemove(10, 10);
+        begin_test_frame(&mut parent, rect(0, 0, 100, 20));
+        let blocked = parent.update_control(widget_id_of(&blocked_button), rect(0, 0, 40, 20), &blocked_button);
+        assert!(!blocked.hovered);
+        parent.with_row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |container| {
+            container.panel(&mut panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
+        });
+        parent.finish();
+
+        let free_button = Button::new("free");
+        input.borrow_mut().mousemove(75, 10);
+        begin_test_frame(&mut parent, rect(0, 0, 100, 20));
+        let free = parent.update_control(widget_id_of(&free_button), rect(60, 0, 30, 20), &free_button);
+        assert!(free.hovered);
     }
 }

@@ -397,12 +397,7 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Opens a popup window with default options.
-    pub fn popup<F: FnOnce(&mut Container, &mut FrameResults) -> WindowState>(
-        &mut self,
-        window: &mut WindowHandle,
-        bopt: WidgetBehaviourOption,
-        f: F,
-    ) {
+    pub fn popup<F: FnOnce(&mut Container, &mut FrameResults) -> WindowState>(&mut self, window: &mut WindowHandle, bopt: WidgetBehaviourOption, f: F) {
         let opt = ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE;
         self.window(window, opt, bopt, f);
     }

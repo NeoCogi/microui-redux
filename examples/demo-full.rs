@@ -374,12 +374,7 @@ impl State {
         }
     }
 
-    fn tree_section<F: FnOnce(&mut Container, &mut FrameResults)>(
-        container: &mut Container,
-        results: &mut FrameResults,
-        node: &mut Node,
-        f: F,
-    ) {
+    fn tree_section<F: FnOnce(&mut Container, &mut FrameResults)>(container: &mut Container, results: &mut FrameResults, node: &mut Node, f: F) {
         container.set_row_flow(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let mut __runs = [widget_ref(node)];
         container.widgets(results, &mut __runs);
@@ -482,10 +477,7 @@ impl State {
                 let submit_btn_id = widget_id_of(&self.submit_button);
                 let mut submit_buf_out = ResourceState::NONE;
                 let mut submit_btn_out = ResourceState::NONE;
-                let mut submit_runs = [
-                    widget_ref(&mut self.submit_buf),
-                    widget_ref(&mut self.submit_button),
-                ];
+                let mut submit_runs = [widget_ref(&mut self.submit_buf), widget_ref(&mut self.submit_button)];
                 container.row_widgets(results, &submit_row, SizePolicy::Auto, &mut submit_runs);
                 submit_buf_out = results.state(submit_buf_id);
                 submit_btn_out = results.state(submit_btn_id);
@@ -650,11 +642,7 @@ impl State {
                         let mut out0 = ResourceState::NONE;
                         let mut out1 = ResourceState::NONE;
                         let mut out2 = ResourceState::NONE;
-                        let mut runs = [
-                            widget_ref(button_top_0),
-                            widget_ref(button_top_1),
-                            widget_ref(button_top_2),
-                        ];
+                        let mut runs = [widget_ref(button_top_0), widget_ref(button_top_1), widget_ref(button_top_2)];
                         container.stack_widgets(results, SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, &mut runs);
                         out0 = results.state(button_top_0_id);
                         out1 = results.state(button_top_1_id);
@@ -676,11 +664,7 @@ impl State {
                         let mut out0 = ResourceState::NONE;
                         let mut out1 = ResourceState::NONE;
                         let mut out2 = ResourceState::NONE;
-                        let mut runs = [
-                            widget_ref(button_bottom_0),
-                            widget_ref(button_bottom_1),
-                            widget_ref(button_bottom_2),
-                        ];
+                        let mut runs = [widget_ref(button_bottom_0), widget_ref(button_bottom_1), widget_ref(button_bottom_2)];
                         container.stack_widgets(results, SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::BottomToTop, &mut runs);
                         out0 = results.state(button_bottom_0_id);
                         out1 = results.state(button_bottom_1_id);
@@ -742,11 +726,7 @@ impl State {
                 let mut row_out0 = ResourceState::NONE;
                 let mut row_out1 = ResourceState::NONE;
                 let mut row_out2 = ResourceState::NONE;
-                let mut row_runs = [
-                    widget_ref(button_row_0),
-                    widget_ref(button_row_1),
-                    widget_ref(button_row_2),
-                ];
+                let mut row_runs = [widget_ref(button_row_0), widget_ref(button_row_1), widget_ref(button_row_2)];
                 container.row_widgets(results, &row, SizePolicy::Fixed(28), &mut row_runs);
                 row_out0 = results.state(row_0_id);
                 row_out1 = results.state(row_1_id);
@@ -1207,29 +1187,33 @@ impl State {
         let mut popup_logs: Vec<&'static str> = Vec::new();
         {
             let popup_buttons = &mut self.popup_buttons;
-            ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), WidgetBehaviourOption::NO_SCROLL, |ctx, results| {
-                ctx.stack(SizePolicy::Auto, |ctx| {
-                    let (button0, button1) = {
-                        let (head, tail) = popup_buttons.split_at_mut(1);
-                        (&mut head[0], &mut tail[0])
-                    };
-                    let button0_id = widget_id_of(&*button0);
-                    let button1_id = widget_id_of(&*button1);
-                    let mut out0 = ResourceState::NONE;
-                    let mut out1 = ResourceState::NONE;
-                    let mut runs = [widget_ref(button0), widget_ref(button1)];
-                    ctx.widgets(results, &mut runs);
-                    out0 = results.state(button0_id);
-                    out1 = results.state(button1_id);
-                    if out0.is_submitted() {
-                        popup_logs.push("Hello")
-                    }
-                    if out1.is_submitted() {
-                        popup_logs.push("World")
-                    }
-                });
-                WindowState::Open
-            });
+            ctx.popup(
+                &mut self.popup_window.as_mut().unwrap().clone(),
+                WidgetBehaviourOption::NO_SCROLL,
+                |ctx, results| {
+                    ctx.stack(SizePolicy::Auto, |ctx| {
+                        let (button0, button1) = {
+                            let (head, tail) = popup_buttons.split_at_mut(1);
+                            (&mut head[0], &mut tail[0])
+                        };
+                        let button0_id = widget_id_of(&*button0);
+                        let button1_id = widget_id_of(&*button1);
+                        let mut out0 = ResourceState::NONE;
+                        let mut out1 = ResourceState::NONE;
+                        let mut runs = [widget_ref(button0), widget_ref(button1)];
+                        ctx.widgets(results, &mut runs);
+                        out0 = results.state(button0_id);
+                        out1 = results.state(button1_id);
+                        if out0.is_submitted() {
+                            popup_logs.push("Hello")
+                        }
+                        if out1.is_submitted() {
+                            popup_logs.push("World")
+                        }
+                    });
+                    WindowState::Open
+                },
+            );
         }
         for msg in popup_logs {
             self.write_log(msg);
