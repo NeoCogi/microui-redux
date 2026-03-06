@@ -102,6 +102,18 @@ pub struct WidgetCtx<'a> {
 }
 
 impl<'a> WidgetCtx<'a> {
+    fn localize_input(rect: Recti, input: Option<Rc<InputSnapshot>>) -> Option<Rc<InputSnapshot>> {
+        input.map(|input| {
+            let mut localized = input.as_ref().clone();
+            localized.mouse_pos = localized.mouse_pos - Vec2i::new(rect.x, rect.y);
+            Rc::new(localized)
+        })
+    }
+
+    fn local_rect_for(&self, rect: Recti) -> Recti {
+        Recti::new(rect.x - self.rect.x, rect.y - self.rect.y, rect.width, rect.height)
+    }
+
     /// Creates a widget context for the given widget ID and rectangle.
     pub(crate) fn new(
         id: WidgetId,
@@ -122,7 +134,7 @@ impl<'a> WidgetCtx<'a> {
             focus,
             updated_focus,
             in_hover_root,
-            input,
+            input: Self::localize_input(rect, input),
             default_input: InputSnapshot::default(),
         }
     }
@@ -137,7 +149,7 @@ impl<'a> WidgetCtx<'a> {
         self.rect
     }
 
-    /// Returns the input snapshot for this widget, if provided.
+    /// Returns the widget-local input snapshot for this widget, if provided.
     pub fn input(&self) -> Option<&InputSnapshot> {
         self.input.as_deref()
     }
@@ -242,7 +254,8 @@ impl<'a> WidgetCtx<'a> {
         if !self.in_hover_root {
             return false;
         }
-        let clip_rect = self.current_clip_rect();
-        rect.contains(&input.mouse_pos) && clip_rect.contains(&input.mouse_pos)
+        let local_rect = self.local_rect_for(rect);
+        let clip_rect = self.local_rect_for(self.current_clip_rect());
+        local_rect.contains(&input.mouse_pos) && clip_rect.contains(&input.mouse_pos)
     }
 }

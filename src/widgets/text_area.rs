@@ -141,6 +141,7 @@ impl TextArea {
 fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea) -> ResourceState {
     let mut res = ResourceState::NONE;
     let bounds = ctx.rect();
+    let local_bounds = rect(0, 0, bounds.width, bounds.height);
     if !control.focused {
         state.cursor = state.buf.len();
         state.preferred_x = None;
@@ -233,10 +234,17 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     let mut clicked_scrollbar = false;
     let mut vscroll_base = bounds;
     let mut hscroll_base = bounds;
+    let mut body_local = local_bounds;
+
+    body_local.x = body.x - bounds.x;
+    body_local.y = body.y - bounds.y;
+    body_local.width = body.width;
+    body_local.height = body.height;
 
     if needs_v && maxscroll_y > 0 && body.height > 0 {
         vscroll_base = scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size);
-        if input.mouse_pressed.is_left() && vscroll_base.contains(&input.mouse_pos) {
+        let vscroll_base_local = rect(vscroll_base.x - bounds.x, vscroll_base.y - bounds.y, vscroll_base.width, vscroll_base.height);
+        if input.mouse_pressed.is_left() && vscroll_base_local.contains(&input.mouse_pos) {
             state.dragging_y = true;
             clicked_scrollbar = true;
         }
@@ -247,7 +255,8 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
 
     if needs_h && maxscroll_x > 0 && body.width > 0 {
         hscroll_base = scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size);
-        if input.mouse_pressed.is_left() && hscroll_base.contains(&input.mouse_pos) {
+        let hscroll_base_local = rect(hscroll_base.x - bounds.x, hscroll_base.y - bounds.y, hscroll_base.width, hscroll_base.height);
+        if input.mouse_pressed.is_left() && hscroll_base_local.contains(&input.mouse_pos) {
             state.dragging_x = true;
             clicked_scrollbar = true;
         }
@@ -291,8 +300,8 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     }
 
     if control.focused && input.mouse_pressed.is_left() && ctx.mouse_over(bounds) && !clicked_scrollbar {
-        let local_x = input.mouse_pos.x - (body.x + padding) + state.scroll.x;
-        let local_y = input.mouse_pos.y - (body.y + padding) + state.scroll.y;
+        let local_x = input.mouse_pos.x - (body_local.x + padding) + state.scroll.x;
+        let local_y = input.mouse_pos.y - (body_local.y + padding) + state.scroll.y;
         let line_idx = if lines.is_empty() {
             0
         } else {

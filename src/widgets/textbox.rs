@@ -175,7 +175,7 @@ pub(crate) fn textbox_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, bu
     let textx = r.x + if ofx < padding { ofx } else { padding };
 
     if control.focused && mouse_pressed.is_left() && ctx.mouse_over(r) {
-        let click_x = mouse_pos.x - textx;
+        let click_x = mouse_pos.x - (textx - r.x);
         if click_x <= 0 {
             cursor_pos = 0;
         } else {

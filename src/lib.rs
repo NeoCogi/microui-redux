@@ -430,9 +430,9 @@ pub struct ControlState {
 #[derive(Clone, Debug)]
 /// Snapshot of the per-frame input state for widgets that need it.
 pub struct InputSnapshot {
-    /// Absolute mouse position in screen coordinates.
+    /// Mouse position relative to the current widget rectangle.
     pub mouse_pos: Vec2i,
-    /// Mouse movement delta since the previous frame.
+    /// Mouse movement delta since the previous frame, expressed in widget-local space.
     pub mouse_delta: Vec2i,
     /// Currently held mouse buttons.
     pub mouse_down: MouseButton,

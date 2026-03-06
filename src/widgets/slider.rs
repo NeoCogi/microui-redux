@@ -142,7 +142,7 @@ impl Slider {
         let input = ctx.input_or_default();
         let range = self.high - self.low;
         if control.focused && (!input.mouse_down.is_none() || input.mouse_pressed.is_left()) && base.width > 0 && range != 0.0 {
-            v = self.low + (input.mouse_pos.x - base.x) as Real * range / base.width as Real;
+            v = self.low + input.mouse_pos.x as Real * range / base.width as Real;
             if self.step != 0. {
                 v = (v + self.step / 2 as Real) / self.step * self.step;
             }
@@ -449,5 +449,50 @@ mod tests {
         assert!(res.is_none());
         assert!(slider.value.is_finite());
         assert_eq!(slider.value, 5.0);
+    }
+
+    #[test]
+    fn slider_uses_widget_local_mouse_position() {
+        let atlas = make_test_atlas();
+        let style = Style::default();
+        let mut commands = Vec::new();
+        let mut clip_stack = Vec::new();
+        let mut focus = None;
+        let mut updated_focus = false;
+
+        let mut slider = Slider::new(0.0, 0.0, 100.0);
+        let slider_id = widget_id_of(&slider);
+        let rect = rect(40, 20, 100, 20);
+        let input = Rc::new(InputSnapshot {
+            mouse_pos: vec2(90, 30),
+            mouse_delta: vec2(0, 0),
+            mouse_down: MouseButton::LEFT,
+            mouse_pressed: MouseButton::LEFT,
+            ..Default::default()
+        });
+        let mut ctx = WidgetCtx::new(
+            slider_id,
+            rect,
+            &mut commands,
+            &mut clip_stack,
+            &style,
+            &atlas,
+            &mut focus,
+            &mut updated_focus,
+            true,
+            Some(input),
+        );
+        let control = ControlState {
+            hovered: true,
+            focused: true,
+            clicked: false,
+            active: true,
+            scroll_delta: None,
+        };
+
+        let res = slider.handle(&mut ctx, &control);
+
+        assert!(!res.is_none());
+        assert_eq!(slider.value, 50.0);
     }
 }
