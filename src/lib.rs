@@ -60,8 +60,10 @@
 //! per-widget intrinsic text/icon metrics instead of a single shared control size.
 //! Layout internals are flow-based: row tracks and vertical stack flows both run through the same
 //! engine so scope/scroll/content bookkeeping stays consistent.
-//! Per-frame interaction results are collected in [`FrameResults`], allowing retained widget handles to be
-//! queried after traversal without threading ad-hoc output slots through every widget call.
+//! Per-frame interaction results are collected in [`FrameResults`], which keeps
+//! committed previous-frame results separate from the current frame's in-progress
+//! result generation so retained widgets can reconcile against stable state while
+//! still exposing same-frame interaction data when needed.
 
 mod atlas;
 mod canvas;

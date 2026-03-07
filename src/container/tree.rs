@@ -55,14 +55,24 @@
 use super::*;
 
 impl Container {
-    /// Returns the previous frame cache entry for `node_id`, if any.
-    pub fn previous_node_state(&self, node_id: NodeId) -> Option<NodeCacheEntry> {
-        self.tree_cache.prev(node_id).copied()
+    /// Returns the previous frame layout for `node_id`, if any.
+    pub fn previous_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
+        self.tree_cache.prev_layout(node_id).copied()
     }
 
-    /// Returns the current frame cache entry for `node_id`, if any.
-    pub fn current_node_state(&self, node_id: NodeId) -> Option<NodeCacheEntry> {
-        self.tree_cache.current(node_id).copied()
+    /// Returns the current frame layout for `node_id`, if any.
+    pub fn current_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
+        self.tree_cache.current_layout(node_id).copied()
+    }
+
+    /// Returns the previous frame interaction for `node_id`, if any.
+    pub fn previous_node_interaction(&self, node_id: NodeId) -> Option<NodeInteraction> {
+        self.tree_cache.prev_interaction(node_id).copied()
+    }
+
+    /// Returns the current frame interaction for `node_id`, if any.
+    pub fn current_node_interaction(&self, node_id: NodeId) -> Option<NodeInteraction> {
+        self.tree_cache.current_interaction(node_id).copied()
     }
 
     fn run_node_scope(&mut self, results: &mut FrameResults, state: &mut Node) -> NodeStateValue {
@@ -141,21 +151,25 @@ impl Container {
     }
 
     fn cached_tree_click(&mut self, node_id: NodeId) -> bool {
-        let Some(cached) = self.tree_cache.prev(node_id).copied() else {
+        let Some(cached) = self.tree_cache.prev_layout(node_id).copied() else {
             return false;
         };
 
         self.mouse_over(cached.rect, self.in_hover_root) && self.input.borrow().mouse_pressed.is_left()
     }
 
-    fn record_tree_node(&mut self, node_id: NodeId, state: NodeCacheEntry) {
-        self.tree_cache.record(node_id, state);
+    fn record_tree_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
+        self.tree_cache.record_layout(node_id, layout);
+    }
+
+    fn record_tree_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
+        self.tree_cache.record_interaction(node_id, interaction);
     }
 
     fn record_tree_group_from_children(&mut self, node_id: NodeId, children: &[RuntimeTreeNode<'_>]) {
         let mut bounds: Option<Recti> = None;
         for child in children {
-            if let Some(child_state) = self.tree_cache.current(child.id()) {
+            if let Some(child_state) = self.tree_cache.current_layout(child.id()) {
                 bounds = Some(match bounds {
                     Some(existing_rect) => {
                         let min_x = existing_rect.x.min(child_state.rect.x);
@@ -170,16 +184,7 @@ impl Container {
         }
 
         if let Some(rect) = bounds {
-            self.record_tree_node(
-                node_id,
-                NodeCacheEntry {
-                    rect,
-                    body: rect,
-                    content_size: vec2(rect.width, rect.height),
-                    control: ControlState::default(),
-                    result: ResourceState::NONE,
-                },
-            );
+            self.record_tree_layout(node_id, NodeLayout::new(rect, rect, vec2(rect.width, rect.height)));
         }
     }
 
@@ -190,16 +195,8 @@ impl Container {
         let bopt = widget.effective_behaviour_opt();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let (control, result) = self.render_widget_dyn(results, widget, rect, input, opt, bopt);
-        self.record_tree_node(
-            node_id,
-            NodeCacheEntry {
-                rect,
-                body: rect,
-                content_size: Vec2i::default(),
-                control,
-                result,
-            },
-        );
+        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
+        self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
     }
 
     fn handle_tree_custom_render(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>, render: &TreeCustomRender) {
@@ -239,16 +236,8 @@ impl Container {
             }),
         ));
 
-        self.record_tree_node(
-            node_id,
-            NodeCacheEntry {
-                rect,
-                body: rect,
-                content_size: Vec2i::default(),
-                control,
-                result,
-            },
-        );
+        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
+        self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
     }
 
     fn run_tree_node_scope(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
@@ -265,16 +254,8 @@ impl Container {
             state.borrow_mut().state = stable_state;
         }
 
-        self.record_tree_node(
-            node_id,
-            NodeCacheEntry {
-                rect,
-                body: rect,
-                content_size: Vec2i::default(),
-                control,
-                result,
-            },
-        );
+        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
+        self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
         stable_state
     }
 
@@ -294,16 +275,7 @@ impl Container {
                 });
                 self.end_panel(&mut handle);
                 let (rect, body, content_size) = handle.with(|container| (container.rect(), container.body(), container.content_size()));
-                self.record_tree_node(
-                    node.id(),
-                    NodeCacheEntry {
-                        rect,
-                        body,
-                        content_size,
-                        control: ControlState::default(),
-                        result: ResourceState::NONE,
-                    },
-                );
+                self.record_tree_layout(node.id(), NodeLayout::new(rect, body, content_size));
             }
             RuntimeTreeNodeKind::Header { state } => {
                 if self.run_tree_node_scope(results, node.id(), state).is_expanded() {

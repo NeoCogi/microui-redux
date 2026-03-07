@@ -411,7 +411,11 @@ impl<R: Renderer> Context<R> {
         self.render_window_tree(window, opt, bopt, tree);
     }
 
-    /// Returns the current frame's widget interaction results.
+    /// Returns the widget interaction result generations for the active frame.
+    ///
+    /// [`FrameResults::committed`] exposes the previous frame's published
+    /// results, while [`FrameResults::current`] exposes the in-progress results
+    /// being written during the current frame.
     pub fn frame_results(&self) -> &FrameResults {
         &self.frame_results
     }

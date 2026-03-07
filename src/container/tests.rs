@@ -340,11 +340,11 @@ fn tree_nodes_expand_children_in_same_frame_from_cached_rects() {
         });
     });
     container.widget_tree(&mut results, &tree);
-    assert!(container.current_node_state(header_node_id).is_some());
-    assert!(container.current_node_state(child_node_id).is_none());
+    assert!(container.current_node_layout(header_node_id).is_some());
+    assert!(container.current_node_layout(child_node_id).is_none());
     container.finish();
 
-    let header_rect = container.previous_node_state(header_node_id).expect("header cache missing").rect;
+    let header_rect = container.previous_node_layout(header_node_id).expect("header cache missing").rect;
     {
         let mut input = input.borrow_mut();
         input.mousemove(header_rect.x + 1, header_rect.y + 1);
@@ -361,7 +361,7 @@ fn tree_nodes_expand_children_in_same_frame_from_cached_rects() {
     container.widget_tree(&mut results, &tree);
 
     assert!(header.borrow().is_expanded());
-    assert!(container.current_node_state(child_node_id).is_some());
+    assert!(container.current_node_layout(child_node_id).is_some());
     container.finish();
 }
 

@@ -151,16 +151,47 @@ pub fn widget_id_of_handle<W: Widget>(handle: &WidgetHandle<W>) -> WidgetId {
 ///
 /// A single widget state is expected to be dispatched once per frame.
 /// Duplicate dispatches with the same ID trigger a debug assertion.
+///
+/// The storage is split into two generations:
+/// - the committed result set published at the end of the previous frame,
+/// - and the current in-progress result set being written by this frame.
 #[derive(Default)]
 pub struct FrameResults {
     committed: HashMap<WidgetId, ResourceState>,
     current: HashMap<WidgetId, ResourceState>,
 }
 
+/// Read-only view over one frame-result generation.
+#[derive(Copy, Clone)]
+pub struct FrameResultGeneration<'a> {
+    entries: &'a HashMap<WidgetId, ResourceState>,
+}
+
+impl<'a> FrameResultGeneration<'a> {
+    fn new(entries: &'a HashMap<WidgetId, ResourceState>) -> Self {
+        Self { entries }
+    }
+
+    /// Returns the state for `widget_id` in this generation.
+    pub fn state(&self, widget_id: WidgetId) -> ResourceState {
+        self.entries.get(&widget_id).copied().unwrap_or(ResourceState::NONE)
+    }
+
+    /// Returns the state for `widget` in this generation.
+    pub fn state_of<W: Widget + ?Sized>(&self, widget: &W) -> ResourceState {
+        self.state(widget_id_of(widget))
+    }
+
+    /// Returns the state for the widget stored in `handle` in this generation.
+    pub fn state_of_handle<W: Widget>(&self, handle: &WidgetHandle<W>) -> ResourceState {
+        self.state(widget_id_of_handle(handle))
+    }
+}
+
 impl FrameResults {
     /// Clears the in-progress frame results for a new frame.
     ///
-    /// Previously committed results remain available through [`FrameResults::committed_state`].
+    /// Previously committed results remain available through [`FrameResults::committed`].
     pub fn begin_frame(&mut self) {
         self.current.clear();
     }
@@ -177,18 +208,24 @@ impl FrameResults {
         debug_assert!(prev.is_none(), "Widget {:?} was dispatched more than once in the same frame", widget_id);
     }
 
+    /// Returns the committed result generation published by the previous frame.
+    pub fn committed(&self) -> FrameResultGeneration<'_> {
+        FrameResultGeneration::new(&self.committed)
+    }
+
+    /// Returns the in-progress result generation for the current frame.
+    pub fn current(&self) -> FrameResultGeneration<'_> {
+        FrameResultGeneration::new(&self.current)
+    }
+
     /// Returns the committed result for `widget_id` from the previous frame.
-    ///
-    /// Returns [`ResourceState::NONE`] when no committed result exists.
     pub fn committed_state(&self, widget_id: WidgetId) -> ResourceState {
-        self.committed.get(&widget_id).copied().unwrap_or(ResourceState::NONE)
+        self.committed().state(widget_id)
     }
 
     /// Returns the in-progress result for `widget_id` in the current frame.
-    ///
-    /// Returns [`ResourceState::NONE`] when the widget has not been rendered this frame.
     pub fn current_state(&self, widget_id: WidgetId) -> ResourceState {
-        self.current.get(&widget_id).copied().unwrap_or(ResourceState::NONE)
+        self.current().state(widget_id)
     }
 
     /// Returns the most relevant available state for `widget_id`.
@@ -196,6 +233,10 @@ impl FrameResults {
     /// Once any widget has been rendered in the current frame, this reports only the
     /// current-frame result set. Before the first current-frame record, it falls back
     /// to the previously committed result generation.
+    ///
+    /// This is a compatibility lookup for code that still expects a single
+    /// result map. New code should prefer [`FrameResults::committed`] or
+    /// [`FrameResults::current`] explicitly.
     pub fn state(&self, widget_id: WidgetId) -> ResourceState {
         if self.current.is_empty() {
             self.committed_state(widget_id)
@@ -250,6 +291,24 @@ mod tests {
         assert!(results.state(committed_id).is_none());
         assert!(results.state(current_id).is_changed());
         assert!(results.committed_state(committed_id).is_submitted());
+    }
+
+    #[test]
+    fn committed_and_current_generation_views_are_explicit() {
+        let committed_widget = 1_u8;
+        let current_widget = 2_u8;
+        let committed_id = (&committed_widget as *const u8).cast::<()>();
+        let current_id = (&current_widget as *const u8).cast::<()>();
+
+        let mut results = FrameResults::default();
+        results.record(committed_id, ResourceState::SUBMIT);
+        results.finish_frame();
+        results.begin_frame();
+        results.record(current_id, ResourceState::CHANGE);
+
+        assert!(results.committed().state(committed_id).is_submitted());
+        assert!(results.current().state(committed_id).is_none());
+        assert!(results.current().state(current_id).is_changed());
     }
 }
 

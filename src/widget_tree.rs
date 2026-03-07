@@ -32,7 +32,9 @@
 // here and keep stable NodeIds across frames. Each frame the container derives
 // a short-lived runtime tree from these retained nodes, uses the previous-frame
 // cache for structural pre-handle, then traverses the runtime tree through the
-// normal layout and widget paths.
+// normal layout and widget paths. Layout and interaction are cached in separate
+// generations so previous-frame geometry can be consulted without conflating it
+// with current-frame widget results.
 
 mod builder;
 mod cache;
@@ -41,7 +43,7 @@ mod retained;
 mod runtime;
 
 pub use builder::WidgetTreeBuilder;
-pub use cache::{NodeCacheEntry, WidgetTreeCache};
+pub use cache::{NodeFrameState, NodeInteraction, NodeLayout, WidgetTreeCache};
 pub use node::{NodeId, Policy, WidgetTree, WidgetTreeNode};
 pub use retained::{widget_handle, WidgetHandle};
 
