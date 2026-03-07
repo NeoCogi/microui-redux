@@ -518,6 +518,12 @@ pub fn widget_id_of<W: Widget + ?Sized>(widget: &W) -> WidgetId {
     widget as *const W as *const ()
 }
 
+/// Returns the pointer identity for the widget state stored in `handle`.
+pub fn widget_id_of_handle<W: Widget>(handle: &WidgetHandle<W>) -> WidgetId {
+    let widget = handle.borrow();
+    widget_id_of(&*widget)
+}
+
 pub(crate) fn container_id_of(handle: &ContainerHandle) -> ContainerId {
     Rc::as_ptr(&handle.0) as *const ()
 }
@@ -557,6 +563,11 @@ impl FrameResults {
     /// Returns [`ResourceState::NONE`] when no state is recorded.
     pub fn state_of<W: Widget + ?Sized>(&self, widget: &W) -> ResourceState {
         self.state(widget_id_of(widget))
+    }
+
+    /// Returns the recorded state for the widget stored in `handle`.
+    pub fn state_of_handle<W: Widget>(&self, handle: &WidgetHandle<W>) -> ResourceState {
+        self.state(widget_id_of_handle(handle))
     }
 }
 

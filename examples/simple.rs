@@ -7,15 +7,26 @@ use microui_redux::*;
 
 struct State {
     window: WindowHandle,
-    hello_button: Button,
+    tree: WidgetTree,
 }
 
 fn main() {
     let slots = atlas_assets::default_slots();
     let atlas = atlas_assets::load_atlas(&slots);
-    let mut fw = Application::new(atlas.clone(), move |_gl, ctx| State {
-        window: ctx.new_window("Hello Window", rect(40, 40, 300, 450)),
-        hello_button: Button::with_opt("Hello World!", WidgetOption::ALIGN_CENTER),
+    let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
+        let hello_button = widget_handle(Button::with_opt("Hello World!", WidgetOption::ALIGN_CENTER));
+        let tree = WidgetTreeBuilder::build({
+            let hello_button = hello_button.clone();
+            move |tree| {
+                tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
+                    tree.widget(hello_button.clone());
+                });
+            }
+        });
+        State {
+            window: ctx.new_window("Hello Window", rect(40, 40, 300, 450)),
+            tree,
+        }
     })
     .unwrap();
 
@@ -26,11 +37,7 @@ fn main() {
                 ContainerOption::NONE,
                 WidgetBehaviourOption::NONE,
                 |container, results| {
-                    container.build_tree(results, |tree| {
-                        tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
-                            tree.widget(&mut state.hello_button);
-                        });
-                    });
+                    container.widget_tree(results, &state.tree);
                     WindowState::Open
                 },
             );

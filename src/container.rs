@@ -54,7 +54,9 @@ use super::*;
 use crate::draw_context::DrawCtx;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::text_layout::build_text_lines;
+use crate::widget_tree::{RuntimeTreeNode, RuntimeTreeNodeKind, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn};
 use std::cell::RefCell;
+use std::hash::{Hash, Hasher};
 
 macro_rules! widget_layout {
     ($(#[$meta:meta])* $name:ident, $state:ty, $builder:expr) => {
@@ -220,6 +222,8 @@ pub struct Container {
     pending_scroll: Option<Vec2i>,
     /// Determines whether container scrollbars and scroll consumption are enabled.
     scroll_enabled: bool,
+    /// Previous/current frame cache for tree node geometry and interaction state.
+    tree_cache: WidgetTreeCache,
 
     panels: Vec<ContainerHandle>,
 }
@@ -253,6 +257,7 @@ impl Container {
             input_snapshot: None,
             pending_scroll: None,
             scroll_enabled: true,
+            tree_cache: WidgetTreeCache::default(),
 
             panels: Default::default(),
         }
@@ -270,6 +275,7 @@ impl Container {
         self.input_snapshot = None;
         self.pending_scroll = None;
         self.scroll_enabled = true;
+        self.tree_cache.clear();
     }
 
     pub(crate) fn prepare(&mut self) {
@@ -281,6 +287,7 @@ impl Container {
         self.next_hover_root_child_rect = None;
         self.pending_scroll = None;
         self.scroll_enabled = true;
+        self.tree_cache.begin_frame();
     }
 
     pub(crate) fn seed_pending_scroll(&mut self, delta: Option<Vec2i>) {
@@ -664,6 +671,58 @@ impl Container {
         res
     }
 
+    fn next_widget_rect_dyn(&mut self, widget: &dyn WidgetStateHandleDyn) -> Recti {
+        let body = self.layout.current_body();
+        let avail = Dimensioni::new(body.width.max(0), body.height.max(0));
+        let preferred = widget.preferred_size(self.style.as_ref(), &self.atlas, avail);
+        self.layout.next_with_preferred(preferred)
+    }
+
+    fn run_widget_dyn(
+        &mut self,
+        results: &mut FrameResults,
+        widget: &dyn WidgetStateHandleDyn,
+        rect: Recti,
+        input: Option<Rc<InputSnapshot>>,
+        opt: WidgetOption,
+        bopt: WidgetBehaviourOption,
+    ) -> (ControlState, ResourceState) {
+        let widget_id = widget.widget_id();
+        let control = self.update_control_with_opts(widget_id, rect, opt, bopt);
+        let mut ctx = self.widget_ctx(widget_id, rect, input);
+        let res = widget.handle(&mut ctx, &control);
+        results.record(widget_id, res);
+        (control, res)
+    }
+
+    fn next_widget_rect_handle<W: Widget>(&mut self, handle: &WidgetHandle<W>) -> Recti {
+        let state = handle.borrow();
+        self.next_widget_rect(&*state)
+    }
+
+    fn run_widget_handle<W: Widget>(
+        &mut self,
+        results: &mut FrameResults,
+        handle: &WidgetHandle<W>,
+        rect: Recti,
+        input: Option<Rc<InputSnapshot>>,
+        opt: WidgetOption,
+        bopt: WidgetBehaviourOption,
+    ) -> (ControlState, ResourceState) {
+        let widget_id = {
+            let state = handle.borrow();
+            widget_id_of(&*state)
+        };
+        let control = self.update_control_with_opts(widget_id, rect, opt, bopt);
+        let mut ctx = self.widget_ctx(widget_id, rect, input);
+        let res = {
+            let mut state = handle.borrow_mut();
+            state.handle(&mut ctx, &control)
+        };
+        results.record(widget_id, res);
+        (control, res)
+    }
+
     /// Resets transient per-frame state after widgets have been processed.
     pub fn finish(&mut self) {
         for panel in &mut self.panels {
@@ -677,6 +736,7 @@ impl Container {
         self.hover_root_child_rect = self.next_hover_root_child_rect;
         self.next_hover_root_child = None;
         self.next_hover_root_child_rect = None;
+        self.tree_cache.finish_frame();
     }
 
     /// Returns the outer container rectangle.
@@ -707,6 +767,16 @@ impl Container {
     /// Returns the content size derived from layout traversal.
     pub fn content_size(&self) -> Vec2i {
         self.content_size
+    }
+
+    /// Returns the previous frame cache entry for `node_id`, if any.
+    pub fn previous_node_state(&self, node_id: NodeId) -> Option<NodeCacheEntry> {
+        self.tree_cache.prev(node_id).copied()
+    }
+
+    /// Returns the current frame cache entry for `node_id`, if any.
+    pub fn current_node_state(&self, node_id: NodeId) -> Option<NodeCacheEntry> {
+        self.tree_cache.current(node_id).copied()
     }
 
     fn run_node_scope(&mut self, results: &mut FrameResults, state: &mut Node) -> NodeStateValue {
@@ -1059,71 +1129,291 @@ impl Container {
         self.handle_widget_in_rect(results, widget, rect, input, opt, bopt)
     }
 
-    fn run_tree_nodes(&mut self, results: &mut FrameResults, nodes: &mut [WidgetTreeNode<'_>]) {
-        for node in nodes.iter_mut() {
+    fn run_tree_nodes(&mut self, results: &mut FrameResults, nodes: &[RuntimeTreeNode<'_>]) {
+        for node in nodes {
             self.run_tree_node(results, node);
         }
     }
 
-    fn run_tree_node(&mut self, results: &mut FrameResults, node: &mut WidgetTreeNode<'_>) {
-        let (kind, children) = node.parts_mut();
-        match kind {
-            WidgetTreeNodeKind::Widget { widget, .. } => {
-                let _ = self.handle_widget_raw(results, &mut **widget);
-            }
-            WidgetTreeNodeKind::Run { run } => run(self, results),
-            WidgetTreeNodeKind::Container { handle, opt, behaviour } => {
-                self.begin_panel(handle, *opt, *behaviour);
-                handle.with_mut(|container| {
-                    container.run_tree_nodes(results, children);
-                });
-                self.end_panel(handle);
-            }
-            WidgetTreeNodeKind::Header { state } => {
-                if self.run_node_scope(results, state).is_expanded() {
-                    self.run_tree_nodes(results, children);
+    fn pre_handle_tree_nodes(&mut self, nodes: &[RuntimeTreeNode<'_>]) {
+        for node in nodes {
+            self.pre_handle_tree_node(node);
+        }
+    }
+
+    fn pre_handle_tree_node(&mut self, node: &RuntimeTreeNode<'_>) {
+        match node.kind() {
+            // Parent tree nodes use previous-frame geometry so they can update
+            // structural state before the current frame's layout is computed.
+            RuntimeTreeNodeKind::Header { state } | RuntimeTreeNodeKind::Tree { state } => {
+                if self.cached_tree_click(node.id()) {
+                    let mut state = state.borrow_mut();
+                    state.state = if state.state.is_expanded() {
+                        NodeStateValue::Closed
+                    } else {
+                        NodeStateValue::Expanded
+                    };
+                }
+                if state.borrow().state.is_expanded() {
+                    self.pre_handle_tree_nodes(node.children());
                 }
             }
-            WidgetTreeNodeKind::Tree { state } => {
-                if self.run_node_scope(results, state).is_expanded() {
+            RuntimeTreeNodeKind::Container { handle, .. } => {
+                let mut handle = handle.clone();
+                handle.with_mut(|container| {
+                    container.pre_handle_tree_nodes(node.children());
+                });
+            }
+            RuntimeTreeNodeKind::Row { .. } | RuntimeTreeNodeKind::Grid { .. } | RuntimeTreeNodeKind::Column | RuntimeTreeNodeKind::Stack { .. } => {
+                self.pre_handle_tree_nodes(node.children())
+            }
+            RuntimeTreeNodeKind::Widget { .. } | RuntimeTreeNodeKind::CustomRender { .. } | RuntimeTreeNodeKind::Run { .. } => {}
+        }
+    }
+
+    fn cached_tree_click(&mut self, node_id: NodeId) -> bool {
+        let Some(cached) = self.tree_cache.prev(node_id).copied() else {
+            return false;
+        };
+
+        self.mouse_over(cached.rect, self.in_hover_root) && self.input.borrow().mouse_pressed.is_left()
+    }
+
+    fn record_tree_node(&mut self, node_id: NodeId, state: NodeCacheEntry) {
+        self.tree_cache.record(node_id, state);
+    }
+
+    fn record_tree_group_from_children(&mut self, node_id: NodeId, children: &[RuntimeTreeNode<'_>]) {
+        let mut bounds: Option<Recti> = None;
+        for child in children {
+            if let Some(child_state) = self.tree_cache.current(child.id()) {
+                bounds = Some(match bounds {
+                    Some(existing_rect) => {
+                        let min_x = existing_rect.x.min(child_state.rect.x);
+                        let min_y = existing_rect.y.min(child_state.rect.y);
+                        let max_x = (existing_rect.x + existing_rect.width).max(child_state.rect.x + child_state.rect.width);
+                        let max_y = (existing_rect.y + existing_rect.height).max(child_state.rect.y + child_state.rect.height);
+                        rect(min_x, min_y, max_x - min_x, max_y - min_y)
+                    }
+                    None => child_state.rect,
+                });
+            }
+        }
+
+        if let Some(rect) = bounds {
+            self.record_tree_node(
+                node_id,
+                NodeCacheEntry {
+                    rect,
+                    body: rect,
+                    content_size: vec2(rect.width, rect.height),
+                    control: ControlState::default(),
+                    result: ResourceState::NONE,
+                },
+            );
+        }
+    }
+
+    fn handle_tree_widget(&mut self, results: &mut FrameResults, node_id: NodeId, widget: &dyn WidgetStateHandleDyn) {
+        let rect = self.next_widget_rect_dyn(widget);
+        let opt = widget.effective_widget_opt();
+        let bopt = widget.effective_behaviour_opt();
+        let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
+        let (control, result) = self.run_widget_dyn(results, widget, rect, input, opt, bopt);
+        self.record_tree_node(
+            node_id,
+            NodeCacheEntry {
+                rect,
+                body: rect,
+                content_size: Vec2i::default(),
+                control,
+                result,
+            },
+        );
+    }
+
+    fn handle_tree_custom_render(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>, render: &TreeCustomRender) {
+        let rect = self.next_widget_rect_handle(state);
+        let (opt, bopt, needs_input) = {
+            let state = state.borrow();
+            (state.effective_widget_opt(), state.effective_behaviour_opt(), state.needs_input_snapshot())
+        };
+        let input = if needs_input { Some(self.snapshot_input()) } else { None };
+        let (control, result) = self.run_widget_handle(results, state, rect, input, opt, bopt);
+
+        let snapshot = self.snapshot_input();
+        let input_ref = snapshot.as_ref();
+        let mouse_event = self.input_to_mouse_event(&control, input_ref, rect);
+
+        let active = control.focused && self.in_hover_root;
+        let key_mods = if active { input_ref.key_mods } else { KeyMode::NONE };
+        let key_codes = if active { input_ref.key_codes } else { KeyCode::NONE };
+        let text_input = if active { input_ref.text_input.clone() } else { String::new() };
+        let cra = CustomRenderArgs {
+            content_area: rect,
+            view: self.get_clip_rect(),
+            mouse_event,
+            scroll_delta: control.scroll_delta,
+            widget_opt: opt,
+            behaviour_opt: bopt,
+            key_mods,
+            key_codes,
+            text_input,
+        };
+        let render = render.clone();
+        self.command_list.push(Command::CustomRender(
+            cra,
+            Box::new(move |dim, args| {
+                (*render.borrow_mut())(dim, args);
+            }),
+        ));
+
+        self.record_tree_node(
+            node_id,
+            NodeCacheEntry {
+                rect,
+                body: rect,
+                content_size: Vec2i::default(),
+                control,
+                result,
+            },
+        );
+    }
+
+    fn run_tree_node_scope(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
+        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
+        let rect = self.next_widget_rect_handle(state);
+        let (opt, bopt, stable_state) = {
+            let state = state.borrow();
+            (*state.widget_opt(), *state.behaviour_opt(), state.state)
+        };
+        let (control, result) = self.run_widget_handle(results, state, rect, None, opt, bopt);
+
+        // Header/tree nodes already consumed structural clicks from the previous
+        // frame's cached rect. Reset the state after drawing so the old Widget
+        // implementation does not toggle it a second time.
+        if control.clicked {
+            state.borrow_mut().state = stable_state;
+        }
+
+        self.record_tree_node(
+            node_id,
+            NodeCacheEntry {
+                rect,
+                body: rect,
+                content_size: Vec2i::default(),
+                control,
+                result,
+            },
+        );
+        stable_state
+    }
+
+    fn run_tree_node(&mut self, results: &mut FrameResults, node: &RuntimeTreeNode<'_>) {
+        match node.kind() {
+            RuntimeTreeNodeKind::Widget { widget } => {
+                self.handle_tree_widget(results, node.id(), *widget);
+            }
+            RuntimeTreeNodeKind::CustomRender { state, render } => {
+                self.handle_tree_custom_render(results, node.id(), state, render);
+            }
+            RuntimeTreeNodeKind::Run { run } => {
+                (*run.borrow_mut())(self, results);
+            }
+            RuntimeTreeNodeKind::Container { handle, opt, behaviour } => {
+                let mut handle = handle.clone();
+                self.begin_panel(&mut handle, *opt, *behaviour);
+                handle.with_mut(|container| {
+                    container.run_tree_nodes(results, node.children());
+                });
+                self.end_panel(&mut handle);
+                let (rect, body, content_size) = handle.with(|container| (container.rect(), container.body(), container.content_size()));
+                self.record_tree_node(
+                    node.id(),
+                    NodeCacheEntry {
+                        rect,
+                        body,
+                        content_size,
+                        control: ControlState::default(),
+                        result: ResourceState::NONE,
+                    },
+                );
+            }
+            RuntimeTreeNodeKind::Header { state } => {
+                if self.run_tree_node_scope(results, node.id(), state).is_expanded() {
+                    self.run_tree_nodes(results, node.children());
+                }
+            }
+            RuntimeTreeNodeKind::Tree { state } => {
+                if self.run_tree_node_scope(results, node.id(), state).is_expanded() {
                     let indent_size = self.style.as_ref().indent;
                     self.layout.adjust_indent(indent_size);
-                    self.run_tree_nodes(results, children);
+                    self.run_tree_nodes(results, node.children());
                     self.layout.adjust_indent(-indent_size);
                 }
             }
-            WidgetTreeNodeKind::Row { widths, height } => {
+            RuntimeTreeNodeKind::Row { widths, height } => {
                 self.with_row(widths, *height, |container| {
-                    container.run_tree_nodes(results, children);
+                    container.run_tree_nodes(results, node.children());
                 });
+                self.record_tree_group_from_children(node.id(), node.children());
             }
-            WidgetTreeNodeKind::Grid { widths, heights } => {
+            RuntimeTreeNodeKind::Grid { widths, heights } => {
                 self.with_grid(widths, heights, |container| {
-                    container.run_tree_nodes(results, children);
+                    container.run_tree_nodes(results, node.children());
                 });
+                self.record_tree_group_from_children(node.id(), node.children());
             }
-            WidgetTreeNodeKind::Column => {
+            RuntimeTreeNodeKind::Column => {
                 self.column(|container| {
-                    container.run_tree_nodes(results, children);
+                    container.run_tree_nodes(results, node.children());
                 });
+                self.record_tree_group_from_children(node.id(), node.children());
             }
-            WidgetTreeNodeKind::Stack { width, height, direction } => {
+            RuntimeTreeNodeKind::Stack { width, height, direction } => {
                 self.stack_with_width_direction(*width, *height, *direction, |container| {
-                    container.run_tree_nodes(results, children);
+                    container.run_tree_nodes(results, node.children());
                 });
+                self.record_tree_group_from_children(node.id(), node.children());
             }
         }
     }
 
     /// Evaluates a prebuilt widget tree using the current container layout.
-    pub fn widget_tree(&mut self, results: &mut FrameResults, tree: &mut WidgetTree<'_>) {
-        self.run_tree_nodes(results, tree.roots_mut());
+    pub fn widget_tree(&mut self, results: &mut FrameResults, tree: &WidgetTree) {
+        let runtime_roots = tree.runtime_roots();
+        self.pre_handle_tree_nodes(&runtime_roots);
+        self.run_tree_nodes(results, &runtime_roots);
     }
 
     /// Builds a widget tree and evaluates it immediately.
-    pub fn build_tree<'a>(&mut self, results: &mut FrameResults, f: impl FnOnce(&mut WidgetTreeBuilder<'a>)) {
-        let mut tree = WidgetTreeBuilder::build(f);
-        self.widget_tree(results, &mut tree);
+    #[track_caller]
+    pub fn build_tree(&mut self, results: &mut FrameResults, f: impl FnOnce(&mut WidgetTreeBuilder)) {
+        let location = std::panic::Location::caller();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        location.file().hash(&mut hasher);
+        location.line().hash(&mut hasher);
+        location.column().hash(&mut hasher);
+        let tree = WidgetTreeBuilder::build_with_seed(hasher.finish(), f);
+        self.widget_tree(results, &tree);
+    }
+
+    /// Same as [`Container::build_tree`], but lets callers provide an explicit
+    /// root key when the same call site builds multiple independent trees.
+    ///
+    /// The key is mixed with the caller location instead of replacing it so a
+    /// reused logical key in unrelated call sites still lands in a distinct
+    /// root namespace.
+    #[track_caller]
+    pub fn build_tree_with_key<K: Hash>(&mut self, key: K, results: &mut FrameResults, f: impl FnOnce(&mut WidgetTreeBuilder)) {
+        let location = std::panic::Location::caller();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        location.file().hash(&mut hasher);
+        location.line().hash(&mut hasher);
+        location.column().hash(&mut hasher);
+        key.hash(&mut hasher);
+        let tree = WidgetTreeBuilder::build_with_seed(hasher.finish(), f);
+        self.widget_tree(results, &tree);
     }
 
     /// Evaluates each widget state using the current flow.
@@ -1572,37 +1862,80 @@ mod tests {
     #[test]
     fn widget_tree_records_leaf_states() {
         let mut container = make_container();
-        let mut button_a = Button::new("A");
-        let mut button_b = Button::new("B");
+        let button_a = widget_handle(Button::new("A"));
+        let button_b = widget_handle(Button::new("B"));
         let mut results = FrameResults::default();
 
         container.build_tree(&mut results, |tree| {
             tree.row(&[SizePolicy::Auto, SizePolicy::Auto], SizePolicy::Auto, |tree| {
-                tree.widget(&mut button_a);
-                tree.widget(&mut button_b);
+                tree.widget(button_a.clone());
+                tree.widget(button_b.clone());
             });
         });
 
-        assert!(results.state_of(&button_a).is_none());
-        assert!(results.state_of(&button_b).is_none());
+        assert!(results.state_of_handle(&button_a).is_none());
+        assert!(results.state_of_handle(&button_b).is_none());
     }
 
     #[test]
     fn widget_tree_dispatches_panel_children() {
         let mut parent = make_container();
         let panel = make_panel_handle(&parent, "panel");
-        let mut button = Button::new("inside");
+        let button = widget_handle(Button::new("inside"));
         let mut results = FrameResults::default();
 
         parent.build_tree(&mut results, |tree| {
             tree.row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
                 tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
-                    tree.widget(&mut button);
+                    tree.widget(button.clone());
                 });
             });
         });
 
-        assert!(results.state_of(&button).is_none());
+        assert!(results.state_of_handle(&button).is_none());
+    }
+
+    #[test]
+    fn tree_nodes_expand_children_in_same_frame_from_cached_rects() {
+        let mut container = make_container();
+        let input = container.input.clone();
+        let header = widget_handle(Node::header("Header", NodeStateValue::Closed));
+        let child = widget_handle(Button::new("Child"));
+        let seed = 0xfeed_face_u64;
+        let mut header_node_id = NodeId::new(0);
+        let mut child_node_id = NodeId::new(0);
+
+        begin_test_frame(&mut container, rect(0, 0, 100, 40));
+        let mut results = FrameResults::default();
+        let tree = WidgetTreeBuilder::build_with_seed(seed, |tree| {
+            header_node_id = tree.header(header.clone(), |tree| {
+                child_node_id = tree.widget(child.clone());
+            });
+        });
+        container.widget_tree(&mut results, &tree);
+        assert!(container.current_node_state(header_node_id).is_some());
+        assert!(container.current_node_state(child_node_id).is_none());
+        container.finish();
+
+        let header_rect = container.previous_node_state(header_node_id).expect("header cache missing").rect;
+        {
+            let mut i = input.borrow_mut();
+            i.mousemove(header_rect.x + 1, header_rect.y + 1);
+            i.mousedown(header_rect.x + 1, header_rect.y + 1, MouseButton::LEFT);
+        }
+
+        begin_test_frame(&mut container, rect(0, 0, 100, 40));
+        let mut results = FrameResults::default();
+        let tree = WidgetTreeBuilder::build_with_seed(seed, |tree| {
+            tree.header(header.clone(), |tree| {
+                child_node_id = tree.widget(child.clone());
+            });
+        });
+        container.widget_tree(&mut results, &tree);
+
+        assert!(header.borrow().is_expanded());
+        assert!(container.current_node_state(child_node_id).is_some());
+        container.finish();
     }
 
     #[test]

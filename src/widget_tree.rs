@@ -27,32 +27,162 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
-// The widget tree provides a structured, per-frame description of UI content
-// on top of the existing immediate-mode widget APIs. Callers use it to build
-// rows, grids, stacks, headers, tree nodes, embedded containers, and leaf
-// widgets into one executable tree, which `Container::build_tree` and
-// `Container::widget_tree` then traverse through the normal widget/layout
-// handling paths.
+// The retained widget tree owns the long-lived UI structure. Composite nodes
+// such as headers, tree nodes, and embedded containers store their child lists
+// here and keep stable NodeIds across frames. Each frame the container derives
+// a short-lived runtime tree from these retained nodes, uses the previous-frame
+// cache for structural pre-handle, then traverses the runtime tree through the
+// normal layout and widget paths.
 
 use std::{
+    cell::RefCell,
+    collections::HashMap,
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
+    rc::Rc,
 };
 
 use crate::{
-    widget_id_of, Container, ContainerHandle, ContainerOption, FrameResults, Id, Node, SizePolicy, StackDirection, Widget, WidgetBehaviourOption, WidgetId,
-    WidgetRef,
+    widget_id_of, AtlasHandle, Container, ContainerHandle, ContainerOption, ControlState, Custom, CustomRenderArgs, Dimensioni, FrameResults, Id, Node, Recti,
+    ResourceState, SizePolicy, StackDirection, Style, TextWrap, Vec2i, Widget, WidgetBehaviourOption, WidgetCtx, WidgetId, WidgetOption,
 };
 
-/// Stable identifier assigned to a node built by [`WidgetTreeBuilder`].
+/// Shared ownership handle for retained widget state.
+pub type WidgetHandle<T> = Rc<RefCell<T>>;
+
+/// Wraps widget state into a retained handle.
+pub fn widget_handle<T>(value: T) -> WidgetHandle<T> {
+    Rc::new(RefCell::new(value))
+}
+
+pub(crate) type TreeRun = Rc<RefCell<Box<dyn FnMut(&mut Container, &mut FrameResults) + 'static>>>;
+pub(crate) type TreeCustomRender = Rc<RefCell<Box<dyn FnMut(Dimensioni, &CustomRenderArgs) + 'static>>>;
+
+pub(crate) trait WidgetStateHandleDyn {
+    fn widget_id(&self) -> WidgetId;
+    fn effective_widget_opt(&self) -> WidgetOption;
+    fn effective_behaviour_opt(&self) -> WidgetBehaviourOption;
+    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
+    fn needs_input_snapshot(&self) -> bool;
+    fn handle(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
+}
+
+struct WidgetStateHandle<W: Widget + 'static> {
+    handle: WidgetHandle<W>,
+}
+
+impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
+    fn widget_id(&self) -> WidgetId {
+        let widget = self.handle.borrow();
+        widget_id_of(&*widget)
+    }
+
+    fn effective_widget_opt(&self) -> WidgetOption {
+        let widget = self.handle.borrow();
+        widget.effective_widget_opt()
+    }
+
+    fn effective_behaviour_opt(&self) -> WidgetBehaviourOption {
+        let widget = self.handle.borrow();
+        widget.effective_behaviour_opt()
+    }
+
+    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        let widget = self.handle.borrow();
+        widget.preferred_size(style, atlas, avail)
+    }
+
+    fn needs_input_snapshot(&self) -> bool {
+        let widget = self.handle.borrow();
+        widget.needs_input_snapshot()
+    }
+
+    fn handle(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let mut widget = self.handle.borrow_mut();
+        widget.handle(ctx, control)
+    }
+}
+
+/// Stable identifier assigned to a retained or runtime node.
 pub type NodeId = Id;
 
-/// Placement policy metadata attached to a tree node.
+/// Cached per-frame data for a tree node keyed by [`NodeId`].
 ///
-/// The current runtime tree preserves the crate's existing immediate layout
-/// semantics, so parent flows still decide how space is allocated. These
-/// policies are recorded on the tree for future measure/layout work and for
-/// callers that want to tag nodes with intended sizing rules.
+/// The cache is intentionally geometry-first. Parent nodes such as headers,
+/// tree nodes, and embedded containers need the previous frame's rectangles to
+/// react to structural input before the current frame's layout runs.
+#[derive(Copy, Clone, Debug)]
+pub struct NodeCacheEntry {
+    /// Outer rectangle assigned to the node.
+    pub rect: Recti,
+    /// Inner body rectangle, when the node exposes one.
+    pub body: Recti,
+    /// Content size produced while traversing the node's children.
+    pub content_size: Vec2i,
+    /// Control state observed while handling the node this frame.
+    pub control: ControlState,
+    /// Resource state returned by the node this frame.
+    pub result: ResourceState,
+}
+
+impl Default for NodeCacheEntry {
+    fn default() -> Self {
+        Self {
+            rect: Recti::default(),
+            body: Recti::default(),
+            content_size: Vec2i::default(),
+            control: ControlState::default(),
+            result: ResourceState::NONE,
+        }
+    }
+}
+
+/// Previous/current frame cache for widget tree nodes.
+///
+/// `curr` is cleared at the start of each frame, populated while the runtime
+/// tree runs, then swapped into `prev` at frame end.
+#[derive(Default)]
+pub struct WidgetTreeCache {
+    prev: HashMap<NodeId, NodeCacheEntry>,
+    curr: HashMap<NodeId, NodeCacheEntry>,
+}
+
+impl WidgetTreeCache {
+    /// Clears the in-progress frame cache while preserving the previous frame.
+    pub fn begin_frame(&mut self) {
+        self.curr.clear();
+    }
+
+    /// Publishes the current frame cache as the previous frame for the next run.
+    pub fn finish_frame(&mut self) {
+        std::mem::swap(&mut self.prev, &mut self.curr);
+        self.curr.clear();
+    }
+
+    /// Drops both previous and current cached node state.
+    pub fn clear(&mut self) {
+        self.prev.clear();
+        self.curr.clear();
+    }
+
+    /// Returns the previous frame state for `node_id`.
+    pub fn prev(&self, node_id: NodeId) -> Option<&NodeCacheEntry> {
+        self.prev.get(&node_id)
+    }
+
+    /// Returns the current frame state for `node_id`.
+    pub fn current(&self, node_id: NodeId) -> Option<&NodeCacheEntry> {
+        self.curr.get(&node_id)
+    }
+
+    /// Records the current frame state for `node_id`.
+    pub fn record(&mut self, node_id: NodeId, state: NodeCacheEntry) {
+        let prev = self.curr.insert(node_id, state);
+        debug_assert!(prev.is_none(), "Node {:?} was recorded more than once in the same frame", node_id);
+    }
+}
+
+/// Placement policy metadata attached to a retained node.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Policy {
     /// Width policy associated with the node.
@@ -93,24 +223,24 @@ impl Policy {
     }
 }
 
-type TreeRun<'a> = Box<dyn FnMut(&mut Container, &mut FrameResults) + 'a>;
-
-/// Kind of a node emitted by [`WidgetTreeBuilder`].
-pub enum WidgetTreeNodeKind<'a> {
-    /// Leaf node that dispatches a widget through the normal widget pipeline.
+/// Kind of a retained node emitted by [`WidgetTreeBuilder`].
+pub(crate) enum WidgetTreeNodeKind {
+    /// Leaf node that dispatches widget state through the normal widget pipeline.
     Widget {
-        /// Pointer identity of the widget state.
-        widget_id: WidgetId,
-        /// Borrowed widget state to dispatch.
-        widget: WidgetRef<'a>,
+        /// Retained widget state handle.
+        widget: Box<dyn WidgetStateHandleDyn>,
+    },
+    /// Leaf node that behaves like [`Container::widget_custom_render`].
+    CustomRender {
+        /// Retained widget state handle.
+        state: WidgetHandle<Custom>,
+        /// Deferred rendering callback enqueued after interaction handling.
+        render: TreeCustomRender,
     },
     /// Leaf node that executes arbitrary container code.
-    ///
-    /// This is the escape hatch for direct drawing, text helpers, and other
-    /// container APIs that are not represented as `Widget` states.
     Run {
         /// Callback invoked during tree traversal.
-        run: TreeRun<'a>,
+        run: TreeRun,
     },
     /// Embedded container/panel node with its own child subtree.
     Container {
@@ -123,13 +253,13 @@ pub enum WidgetTreeNodeKind<'a> {
     },
     /// Collapsible header node with optional child content.
     Header {
-        /// Header state object that owns the expanded/collapsed state.
-        state: &'a mut Node,
+        /// Header state handle that owns the expanded/collapsed state.
+        state: WidgetHandle<Node>,
     },
     /// Tree node with automatic indentation while expanded.
     Tree {
-        /// Tree state object that owns the expanded/collapsed state.
-        state: &'a mut Node,
+        /// Tree state handle that owns the expanded/collapsed state.
+        state: WidgetHandle<Node>,
     },
     /// Horizontal row flow group.
     Row {
@@ -158,40 +288,32 @@ pub enum WidgetTreeNodeKind<'a> {
     },
 }
 
-impl<'a> WidgetTreeNodeKind<'a> {
+impl WidgetTreeNodeKind {
     fn tag(&self) -> u8 {
         match self {
             Self::Widget { .. } => 1,
-            Self::Run { .. } => 2,
-            Self::Container { .. } => 3,
-            Self::Header { .. } => 4,
-            Self::Tree { .. } => 5,
-            Self::Row { .. } => 6,
-            Self::Grid { .. } => 7,
-            Self::Column => 8,
-            Self::Stack { .. } => 9,
-        }
-    }
-
-    /// Returns the underlying widget identity when the node dispatches a widget.
-    pub fn widget_id(&self) -> Option<WidgetId> {
-        match self {
-            Self::Widget { widget_id, .. } => Some(*widget_id),
-            Self::Header { state } | Self::Tree { state } => Some(widget_id_of(&**state)),
-            _ => None,
+            Self::CustomRender { .. } => 2,
+            Self::Run { .. } => 3,
+            Self::Container { .. } => 4,
+            Self::Header { .. } => 5,
+            Self::Tree { .. } => 6,
+            Self::Row { .. } => 7,
+            Self::Grid { .. } => 8,
+            Self::Column => 9,
+            Self::Stack { .. } => 10,
         }
     }
 }
 
-/// A single node in a widget tree.
-pub struct WidgetTreeNode<'a> {
+/// A single node in a retained widget tree.
+pub struct WidgetTreeNode {
     id: NodeId,
     policy: Policy,
-    kind: WidgetTreeNodeKind<'a>,
-    children: Vec<WidgetTreeNode<'a>>,
+    kind: WidgetTreeNodeKind,
+    children: Vec<WidgetTreeNode>,
 }
 
-impl<'a> WidgetTreeNode<'a> {
+impl WidgetTreeNode {
     /// Returns the stable node identifier.
     pub fn id(&self) -> NodeId {
         self.id
@@ -203,53 +325,48 @@ impl<'a> WidgetTreeNode<'a> {
     }
 
     /// Returns the node kind.
-    pub fn kind(&self) -> &WidgetTreeNodeKind<'a> {
+    #[cfg(test)]
+    pub(crate) fn kind(&self) -> &WidgetTreeNodeKind {
         &self.kind
     }
 
     /// Returns the node's child nodes.
-    pub fn children(&self) -> &[WidgetTreeNode<'a>] {
+    pub fn children(&self) -> &[WidgetTreeNode] {
         &self.children
     }
 
-    pub(crate) fn parts_mut(&mut self) -> (&mut WidgetTreeNodeKind<'a>, &mut Vec<WidgetTreeNode<'a>>) {
-        (&mut self.kind, &mut self.children)
+    pub(crate) fn parts(&self) -> (NodeId, &WidgetTreeNodeKind, &[WidgetTreeNode]) {
+        (self.id, &self.kind, &self.children)
     }
 }
 
-/// Completed widget tree built for a frame.
+/// Completed retained widget tree.
 #[derive(Default)]
-pub struct WidgetTree<'a> {
-    roots: Vec<WidgetTreeNode<'a>>,
+pub struct WidgetTree {
+    roots: Vec<WidgetTreeNode>,
 }
 
-impl<'a> WidgetTree<'a> {
+impl WidgetTree {
     /// Returns the root nodes of the tree.
-    pub fn roots(&self) -> &[WidgetTreeNode<'a>] {
+    pub fn roots(&self) -> &[WidgetTreeNode] {
         &self.roots
     }
 
-    /// Returns the root nodes mutably for execution or inspection.
-    pub fn roots_mut(&mut self) -> &mut [WidgetTreeNode<'a>] {
-        &mut self.roots
-    }
-
-    /// Consumes the tree and returns the owned root nodes.
-    pub fn into_roots(self) -> Vec<WidgetTreeNode<'a>> {
-        self.roots
+    pub(crate) fn runtime_roots(&self) -> Vec<RuntimeTreeNode<'_>> {
+        self.roots.iter().map(RuntimeTreeNode::from_retained).collect()
     }
 }
 
-struct BuilderFrame<'a> {
+struct BuilderFrame {
     scope_seed: u64,
     next_auto: u64,
-    nodes: Vec<WidgetTreeNode<'a>>,
+    nodes: Vec<WidgetTreeNode>,
 }
 
-impl<'a> BuilderFrame<'a> {
-    fn root() -> Self {
+impl BuilderFrame {
+    fn root(seed: u64) -> Self {
         Self {
-            scope_seed: 0x9e37_79b9_7f4a_7c15,
+            scope_seed: seed,
             next_auto: 0,
             nodes: Vec::new(),
         }
@@ -264,93 +381,143 @@ impl<'a> BuilderFrame<'a> {
     }
 }
 
-/// Builder that creates an executable tree of widgets, container nodes, and
-/// layout scopes.
+/// Builder that creates a retained widget tree.
 ///
 /// Unkeyed methods derive IDs from sibling order and remain stable only while
 /// the surrounding structure stays in the same order. Keyed methods should be
 /// used for dynamic or reorderable children.
-pub struct WidgetTreeBuilder<'a> {
-    frames: Vec<BuilderFrame<'a>>,
+pub struct WidgetTreeBuilder {
+    frames: Vec<BuilderFrame>,
 }
 
-impl<'a> Default for WidgetTreeBuilder<'a> {
+impl Default for WidgetTreeBuilder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a> WidgetTreeBuilder<'a> {
+impl WidgetTreeBuilder {
+    /// Default root seed used by [`WidgetTreeBuilder::new`].
+    pub const DEFAULT_ROOT_SEED: u64 = 0x9e37_79b9_7f4a_7c15;
+
     /// Creates an empty builder with a root scope.
     pub fn new() -> Self {
-        Self { frames: vec![BuilderFrame::root()] }
+        Self::with_seed(Self::DEFAULT_ROOT_SEED)
     }
 
-    /// Builds a tree by executing `f` within a fresh builder.
-    pub fn build(f: impl FnOnce(&mut Self)) -> WidgetTree<'a> {
+    /// Creates an empty builder whose root IDs are derived from `seed`.
+    pub fn with_seed(seed: u64) -> Self {
+        Self { frames: vec![BuilderFrame::root(seed)] }
+    }
+
+    /// Builds a retained tree by executing `f` within a fresh builder.
+    pub fn build(f: impl FnOnce(&mut Self)) -> WidgetTree {
         let mut builder = Self::new();
         f(&mut builder);
         builder.finish()
     }
 
+    /// Builds a retained tree whose root IDs are derived from `seed`.
+    pub fn build_with_seed(seed: u64, f: impl FnOnce(&mut Self)) -> WidgetTree {
+        let mut builder = Self::with_seed(seed);
+        f(&mut builder);
+        builder.finish()
+    }
+
     /// Finishes the builder and returns the resulting tree.
-    pub fn finish(mut self) -> WidgetTree<'a> {
+    pub fn finish(mut self) -> WidgetTree {
         debug_assert_eq!(self.frames.len(), 1, "widget tree builder scopes must be balanced");
         let frame = self.frames.pop().expect("root frame missing");
         WidgetTree { roots: frame.nodes }
     }
 
     /// Adds an unkeyed widget leaf node.
-    pub fn widget<W: Widget + 'a>(&mut self, widget: &'a mut W) -> NodeId {
+    pub fn widget<W: Widget + 'static>(&mut self, widget: WidgetHandle<W>) -> NodeId {
         self.widget_with_policy(Policy::auto(), widget)
     }
 
     /// Adds an unkeyed widget leaf node with explicit policy metadata.
-    pub fn widget_with_policy<W: Widget + 'a>(&mut self, policy: Policy, widget: &'a mut W) -> NodeId {
-        self.push_widget(policy, widget_id_of(widget), widget as WidgetRef<'a>, None::<u64>)
+    pub fn widget_with_policy<W: Widget + 'static>(&mut self, policy: Policy, widget: WidgetHandle<W>) -> NodeId {
+        self.push_leaf(
+            policy,
+            WidgetTreeNodeKind::Widget {
+                widget: Box::new(WidgetStateHandle { handle: widget }),
+            },
+            None::<u64>,
+        )
     }
 
     /// Adds a keyed widget leaf node.
-    pub fn keyed_widget<K: Hash, W: Widget + 'a>(&mut self, key: K, widget: &'a mut W) -> NodeId {
+    pub fn keyed_widget<K: Hash, W: Widget + 'static>(&mut self, key: K, widget: WidgetHandle<W>) -> NodeId {
         self.keyed_widget_with_policy(key, Policy::auto(), widget)
     }
 
     /// Adds a keyed widget leaf node with explicit policy metadata.
-    pub fn keyed_widget_with_policy<K: Hash, W: Widget + 'a>(&mut self, key: K, policy: Policy, widget: &'a mut W) -> NodeId {
-        self.push_widget(policy, widget_id_of(widget), widget as WidgetRef<'a>, Some(key))
-    }
-
-    /// Adds each widget reference in `runs` as a sibling widget node.
-    pub fn widgets(&mut self, runs: &'a mut [WidgetRef<'a>]) {
-        for widget in runs.iter_mut() {
-            let widget_id = widget_id_of(&**widget);
-            self.push_widget(Policy::auto(), widget_id, &mut **widget, None::<u64>);
-        }
+    pub fn keyed_widget_with_policy<K: Hash, W: Widget + 'static>(&mut self, key: K, policy: Policy, widget: WidgetHandle<W>) -> NodeId {
+        self.push_leaf(
+            policy,
+            WidgetTreeNodeKind::Widget {
+                widget: Box::new(WidgetStateHandle { handle: widget }),
+            },
+            Some(key),
+        )
     }
 
     /// Adds an unkeyed callback leaf node.
-    pub fn run(&mut self, f: impl FnMut(&mut Container, &mut FrameResults) + 'a) -> NodeId {
+    pub fn run(&mut self, f: impl FnMut(&mut Container, &mut FrameResults) + 'static) -> NodeId {
         self.run_with_policy(Policy::auto(), f)
     }
 
     /// Adds an unkeyed callback leaf node with explicit policy metadata.
-    pub fn run_with_policy(&mut self, policy: Policy, f: impl FnMut(&mut Container, &mut FrameResults) + 'a) -> NodeId {
-        self.push_leaf(policy, WidgetTreeNodeKind::Run { run: Box::new(f) }, None::<u64>)
+    pub fn run_with_policy(&mut self, policy: Policy, f: impl FnMut(&mut Container, &mut FrameResults) + 'static) -> NodeId {
+        let run: TreeRun = Rc::new(RefCell::new(Box::new(f)));
+        self.push_leaf(policy, WidgetTreeNodeKind::Run { run }, None::<u64>)
     }
 
     /// Adds a keyed callback leaf node.
-    pub fn keyed_run<K: Hash>(&mut self, key: K, f: impl FnMut(&mut Container, &mut FrameResults) + 'a) -> NodeId {
+    pub fn keyed_run<K: Hash>(&mut self, key: K, f: impl FnMut(&mut Container, &mut FrameResults) + 'static) -> NodeId {
         self.keyed_run_with_policy(key, Policy::auto(), f)
     }
 
     /// Adds a keyed callback leaf node with explicit policy metadata.
-    pub fn keyed_run_with_policy<K: Hash>(&mut self, key: K, policy: Policy, f: impl FnMut(&mut Container, &mut FrameResults) + 'a) -> NodeId {
-        self.push_leaf(policy, WidgetTreeNodeKind::Run { run: Box::new(f) }, Some(key))
+    pub fn keyed_run_with_policy<K: Hash>(&mut self, key: K, policy: Policy, f: impl FnMut(&mut Container, &mut FrameResults) + 'static) -> NodeId {
+        let run: TreeRun = Rc::new(RefCell::new(Box::new(f)));
+        self.push_leaf(policy, WidgetTreeNodeKind::Run { run }, Some(key))
     }
 
     /// Adds a text label node that uses [`Container::label`] during traversal.
-    pub fn label(&mut self, text: &'a str) -> NodeId {
-        self.run(move |container, _results| container.label(text))
+    pub fn label(&mut self, text: impl Into<String>) -> NodeId {
+        let text = text.into();
+        self.run(move |container, _results| container.label(text.as_str()))
+    }
+
+    /// Adds a text block that uses [`Container::text`] during traversal.
+    pub fn text(&mut self, text: impl Into<String>) -> NodeId {
+        let text = text.into();
+        self.run(move |container, _results| container.text(text.as_str()))
+    }
+
+    /// Adds a wrapped text block that uses [`Container::text_with_wrap`].
+    pub fn text_with_wrap(&mut self, text: impl Into<String>, wrap: TextWrap) -> NodeId {
+        let text = text.into();
+        self.run(move |container, _results| container.text_with_wrap(text.as_str(), wrap))
+    }
+
+    /// Adds a custom-render widget node.
+    pub fn custom_render<F>(&mut self, state: WidgetHandle<Custom>, f: F) -> NodeId
+    where
+        F: FnMut(Dimensioni, &CustomRenderArgs) + 'static,
+    {
+        self.custom_render_with_policy(Policy::auto(), state, f)
+    }
+
+    /// Adds a custom-render widget node with explicit policy metadata.
+    pub fn custom_render_with_policy<F>(&mut self, policy: Policy, state: WidgetHandle<Custom>, f: F) -> NodeId
+    where
+        F: FnMut(Dimensioni, &CustomRenderArgs) + 'static,
+    {
+        let render: TreeCustomRender = Rc::new(RefCell::new(Box::new(f)));
+        self.push_leaf(policy, WidgetTreeNodeKind::CustomRender { state, render }, None::<u64>)
     }
 
     /// Adds an unkeyed embedded container node.
@@ -396,42 +563,42 @@ impl<'a> WidgetTreeBuilder<'a> {
     }
 
     /// Adds an unkeyed collapsible header node.
-    pub fn header(&mut self, state: &'a mut Node, f: impl FnOnce(&mut Self)) -> NodeId {
+    pub fn header(&mut self, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
         self.header_with_policy(Policy::auto(), state, f)
     }
 
     /// Adds an unkeyed collapsible header node with explicit policy metadata.
-    pub fn header_with_policy(&mut self, policy: Policy, state: &'a mut Node, f: impl FnOnce(&mut Self)) -> NodeId {
+    pub fn header_with_policy(&mut self, policy: Policy, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
         self.push_group(policy, WidgetTreeNodeKind::Header { state }, None::<u64>, f)
     }
 
     /// Adds a keyed collapsible header node.
-    pub fn keyed_header<K: Hash>(&mut self, key: K, state: &'a mut Node, f: impl FnOnce(&mut Self)) -> NodeId {
+    pub fn keyed_header<K: Hash>(&mut self, key: K, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
         self.keyed_header_with_policy(key, Policy::auto(), state, f)
     }
 
     /// Adds a keyed collapsible header node with explicit policy metadata.
-    pub fn keyed_header_with_policy<K: Hash>(&mut self, key: K, policy: Policy, state: &'a mut Node, f: impl FnOnce(&mut Self)) -> NodeId {
+    pub fn keyed_header_with_policy<K: Hash>(&mut self, key: K, policy: Policy, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
         self.push_group(policy, WidgetTreeNodeKind::Header { state }, Some(key), f)
     }
 
     /// Adds an unkeyed tree node that indents its children while expanded.
-    pub fn treenode(&mut self, state: &'a mut Node, f: impl FnOnce(&mut Self)) -> NodeId {
+    pub fn treenode(&mut self, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
         self.treenode_with_policy(Policy::auto(), state, f)
     }
 
     /// Adds an unkeyed tree node with explicit policy metadata.
-    pub fn treenode_with_policy(&mut self, policy: Policy, state: &'a mut Node, f: impl FnOnce(&mut Self)) -> NodeId {
+    pub fn treenode_with_policy(&mut self, policy: Policy, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
         self.push_group(policy, WidgetTreeNodeKind::Tree { state }, None::<u64>, f)
     }
 
     /// Adds a keyed tree node.
-    pub fn keyed_treenode<K: Hash>(&mut self, key: K, state: &'a mut Node, f: impl FnOnce(&mut Self)) -> NodeId {
+    pub fn keyed_treenode<K: Hash>(&mut self, key: K, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
         self.keyed_treenode_with_policy(key, Policy::auto(), state, f)
     }
 
     /// Adds a keyed tree node with explicit policy metadata.
-    pub fn keyed_treenode_with_policy<K: Hash>(&mut self, key: K, policy: Policy, state: &'a mut Node, f: impl FnOnce(&mut Self)) -> NodeId {
+    pub fn keyed_treenode_with_policy<K: Hash>(&mut self, key: K, policy: Policy, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
         self.push_group(policy, WidgetTreeNodeKind::Tree { state }, Some(key), f)
     }
 
@@ -546,17 +713,13 @@ impl<'a> WidgetTreeBuilder<'a> {
         self.push_group(policy, WidgetTreeNodeKind::Stack { width, height, direction }, Some(key), f)
     }
 
-    fn push_widget<K: Hash>(&mut self, policy: Policy, widget_id: WidgetId, widget: WidgetRef<'a>, key: Option<K>) -> NodeId {
-        self.push_leaf(policy, WidgetTreeNodeKind::Widget { widget_id, widget }, key)
-    }
-
-    fn push_leaf<K: Hash>(&mut self, policy: Policy, kind: WidgetTreeNodeKind<'a>, key: Option<K>) -> NodeId {
+    fn push_leaf<K: Hash>(&mut self, policy: Policy, kind: WidgetTreeNodeKind, key: Option<K>) -> NodeId {
         let id = self.alloc_id(kind.tag(), key);
         self.current_frame_mut().nodes.push(WidgetTreeNode { id, policy, kind, children: Vec::new() });
         id
     }
 
-    fn push_group<K: Hash>(&mut self, policy: Policy, kind: WidgetTreeNodeKind<'a>, key: Option<K>, f: impl FnOnce(&mut Self)) -> NodeId {
+    fn push_group<K: Hash>(&mut self, policy: Policy, kind: WidgetTreeNodeKind, key: Option<K>, f: impl FnOnce(&mut Self)) -> NodeId {
         let id = self.alloc_id(kind.tag(), key);
         self.frames.push(BuilderFrame::child(id.raw() as u64));
         f(self);
@@ -586,9 +749,96 @@ impl<'a> WidgetTreeBuilder<'a> {
         NodeId::new(hasher.finish())
     }
 
-    fn current_frame_mut(&mut self) -> &mut BuilderFrame<'a> {
+    fn current_frame_mut(&mut self) -> &mut BuilderFrame {
         self.frames.last_mut().expect("widget tree builder frame missing")
     }
+}
+
+pub(crate) struct RuntimeTreeNode<'a> {
+    id: NodeId,
+    kind: RuntimeTreeNodeKind<'a>,
+    children: Vec<RuntimeTreeNode<'a>>,
+}
+
+impl<'a> RuntimeTreeNode<'a> {
+    fn from_retained(node: &'a WidgetTreeNode) -> Self {
+        let (_, kind, children) = node.parts();
+        let kind = match kind {
+            WidgetTreeNodeKind::Widget { widget } => RuntimeTreeNodeKind::Widget { widget: &**widget },
+            WidgetTreeNodeKind::CustomRender { state, render } => RuntimeTreeNodeKind::CustomRender { state, render },
+            WidgetTreeNodeKind::Run { run } => RuntimeTreeNodeKind::Run { run },
+            WidgetTreeNodeKind::Container { handle, opt, behaviour } => RuntimeTreeNodeKind::Container {
+                handle: handle.clone(),
+                opt: *opt,
+                behaviour: *behaviour,
+            },
+            WidgetTreeNodeKind::Header { state } => RuntimeTreeNodeKind::Header { state },
+            WidgetTreeNodeKind::Tree { state } => RuntimeTreeNodeKind::Tree { state },
+            WidgetTreeNodeKind::Row { widths, height } => RuntimeTreeNodeKind::Row { widths, height: *height },
+            WidgetTreeNodeKind::Grid { widths, heights } => RuntimeTreeNodeKind::Grid { widths, heights },
+            WidgetTreeNodeKind::Column => RuntimeTreeNodeKind::Column,
+            WidgetTreeNodeKind::Stack { width, height, direction } => RuntimeTreeNodeKind::Stack {
+                width: *width,
+                height: *height,
+                direction: *direction,
+            },
+        };
+        Self {
+            id: node.id(),
+            kind,
+            children: children.iter().map(Self::from_retained).collect(),
+        }
+    }
+
+    pub(crate) fn id(&self) -> NodeId {
+        self.id
+    }
+
+    pub(crate) fn kind(&self) -> &RuntimeTreeNodeKind<'a> {
+        &self.kind
+    }
+
+    pub(crate) fn children(&self) -> &[RuntimeTreeNode<'a>] {
+        &self.children
+    }
+}
+
+pub(crate) enum RuntimeTreeNodeKind<'a> {
+    Widget {
+        widget: &'a dyn WidgetStateHandleDyn,
+    },
+    CustomRender {
+        state: &'a WidgetHandle<Custom>,
+        render: &'a TreeCustomRender,
+    },
+    Run {
+        run: &'a TreeRun,
+    },
+    Container {
+        handle: ContainerHandle,
+        opt: ContainerOption,
+        behaviour: WidgetBehaviourOption,
+    },
+    Header {
+        state: &'a WidgetHandle<Node>,
+    },
+    Tree {
+        state: &'a WidgetHandle<Node>,
+    },
+    Row {
+        widths: &'a [SizePolicy],
+        height: SizePolicy,
+    },
+    Grid {
+        widths: &'a [SizePolicy],
+        heights: &'a [SizePolicy],
+    },
+    Column,
+    Stack {
+        width: SizePolicy,
+        height: SizePolicy,
+        direction: StackDirection,
+    },
 }
 
 #[cfg(test)]
@@ -652,18 +902,17 @@ mod tests {
 
     #[test]
     fn unkeyed_widget_ids_are_stable_for_same_shape() {
-        let mut button_a = Button::new("A");
-        let mut button_b = Button::new("B");
+        let button_a = widget_handle(Button::new("A"));
+        let button_b = widget_handle(Button::new("B"));
 
         let tree_a = WidgetTreeBuilder::build(|builder| {
-            builder.widget(&mut button_a);
-            builder.widget(&mut button_b);
+            builder.widget(button_a.clone());
+            builder.widget(button_b.clone());
         });
         let tree_a_ids: Vec<NodeId> = tree_a.roots().iter().map(WidgetTreeNode::id).collect();
-        drop(tree_a);
         let tree_b = WidgetTreeBuilder::build(|builder| {
-            builder.widget(&mut button_a);
-            builder.widget(&mut button_b);
+            builder.widget(button_a.clone());
+            builder.widget(button_b.clone());
         });
         let tree_b_ids: Vec<NodeId> = tree_b.roots().iter().map(WidgetTreeNode::id).collect();
 
@@ -673,18 +922,17 @@ mod tests {
 
     #[test]
     fn keyed_widgets_keep_ids_across_reorder() {
-        let mut button_a = Button::new("A");
-        let mut button_b = Button::new("B");
+        let button_a = widget_handle(Button::new("A"));
+        let button_b = widget_handle(Button::new("B"));
 
         let tree_a = WidgetTreeBuilder::build(|builder| {
-            builder.keyed_widget("a", &mut button_a);
-            builder.keyed_widget("b", &mut button_b);
+            builder.keyed_widget("a", button_a.clone());
+            builder.keyed_widget("b", button_b.clone());
         });
         let ids_a: Vec<NodeId> = tree_a.roots().iter().map(WidgetTreeNode::id).collect();
-        drop(tree_a);
         let tree_b = WidgetTreeBuilder::build(|builder| {
-            builder.keyed_widget("b", &mut button_b);
-            builder.keyed_widget("a", &mut button_a);
+            builder.keyed_widget("b", button_b.clone());
+            builder.keyed_widget("a", button_a.clone());
         });
         let ids_b: Vec<NodeId> = tree_b.roots().iter().map(WidgetTreeNode::id).collect();
 
@@ -694,8 +942,8 @@ mod tests {
 
     #[test]
     fn row_nodes_capture_children_and_track_policy() {
-        let mut button_a = Button::new("A");
-        let mut button_b = Button::new("B");
+        let button_a = widget_handle(Button::new("A"));
+        let button_b = widget_handle(Button::new("B"));
 
         let tree = WidgetTreeBuilder::build(|builder| {
             builder.row_with_policy(
@@ -703,8 +951,8 @@ mod tests {
                 &[SizePolicy::Fixed(40), SizePolicy::Remainder(0)],
                 SizePolicy::Fixed(24),
                 |builder| {
-                    builder.widget(&mut button_a);
-                    builder.widget(&mut button_b);
+                    builder.widget(button_a.clone());
+                    builder.widget(button_b.clone());
                 },
             );
         });
@@ -727,11 +975,11 @@ mod tests {
         let atlas = make_test_atlas();
         let input = Rc::new(RefCell::new(Input::default()));
         let handle = ContainerHandle::new(Container::new("panel", atlas, Rc::new(Style::default()), input));
-        let mut leaf = (crate::WidgetOption::NONE, WidgetBehaviourOption::NONE);
+        let leaf = widget_handle((crate::WidgetOption::NONE, WidgetBehaviourOption::NONE));
 
         let tree = WidgetTreeBuilder::build(|builder| {
             builder.container_with_policy(Policy::fill(), handle.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |builder| {
-                builder.widget(&mut leaf);
+                builder.widget(leaf.clone());
             });
         });
 

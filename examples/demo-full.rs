@@ -61,31 +61,31 @@ struct SuzaneData {
     mesh: MeshBuffers,
 }
 
-fn static_label(text: impl Into<String>) -> ListItem {
-    ListItem::with_opt(text, WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)
+fn static_label(text: impl Into<String>) -> WidgetHandle<ListItem> {
+    widget_handle(ListItem::with_opt(text, WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME))
 }
 
 struct State {
     renderer: RendererHandle<BackendRenderer>,
     bg: [Real; 3],
-    bg_sliders: [Slider; 3],
-    style_color_sliders: [Slider; 60],
-    style_value_sliders: [Slider; 5],
-    logbuf: String,
+    bg_sliders: [WidgetHandle<Slider>; 3],
+    style_color_sliders: [WidgetHandle<Slider>; 60],
+    style_value_sliders: [WidgetHandle<Slider>; 5],
+    logbuf: Rc<RefCell<String>>,
     logbuf_updated: bool,
-    submit_buf: Textbox,
-    text_area: TextArea,
-    combo_state: Option<Combo>,
-    combo_items: [ListItem; 4],
-    style_color_labels: [ListItem; 14],
-    style_metric_labels: [ListItem; 5],
-    stack_direction_labels: [ListItem; 2],
-    weight_labels: [ListItem; 2],
-    window_info_labels: [ListItem; 3],
-    window_info_values: [ListItem; 3],
-    test_button_labels: [ListItem; 3],
-    tree_labels: [ListItem; 2],
-    background_labels: [ListItem; 3],
+    submit_buf: WidgetHandle<Textbox>,
+    text_area: WidgetHandle<TextArea>,
+    combo_state: WidgetHandle<Combo>,
+    combo_items: [WidgetHandle<ListItem>; 4],
+    style_color_labels: [WidgetHandle<ListItem>; 14],
+    style_metric_labels: [WidgetHandle<ListItem>; 5],
+    stack_direction_labels: [WidgetHandle<ListItem>; 2],
+    weight_labels: [WidgetHandle<ListItem>; 2],
+    window_info_labels: [WidgetHandle<ListItem>; 3],
+    window_info_values: [WidgetHandle<ListItem>; 3],
+    test_button_labels: [WidgetHandle<ListItem>; 3],
+    tree_labels: [WidgetHandle<ListItem>; 2],
+    background_labels: [WidgetHandle<ListItem>; 3],
     style: Style,
 
     demo_window: Option<WindowHandle>,
@@ -102,34 +102,43 @@ struct State {
     fps: f32,
     last_frame: Instant,
 
-    window_header: Node,
-    test_buttons_header: Node,
-    background_header: Node,
-    tree_and_text_header: Node,
-    text_area_header: Node,
-    slot_header: Node,
-    combo_header: Node,
-    test1_tn: Node,
-    test1a_tn: Node,
-    test1b_tn: Node,
-    test2_tn: Node,
-    test3_tn: Node,
-    submit_button: Button,
-    test_buttons: [Button; 6],
-    tree_buttons: [Button; 6],
-    popup_buttons: [Button; 2],
-    slot_buttons: [Button; 4],
-    stack_direction_buttons: [Button; 6],
-    weight_buttons: [Button; 9],
-    external_image_button: Option<Button>,
-    checkboxes: [Checkbox; 3],
+    window_header: WidgetHandle<Node>,
+    test_buttons_header: WidgetHandle<Node>,
+    background_header: WidgetHandle<Node>,
+    tree_and_text_header: WidgetHandle<Node>,
+    text_area_header: WidgetHandle<Node>,
+    slot_header: WidgetHandle<Node>,
+    combo_header: WidgetHandle<Node>,
+    test1_tn: WidgetHandle<Node>,
+    test1a_tn: WidgetHandle<Node>,
+    test1b_tn: WidgetHandle<Node>,
+    test2_tn: WidgetHandle<Node>,
+    test3_tn: WidgetHandle<Node>,
+    submit_button: WidgetHandle<Button>,
+    test_buttons: [WidgetHandle<Button>; 6],
+    tree_buttons: [WidgetHandle<Button>; 6],
+    popup_buttons: [WidgetHandle<Button>; 2],
+    slot_buttons: [WidgetHandle<Button>; 4],
+    stack_direction_buttons: [WidgetHandle<Button>; 6],
+    weight_buttons: [WidgetHandle<Button>; 9],
+    external_image_button: Option<WidgetHandle<Button>>,
+    checkboxes: [WidgetHandle<Checkbox>; 3],
     open_popup: bool,
     open_dialog: bool,
     white_uv: Vec2f,
     triangle_data: Arc<RwLock<TriangleState>>,
     suzane_data: Arc<RwLock<SuzaneData>>,
-    triangle_widget: Custom,
-    suzane_widget: Custom,
+    triangle_widget: WidgetHandle<Custom>,
+    suzane_widget: WidgetHandle<Custom>,
+    style_tree: WidgetTree,
+    log_tree: WidgetTree,
+    triangle_tree: WidgetTree,
+    suzane_tree: WidgetTree,
+    stack_direction_tree: WidgetTree,
+    weight_tree: WidgetTree,
+    demo_tree: WidgetTree,
+    combo_tree: WidgetTree,
+    popup_tree: WidgetTree,
 }
 
 impl State {
@@ -181,38 +190,70 @@ impl State {
             })
         };
         let slot_buttons = [
-            Button::with_image("Slot 1", Some(Image::Slot(slots[0])), WidgetOption::NONE, WidgetFillOption::ALL),
-            Button::with_slot("Slot 2 - Green", slots[1], green_paint, WidgetOption::NONE, WidgetFillOption::ALL),
-            Button::with_image("Slot 3", Some(Image::Slot(slots[2])), WidgetOption::NONE, WidgetFillOption::ALL),
-            Button::with_slot("Slot 2 - Random", slots[1], random_paint, WidgetOption::NONE, WidgetFillOption::ALL),
+            widget_handle(Button::with_image(
+                "Slot 1",
+                Some(Image::Slot(slots[0])),
+                WidgetOption::NONE,
+                WidgetFillOption::ALL,
+            )),
+            widget_handle(Button::with_slot(
+                "Slot 2 - Green",
+                slots[1],
+                green_paint,
+                WidgetOption::NONE,
+                WidgetFillOption::ALL,
+            )),
+            widget_handle(Button::with_image(
+                "Slot 3",
+                Some(Image::Slot(slots[2])),
+                WidgetOption::NONE,
+                WidgetFillOption::ALL,
+            )),
+            widget_handle(Button::with_slot(
+                "Slot 2 - Random",
+                slots[1],
+                random_paint,
+                WidgetOption::NONE,
+                WidgetFillOption::ALL,
+            )),
         ];
-        let external_image_button =
-            image_texture.map(|texture| Button::with_image("External Image", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL));
-        let style_color_sliders = std::array::from_fn(|_| Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER));
+        let external_image_button = image_texture.map(|texture| {
+            widget_handle(Button::with_image(
+                "External Image",
+                Some(Image::Texture(texture)),
+                WidgetOption::NONE,
+                WidgetFillOption::ALL,
+            ))
+        });
+        let style_color_sliders = std::array::from_fn(|_| widget_handle(Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)));
         let style_value_sliders = [
-            Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
-            Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
-            Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
-            Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
-            Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER),
+            widget_handle(Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER)),
+            widget_handle(Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER)),
+            widget_handle(Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER)),
+            widget_handle(Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER)),
+            widget_handle(Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER)),
         ];
-        let bg_sliders = std::array::from_fn(|_| Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER));
+        let bg_sliders = std::array::from_fn(|_| widget_handle(Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)));
         let mut text_area =
             TextArea::new("This is a multi-line TextArea.\nYou can type, scroll, and resize the window.\n\nTry adding more lines to see the scrollbars.");
         text_area.wrap = TextWrap::Word;
-
-        Self {
+        let mut state = Self {
             renderer,
             bg: [90.0, 95.0, 100.0],
             bg_sliders,
             style_color_sliders,
             style_value_sliders,
-            logbuf: String::new(),
+            logbuf: Rc::new(RefCell::new(String::new())),
             logbuf_updated: false,
-            submit_buf: Textbox::new(""),
-            text_area,
-            combo_state: None,
-            combo_items: [ListItem::new("Apple"), ListItem::new("Banana"), ListItem::new("Cherry"), ListItem::new("Date")],
+            submit_buf: widget_handle(Textbox::new("")),
+            text_area: widget_handle(text_area),
+            combo_state: widget_handle(Combo::new(ctx.new_popup("Combo Box Popup"))),
+            combo_items: [
+                widget_handle(ListItem::new("Apple")),
+                widget_handle(ListItem::new("Banana")),
+                widget_handle(ListItem::new("Cherry")),
+                widget_handle(ListItem::new("Date")),
+            ],
             style_color_labels: [
                 static_label("text"),
                 static_label("border:"),
@@ -248,205 +289,615 @@ impl State {
             tree_labels: [static_label("Hello"), static_label("world")],
             background_labels: [static_label("Red:"), static_label("Green:"), static_label("Blue:")],
             style: Style::default(),
-            demo_window: None,
-            style_window: None,
-            log_window: None,
-            popup_window: None,
-            log_output: None,
-            triangle_window: None,
-            suzane_window: None,
-            stack_direction_window: None,
-            weight_window: None,
-            dialog_window: None,
+            demo_window: Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450))),
+            style_window: Some(ctx.new_window("Style Editor", rect(350, 250, 300, 240))),
+            log_window: Some(ctx.new_window("Log Window", rect(350, 40, 300, 200))),
+            popup_window: Some(ctx.new_popup("Test Popup")),
+            log_output: Some(ctx.new_panel("Log Output")),
+            triangle_window: Some(ctx.new_window("Triangle Window", rect(200, 100, 200, 200))),
+            suzane_window: Some(ctx.new_window("Suzane Window", rect(220, 220, 300, 300))),
+            stack_direction_window: Some(ctx.new_window("Stack Direction Demo", rect(530, 40, 280, 220))),
+            weight_window: Some(ctx.new_window("Weight Demo", rect(530, 270, 280, 260))),
+            dialog_window: Some(FileDialogState::new(ctx)),
             fps: 0.0,
             last_frame: Instant::now(),
-            window_header: Node::header("Window Info", NodeStateValue::Closed),
-            test_buttons_header: Node::header("Test Buttons", NodeStateValue::Expanded),
-            background_header: Node::header("Background Color", NodeStateValue::Expanded),
-            tree_and_text_header: Node::header("Tree and Text", NodeStateValue::Expanded),
-            text_area_header: Node::header("TextArea", NodeStateValue::Expanded),
-            slot_header: Node::header("Slots", NodeStateValue::Expanded),
-            combo_header: Node::header("Combo Box", NodeStateValue::Expanded),
-            test1_tn: Node::tree("Test 1", NodeStateValue::Closed),
-            test1a_tn: Node::tree("Test 1a", NodeStateValue::Closed),
-            test1b_tn: Node::tree("Test 1b", NodeStateValue::Closed),
-            test2_tn: Node::tree("Test 2", NodeStateValue::Closed),
-            test3_tn: Node::tree("Test 3", NodeStateValue::Closed),
-            submit_button: Button::with_opt("Submit", WidgetOption::ALIGN_CENTER),
+            window_header: widget_handle(Node::header("Window Info", NodeStateValue::Closed)),
+            test_buttons_header: widget_handle(Node::header("Test Buttons", NodeStateValue::Expanded)),
+            background_header: widget_handle(Node::header("Background Color", NodeStateValue::Expanded)),
+            tree_and_text_header: widget_handle(Node::header("Tree and Text", NodeStateValue::Expanded)),
+            text_area_header: widget_handle(Node::header("TextArea", NodeStateValue::Expanded)),
+            slot_header: widget_handle(Node::header("Slots", NodeStateValue::Expanded)),
+            combo_header: widget_handle(Node::header("Combo Box", NodeStateValue::Expanded)),
+            test1_tn: widget_handle(Node::tree("Test 1", NodeStateValue::Closed)),
+            test1a_tn: widget_handle(Node::tree("Test 1a", NodeStateValue::Closed)),
+            test1b_tn: widget_handle(Node::tree("Test 1b", NodeStateValue::Closed)),
+            test2_tn: widget_handle(Node::tree("Test 2", NodeStateValue::Closed)),
+            test3_tn: widget_handle(Node::tree("Test 3", NodeStateValue::Closed)),
+            submit_button: widget_handle(Button::with_opt("Submit", WidgetOption::ALIGN_CENTER)),
             test_buttons: [
-                Button::with_opt("Button 1", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Button 2", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Button 3", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Popup", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Button 4", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Dialog", WidgetOption::ALIGN_CENTER),
+                widget_handle(Button::with_opt("Button 1", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 2", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 3", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Popup", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 4", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Dialog", WidgetOption::ALIGN_CENTER)),
             ],
             tree_buttons: [
-                Button::with_opt("Button 1", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Button 2", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Button 3", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Button 4", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Button 5", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Button 6", WidgetOption::ALIGN_CENTER),
+                widget_handle(Button::with_opt("Button 1", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 2", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 3", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 4", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 5", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 6", WidgetOption::ALIGN_CENTER)),
             ],
             popup_buttons: [
-                Button::with_opt("Hello", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("World", WidgetOption::ALIGN_CENTER),
+                widget_handle(Button::with_opt("Hello", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("World", WidgetOption::ALIGN_CENTER)),
             ],
             slot_buttons,
             stack_direction_buttons: [
-                Button::with_opt("Call 1", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Call 2", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Call 3", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Call 1", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Call 2", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("Call 3", WidgetOption::ALIGN_CENTER),
+                widget_handle(Button::with_opt("Call 1", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Call 2", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Call 3", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Call 1", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Call 2", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Call 3", WidgetOption::ALIGN_CENTER)),
             ],
             weight_buttons: [
-                Button::with_opt("w1", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("w2", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("w3", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("g1", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("g2", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("g3", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("g4", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("g5", WidgetOption::ALIGN_CENTER),
-                Button::with_opt("g6", WidgetOption::ALIGN_CENTER),
+                widget_handle(Button::with_opt("w1", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("w2", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("w3", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("g1", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("g2", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("g3", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("g4", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("g5", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("g6", WidgetOption::ALIGN_CENTER)),
             ],
             external_image_button,
             checkboxes: [
-                Checkbox::new("Checkbox 1", false),
-                Checkbox::new("Checkbox 2", true),
-                Checkbox::new("Checkbox 3", false),
+                widget_handle(Checkbox::new("Checkbox 1", false)),
+                widget_handle(Checkbox::new("Checkbox 2", true)),
+                widget_handle(Checkbox::new("Checkbox 3", false)),
             ],
             open_popup: false,
             open_dialog: false,
             white_uv,
             triangle_data,
             suzane_data,
-            triangle_widget: Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::NONE),
-            suzane_widget: Custom::with_opt("Suzane", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::GRAB_SCROLL),
-        }
+            triangle_widget: widget_handle(Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::NONE)),
+            suzane_widget: widget_handle(Custom::with_opt("Suzane", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::GRAB_SCROLL)),
+            style_tree: WidgetTree::default(),
+            log_tree: WidgetTree::default(),
+            triangle_tree: WidgetTree::default(),
+            suzane_tree: WidgetTree::default(),
+            stack_direction_tree: WidgetTree::default(),
+            weight_tree: WidgetTree::default(),
+            demo_tree: WidgetTree::default(),
+            combo_tree: WidgetTree::default(),
+            popup_tree: WidgetTree::default(),
+        };
+        state.rebuild_trees();
+        state
     }
 
     fn write_log(&mut self, text: &str) {
-        if self.logbuf.len() != 0 {
-            self.logbuf.push('\n');
+        let mut logbuf = self.logbuf.borrow_mut();
+        if !logbuf.is_empty() {
+            logbuf.push('\n');
         }
         for c in text.chars() {
-            self.logbuf.push(c);
+            logbuf.push(c);
         }
         self.logbuf_updated = true;
     }
 
-    fn u8_slider(value: &mut u8, slider: &mut Slider, ctx: &mut Container, results: &mut FrameResults) -> ResourceState {
-        slider.value = *value as Real;
-        ctx.build_tree(results, |tree| {
-            tree.widget(slider);
+    fn section(tree: &mut WidgetTreeBuilder, node: &WidgetHandle<Node>, f: impl FnOnce(&mut WidgetTreeBuilder)) {
+        tree.header(node.clone(), f);
+    }
+
+    fn rebuild_trees(&mut self) {
+        let style_color_labels = self.style_color_labels.clone();
+        let style_color_sliders = self.style_color_sliders.clone();
+        let style_metric_labels = self.style_metric_labels.clone();
+        let style_value_sliders = self.style_value_sliders.clone();
+        self.style_tree = WidgetTreeBuilder::build(move |tree| {
+            tree.run({
+                let style_color_labels = style_color_labels.clone();
+                let style_color_sliders = style_color_sliders.clone();
+                let style_metric_labels = style_metric_labels.clone();
+                let style_value_sliders = style_value_sliders.clone();
+                move |container, results| {
+                    // This editor computes row widths from the current window width,
+                    // so it keeps retained widget handles but leaves the final row
+                    // track math in a runtime callback.
+                    let sw = (container.body().width as f64 * 0.14) as i32;
+                    let color_row = [
+                        SizePolicy::Fixed(80),
+                        SizePolicy::Fixed(sw),
+                        SizePolicy::Fixed(sw),
+                        SizePolicy::Fixed(sw),
+                        SizePolicy::Fixed(sw),
+                        SizePolicy::Remainder(0),
+                    ];
+                    let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Fixed(sw)];
+
+                    for (label, sliders) in style_color_labels.iter().zip(style_color_sliders.chunks_exact(4)) {
+                        let label = label.clone();
+                        let red = sliders[0].clone();
+                        let green = sliders[1].clone();
+                        let blue = sliders[2].clone();
+                        let alpha = sliders[3].clone();
+                        container.with_row(&color_row, SizePolicy::Auto, |container| {
+                            let mut label = label.borrow_mut();
+                            let mut red = red.borrow_mut();
+                            let mut green = green.borrow_mut();
+                            let mut blue = blue.borrow_mut();
+                            let mut alpha = alpha.borrow_mut();
+                            let mut runs = [
+                                widget_ref(&mut *label),
+                                widget_ref(&mut *red),
+                                widget_ref(&mut *green),
+                                widget_ref(&mut *blue),
+                                widget_ref(&mut *alpha),
+                            ];
+                            container.widgets(results, &mut runs);
+                            let swatch = container.next_cell();
+                            let color = color(red.value as u8, green.value as u8, blue.value as u8, alpha.value as u8);
+                            container.draw_rect(swatch, color);
+                        });
+                    }
+
+                    for (label, slider) in style_metric_labels.iter().zip(style_value_sliders.iter()) {
+                        let label = label.clone();
+                        let slider = slider.clone();
+                        container.with_row(&metrics_row, SizePolicy::Auto, |container| {
+                            let mut label = label.borrow_mut();
+                            let mut slider = slider.borrow_mut();
+                            let mut runs = [widget_ref(&mut *label), widget_ref(&mut *slider)];
+                            container.widgets(results, &mut runs);
+                        });
+                    }
+                }
+            });
         });
-        let res = results.state_of(&*slider);
-        *value = slider.value as u8;
-        slider.value = *value as Real;
-        res
-    }
 
-    fn i32_slider(value: &mut i32, slider: &mut Slider, ctx: &mut Container, results: &mut FrameResults) -> ResourceState {
-        slider.value = *value as Real;
-        ctx.build_tree(results, |tree| {
-            tree.widget(slider);
+        let log_output = self.log_output.clone().expect("log output panel missing");
+        let submit_buf = self.submit_buf.clone();
+        let submit_button = self.submit_button.clone();
+        let logbuf = self.logbuf.clone();
+        self.log_tree = WidgetTreeBuilder::build(move |tree| {
+            let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
+            tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
+                tree.container(log_output.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
+                        let logbuf = logbuf.clone();
+                        tree.run(move |container, _results| {
+                            let log = logbuf.borrow();
+                            container.text(log.as_str());
+                        });
+                    });
+                });
+            });
+            tree.row(&submit_row, SizePolicy::Auto, |tree| {
+                tree.widget(submit_buf.clone());
+                tree.widget(submit_button.clone());
+            });
         });
-        let res = results.state_of(&*slider);
-        *value = slider.value as i32;
-        slider.value = *value as Real;
-        res
-    }
 
-    fn section<'a, F: FnOnce(&mut WidgetTreeBuilder<'a>)>(tree: &mut WidgetTreeBuilder<'a>, node: &'a mut Node, f: F) {
-        tree.header(node, f);
-    }
+        let triangle_widget = self.triangle_widget.clone();
+        let triangle_data = self.triangle_data.clone();
+        let renderer = self.renderer.clone();
+        let white_uv = self.white_uv;
+        self.triangle_tree = WidgetTreeBuilder::build(move |tree| {
+            tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
+                let triangle_data = triangle_data.clone();
+                let renderer = renderer.clone();
+                tree.custom_render(triangle_widget.clone(), move |_dim, cra| {
+                    if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
+                        return;
+                    }
+                    let area = area_from_args(cra);
+                    if let Ok(mut tri) = triangle_data.write() {
+                        tri.angle = (tri.angle + 0.02) % (std::f32::consts::PI * 2.0);
+                        let mut verts = build_triangle_vertices(area.rect, white_uv, tri.angle);
+                        let mut renderer = renderer.clone();
+                        renderer.scope_mut(move |vk| {
+                            let verts_local = std::mem::take(&mut verts);
+                            vk.enqueue_colored_vertices(area, verts_local);
+                        });
+                    }
+                });
+            });
+        });
 
-    fn legacy_tree_section<F: FnOnce(&mut Container, &mut FrameResults)>(container: &mut Container, results: &mut FrameResults, node: &mut Node, f: F) {
-        container.set_row_flow(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        let mut __runs = [widget_ref(node)];
-        container.widgets(results, &mut __runs);
-        if node.is_expanded() {
-            let indent = container.get_style().indent;
-            container.with_indent(indent, |container| f(container, results));
-        }
+        let suzane_widget = self.suzane_widget.clone();
+        let suzane_data = self.suzane_data.clone();
+        let renderer = self.renderer.clone();
+        self.suzane_tree = WidgetTreeBuilder::build(move |tree| {
+            tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
+                let suzane_data = suzane_data.clone();
+                let renderer = renderer.clone();
+                tree.custom_render(suzane_widget.clone(), move |_dim, cra| {
+                    if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
+                        return;
+                    }
+                    if let Ok(mut suzane) = suzane_data.write() {
+                        suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
+                        let _ = suzane.view_3d.update(cra.mouse_event);
+                        if let Some(delta) = cra.scroll_delta {
+                            let axis = if delta.y != 0 { delta.y } else { delta.x };
+                            if axis != 0 {
+                                suzane.view_3d.apply_scroll(axis as f32);
+                            }
+                        }
+                        if !matches!(cra.mouse_event, MouseEvent::Drag { .. }) && cra.scroll_delta.is_none() {
+                            let step = 20;
+                            let mut delta = Vec2i::new(0, 0);
+                            if cra.key_codes.is_left() {
+                                delta.x -= step;
+                            }
+                            if cra.key_codes.is_right() {
+                                delta.x += step;
+                            }
+                            if cra.key_codes.is_up() {
+                                delta.y -= step;
+                            }
+                            if cra.key_codes.is_down() {
+                                delta.y += step;
+                            }
+                            if delta.x != 0 || delta.y != 0 {
+                                let center = Vec2i::new(cra.content_area.width / 2, cra.content_area.height / 2);
+                                let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
+                                suzane.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
+                            }
+                            for ch in cra.text_input.chars() {
+                                match ch {
+                                    'w' | 'W' => {
+                                        let _ = suzane.view_3d.apply_scroll(-0.5);
+                                    }
+                                    's' | 'S' => {
+                                        let _ = suzane.view_3d.apply_scroll(0.5);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+
+                        let area = area_from_args(cra);
+                        let submission = MeshSubmission {
+                            mesh: suzane.mesh.clone(),
+                            pvm: suzane.view_3d.pvm(),
+                            view_model: suzane.view_3d.view_matrix(),
+                        };
+                        let mut renderer = renderer.clone();
+                        renderer.scope_mut(|r| {
+                            r.enqueue_mesh_draw(area, submission.clone());
+                        });
+                    }
+                });
+            });
+        });
+
+        let stack_direction_labels = self.stack_direction_labels.clone();
+        let stack_direction_buttons = self.stack_direction_buttons.clone();
+        self.stack_direction_tree = WidgetTreeBuilder::build(move |tree| {
+            tree.run({
+                let stack_direction_labels = stack_direction_labels.clone();
+                let stack_direction_buttons = stack_direction_buttons.clone();
+                move |container, results| {
+                    let spacing = container.get_style().spacing.max(0);
+                    let body_width = container.body().width.max(1);
+                    let left_width = body_width.saturating_sub(spacing).max(2) / 2;
+                    let columns = [SizePolicy::Fixed(left_width), SizePolicy::Remainder(0)];
+                    let [label_top, label_bottom] = stack_direction_labels.clone();
+                    let [button_top_0, button_top_1, button_top_2, button_bottom_0, button_bottom_1, button_bottom_2] = stack_direction_buttons.clone();
+                    container.with_row(&columns, SizePolicy::Auto, |container| {
+                        let mut label_top = label_top.borrow_mut();
+                        let mut label_bottom = label_bottom.borrow_mut();
+                        let mut runs = [widget_ref(&mut *label_top), widget_ref(&mut *label_bottom)];
+                        container.widgets(results, &mut runs);
+                    });
+                    container.with_row(&columns, SizePolicy::Fixed(120), |container| {
+                        container.column(|container| {
+                            container.stack_with_width_direction(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, |container| {
+                                let mut b0 = button_top_0.borrow_mut();
+                                let mut b1 = button_top_1.borrow_mut();
+                                let mut b2 = button_top_2.borrow_mut();
+                                let mut runs = [widget_ref(&mut *b0), widget_ref(&mut *b1), widget_ref(&mut *b2)];
+                                container.widgets(results, &mut runs);
+                            });
+                        });
+                        container.column(|container| {
+                            container.stack_with_width_direction(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::BottomToTop, |container| {
+                                let mut b0 = button_bottom_0.borrow_mut();
+                                let mut b1 = button_bottom_1.borrow_mut();
+                                let mut b2 = button_bottom_2.borrow_mut();
+                                let mut runs = [widget_ref(&mut *b0), widget_ref(&mut *b1), widget_ref(&mut *b2)];
+                                container.widgets(results, &mut runs);
+                            });
+                        });
+                    });
+                }
+            });
+        });
+
+        let weight_labels = self.weight_labels.clone();
+        let weight_buttons = self.weight_buttons.clone();
+        self.weight_tree = WidgetTreeBuilder::build(move |tree| {
+            let [row_weight_label, grid_weight_label] = weight_labels.clone();
+            let [
+                button_row_0,
+                button_row_1,
+                button_row_2,
+                button_grid_0,
+                button_grid_1,
+                button_grid_2,
+                button_grid_3,
+                button_grid_4,
+                button_grid_5,
+            ] = weight_buttons.clone();
+            let row = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0), SizePolicy::Weight(3.0)];
+            let cols = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
+            let rows = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
+            tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
+                tree.widget(row_weight_label.clone());
+            });
+            tree.row(&row, SizePolicy::Fixed(28), |tree| {
+                tree.widget(button_row_0.clone());
+                tree.widget(button_row_1.clone());
+                tree.widget(button_row_2.clone());
+            });
+            tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |tree| {
+                tree.widget(grid_weight_label.clone());
+            });
+            tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |tree| {
+                tree.column(|tree| {
+                    tree.grid(&cols, &rows, |tree| {
+                        tree.widget(button_grid_0.clone());
+                        tree.widget(button_grid_1.clone());
+                        tree.widget(button_grid_2.clone());
+                        tree.widget(button_grid_3.clone());
+                        tree.widget(button_grid_4.clone());
+                        tree.widget(button_grid_5.clone());
+                    });
+                });
+            });
+        });
+
+        let combo_items = self.combo_items.clone();
+        self.combo_tree = WidgetTreeBuilder::build(move |tree| {
+            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                for item in &combo_items {
+                    tree.widget(item.clone());
+                }
+            });
+        });
+
+        let popup_buttons = self.popup_buttons.clone();
+        self.popup_tree = WidgetTreeBuilder::build(move |tree| {
+            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                for button in &popup_buttons {
+                    tree.widget(button.clone());
+                }
+            });
+        });
+
+        let window_header = self.window_header.clone();
+        let test_buttons_header = self.test_buttons_header.clone();
+        let background_header = self.background_header.clone();
+        let tree_and_text_header = self.tree_and_text_header.clone();
+        let text_area_header = self.text_area_header.clone();
+        let slot_header = self.slot_header.clone();
+        let combo_header = self.combo_header.clone();
+        let test1_tn = self.test1_tn.clone();
+        let test1a_tn = self.test1a_tn.clone();
+        let test1b_tn = self.test1b_tn.clone();
+        let test2_tn = self.test2_tn.clone();
+        let test3_tn = self.test3_tn.clone();
+        let window_info_labels = self.window_info_labels.clone();
+        let window_info_values = self.window_info_values.clone();
+        let test_buttons = self.test_buttons.clone();
+        let test_button_labels = self.test_button_labels.clone();
+        let combo_state = self.combo_state.clone();
+        let tree_buttons = self.tree_buttons.clone();
+        let checkboxes = self.checkboxes.clone();
+        let tree_labels = self.tree_labels.clone();
+        let text_area = self.text_area.clone();
+        let bg_sliders = self.bg_sliders.clone();
+        let background_labels = self.background_labels.clone();
+        let slot_buttons = self.slot_buttons.clone();
+        let external_image_button = self.external_image_button.clone();
+        self.demo_tree = WidgetTreeBuilder::build(move |tree| {
+            let window_info_row = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
+            let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
+            let tree_widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
+            let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
+            let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
+            let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
+            let [label_pos, label_size, label_fps] = window_info_labels.clone();
+            let [value_pos, value_size, value_fps] = window_info_values.clone();
+            let [button0, button1, button2, button3, button4, button5] = test_buttons.clone();
+            let [test_label0, test_label1, test_label2] = test_button_labels.clone();
+            let [tree_button0, tree_button1, tree_button2, tree_button3, tree_button4, tree_button5] = tree_buttons.clone();
+            let [checkbox0, checkbox1, checkbox2] = checkboxes.clone();
+            let [tree_label_hello, tree_label_world] = tree_labels.clone();
+            let [slider_red, slider_green, slider_blue] = bg_sliders.clone();
+            let [label_red, label_green, label_blue] = background_labels.clone();
+            let [slot0, slot1, slot2, slot3] = slot_buttons.clone();
+
+            Self::section(tree, &window_header, |tree| {
+                tree.row(&window_info_row, SizePolicy::Auto, |tree| {
+                    tree.widget(label_pos.clone());
+                    tree.widget(value_pos.clone());
+                });
+                tree.row(&window_info_row, SizePolicy::Auto, |tree| {
+                    tree.widget(label_size.clone());
+                    tree.widget(value_size.clone());
+                });
+                tree.row(&window_info_row, SizePolicy::Auto, |tree| {
+                    tree.widget(label_fps.clone());
+                    tree.widget(value_fps.clone());
+                });
+            });
+
+            Self::section(tree, &test_buttons_header, |tree| {
+                tree.row(&button_widths, SizePolicy::Auto, |tree| {
+                    tree.widget(test_label0.clone());
+                    tree.widget(button0.clone());
+                    tree.widget(button1.clone());
+                });
+                tree.row(&button_widths, SizePolicy::Auto, |tree| {
+                    tree.widget(test_label1.clone());
+                    tree.widget(button2.clone());
+                    tree.widget(button3.clone());
+                });
+                tree.row(&button_widths, SizePolicy::Auto, |tree| {
+                    tree.widget(test_label2.clone());
+                    tree.widget(button4.clone());
+                    tree.widget(button5.clone());
+                });
+            });
+
+            Self::section(tree, &combo_header, |tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                    tree.widget(combo_state.clone());
+                });
+            });
+
+            Self::section(tree, &tree_and_text_header, |tree| {
+                tree.row(&tree_widths, SizePolicy::Auto, |tree| {
+                    tree.column(|tree| {
+                        tree.treenode(test1_tn.clone(), |tree| {
+                            tree.treenode(test1a_tn.clone(), |tree| {
+                                tree.widget(tree_label_hello.clone());
+                                tree.widget(tree_label_world.clone());
+                            });
+                            tree.treenode(test1b_tn.clone(), |tree| {
+                                tree.widget(tree_button0.clone());
+                                tree.widget(tree_button1.clone());
+                            });
+                        });
+                        tree.treenode(test2_tn.clone(), |tree| {
+                            tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
+                                tree.widget(tree_button2.clone());
+                                tree.widget(tree_button3.clone());
+                            });
+                            tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
+                                tree.widget(tree_button4.clone());
+                                tree.widget(tree_button5.clone());
+                            });
+                        });
+                        tree.treenode(test3_tn.clone(), |tree| {
+                            tree.widget(checkbox0.clone());
+                            tree.widget(checkbox1.clone());
+                            tree.widget(checkbox2.clone());
+                        });
+                    });
+                    tree.column(|tree| {
+                        tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                            tree.text_with_wrap(
+                                "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.",
+                                TextWrap::Word,
+                            );
+                        });
+                    });
+                });
+            });
+
+            Self::section(tree, &text_area_header, |tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(120), StackDirection::TopToBottom, |tree| {
+                    tree.widget(text_area.clone());
+                });
+            });
+
+            Self::section(tree, &background_header, |tree| {
+                tree.row(&background_widths, SizePolicy::Fixed(74), |tree| {
+                    tree.column(|tree| {
+                        tree.row(&slider_row, SizePolicy::Auto, |tree| {
+                            tree.widget(label_red.clone());
+                            tree.widget(slider_red.clone());
+                        });
+                        tree.row(&slider_row, SizePolicy::Auto, |tree| {
+                            tree.widget(label_green.clone());
+                            tree.widget(slider_green.clone());
+                        });
+                        tree.row(&slider_row, SizePolicy::Auto, |tree| {
+                            tree.widget(label_blue.clone());
+                            tree.widget(slider_blue.clone());
+                        });
+                    });
+                    let slider_red = slider_red.clone();
+                    let slider_green = slider_green.clone();
+                    let slider_blue = slider_blue.clone();
+                    tree.run(move |container, _results| {
+                        let swatch = container.next_cell();
+                        let color = color(
+                            slider_red.borrow().value as u8,
+                            slider_green.borrow().value as u8,
+                            slider_blue.borrow().value as u8,
+                            255,
+                        );
+                        container.draw_rect(swatch, color);
+                        let swatch_label = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
+                        container.draw_control_text(swatch_label.as_str(), swatch, ControlColor::Text, WidgetOption::ALIGN_CENTER);
+                    });
+                });
+            });
+
+            Self::section(tree, &slot_header, |tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(67), StackDirection::TopToBottom, |tree| {
+                    tree.widget(slot0.clone());
+                    tree.widget(slot1.clone());
+                    tree.widget(slot2.clone());
+                    if let Some(button) = external_image_button.clone() {
+                        tree.stack(SizePolicy::Fixed(256), SizePolicy::Fixed(256), StackDirection::TopToBottom, |tree| {
+                            tree.widget(button.clone());
+                        });
+                    }
+                });
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(67), StackDirection::TopToBottom, |tree| {
+                    tree.widget(slot3.clone());
+                });
+            });
+        });
     }
 
     fn style_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        let style_color_labels = &mut self.style_color_labels;
-        let style_metric_labels = &mut self.style_metric_labels;
-        let style_color_sliders = &mut self.style_color_sliders;
-        let style_value_sliders = &mut self.style_value_sliders;
-        let style = &mut self.style;
         ctx.window(
             &mut self.style_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
             WidgetBehaviourOption::NONE,
             |container, results| {
-                let sw = (container.body().width as f64 * 0.14) as i32;
-                let color_row = [
-                    SizePolicy::Fixed(80),
-                    SizePolicy::Fixed(sw),
-                    SizePolicy::Fixed(sw),
-                    SizePolicy::Fixed(sw),
-                    SizePolicy::Fixed(sw),
-                    SizePolicy::Remainder(0),
-                ];
-                let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Fixed(sw)];
-                for (i, color) in style.colors.iter().enumerate() {
+                for (i, color) in self.style.colors.iter().enumerate() {
                     let slider_base = i * 4;
-                    style_color_sliders[slider_base].value = color.r as Real;
-                    style_color_sliders[slider_base + 1].value = color.g as Real;
-                    style_color_sliders[slider_base + 2].value = color.b as Real;
-                    style_color_sliders[slider_base + 3].value = color.a as Real;
+                    self.style_color_sliders[slider_base].borrow_mut().value = color.r as Real;
+                    self.style_color_sliders[slider_base + 1].borrow_mut().value = color.g as Real;
+                    self.style_color_sliders[slider_base + 2].borrow_mut().value = color.b as Real;
+                    self.style_color_sliders[slider_base + 3].borrow_mut().value = color.a as Real;
                 }
-                style_value_sliders[0].value = style.padding as Real;
-                style_value_sliders[1].value = style.spacing as Real;
-                style_value_sliders[2].value = style.title_height as Real;
-                style_value_sliders[3].value = style.thumb_size as Real;
-                style_value_sliders[4].value = style.scrollbar_size as Real;
+                self.style_value_sliders[0].borrow_mut().value = self.style.padding as Real;
+                self.style_value_sliders[1].borrow_mut().value = self.style.spacing as Real;
+                self.style_value_sliders[2].borrow_mut().value = self.style.title_height as Real;
+                self.style_value_sliders[3].borrow_mut().value = self.style.thumb_size as Real;
+                self.style_value_sliders[4].borrow_mut().value = self.style.scrollbar_size as Real;
 
-                container.build_tree(results, |tree| {
-                    tree.run(|container, results| {
-                        container.with_row(&color_row, SizePolicy::Auto, |container| {
-                            for (i, label) in style_color_labels.iter_mut().enumerate() {
-                                let mut label_runs = [widget_ref(label)];
-                                container.widgets(results, &mut label_runs);
-                                unsafe {
-                                    let color = style.colors.as_mut_ptr().offset(i as isize);
-                                    let slider_base = i * 4;
-                                    Self::u8_slider(&mut (*color).r, &mut style_color_sliders[slider_base], container, results);
-                                    Self::u8_slider(&mut (*color).g, &mut style_color_sliders[slider_base + 1], container, results);
-                                    Self::u8_slider(&mut (*color).b, &mut style_color_sliders[slider_base + 2], container, results);
-                                    Self::u8_slider(&mut (*color).a, &mut style_color_sliders[slider_base + 3], container, results);
-                                }
-                                let next_layout = container.next_cell();
-                                let color = style.colors[i];
-                                container.draw_rect(next_layout, color);
-                            }
-                        });
-                        container.with_row(&metrics_row, SizePolicy::Auto, |container| {
-                            for (idx, label) in style_metric_labels.iter_mut().enumerate() {
-                                let mut label_runs = [widget_ref(label)];
-                                container.widgets(results, &mut label_runs);
-                                match idx {
-                                    0 => Self::i32_slider(&mut style.padding, &mut style_value_sliders[0], container, results),
-                                    1 => Self::i32_slider(&mut style.spacing, &mut style_value_sliders[1], container, results),
-                                    2 => Self::i32_slider(&mut style.title_height, &mut style_value_sliders[2], container, results),
-                                    3 => Self::i32_slider(&mut style.thumb_size, &mut style_value_sliders[3], container, results),
-                                    _ => Self::i32_slider(&mut style.scrollbar_size, &mut style_value_sliders[4], container, results),
-                                };
-                            }
-                        });
-                    });
-                });
+                container.widget_tree(results, &self.style_tree);
+                for (color, sliders) in self.style.colors.iter_mut().zip(self.style_color_sliders.chunks_exact(4)) {
+                    color.r = sliders[0].borrow().value as u8;
+                    color.g = sliders[1].borrow().value as u8;
+                    color.b = sliders[2].borrow().value as u8;
+                    color.a = sliders[3].borrow().value as u8;
+                }
+                self.style.padding = self.style_value_sliders[0].borrow().value as i32;
+                self.style.spacing = self.style_value_sliders[1].borrow().value as i32;
+                self.style.title_height = self.style_value_sliders[2].borrow().value as i32;
+                self.style.thumb_size = self.style_value_sliders[3].borrow().value as i32;
+                self.style.scrollbar_size = self.style_value_sliders[4].borrow().value as i32;
                 WindowState::Open
             },
         );
-        ctx.set_style(style);
+        ctx.set_style(&self.style);
     }
 
     fn log_window(&mut self, ctx: &mut Context<BackendRenderer>) {
@@ -456,39 +907,21 @@ impl State {
             WidgetBehaviourOption::NONE,
             |container, results| {
                 let mut submitted = false;
-                let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
-                let log_output = self.log_output.as_mut().unwrap().clone();
-                let logbuf = &self.logbuf;
-                let logbuf_updated = &mut self.logbuf_updated;
-
-                container.build_tree(results, |tree| {
-                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
-                        tree.container(log_output, ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
-                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                                tree.run(move |container, _results| {
-                                    let mut scroll = container.scroll();
-                                    let content_size = container.content_size();
-                                    container.text(logbuf.as_str());
-
-                                    if *logbuf_updated {
-                                        scroll.y = content_size.y;
-                                        container.set_scroll(scroll);
-                                        *logbuf_updated = false;
-                                    }
-                                });
-                            });
-                        });
+                container.widget_tree(results, &self.log_tree);
+                if self.logbuf_updated {
+                    let mut log_output = self.log_output.as_mut().unwrap().clone();
+                    log_output.with_mut(|panel| {
+                        let mut scroll = panel.scroll();
+                        scroll.y = panel.content_size().y;
+                        panel.set_scroll(scroll);
                     });
-                    tree.row(&submit_row, SizePolicy::Auto, |tree| {
-                        tree.widget(&mut self.submit_buf);
-                        tree.widget(&mut self.submit_button);
-                    });
-                });
+                    self.logbuf_updated = false;
+                }
 
-                let submit_buf_out = results.state_of(&self.submit_buf);
-                let submit_btn_out = results.state_of(&self.submit_button);
+                let submit_buf_out = results.state_of_handle(&self.submit_buf);
+                let submit_btn_out = results.state_of_handle(&self.submit_button);
                 if submit_buf_out.is_submitted() {
-                    container.set_focus(Some(widget_id_of(&self.submit_buf)));
+                    container.set_focus(Some(widget_id_of_handle(&self.submit_buf)));
                     submitted = true;
                 }
                 if submit_btn_out.is_submitted() {
@@ -496,9 +929,9 @@ impl State {
                 }
                 if submitted {
                     let mut buf = String::new();
-                    buf.push_str(self.submit_buf.buf.as_str());
+                    buf.push_str(self.submit_buf.borrow().buf.as_str());
                     self.write_log(buf.as_str());
-                    self.submit_buf.buf.clear();
+                    self.submit_buf.borrow_mut().buf.clear();
                 }
                 WindowState::Open
             },
@@ -518,28 +951,8 @@ impl State {
             ContainerOption::NONE,
             WidgetBehaviourOption::NONE,
             |container, results| {
-                container.build_tree(results, |tree| {
-                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                        tree.run(move |container, results| {
-                            let tri_state = tri_state.clone();
-                            let mut renderer = renderer.clone();
-                            container.widget_custom_render(results, triangle_widget, move |_dim, cra| {
-                                if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
-                                    return;
-                                }
-                                let area = area_from_args(&cra);
-                                if let Ok(mut tri) = tri_state.write() {
-                                    tri.angle = (tri.angle + 0.02) % (std::f32::consts::PI * 2.0);
-                                    let mut verts = build_triangle_vertices(area.rect, white_uv, tri.angle);
-                                    renderer.scope_mut(move |vk| {
-                                        let verts_local = std::mem::take(&mut verts);
-                                        vk.enqueue_colored_vertices(area, verts_local);
-                                    });
-                                }
-                            });
-                        });
-                    });
-                });
+                let _ = (&renderer, &tri_state, white_uv, &triangle_widget);
+                container.widget_tree(results, &self.triangle_tree);
                 WindowState::Open
             },
         );
@@ -557,71 +970,8 @@ impl State {
             ContainerOption::NONE,
             WidgetBehaviourOption::NONE,
             |container, results| {
-                container.build_tree(results, |tree| {
-                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                        tree.run(move |container, results| {
-                            let suzane_state = suzane_state.clone();
-                            let mut renderer = renderer.clone();
-                            container.widget_custom_render(results, suzane_widget, move |_dim, cra| {
-                                if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
-                                    return;
-                                }
-                                if let Ok(mut suzane) = suzane_state.write() {
-                                    suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
-                                    let _ = suzane.view_3d.update(cra.mouse_event);
-                                    if let Some(delta) = cra.scroll_delta {
-                                        let axis = if delta.y != 0 { delta.y } else { delta.x };
-                                        if axis != 0 {
-                                            suzane.view_3d.apply_scroll(axis as f32);
-                                        }
-                                    }
-                                    if !matches!(cra.mouse_event, MouseEvent::Drag { .. }) && cra.scroll_delta.is_none() {
-                                        let step = 20;
-                                        let mut delta = Vec2i::new(0, 0);
-                                        if cra.key_codes.is_left() {
-                                            delta.x -= step;
-                                        }
-                                        if cra.key_codes.is_right() {
-                                            delta.x += step;
-                                        }
-                                        if cra.key_codes.is_up() {
-                                            delta.y -= step;
-                                        }
-                                        if cra.key_codes.is_down() {
-                                            delta.y += step;
-                                        }
-                                        if delta.x != 0 || delta.y != 0 {
-                                            let center = Vec2i::new(cra.content_area.width / 2, cra.content_area.height / 2);
-                                            let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
-                                            suzane.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
-                                        }
-                                        for ch in cra.text_input.chars() {
-                                            match ch {
-                                                'w' | 'W' => {
-                                                    suzane.view_3d.apply_scroll(-0.5);
-                                                }
-                                                's' | 'S' => {
-                                                    suzane.view_3d.apply_scroll(0.5);
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                    }
-
-                                    let area = area_from_args(&cra);
-                                    let submission = MeshSubmission {
-                                        mesh: suzane.mesh.clone(),
-                                        pvm: suzane.view_3d.pvm(),
-                                        view_model: suzane.view_3d.view_matrix(),
-                                    };
-                                    renderer.scope_mut(|r| {
-                                        r.enqueue_mesh_draw(area, submission.clone());
-                                    });
-                                }
-                            });
-                        });
-                    });
-                });
+                let _ = (&renderer, &suzane_state, &suzane_widget);
+                container.widget_tree(results, &self.suzane_tree);
                 WindowState::Open
             },
         );
@@ -632,60 +982,30 @@ impl State {
             return;
         }
 
-        let buttons = &mut self.stack_direction_buttons;
-        let stack_direction_labels = &mut self.stack_direction_labels;
         let mut logs: Vec<&'static str> = Vec::new();
         ctx.window(
             &mut self.stack_direction_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
             WidgetBehaviourOption::NONE,
             |container, results| {
-                let spacing = container.get_style().spacing.max(0);
-                let body_width = container.body().width.max(1);
-                let left_width = body_width.saturating_sub(spacing).max(2) / 2;
-                let columns = [SizePolicy::Fixed(left_width), SizePolicy::Remainder(0)];
+                container.widget_tree(results, &self.stack_direction_tree);
 
-                let [button_top_0, button_top_1, button_top_2, button_bottom_0, button_bottom_1, button_bottom_2] = buttons;
-                let [label_top, label_bottom] = stack_direction_labels;
-                container.build_tree(results, |tree| {
-                    tree.row(&columns, SizePolicy::Auto, |tree| {
-                        tree.widget(label_top);
-                        tree.widget(label_bottom);
-                    });
-                    tree.row(&columns, SizePolicy::Fixed(120), |tree| {
-                        tree.column(|tree| {
-                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, |tree| {
-                                tree.widget(button_top_0);
-                                tree.widget(button_top_1);
-                                tree.widget(button_top_2);
-                            });
-                        });
-                        tree.column(|tree| {
-                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::BottomToTop, |tree| {
-                                tree.widget(button_bottom_0);
-                                tree.widget(button_bottom_1);
-                                tree.widget(button_bottom_2);
-                            });
-                        });
-                    });
-                });
-
-                if results.state_of(&*button_top_0).is_submitted() {
+                if results.state_of_handle(&self.stack_direction_buttons[0]).is_submitted() {
                     logs.push("Top->Bottom: call 1");
                 }
-                if results.state_of(&*button_top_1).is_submitted() {
+                if results.state_of_handle(&self.stack_direction_buttons[1]).is_submitted() {
                     logs.push("Top->Bottom: call 2");
                 }
-                if results.state_of(&*button_top_2).is_submitted() {
+                if results.state_of_handle(&self.stack_direction_buttons[2]).is_submitted() {
                     logs.push("Top->Bottom: call 3");
                 }
-                if results.state_of(&*button_bottom_0).is_submitted() {
+                if results.state_of_handle(&self.stack_direction_buttons[3]).is_submitted() {
                     logs.push("Bottom->Top: call 1");
                 }
-                if results.state_of(&*button_bottom_1).is_submitted() {
+                if results.state_of_handle(&self.stack_direction_buttons[4]).is_submitted() {
                     logs.push("Bottom->Top: call 2");
                 }
-                if results.state_of(&*button_bottom_2).is_submitted() {
+                if results.state_of_handle(&self.stack_direction_buttons[5]).is_submitted() {
                     logs.push("Bottom->Top: call 3");
                 }
                 WindowState::Open
@@ -702,81 +1022,39 @@ impl State {
             return;
         }
 
-        let buttons = &mut self.weight_buttons;
-        let weight_labels = &mut self.weight_labels;
         let mut logs: Vec<&'static str> = Vec::new();
         ctx.window(
             &mut self.weight_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
             WidgetBehaviourOption::NONE,
             |container, results| {
-                let [
-                    button_row_0,
-                    button_row_1,
-                    button_row_2,
-                    button_grid_0,
-                    button_grid_1,
-                    button_grid_2,
-                    button_grid_3,
-                    button_grid_4,
-                    button_grid_5,
-                ] = buttons;
-                let [row_weight_label, grid_weight_label] = weight_labels;
-                let row = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0), SizePolicy::Weight(3.0)];
-                let cols = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
-                let rows = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
+                container.widget_tree(results, &self.weight_tree);
 
-                container.build_tree(results, |tree| {
-                    tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
-                        tree.widget(row_weight_label);
-                    });
-                    tree.row(&row, SizePolicy::Fixed(28), |tree| {
-                        tree.widget(button_row_0);
-                        tree.widget(button_row_1);
-                        tree.widget(button_row_2);
-                    });
-                    tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |tree| {
-                        tree.widget(grid_weight_label);
-                    });
-                    tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |tree| {
-                        tree.column(|tree| {
-                            tree.grid(&cols, &rows, |tree| {
-                                tree.widget(button_grid_0);
-                                tree.widget(button_grid_1);
-                                tree.widget(button_grid_2);
-                                tree.widget(button_grid_3);
-                                tree.widget(button_grid_4);
-                                tree.widget(button_grid_5);
-                            });
-                        });
-                    });
-                });
-
-                if results.state_of(&*button_row_0).is_submitted() {
+                if results.state_of_handle(&self.weight_buttons[0]).is_submitted() {
                     logs.push("Weight row: 1");
                 }
-                if results.state_of(&*button_row_1).is_submitted() {
+                if results.state_of_handle(&self.weight_buttons[1]).is_submitted() {
                     logs.push("Weight row: 2");
                 }
-                if results.state_of(&*button_row_2).is_submitted() {
+                if results.state_of_handle(&self.weight_buttons[2]).is_submitted() {
                     logs.push("Weight row: 3");
                 }
-                if results.state_of(&*button_grid_0).is_submitted() {
+                if results.state_of_handle(&self.weight_buttons[3]).is_submitted() {
                     logs.push("Weight grid: 1");
                 }
-                if results.state_of(&*button_grid_1).is_submitted() {
+                if results.state_of_handle(&self.weight_buttons[4]).is_submitted() {
                     logs.push("Weight grid: 2");
                 }
-                if results.state_of(&*button_grid_2).is_submitted() {
+                if results.state_of_handle(&self.weight_buttons[5]).is_submitted() {
                     logs.push("Weight grid: 3");
                 }
-                if results.state_of(&*button_grid_3).is_submitted() {
+                if results.state_of_handle(&self.weight_buttons[6]).is_submitted() {
                     logs.push("Weight grid: 4");
                 }
-                if results.state_of(&*button_grid_4).is_submitted() {
+                if results.state_of_handle(&self.weight_buttons[7]).is_submitted() {
                     logs.push("Weight grid: 5");
                 }
-                if results.state_of(&*button_grid_5).is_submitted() {
+                if results.state_of_handle(&self.weight_buttons[8]).is_submitted() {
                     logs.push("Weight grid: 6");
                 }
                 WindowState::Open
@@ -792,332 +1070,97 @@ impl State {
         let mut combo_anchor = None;
         let mut combo_changed = false;
 
-        ctx.window(&mut self.demo_window.as_mut().unwrap().clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |container, results| {
-            let mut win = container.rect();
-            win.width = win.width.max(240);
-            win.height = win.height.max(300);
+        ctx.window(
+            &mut self.demo_window.as_mut().unwrap().clone(),
+            ContainerOption::NONE,
+            WidgetBehaviourOption::NONE,
+            |container, results| {
+                let mut win = container.rect();
+                win.width = win.width.max(240);
+                win.height = win.height.max(300);
 
-            container.set_rect(win);
+                container.set_rect(win);
 
-            let mut buff = String::new();
-            let fps = self.fps;
-            let mut button_logs: Vec<&'static str> = Vec::new();
-            let mut tree_logs: Vec<&'static str> = Vec::new();
-            {
-                let window_header = &mut self.window_header;
-                let window_info_labels = &mut self.window_info_labels;
-                let window_info_values = &mut self.window_info_values;
-                let test_buttons_header = &mut self.test_buttons_header;
-                let test_buttons = &mut self.test_buttons;
-                let test_button_labels = &mut self.test_button_labels;
-                let open_popup = &mut self.open_popup;
-                let open_dialog = &mut self.open_dialog;
-                let combo_header = &mut self.combo_header;
-                let combo_state = self.combo_state.as_mut().unwrap();
-                let combo_labels = [
-                    self.combo_items[0].label.as_str(),
-                    self.combo_items[1].label.as_str(),
-                    self.combo_items[2].label.as_str(),
-                    self.combo_items[3].label.as_str(),
-                ];
-                let tree_and_text_header = &mut self.tree_and_text_header;
-                let test1_tn = &mut self.test1_tn;
-                let test1a_tn = &mut self.test1a_tn;
-                let test1b_tn = &mut self.test1b_tn;
-                let test2_tn = &mut self.test2_tn;
-                let test3_tn = &mut self.test3_tn;
-                let tree_buttons = &mut self.tree_buttons;
-                let checkboxes = &mut self.checkboxes;
-                let tree_labels = &mut self.tree_labels;
-                let text_area_header = &mut self.text_area_header;
-                let text_area = &mut self.text_area;
-                let background_header = &mut self.background_header;
-                let bg = &mut self.bg;
-                let bg_sliders = &mut self.bg_sliders;
-                let background_labels = &mut self.background_labels;
-                let slot_header = &mut self.slot_header;
-                let slot_buttons = &mut self.slot_buttons;
-                let external_image_button = &mut self.external_image_button;
-                container.build_tree(results, |tree| {
-                    Self::section(tree, window_header, |tree| {
-                        tree.run(|container, results| {
-                            let [label_pos, label_size, label_fps] = window_info_labels;
-                            let [value_pos, value_size, value_fps] = window_info_values;
-                            let win_0 = container.rect();
-                            let row_widths = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
-                            buff.clear();
-                            buff.push_str(format!("{}, {}", win_0.x, win_0.y).as_str());
-                            value_pos.label.clear();
-                            value_pos.label.push_str(buff.as_str());
-                            let mut runs = [widget_ref(label_pos), widget_ref(value_pos)];
-                            container.row_widgets(results, &row_widths, SizePolicy::Auto, &mut runs);
+                let mut button_logs: Vec<&'static str> = Vec::new();
+                let mut tree_logs: Vec<&'static str> = Vec::new();
+                let [value_pos, value_size, value_fps] = self.window_info_values.clone();
+                value_pos.borrow_mut().label = format!("{}, {}", win.x, win.y);
+                value_size.borrow_mut().label = format!("{}, {}", win.width, win.height);
+                value_fps.borrow_mut().label = format!("{:.1}", self.fps);
 
-                            buff.clear();
-                            buff.push_str(format!("{}, {}", win_0.width, win_0.height).as_str());
-                            value_size.label.clear();
-                            value_size.label.push_str(buff.as_str());
-                            let mut runs = [widget_ref(label_size), widget_ref(value_size)];
-                            container.row_widgets(results, &row_widths, SizePolicy::Auto, &mut runs);
+                let combo_labels: Vec<String> = self.combo_items.iter().map(|item| item.borrow().label.clone()).collect();
+                self.combo_state.borrow_mut().update_items(&combo_labels);
 
-                            buff.clear();
-                            buff.push_str(format!("{:.1}", fps).as_str());
-                            value_fps.label.clear();
-                            value_fps.label.push_str(buff.as_str());
-                            let mut runs = [widget_ref(label_fps), widget_ref(value_fps)];
-                            container.row_widgets(results, &row_widths, SizePolicy::Auto, &mut runs);
-                        });
-                    });
+                self.bg_sliders[0].borrow_mut().value = self.bg[0];
+                self.bg_sliders[1].borrow_mut().value = self.bg[1];
+                self.bg_sliders[2].borrow_mut().value = self.bg[2];
 
-                    Self::section(tree, test_buttons_header, |tree| {
-                        tree.run(|container, results| {
-                            let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
-                            let [button0, button1, button2, button3, button4, button5] = test_buttons;
-                            let [label0, label1, label2] = test_button_labels;
-                            let button0_id = widget_id_of(&*button0);
-                            let button1_id = widget_id_of(&*button1);
-                            let button2_id = widget_id_of(&*button2);
-                            let button3_id = widget_id_of(&*button3);
-                            let button4_id = widget_id_of(&*button4);
-                            let button5_id = widget_id_of(&*button5);
-                            let mut runs = [
-                                widget_ref(label0),
-                                widget_ref(button0),
-                                widget_ref(button1),
-                                widget_ref(label1),
-                                widget_ref(button2),
-                                widget_ref(button3),
-                                widget_ref(label2),
-                                widget_ref(button4),
-                                widget_ref(button5),
-                            ];
-                            container.row_widgets(results, &button_widths, SizePolicy::Auto, &mut runs);
-
-                            if results.state(button0_id).is_submitted() {
-                                button_logs.push("Pressed button 1");
-                            }
-                            if results.state(button1_id).is_submitted() {
-                                button_logs.push("Pressed button 2");
-                            }
-                            if results.state(button2_id).is_submitted() {
-                                button_logs.push("Pressed button 3");
-                            }
-                            if results.state(button3_id).is_submitted() {
-                                *open_popup = true;
-                            }
-                            if results.state(button4_id).is_submitted() {
-                                button_logs.push("Pressed button 4");
-                            }
-                            if results.state(button5_id).is_submitted() {
-                                *open_dialog = true;
-                            }
-                        });
-                    });
-
-                    Self::section(tree, combo_header, |tree| {
-                        tree.run(|container, results| {
-                            container.stack(SizePolicy::Auto, |container| {
-                                combo_state.update_items(&combo_labels);
-                                let combo_id = widget_id_of(&*combo_state);
-                                let mut __runs = [widget_ref(combo_state)];
-                                container.widgets(results, &mut __runs);
-                                let res = results.state(combo_id);
-                                combo_anchor = Some(combo_state.anchor());
-                                if res.is_submitted() {
-                                    combo_state.open = !combo_state.open;
-                                }
-                            });
-                        });
-                    });
-
-                    Self::section(tree, tree_and_text_header, |tree| {
-                        tree.run(|container, results| {
-                            let widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
-                            container.with_row(&widths, SizePolicy::Auto, |container| {
-                                container.column(|container| {
-                                    Self::legacy_tree_section(container, results, test1_tn, |container, results| {
-                                        Self::legacy_tree_section(container, results, test1a_tn, |container, results| {
-                                            let [label_hello, label_world] = tree_labels;
-                                            let mut runs = [widget_ref(label_hello), widget_ref(label_world)];
-                                            container.widgets(results, &mut runs);
-                                        });
-                                        Self::legacy_tree_section(container, results, test1b_tn, |container, results| {
-                                            let (button0, button1) = {
-                                                let (head, tail) = tree_buttons.split_at_mut(1);
-                                                (&mut head[0], &mut tail[0])
-                                            };
-                                            let button0_id = widget_id_of(&*button0);
-                                            let button1_id = widget_id_of(&*button1);
-                                            let mut runs = [widget_ref(button0), widget_ref(button1)];
-                                            container.widgets(results, &mut runs);
-                                            if results.state(button0_id).is_submitted() {
-                                                tree_logs.push("Pressed button 1");
-                                            }
-                                            if results.state(button1_id).is_submitted() {
-                                                tree_logs.push("Pressed button 2");
-                                            }
-                                        });
-                                    });
-                                    Self::legacy_tree_section(container, results, test2_tn, |container, results| {
-                                        let (button2, button3, button4, button5) = {
-                                            let (_, tail) = tree_buttons.split_at_mut(2);
-                                            let (b2_slice, tail) = tail.split_at_mut(1);
-                                            let (b3_slice, tail) = tail.split_at_mut(1);
-                                            let (b4_slice, b5_slice) = tail.split_at_mut(1);
-                                            (&mut b2_slice[0], &mut b3_slice[0], &mut b4_slice[0], &mut b5_slice[0])
-                                        };
-                                        let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
-                                        let button2_id = widget_id_of(&*button2);
-                                        let button3_id = widget_id_of(&*button3);
-                                        let button4_id = widget_id_of(&*button4);
-                                        let button5_id = widget_id_of(&*button5);
-                                        let mut runs = [
-                                            widget_ref(button2),
-                                            widget_ref(button3),
-                                            widget_ref(button4),
-                                            widget_ref(button5),
-                                        ];
-                                        container.row_widgets(results, &tree_button_widths, SizePolicy::Auto, &mut runs);
-                                        if results.state(button2_id).is_submitted() {
-                                            tree_logs.push("Pressed button 3");
-                                        }
-                                        if results.state(button3_id).is_submitted() {
-                                            tree_logs.push("Pressed button 4");
-                                        }
-                                        if results.state(button4_id).is_submitted() {
-                                            tree_logs.push("Pressed button 5");
-                                        }
-                                        if results.state(button5_id).is_submitted() {
-                                            tree_logs.push("Pressed button 6");
-                                        }
-                                    });
-                                    Self::legacy_tree_section(container, results, test3_tn, |container, results| {
-                                        let (checkbox0, checkbox1, checkbox2) = {
-                                            let (head, tail) = checkboxes.split_at_mut(1);
-                                            let (mid, tail) = tail.split_at_mut(1);
-                                            (&mut head[0], &mut mid[0], &mut tail[0])
-                                        };
-                                        let mut runs = [
-                                            widget_ref(checkbox0),
-                                            widget_ref(checkbox1),
-                                            widget_ref(checkbox2),
-                                        ];
-                                        container.widgets(results, &mut runs);
-                                    });
-                                });
-                                container.column(|container| {
-                                    container.stack(SizePolicy::Auto, |container| {
-                                        container.text_with_wrap(
-                                            "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.",
-                                            TextWrap::Word,
-                                        );
-                                    });
-                                });
-                            });
-                        });
-                    });
-
-                    Self::section(tree, text_area_header, |tree| {
-                        tree.run(|container, results| {
-                            container.stack(SizePolicy::Fixed(120), |container| {
-                                let mut __runs = [widget_ref(text_area)];
-                                container.widgets(results, &mut __runs);
-                            });
-                        });
-                    });
-
-                    Self::section(tree, background_header, |tree| {
-                        tree.run(|container, results| {
-                            let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
-                            container.with_row(&background_widths, SizePolicy::Fixed(74), |container| {
-                                let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
-                                container.column(|container| {
-                                    let (slider_red, slider_green, slider_blue) = {
-                                        let (head, tail) = bg_sliders.split_at_mut(1);
-                                        let (mid, tail) = tail.split_at_mut(1);
-                                        (&mut head[0], &mut mid[0], &mut tail[0])
-                                    };
-                                    let [label_red, label_green, label_blue] = background_labels;
-
-                                    slider_red.value = bg[0];
-                                    slider_green.value = bg[1];
-                                    slider_blue.value = bg[2];
-
-                                    let mut runs = [
-                                        widget_ref(label_red),
-                                        widget_ref(slider_red),
-                                        widget_ref(label_green),
-                                        widget_ref(slider_green),
-                                        widget_ref(label_blue),
-                                        widget_ref(slider_blue),
-                                    ];
-                                    container.row_widgets(results, &slider_row, SizePolicy::Auto, &mut runs);
-                                    bg[0] = slider_red.value;
-                                    bg[1] = slider_green.value;
-                                    bg[2] = slider_blue.value;
-                                });
-                                let r: Recti = container.next_cell();
-                                container.draw_rect(r, color(bg[0] as u8, bg[1] as u8, bg[2] as u8, 255));
-                                let mut buff = String::new();
-                                buff.push_str(format!("#{:02X}{:02X}{:02X}", bg[0] as u8, bg[1] as u8, bg[2] as u8).as_str());
-                                container.draw_control_text(buff.as_str(), r, ControlColor::Text, WidgetOption::ALIGN_CENTER);
-                            });
-                        });
-                    });
-
-                    Self::section(tree, slot_header, |tree| {
-                        tree.run(|container, results| {
-                            let (slot0, slot1, slot2, slot3) = {
-                                let (s0, rest) = slot_buttons.split_at_mut(1);
-                                let (s1, rest) = rest.split_at_mut(1);
-                                let (s2, s3) = rest.split_at_mut(1);
-                                (&mut s0[0], &mut s1[0], &mut s2[0], &mut s3[0])
-                            };
-                            container.stack(SizePolicy::Fixed(67), |container| {
-                                let mut runs = [widget_ref(slot0), widget_ref(slot1), widget_ref(slot2)];
-                                container.widgets(results, &mut runs);
-                                if let Some(button) = external_image_button.as_mut() {
-                                    container.stack_with_width(SizePolicy::Fixed(256), SizePolicy::Fixed(256), |ctx| {
-                                        let mut runs = [widget_ref(button)];
-                                        ctx.widgets(results, &mut runs);
-                                    });
-                                }
-                            });
-                            container.stack(SizePolicy::Fixed(67), |container| {
-                                let mut runs = [widget_ref(slot3)];
-                                container.widgets(results, &mut runs);
-                            });
-                        });
-                    });
-                });
-            }
-            for msg in button_logs {
-                self.write_log(msg);
-            }
-            for msg in tree_logs {
-                self.write_log(msg);
-            }
-            WindowState::Open
-        });
+                container.widget_tree(results, &self.demo_tree);
+                combo_anchor = Some(self.combo_state.borrow().anchor());
+                if results.state_of_handle(&self.combo_state).is_submitted() {
+                    let mut combo_state = self.combo_state.borrow_mut();
+                    combo_state.open = !combo_state.open;
+                }
+                if results.state_of_handle(&self.test_buttons[0]).is_submitted() {
+                    button_logs.push("Pressed button 1");
+                }
+                if results.state_of_handle(&self.test_buttons[1]).is_submitted() {
+                    button_logs.push("Pressed button 2");
+                }
+                if results.state_of_handle(&self.test_buttons[2]).is_submitted() {
+                    button_logs.push("Pressed button 3");
+                }
+                if results.state_of_handle(&self.test_buttons[3]).is_submitted() {
+                    self.open_popup = true;
+                }
+                if results.state_of_handle(&self.test_buttons[4]).is_submitted() {
+                    button_logs.push("Pressed button 4");
+                }
+                if results.state_of_handle(&self.test_buttons[5]).is_submitted() {
+                    self.open_dialog = true;
+                }
+                if results.state_of_handle(&self.tree_buttons[0]).is_submitted() {
+                    tree_logs.push("Pressed button 1");
+                }
+                if results.state_of_handle(&self.tree_buttons[1]).is_submitted() {
+                    tree_logs.push("Pressed button 2");
+                }
+                if results.state_of_handle(&self.tree_buttons[2]).is_submitted() {
+                    tree_logs.push("Pressed button 3");
+                }
+                if results.state_of_handle(&self.tree_buttons[3]).is_submitted() {
+                    tree_logs.push("Pressed button 4");
+                }
+                if results.state_of_handle(&self.tree_buttons[4]).is_submitted() {
+                    tree_logs.push("Pressed button 5");
+                }
+                if results.state_of_handle(&self.tree_buttons[5]).is_submitted() {
+                    tree_logs.push("Pressed button 6");
+                }
+                self.bg[0] = self.bg_sliders[0].borrow().value;
+                self.bg[1] = self.bg_sliders[1].borrow().value;
+                self.bg[2] = self.bg_sliders[2].borrow().value;
+                for msg in button_logs {
+                    self.write_log(msg);
+                }
+                for msg in tree_logs {
+                    self.write_log(msg);
+                }
+                WindowState::Open
+            },
+        );
 
         if let Some(anchor) = combo_anchor {
-            let combo_state = self.combo_state.as_mut().unwrap();
-            let combo_items = &mut self.combo_items;
-            let popup = &mut combo_state.popup;
-            if combo_state.open {
-                ctx.open_popup_at(popup, anchor);
+            let mut popup = self.combo_state.borrow().popup.clone();
+            if self.combo_state.borrow().open {
+                ctx.open_popup_at(&mut popup, anchor);
             }
 
-            ctx.popup(popup, WidgetBehaviourOption::NO_SCROLL, |dropdown, results| {
-                dropdown.build_tree(results, |tree| {
-                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                        for item in combo_items.iter_mut() {
-                            tree.widget(item);
-                        }
-                    });
-                });
-                for (idx, item) in combo_items.iter().enumerate() {
-                    if results.state_of(item).is_submitted() {
-                        combo_state.selected = idx;
+            ctx.popup(&mut popup, WidgetBehaviourOption::NO_SCROLL, |dropdown, results| {
+                dropdown.widget_tree(results, &self.combo_tree);
+                for (idx, item) in self.combo_items.iter().enumerate() {
+                    if results.state_of_handle(item).is_submitted() {
+                        self.combo_state.borrow_mut().selected = idx;
                         combo_changed = true;
                         dropdown.set_focus(None);
                     }
@@ -1126,14 +1169,14 @@ impl State {
             });
 
             if !popup.is_open() {
-                combo_state.open = false;
+                self.combo_state.borrow_mut().open = false;
             }
         }
 
         if combo_changed {
-            let selected = self.combo_state.as_ref().unwrap().selected;
+            let selected = self.combo_state.borrow().selected;
             if let Some(choice) = self.combo_items.get(selected) {
-                let msg = format!("Selected: {}", choice.label);
+                let msg = format!("Selected: {}", choice.borrow().label);
                 self.write_log(msg.as_str());
             }
         }
@@ -1147,32 +1190,20 @@ impl State {
         }
 
         let mut popup_logs: Vec<&'static str> = Vec::new();
-        {
-            let popup_buttons = &mut self.popup_buttons;
-            ctx.popup(
-                &mut self.popup_window.as_mut().unwrap().clone(),
-                WidgetBehaviourOption::NO_SCROLL,
-                |ctx, results| {
-                    ctx.build_tree(results, |tree| {
-                        tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                            let (button0, button1) = {
-                                let (head, tail) = popup_buttons.split_at_mut(1);
-                                (&mut head[0], &mut tail[0])
-                            };
-                            tree.widget(button0);
-                            tree.widget(button1);
-                        });
-                    });
-                    if results.state_of(&popup_buttons[0]).is_submitted() {
-                        popup_logs.push("Hello")
-                    }
-                    if results.state_of(&popup_buttons[1]).is_submitted() {
-                        popup_logs.push("World")
-                    }
-                    WindowState::Open
-                },
-            );
-        }
+        ctx.popup(
+            &mut self.popup_window.as_mut().unwrap().clone(),
+            WidgetBehaviourOption::NO_SCROLL,
+            |ctx, results| {
+                ctx.widget_tree(results, &self.popup_tree);
+                if results.state_of_handle(&self.popup_buttons[0]).is_submitted() {
+                    popup_logs.push("Hello")
+                }
+                if results.state_of_handle(&self.popup_buttons[1]).is_submitted() {
+                    popup_logs.push("World")
+                }
+                WindowState::Open
+            },
+        );
         for msg in popup_logs {
             self.write_log(msg);
         }
@@ -1246,19 +1277,7 @@ fn main() {
     let mut app = Application::new(atlas.clone(), move |backend: BackendInitContext, ctx| {
         let slots = atlas.clone_slot_table();
         let renderer = ctx.renderer_handle();
-        let mut state = State::new(backend, renderer, slots, ctx);
-        state.demo_window = Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450)));
-        state.log_window = Some(ctx.new_window("Log Window", rect(350, 40, 300, 200)));
-        state.style_window = Some(ctx.new_window("Style Editor", rect(350, 250, 300, 240)));
-        state.popup_window = Some(ctx.new_popup("Test Popup"));
-        state.combo_state = Some(Combo::new(ctx.new_popup("Combo Box Popup")));
-        state.log_output = Some(ctx.new_panel("Log Output"));
-        state.dialog_window = Some(FileDialogState::new(ctx));
-        state.triangle_window = Some(ctx.new_window("Triangle Window", rect(200, 100, 200, 200)));
-        state.suzane_window = Some(ctx.new_window("Suzane Window", rect(220, 220, 300, 300)));
-        state.stack_direction_window = Some(ctx.new_window("Stack Direction Demo", rect(530, 40, 280, 220)));
-        state.weight_window = Some(ctx.new_window("Weight Demo", rect(530, 270, 280, 260)));
-        state
+        State::new(backend, renderer, slots, ctx)
     })
     .unwrap();
 
