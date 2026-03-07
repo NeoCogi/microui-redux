@@ -79,6 +79,7 @@ mod layout;
 mod rect_packer;
 mod scrollbar;
 mod text_layout;
+mod widget_tree;
 mod widgets;
 mod window;
 
@@ -89,6 +90,7 @@ pub use context::Context;
 pub use layout::{SizePolicy, StackDirection};
 pub use rect_packer::*;
 pub use rs_math3d::*;
+pub use widget_tree::*;
 pub use window::*;
 pub use file_dialog::*;
 pub use widgets::*;

@@ -341,12 +341,10 @@ impl State {
 
     fn u8_slider(value: &mut u8, slider: &mut Slider, ctx: &mut Container, results: &mut FrameResults) -> ResourceState {
         slider.value = *value as Real;
-        let res = {
-            let slider_id = widget_id_of(&*slider);
-            let mut __runs = [widget_ref(slider)];
-            ctx.widgets(results, &mut __runs);
-            results.state(slider_id)
-        };
+        ctx.build_tree(results, |tree| {
+            tree.widget(slider);
+        });
+        let res = results.state_of(&*slider);
         *value = slider.value as u8;
         slider.value = *value as Real;
         res
@@ -354,27 +352,20 @@ impl State {
 
     fn i32_slider(value: &mut i32, slider: &mut Slider, ctx: &mut Container, results: &mut FrameResults) -> ResourceState {
         slider.value = *value as Real;
-        let res = {
-            let slider_id = widget_id_of(&*slider);
-            let mut __runs = [widget_ref(slider)];
-            ctx.widgets(results, &mut __runs);
-            results.state(slider_id)
-        };
+        ctx.build_tree(results, |tree| {
+            tree.widget(slider);
+        });
+        let res = results.state_of(&*slider);
         *value = slider.value as i32;
         slider.value = *value as Real;
         res
     }
 
-    fn section<F: FnOnce(&mut Container, &mut FrameResults)>(container: &mut Container, results: &mut FrameResults, node: &mut Node, f: F) {
-        container.set_row_flow(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        let mut __runs = [widget_ref(node)];
-        container.widgets(results, &mut __runs);
-        if node.is_expanded() {
-            f(container, results);
-        }
+    fn section<'a, F: FnOnce(&mut WidgetTreeBuilder<'a>)>(tree: &mut WidgetTreeBuilder<'a>, node: &'a mut Node, f: F) {
+        tree.header(node, f);
     }
 
-    fn tree_section<F: FnOnce(&mut Container, &mut FrameResults)>(container: &mut Container, results: &mut FrameResults, node: &mut Node, f: F) {
+    fn legacy_tree_section<F: FnOnce(&mut Container, &mut FrameResults)>(container: &mut Container, results: &mut FrameResults, node: &mut Node, f: F) {
         container.set_row_flow(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let mut __runs = [widget_ref(node)];
         container.widgets(results, &mut __runs);
@@ -404,38 +395,53 @@ impl State {
                     SizePolicy::Fixed(sw),
                     SizePolicy::Remainder(0),
                 ];
-                container.with_row(&color_row, SizePolicy::Auto, |container| {
-                    for (i, label) in style_color_labels.iter_mut().enumerate() {
-                        let mut out_label = ResourceState::NONE;
-                        let mut label_runs = [widget_ref(label)];
-                        container.widgets(results, &mut label_runs);
-                        unsafe {
-                            let color = style.colors.as_mut_ptr().offset(i as isize);
-                            let slider_base = i * 4;
-                            Self::u8_slider(&mut (*color).r, &mut style_color_sliders[slider_base], container, results);
-                            Self::u8_slider(&mut (*color).g, &mut style_color_sliders[slider_base + 1], container, results);
-                            Self::u8_slider(&mut (*color).b, &mut style_color_sliders[slider_base + 2], container, results);
-                            Self::u8_slider(&mut (*color).a, &mut style_color_sliders[slider_base + 3], container, results);
-                        }
-                        let next_layout = container.next_cell();
-                        let color = style.colors[i];
-                        container.draw_rect(next_layout, color);
-                    }
-                });
                 let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Fixed(sw)];
-                container.with_row(&metrics_row, SizePolicy::Auto, |container| {
-                    for (idx, label) in style_metric_labels.iter_mut().enumerate() {
-                        let mut out_label = ResourceState::NONE;
-                        let mut label_runs = [widget_ref(label)];
-                        container.widgets(results, &mut label_runs);
-                        match idx {
-                            0 => Self::i32_slider(&mut style.padding, &mut style_value_sliders[0], container, results),
-                            1 => Self::i32_slider(&mut style.spacing, &mut style_value_sliders[1], container, results),
-                            2 => Self::i32_slider(&mut style.title_height, &mut style_value_sliders[2], container, results),
-                            3 => Self::i32_slider(&mut style.thumb_size, &mut style_value_sliders[3], container, results),
-                            _ => Self::i32_slider(&mut style.scrollbar_size, &mut style_value_sliders[4], container, results),
-                        };
-                    }
+                for (i, color) in style.colors.iter().enumerate() {
+                    let slider_base = i * 4;
+                    style_color_sliders[slider_base].value = color.r as Real;
+                    style_color_sliders[slider_base + 1].value = color.g as Real;
+                    style_color_sliders[slider_base + 2].value = color.b as Real;
+                    style_color_sliders[slider_base + 3].value = color.a as Real;
+                }
+                style_value_sliders[0].value = style.padding as Real;
+                style_value_sliders[1].value = style.spacing as Real;
+                style_value_sliders[2].value = style.title_height as Real;
+                style_value_sliders[3].value = style.thumb_size as Real;
+                style_value_sliders[4].value = style.scrollbar_size as Real;
+
+                container.build_tree(results, |tree| {
+                    tree.run(|container, results| {
+                        container.with_row(&color_row, SizePolicy::Auto, |container| {
+                            for (i, label) in style_color_labels.iter_mut().enumerate() {
+                                let mut label_runs = [widget_ref(label)];
+                                container.widgets(results, &mut label_runs);
+                                unsafe {
+                                    let color = style.colors.as_mut_ptr().offset(i as isize);
+                                    let slider_base = i * 4;
+                                    Self::u8_slider(&mut (*color).r, &mut style_color_sliders[slider_base], container, results);
+                                    Self::u8_slider(&mut (*color).g, &mut style_color_sliders[slider_base + 1], container, results);
+                                    Self::u8_slider(&mut (*color).b, &mut style_color_sliders[slider_base + 2], container, results);
+                                    Self::u8_slider(&mut (*color).a, &mut style_color_sliders[slider_base + 3], container, results);
+                                }
+                                let next_layout = container.next_cell();
+                                let color = style.colors[i];
+                                container.draw_rect(next_layout, color);
+                            }
+                        });
+                        container.with_row(&metrics_row, SizePolicy::Auto, |container| {
+                            for (idx, label) in style_metric_labels.iter_mut().enumerate() {
+                                let mut label_runs = [widget_ref(label)];
+                                container.widgets(results, &mut label_runs);
+                                match idx {
+                                    0 => Self::i32_slider(&mut style.padding, &mut style_value_sliders[0], container, results),
+                                    1 => Self::i32_slider(&mut style.spacing, &mut style_value_sliders[1], container, results),
+                                    2 => Self::i32_slider(&mut style.title_height, &mut style_value_sliders[2], container, results),
+                                    3 => Self::i32_slider(&mut style.thumb_size, &mut style_value_sliders[3], container, results),
+                                    _ => Self::i32_slider(&mut style.scrollbar_size, &mut style_value_sliders[4], container, results),
+                                };
+                            }
+                        });
+                    });
                 });
                 WindowState::Open
             },
@@ -449,38 +455,38 @@ impl State {
             ContainerOption::NONE,
             WidgetBehaviourOption::NONE,
             |container, results| {
-                container.stack(SizePolicy::Remainder(24), |container| {
-                    container.panel(
-                        self.log_output.as_mut().unwrap(),
-                        ContainerOption::NONE,
-                        WidgetBehaviourOption::NONE,
-                        |container_handle| {
-                            container_handle.with_mut(|container| {
-                                let mut scroll = container.scroll();
-                                let content_size = container.content_size();
-                                container.stack(SizePolicy::Remainder(0), |container| {
-                                    container.text(self.logbuf.as_str());
+                let mut submitted = false;
+                let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
+                let log_output = self.log_output.as_mut().unwrap().clone();
+                let logbuf = &self.logbuf;
+                let logbuf_updated = &mut self.logbuf_updated;
 
-                                    if self.logbuf_updated {
+                container.build_tree(results, |tree| {
+                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
+                        tree.container(log_output, ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
+                                tree.run(move |container, _results| {
+                                    let mut scroll = container.scroll();
+                                    let content_size = container.content_size();
+                                    container.text(logbuf.as_str());
+
+                                    if *logbuf_updated {
                                         scroll.y = content_size.y;
                                         container.set_scroll(scroll);
-                                        self.logbuf_updated = false;
+                                        *logbuf_updated = false;
                                     }
                                 });
                             });
-                        },
-                    );
+                        });
+                    });
+                    tree.row(&submit_row, SizePolicy::Auto, |tree| {
+                        tree.widget(&mut self.submit_buf);
+                        tree.widget(&mut self.submit_button);
+                    });
                 });
-                let mut submitted = false;
-                let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
-                let submit_buf_id = widget_id_of(&self.submit_buf);
-                let submit_btn_id = widget_id_of(&self.submit_button);
-                let mut submit_buf_out = ResourceState::NONE;
-                let mut submit_btn_out = ResourceState::NONE;
-                let mut submit_runs = [widget_ref(&mut self.submit_buf), widget_ref(&mut self.submit_button)];
-                container.row_widgets(results, &submit_row, SizePolicy::Auto, &mut submit_runs);
-                submit_buf_out = results.state(submit_buf_id);
-                submit_btn_out = results.state(submit_btn_id);
+
+                let submit_buf_out = results.state_of(&self.submit_buf);
+                let submit_btn_out = results.state_of(&self.submit_button);
                 if submit_buf_out.is_submitted() {
                     container.set_focus(Some(widget_id_of(&self.submit_buf)));
                     submitted = true;
@@ -503,7 +509,7 @@ impl State {
         if self.triangle_window.is_none() {
             return;
         }
-        let mut renderer = self.renderer.clone();
+        let renderer = self.renderer.clone();
         let tri_state = self.triangle_data.clone();
         let white_uv = self.white_uv;
         let triangle_widget = &mut self.triangle_widget;
@@ -512,20 +518,26 @@ impl State {
             ContainerOption::NONE,
             WidgetBehaviourOption::NONE,
             |container, results| {
-                container.stack(SizePolicy::Remainder(0), |container| {
-                    container.widget_custom_render(results, triangle_widget, move |_dim, cra| {
-                        if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
-                            return;
-                        }
-                        let area = area_from_args(&cra);
-                        if let Ok(mut tri) = tri_state.write() {
-                            tri.angle = (tri.angle + 0.02) % (std::f32::consts::PI * 2.0);
-                            let mut verts = build_triangle_vertices(area.rect, white_uv, tri.angle);
-                            renderer.scope_mut(move |vk| {
-                                let verts_local = std::mem::take(&mut verts);
-                                vk.enqueue_colored_vertices(area, verts_local);
+                container.build_tree(results, |tree| {
+                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
+                        tree.run(move |container, results| {
+                            let tri_state = tri_state.clone();
+                            let mut renderer = renderer.clone();
+                            container.widget_custom_render(results, triangle_widget, move |_dim, cra| {
+                                if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
+                                    return;
+                                }
+                                let area = area_from_args(&cra);
+                                if let Ok(mut tri) = tri_state.write() {
+                                    tri.angle = (tri.angle + 0.02) % (std::f32::consts::PI * 2.0);
+                                    let mut verts = build_triangle_vertices(area.rect, white_uv, tri.angle);
+                                    renderer.scope_mut(move |vk| {
+                                        let verts_local = std::mem::take(&mut verts);
+                                        vk.enqueue_colored_vertices(area, verts_local);
+                                    });
+                                }
                             });
-                        }
+                        });
                     });
                 });
                 WindowState::Open
@@ -537,7 +549,7 @@ impl State {
         if self.suzane_window.is_none() {
             return;
         }
-        let mut renderer = self.renderer.clone();
+        let renderer = self.renderer.clone();
         let suzane_state = self.suzane_data.clone();
         let suzane_widget = &mut self.suzane_widget;
         ctx.window(
@@ -545,63 +557,69 @@ impl State {
             ContainerOption::NONE,
             WidgetBehaviourOption::NONE,
             |container, results| {
-                container.stack(SizePolicy::Remainder(0), |container| {
-                    container.widget_custom_render(results, suzane_widget, move |_dim, cra| {
-                        if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
-                            return;
-                        }
-                        if let Ok(mut suzane) = suzane_state.write() {
-                            suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
-                            let _ = suzane.view_3d.update(cra.mouse_event);
-                            if let Some(delta) = cra.scroll_delta {
-                                let axis = if delta.y != 0 { delta.y } else { delta.x };
-                                if axis != 0 {
-                                    suzane.view_3d.apply_scroll(axis as f32);
+                container.build_tree(results, |tree| {
+                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
+                        tree.run(move |container, results| {
+                            let suzane_state = suzane_state.clone();
+                            let mut renderer = renderer.clone();
+                            container.widget_custom_render(results, suzane_widget, move |_dim, cra| {
+                                if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
+                                    return;
                                 }
-                            }
-                            if !matches!(cra.mouse_event, MouseEvent::Drag { .. }) && cra.scroll_delta.is_none() {
-                                let step = 20;
-                                let mut delta = Vec2i::new(0, 0);
-                                if cra.key_codes.is_left() {
-                                    delta.x -= step;
-                                }
-                                if cra.key_codes.is_right() {
-                                    delta.x += step;
-                                }
-                                if cra.key_codes.is_up() {
-                                    delta.y -= step;
-                                }
-                                if cra.key_codes.is_down() {
-                                    delta.y += step;
-                                }
-                                if delta.x != 0 || delta.y != 0 {
-                                    let center = Vec2i::new(cra.content_area.width / 2, cra.content_area.height / 2);
-                                    let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
-                                    suzane.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
-                                }
-                                for ch in cra.text_input.chars() {
-                                    match ch {
-                                        'w' | 'W' => {
-                                            suzane.view_3d.apply_scroll(-0.5);
+                                if let Ok(mut suzane) = suzane_state.write() {
+                                    suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
+                                    let _ = suzane.view_3d.update(cra.mouse_event);
+                                    if let Some(delta) = cra.scroll_delta {
+                                        let axis = if delta.y != 0 { delta.y } else { delta.x };
+                                        if axis != 0 {
+                                            suzane.view_3d.apply_scroll(axis as f32);
                                         }
-                                        's' | 'S' => {
-                                            suzane.view_3d.apply_scroll(0.5);
-                                        }
-                                        _ => {}
                                     }
-                                }
-                            }
+                                    if !matches!(cra.mouse_event, MouseEvent::Drag { .. }) && cra.scroll_delta.is_none() {
+                                        let step = 20;
+                                        let mut delta = Vec2i::new(0, 0);
+                                        if cra.key_codes.is_left() {
+                                            delta.x -= step;
+                                        }
+                                        if cra.key_codes.is_right() {
+                                            delta.x += step;
+                                        }
+                                        if cra.key_codes.is_up() {
+                                            delta.y -= step;
+                                        }
+                                        if cra.key_codes.is_down() {
+                                            delta.y += step;
+                                        }
+                                        if delta.x != 0 || delta.y != 0 {
+                                            let center = Vec2i::new(cra.content_area.width / 2, cra.content_area.height / 2);
+                                            let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
+                                            suzane.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
+                                        }
+                                        for ch in cra.text_input.chars() {
+                                            match ch {
+                                                'w' | 'W' => {
+                                                    suzane.view_3d.apply_scroll(-0.5);
+                                                }
+                                                's' | 'S' => {
+                                                    suzane.view_3d.apply_scroll(0.5);
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
 
-                            let area = area_from_args(&cra);
-                            let submission = MeshSubmission {
-                                mesh: suzane.mesh.clone(),
-                                pvm: suzane.view_3d.pvm(),
-                                view_model: suzane.view_3d.view_matrix(),
-                            };
-                            renderer.scope_mut(|r| {
-                                r.enqueue_mesh_draw(area, submission.clone());
+                                    let area = area_from_args(&cra);
+                                    let submission = MeshSubmission {
+                                        mesh: suzane.mesh.clone(),
+                                        pvm: suzane.view_3d.pvm(),
+                                        view_model: suzane.view_3d.view_matrix(),
+                                    };
+                                    renderer.scope_mut(|r| {
+                                        r.enqueue_mesh_draw(area, submission.clone());
+                                    });
+                                }
                             });
-                        }
+                        });
                     });
                 });
                 WindowState::Open
@@ -629,57 +647,47 @@ impl State {
 
                 let [button_top_0, button_top_1, button_top_2, button_bottom_0, button_bottom_1, button_bottom_2] = buttons;
                 let [label_top, label_bottom] = stack_direction_labels;
-                container.with_row(&columns, SizePolicy::Auto, |container| {
-                    let mut runs = [widget_ref(label_top), widget_ref(label_bottom)];
-                    container.widgets(results, &mut runs);
+                container.build_tree(results, |tree| {
+                    tree.row(&columns, SizePolicy::Auto, |tree| {
+                        tree.widget(label_top);
+                        tree.widget(label_bottom);
+                    });
+                    tree.row(&columns, SizePolicy::Fixed(120), |tree| {
+                        tree.column(|tree| {
+                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, |tree| {
+                                tree.widget(button_top_0);
+                                tree.widget(button_top_1);
+                                tree.widget(button_top_2);
+                            });
+                        });
+                        tree.column(|tree| {
+                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::BottomToTop, |tree| {
+                                tree.widget(button_bottom_0);
+                                tree.widget(button_bottom_1);
+                                tree.widget(button_bottom_2);
+                            });
+                        });
+                    });
                 });
 
-                container.with_row(&columns, SizePolicy::Fixed(120), |container| {
-                    container.column(|container| {
-                        let button_top_0_id = widget_id_of(&*button_top_0);
-                        let button_top_1_id = widget_id_of(&*button_top_1);
-                        let button_top_2_id = widget_id_of(&*button_top_2);
-                        let mut out0 = ResourceState::NONE;
-                        let mut out1 = ResourceState::NONE;
-                        let mut out2 = ResourceState::NONE;
-                        let mut runs = [widget_ref(button_top_0), widget_ref(button_top_1), widget_ref(button_top_2)];
-                        container.stack_widgets(results, SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, &mut runs);
-                        out0 = results.state(button_top_0_id);
-                        out1 = results.state(button_top_1_id);
-                        out2 = results.state(button_top_2_id);
-                        if out0.is_submitted() {
-                            logs.push("Top->Bottom: call 1");
-                        }
-                        if out1.is_submitted() {
-                            logs.push("Top->Bottom: call 2");
-                        }
-                        if out2.is_submitted() {
-                            logs.push("Top->Bottom: call 3");
-                        }
-                    });
-                    container.column(|container| {
-                        let button_bottom_0_id = widget_id_of(&*button_bottom_0);
-                        let button_bottom_1_id = widget_id_of(&*button_bottom_1);
-                        let button_bottom_2_id = widget_id_of(&*button_bottom_2);
-                        let mut out0 = ResourceState::NONE;
-                        let mut out1 = ResourceState::NONE;
-                        let mut out2 = ResourceState::NONE;
-                        let mut runs = [widget_ref(button_bottom_0), widget_ref(button_bottom_1), widget_ref(button_bottom_2)];
-                        container.stack_widgets(results, SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::BottomToTop, &mut runs);
-                        out0 = results.state(button_bottom_0_id);
-                        out1 = results.state(button_bottom_1_id);
-                        out2 = results.state(button_bottom_2_id);
-                        if out0.is_submitted() {
-                            logs.push("Bottom->Top: call 1");
-                        }
-                        if out1.is_submitted() {
-                            logs.push("Bottom->Top: call 2");
-                        }
-                        if out2.is_submitted() {
-                            logs.push("Bottom->Top: call 3");
-                        }
-                    });
-                });
+                if results.state_of(&*button_top_0).is_submitted() {
+                    logs.push("Top->Bottom: call 1");
+                }
+                if results.state_of(&*button_top_1).is_submitted() {
+                    logs.push("Top->Bottom: call 2");
+                }
+                if results.state_of(&*button_top_2).is_submitted() {
+                    logs.push("Top->Bottom: call 3");
+                }
+                if results.state_of(&*button_bottom_0).is_submitted() {
+                    logs.push("Bottom->Top: call 1");
+                }
+                if results.state_of(&*button_bottom_1).is_submitted() {
+                    logs.push("Bottom->Top: call 2");
+                }
+                if results.state_of(&*button_bottom_2).is_submitted() {
+                    logs.push("Bottom->Top: call 3");
+                }
                 WindowState::Open
             },
         );
@@ -714,88 +722,63 @@ impl State {
                     button_grid_5,
                 ] = buttons;
                 let [row_weight_label, grid_weight_label] = weight_labels;
-
-                container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                    let mut __label_runs = [widget_ref(row_weight_label)];
-                    container.widgets(results, &mut __label_runs);
-                });
                 let row = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0), SizePolicy::Weight(3.0)];
-                let row_0_id = widget_id_of(&*button_row_0);
-                let row_1_id = widget_id_of(&*button_row_1);
-                let row_2_id = widget_id_of(&*button_row_2);
-                let mut row_out0 = ResourceState::NONE;
-                let mut row_out1 = ResourceState::NONE;
-                let mut row_out2 = ResourceState::NONE;
-                let mut row_runs = [widget_ref(button_row_0), widget_ref(button_row_1), widget_ref(button_row_2)];
-                container.row_widgets(results, &row, SizePolicy::Fixed(28), &mut row_runs);
-                row_out0 = results.state(row_0_id);
-                row_out1 = results.state(row_1_id);
-                row_out2 = results.state(row_2_id);
-                if row_out0.is_submitted() {
-                    logs.push("Weight row: 1");
-                }
-                if row_out1.is_submitted() {
-                    logs.push("Weight row: 2");
-                }
-                if row_out2.is_submitted() {
-                    logs.push("Weight row: 3");
-                }
+                let cols = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
+                let rows = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
 
-                container.with_row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |container| {
-                    let mut __label_runs = [widget_ref(grid_weight_label)];
-                    container.widgets(results, &mut __label_runs);
-                });
-                container.with_row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |container| {
-                    container.column(|container| {
-                        let cols = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
-                        let rows = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
-                        let grid_0_id = widget_id_of(&*button_grid_0);
-                        let grid_1_id = widget_id_of(&*button_grid_1);
-                        let grid_2_id = widget_id_of(&*button_grid_2);
-                        let grid_3_id = widget_id_of(&*button_grid_3);
-                        let grid_4_id = widget_id_of(&*button_grid_4);
-                        let grid_5_id = widget_id_of(&*button_grid_5);
-                        let mut grid_out0 = ResourceState::NONE;
-                        let mut grid_out1 = ResourceState::NONE;
-                        let mut grid_out2 = ResourceState::NONE;
-                        let mut grid_out3 = ResourceState::NONE;
-                        let mut grid_out4 = ResourceState::NONE;
-                        let mut grid_out5 = ResourceState::NONE;
-                        let mut grid_runs = [
-                            widget_ref(button_grid_0),
-                            widget_ref(button_grid_1),
-                            widget_ref(button_grid_2),
-                            widget_ref(button_grid_3),
-                            widget_ref(button_grid_4),
-                            widget_ref(button_grid_5),
-                        ];
-                        container.grid_widgets(results, &cols, &rows, &mut grid_runs);
-                        grid_out0 = results.state(grid_0_id);
-                        grid_out1 = results.state(grid_1_id);
-                        grid_out2 = results.state(grid_2_id);
-                        grid_out3 = results.state(grid_3_id);
-                        grid_out4 = results.state(grid_4_id);
-                        grid_out5 = results.state(grid_5_id);
-                        if grid_out0.is_submitted() {
-                            logs.push("Weight grid: 1");
-                        }
-                        if grid_out1.is_submitted() {
-                            logs.push("Weight grid: 2");
-                        }
-                        if grid_out2.is_submitted() {
-                            logs.push("Weight grid: 3");
-                        }
-                        if grid_out3.is_submitted() {
-                            logs.push("Weight grid: 4");
-                        }
-                        if grid_out4.is_submitted() {
-                            logs.push("Weight grid: 5");
-                        }
-                        if grid_out5.is_submitted() {
-                            logs.push("Weight grid: 6");
-                        }
+                container.build_tree(results, |tree| {
+                    tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
+                        tree.widget(row_weight_label);
+                    });
+                    tree.row(&row, SizePolicy::Fixed(28), |tree| {
+                        tree.widget(button_row_0);
+                        tree.widget(button_row_1);
+                        tree.widget(button_row_2);
+                    });
+                    tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |tree| {
+                        tree.widget(grid_weight_label);
+                    });
+                    tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |tree| {
+                        tree.column(|tree| {
+                            tree.grid(&cols, &rows, |tree| {
+                                tree.widget(button_grid_0);
+                                tree.widget(button_grid_1);
+                                tree.widget(button_grid_2);
+                                tree.widget(button_grid_3);
+                                tree.widget(button_grid_4);
+                                tree.widget(button_grid_5);
+                            });
+                        });
                     });
                 });
+
+                if results.state_of(&*button_row_0).is_submitted() {
+                    logs.push("Weight row: 1");
+                }
+                if results.state_of(&*button_row_1).is_submitted() {
+                    logs.push("Weight row: 2");
+                }
+                if results.state_of(&*button_row_2).is_submitted() {
+                    logs.push("Weight row: 3");
+                }
+                if results.state_of(&*button_grid_0).is_submitted() {
+                    logs.push("Weight grid: 1");
+                }
+                if results.state_of(&*button_grid_1).is_submitted() {
+                    logs.push("Weight grid: 2");
+                }
+                if results.state_of(&*button_grid_2).is_submitted() {
+                    logs.push("Weight grid: 3");
+                }
+                if results.state_of(&*button_grid_3).is_submitted() {
+                    logs.push("Weight grid: 4");
+                }
+                if results.state_of(&*button_grid_4).is_submitted() {
+                    logs.push("Weight grid: 5");
+                }
+                if results.state_of(&*button_grid_5).is_submitted() {
+                    logs.push("Weight grid: 6");
+                }
                 WindowState::Open
             },
         );
@@ -818,108 +801,17 @@ impl State {
 
             let mut buff = String::new();
             let fps = self.fps;
-
+            let mut button_logs: Vec<&'static str> = Vec::new();
+            let mut tree_logs: Vec<&'static str> = Vec::new();
             {
                 let window_header = &mut self.window_header;
                 let window_info_labels = &mut self.window_info_labels;
                 let window_info_values = &mut self.window_info_values;
-                Self::section(container, results, window_header, |container, results| {
-                    let [label_pos, label_size, label_fps] = window_info_labels;
-                    let [value_pos, value_size, value_fps] = window_info_values;
-                    let win_0 = container.rect();
-                    let row_widths = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
-                    buff.clear();
-                    buff.push_str(format!("{}, {}", win_0.x, win_0.y).as_str());
-                    value_pos.label.clear();
-                    value_pos.label.push_str(buff.as_str());
-                    let mut runs = [widget_ref(label_pos), widget_ref(value_pos)];
-                    container.row_widgets(results, &row_widths, SizePolicy::Auto, &mut runs);
-
-                    buff.clear();
-                    buff.push_str(format!("{}, {}", win_0.width, win_0.height).as_str());
-                    value_size.label.clear();
-                    value_size.label.push_str(buff.as_str());
-                    let mut runs = [widget_ref(label_size), widget_ref(value_size)];
-                    container.row_widgets(results, &row_widths, SizePolicy::Auto, &mut runs);
-
-                    buff.clear();
-                    buff.push_str(format!("{:.1}", fps).as_str());
-                    value_fps.label.clear();
-                    value_fps.label.push_str(buff.as_str());
-                    let mut runs = [widget_ref(label_fps), widget_ref(value_fps)];
-                    container.row_widgets(results, &row_widths, SizePolicy::Auto, &mut runs);
-                });
-            }
-            let mut button_logs: Vec<&'static str> = Vec::new();
-            {
                 let test_buttons_header = &mut self.test_buttons_header;
                 let test_buttons = &mut self.test_buttons;
                 let test_button_labels = &mut self.test_button_labels;
                 let open_popup = &mut self.open_popup;
                 let open_dialog = &mut self.open_dialog;
-                Self::section(container, results, test_buttons_header, |container, results| {
-                    let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
-                    let [button0, button1, button2, button3, button4, button5] = test_buttons;
-                    let [label0, label1, label2] = test_button_labels;
-                    let button0_id = widget_id_of(&*button0);
-                    let button1_id = widget_id_of(&*button1);
-                    let button2_id = widget_id_of(&*button2);
-                    let button3_id = widget_id_of(&*button3);
-                    let button4_id = widget_id_of(&*button4);
-                    let button5_id = widget_id_of(&*button5);
-                    let mut out_label0 = ResourceState::NONE;
-                    let mut out_btn0 = ResourceState::NONE;
-                    let mut out_btn1 = ResourceState::NONE;
-                    let mut out_label1 = ResourceState::NONE;
-                    let mut out_btn2 = ResourceState::NONE;
-                    let mut out_btn3 = ResourceState::NONE;
-                    let mut out_label2 = ResourceState::NONE;
-                    let mut out_btn4 = ResourceState::NONE;
-                    let mut out_btn5 = ResourceState::NONE;
-                    let mut runs = [
-                        widget_ref(label0),
-                        widget_ref(button0),
-                        widget_ref(button1),
-                        widget_ref(label1),
-                        widget_ref(button2),
-                        widget_ref(button3),
-                        widget_ref(label2),
-                        widget_ref(button4),
-                        widget_ref(button5),
-                    ];
-                    container.row_widgets(results, &button_widths, SizePolicy::Auto, &mut runs);
-                    out_btn0 = results.state(button0_id);
-                    out_btn1 = results.state(button1_id);
-                    out_btn2 = results.state(button2_id);
-                    out_btn3 = results.state(button3_id);
-                    out_btn4 = results.state(button4_id);
-                    out_btn5 = results.state(button5_id);
-
-                    if out_btn0.is_submitted() {
-                        button_logs.push("Pressed button 1");
-                    }
-                    if out_btn1.is_submitted() {
-                        button_logs.push("Pressed button 2");
-                    }
-                    if out_btn2.is_submitted() {
-                        button_logs.push("Pressed button 3");
-                    }
-                    if out_btn3.is_submitted() {
-                        *open_popup = true;
-                    }
-                    if out_btn4.is_submitted() {
-                        button_logs.push("Pressed button 4");
-                    }
-                    if out_btn5.is_submitted() {
-                        *open_dialog = true;
-                    }
-                });
-            }
-            for msg in button_logs {
-                self.write_log(msg);
-            }
-
-            {
                 let combo_header = &mut self.combo_header;
                 let combo_state = self.combo_state.as_mut().unwrap();
                 let combo_labels = [
@@ -928,23 +820,6 @@ impl State {
                     self.combo_items[2].label.as_str(),
                     self.combo_items[3].label.as_str(),
                 ];
-                Self::section(container, results, combo_header, |container, results| {
-                    container.stack(SizePolicy::Auto, |container| {
-                        combo_state.update_items(&combo_labels);
-                        let combo_id = widget_id_of(&*combo_state);
-                        let mut __runs = [widget_ref(combo_state)];
-                        container.widgets(results, &mut __runs);
-                        let res = results.state(combo_id);
-                        combo_anchor = Some(combo_state.anchor());
-                        if res.is_submitted() {
-                            combo_state.open = !combo_state.open;
-                        }
-                    });
-                });
-            }
-
-            let mut tree_logs: Vec<&'static str> = Vec::new();
-            {
                 let tree_and_text_header = &mut self.tree_and_text_header;
                 let test1_tn = &mut self.test1_tn;
                 let test1a_tn = &mut self.test1a_tn;
@@ -954,187 +829,272 @@ impl State {
                 let tree_buttons = &mut self.tree_buttons;
                 let checkboxes = &mut self.checkboxes;
                 let tree_labels = &mut self.tree_labels;
-                Self::section(container, results, tree_and_text_header, |container, results| {
-                    let widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
-                    container.with_row(&widths, SizePolicy::Auto, |container| {
-                        container.column(|container| {
-                            Self::tree_section(container, results, test1_tn, |container, results| {
-                                Self::tree_section(container, results, test1a_tn, |container, results| {
-                                    let [label_hello, label_world] = tree_labels;
-                                    let mut runs = [widget_ref(label_hello), widget_ref(label_world)];
-                                    container.widgets(results, &mut runs);
-                                });
-                                Self::tree_section(container, results, test1b_tn, |container, results| {
-                                    let (button0, button1) = {
-                                        let (head, tail) = tree_buttons.split_at_mut(1);
-                                        (&mut head[0], &mut tail[0])
-                                    };
-                                    let button0_id = widget_id_of(&*button0);
-                                    let button1_id = widget_id_of(&*button1);
-                                    let mut out0 = ResourceState::NONE;
-                                    let mut out1 = ResourceState::NONE;
-                                    let mut runs = [widget_ref(button0), widget_ref(button1)];
-                                    container.widgets(results, &mut runs);
-                                    out0 = results.state(button0_id);
-                                    out1 = results.state(button1_id);
-                                    if out0.is_submitted() {
-                                        tree_logs.push("Pressed button 1");
-                                    }
-                                    if out1.is_submitted() {
-                                        tree_logs.push("Pressed button 2");
-                                    }
-                                });
-                            });
-                            Self::tree_section(container, results, test2_tn, |container, results| {
-                                let (button2, button3, button4, button5) = {
-                                    let (_, tail) = tree_buttons.split_at_mut(2);
-                                    let (b2_slice, tail) = tail.split_at_mut(1);
-                                    let (b3_slice, tail) = tail.split_at_mut(1);
-                                    let (b4_slice, b5_slice) = tail.split_at_mut(1);
-                                    (&mut b2_slice[0], &mut b3_slice[0], &mut b4_slice[0], &mut b5_slice[0])
-                                };
-                                let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
-                                let button2_id = widget_id_of(&*button2);
-                                let button3_id = widget_id_of(&*button3);
-                                let button4_id = widget_id_of(&*button4);
-                                let button5_id = widget_id_of(&*button5);
-                                let mut out2 = ResourceState::NONE;
-                                let mut out3 = ResourceState::NONE;
-                                let mut out4 = ResourceState::NONE;
-                                let mut out5 = ResourceState::NONE;
-                                let mut runs = [
-                                    widget_ref(button2),
-                                    widget_ref(button3),
-                                    widget_ref(button4),
-                                    widget_ref(button5),
-                                ];
-                                container.row_widgets(results, &tree_button_widths, SizePolicy::Auto, &mut runs);
-                                out2 = results.state(button2_id);
-                                out3 = results.state(button3_id);
-                                out4 = results.state(button4_id);
-                                out5 = results.state(button5_id);
-                                if out2.is_submitted() {
-                                    tree_logs.push("Pressed button 3");
-                                }
-                                if out3.is_submitted() {
-                                    tree_logs.push("Pressed button 4");
-                                }
-                                if out4.is_submitted() {
-                                    tree_logs.push("Pressed button 5");
-                                }
-                                if out5.is_submitted() {
-                                    tree_logs.push("Pressed button 6");
-                                }
-                            });
-                            Self::tree_section(container, results, test3_tn, |container, results| {
-                                let (checkbox0, checkbox1, checkbox2) = {
-                                    let (head, tail) = checkboxes.split_at_mut(1);
-                                    let (mid, tail) = tail.split_at_mut(1);
-                                    (&mut head[0], &mut mid[0], &mut tail[0])
-                                };
-                                let mut runs = [
-                                    widget_ref(checkbox0),
-                                    widget_ref(checkbox1),
-                                    widget_ref(checkbox2),
-                                ];
-                                container.widgets(results, &mut runs);
-                            });
-                        });
-                        container.column(|container| {
-                            container.stack(SizePolicy::Auto, |container| {
-                                container.text_with_wrap(
-                                    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.",
-                                    TextWrap::Word,
-                                );
-                            });
-                        });
-                    });
-                });
-            }
-            for msg in tree_logs {
-                self.write_log(msg);
-            }
-
-            {
                 let text_area_header = &mut self.text_area_header;
                 let text_area = &mut self.text_area;
-                Self::section(container, results, text_area_header, |container, results| {
-                    container.stack(SizePolicy::Fixed(120), |container| {
-                        let mut __runs = [widget_ref(text_area)];
-                        container.widgets(results, &mut __runs);
-                    });
-                });
-            }
-
-            {
                 let background_header = &mut self.background_header;
                 let bg = &mut self.bg;
                 let bg_sliders = &mut self.bg_sliders;
                 let background_labels = &mut self.background_labels;
-                Self::section(container, results, background_header, |container, results| {
-                    let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
-                    container.with_row(&background_widths, SizePolicy::Fixed(74), |container| {
-                        let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
-                        container.column(|container| {
-                            let (slider_red, slider_green, slider_blue) = {
-                                let (head, tail) = bg_sliders.split_at_mut(1);
-                                let (mid, tail) = tail.split_at_mut(1);
-                                (&mut head[0], &mut mid[0], &mut tail[0])
-                            };
-                            let [label_red, label_green, label_blue] = background_labels;
-
-                            slider_red.value = bg[0];
-                            slider_green.value = bg[1];
-                            slider_blue.value = bg[2];
-
-                            let mut runs = [
-                                widget_ref(label_red),
-                                widget_ref(slider_red),
-                                widget_ref(label_green),
-                                widget_ref(slider_green),
-                                widget_ref(label_blue),
-                                widget_ref(slider_blue),
-                            ];
-                            container.row_widgets(results, &slider_row, SizePolicy::Auto, &mut runs);
-                            bg[0] = slider_red.value;
-                            bg[1] = slider_green.value;
-                            bg[2] = slider_blue.value;
-                        });
-                        let r: Recti = container.next_cell();
-                        container.draw_rect(r, color(bg[0] as u8, bg[1] as u8, bg[2] as u8, 255));
-                        let mut buff = String::new();
-                        buff.push_str(format!("#{:02X}{:02X}{:02X}", bg[0] as u8, bg[1] as u8, bg[2] as u8).as_str());
-                        container.draw_control_text(buff.as_str(), r, ControlColor::Text, WidgetOption::ALIGN_CENTER);
-                    });
-                });
-            }
-
-            {
                 let slot_header = &mut self.slot_header;
                 let slot_buttons = &mut self.slot_buttons;
                 let external_image_button = &mut self.external_image_button;
-                Self::section(container, results, slot_header, |container, results| {
-                    let (slot0, slot1, slot2, slot3) = {
-                        let (s0, rest) = slot_buttons.split_at_mut(1);
-                        let (s1, rest) = rest.split_at_mut(1);
-                        let (s2, s3) = rest.split_at_mut(1);
-                        (&mut s0[0], &mut s1[0], &mut s2[0], &mut s3[0])
-                    };
-                    container.stack(SizePolicy::Fixed(67), |container| {
-                        let mut runs = [widget_ref(slot0), widget_ref(slot1), widget_ref(slot2)];
-                        container.widgets(results, &mut runs);
-                        if let Some(button) = external_image_button.as_mut() {
-                            container.stack_with_width(SizePolicy::Fixed(256), SizePolicy::Fixed(256), |ctx| {
-                                let mut runs = [widget_ref(button)];
-                                ctx.widgets(results, &mut runs);
-                            });
-                        }
+                container.build_tree(results, |tree| {
+                    Self::section(tree, window_header, |tree| {
+                        tree.run(|container, results| {
+                            let [label_pos, label_size, label_fps] = window_info_labels;
+                            let [value_pos, value_size, value_fps] = window_info_values;
+                            let win_0 = container.rect();
+                            let row_widths = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
+                            buff.clear();
+                            buff.push_str(format!("{}, {}", win_0.x, win_0.y).as_str());
+                            value_pos.label.clear();
+                            value_pos.label.push_str(buff.as_str());
+                            let mut runs = [widget_ref(label_pos), widget_ref(value_pos)];
+                            container.row_widgets(results, &row_widths, SizePolicy::Auto, &mut runs);
+
+                            buff.clear();
+                            buff.push_str(format!("{}, {}", win_0.width, win_0.height).as_str());
+                            value_size.label.clear();
+                            value_size.label.push_str(buff.as_str());
+                            let mut runs = [widget_ref(label_size), widget_ref(value_size)];
+                            container.row_widgets(results, &row_widths, SizePolicy::Auto, &mut runs);
+
+                            buff.clear();
+                            buff.push_str(format!("{:.1}", fps).as_str());
+                            value_fps.label.clear();
+                            value_fps.label.push_str(buff.as_str());
+                            let mut runs = [widget_ref(label_fps), widget_ref(value_fps)];
+                            container.row_widgets(results, &row_widths, SizePolicy::Auto, &mut runs);
+                        });
                     });
-                    container.stack(SizePolicy::Fixed(67), |container| {
-                        let mut runs = [widget_ref(slot3)];
-                        container.widgets(results, &mut runs);
+
+                    Self::section(tree, test_buttons_header, |tree| {
+                        tree.run(|container, results| {
+                            let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
+                            let [button0, button1, button2, button3, button4, button5] = test_buttons;
+                            let [label0, label1, label2] = test_button_labels;
+                            let button0_id = widget_id_of(&*button0);
+                            let button1_id = widget_id_of(&*button1);
+                            let button2_id = widget_id_of(&*button2);
+                            let button3_id = widget_id_of(&*button3);
+                            let button4_id = widget_id_of(&*button4);
+                            let button5_id = widget_id_of(&*button5);
+                            let mut runs = [
+                                widget_ref(label0),
+                                widget_ref(button0),
+                                widget_ref(button1),
+                                widget_ref(label1),
+                                widget_ref(button2),
+                                widget_ref(button3),
+                                widget_ref(label2),
+                                widget_ref(button4),
+                                widget_ref(button5),
+                            ];
+                            container.row_widgets(results, &button_widths, SizePolicy::Auto, &mut runs);
+
+                            if results.state(button0_id).is_submitted() {
+                                button_logs.push("Pressed button 1");
+                            }
+                            if results.state(button1_id).is_submitted() {
+                                button_logs.push("Pressed button 2");
+                            }
+                            if results.state(button2_id).is_submitted() {
+                                button_logs.push("Pressed button 3");
+                            }
+                            if results.state(button3_id).is_submitted() {
+                                *open_popup = true;
+                            }
+                            if results.state(button4_id).is_submitted() {
+                                button_logs.push("Pressed button 4");
+                            }
+                            if results.state(button5_id).is_submitted() {
+                                *open_dialog = true;
+                            }
+                        });
+                    });
+
+                    Self::section(tree, combo_header, |tree| {
+                        tree.run(|container, results| {
+                            container.stack(SizePolicy::Auto, |container| {
+                                combo_state.update_items(&combo_labels);
+                                let combo_id = widget_id_of(&*combo_state);
+                                let mut __runs = [widget_ref(combo_state)];
+                                container.widgets(results, &mut __runs);
+                                let res = results.state(combo_id);
+                                combo_anchor = Some(combo_state.anchor());
+                                if res.is_submitted() {
+                                    combo_state.open = !combo_state.open;
+                                }
+                            });
+                        });
+                    });
+
+                    Self::section(tree, tree_and_text_header, |tree| {
+                        tree.run(|container, results| {
+                            let widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
+                            container.with_row(&widths, SizePolicy::Auto, |container| {
+                                container.column(|container| {
+                                    Self::legacy_tree_section(container, results, test1_tn, |container, results| {
+                                        Self::legacy_tree_section(container, results, test1a_tn, |container, results| {
+                                            let [label_hello, label_world] = tree_labels;
+                                            let mut runs = [widget_ref(label_hello), widget_ref(label_world)];
+                                            container.widgets(results, &mut runs);
+                                        });
+                                        Self::legacy_tree_section(container, results, test1b_tn, |container, results| {
+                                            let (button0, button1) = {
+                                                let (head, tail) = tree_buttons.split_at_mut(1);
+                                                (&mut head[0], &mut tail[0])
+                                            };
+                                            let button0_id = widget_id_of(&*button0);
+                                            let button1_id = widget_id_of(&*button1);
+                                            let mut runs = [widget_ref(button0), widget_ref(button1)];
+                                            container.widgets(results, &mut runs);
+                                            if results.state(button0_id).is_submitted() {
+                                                tree_logs.push("Pressed button 1");
+                                            }
+                                            if results.state(button1_id).is_submitted() {
+                                                tree_logs.push("Pressed button 2");
+                                            }
+                                        });
+                                    });
+                                    Self::legacy_tree_section(container, results, test2_tn, |container, results| {
+                                        let (button2, button3, button4, button5) = {
+                                            let (_, tail) = tree_buttons.split_at_mut(2);
+                                            let (b2_slice, tail) = tail.split_at_mut(1);
+                                            let (b3_slice, tail) = tail.split_at_mut(1);
+                                            let (b4_slice, b5_slice) = tail.split_at_mut(1);
+                                            (&mut b2_slice[0], &mut b3_slice[0], &mut b4_slice[0], &mut b5_slice[0])
+                                        };
+                                        let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
+                                        let button2_id = widget_id_of(&*button2);
+                                        let button3_id = widget_id_of(&*button3);
+                                        let button4_id = widget_id_of(&*button4);
+                                        let button5_id = widget_id_of(&*button5);
+                                        let mut runs = [
+                                            widget_ref(button2),
+                                            widget_ref(button3),
+                                            widget_ref(button4),
+                                            widget_ref(button5),
+                                        ];
+                                        container.row_widgets(results, &tree_button_widths, SizePolicy::Auto, &mut runs);
+                                        if results.state(button2_id).is_submitted() {
+                                            tree_logs.push("Pressed button 3");
+                                        }
+                                        if results.state(button3_id).is_submitted() {
+                                            tree_logs.push("Pressed button 4");
+                                        }
+                                        if results.state(button4_id).is_submitted() {
+                                            tree_logs.push("Pressed button 5");
+                                        }
+                                        if results.state(button5_id).is_submitted() {
+                                            tree_logs.push("Pressed button 6");
+                                        }
+                                    });
+                                    Self::legacy_tree_section(container, results, test3_tn, |container, results| {
+                                        let (checkbox0, checkbox1, checkbox2) = {
+                                            let (head, tail) = checkboxes.split_at_mut(1);
+                                            let (mid, tail) = tail.split_at_mut(1);
+                                            (&mut head[0], &mut mid[0], &mut tail[0])
+                                        };
+                                        let mut runs = [
+                                            widget_ref(checkbox0),
+                                            widget_ref(checkbox1),
+                                            widget_ref(checkbox2),
+                                        ];
+                                        container.widgets(results, &mut runs);
+                                    });
+                                });
+                                container.column(|container| {
+                                    container.stack(SizePolicy::Auto, |container| {
+                                        container.text_with_wrap(
+                                            "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.",
+                                            TextWrap::Word,
+                                        );
+                                    });
+                                });
+                            });
+                        });
+                    });
+
+                    Self::section(tree, text_area_header, |tree| {
+                        tree.run(|container, results| {
+                            container.stack(SizePolicy::Fixed(120), |container| {
+                                let mut __runs = [widget_ref(text_area)];
+                                container.widgets(results, &mut __runs);
+                            });
+                        });
+                    });
+
+                    Self::section(tree, background_header, |tree| {
+                        tree.run(|container, results| {
+                            let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
+                            container.with_row(&background_widths, SizePolicy::Fixed(74), |container| {
+                                let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
+                                container.column(|container| {
+                                    let (slider_red, slider_green, slider_blue) = {
+                                        let (head, tail) = bg_sliders.split_at_mut(1);
+                                        let (mid, tail) = tail.split_at_mut(1);
+                                        (&mut head[0], &mut mid[0], &mut tail[0])
+                                    };
+                                    let [label_red, label_green, label_blue] = background_labels;
+
+                                    slider_red.value = bg[0];
+                                    slider_green.value = bg[1];
+                                    slider_blue.value = bg[2];
+
+                                    let mut runs = [
+                                        widget_ref(label_red),
+                                        widget_ref(slider_red),
+                                        widget_ref(label_green),
+                                        widget_ref(slider_green),
+                                        widget_ref(label_blue),
+                                        widget_ref(slider_blue),
+                                    ];
+                                    container.row_widgets(results, &slider_row, SizePolicy::Auto, &mut runs);
+                                    bg[0] = slider_red.value;
+                                    bg[1] = slider_green.value;
+                                    bg[2] = slider_blue.value;
+                                });
+                                let r: Recti = container.next_cell();
+                                container.draw_rect(r, color(bg[0] as u8, bg[1] as u8, bg[2] as u8, 255));
+                                let mut buff = String::new();
+                                buff.push_str(format!("#{:02X}{:02X}{:02X}", bg[0] as u8, bg[1] as u8, bg[2] as u8).as_str());
+                                container.draw_control_text(buff.as_str(), r, ControlColor::Text, WidgetOption::ALIGN_CENTER);
+                            });
+                        });
+                    });
+
+                    Self::section(tree, slot_header, |tree| {
+                        tree.run(|container, results| {
+                            let (slot0, slot1, slot2, slot3) = {
+                                let (s0, rest) = slot_buttons.split_at_mut(1);
+                                let (s1, rest) = rest.split_at_mut(1);
+                                let (s2, s3) = rest.split_at_mut(1);
+                                (&mut s0[0], &mut s1[0], &mut s2[0], &mut s3[0])
+                            };
+                            container.stack(SizePolicy::Fixed(67), |container| {
+                                let mut runs = [widget_ref(slot0), widget_ref(slot1), widget_ref(slot2)];
+                                container.widgets(results, &mut runs);
+                                if let Some(button) = external_image_button.as_mut() {
+                                    container.stack_with_width(SizePolicy::Fixed(256), SizePolicy::Fixed(256), |ctx| {
+                                        let mut runs = [widget_ref(button)];
+                                        ctx.widgets(results, &mut runs);
+                                    });
+                                }
+                            });
+                            container.stack(SizePolicy::Fixed(67), |container| {
+                                let mut runs = [widget_ref(slot3)];
+                                container.widgets(results, &mut runs);
+                            });
+                        });
                     });
                 });
+            }
+            for msg in button_logs {
+                self.write_log(msg);
+            }
+            for msg in tree_logs {
+                self.write_log(msg);
             }
             WindowState::Open
         });
@@ -1148,18 +1108,20 @@ impl State {
             }
 
             ctx.popup(popup, WidgetBehaviourOption::NO_SCROLL, |dropdown, results| {
-                dropdown.stack(SizePolicy::Auto, |dropdown| {
-                    for (idx, item) in combo_items.iter_mut().enumerate() {
-                        let item_id = widget_id_of(&*item);
-                        let mut __runs = [widget_ref(item)];
-                        dropdown.widgets(results, &mut __runs);
-                        if results.state(item_id).is_submitted() {
-                            combo_state.selected = idx;
-                            combo_changed = true;
-                            dropdown.set_focus(None);
+                dropdown.build_tree(results, |tree| {
+                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                        for item in combo_items.iter_mut() {
+                            tree.widget(item);
                         }
-                    }
+                    });
                 });
+                for (idx, item) in combo_items.iter().enumerate() {
+                    if results.state_of(item).is_submitted() {
+                        combo_state.selected = idx;
+                        combo_changed = true;
+                        dropdown.set_focus(None);
+                    }
+                }
                 if combo_changed { WindowState::Closed } else { WindowState::Open }
             });
 
@@ -1191,26 +1153,22 @@ impl State {
                 &mut self.popup_window.as_mut().unwrap().clone(),
                 WidgetBehaviourOption::NO_SCROLL,
                 |ctx, results| {
-                    ctx.stack(SizePolicy::Auto, |ctx| {
-                        let (button0, button1) = {
-                            let (head, tail) = popup_buttons.split_at_mut(1);
-                            (&mut head[0], &mut tail[0])
-                        };
-                        let button0_id = widget_id_of(&*button0);
-                        let button1_id = widget_id_of(&*button1);
-                        let mut out0 = ResourceState::NONE;
-                        let mut out1 = ResourceState::NONE;
-                        let mut runs = [widget_ref(button0), widget_ref(button1)];
-                        ctx.widgets(results, &mut runs);
-                        out0 = results.state(button0_id);
-                        out1 = results.state(button1_id);
-                        if out0.is_submitted() {
-                            popup_logs.push("Hello")
-                        }
-                        if out1.is_submitted() {
-                            popup_logs.push("World")
-                        }
+                    ctx.build_tree(results, |tree| {
+                        tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                            let (button0, button1) = {
+                                let (head, tail) = popup_buttons.split_at_mut(1);
+                                (&mut head[0], &mut tail[0])
+                            };
+                            tree.widget(button0);
+                            tree.widget(button1);
+                        });
                     });
+                    if results.state_of(&popup_buttons[0]).is_submitted() {
+                        popup_logs.push("Hello")
+                    }
+                    if results.state_of(&popup_buttons[1]).is_submitted() {
+                        popup_logs.push("World")
+                    }
                     WindowState::Open
                 },
             );

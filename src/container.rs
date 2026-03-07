@@ -709,12 +709,17 @@ impl Container {
         self.content_size
     }
 
-    fn node_scope<F: FnOnce(&mut Self)>(&mut self, results: &mut FrameResults, state: &mut Node, indent: bool, f: F) -> NodeStateValue {
+    fn run_node_scope(&mut self, results: &mut FrameResults, state: &mut Node) -> NodeStateValue {
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let r = self.next_widget_rect(state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
         let _ = self.handle_widget_in_rect(results, state, r, None, opt, bopt);
+        state.state
+    }
+
+    fn node_scope<F: FnOnce(&mut Self)>(&mut self, results: &mut FrameResults, state: &mut Node, indent: bool, f: F) -> NodeStateValue {
+        let node_state = self.run_node_scope(results, state);
         if state.state.is_expanded() {
             if indent {
                 let indent_size = self.style.as_ref().indent;
@@ -725,7 +730,7 @@ impl Container {
                 f(self);
             }
         }
-        state.state
+        node_state
     }
 
     /// Builds a collapsible header row that executes `f` when expanded.
@@ -1052,6 +1057,73 @@ impl Container {
         let bopt = widget.effective_behaviour_opt();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         self.handle_widget_in_rect(results, widget, rect, input, opt, bopt)
+    }
+
+    fn run_tree_nodes(&mut self, results: &mut FrameResults, nodes: &mut [WidgetTreeNode<'_>]) {
+        for node in nodes.iter_mut() {
+            self.run_tree_node(results, node);
+        }
+    }
+
+    fn run_tree_node(&mut self, results: &mut FrameResults, node: &mut WidgetTreeNode<'_>) {
+        let (kind, children) = node.parts_mut();
+        match kind {
+            WidgetTreeNodeKind::Widget { widget, .. } => {
+                let _ = self.handle_widget_raw(results, &mut **widget);
+            }
+            WidgetTreeNodeKind::Run { run } => run(self, results),
+            WidgetTreeNodeKind::Container { handle, opt, behaviour } => {
+                self.begin_panel(handle, *opt, *behaviour);
+                handle.with_mut(|container| {
+                    container.run_tree_nodes(results, children);
+                });
+                self.end_panel(handle);
+            }
+            WidgetTreeNodeKind::Header { state } => {
+                if self.run_node_scope(results, state).is_expanded() {
+                    self.run_tree_nodes(results, children);
+                }
+            }
+            WidgetTreeNodeKind::Tree { state } => {
+                if self.run_node_scope(results, state).is_expanded() {
+                    let indent_size = self.style.as_ref().indent;
+                    self.layout.adjust_indent(indent_size);
+                    self.run_tree_nodes(results, children);
+                    self.layout.adjust_indent(-indent_size);
+                }
+            }
+            WidgetTreeNodeKind::Row { widths, height } => {
+                self.with_row(widths, *height, |container| {
+                    container.run_tree_nodes(results, children);
+                });
+            }
+            WidgetTreeNodeKind::Grid { widths, heights } => {
+                self.with_grid(widths, heights, |container| {
+                    container.run_tree_nodes(results, children);
+                });
+            }
+            WidgetTreeNodeKind::Column => {
+                self.column(|container| {
+                    container.run_tree_nodes(results, children);
+                });
+            }
+            WidgetTreeNodeKind::Stack { width, height, direction } => {
+                self.stack_with_width_direction(*width, *height, *direction, |container| {
+                    container.run_tree_nodes(results, children);
+                });
+            }
+        }
+    }
+
+    /// Evaluates a prebuilt widget tree using the current container layout.
+    pub fn widget_tree(&mut self, results: &mut FrameResults, tree: &mut WidgetTree<'_>) {
+        self.run_tree_nodes(results, tree.roots_mut());
+    }
+
+    /// Builds a widget tree and evaluates it immediately.
+    pub fn build_tree<'a>(&mut self, results: &mut FrameResults, f: impl FnOnce(&mut WidgetTreeBuilder<'a>)) {
+        let mut tree = WidgetTreeBuilder::build(f);
+        self.widget_tree(results, &mut tree);
     }
 
     /// Evaluates each widget state using the current flow.
@@ -1495,6 +1567,42 @@ mod tests {
 
         assert!(results.state(button_a_id).is_none());
         assert!(results.state(button_b_id).is_none());
+    }
+
+    #[test]
+    fn widget_tree_records_leaf_states() {
+        let mut container = make_container();
+        let mut button_a = Button::new("A");
+        let mut button_b = Button::new("B");
+        let mut results = FrameResults::default();
+
+        container.build_tree(&mut results, |tree| {
+            tree.row(&[SizePolicy::Auto, SizePolicy::Auto], SizePolicy::Auto, |tree| {
+                tree.widget(&mut button_a);
+                tree.widget(&mut button_b);
+            });
+        });
+
+        assert!(results.state_of(&button_a).is_none());
+        assert!(results.state_of(&button_b).is_none());
+    }
+
+    #[test]
+    fn widget_tree_dispatches_panel_children() {
+        let mut parent = make_container();
+        let panel = make_panel_handle(&parent, "panel");
+        let mut button = Button::new("inside");
+        let mut results = FrameResults::default();
+
+        parent.build_tree(&mut results, |tree| {
+            tree.row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
+                tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                    tree.widget(&mut button);
+                });
+            });
+        });
+
+        assert!(results.state_of(&button).is_none());
     }
 
     #[test]

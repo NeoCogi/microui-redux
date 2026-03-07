@@ -26,9 +26,10 @@ fn main() {
                 ContainerOption::NONE,
                 WidgetBehaviourOption::NONE,
                 |container, results| {
-                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                        let mut __runs = [widget_ref(&mut state.hello_button)];
-                        container.widgets(results, &mut __runs);
+                    container.build_tree(results, |tree| {
+                        tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
+                            tree.widget(&mut state.hello_button);
+                        });
                     });
                     WindowState::Open
                 },

@@ -325,41 +325,33 @@ fn main() {
                     state.display.buf = state.calculator.display_text().to_string();
                     state.display.cursor = state.display.buf.len();
 
-                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Weight(DISPLAY_HEIGHT_WEIGHT), |container| {
-                        let mut __runs = [widget_ref(&mut state.display)];
-                        container.widgets(results, &mut __runs);
-                    });
-
-                    container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |container| {
-                        container.column(|container| {
-                            let columns = [
-                                SizePolicy::Weight(1.0),
-                                SizePolicy::Weight(1.0),
-                                SizePolicy::Weight(1.0),
-                                SizePolicy::Weight(1.0),
-                            ];
-                            let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
-                            container.with_grid(&columns, &rows, |container| {
-                                for idx in 0..state.buttons.len() {
-                                    let (clicked, action) = {
-                                        let button = &mut state.buttons[idx];
-                                        let button_id = widget_id_of(&button.widget);
-                                        (
-                                            {
-                                                let mut __runs = [widget_ref(&mut button.widget)];
-                                                container.widgets(results, &mut __runs);
-                                                results.state(button_id).is_submitted()
-                                            },
-                                            button.action,
-                                        )
-                                    };
-                                    if clicked {
-                                        state.calculator.apply(action);
+                    container.build_tree(results, |tree| {
+                        tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Weight(DISPLAY_HEIGHT_WEIGHT), |tree| {
+                            tree.widget(&mut state.display);
+                        });
+                        tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
+                            tree.column(|tree| {
+                                let columns = [
+                                    SizePolicy::Weight(1.0),
+                                    SizePolicy::Weight(1.0),
+                                    SizePolicy::Weight(1.0),
+                                    SizePolicy::Weight(1.0),
+                                ];
+                                let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
+                                tree.grid(&columns, &rows, |tree| {
+                                    for button in state.buttons.iter_mut() {
+                                        tree.widget(&mut button.widget);
                                     }
-                                }
+                                });
                             });
                         });
                     });
+
+                    for button in state.buttons.iter_mut() {
+                        if results.state_of(&button.widget).is_submitted() {
+                            state.calculator.apply(button.action);
+                        }
+                    }
 
                     WindowState::Open
                 },

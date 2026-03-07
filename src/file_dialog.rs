@@ -245,12 +245,83 @@ impl FileDialogState {
                 }
 
                 let toolbar_widths = [SizePolicy::Fixed(56), SizePolicy::Fixed(56), SizePolicy::Remainder(72), SizePolicy::Fixed(56)];
+
+                let style = cont.get_style();
+                let spacing = style.spacing.max(0);
+                let padding = style.padding.max(0);
+                let font_height = cont.atlas.get_font_height(style.font) as i32;
+                let vertical_pad = (padding / 2).max(1);
+                let control_height = font_height.saturating_add(vertical_pad.saturating_mul(2)).max(0);
+                // Reserve only enough space for "File name" row + action row + inter-row spacing.
+                let footer_reserve = control_height
+                    .saturating_mul(2)
+                    .saturating_add(spacing.saturating_mul(3))
+                    .saturating_add(padding);
+
+                let sidebar_width = (cont.body().width / 3).clamp(160, 260);
+                let pane_widths = [SizePolicy::Fixed(sidebar_width), SizePolicy::Remainder(0)];
+                let no_folder_items = folder_items.is_empty();
+                let no_file_items = file_items.is_empty();
+
+                let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
+                let button_width = 96;
+                let spacing = cont.get_style().spacing.max(0);
+                let trailing_buttons = button_width * 2 + spacing * 2;
+                let action_widths = [
+                    SizePolicy::Remainder(trailing_buttons),
+                    SizePolicy::Fixed(button_width),
+                    SizePolicy::Fixed(button_width),
+                ];
+                cont.build_tree(results, |tree| {
+                    tree.row(&toolbar_widths, SizePolicy::Auto, |tree| {
+                        tree.widget(up_button);
+                        tree.widget(home_button);
+                        tree.widget(path_box);
+                        tree.widget(go_button);
+                    });
+                    tree.row(&pane_widths, SizePolicy::Remainder(footer_reserve), |tree| {
+                        tree.container(folder_panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                                tree.widget(folders_label);
+                            });
+                            tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
+                                for item in folder_items.iter_mut() {
+                                    tree.widget(item);
+                                }
+                                if no_folder_items {
+                                    tree.widget(no_folders_label);
+                                }
+                            });
+                        });
+                        tree.container(file_panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                                tree.widget(files_label);
+                            });
+                            tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
+                                for item in file_items.iter_mut() {
+                                    tree.widget(item);
+                                }
+                                if no_file_items {
+                                    tree.widget(no_files_label);
+                                }
+                            });
+                        });
+                    });
+                    tree.row(&filename_widths, SizePolicy::Auto, |tree| {
+                        tree.widget(file_name_label);
+                        tree.widget(tmp_file_name);
+                    });
+                    tree.row(&action_widths, SizePolicy::Auto, |tree| {
+                        tree.widget(spacer_label);
+                        tree.widget(cancel_button);
+                        tree.widget(ok_button);
+                    });
+                });
+
                 let up_id = widget_id_of(&*up_button);
                 let home_id = widget_id_of(&*home_button);
                 let path_id = widget_id_of(&*path_box);
                 let go_id = widget_id_of(&*go_button);
-                let mut toolbar_runs = [widget_ref(up_button), widget_ref(home_button), widget_ref(path_box), widget_ref(go_button)];
-                cont.row_widgets(results, &toolbar_widths, SizePolicy::Auto, &mut toolbar_runs);
 
                 if results.state(up_id).is_submitted() {
                     if let Some(parent) = Path::new(current_working_directory.as_str()).parent() {
@@ -284,103 +355,27 @@ impl FileDialogState {
                     }
                 }
 
-                let style = cont.get_style();
-                let spacing = style.spacing.max(0);
-                let padding = style.padding.max(0);
-                let font_height = cont.atlas.get_font_height(style.font) as i32;
-                let vertical_pad = (padding / 2).max(1);
-                let control_height = font_height.saturating_add(vertical_pad.saturating_mul(2)).max(0);
-                // Reserve only enough space for "File name" row + action row + inter-row spacing.
-                let footer_reserve = control_height
-                    .saturating_mul(2)
-                    .saturating_add(spacing.saturating_mul(3))
-                    .saturating_add(padding);
+                for (index, item) in folder_items.iter().enumerate() {
+                    if results.state_of(item).is_submitted() {
+                        if let Some(path) = folders.get(index) {
+                            *current_working_directory = path.to_string();
+                            *selected_folder = Some(path.to_string());
+                            path_box.buf = current_working_directory.clone();
+                            needs_refresh = true;
+                        }
+                    }
+                }
 
-                let sidebar_width = (cont.body().width / 3).clamp(160, 260);
-                let pane_widths = [SizePolicy::Fixed(sidebar_width), SizePolicy::Remainder(0)];
-                cont.with_row(&pane_widths, SizePolicy::Remainder(footer_reserve), |cont| {
-                    cont.panel(folder_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
-                        container_handle.with_mut(|container| {
-                            container.stack(SizePolicy::Auto, |container| {
-                                let mut __label_runs = [widget_ref(folders_label)];
-                                container.widgets(results, &mut __label_runs);
-                            });
-                            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                                let mut refresh = false;
-                                for index in 0..folder_items.len() {
-                                    let submitted = {
-                                        let item = &mut folder_items[index];
-                                        let item_id = widget_id_of(&*item);
-                                        let mut __runs = [widget_ref(item)];
-                                        container.widgets(results, &mut __runs);
-                                        results.state(item_id).is_submitted()
-                                    };
-                                    if submitted {
-                                        if let Some(path) = folders.get(index) {
-                                            *current_working_directory = path.to_string();
-                                            *selected_folder = Some(path.to_string());
-                                            path_box.buf = current_working_directory.clone();
-                                        }
-                                        refresh = true;
-                                    }
-                                }
-                                if folder_items.is_empty() {
-                                    let mut __label_runs = [widget_ref(no_folders_label)];
-                                    container.widgets(results, &mut __label_runs);
-                                }
-                                if refresh {
-                                    needs_refresh = true;
-                                }
-                            });
-                        });
-                    });
-                    cont.panel(file_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |container_handle| {
-                        container_handle.with_mut(|container| {
-                            container.stack(SizePolicy::Auto, |container| {
-                                let mut __label_runs = [widget_ref(files_label)];
-                                container.widgets(results, &mut __label_runs);
-                            });
-                            container.with_row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |container| {
-                                if !file_items.is_empty() {
-                                    for index in 0..file_items.len() {
-                                        let submitted = {
-                                            let item = &mut file_items[index];
-                                            let item_id = widget_id_of(&*item);
-                                            let mut __runs = [widget_ref(item)];
-                                            container.widgets(results, &mut __runs);
-                                            results.state(item_id).is_submitted()
-                                        };
-                                        if submitted {
-                                            if let Some(name) = files.get(index) {
-                                                tmp_file_name.buf = name.to_string();
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    let mut __label_runs = [widget_ref(no_files_label)];
-                                    container.widgets(results, &mut __label_runs);
-                                }
-                            });
-                        });
-                    });
-                });
+                for (index, item) in file_items.iter().enumerate() {
+                    if results.state_of(item).is_submitted() {
+                        if let Some(name) = files.get(index) {
+                            tmp_file_name.buf = name.to_string();
+                        }
+                    }
+                }
 
-                let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
-                let mut filename_runs = [widget_ref(file_name_label), widget_ref(tmp_file_name)];
-                cont.row_widgets(results, &filename_widths, SizePolicy::Auto, &mut filename_runs);
-
-                let button_width = 96;
-                let spacing = cont.get_style().spacing.max(0);
-                let trailing_buttons = button_width * 2 + spacing * 2;
-                let action_widths = [
-                    SizePolicy::Remainder(trailing_buttons),
-                    SizePolicy::Fixed(button_width),
-                    SizePolicy::Fixed(button_width),
-                ];
                 let cancel_id = widget_id_of(&*cancel_button);
                 let ok_id = widget_id_of(&*ok_button);
-                let mut action_runs = [widget_ref(spacer_label), widget_ref(cancel_button), widget_ref(ok_button)];
-                cont.row_widgets(results, &action_widths, SizePolicy::Auto, &mut action_runs);
                 if results.state(cancel_id).is_submitted() {
                     *file_name = None;
                     *file_path = None;
