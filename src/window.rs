@@ -190,7 +190,6 @@ impl Window {
             if !opt.has_no_close() {
                 let close_id = widget_id_of(close_state);
                 let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
-                tr.width -= r.width;
                 let color = title_text_color;
                 container.draw_icon(CLOSE_ICON, r, color);
                 let control_state = (close_state.opt, close_state.bopt);

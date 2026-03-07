@@ -1,0 +1,183 @@
+//! Shared widget execution context built on top of draw command recording.
+
+use std::rc::Rc;
+
+use rs_math3d::{Color4b, Recti, Vec2i};
+
+use crate::atlas::{AtlasHandle, FontId, IconId, SlotId};
+use crate::container::Command;
+use crate::draw_context::DrawCtx;
+use crate::input::{Clip, ControlColor, ControlState, InputSnapshot, WidgetOption};
+use crate::style::{Color, Image, Style};
+use crate::widget::WidgetId;
+
+/// Shared context passed to widget handlers.
+pub struct WidgetCtx<'a> {
+    id: WidgetId,
+    rect: Recti,
+    draw: DrawCtx<'a>,
+    focus: &'a mut Option<WidgetId>,
+    updated_focus: &'a mut bool,
+    in_hover_root: bool,
+    input: Option<Rc<InputSnapshot>>,
+    default_input: InputSnapshot,
+}
+
+impl<'a> WidgetCtx<'a> {
+    fn localize_input(rect: Recti, input: Option<Rc<InputSnapshot>>) -> Option<Rc<InputSnapshot>> {
+        input.map(|input| {
+            let mut localized = input.as_ref().clone();
+            localized.mouse_pos = localized.mouse_pos - Vec2i::new(rect.x, rect.y);
+            Rc::new(localized)
+        })
+    }
+
+    fn local_rect_for(&self, rect: Recti) -> Recti {
+        Recti::new(rect.x - self.rect.x, rect.y - self.rect.y, rect.width, rect.height)
+    }
+
+    /// Creates a widget context for the given widget ID and rectangle.
+    pub(crate) fn new(
+        id: WidgetId,
+        rect: Recti,
+        commands: &'a mut Vec<Command>,
+        clip_stack: &'a mut Vec<Recti>,
+        style: &'a Style,
+        atlas: &'a AtlasHandle,
+        focus: &'a mut Option<WidgetId>,
+        updated_focus: &'a mut bool,
+        in_hover_root: bool,
+        input: Option<Rc<InputSnapshot>>,
+    ) -> Self {
+        Self {
+            id,
+            rect,
+            draw: DrawCtx::new(commands, clip_stack, style, atlas),
+            focus,
+            updated_focus,
+            in_hover_root,
+            input: Self::localize_input(rect, input),
+            default_input: InputSnapshot::default(),
+        }
+    }
+
+    /// Returns the widget identity pointer.
+    pub fn id(&self) -> WidgetId {
+        self.id
+    }
+
+    /// Returns the widget rectangle.
+    pub fn rect(&self) -> Recti {
+        self.rect
+    }
+
+    /// Returns the widget-local input snapshot for this widget, if provided.
+    pub fn input(&self) -> Option<&InputSnapshot> {
+        self.input.as_deref()
+    }
+
+    pub(crate) fn input_or_default(&self) -> &InputSnapshot {
+        self.input.as_deref().unwrap_or(&self.default_input)
+    }
+
+    /// Sets focus to this widget for the current frame.
+    pub fn set_focus(&mut self) {
+        *self.focus = Some(self.id);
+        *self.updated_focus = true;
+    }
+
+    /// Clears focus from the current widget.
+    pub fn clear_focus(&mut self) {
+        *self.focus = None;
+        *self.updated_focus = true;
+    }
+
+    /// Pushes a new clip rectangle onto the stack.
+    pub fn push_clip_rect(&mut self, rect: Recti) {
+        self.draw.push_clip_rect(rect);
+    }
+
+    /// Pops the current clip rectangle.
+    pub fn pop_clip_rect(&mut self) {
+        self.draw.pop_clip_rect();
+    }
+
+    /// Executes `f` with the provided clip rect applied.
+    pub fn with_clip<F: FnOnce(&mut Self)>(&mut self, rect: Recti, f: F) {
+        self.push_clip_rect(rect);
+        f(self);
+        self.pop_clip_rect();
+    }
+
+    fn current_clip_rect(&self) -> Recti {
+        self.draw.current_clip_rect()
+    }
+
+    pub(crate) fn style(&self) -> &Style {
+        self.draw.style()
+    }
+
+    pub(crate) fn atlas(&self) -> &AtlasHandle {
+        self.draw.atlas()
+    }
+
+    /// Sets the current clip rectangle for subsequent draw commands.
+    pub fn set_clip(&mut self, rect: Recti) {
+        self.draw.set_clip(rect);
+    }
+
+    /// Returns the clipping relation between `r` and the current clip rect.
+    pub fn check_clip(&self, r: Recti) -> Clip {
+        self.draw.check_clip(r)
+    }
+
+    pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
+        self.draw.draw_rect(rect, color);
+    }
+
+    /// Draws a 1-pixel box outline using the supplied color.
+    pub fn draw_box(&mut self, r: Recti, color: Color) {
+        self.draw.draw_box(r, color);
+    }
+
+    pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
+        self.draw.draw_text(font, text, pos, color);
+    }
+
+    pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
+        self.draw.draw_icon(id, rect, color);
+    }
+
+    pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
+        self.draw.push_image(image, rect, color);
+    }
+
+    pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
+        self.draw.draw_slot_with_function(id, rect, color, f);
+    }
+
+    pub(crate) fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
+        self.draw.draw_frame(rect, colorid);
+    }
+
+    pub(crate) fn draw_widget_frame(&mut self, control: &ControlState, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        self.draw.draw_widget_frame(control.focused, control.hovered, rect, colorid, opt);
+    }
+
+    pub(crate) fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        self.draw.draw_control_text(text, rect, colorid, opt);
+    }
+
+    pub(crate) fn mouse_over(&self, rect: Recti) -> bool {
+        let input = match self.input.as_ref() {
+            Some(input) => input,
+            None => return false,
+        };
+        if !self.in_hover_root {
+            return false;
+        }
+        let local_rect = self.local_rect_for(rect);
+        let clip_rect = self.local_rect_for(self.current_clip_rect());
+        local_rect.contains(&input.mouse_pos) && clip_rect.contains(&input.mouse_pos)
+    }
+}
