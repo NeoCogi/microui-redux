@@ -133,6 +133,8 @@ impl FileDialogState {
     }
 
     fn refresh_entries(&mut self) {
+        // Re-snapshot the filesystem, then rebuild both the retained widget
+        // handles and the tree shape so list length changes stay in sync.
         Self::list_folders_files(Path::new(&self.current_working_directory), &mut self.folders, &mut self.files);
         self.rebuild_item_states();
         self.rebuild_tree();
@@ -144,11 +146,15 @@ impl FileDialogState {
         self.folder_items.clear();
         self.folder_items.reserve(self.folders.len());
         for f in &self.folders {
+            // Show the injected parent entry using the conventional ".." label
+            // while preserving the full path internally for navigation.
             let label = if parent_path.as_deref() == Some(f.as_str()) {
                 ".."
             } else {
                 Path::new(f).file_name().and_then(|name| name.to_str()).unwrap_or(f.as_str())
             };
+            // Mirror the currently selected directory in the icon so the list
+            // provides a visual cue before the next refresh swaps contents.
             let icon = if self.selected_folder.as_deref() == Some(f.as_str()) {
                 OPEN_FOLDER_16_ICON
             } else {
@@ -191,6 +197,8 @@ impl FileDialogState {
 
         self.tree = WidgetTreeBuilder::build(|tree| {
             tree.run(move |cont, results| {
+                // The overall scaffold is retained, but these row widths depend
+                // on the dialog's current body size so they are derived at run time.
                 let toolbar_widths = [SizePolicy::Fixed(56), SizePolicy::Fixed(56), SizePolicy::Remainder(72), SizePolicy::Fixed(56)];
 
                 let style = cont.get_style();
@@ -334,6 +342,8 @@ impl FileDialogState {
     pub fn eval<R: Renderer>(&mut self, ctx: &mut Context<R>) {
         let mut needs_refresh = false;
         {
+            // Split borrows up front so the dialog closure can read/write the
+            // state it needs without fighting the borrow checker.
             let win = &mut self.win;
             let folders = &self.folders;
             let files = &self.files;
@@ -355,6 +365,8 @@ impl FileDialogState {
             ctx.dialog(win, ContainerOption::NONE, WidgetBehaviourOption::NO_SCROLL, |cont, results| {
                 let mut dialog_state = WindowState::Open;
 
+                // Keep the textbox aligned with the canonical cwd when navigation
+                // came from buttons or list clicks instead of typed input.
                 if path_box.borrow().buf != *current_working_directory {
                     path_box.borrow_mut().buf = current_working_directory.clone();
                 }
@@ -394,6 +406,8 @@ impl FileDialogState {
                     }
                 }
 
+                // Folder selection navigates immediately and triggers a full
+                // item/tree rebuild after the dialog closure returns.
                 for (index, item) in folder_items.iter().enumerate() {
                     if results.state_of_handle(item).is_submitted() {
                         if let Some(path) = folders.get(index) {
@@ -405,6 +419,8 @@ impl FileDialogState {
                     }
                 }
 
+                // File selection only primes the filename field; the dialog
+                // still waits for an explicit Open/Enter confirmation.
                 for (index, item) in file_items.iter().enumerate() {
                     if results.state_of_handle(item).is_submitted() {
                         if let Some(name) = files.get(index) {
@@ -440,6 +456,8 @@ impl FileDialogState {
         }
 
         if needs_refresh {
+            // Defer the rebuild until the dialog callback is done so all borrows
+            // against the current tree and item handles have been released.
             self.refresh_entries();
         }
     }
