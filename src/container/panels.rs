@@ -133,7 +133,7 @@ impl Container {
                     self.in_hover_root,
                     None,
                 );
-                let _ = self.scrollbar_y_state.handle(&mut ctx, &control);
+                let _ = self.scrollbar_y_state.render(&mut ctx, &control);
             }
             if control.active {
                 let delta = scrollbar_drag_delta(ScrollAxis::Vertical, self.input.borrow().mouse_delta, cs.y, base);
@@ -165,7 +165,7 @@ impl Container {
                     self.in_hover_root,
                     None,
                 );
-                let _ = self.scrollbar_x_state.handle(&mut ctx, &control);
+                let _ = self.scrollbar_x_state.render(&mut ctx, &control);
             }
             if control.active {
                 let delta = scrollbar_drag_delta(ScrollAxis::Horizontal, self.input.borrow().mouse_delta, cs.x, base);

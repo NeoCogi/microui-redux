@@ -63,21 +63,51 @@ use crate::style::Style;
 use crate::widget_ctx::WidgetCtx;
 use crate::widget_tree::WidgetHandle;
 
+/// Committed retained-state view passed into the widget reconcile phase.
+///
+/// This is the previous frame's published interaction result for the widget.
+#[derive(Copy, Clone, Debug)]
+pub struct CommittedWidgetState {
+    /// Interaction result published at the end of the previous frame.
+    pub previous_result: ResourceState,
+}
+
+impl CommittedWidgetState {
+    /// Creates a committed retained-state view from the previous frame result.
+    pub const fn new(previous_result: ResourceState) -> Self {
+        Self { previous_result }
+    }
+}
+
+impl Default for CommittedWidgetState {
+    fn default() -> Self {
+        Self::new(ResourceState::NONE)
+    }
+}
+
 /// Trait implemented by persistent widget state structures.
-/// `handle` is invoked with a `WidgetCtx` and precomputed `ControlState`.
+///
+/// Widgets participate in three retained phases:
+/// 1. `reconcile`, which consumes previously committed frame state.
+/// 2. `measure`, which reports intrinsic size for the current frame's layout pass.
+/// 3. `render`, which records draw commands and produces the next frame result.
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
     /// Returns the behaviour options for this state.
     fn behaviour_opt(&self) -> &WidgetBehaviourOption;
-    /// Returns the preferred widget size for automatic layout resolution.
+    /// Applies previously committed frame state to the persistent widget state.
     ///
-    /// Called before [`Widget::handle`] each frame so the layout manager can allocate a cell.
+    /// This runs before measurement so retained state changes can influence layout.
+    fn reconcile(&mut self, _committed: CommittedWidgetState) {}
+    /// Returns the intrinsic widget size for the current frame's layout pass.
+    ///
+    /// Called after [`Widget::reconcile`] each frame so the layout manager can allocate a cell.
     /// `avail` reports the current container body size visible to the widget.
     /// Values less than or equal to zero are treated as "use layout defaults" for that axis.
-    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
-    /// Handles widget interaction and rendering for the current frame using the provided context.
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
+    /// Renders the widget for the current frame and returns the next committed result.
+    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
     /// Returns the effective widget options used by generic dispatch.
     ///
     /// Widgets can override this to apply dynamic option adjustments.
@@ -123,38 +153,70 @@ pub fn widget_id_of_handle<W: Widget>(handle: &WidgetHandle<W>) -> WidgetId {
 /// Duplicate dispatches with the same ID trigger a debug assertion.
 #[derive(Default)]
 pub struct FrameResults {
-    states: HashMap<WidgetId, ResourceState>,
+    committed: HashMap<WidgetId, ResourceState>,
+    current: HashMap<WidgetId, ResourceState>,
 }
 
 impl FrameResults {
-    /// Clears all recorded widget states for a new frame.
+    /// Clears the in-progress frame results for a new frame.
     ///
-    /// This preserves internal capacity to avoid repeated reallocations.
+    /// Previously committed results remain available through [`FrameResults::committed_state`].
     pub fn begin_frame(&mut self) {
-        self.states.clear();
+        self.current.clear();
     }
 
-    /// Records a widget state under `widget_id`.
+    /// Publishes the current frame as the next committed result generation.
+    pub fn finish_frame(&mut self) {
+        std::mem::swap(&mut self.committed, &mut self.current);
+        self.current.clear();
+    }
+
+    /// Records the current frame state under `widget_id`.
     pub fn record(&mut self, widget_id: WidgetId, state: ResourceState) {
-        let prev = self.states.insert(widget_id, state);
+        let prev = self.current.insert(widget_id, state);
         debug_assert!(prev.is_none(), "Widget {:?} was dispatched more than once in the same frame", widget_id);
     }
 
-    /// Returns the recorded state for `widget_id` in the current frame.
+    /// Returns the committed result for `widget_id` from the previous frame.
     ///
-    /// Returns [`ResourceState::NONE`] when no state is recorded.
-    pub fn state(&self, widget_id: WidgetId) -> ResourceState {
-        self.states.get(&widget_id).copied().unwrap_or(ResourceState::NONE)
+    /// Returns [`ResourceState::NONE`] when no committed result exists.
+    pub fn committed_state(&self, widget_id: WidgetId) -> ResourceState {
+        self.committed.get(&widget_id).copied().unwrap_or(ResourceState::NONE)
     }
 
-    /// Returns the recorded state for `widget` in the current frame.
+    /// Returns the in-progress result for `widget_id` in the current frame.
     ///
-    /// Returns [`ResourceState::NONE`] when no state is recorded.
+    /// Returns [`ResourceState::NONE`] when the widget has not been rendered this frame.
+    pub fn current_state(&self, widget_id: WidgetId) -> ResourceState {
+        self.current.get(&widget_id).copied().unwrap_or(ResourceState::NONE)
+    }
+
+    /// Returns the most relevant available state for `widget_id`.
+    ///
+    /// During a frame this prefers the current in-progress result; otherwise it falls
+    /// back to the previously committed result.
+    pub fn state(&self, widget_id: WidgetId) -> ResourceState {
+        self.current.get(&widget_id).copied().or_else(|| self.committed.get(&widget_id).copied()).unwrap_or(ResourceState::NONE)
+    }
+
+    /// Returns the most relevant available state for `widget`.
+    ///
+    /// See [`FrameResults::state`] for the lookup behavior.
     pub fn state_of<W: Widget + ?Sized>(&self, widget: &W) -> ResourceState {
         self.state(widget_id_of(widget))
     }
 
-    /// Returns the recorded state for the widget stored in `handle`.
+    /// Returns the committed result for `widget` from the previous frame.
+    pub fn committed_state_of<W: Widget + ?Sized>(&self, widget: &W) -> ResourceState {
+        self.committed_state(widget_id_of(widget))
+    }
+
+    /// Returns the committed result for the widget stored in `handle`.
+    pub fn committed_state_of_handle<W: Widget>(&self, handle: &WidgetHandle<W>) -> ResourceState {
+        self.committed_state(widget_id_of_handle(handle))
+    }
+
+    /// Returns the most relevant available state for the widget stored in `handle`.
     pub fn state_of_handle<W: Widget>(&self, handle: &WidgetHandle<W>) -> ResourceState {
         self.state(widget_id_of_handle(handle))
     }
@@ -169,7 +231,7 @@ impl Widget for (WidgetOption, WidgetBehaviourOption) {
         &self.1
     }
 
-    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let vertical_pad = max(1, padding / 2);
         let font_height = atlas.get_font_height(style.font) as i32;
@@ -180,7 +242,7 @@ impl Widget for (WidgetOption, WidgetBehaviourOption) {
         Dimensioni::new(width, height)
     }
 
-    fn handle(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn render(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         ResourceState::NONE
     }
 }

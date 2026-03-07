@@ -67,10 +67,11 @@ impl Container {
 
     fn run_node_scope(&mut self, results: &mut FrameResults, state: &mut Node) -> NodeStateValue {
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        let rect = self.next_widget_rect(state);
+        self.reconcile_widget(results, state);
+        let rect = self.measure_widget_rect(state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
-        let _ = self.handle_widget_in_rect(results, state, rect, None, opt, bopt);
+        let _ = self.render_widget(results, state, rect, None, opt, bopt);
         state.state
     }
 
@@ -183,11 +184,12 @@ impl Container {
     }
 
     fn handle_tree_widget(&mut self, results: &mut FrameResults, node_id: NodeId, widget: &dyn WidgetStateHandleDyn) {
-        let rect = self.next_widget_rect_dyn(widget);
+        self.reconcile_widget_dyn(results, widget);
+        let rect = self.measure_widget_rect_dyn(widget);
         let opt = widget.effective_widget_opt();
         let bopt = widget.effective_behaviour_opt();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
-        let (control, result) = self.run_widget_dyn(results, widget, rect, input, opt, bopt);
+        let (control, result) = self.render_widget_dyn(results, widget, rect, input, opt, bopt);
         self.record_tree_node(
             node_id,
             NodeCacheEntry {
@@ -201,13 +203,14 @@ impl Container {
     }
 
     fn handle_tree_custom_render(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>, render: &TreeCustomRender) {
-        let rect = self.next_widget_rect_handle(state);
+        self.reconcile_widget_handle(results, state);
+        let rect = self.measure_widget_rect_handle(state);
         let (opt, bopt, needs_input) = {
             let state = state.borrow();
             (state.effective_widget_opt(), state.effective_behaviour_opt(), state.needs_input_snapshot())
         };
         let input = if needs_input { Some(self.snapshot_input()) } else { None };
-        let (control, result) = self.run_widget_handle(results, state, rect, input, opt, bopt);
+        let (control, result) = self.render_widget_handle(results, state, rect, input, opt, bopt);
 
         let snapshot = self.snapshot_input();
         let input_ref = snapshot.as_ref();
@@ -250,12 +253,13 @@ impl Container {
 
     fn run_tree_node_scope(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        let rect = self.next_widget_rect_handle(state);
+        self.reconcile_widget_handle(results, state);
+        let rect = self.measure_widget_rect_handle(state);
         let (opt, bopt, stable_state) = {
             let state = state.borrow();
             (*state.widget_opt(), *state.behaviour_opt(), state.state)
         };
-        let (control, result) = self.run_widget_handle(results, state, rect, None, opt, bopt);
+        let (control, result) = self.render_widget_handle(results, state, rect, None, opt, bopt);
 
         if control.clicked {
             state.borrow_mut().state = stable_state;

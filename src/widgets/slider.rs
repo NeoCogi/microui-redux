@@ -215,11 +215,11 @@ impl Widget for Slider {
         &self.bopt
     }
 
-    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         self.handle_widget(ctx, control)
     }
 
@@ -328,11 +328,11 @@ impl Widget for Number {
         &self.bopt
     }
 
-    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         self.handle_widget(ctx, control)
     }
 
@@ -444,7 +444,7 @@ mod tests {
             scroll_delta: None,
         };
 
-        let res = slider.handle(&mut ctx, &control);
+        let res = slider.render(&mut ctx, &control);
 
         assert!(res.is_none());
         assert!(slider.value.is_finite());
@@ -490,7 +490,7 @@ mod tests {
             scroll_delta: None,
         };
 
-        let res = slider.handle(&mut ctx, &control);
+        let res = slider.render(&mut ctx, &control);
 
         assert!(!res.is_none());
         assert_eq!(slider.value, 50.0);

@@ -66,7 +66,8 @@ macro_rules! widget_layout {
     ($(#[$meta:meta])* $name:ident, $state:ty, $builder:expr) => {
         $(#[$meta])*
         pub fn $name(&mut self, results: &mut FrameResults, state: &mut $state) -> ResourceState {
-            let rect = self.next_widget_rect(state);
+            self.reconcile_widget(results, state);
+            let rect = self.measure_widget_rect(state);
             ($builder)(self, results, state, rect)
         }
     };

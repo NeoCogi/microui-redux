@@ -176,7 +176,7 @@ fn textbox_left_moves_over_multibyte() {
     let control = container.update_control(textbox_id, rect, &control_state);
     let input = container.snapshot_input();
     let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
-    state.handle(&mut ctx, &control);
+    state.render(&mut ctx, &control);
 
     assert_eq!(state.cursor, 1);
 }
@@ -196,7 +196,7 @@ fn textbox_backspace_removes_multibyte() {
     let control = container.update_control(textbox_id, rect, &control_state);
     let input = container.snapshot_input();
     let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
-    state.handle(&mut ctx, &control);
+    state.render(&mut ctx, &control);
 
     assert_eq!(state.buf, "ab");
     assert_eq!(state.cursor, 1);

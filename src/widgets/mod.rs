@@ -51,7 +51,7 @@
 // IN THE SOFTWARE.
 //
 macro_rules! implement_widget {
-    ($ty:ty, $handle:ident, $preferred:ident) => {
+    ($ty:ty, $render:ident, $measure:ident) => {
         impl Widget for $ty {
             fn widget_opt(&self) -> &WidgetOption {
                 &self.opt
@@ -59,11 +59,11 @@ macro_rules! implement_widget {
             fn behaviour_opt(&self) -> &WidgetBehaviourOption {
                 &self.bopt
             }
-            fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-                self.$preferred(style, atlas, avail)
+            fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+                self.$measure(style, atlas, avail)
             }
-            fn handle(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-                self.$handle(ctx, control)
+            fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+                self.$render(ctx, control)
             }
         }
     };

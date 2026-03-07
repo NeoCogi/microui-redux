@@ -61,7 +61,7 @@ use crate::{
     container::Container,
     input::{ControlState, ResourceState, WidgetBehaviourOption, WidgetOption},
     style::Style,
-    widget::{widget_id_of, FrameResults, Widget, WidgetId},
+    widget::{widget_id_of, CommittedWidgetState, FrameResults, Widget, WidgetId},
     widget_ctx::WidgetCtx,
     CustomRenderArgs,
 };
@@ -79,11 +79,12 @@ pub(crate) type TreeCustomRender = Rc<RefCell<Box<dyn FnMut(Dimensioni, &CustomR
 
 pub(crate) trait WidgetStateHandleDyn {
     fn widget_id(&self) -> WidgetId;
+    fn reconcile(&self, committed: CommittedWidgetState);
     fn effective_widget_opt(&self) -> WidgetOption;
     fn effective_behaviour_opt(&self) -> WidgetBehaviourOption;
-    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     fn needs_input_snapshot(&self) -> bool;
-    fn handle(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
+    fn render(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
 }
 
 struct WidgetStateHandle<W: Widget + 'static> {
@@ -96,6 +97,11 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
         widget_id_of(&*widget)
     }
 
+    fn reconcile(&self, committed: CommittedWidgetState) {
+        let mut widget = self.handle.borrow_mut();
+        widget.reconcile(committed);
+    }
+
     fn effective_widget_opt(&self) -> WidgetOption {
         let widget = self.handle.borrow();
         widget.effective_widget_opt()
@@ -106,9 +112,9 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
         widget.effective_behaviour_opt()
     }
 
-    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         let widget = self.handle.borrow();
-        widget.preferred_size(style, atlas, avail)
+        widget.measure(style, atlas, avail)
     }
 
     fn needs_input_snapshot(&self) -> bool {
@@ -116,9 +122,9 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
         widget.needs_input_snapshot()
     }
 
-    fn handle(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn render(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut widget = self.handle.borrow_mut();
-        widget.handle(ctx, control)
+        widget.render(ctx, control)
     }
 }
 

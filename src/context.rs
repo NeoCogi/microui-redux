@@ -182,6 +182,7 @@ impl<R: Renderer> Context<R> {
         for r in &mut self.root_list {
             r.finish();
         }
+        self.frame_results.finish_frame();
 
         let mouse_pressed = self.input.borrow().mouse_pressed;
         match (mouse_pressed.is_none(), &self.next_hover_root) {

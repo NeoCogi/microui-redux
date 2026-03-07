@@ -91,7 +91,7 @@ for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widg
 
 ### Preferred sizing
 - Every built-in widget now reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
-- `Container` widget helpers call `Widget::preferred_size` first, then allocate the widget rectangle, then call `Widget::handle`.
+- `Container` widget helpers reconcile from the previous committed frame result, call `Widget::measure`, allocate the widget rectangle, then call `Widget::render`.
 - Returning `<= 0` for either axis still means "use layout fallback/defaults" for that axis.
 - `next_cell()` is the raw layout helper that does not run widget preferred sizing.
 
@@ -174,7 +174,7 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
 - [x] Widget identity moved fully to pointer-based IDs.
     - [x] Removed `with_id`; focus/hover now use widget trait-object/state pointers.
 - [x] Layout refactor: introduced `LayoutEngine` + specialized flows (`RowFlow`, `StackFlow`) instead of a one-size-fits-all manager.
-    - [x] Preferred sizing pipeline: widget helpers now call `Widget::preferred_size` before rectangle allocation.
+    - [x] Preferred sizing pipeline: widget helpers now reconcile retained state, call `Widget::measure`, then allocate rectangles before `Widget::render`.
     - [x] Directional stack support: `StackDirection::{TopToBottom, BottomToTop}` plus `stack_direction` and `stack_with_width_direction`.
 - [x] Context/container API cleanup: `Context` module split, input forwarding helpers, container state encapsulation, and handle views.
 - [x] Widget internals cleanup: helper macroization/simplification, node/widget scaffolding unification, and text widget module split.

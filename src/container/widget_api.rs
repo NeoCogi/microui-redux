@@ -113,10 +113,11 @@ impl Container {
     /// The caller is responsible for opening the popup and updating `state.selected` from its list.
     pub fn combo_box<S: AsRef<str>>(&mut self, results: &mut FrameResults, state: &mut Combo, items: &[S]) -> (Recti, bool, ResourceState) {
         state.update_items(items);
-        let header = self.next_widget_rect(state);
+        self.reconcile_widget(results, state);
+        let header = self.measure_widget_rect(state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
-        let res = self.handle_widget_in_rect(results, state, header, None, opt, bopt);
+        let (_, res) = self.render_widget(results, state, header, None, opt, bopt);
         let header_clicked = res.is_submitted();
         let anchor = rect(header.x, header.y + header.height, header.width, 1);
         (anchor, header_clicked, res)
@@ -143,11 +144,12 @@ impl Container {
         widget: &mut W,
         f: F,
     ) {
-        let rect = self.next_widget_rect(widget);
+        self.reconcile_widget(results, widget);
+        let rect = self.measure_widget_rect(widget);
         let opt = widget.effective_widget_opt();
         let bopt = widget.effective_behaviour_opt();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
-        let (control, _) = self.run_widget(results, widget, rect, input, opt, bopt);
+        let (control, _) = self.render_widget(results, widget, rect, input, opt, bopt);
 
         let snapshot = self.snapshot_input();
         let input_ref = snapshot.as_ref();
@@ -178,7 +180,8 @@ impl Container {
         |this: &mut Self, results: &mut FrameResults, state: &mut Textbox, rect: Recti| {
             let input = Some(this.snapshot_input());
             let opt = state.opt | WidgetOption::HOLD_FOCUS;
-            this.handle_widget_in_rect(results, state, rect, input, opt, state.bopt)
+            let (_, res) = this.render_widget(results, state, rect, input, opt, state.bopt);
+            res
         }
     );
 
@@ -189,7 +192,8 @@ impl Container {
         |this: &mut Self, results: &mut FrameResults, state: &mut TextArea, rect: Recti| {
             let input = Some(this.snapshot_input());
             let opt = state.opt | WidgetOption::HOLD_FOCUS;
-            this.handle_widget_in_rect(results, state, rect, input, opt, state.bopt)
+            let (_, res) = this.render_widget(results, state, rect, input, opt, state.bopt);
+            res
         }
     );
 
@@ -204,7 +208,8 @@ impl Container {
                 opt |= WidgetOption::HOLD_FOCUS;
             }
             let input = Some(this.snapshot_input());
-            this.handle_widget_in_rect(results, state, rect, input, opt, state.bopt)
+            let (_, res) = this.render_widget(results, state, rect, input, opt, state.bopt);
+            res
         }
     );
 
@@ -219,7 +224,8 @@ impl Container {
                 opt |= WidgetOption::HOLD_FOCUS;
             }
             let input = Some(this.snapshot_input());
-            this.handle_widget_in_rect(results, state, rect, input, opt, state.bopt)
+            let (_, res) = this.render_widget(results, state, rect, input, opt, state.bopt);
+            res
         }
     );
 }

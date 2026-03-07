@@ -176,7 +176,7 @@ impl Window {
                 let control = container.update_control(title_id, tr, &control_state);
                 {
                     let mut ctx = container.widget_ctx(title_id, tr, None);
-                    let _ = title_state.handle(&mut ctx, &control);
+                    let _ = title_state.render(&mut ctx, &control);
                 }
                 let name = container.name.clone(); // Necessary due to borrow checker limitations
                 container.draw_control_text(&name, tr, ControlColor::TitleText, WidgetOption::NONE);
@@ -196,7 +196,7 @@ impl Window {
                 let control = container.update_control(close_id, r, &control_state);
                 {
                     let mut ctx = container.widget_ctx(close_id, r, None);
-                    let _ = close_state.handle(&mut ctx, &control);
+                    let _ = close_state.render(&mut ctx, &control);
                 }
                 if control.clicked {
                     *win_state = WindowState::Closed;
@@ -212,7 +212,7 @@ impl Window {
             let control = container.update_control(resize_id, r_0, &control_state);
             {
                 let mut ctx = container.widget_ctx(resize_id, r_0, None);
-                let _ = resize_state.handle(&mut ctx, &control);
+                let _ = resize_state.render(&mut ctx, &control);
             }
             if control.active {
                 container.rect.width = if 96 > container.rect.width + container.input.borrow().mouse_delta.x {
