@@ -1,9 +1,9 @@
 # Rxi's Microui Port to Idiomatic Rust
 [![Crate](https://img.shields.io/crates/v/microui-redux.svg)](https://crates.io/crates/microui-redux)
 
-This project started as a C2Rust conversion of Rxi's MicroUI and has since grown into a Rust-first UI toolkit. It preserves the immediate-mode feel while using stateful widget structs with pointer-derived widget identity, a row/column layout helper API, retained `WidgetTree` values for reusable UI structure, and backend-agnostic rendering hooks.
+This project started as a C2Rust conversion of Rxi's MicroUI and has since grown into a Rust-first UI toolkit. It keeps Microui's compact rendering model while moving UI authoring onto retained `WidgetTree` values, stateful widget structs with pointer-derived identity, and backend-agnostic rendering hooks.
 
-Compared to [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces std types, closure-based window/panel/column scopes, and richer widgets such as custom rendering callbacks, dialogs, and a file dialog.
+Compared to [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces std types, reusable retained trees, and richer widgets such as custom rendering callbacks, dialogs, and a file dialog.
 
 ## Demo
 Clone and build the demo (enable exactly one backend feature):
@@ -36,11 +36,11 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 ![random](https://github.com/NeoCogi/microui-redux/raw/master/res/microui.png)
 
 ## Key Concepts
-- **Context**: owns the renderer handle, user input, and root windows. The atlas is provided by the renderer and accessed through the context. Each frame starts by feeding input into the context, then calling `context.window(...)` for every visible window or popup.
-- **Container**: describes one layout surface. Every window, panel, popup or custom widget receives a mutable `Container` that exposes high-level widgets (buttons, sliders, etc.), retained-tree execution helpers, and lower-level drawing helpers.
-- **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. Use `Container::with_row` for row tracks, `Container::stack`/`Container::stack_direction` for one-item-per-line sections, and `container.column(|ui| { ... })` for nested scopes. Widget helpers (`button`, `textbox`, `slider`, etc.) query each widget's `preferred_size` before allocating the cell, so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
+- **Context**: owns the renderer handle, user input, frame results, and root windows. Each frame starts by feeding input into the context, then calling `context.window(...)`, `context.dialog(...)`, or `context.popup(...)` with retained trees for every visible surface.
+- **Container**: describes one layout surface and remains the internal execution object behind windows, panels, popups, and retained tree nodes.
+- **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). These structs hold interaction state and use pointer-derived IDs from their current address.
-- **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and replayed each frame through `Container::widget_tree(results, &tree)`. Tree nodes cover widgets, panels, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering. `tree.run(...)` remains available as a runtime escape hatch for sections that still need live geometry.
+- **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and replayed each frame through `Context::window(...)`, `Context::dialog(...)`, or `Context::popup(...)`. Tree nodes cover widgets, panels, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
 
 ```rust
@@ -55,25 +55,23 @@ let tree = WidgetTreeBuilder::build({
     }
 });
 
-ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, |ui, results| {
-    ui.widget_tree(results, &tree);
-    WindowState::Open
-});
+ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+
+let results = ctx.frame_results();
+if results.state_of_handle(&name).is_submitted() {
+    // react to the textbox submission here
+}
 ```
 
-For direct one-off UI, the immediate-style `Container` helpers still exist. The retained tree path is the preferred way to build reusable window bodies, panels, dialogs, and list/grid scaffolds.
+Retained trees are the supported public authoring path. Post-render business logic lives alongside the window call and reads from `ctx.frame_results()`:
 
 ```rust
-let mut temp_name = Textbox::new("");
+ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
 
-ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, |ui, results| {
-    let widths = [SizePolicy::Fixed(120), SizePolicy::Remainder(0)];
-    ui.with_row(&widths, SizePolicy::Auto, |ui| {
-        ui.label("Name");
-        ui.textbox(results, &mut temp_name);
-    });
-    WindowState::Open
-});
+let results = ctx.frame_results();
+if results.state_of_handle(&submit_button).is_submitted() {
+    save_form();
+}
 ```
 
 ### Widget IDs
@@ -82,7 +80,7 @@ Widget IDs default to the address of the widget state. This is stable as long as
 When setting focus manually, pass a widget pointer ID from `widget_id_of` or `widget_id_of_handle`:
 
 ```rust
-ui.set_focus(Some(widget_id_of_handle(&my_textbox_handle)));
+my_window.set_focus(Some(widget_id_of_handle(&my_textbox_handle)));
 ```
 
 Window, dialog, and popup builders now accept a `WidgetBehaviourOption` to control scroll behavior. Use `WidgetBehaviourOption::NO_SCROLL`
@@ -151,14 +149,14 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
 ### Version 0.6
 - [x] Added retained widget trees.
     - [x] New `WidgetTree` / `WidgetTreeBuilder` API with stable `NodeId`s and reusable widget/layout hierarchy.
-    - [x] `Container::widget_tree`, `build_tree`, and `build_tree_with_key` execute retained trees through the normal container/widget paths.
-    - [x] Tree nodes now cover widgets, panels, headers/tree nodes, row/grid/column/stack groups, custom render widgets, and `run(...)` escape hatches.
+    - [x] `Context::window`, `dialog`, and `popup` render retained trees directly through the normal container/widget paths.
+    - [x] Tree nodes now cover widgets, panels, headers/tree nodes, row/grid/column/stack groups, and custom render widgets.
 - [x] Migrated shipped UI to the retained model.
     - [x] `examples/simple`, `examples/calculator`, `examples/demo-full`, and the file dialog now build trees once and replay them every frame.
-    - [x] Complex sections that depend on live container geometry stay on `tree.run(...)` for now.
+    - [x] Removed `tree.run(...)` and rewrote the remaining callback-only sections as retained tree structure plus retained display widgets.
 - [x] Reworked dispatch around `FrameResults`.
     - [x] Replaced per-call output slots with a per-frame result registry keyed by widget ID.
-    - [x] `window` / `dialog` / `popup` closures now receive `(&mut Container, &mut FrameResults)`.
+    - [x] `window` / `dialog` / `popup` now render retained trees directly and expose results through `Context::frame_results()`.
     - [x] Added handle-oriented helpers such as `FrameResults::state_of_handle` and `widget_id_of_handle`.
 - [x] Simplified widget batching and handle-backed dispatch.
     - [x] Migrated generic dispatch to `widget_ref(...)` batches and unified container batch helpers.

@@ -36,7 +36,7 @@ use crate::{
     ContainerHandle, Custom, Id, Node,
 };
 
-use super::{TreeCustomRender, TreeRun, WidgetHandle, WidgetStateHandleDyn};
+use super::{TreeCustomRender, WidgetHandle, WidgetStateHandleDyn};
 
 /// Stable identifier assigned to a retained or runtime node.
 pub type NodeId = Id;
@@ -96,11 +96,6 @@ pub(crate) enum WidgetTreeNodeKind {
         /// Deferred rendering callback enqueued after interaction handling.
         render: TreeCustomRender,
     },
-    /// Leaf node that executes arbitrary container code.
-    Run {
-        /// Callback invoked during tree traversal.
-        run: TreeRun,
-    },
     /// Embedded container/panel node with its own child subtree.
     Container {
         /// Container handle used for the embedded panel.
@@ -152,14 +147,13 @@ impl WidgetTreeNodeKind {
         match self {
             Self::Widget { .. } => 1,
             Self::CustomRender { .. } => 2,
-            Self::Run { .. } => 3,
-            Self::Container { .. } => 4,
-            Self::Header { .. } => 5,
-            Self::Tree { .. } => 6,
-            Self::Row { .. } => 7,
-            Self::Grid { .. } => 8,
-            Self::Column => 9,
-            Self::Stack { .. } => 10,
+            Self::Container { .. } => 3,
+            Self::Header { .. } => 4,
+            Self::Tree { .. } => 5,
+            Self::Row { .. } => 6,
+            Self::Grid { .. } => 7,
+            Self::Column => 8,
+            Self::Stack { .. } => 9,
         }
     }
 }

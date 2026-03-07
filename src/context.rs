@@ -60,7 +60,7 @@ use png::{ColorType, Decoder};
 
 use crate::{
     rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, ImageSource, Input, Recti, Renderer, KeyCode, KeyMode, MouseButton,
-    RendererHandle, Style, TextureId, UNCLIPPED_RECT, Vec2i, WidgetBehaviourOption, WindowHandle, WindowState, FrameResults,
+    RendererHandle, Style, TextureId, UNCLIPPED_RECT, Vec2i, WidgetBehaviourOption, WidgetTree, WindowHandle, WindowState, FrameResults,
 };
 
 /// Primary entry point used to drive the UI over a renderer implementation.
@@ -300,28 +300,36 @@ impl<R: Renderer> Context<R> {
         self.end_root_container(window);
     }
 
-    /// Opens a window, executes the provided UI builder, and closes the window.
-    pub fn window<F: FnOnce(&mut Container, &mut FrameResults) -> WindowState>(
+    fn render_window_tree(
         &mut self,
         window: &mut WindowHandle,
         opt: ContainerOption,
         bopt: WidgetBehaviourOption,
-        f: F,
+        tree: &WidgetTree,
     ) {
-        // call the window function if the window is open
         if self.begin_window(window, opt, bopt) {
-            window.inner_mut().main.style = self.style.clone();
-            let state = f(&mut window.inner_mut().main, &mut self.frame_results);
-            self.end_window(window);
-            if window.is_open() {
-                window.inner_mut().win_state = state;
+            {
+                let mut inner = window.inner_mut();
+                inner.main.style = self.style.clone();
+                inner.main.widget_tree(&mut self.frame_results, tree);
             }
+            self.end_window(window);
 
-            // in case the window needs to be reopened, reset all states
             if !window.is_open() {
                 window.inner_mut().main.reset();
             }
         }
+    }
+
+    /// Opens a window and renders the provided retained widget tree into it.
+    pub fn window(
+        &mut self,
+        window: &mut WindowHandle,
+        opt: ContainerOption,
+        bopt: WidgetBehaviourOption,
+        tree: &WidgetTree,
+    ) {
+        self.render_window_tree(window, opt, bopt, tree);
     }
 
     /// Marks a dialog window as open for the next frame.
@@ -330,12 +338,12 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Renders a dialog window if it is currently open.
-    pub fn dialog<F: FnOnce(&mut Container, &mut FrameResults) -> WindowState>(
+    pub fn dialog(
         &mut self,
         window: &mut WindowHandle,
         opt: ContainerOption,
         bopt: WidgetBehaviourOption,
-        f: F,
+        tree: &WidgetTree,
     ) {
         if window.is_open() {
             self.next_hover_root = Some(window.clone());
@@ -343,7 +351,7 @@ impl<R: Renderer> Context<R> {
             window.inner_mut().main.in_hover_root = true;
             self.bring_to_front(window);
 
-            self.window(window, opt, bopt, f);
+            self.render_window_tree(window, opt, bopt, tree);
         }
     }
 
@@ -397,10 +405,10 @@ impl<R: Renderer> Context<R> {
         }
     }
 
-    /// Opens a popup window with default options.
-    pub fn popup<F: FnOnce(&mut Container, &mut FrameResults) -> WindowState>(&mut self, window: &mut WindowHandle, bopt: WidgetBehaviourOption, f: F) {
+    /// Opens a popup window with default options and renders a retained tree into it.
+    pub fn popup(&mut self, window: &mut WindowHandle, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
         let opt = ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE;
-        self.window(window, opt, bopt, f);
+        self.render_window_tree(window, opt, bopt, tree);
     }
 
     /// Returns the current frame's widget interaction results.

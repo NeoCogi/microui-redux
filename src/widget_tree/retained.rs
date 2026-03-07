@@ -58,10 +58,9 @@ use rs_math3d::Dimensioni;
 
 use crate::{
     atlas::AtlasHandle,
-    container::Container,
     input::{ControlState, ResourceState, WidgetBehaviourOption, WidgetOption},
     style::Style,
-    widget::{widget_id_of, CommittedWidgetState, FrameResults, Widget, WidgetId},
+    widget::{widget_id_of, CommittedWidgetState, Widget, WidgetId},
     widget_ctx::WidgetCtx,
     CustomRenderArgs,
 };
@@ -74,7 +73,6 @@ pub fn widget_handle<T>(value: T) -> WidgetHandle<T> {
     Rc::new(RefCell::new(value))
 }
 
-pub(crate) type TreeRun = Rc<RefCell<Box<dyn FnMut(&mut Container, &mut FrameResults) + 'static>>>;
 pub(crate) type TreeCustomRender = Rc<RefCell<Box<dyn FnMut(Dimensioni, &CustomRenderArgs) + 'static>>>;
 
 pub(crate) trait WidgetStateHandleDyn {

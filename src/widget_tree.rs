@@ -46,7 +46,7 @@ pub use node::{NodeId, Policy, WidgetTree, WidgetTreeNode};
 pub use retained::{widget_handle, WidgetHandle};
 
 pub(crate) use node::WidgetTreeNodeKind;
-pub(crate) use retained::{erased_widget_state, TreeCustomRender, TreeRun, WidgetStateHandleDyn};
+pub(crate) use retained::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
 pub(crate) use runtime::{RuntimeTreeNode, RuntimeTreeNodeKind};
 
 #[cfg(test)]
@@ -206,15 +206,15 @@ mod tests {
     }
 
     #[test]
-    fn run_nodes_are_recorded() {
+    fn text_nodes_are_recorded_as_widgets() {
         let tree = WidgetTreeBuilder::build(|builder| {
-            builder.run(|_container, _results| {});
+            builder.text("hello");
         });
 
         assert_eq!(tree.roots().len(), 1);
         match tree.roots()[0].kind() {
-            WidgetTreeNodeKind::Run { .. } => {}
-            _ => panic!("expected run node"),
+            WidgetTreeNodeKind::Widget { .. } => {}
+            _ => panic!("expected retained text widget node"),
         }
     }
 }

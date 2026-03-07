@@ -274,6 +274,47 @@ impl WindowHandle {
         }
     }
 
+    /// Returns the current visibility state for the window.
+    pub fn state(&self) -> WindowState {
+        self.0.borrow().win_state
+    }
+
+    /// Updates the window visibility state.
+    ///
+    /// Closing a window resets its container state so the next open starts cleanly.
+    pub fn set_state(&mut self, state: WindowState) {
+        let mut inner = self.inner_mut();
+        inner.win_state = state;
+        if matches!(state, WindowState::Closed) {
+            inner.main.reset();
+        }
+    }
+
+    /// Marks the window as open.
+    pub fn open(&mut self) {
+        self.set_state(WindowState::Open);
+    }
+
+    /// Marks the window as closed and resets its container state.
+    pub fn close(&mut self) {
+        self.set_state(WindowState::Closed);
+    }
+
+    /// Returns the current window rectangle.
+    pub fn rect(&self) -> Recti {
+        self.inner().main.rect
+    }
+
+    /// Replaces the current window rectangle.
+    pub fn set_rect(&mut self, rect: Recti) {
+        self.inner_mut().main.rect = rect;
+    }
+
+    /// Sets the focused widget inside the window's root container.
+    pub fn set_focus(&mut self, widget_id: Option<WidgetId>) {
+        self.inner_mut().main.set_focus(widget_id);
+    }
+
     pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Window> {
         self.0.borrow_mut()
     }

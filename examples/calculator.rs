@@ -377,28 +377,25 @@ fn main() {
         ctx.frame(|ctx| {
             let dim = ctx.canvas().current_dimension();
             state.window.set_size(&dim);
+            {
+                let mut display = state.display.borrow_mut();
+                display.buf = state.calculator.display_text().to_string();
+                display.cursor = display.buf.len();
+            }
+
             ctx.window(
                 &mut state.window.clone(),
                 ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
                 WidgetBehaviourOption::NONE,
-                |container, results| {
-                    {
-                        let mut display = state.display.borrow_mut();
-                        display.buf = state.calculator.display_text().to_string();
-                        display.cursor = display.buf.len();
-                    }
-
-                    container.widget_tree(results, &state.tree);
-
-                    for button in &state.buttons {
-                        if results.state_of_handle(&button.widget).is_submitted() {
-                            state.calculator.apply(button.action);
-                        }
-                    }
-
-                    WindowState::Open
-                },
+                &state.tree,
             );
+
+            let results = ctx.frame_results();
+            for button in &state.buttons {
+                if results.state_of_handle(&button.widget).is_submitted() {
+                    state.calculator.apply(button.action);
+                }
+            }
         });
     });
 }

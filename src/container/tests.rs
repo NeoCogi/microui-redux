@@ -298,6 +298,31 @@ fn widget_tree_dispatches_panel_children() {
 }
 
 #[test]
+fn retained_text_inside_panel_grows_content_height() {
+    let mut parent = make_container();
+    let mut style = Style::default();
+    style.padding = 0;
+    style.scrollbar_size = 10;
+    parent.style = Rc::new(style);
+
+    let panel = make_panel_handle(&parent, "panel");
+    let text = widget_handle(TextBlock::new("a\na\na\na"));
+    let mut results = FrameResults::default();
+
+    begin_test_frame(&mut parent, rect(0, 0, 60, 20));
+    parent.build_tree(&mut results, |tree| {
+        tree.row(&[SizePolicy::Fixed(60)], SizePolicy::Fixed(20), |tree| {
+            tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                tree.widget(text.clone());
+            });
+        });
+    });
+
+    let panel = panel.inner();
+    assert!(panel.content_size().y > panel.body().height);
+}
+
+#[test]
 fn tree_nodes_expand_children_in_same_frame_from_cached_rects() {
     let mut container = make_container();
     let input = container.input.clone();

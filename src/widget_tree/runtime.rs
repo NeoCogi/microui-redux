@@ -36,7 +36,7 @@ use crate::{
     ContainerHandle, Custom, Node,
 };
 
-use super::{NodeId, TreeCustomRender, TreeRun, WidgetHandle, WidgetStateHandleDyn, WidgetTree, WidgetTreeNode, WidgetTreeNodeKind};
+use super::{NodeId, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTree, WidgetTreeNode, WidgetTreeNodeKind};
 
 pub(crate) struct RuntimeTreeNode<'a> {
     id: NodeId,
@@ -50,7 +50,6 @@ impl<'a> RuntimeTreeNode<'a> {
         let kind = match kind {
             WidgetTreeNodeKind::Widget { widget } => RuntimeTreeNodeKind::Widget { widget: &**widget },
             WidgetTreeNodeKind::CustomRender { state, render } => RuntimeTreeNodeKind::CustomRender { state, render },
-            WidgetTreeNodeKind::Run { run } => RuntimeTreeNodeKind::Run { run },
             WidgetTreeNodeKind::Container { handle, opt, behaviour } => RuntimeTreeNodeKind::Container {
                 handle: handle.clone(),
                 opt: *opt,
@@ -94,9 +93,6 @@ pub(crate) enum RuntimeTreeNodeKind<'a> {
     CustomRender {
         state: &'a WidgetHandle<Custom>,
         render: &'a TreeCustomRender,
-    },
-    Run {
-        run: &'a TreeRun,
     },
     Container {
         handle: ContainerHandle,

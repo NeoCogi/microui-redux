@@ -84,15 +84,7 @@ fn main() {
 
     fw.event_loop(|ctx, state| {
         ctx.frame(|ctx| {
-            ctx.window(
-                &mut state.window.clone(),
-                ContainerOption::NONE,
-                WidgetBehaviourOption::NONE,
-                |container, results| {
-                    container.widget_tree(results, &state.tree);
-                    WindowState::Open
-                },
-            );
+            ctx.window(&mut state.window.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, &state.tree);
         });
     });
 }

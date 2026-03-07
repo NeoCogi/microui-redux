@@ -136,7 +136,7 @@ impl Container {
             RuntimeTreeNodeKind::Row { .. } | RuntimeTreeNodeKind::Grid { .. } | RuntimeTreeNodeKind::Column | RuntimeTreeNodeKind::Stack { .. } => {
                 self.pre_handle_tree_nodes(node.children())
             }
-            RuntimeTreeNodeKind::Widget { .. } | RuntimeTreeNodeKind::CustomRender { .. } | RuntimeTreeNodeKind::Run { .. } => {}
+            RuntimeTreeNodeKind::Widget { .. } | RuntimeTreeNodeKind::CustomRender { .. } => {}
         }
     }
 
@@ -285,9 +285,6 @@ impl Container {
             }
             RuntimeTreeNodeKind::CustomRender { state, render } => {
                 self.handle_tree_custom_render(results, node.id(), state, render);
-            }
-            RuntimeTreeNodeKind::Run { run } => {
-                (*run.borrow_mut())(self, results);
             }
             RuntimeTreeNodeKind::Container { handle, opt, behaviour } => {
                 let mut handle = handle.clone();

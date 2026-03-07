@@ -42,11 +42,11 @@ use rs_math3d::Dimensioni;
 use crate::{
     input::{ContainerOption, WidgetBehaviourOption},
     layout::{SizePolicy, StackDirection},
-    widget::{FrameResults, Widget},
-    Container, ContainerHandle, Custom, CustomRenderArgs, Node, TextWrap,
+    widget::Widget,
+    ColorSwatch, ContainerHandle, Custom, CustomRenderArgs, ListItem, Node, TextBlock, TextWrap,
 };
 
-use super::{erased_widget_state, NodeId, Policy, TreeCustomRender, TreeRun, WidgetHandle, WidgetTree, WidgetTreeNode, WidgetTreeNodeKind};
+use super::{erased_widget_state, widget_handle, NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetTree, WidgetTreeNode, WidgetTreeNodeKind};
 
 struct BuilderFrame {
     scope_seed: u64,
@@ -142,44 +142,32 @@ impl WidgetTreeBuilder {
         self.push_leaf(policy, WidgetTreeNodeKind::Widget { widget: erased_widget_state(widget) }, Some(key))
     }
 
-    /// Adds an unkeyed callback leaf node.
-    pub fn run(&mut self, f: impl FnMut(&mut Container, &mut FrameResults) + 'static) -> NodeId {
-        self.run_with_policy(Policy::auto(), f)
-    }
-
-    /// Adds an unkeyed callback leaf node with explicit policy metadata.
-    pub fn run_with_policy(&mut self, policy: Policy, f: impl FnMut(&mut Container, &mut FrameResults) + 'static) -> NodeId {
-        let run: TreeRun = Rc::new(RefCell::new(Box::new(f)));
-        self.push_leaf(policy, WidgetTreeNodeKind::Run { run }, None::<u64>)
-    }
-
-    /// Adds a keyed callback leaf node.
-    pub fn keyed_run<K: Hash>(&mut self, key: K, f: impl FnMut(&mut Container, &mut FrameResults) + 'static) -> NodeId {
-        self.keyed_run_with_policy(key, Policy::auto(), f)
-    }
-
-    /// Adds a keyed callback leaf node with explicit policy metadata.
-    pub fn keyed_run_with_policy<K: Hash>(&mut self, key: K, policy: Policy, f: impl FnMut(&mut Container, &mut FrameResults) + 'static) -> NodeId {
-        let run: TreeRun = Rc::new(RefCell::new(Box::new(f)));
-        self.push_leaf(policy, WidgetTreeNodeKind::Run { run }, Some(key))
-    }
-
-    /// Adds a text label node that uses [`Container::label`] during traversal.
+    /// Adds a text label node.
     pub fn label(&mut self, text: impl Into<String>) -> NodeId {
         let text = text.into();
-        self.run(move |container, _results| container.label(text.as_str()))
+        self.widget(widget_handle(TextBlock::new(text)))
     }
 
-    /// Adds a text block that uses [`Container::text`] during traversal.
+    /// Adds a text block without wrapping.
     pub fn text(&mut self, text: impl Into<String>) -> NodeId {
         let text = text.into();
-        self.run(move |container, _results| container.text(text.as_str()))
+        self.widget(widget_handle(TextBlock::new(text)))
     }
 
-    /// Adds a wrapped text block that uses [`Container::text_with_wrap`].
+    /// Adds a wrapped text block.
     pub fn text_with_wrap(&mut self, text: impl Into<String>, wrap: TextWrap) -> NodeId {
         let text = text.into();
-        self.run(move |container, _results| container.text_with_wrap(text.as_str(), wrap))
+        self.widget(widget_handle(TextBlock::with_wrap(text, wrap)))
+    }
+
+    /// Adds an unkeyed read-only list-item label.
+    pub fn list_label(&mut self, text: impl Into<String>) -> NodeId {
+        self.widget(widget_handle(ListItem::with_opt(text, crate::WidgetOption::NO_INTERACT | crate::WidgetOption::NO_FRAME)))
+    }
+
+    /// Adds an unkeyed color swatch widget.
+    pub fn color_swatch(&mut self, swatch: WidgetHandle<ColorSwatch>) -> NodeId {
+        self.widget(swatch)
     }
 
     /// Adds a custom-render widget node.

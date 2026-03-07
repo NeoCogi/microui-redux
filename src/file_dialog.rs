@@ -134,10 +134,9 @@ impl FileDialogState {
 
     fn refresh_entries(&mut self) {
         // Re-snapshot the filesystem, then rebuild both the retained widget
-        // handles and the tree shape so list length changes stay in sync.
+        // handles so list length changes stay in sync.
         Self::list_folders_files(Path::new(&self.current_working_directory), &mut self.folders, &mut self.files);
         self.rebuild_item_states();
-        self.rebuild_tree();
     }
 
     fn rebuild_item_states(&mut self) {
@@ -194,103 +193,68 @@ impl FileDialogState {
         let file_items = self.file_items.clone();
         let no_folder_items = folder_items.is_empty();
         let no_file_items = file_items.is_empty();
+        let (control_height, spacing) = {
+            let win = self.win.inner();
+            let container = &win.main;
+            let style = container.style.as_ref();
+            let padding = style.padding.max(0);
+            let font_height = container.atlas.get_font_height(style.font) as i32;
+            let vertical_pad = std::cmp::max(1, padding / 2);
+            let icon_height = container.atlas.get_icon_size(EXPAND_DOWN_ICON).height;
+            (
+                std::cmp::max(font_height + vertical_pad * 2, icon_height),
+                style.spacing.max(0),
+            )
+        };
 
         self.tree = WidgetTreeBuilder::build(|tree| {
-            tree.run(move |cont, results| {
-                // The overall scaffold is retained, but these row widths depend
-                // on the dialog's current body size so they are derived at run time.
-                let toolbar_widths = [SizePolicy::Fixed(56), SizePolicy::Fixed(56), SizePolicy::Remainder(72), SizePolicy::Fixed(56)];
+            let toolbar_widths = [SizePolicy::Fixed(56), SizePolicy::Fixed(56), SizePolicy::Remainder(56 + spacing), SizePolicy::Fixed(56)];
+            let pane_widths = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
+            let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
+            let action_widths = [SizePolicy::Remainder(96 * 2 + spacing * 2), SizePolicy::Fixed(96), SizePolicy::Fixed(96)];
+            let footer_reserved = control_height * 2 + spacing * 2;
+            tree.row(&toolbar_widths, SizePolicy::Auto, |tree| {
+                tree.widget(up_button.clone());
+                tree.widget(home_button.clone());
+                tree.widget(path_box.clone());
+                tree.widget(go_button.clone());
+            });
 
-                let style = cont.get_style();
-                let spacing = style.spacing.max(0);
-                let padding = style.padding.max(0);
-                let font_height = cont.atlas.get_font_height(style.font) as i32;
-                let vertical_pad = (padding / 2).max(1);
-                let control_height = font_height.saturating_add(vertical_pad.saturating_mul(2)).max(0);
-                let footer_reserve = control_height
-                    .saturating_mul(2)
-                    .saturating_add(spacing.saturating_mul(3))
-                    .saturating_add(padding);
-
-                let sidebar_width = (cont.body().width / 3).clamp(160, 260);
-                let pane_widths = [SizePolicy::Fixed(sidebar_width), SizePolicy::Remainder(0)];
-                let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
-                let button_width = 96;
-                let spacing = cont.get_style().spacing.max(0);
-                let trailing_buttons = button_width * 2 + spacing * 2;
-                let action_widths = [
-                    SizePolicy::Remainder(trailing_buttons),
-                    SizePolicy::Fixed(button_width),
-                    SizePolicy::Fixed(button_width),
-                ];
-                cont.with_row(&toolbar_widths, SizePolicy::Auto, |cont| {
-                    let mut up_button = up_button.borrow_mut();
-                    let mut home_button = home_button.borrow_mut();
-                    let mut path_box = path_box.borrow_mut();
-                    let mut go_button = go_button.borrow_mut();
-                    let mut runs = [
-                        widget_ref(&mut *up_button),
-                        widget_ref(&mut *home_button),
-                        widget_ref(&mut *path_box),
-                        widget_ref(&mut *go_button),
-                    ];
-                    cont.widgets(results, &mut runs);
-                });
-                cont.with_row(&pane_widths, SizePolicy::Remainder(footer_reserve), |cont| {
-                    let mut folder_panel = folder_panel.clone();
-                    cont.panel(&mut folder_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
-                        panel.with_mut(|panel| {
-                            panel.stack(SizePolicy::Auto, |panel| {
-                                let mut folders_label = folders_label.borrow_mut();
-                                let mut runs = [widget_ref(&mut *folders_label)];
-                                panel.widgets(results, &mut runs);
-                            });
-                            for item in &folder_items {
-                                let mut item = item.borrow_mut();
-                                let mut runs = [widget_ref(&mut *item)];
-                                panel.widgets(results, &mut runs);
-                            }
-                            if no_folder_items {
-                                let mut no_folders_label = no_folders_label.borrow_mut();
-                                let mut runs = [widget_ref(&mut *no_folders_label)];
-                                panel.widgets(results, &mut runs);
-                            }
-                        });
-                    });
-                    let mut file_panel = file_panel.clone();
-                    cont.panel(&mut file_panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
-                        panel.with_mut(|panel| {
-                            panel.stack(SizePolicy::Auto, |panel| {
-                                let mut files_label = files_label.borrow_mut();
-                                let mut runs = [widget_ref(&mut *files_label)];
-                                panel.widgets(results, &mut runs);
-                            });
-                            for item in &file_items {
-                                let mut item = item.borrow_mut();
-                                let mut runs = [widget_ref(&mut *item)];
-                                panel.widgets(results, &mut runs);
-                            }
-                            if no_file_items {
-                                let mut no_files_label = no_files_label.borrow_mut();
-                                let mut runs = [widget_ref(&mut *no_files_label)];
-                                panel.widgets(results, &mut runs);
-                            }
-                        });
+            tree.row(&pane_widths, SizePolicy::Remainder(footer_reserved), |tree| {
+                tree.container(folder_panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                        tree.widget(folders_label.clone());
+                        for item in &folder_items {
+                            tree.widget(item.clone());
+                        }
+                        if no_folder_items {
+                            tree.widget(no_folders_label.clone());
+                        }
                     });
                 });
-                cont.with_row(&filename_widths, SizePolicy::Auto, |cont| {
-                    let mut file_name_label = file_name_label.borrow_mut();
-                    let mut tmp_file_name = tmp_file_name.borrow_mut();
-                    let mut runs = [widget_ref(&mut *file_name_label), widget_ref(&mut *tmp_file_name)];
-                    cont.widgets(results, &mut runs);
+
+                tree.container(file_panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                        tree.widget(files_label.clone());
+                        for item in &file_items {
+                            tree.widget(item.clone());
+                        }
+                        if no_file_items {
+                            tree.widget(no_files_label.clone());
+                        }
+                    });
                 });
-                cont.with_row(&action_widths, SizePolicy::Auto, |cont| {
-                    let mut spacer_label = spacer_label.borrow_mut();
-                    let mut cancel_button = cancel_button.borrow_mut();
-                    let mut ok_button = ok_button.borrow_mut();
-                    let mut runs = [widget_ref(&mut *spacer_label), widget_ref(&mut *cancel_button), widget_ref(&mut *ok_button)];
-                    cont.widgets(results, &mut runs);
-                });
+            });
+
+            tree.row(&filename_widths, SizePolicy::Auto, |tree| {
+                tree.widget(file_name_label.clone());
+                tree.widget(tmp_file_name.clone());
+            });
+
+            tree.row(&action_widths, SizePolicy::Auto, |tree| {
+                tree.widget(spacer_label.clone());
+                tree.widget(cancel_button.clone());
+                tree.widget(ok_button.clone());
             });
         });
     }
@@ -341,118 +305,92 @@ impl FileDialogState {
     /// Renders the dialog and updates the selected file when confirmed.
     pub fn eval<R: Renderer>(&mut self, ctx: &mut Context<R>) {
         let mut needs_refresh = false;
-        {
-            // Split borrows up front so the dialog closure can read/write the
-            // state it needs without fighting the borrow checker.
-            let win = &mut self.win;
-            let folders = &self.folders;
-            let files = &self.files;
-            let folder_items = &self.folder_items;
-            let file_items = &self.file_items;
-            let current_working_directory = &mut self.current_working_directory;
-            let path_box = &self.path_box;
-            let tmp_file_name = &self.tmp_file_name;
-            let selected_folder = &mut self.selected_folder;
-            let up_button = &self.up_button;
-            let home_button = &self.home_button;
-            let go_button = &self.go_button;
-            let ok_button = &self.ok_button;
-            let cancel_button = &self.cancel_button;
-            let file_name = &mut self.file_name;
-            let file_path = &mut self.file_path;
-            let tree = &self.tree;
+        if self.path_box.borrow().buf != self.current_working_directory {
+            self.path_box.borrow_mut().buf = self.current_working_directory.clone();
+        }
+        self.rebuild_tree();
 
-            ctx.dialog(win, ContainerOption::NONE, WidgetBehaviourOption::NO_SCROLL, |cont, results| {
-                let mut dialog_state = WindowState::Open;
+        ctx.dialog(&mut self.win, ContainerOption::NONE, WidgetBehaviourOption::NO_SCROLL, &self.tree);
 
-                // Keep the textbox aligned with the canonical cwd when navigation
-                // came from buttons or list clicks instead of typed input.
-                if path_box.borrow().buf != *current_working_directory {
-                    path_box.borrow_mut().buf = current_working_directory.clone();
-                }
+        let results = ctx.frame_results();
 
-                cont.widget_tree(results, tree);
+        if results.state_of_handle(&self.up_button).is_submitted() {
+            if let Some(parent) = Path::new(self.current_working_directory.as_str()).parent() {
+                let parent_path = parent.to_string_lossy().to_string();
+                if !parent_path.is_empty() && parent_path != self.current_working_directory {
+                    self.current_working_directory = parent_path;
+                    self.selected_folder = None;
+                    self.path_box.borrow_mut().buf = self.current_working_directory.clone();
+                    needs_refresh = true;
+                }
+            }
+        }
+        if results.state_of_handle(&self.home_button).is_submitted() {
+            if let Some(home) = Self::home_dir() {
+                if home != self.current_working_directory && Path::new(home.as_str()).is_dir() {
+                    self.current_working_directory = home;
+                    self.selected_folder = None;
+                    self.path_box.borrow_mut().buf = self.current_working_directory.clone();
+                    needs_refresh = true;
+                }
+            }
+        }
+        if results.state_of_handle(&self.path_box).is_submitted() || results.state_of_handle(&self.go_button).is_submitted() {
+            let path_input = self.path_box.borrow().buf.clone();
+            if let Some(path) = Self::resolve_directory_path(self.current_working_directory.as_str(), path_input.as_str()) {
+                if path != self.current_working_directory {
+                    self.current_working_directory = path;
+                    self.selected_folder = None;
+                    self.path_box.borrow_mut().buf = self.current_working_directory.clone();
+                    needs_refresh = true;
+                }
+            }
+        }
 
-                if results.state_of_handle(up_button).is_submitted() {
-                    if let Some(parent) = Path::new(current_working_directory.as_str()).parent() {
-                        let parent_path = parent.to_string_lossy().to_string();
-                        if !parent_path.is_empty() && parent_path != *current_working_directory {
-                            *current_working_directory = parent_path;
-                            *selected_folder = None;
-                            path_box.borrow_mut().buf = current_working_directory.clone();
-                            needs_refresh = true;
-                        }
-                    }
+        // Folder selection navigates immediately and triggers a full
+        // item/tree rebuild after evaluation finishes.
+        for (index, item) in self.folder_items.iter().enumerate() {
+            if results.state_of_handle(item).is_submitted() {
+                if let Some(path) = self.folders.get(index) {
+                    self.current_working_directory = path.to_string();
+                    self.selected_folder = Some(path.to_string());
+                    self.path_box.borrow_mut().buf = self.current_working_directory.clone();
+                    needs_refresh = true;
                 }
-                if results.state_of_handle(home_button).is_submitted() {
-                    if let Some(home) = Self::home_dir() {
-                        if home != *current_working_directory && Path::new(home.as_str()).is_dir() {
-                            *current_working_directory = home;
-                            *selected_folder = None;
-                            path_box.borrow_mut().buf = current_working_directory.clone();
-                            needs_refresh = true;
-                        }
-                    }
-                }
-                if results.state_of_handle(path_box).is_submitted() || results.state_of_handle(go_button).is_submitted() {
-                    let path_input = path_box.borrow().buf.clone();
-                    if let Some(path) = Self::resolve_directory_path(current_working_directory.as_str(), path_input.as_str()) {
-                        if path != *current_working_directory {
-                            *current_working_directory = path;
-                            *selected_folder = None;
-                            path_box.borrow_mut().buf = current_working_directory.clone();
-                            needs_refresh = true;
-                        }
-                    }
-                }
+            }
+        }
 
-                // Folder selection navigates immediately and triggers a full
-                // item/tree rebuild after the dialog closure returns.
-                for (index, item) in folder_items.iter().enumerate() {
-                    if results.state_of_handle(item).is_submitted() {
-                        if let Some(path) = folders.get(index) {
-                            *current_working_directory = path.to_string();
-                            *selected_folder = Some(path.to_string());
-                            path_box.borrow_mut().buf = current_working_directory.clone();
-                            needs_refresh = true;
-                        }
-                    }
+        // File selection only primes the filename field; the dialog still
+        // waits for an explicit Open/Enter confirmation.
+        for (index, item) in self.file_items.iter().enumerate() {
+            if results.state_of_handle(item).is_submitted() {
+                if let Some(name) = self.files.get(index) {
+                    self.tmp_file_name.borrow_mut().buf = name.to_string();
                 }
+            }
+        }
 
-                // File selection only primes the filename field; the dialog
-                // still waits for an explicit Open/Enter confirmation.
-                for (index, item) in file_items.iter().enumerate() {
-                    if results.state_of_handle(item).is_submitted() {
-                        if let Some(name) = files.get(index) {
-                            tmp_file_name.borrow_mut().buf = name.to_string();
-                        }
-                    }
-                }
-
-                if results.state_of_handle(cancel_button).is_submitted() {
-                    *file_name = None;
-                    *file_path = None;
-                    dialog_state = WindowState::Closed;
-                }
-                if results.state_of_handle(ok_button).is_submitted() {
-                    let typed_name = tmp_file_name.borrow().buf.clone();
-                    if typed_name.is_empty() {
-                        *file_name = None;
-                        *file_path = None;
-                    } else {
-                        let selected_path = Self::resolve_selected_path(current_working_directory.as_str(), typed_name.as_str());
-                        let selected_name = Path::new(selected_path.as_str())
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .map(|name| name.to_string())
-                            .unwrap_or(typed_name);
-                        *file_name = Some(selected_name);
-                        *file_path = Some(selected_path);
-                    }
-                    dialog_state = WindowState::Closed;
-                }
-                dialog_state
-            });
+        if results.state_of_handle(&self.cancel_button).is_submitted() {
+            self.file_name = None;
+            self.file_path = None;
+            self.win.close();
+        }
+        if results.state_of_handle(&self.ok_button).is_submitted() {
+            let typed_name = self.tmp_file_name.borrow().buf.clone();
+            if typed_name.is_empty() {
+                self.file_name = None;
+                self.file_path = None;
+            } else {
+                let selected_path = Self::resolve_selected_path(self.current_working_directory.as_str(), typed_name.as_str());
+                let selected_name = Path::new(selected_path.as_str())
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.to_string())
+                    .unwrap_or(typed_name);
+                self.file_name = Some(selected_name);
+                self.file_path = Some(selected_path);
+            }
+            self.win.close();
         }
 
         if needs_refresh {

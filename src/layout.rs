@@ -769,6 +769,35 @@ mod tests {
     }
 
     #[test]
+    fn row_remainder_margin_preserves_footer_rows() {
+        let mut layout = LayoutManager::default();
+        layout.style = Style::default();
+        let body = rect(0, 0, 160, 120);
+        layout.reset(body, vec2(0, 0));
+        layout.set_default_cell_height(10);
+
+        let row = [SizePolicy::Remainder(0)];
+        let spacing = layout.style.spacing;
+
+        layout.row(&row, SizePolicy::Fixed(10));
+        let toolbar = layout.next();
+
+        layout.row(&row, SizePolicy::Remainder(10 * 2 + spacing * 2));
+        let pane = layout.next();
+
+        layout.row(&row, SizePolicy::Fixed(10));
+        let filename = layout.next();
+
+        layout.row(&row, SizePolicy::Fixed(10));
+        let actions = layout.next();
+
+        assert_eq!(toolbar.y, body.y);
+        assert_eq!(filename.y, pane.y + pane.height + spacing);
+        assert_eq!(actions.y, filename.y + filename.height + spacing);
+        assert!(actions.y + actions.height <= body.y + body.height);
+    }
+
+    #[test]
     fn grid_weight_is_symmetric_across_axes() {
         let mut layout = LayoutManager::default();
         layout.style = Style::default();

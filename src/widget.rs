@@ -193,10 +193,15 @@ impl FrameResults {
 
     /// Returns the most relevant available state for `widget_id`.
     ///
-    /// During a frame this prefers the current in-progress result; otherwise it falls
-    /// back to the previously committed result.
+    /// Once any widget has been rendered in the current frame, this reports only the
+    /// current-frame result set. Before the first current-frame record, it falls back
+    /// to the previously committed result generation.
     pub fn state(&self, widget_id: WidgetId) -> ResourceState {
-        self.current.get(&widget_id).copied().or_else(|| self.committed.get(&widget_id).copied()).unwrap_or(ResourceState::NONE)
+        if self.current.is_empty() {
+            self.committed_state(widget_id)
+        } else {
+            self.current_state(widget_id)
+        }
     }
 
     /// Returns the most relevant available state for `widget`.
@@ -219,6 +224,32 @@ impl FrameResults {
     /// Returns the most relevant available state for the widget stored in `handle`.
     pub fn state_of_handle<W: Widget>(&self, handle: &WidgetHandle<W>) -> ResourceState {
         self.state(widget_id_of_handle(handle))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_does_not_fall_back_to_committed_once_current_frame_is_active() {
+        let committed_widget = 1_u8;
+        let current_widget = 2_u8;
+        let committed_id = (&committed_widget as *const u8).cast::<()>();
+        let current_id = (&current_widget as *const u8).cast::<()>();
+
+        let mut results = FrameResults::default();
+        results.record(committed_id, ResourceState::SUBMIT);
+        results.finish_frame();
+
+        assert!(results.state(committed_id).is_submitted());
+
+        results.begin_frame();
+        results.record(current_id, ResourceState::CHANGE);
+
+        assert!(results.state(committed_id).is_none());
+        assert!(results.state(current_id).is_changed());
+        assert!(results.committed_state(committed_id).is_submitted());
     }
 }
 

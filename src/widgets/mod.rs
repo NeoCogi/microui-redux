@@ -73,6 +73,7 @@ macro_rules! implement_widget {
 // lives in `widget_ctx.rs` beside the widget runtime traits.
 
 mod core_widgets;
+mod display;
 mod nodes;
 mod slider;
 mod text_area;
@@ -80,6 +81,7 @@ mod text_edit;
 mod textbox;
 
 pub use core_widgets::*;
+pub use display::*;
 pub use nodes::*;
 pub use slider::*;
 pub use text_area::*;

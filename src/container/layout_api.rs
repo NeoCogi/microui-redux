@@ -128,7 +128,7 @@ impl Container {
     /// Returns the next raw layout cell rectangle.
     ///
     /// Unlike widget helper methods (`button`, `textbox`, etc.), this does not consult
-    /// a widget's `preferred_size`; it uses only the current row/column policies.
+    /// a widget's measured intrinsic size; it uses only the current row/column policies.
     pub fn next_cell(&mut self) -> Recti {
         self.layout.next()
     }
