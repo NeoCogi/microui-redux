@@ -1,0 +1,212 @@
+//! Embedded panel lifecycle and scroll management.
+
+use super::*;
+
+impl Container {
+    pub(crate) fn consume_pending_scroll(&mut self) {
+        if !self.scroll_enabled {
+            return;
+        }
+        let delta = match self.pending_scroll {
+            Some(delta) if delta.x != 0 || delta.y != 0 => delta,
+            _ => return,
+        };
+
+        let mut consumed = false;
+        let mut scroll = self.scroll;
+        let mut content_size = self.content_size;
+        let padding = self.style.as_ref().padding * 2;
+        content_size.x += padding;
+        content_size.y += padding;
+        let body = self.body;
+
+        let maxscroll_y = content_size.y - body.height;
+        if delta.y != 0 && maxscroll_y > 0 && body.height > 0 {
+            let new_scroll = Self::clamp(scroll.y + delta.y, 0, maxscroll_y);
+            if new_scroll != scroll.y {
+                scroll.y = new_scroll;
+                consumed = true;
+            }
+        }
+
+        let maxscroll_x = content_size.x - body.width;
+        if delta.x != 0 && maxscroll_x > 0 && body.width > 0 {
+            let new_scroll = Self::clamp(scroll.x + delta.x, 0, maxscroll_x);
+            if new_scroll != scroll.x {
+                scroll.x = new_scroll;
+                consumed = true;
+            }
+        }
+
+        if consumed {
+            self.scroll = scroll;
+            self.pending_scroll = None;
+        }
+    }
+
+    #[inline(never)]
+    pub(crate) fn scrollbars(&mut self, body: &mut Recti) {
+        let (scrollbar_size, padding, thumb_size) = {
+            let style = self.style.as_ref();
+            (style.scrollbar_size, style.padding, style.thumb_size)
+        };
+        let sz = scrollbar_size;
+        let mut cs: Vec2i = self.content_size;
+        cs.x += padding * 2;
+        cs.y += padding * 2;
+        let base_body = *body;
+        self.push_clip_rect(*body);
+        if cs.y > base_body.height {
+            body.width -= sz;
+        }
+        if cs.x > base_body.width {
+            body.height -= sz;
+        }
+        let body = *body;
+        let maxscroll_y = scrollbar_max_scroll(cs.y, body.height);
+        if maxscroll_y > 0 && body.height > 0 {
+            let scrollbar_y_id = widget_id_of(&self.scrollbar_y_state);
+            let base = scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size);
+            let control = self.update_control_with_opts(scrollbar_y_id, base, self.scrollbar_y_state.opt, self.scrollbar_y_state.bopt);
+            {
+                let mut ctx = WidgetCtx::new(
+                    scrollbar_y_id,
+                    base,
+                    &mut self.command_list,
+                    &mut self.clip_stack,
+                    self.style.as_ref(),
+                    &self.atlas,
+                    &mut self.focus,
+                    &mut self.updated_focus,
+                    self.in_hover_root,
+                    None,
+                );
+                let _ = self.scrollbar_y_state.handle(&mut ctx, &control);
+            }
+            if control.active {
+                let delta = scrollbar_drag_delta(ScrollAxis::Vertical, self.input.borrow().mouse_delta, cs.y, base);
+                self.scroll.y += delta;
+            }
+            self.scroll.y = Self::clamp(self.scroll.y, 0, maxscroll_y);
+            self.draw_frame(base, ControlColor::ScrollBase);
+            let thumb = scrollbar_thumb(ScrollAxis::Vertical, base, body.height, cs.y, self.scroll.y, thumb_size);
+            self.draw_frame(thumb, ControlColor::ScrollThumb);
+        } else {
+            self.scroll.y = 0;
+        }
+
+        let maxscroll_x = scrollbar_max_scroll(cs.x, body.width);
+        if maxscroll_x > 0 && body.width > 0 {
+            let scrollbar_x_id = widget_id_of(&self.scrollbar_x_state);
+            let base = scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size);
+            let control = self.update_control_with_opts(scrollbar_x_id, base, self.scrollbar_x_state.opt, self.scrollbar_x_state.bopt);
+            {
+                let mut ctx = WidgetCtx::new(
+                    scrollbar_x_id,
+                    base,
+                    &mut self.command_list,
+                    &mut self.clip_stack,
+                    self.style.as_ref(),
+                    &self.atlas,
+                    &mut self.focus,
+                    &mut self.updated_focus,
+                    self.in_hover_root,
+                    None,
+                );
+                let _ = self.scrollbar_x_state.handle(&mut ctx, &control);
+            }
+            if control.active {
+                let delta = scrollbar_drag_delta(ScrollAxis::Horizontal, self.input.borrow().mouse_delta, cs.x, base);
+                self.scroll.x += delta;
+            }
+            self.scroll.x = Self::clamp(self.scroll.x, 0, maxscroll_x);
+            self.draw_frame(base, ControlColor::ScrollBase);
+            let thumb = scrollbar_thumb(ScrollAxis::Horizontal, base, body.width, cs.x, self.scroll.x, thumb_size);
+            self.draw_frame(thumb, ControlColor::ScrollThumb);
+        } else {
+            self.scroll.x = 0;
+        }
+        self.pop_clip_rect();
+    }
+
+    /// Configures layout state for the container's client area, handling scrollbars when necessary.
+    pub fn push_container_body(&mut self, body: Recti, _opt: ContainerOption, bopt: WidgetBehaviourOption) {
+        let mut body = body;
+        self.scroll_enabled = !bopt.is_no_scroll();
+        if self.scroll_enabled {
+            self.scrollbars(&mut body);
+        }
+        let (layout_padding, style_padding, font, style_clone) = {
+            let style = self.style.as_ref();
+            (-style.padding, style.padding, style.font, *style)
+        };
+        let scroll = self.scroll;
+        self.layout.reset(expand_rect(body, layout_padding), scroll);
+        self.layout.style = style_clone;
+        let font_height = self.atlas.get_font_height(font) as i32;
+        let vertical_pad = Self::vertical_text_padding(style_padding);
+        let icon_height = self.atlas.get_icon_size(EXPAND_DOWN_ICON).height;
+        let default_height = max(font_height + vertical_pad * 2, icon_height);
+        self.layout.set_default_cell_height(default_height);
+        self.body = body;
+    }
+
+    fn pop_panel(&mut self, panel: &mut ContainerHandle) {
+        let layout_body = panel.inner().layout.current_body();
+        let layout_max = panel.inner().layout.current_max();
+        let container = &mut panel.inner_mut();
+
+        if let Some(lm) = layout_max {
+            container.content_size = Vec2i::new(lm.x - layout_body.x, lm.y - layout_body.y);
+        }
+
+        container.layout.pop_scope();
+    }
+
+    #[inline(never)]
+    pub(crate) fn begin_panel(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, bopt: WidgetBehaviourOption) {
+        let rect = self.layout.next();
+        let panel_id = container_id_of(panel);
+        if self.hit_test_rect(rect, self.in_hover_root) {
+            self.next_hover_root_child = Some(panel_id);
+            self.next_hover_root_child_rect = Some(rect);
+        }
+        let container = &mut panel.inner_mut();
+        container.prepare();
+        container.style = self.style.clone();
+
+        container.rect = rect;
+        if !opt.has_no_frame() {
+            self.draw_frame(rect, ControlColor::PanelBG);
+        }
+
+        container.in_hover_root = self.in_hover_root && self.hover_root_child == Some(panel_id);
+        if self.pending_scroll.is_some() && container.in_hover_root {
+            container.pending_scroll = self.pending_scroll.take();
+        }
+        container.push_container_body(rect, opt, bopt);
+        let clip_rect = container.body;
+        container.push_clip_rect(clip_rect);
+    }
+
+    pub(crate) fn end_panel(&mut self, panel: &mut ContainerHandle) {
+        panel.inner_mut().pop_clip_rect();
+        self.pop_panel(panel);
+        {
+            let mut inner = panel.inner_mut();
+            inner.consume_pending_scroll();
+            let pending = inner.pending_scroll.take();
+            if self.pending_scroll.is_none() {
+                self.pending_scroll = pending;
+            }
+        }
+        self.panels.push(panel.clone())
+    }
+
+    /// Embeds another container handle inside the current layout.
+    pub fn panel<F: FnOnce(&mut ContainerHandle)>(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, f: F) {
+        self.begin_panel(panel, opt, bopt);
+        f(panel);
+        self.end_panel(panel);
+    }
+}
