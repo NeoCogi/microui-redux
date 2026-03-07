@@ -51,13 +51,17 @@
 // IN THE SOFTWARE.
 //
 #![deny(missing_docs)]
-//! `microui-redux` provides an immediate-mode GUI toolkit inspired by [rxi/microui](https://github.com/rxi/microui).
-//! The crate exposes the core context, container, layout, and renderer hooks necessary to embed a UI inside
+//! `microui-redux` provides a GUI toolkit inspired by [rxi/microui](https://github.com/rxi/microui).
+//! The crate keeps the original immediate-mode execution model at the window/context level while also exposing
+//! retained [`WidgetTree`] values that can store reusable widget/layout structure and be replayed each frame.
+//! It exposes the core context, container, layout, and renderer hooks necessary to embed a UI inside
 //! custom render backends while remaining allocator- and platform-agnostic.
 //! Built-in widget placement is driven by each widget's `preferred_size`, so auto-sized rows can use
 //! per-widget intrinsic text/icon metrics instead of a single shared control size.
 //! Layout internals are flow-based: row tracks and vertical stack flows both run through the same
 //! engine so scope/scroll/content bookkeeping stays consistent.
+//! Per-frame interaction results are collected in [`FrameResults`], allowing retained widget handles to be
+//! queried after traversal without threading ad-hoc output slots through every widget call.
 
 use std::{
     cell::{Ref, RefCell, RefMut},
