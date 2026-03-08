@@ -101,6 +101,153 @@ impl<R: Renderer> Context<R> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{container::Command, widget_handle, AtlasHandle, AtlasSource, CharEntry, FontEntry, SourceFormat, TextBlock, WidgetTreeBuilder};
+
+    const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
+
+    struct NoopRenderer {
+        atlas: AtlasHandle,
+    }
+
+    impl Renderer for NoopRenderer {
+        fn get_atlas(&self) -> AtlasHandle {
+            self.atlas.clone()
+        }
+        fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
+        fn push_quad_vertices(&mut self, _v0: &crate::canvas::Vertex, _v1: &crate::canvas::Vertex, _v2: &crate::canvas::Vertex, _v3: &crate::canvas::Vertex) {}
+        fn flush(&mut self) {}
+        fn end(&mut self) {}
+        fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) {}
+        fn destroy_texture(&mut self, _id: TextureId) {}
+        fn draw_texture(&mut self, _id: TextureId, _vertices: [crate::canvas::Vertex; 4]) {}
+    }
+
+    fn make_test_atlas() -> AtlasHandle {
+        let pixels: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+        let icons: Vec<(&str, Recti)> = ICON_NAMES.iter().map(|name| (*name, Recti::new(0, 0, 1, 1))).collect();
+        let entries = vec![
+            (
+                '_',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+            (
+                'a',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+        ];
+        let fonts = vec![(
+            "default",
+            FontEntry {
+                line_size: 10,
+                baseline: 8,
+                font_size: 10,
+                entries: &entries,
+            },
+        )];
+        let source = AtlasSource {
+            width: 1,
+            height: 1,
+            pixels: &pixels,
+            icons: &icons,
+            fonts: &fonts,
+            format: SourceFormat::Raw,
+            slots: &[],
+        };
+        AtlasHandle::from(&source)
+    }
+
+    #[test]
+    fn root_windows_render_scrollbars_after_content_size_is_known() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut style = Style::default();
+        style.padding = 0;
+        style.scrollbar_size = 10;
+        ctx.set_style(&style);
+
+        let mut window = ctx.new_window("window", rect(0, 0, 60, 30));
+        let text = widget_handle(TextBlock::new("a\na\na\na\na\na"));
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.widget(text.clone());
+        });
+
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+        });
+
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+        });
+
+        let inner = window.inner();
+        let body = inner.main.body;
+        let has_vertical_scrollbar = inner.main.command_list.iter().any(|cmd| {
+            matches!(cmd, Command::Recti { rect, .. } if rect.x == body.x + body.width && rect.width == style.scrollbar_size && rect.height > 0)
+        });
+
+        assert!(has_vertical_scrollbar);
+    }
+
+    #[test]
+    fn resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 240));
+        let mut style = Style::default();
+        style.padding = 0;
+        style.scrollbar_size = 10;
+        ctx.set_style(&style);
+
+        let mut window = ctx.new_window("window", rect(0, 0, 60, 40));
+        let text = widget_handle(TextBlock::new("aaaaaaaaaaaaaaaaaaaaaaaa\na\na\na\na\na\na\na"));
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.widget(text.clone());
+        });
+
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+        });
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+        });
+
+        let initial_rect = window.rect();
+        let corner_x = initial_rect.x + initial_rect.width - 1;
+        let corner_y = initial_rect.y + initial_rect.height - 1;
+
+        ctx.mousemove(corner_x, corner_y);
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+        });
+
+        ctx.mousedown(corner_x, corner_y, MouseButton::LEFT);
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+        });
+
+        ctx.mousemove(corner_x + 12, corner_y + 10);
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+        });
+
+        let resized = window.rect();
+        assert!(resized.width > initial_rect.width);
+        assert!(resized.height > initial_rect.height);
+    }
+}
+
 impl<R: Renderer> Context<R> {
     /// Begins a new draw pass on the underlying canvas.
     pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
@@ -278,6 +425,7 @@ impl<R: Renderer> Context<R> {
             None => (),
             Some(lm) => container.content_size = Vec2i::new(lm.x - layout_body.x, lm.y - layout_body.y),
         }
+        container.render_active_scrollbars();
         container.consume_pending_scroll();
         container.layout.pop_scope();
     }
@@ -295,9 +443,10 @@ impl<R: Renderer> Context<R> {
         true
     }
 
-    fn end_window(&mut self, window: &mut WindowHandle) {
+    fn end_window(&mut self, window: &mut WindowHandle, opt: ContainerOption) {
         window.end_window();
         self.end_root_container(window);
+        window.finish_resize(opt);
     }
 
     fn render_window_tree(
@@ -313,7 +462,7 @@ impl<R: Renderer> Context<R> {
                 inner.main.style = self.style.clone();
                 inner.main.widget_tree(&mut self.frame_results, tree);
             }
-            self.end_window(window);
+            self.end_window(window, opt);
 
             if !window.is_open() {
                 window.inner_mut().main.reset();

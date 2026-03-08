@@ -135,7 +135,13 @@ impl Container {
         self.render_scrollbars(*body);
     }
 
-    fn render_scrollbars(&mut self, body: Recti) {
+    pub(crate) fn render_active_scrollbars(&mut self) {
+        if self.scroll_enabled {
+            self.render_scrollbars(self.body);
+        }
+    }
+
+    pub(crate) fn render_scrollbars(&mut self, body: Recti) {
         let (scrollbar_size, padding, thumb_size) = {
             let style = self.style.as_ref();
             (style.scrollbar_size, style.padding, style.thumb_size)
@@ -143,8 +149,16 @@ impl Container {
         let mut cs: Vec2i = self.content_size;
         cs.x += padding * 2;
         cs.y += padding * 2;
-        self.push_clip_rect(body);
         let maxscroll_y = scrollbar_max_scroll(cs.y, body.height);
+        let maxscroll_x = scrollbar_max_scroll(cs.x, body.width);
+        let mut clip_rect = body;
+        if maxscroll_y > 0 && body.height > 0 {
+            clip_rect.width += scrollbar_size;
+        }
+        if maxscroll_x > 0 && body.width > 0 {
+            clip_rect.height += scrollbar_size;
+        }
+        self.push_clip_rect(clip_rect);
         if maxscroll_y > 0 && body.height > 0 {
             let scrollbar_y_id = widget_id_of(&self.scrollbar_y_state);
             let base = scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size);
@@ -176,7 +190,6 @@ impl Container {
             self.scroll.y = 0;
         }
 
-        let maxscroll_x = scrollbar_max_scroll(cs.x, body.width);
         if maxscroll_x > 0 && body.width > 0 {
             let scrollbar_x_id = widget_id_of(&self.scrollbar_x_state);
             let base = scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size);
@@ -235,9 +248,7 @@ impl Container {
     /// Configures layout state for the container's client area, handling scrollbars when necessary.
     pub fn push_container_body(&mut self, body: Recti, _opt: ContainerOption, bopt: WidgetBehaviourOption) {
         self.configure_container_body(body, bopt);
-        if self.scroll_enabled {
-            self.render_scrollbars(self.body);
-        }
+        self.render_active_scrollbars();
     }
 
     fn pop_panel(&mut self, panel: &mut ContainerHandle) {
@@ -327,9 +338,7 @@ impl Container {
         if self.pending_scroll.is_some() && container.in_hover_root {
             container.pending_scroll = self.pending_scroll.take();
         }
-        if container.scroll_enabled {
-            container.render_scrollbars(layout.body);
-        }
+        container.render_active_scrollbars();
         container.push_clip_rect(layout.body);
     }
 

@@ -72,6 +72,7 @@ impl Container {
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
         let (_, res) = self.render_widget(results, state, rect, input, opt, bopt);
+        state.reconcile(CommittedWidgetState::new(res));
         res
     }
 
@@ -86,6 +87,7 @@ impl Container {
     ) -> ResourceState {
         self.reconcile_widget(results, state);
         let (_, res) = self.render_widget(results, state, rect, input, opt, bopt);
+        state.reconcile(CommittedWidgetState::new(res));
         res
     }
 
@@ -95,6 +97,7 @@ impl Container {
         let bopt = state.effective_behaviour_opt();
         let input = if state.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let (_, res) = self.render_widget(results, state, rect, input, opt, bopt);
+        state.reconcile(CommittedWidgetState::new(res));
         res
     }
 

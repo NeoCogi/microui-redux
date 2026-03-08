@@ -74,6 +74,13 @@ pub struct Slider {
     pub bopt: WidgetBehaviourOption,
     /// Text editing state for shift-click numeric entry.
     pub edit: NumberEditState,
+    pending: Option<SliderFrameState>,
+}
+
+#[derive(Clone)]
+struct SliderFrameState {
+    value: Real,
+    edit: NumberEditState,
 }
 
 impl Slider {
@@ -88,6 +95,7 @@ impl Slider {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
             edit: NumberEditState::default(),
+            pending: None,
         }
     }
 
@@ -102,6 +110,7 @@ impl Slider {
             opt,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
             edit: NumberEditState::default(),
+            pending: None,
         }
     }
 
@@ -219,8 +228,34 @@ impl Widget for Slider {
         self.preferred_size_widget(style, atlas, avail)
     }
 
+    fn reconcile(&mut self, committed: CommittedWidgetState) {
+        if committed.should_commit_pending() {
+            if let Some(pending) = self.pending.take() {
+                self.value = pending.value;
+                self.edit = pending.edit;
+            }
+        } else {
+            self.pending = None;
+        }
+    }
+
     fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        self.handle_widget(ctx, control)
+        let mut draft = self.clone();
+        draft.pending = None;
+        let mut res = draft.handle_widget(ctx, control);
+        let changed = draft.value != self.value || draft.edit != self.edit;
+        if draft.edit.editing || changed {
+            res |= ResourceState::ACTIVE;
+        }
+        if !res.is_none() {
+            self.pending = Some(SliderFrameState {
+                value: draft.value,
+                edit: draft.edit,
+            });
+        } else {
+            self.pending = None;
+        }
+        res
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
@@ -247,9 +282,10 @@ pub struct Number {
     pub bopt: WidgetBehaviourOption,
     /// Text editing state for shift-click numeric entry.
     pub edit: NumberEditState,
+    pending: Option<NumberFrameState>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 /// Editing buffer for number-style widgets.
 pub struct NumberEditState {
     /// Whether the widget is currently in edit mode.
@@ -258,6 +294,12 @@ pub struct NumberEditState {
     pub buf: String,
     /// Cursor position within the buffer (byte index).
     pub cursor: usize,
+}
+
+#[derive(Clone)]
+struct NumberFrameState {
+    value: Real,
+    edit: NumberEditState,
 }
 
 impl Number {
@@ -270,6 +312,7 @@ impl Number {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             edit: NumberEditState::default(),
+            pending: None,
         }
     }
 
@@ -282,6 +325,7 @@ impl Number {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             edit: NumberEditState::default(),
+            pending: None,
         }
     }
 
@@ -332,8 +376,34 @@ impl Widget for Number {
         self.preferred_size_widget(style, atlas, avail)
     }
 
+    fn reconcile(&mut self, committed: CommittedWidgetState) {
+        if committed.should_commit_pending() {
+            if let Some(pending) = self.pending.take() {
+                self.value = pending.value;
+                self.edit = pending.edit;
+            }
+        } else {
+            self.pending = None;
+        }
+    }
+
     fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        self.handle_widget(ctx, control)
+        let mut draft = self.clone();
+        draft.pending = None;
+        let mut res = draft.handle_widget(ctx, control);
+        let changed = draft.value != self.value || draft.edit != self.edit;
+        if draft.edit.editing || changed {
+            res |= ResourceState::ACTIVE;
+        }
+        if !res.is_none() {
+            self.pending = Some(NumberFrameState {
+                value: draft.value,
+                edit: draft.edit,
+            });
+        } else {
+            self.pending = None;
+        }
+        res
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
@@ -446,8 +516,10 @@ mod tests {
 
         let res = slider.render(&mut ctx, &control);
 
-        assert!(res.is_none());
+        assert!(res.is_active());
         assert!(slider.value.is_finite());
+        assert_eq!(slider.value, 5.0);
+        slider.reconcile(CommittedWidgetState::new(res));
         assert_eq!(slider.value, 5.0);
     }
 
@@ -493,6 +565,8 @@ mod tests {
         let res = slider.render(&mut ctx, &control);
 
         assert!(!res.is_none());
+        assert_eq!(slider.value, 0.0);
+        slider.reconcile(CommittedWidgetState::new(res));
         assert_eq!(slider.value, 50.0);
     }
 }

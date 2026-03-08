@@ -457,6 +457,7 @@ pub struct Checkbox {
     pub opt: WidgetOption,
     /// Behaviour options applied to the checkbox.
     pub bopt: WidgetBehaviourOption,
+    pending_value: Option<bool>,
 }
 
 impl Checkbox {
@@ -467,6 +468,7 @@ impl Checkbox {
             value,
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
+            pending_value: None,
         }
     }
 
@@ -477,6 +479,7 @@ impl Checkbox {
             value,
             opt,
             bopt: WidgetBehaviourOption::NONE,
+            pending_value: None,
         }
     }
 
@@ -495,12 +498,12 @@ impl Checkbox {
         let mut res = ResourceState::NONE;
         let bounds = ctx.rect();
         let box_rect = rect(bounds.x, bounds.y, bounds.height, bounds.height);
+        let value = if control.clicked { !self.value } else { self.value };
         if control.clicked {
             res |= ResourceState::CHANGE;
-            self.value = !self.value;
         }
         ctx.draw_widget_frame(control, box_rect, ControlColor::Base, self.opt);
-        if self.value {
+        if value {
             let color = ctx.style().colors[ControlColor::Text as usize];
             ctx.draw_icon(CHECK_ICON, box_rect, color);
         }
@@ -512,7 +515,39 @@ impl Checkbox {
     }
 }
 
-implement_widget!(Checkbox, handle_widget, preferred_size_widget);
+impl Widget for Checkbox {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
+        &self.bopt
+    }
+
+    fn reconcile(&mut self, committed: CommittedWidgetState) {
+        if committed.should_commit_pending() {
+            if let Some(value) = self.pending_value.take() {
+                self.value = value;
+            }
+        } else {
+            self.pending_value = None;
+        }
+    }
+
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+
+    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let res = self.handle_widget(ctx, control);
+        if control.clicked {
+            self.pending_value = Some(!self.value);
+        } else {
+            self.pending_value = None;
+        }
+        res
+    }
+}
 
 #[derive(Clone)]
 /// Persistent state for custom render widgets.

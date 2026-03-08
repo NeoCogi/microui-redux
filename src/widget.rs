@@ -77,6 +77,12 @@ impl CommittedWidgetState {
     pub const fn new(previous_result: ResourceState) -> Self {
         Self { previous_result }
     }
+
+    /// Returns `true` when the previous frame produced transient widget state
+    /// that should be committed during reconcile.
+    pub fn should_commit_pending(self) -> bool {
+        !self.previous_result.is_none()
+    }
 }
 
 impl Default for CommittedWidgetState {

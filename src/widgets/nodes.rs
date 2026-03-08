@@ -97,6 +97,7 @@ pub struct Node {
     /// Behaviour options applied to the node.
     pub bopt: WidgetBehaviourOption,
     kind: NodeKind,
+    pending_state: Option<NodeStateValue>,
 }
 
 impl Node {
@@ -113,6 +114,7 @@ impl Node {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Header,
+            pending_state: None,
         }
     }
 
@@ -124,6 +126,7 @@ impl Node {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Tree,
+            pending_state: None,
         }
     }
 
@@ -140,6 +143,7 @@ impl Node {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Header,
+            pending_state: None,
         }
     }
 
@@ -151,6 +155,7 @@ impl Node {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Tree,
+            pending_state: None,
         }
     }
 
@@ -219,11 +224,47 @@ impl Node {
         ctx.draw_control_text(self.label.as_str(), r, ControlColor::Text, self.opt);
 
         if control.clicked {
-            self.state = if expanded { NodeStateValue::Closed } else { NodeStateValue::Expanded };
             res |= ResourceState::CHANGE;
         }
         res
     }
+
+    pub(crate) fn clear_pending_state(&mut self) {
+        self.pending_state = None;
+    }
 }
 
-implement_widget!(Node, handle_widget, preferred_size_widget);
+impl Widget for Node {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
+        &self.bopt
+    }
+
+    fn reconcile(&mut self, committed: CommittedWidgetState) {
+        if committed.should_commit_pending() {
+            if let Some(state) = self.pending_state.take() {
+                self.state = state;
+            }
+        } else {
+            self.pending_state = None;
+        }
+    }
+
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+
+    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let expanded = self.state.is_expanded();
+        let res = self.handle_widget(ctx, control);
+        if control.clicked {
+            self.pending_state = Some(if expanded { NodeStateValue::Closed } else { NodeStateValue::Expanded });
+        } else {
+            self.pending_state = None;
+        }
+        res
+    }
+}

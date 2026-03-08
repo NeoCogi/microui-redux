@@ -143,7 +143,7 @@ impl Window {
             main: container,
             title_state,
             close_state,
-            resize_state,
+            resize_state: _,
             ..
         } = self;
         let mut body = container.rect;
@@ -203,30 +203,7 @@ impl Window {
                 }
             }
         }
-        container.push_container_body(body, opt, bopt);
-        if !opt.is_auto_sizing() {
-            let sz = container.style.as_ref().title_height;
-            let resize_id = widget_id_of(resize_state);
-            let r_0 = rect(r.x + r.width - sz, r.y + r.height - sz, sz, sz);
-            let control_state = (resize_state.opt, resize_state.bopt);
-            let control = container.update_control(resize_id, r_0, &control_state);
-            {
-                let mut ctx = container.widget_ctx(resize_id, r_0, None);
-                let _ = resize_state.render(&mut ctx, &control);
-            }
-            if control.active {
-                container.rect.width = if 96 > container.rect.width + container.input.borrow().mouse_delta.x {
-                    96
-                } else {
-                    container.rect.width + container.input.borrow().mouse_delta.x
-                };
-                container.rect.height = if 64 > container.rect.height + container.input.borrow().mouse_delta.y {
-                    64
-                } else {
-                    container.rect.height + container.input.borrow().mouse_delta.y
-                };
-            }
-        }
+        container.configure_container_body(body, bopt);
         if opt.is_auto_sizing() && (container.content_size.x > 0 || container.content_size.y > 0) {
             let r_1 = container.layout.current_body();
             container.rect.width = container.content_size.x + (container.rect.width - r_1.width);
@@ -246,6 +223,35 @@ impl Window {
     fn end_window(&mut self) {
         let container = &mut self.main;
         container.pop_clip_rect();
+    }
+
+    fn finish_resize(&mut self, opt: ContainerOption) {
+        if opt.is_auto_sizing() || opt.is_fixed() {
+            return;
+        }
+
+        let container = &mut self.main;
+        let sz = container.style.as_ref().title_height;
+        let resize_id = widget_id_of(&self.resize_state);
+        let rect = rect(container.rect.x + container.rect.width - sz, container.rect.y + container.rect.height - sz, sz, sz);
+        let control_state = (self.resize_state.opt, self.resize_state.bopt);
+        let control = container.update_control(resize_id, rect, &control_state);
+        {
+            let mut ctx = container.widget_ctx(resize_id, rect, None);
+            let _ = self.resize_state.render(&mut ctx, &control);
+        }
+        if control.active {
+            container.rect.width = if 96 > container.rect.width + container.input.borrow().mouse_delta.x {
+                96
+            } else {
+                container.rect.width + container.input.borrow().mouse_delta.x
+            };
+            container.rect.height = if 64 > container.rect.height + container.input.borrow().mouse_delta.y {
+                64
+            } else {
+                container.rect.height + container.input.borrow().mouse_delta.y
+            };
+        }
     }
 }
 
@@ -345,6 +351,10 @@ impl WindowHandle {
 
     pub(crate) fn end_window(&mut self) {
         self.inner_mut().end_window()
+    }
+
+    pub(crate) fn finish_resize(&mut self, opt: ContainerOption) {
+        self.inner_mut().finish_resize(opt)
     }
 
     /// Resizes the underlying window rectangle.

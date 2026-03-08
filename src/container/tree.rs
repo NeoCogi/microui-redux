@@ -81,7 +81,8 @@ impl Container {
         let rect = self.measure_widget_rect(state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
-        let _ = self.render_widget(results, state, rect, None, opt, bopt);
+        let (_, result) = self.render_widget(results, state, rect, None, opt, bopt);
+        state.reconcile(CommittedWidgetState::new(result));
         state.state
     }
 
@@ -280,7 +281,7 @@ impl Container {
         let (control, result) = self.render_widget_handle(results, state, rect, None, opt, bopt);
 
         if control.clicked {
-            state.borrow_mut().state = stable_state;
+            state.borrow_mut().clear_pending_state();
         }
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
         stable_state
