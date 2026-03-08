@@ -60,7 +60,8 @@
 //! per-widget intrinsic text/icon metrics instead of a single shared control size.
 //! Layout internals are flow-based: row tracks and vertical stack flows both run through the same
 //! engine so scope/scroll/content bookkeeping stays consistent.
-//! Per-frame interaction results are collected internally in [`FrameResults`].
+//! Per-frame interaction results are collected internally and published as a committed
+//! generation through [`Context::committed_results`].
 //! Retained application/business logic reacts through
 //! [`Context::committed_results`], which exposes the previous frame's published
 //! interaction generation as the crate's public retained contract.

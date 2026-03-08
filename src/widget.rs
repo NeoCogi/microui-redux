@@ -154,7 +154,7 @@ pub fn widget_id_of_handle<W: Widget>(handle: &WidgetHandle<W>) -> WidgetId {
 /// - the committed result set published at the end of the previous frame,
 /// - and the current in-progress result set being written by this frame.
 #[derive(Default)]
-pub struct FrameResults {
+pub(crate) struct FrameResults {
     committed: HashMap<WidgetId, ResourceState>,
     current: HashMap<WidgetId, ResourceState>,
 }

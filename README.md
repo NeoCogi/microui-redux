@@ -152,10 +152,10 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
 - [x] Migrated shipped UI to the retained model.
     - [x] `examples/simple`, `examples/calculator`, `examples/demo-full`, and the file dialog now build trees once and replay them every frame.
     - [x] Removed `tree.run(...)` and rewrote the remaining callback-only sections as retained tree structure plus retained display widgets.
-- [x] Reworked dispatch around `FrameResults`.
-    - [x] Replaced per-call output slots with a per-frame result registry keyed by widget ID.
+- [x] Reworked dispatch around retained frame-result generations.
+    - [x] Replaced per-call output slots with an internal per-frame result registry keyed by widget ID.
     - [x] `window` / `dialog` / `popup` now render retained trees directly and expose committed business-logic results through `Context::committed_results()`.
-    - [x] Added handle-oriented helpers such as `FrameResults::state_of_handle` and `widget_id_of_handle`.
+    - [x] Added handle-oriented helpers such as `FrameResultGeneration::state_of_handle` and `widget_id_of_handle`.
 - [x] Simplified retained dispatch and handle-backed widgets.
     - [x] Unified retained widget dispatch around reconcile/measure/render instead of per-call output slots.
     - [x] Stabilized demo/file-dialog labels by reusing persistent `ListItem` state instead of rebuilding labels every frame.
