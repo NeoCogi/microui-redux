@@ -36,9 +36,9 @@ use std::sync::Arc;
 
 #[cfg(feature = "example-glow")]
 use crate::common::glow_renderer;
-#[cfg(feature = "example-vulkan")]
+#[cfg(all(not(feature = "example-glow"), feature = "example-vulkan"))]
 use crate::common::vulkan_renderer;
-#[cfg(feature = "example-wgpu")]
+#[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
 use crate::common::wgpu_renderer;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
@@ -49,9 +49,9 @@ use sdl2::{Sdl, VideoSubsystem};
 
 #[cfg(feature = "example-glow")]
 type RendererBackend = glow_renderer::GLRenderer;
-#[cfg(feature = "example-vulkan")]
+#[cfg(all(not(feature = "example-glow"), feature = "example-vulkan"))]
 type RendererBackend = vulkan_renderer::VulkanRenderer;
-#[cfg(feature = "example-wgpu")]
+#[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
 type RendererBackend = wgpu_renderer::WgpuRenderer;
 
 // The example app keeps one concrete renderer backend behind the shared microui `Context`. The
@@ -61,7 +61,10 @@ type MicroUI = microui::Context<RendererBackend>;
 
 #[cfg(feature = "example-glow")]
 pub type BackendInitContext = Arc<glow::Context>;
-#[cfg(any(feature = "example-vulkan", feature = "example-wgpu"))]
+#[cfg(any(
+    all(not(feature = "example-glow"), feature = "example-vulkan"),
+    all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"),
+))]
 pub struct BackendInitContext;
 
 pub struct Application<S> {
@@ -86,7 +89,10 @@ impl<S> Application<S> {
         let (bundle, init_ctx) = init_backend(&video, atlas)?;
         #[cfg(feature = "example-glow")]
         let BackendBundle { window, backend, renderer, size } = bundle;
-        #[cfg(not(feature = "example-glow"))]
+        #[cfg(any(
+            all(not(feature = "example-glow"), feature = "example-vulkan"),
+            all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"),
+        ))]
         let BackendBundle { window, renderer, size } = bundle;
 
         let mut ctx = microui::Context::new(renderer, Dimensioni::new(size.0 as i32, size.1 as i32));
@@ -234,7 +240,7 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
     ))
 }
 
-#[cfg(feature = "example-vulkan")]
+#[cfg(all(not(feature = "example-glow"), feature = "example-vulkan"))]
 /// Initializes the Vulkan example backend and returns the window, renderer, and init marker.
 fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBundle, BackendInitContext), String> {
     // Vulkan and wgpu derive their native surfaces from the SDL window itself, so the renderer is
@@ -247,7 +253,7 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
     Ok((BackendBundle { window, renderer, size: (width, height) }, init_ctx))
 }
 
-#[cfg(feature = "example-wgpu")]
+#[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
 /// Initializes the wgpu example backend and returns the window, renderer, and init marker.
 fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBundle, BackendInitContext), String> {
     let window = video.window("Window", 800, 600).resizable().build().map_err(|err| err.to_string())?;
