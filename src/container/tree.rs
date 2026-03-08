@@ -118,7 +118,7 @@ impl Container {
         }
 
         if let Some(rect) = bounds {
-            self.record_tree_layout(node_id, NodeLayout::new(rect, rect, vec2(rect.width, rect.height)));
+            self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Dimensioni::new(rect.width, rect.height)));
         }
     }
 
@@ -142,7 +142,7 @@ impl Container {
         // container. The retained path just captures the allocated rectangle in the tree cache
         // instead of consuming it immediately.
         let rect = self.layout_widget_dyn(results, widget);
-        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
+        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Dimensioni::default()));
     }
 
     /// Replays a leaf widget node using the rectangle captured during the layout pass.
@@ -161,7 +161,7 @@ impl Container {
     /// Measures a retained custom-render node and records its allocated rectangle.
     fn layout_tree_custom_render(&mut self, results: &FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>) {
         let rect = self.layout_widget_handle(results, state);
-        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
+        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Dimensioni::default()));
     }
 
     /// Executes a retained custom-render node and records both interaction and callback payload.
@@ -218,7 +218,7 @@ impl Container {
             let state = state.borrow();
             state.state
         };
-        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
+        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Dimensioni::default()));
         stable_state
     }
 
@@ -350,15 +350,15 @@ impl Container {
     }
 
     /// Measures a prebuilt widget tree using the current container layout without rendering it.
-    pub(crate) fn measure_widget_tree_content(&mut self, results: &FrameResults, tree: &WidgetTree) -> Vec2i {
+    pub(crate) fn measure_widget_tree_content(&mut self, results: &FrameResults, tree: &WidgetTree) -> Dimensioni {
         self.layout_tree_nodes(results, tree.roots());
 
         let content_size = match self.layout.current_max() {
             Some(max_rect) => {
                 let body = self.layout.current_body();
-                Vec2i::new(max_rect.x - body.x, max_rect.y - body.y)
+                Dimensioni::new(max_rect.x - body.x, max_rect.y - body.y)
             }
-            None => Vec2i::default(),
+            None => Dimensioni::default(),
         };
 
         // Discard provisional cache entries from the measurement-only pass so the real render pass

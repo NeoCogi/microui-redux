@@ -914,7 +914,7 @@ impl State {
             let mut log_output = self.log_output.as_mut().unwrap().clone();
             log_output.with_mut(|panel| {
                 let mut scroll = panel.scroll();
-                scroll.y = panel.content_size().y;
+                scroll.y = panel.content_size().height;
                 panel.set_scroll(scroll);
             });
             self.logbuf_updated = false;

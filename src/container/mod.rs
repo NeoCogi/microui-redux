@@ -87,7 +87,7 @@ pub struct Container {
     /// Inner rectangle excluding frame/title.
     pub(crate) body: Recti,
     /// Size of the content region based on layout traversal.
-    pub(crate) content_size: Vec2i,
+    pub(crate) content_size: Dimensioni,
     /// Accumulated scroll offset.
     pub(crate) scroll: Vec2i,
     /// Z-index used to order overlapping windows.
@@ -139,7 +139,7 @@ impl Container {
             atlas,
             rect: Recti::default(),
             body: Recti::default(),
-            content_size: Vec2i::default(),
+            content_size: Dimensioni::default(),
             scroll: Vec2i::default(),
             zindex: 0,
             command_list: Vec::default(),
@@ -169,7 +169,7 @@ impl Container {
         self.command_list.clear();
         self.clip_stack.clear();
         self.body = Recti::default();
-        self.content_size = Vec2i::default();
+        self.content_size = Dimensioni::default();
         self.scroll = Vec2i::default();
         self.hover = None;
         self.focus = None;
@@ -249,7 +249,7 @@ impl Container {
     }
 
     /// Returns the content size derived from layout traversal.
-    pub fn content_size(&self) -> Vec2i {
+    pub fn content_size(&self) -> Dimensioni {
         self.content_size
     }
 

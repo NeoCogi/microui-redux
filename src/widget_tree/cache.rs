@@ -32,7 +32,7 @@
 
 use std::collections::HashMap;
 
-use rs_math3d::{Recti, Vec2i};
+use rs_math3d::{Dimensioni, Recti};
 
 use crate::input::{ControlState, ResourceState};
 
@@ -50,12 +50,12 @@ pub struct NodeLayout {
     /// Inner body rectangle, when the node exposes one.
     pub body: Recti,
     /// Content size produced while traversing the node's children.
-    pub content_size: Vec2i,
+    pub content_size: Dimensioni,
 }
 
 impl NodeLayout {
     /// Creates a layout snapshot for one node.
-    pub const fn new(rect: Recti, body: Recti, content_size: Vec2i) -> Self {
+    pub const fn new(rect: Recti, body: Recti, content_size: Dimensioni) -> Self {
         Self { rect, body, content_size }
     }
 }
@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn layout_and_interaction_generations_are_independent() {
         let node_id = NodeId::new(7);
-        let layout = NodeLayout::new(Recti::new(1, 2, 3, 4), Recti::new(5, 6, 7, 8), Vec2i::new(9, 10));
+        let layout = NodeLayout::new(Recti::new(1, 2, 3, 4), Recti::new(5, 6, 7, 8), Dimensioni::new(9, 10));
         let interaction = NodeInteraction::new(ControlState::default(), ResourceState::SUBMIT);
 
         let mut cache = WidgetTreeCache::default();
@@ -206,8 +206,8 @@ mod tests {
         cache.finish_frame();
 
         let committed_layout = cache.prev_layout(node_id).copied().unwrap();
-        assert_eq!(committed_layout.content_size.x, layout.content_size.x);
-        assert_eq!(committed_layout.content_size.y, layout.content_size.y);
+        assert_eq!(committed_layout.content_size.width, layout.content_size.width);
+        assert_eq!(committed_layout.content_size.height, layout.content_size.height);
         assert!(cache.prev_interaction(node_id).copied().unwrap().result.is_submitted());
     }
 }
