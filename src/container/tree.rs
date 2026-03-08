@@ -110,12 +110,6 @@ impl Container {
         self.node_scope(results, state, true, f)
     }
 
-    fn run_tree_nodes(&mut self, results: &mut FrameResults, nodes: &[WidgetTreeNode]) {
-        for node in nodes {
-            self.run_tree_node(results, node);
-        }
-    }
-
     fn pre_handle_tree_nodes(&mut self, nodes: &[WidgetTreeNode]) {
         for node in nodes {
             self.pre_handle_tree_node(node);
@@ -167,6 +161,13 @@ impl Container {
         self.tree_cache.record_interaction(node_id, interaction);
     }
 
+    fn current_tree_layout_or_panic(&self, node_id: NodeId) -> NodeLayout {
+        self.tree_cache
+            .current_layout(node_id)
+            .copied()
+            .unwrap_or_else(|| panic!("tree node {:?} missing current layout", node_id))
+    }
+
     fn record_tree_group_from_children(&mut self, node_id: NodeId, children: &[WidgetTreeNode]) {
         let mut bounds: Option<Recti> = None;
         for child in children {
@@ -189,20 +190,39 @@ impl Container {
         }
     }
 
-    fn handle_tree_widget(&mut self, results: &mut FrameResults, node_id: NodeId, widget: &dyn WidgetStateHandleDyn) {
-        self.reconcile_widget_dyn(results, widget);
-        let rect = self.measure_widget_rect_dyn(widget);
+    fn layout_tree_nodes(&mut self, results: &FrameResults, nodes: &[WidgetTreeNode]) {
+        for node in nodes {
+            self.layout_tree_node(results, node);
+        }
+    }
+
+    fn render_tree_nodes(&mut self, results: &mut FrameResults, nodes: &[WidgetTreeNode]) {
+        for node in nodes {
+            self.render_tree_node(results, node);
+        }
+    }
+
+    fn layout_tree_widget(&mut self, results: &FrameResults, node_id: NodeId, widget: &dyn WidgetStateHandleDyn) {
+        let rect = self.layout_widget_dyn(results, widget);
+        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
+    }
+
+    fn render_tree_widget(&mut self, results: &mut FrameResults, node_id: NodeId, widget: &dyn WidgetStateHandleDyn) {
+        let rect = self.current_tree_layout_or_panic(node_id).rect;
         let opt = widget.effective_widget_opt();
         let bopt = widget.effective_behaviour_opt();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let (control, result) = self.render_widget_dyn(results, widget, rect, input, opt, bopt);
-        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
     }
 
-    fn handle_tree_custom_render(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>, render: &TreeCustomRender) {
-        self.reconcile_widget_handle(results, state);
-        let rect = self.measure_widget_rect_handle(state);
+    fn layout_tree_custom_render(&mut self, results: &FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>) {
+        let rect = self.layout_widget_handle(results, state);
+        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
+    }
+
+    fn render_tree_custom_render(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>, render: &TreeCustomRender) {
+        let rect = self.current_tree_layout_or_panic(node_id).rect;
         let (opt, bopt, needs_input) = {
             let state = state.borrow();
             (state.effective_widget_opt(), state.effective_behaviour_opt(), state.needs_input_snapshot())
@@ -237,14 +257,22 @@ impl Container {
             }),
         ));
 
-        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
     }
 
-    fn run_tree_node_scope(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
+    fn layout_tree_node_scope(&mut self, results: &FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        self.reconcile_widget_handle(results, state);
-        let rect = self.measure_widget_rect_handle(state);
+        let rect = self.layout_widget_handle(results, state);
+        let stable_state = {
+            let state = state.borrow();
+            state.state
+        };
+        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
+        stable_state
+    }
+
+    fn render_tree_node_scope(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
+        let rect = self.current_tree_layout_or_panic(node_id).rect;
         let (opt, bopt, stable_state) = {
             let state = state.borrow();
             (*state.widget_opt(), *state.behaviour_opt(), state.state)
@@ -254,67 +282,102 @@ impl Container {
         if control.clicked {
             state.borrow_mut().state = stable_state;
         }
-
-        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
         stable_state
     }
 
-    fn run_tree_node(&mut self, results: &mut FrameResults, node: &WidgetTreeNode) {
+    fn layout_tree_node(&mut self, results: &FrameResults, node: &WidgetTreeNode) {
         let (node_id, kind, children) = node.parts();
         match kind {
             WidgetTreeNodeKind::Widget { widget } => {
-                self.handle_tree_widget(results, node_id, &**widget);
+                self.layout_tree_widget(results, node_id, &**widget);
             }
-            WidgetTreeNodeKind::CustomRender { state, render } => {
-                self.handle_tree_custom_render(results, node_id, state, render);
+            WidgetTreeNodeKind::CustomRender { state, .. } => {
+                self.layout_tree_custom_render(results, node_id, state);
             }
             WidgetTreeNodeKind::Container { handle, opt, behaviour } => {
                 let mut handle = handle.clone();
-                self.begin_panel(&mut handle, *opt, *behaviour);
+                self.begin_panel_layout(&mut handle, *opt, *behaviour);
                 handle.with_mut(|container| {
-                    container.run_tree_nodes(results, children);
+                    container.layout_tree_nodes(results, children);
                 });
-                self.end_panel(&mut handle);
+                self.end_panel_layout(&mut handle);
                 let (rect, body, content_size) = handle.with(|container| (container.rect(), container.body(), container.content_size()));
                 self.record_tree_layout(node_id, NodeLayout::new(rect, body, content_size));
             }
             WidgetTreeNodeKind::Header { state } => {
-                if self.run_tree_node_scope(results, node_id, state).is_expanded() {
-                    self.run_tree_nodes(results, children);
+                if self.layout_tree_node_scope(results, node_id, state).is_expanded() {
+                    self.layout_tree_nodes(results, children);
                 }
             }
             WidgetTreeNodeKind::Tree { state } => {
-                if self.run_tree_node_scope(results, node_id, state).is_expanded() {
+                if self.layout_tree_node_scope(results, node_id, state).is_expanded() {
                     let indent_size = self.style.as_ref().indent;
                     self.layout.adjust_indent(indent_size);
-                    self.run_tree_nodes(results, children);
+                    self.layout_tree_nodes(results, children);
                     self.layout.adjust_indent(-indent_size);
                 }
             }
             WidgetTreeNodeKind::Row { widths, height } => {
                 self.with_row(widths, *height, |container| {
-                    container.run_tree_nodes(results, children);
+                    container.layout_tree_nodes(results, children);
                 });
                 self.record_tree_group_from_children(node_id, children);
             }
             WidgetTreeNodeKind::Grid { widths, heights } => {
                 self.with_grid(widths, heights, |container| {
-                    container.run_tree_nodes(results, children);
+                    container.layout_tree_nodes(results, children);
                 });
                 self.record_tree_group_from_children(node_id, children);
             }
             WidgetTreeNodeKind::Column => {
                 self.column(|container| {
-                    container.run_tree_nodes(results, children);
+                    container.layout_tree_nodes(results, children);
                 });
                 self.record_tree_group_from_children(node_id, children);
             }
             WidgetTreeNodeKind::Stack { width, height, direction } => {
                 self.stack_with_width_direction(*width, *height, *direction, |container| {
-                    container.run_tree_nodes(results, children);
+                    container.layout_tree_nodes(results, children);
                 });
                 self.record_tree_group_from_children(node_id, children);
+            }
+        }
+    }
+
+    fn render_tree_node(&mut self, results: &mut FrameResults, node: &WidgetTreeNode) {
+        let (node_id, kind, children) = node.parts();
+        match kind {
+            WidgetTreeNodeKind::Widget { widget } => {
+                self.render_tree_widget(results, node_id, &**widget);
+            }
+            WidgetTreeNodeKind::CustomRender { state, render } => {
+                self.render_tree_custom_render(results, node_id, state, render);
+            }
+            WidgetTreeNodeKind::Container { handle, opt, behaviour } => {
+                let mut handle = handle.clone();
+                let layout = self.current_tree_layout_or_panic(node_id);
+                self.begin_panel_render(&mut handle, *opt, *behaviour, layout);
+                handle.with_mut(|container| {
+                    container.render_tree_nodes(results, children);
+                });
+                self.end_panel_render(&mut handle);
+            }
+            WidgetTreeNodeKind::Header { state } => {
+                if self.render_tree_node_scope(results, node_id, state).is_expanded() {
+                    self.render_tree_nodes(results, children);
+                }
+            }
+            WidgetTreeNodeKind::Tree { state } => {
+                if self.render_tree_node_scope(results, node_id, state).is_expanded() {
+                    self.render_tree_nodes(results, children);
+                }
+            }
+            WidgetTreeNodeKind::Row { .. }
+            | WidgetTreeNodeKind::Grid { .. }
+            | WidgetTreeNodeKind::Column
+            | WidgetTreeNodeKind::Stack { .. } => {
+                self.render_tree_nodes(results, children);
             }
         }
     }
@@ -322,7 +385,8 @@ impl Container {
     /// Evaluates a prebuilt widget tree using the current container layout.
     pub fn widget_tree(&mut self, results: &mut FrameResults, tree: &WidgetTree) {
         self.pre_handle_tree_nodes(tree.roots());
-        self.run_tree_nodes(results, tree.roots());
+        self.layout_tree_nodes(results, tree.roots());
+        self.render_tree_nodes(results, tree.roots());
     }
 
     /// Builds a widget tree and evaluates it immediately.

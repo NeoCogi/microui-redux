@@ -96,18 +96,16 @@ impl Container {
         }
     }
 
-    #[inline(never)]
-    pub(crate) fn scrollbars(&mut self, body: &mut Recti) {
-        let (scrollbar_size, padding, thumb_size) = {
+    fn resolve_scrollbars(&mut self, body: &mut Recti) {
+        let (scrollbar_size, padding) = {
             let style = self.style.as_ref();
-            (style.scrollbar_size, style.padding, style.thumb_size)
+            (style.scrollbar_size, style.padding)
         };
         let sz = scrollbar_size;
         let mut cs: Vec2i = self.content_size;
         cs.x += padding * 2;
         cs.y += padding * 2;
         let base_body = *body;
-        self.push_clip_rect(*body);
         if cs.y > base_body.height {
             body.width -= sz;
         }
@@ -115,6 +113,37 @@ impl Container {
             body.height -= sz;
         }
         let body = *body;
+        let maxscroll_y = scrollbar_max_scroll(cs.y, body.height);
+        self.scroll.y = if maxscroll_y > 0 && body.height > 0 {
+            Self::clamp(self.scroll.y, 0, maxscroll_y)
+        } else {
+            0
+        };
+
+        let maxscroll_x = scrollbar_max_scroll(cs.x, body.width);
+        self.scroll.x = if maxscroll_x > 0 && body.width > 0 {
+            Self::clamp(self.scroll.x, 0, maxscroll_x)
+        } else {
+            0
+        };
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    #[inline(never)]
+    pub(crate) fn scrollbars(&mut self, body: &mut Recti) {
+        self.resolve_scrollbars(body);
+        self.render_scrollbars(*body);
+    }
+
+    fn render_scrollbars(&mut self, body: Recti) {
+        let (scrollbar_size, padding, thumb_size) = {
+            let style = self.style.as_ref();
+            (style.scrollbar_size, style.padding, style.thumb_size)
+        };
+        let mut cs: Vec2i = self.content_size;
+        cs.x += padding * 2;
+        cs.y += padding * 2;
+        self.push_clip_rect(body);
         let maxscroll_y = scrollbar_max_scroll(cs.y, body.height);
         if maxscroll_y > 0 && body.height > 0 {
             let scrollbar_y_id = widget_id_of(&self.scrollbar_y_state);
@@ -181,12 +210,12 @@ impl Container {
         self.pop_clip_rect();
     }
 
-    /// Configures layout state for the container's client area, handling scrollbars when necessary.
-    pub fn push_container_body(&mut self, body: Recti, _opt: ContainerOption, bopt: WidgetBehaviourOption) {
+    /// Configures layout state for the container's client area without drawing.
+    pub(crate) fn configure_container_body(&mut self, body: Recti, bopt: WidgetBehaviourOption) {
         let mut body = body;
         self.scroll_enabled = !bopt.is_no_scroll();
         if self.scroll_enabled {
-            self.scrollbars(&mut body);
+            self.resolve_scrollbars(&mut body);
         }
         let (layout_padding, style_padding, font, style_clone) = {
             let style = self.style.as_ref();
@@ -201,6 +230,14 @@ impl Container {
         let default_height = max(font_height + vertical_pad * 2, icon_height);
         self.layout.set_default_cell_height(default_height);
         self.body = body;
+    }
+
+    /// Configures layout state for the container's client area, handling scrollbars when necessary.
+    pub fn push_container_body(&mut self, body: Recti, _opt: ContainerOption, bopt: WidgetBehaviourOption) {
+        self.configure_container_body(body, bopt);
+        if self.scroll_enabled {
+            self.render_scrollbars(self.body);
+        }
     }
 
     fn pop_panel(&mut self, panel: &mut ContainerHandle) {
@@ -244,6 +281,60 @@ impl Container {
     pub(crate) fn end_panel(&mut self, panel: &mut ContainerHandle) {
         panel.inner_mut().pop_clip_rect();
         self.pop_panel(panel);
+        {
+            let mut inner = panel.inner_mut();
+            inner.consume_pending_scroll();
+            let pending = inner.pending_scroll.take();
+            if self.pending_scroll.is_none() {
+                self.pending_scroll = pending;
+            }
+        }
+        self.panels.push(panel.clone())
+    }
+
+    pub(crate) fn begin_panel_layout(&mut self, panel: &mut ContainerHandle, _opt: ContainerOption, bopt: WidgetBehaviourOption) {
+        let rect = self.layout.next();
+        let container = &mut panel.inner_mut();
+        container.prepare();
+        container.style = self.style.clone();
+        container.rect = rect;
+        container.configure_container_body(rect, bopt);
+    }
+
+    pub(crate) fn end_panel_layout(&mut self, panel: &mut ContainerHandle) {
+        self.pop_panel(panel);
+    }
+
+    pub(crate) fn begin_panel_render(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, layout: NodeLayout) {
+        let panel_id = container_id_of(panel);
+        if self.hit_test_rect(layout.rect, self.in_hover_root) {
+            self.next_hover_root_child = Some(panel_id);
+            self.next_hover_root_child_rect = Some(layout.rect);
+        }
+
+        let container = &mut panel.inner_mut();
+        container.style = self.style.clone();
+        container.rect = layout.rect;
+        container.body = layout.body;
+        container.content_size = layout.content_size;
+        container.scroll_enabled = !bopt.is_no_scroll();
+
+        if !opt.has_no_frame() {
+            self.draw_frame(layout.rect, ControlColor::PanelBG);
+        }
+
+        container.in_hover_root = self.in_hover_root && self.hover_root_child == Some(panel_id);
+        if self.pending_scroll.is_some() && container.in_hover_root {
+            container.pending_scroll = self.pending_scroll.take();
+        }
+        if container.scroll_enabled {
+            container.render_scrollbars(layout.body);
+        }
+        container.push_clip_rect(layout.body);
+    }
+
+    pub(crate) fn end_panel_render(&mut self, panel: &mut ContainerHandle) {
+        panel.inner_mut().pop_clip_rect();
         {
             let mut inner = panel.inner_mut();
             inner.consume_pending_scroll();

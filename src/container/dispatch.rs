@@ -32,6 +32,11 @@
 use super::*;
 
 impl Container {
+    pub(crate) fn layout_widget<W: Widget + ?Sized>(&mut self, results: &FrameResults, state: &mut W) -> Recti {
+        self.reconcile_widget(results, state);
+        self.measure_widget_rect(state)
+    }
+
     pub(crate) fn reconcile_widget<W: Widget + ?Sized>(&mut self, results: &FrameResults, state: &mut W) -> WidgetId {
         let widget_id = widget_id_of(state);
         state.reconcile(CommittedWidgetState::new(results.committed_state(widget_id)));
@@ -63,8 +68,7 @@ impl Container {
     }
 
     pub(crate) fn handle_widget<W: Widget + ?Sized>(&mut self, results: &mut FrameResults, state: &mut W, input: Option<Rc<InputSnapshot>>) -> ResourceState {
-        self.reconcile_widget(results, state);
-        let rect = self.measure_widget_rect(state);
+        let rect = self.layout_widget(results, state);
         let opt = *state.widget_opt();
         let bopt = *state.behaviour_opt();
         let (_, res) = self.render_widget(results, state, rect, input, opt, bopt);
@@ -86,13 +90,17 @@ impl Container {
     }
 
     pub(crate) fn handle_widget_raw<W: Widget + ?Sized>(&mut self, results: &mut FrameResults, state: &mut W) -> ResourceState {
-        self.reconcile_widget(results, state);
-        let rect = self.measure_widget_rect(state);
+        let rect = self.layout_widget(results, state);
         let opt = state.effective_widget_opt();
         let bopt = state.effective_behaviour_opt();
         let input = if state.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let (_, res) = self.render_widget(results, state, rect, input, opt, bopt);
         res
+    }
+
+    pub(crate) fn layout_widget_dyn(&mut self, results: &FrameResults, widget: &dyn WidgetStateHandleDyn) -> Recti {
+        self.reconcile_widget_dyn(results, widget);
+        self.measure_widget_rect_dyn(widget)
     }
 
     pub(crate) fn reconcile_widget_dyn(&mut self, results: &FrameResults, widget: &dyn WidgetStateHandleDyn) -> WidgetId {
@@ -135,6 +143,11 @@ impl Container {
             state.reconcile(CommittedWidgetState::new(results.committed_state(widget_id)));
         }
         widget_id
+    }
+
+    pub(crate) fn layout_widget_handle<W: Widget>(&mut self, results: &FrameResults, handle: &WidgetHandle<W>) -> Recti {
+        self.reconcile_widget_handle(results, handle);
+        self.measure_widget_rect_handle(handle)
     }
 
     pub(crate) fn measure_widget_rect_handle<W: Widget>(&mut self, handle: &WidgetHandle<W>) -> Recti {

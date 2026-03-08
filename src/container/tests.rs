@@ -126,6 +126,44 @@ fn make_panel_handle(container: &Container, name: &str) -> ContainerHandle {
     ContainerHandle::new(Container::new(name, container.atlas.clone(), container.style.clone(), container.input.clone()))
 }
 
+struct TraceWidget {
+    name: &'static str,
+    log: Rc<RefCell<Vec<String>>>,
+    opt: WidgetOption,
+    bopt: WidgetBehaviourOption,
+}
+
+impl TraceWidget {
+    fn new(name: &'static str, log: Rc<RefCell<Vec<String>>>) -> Self {
+        Self {
+            name,
+            log,
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+        }
+    }
+}
+
+impl Widget for TraceWidget {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
+        &self.bopt
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        self.log.borrow_mut().push(format!("measure {}", self.name));
+        Dimensioni::new(10, 10)
+    }
+
+    fn render(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+        self.log.borrow_mut().push(format!("render {}", self.name));
+        ResourceState::NONE
+    }
+}
+
 #[test]
 fn scrollbars_use_current_body() {
     let mut container = make_container();
@@ -277,6 +315,33 @@ fn widget_tree_records_leaf_states() {
 
     assert!(results.state_of_handle(&button_a).is_none());
     assert!(results.state_of_handle(&button_b).is_none());
+}
+
+#[test]
+fn widget_tree_measures_all_nodes_before_rendering() {
+    let mut container = make_container();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let first = widget_handle(TraceWidget::new("first", log.clone()));
+    let second = widget_handle(TraceWidget::new("second", log.clone()));
+    let mut results = FrameResults::default();
+
+    begin_test_frame(&mut container, rect(0, 0, 100, 20));
+    container.build_tree(&mut results, |tree| {
+        tree.row(&[SizePolicy::Auto, SizePolicy::Auto], SizePolicy::Auto, |tree| {
+            tree.widget(first.clone());
+            tree.widget(second.clone());
+        });
+    });
+
+    assert_eq!(
+        &*log.borrow(),
+        &[
+            "measure first".to_string(),
+            "measure second".to_string(),
+            "render first".to_string(),
+            "render second".to_string(),
+        ]
+    );
 }
 
 #[test]
