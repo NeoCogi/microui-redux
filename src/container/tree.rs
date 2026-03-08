@@ -111,49 +111,6 @@ impl Container {
         self.node_scope(results, state, true, f)
     }
 
-    fn pre_handle_tree_nodes(&mut self, nodes: &[WidgetTreeNode]) {
-        for node in nodes {
-            self.pre_handle_tree_node(node);
-        }
-    }
-
-    fn pre_handle_tree_node(&mut self, node: &WidgetTreeNode) {
-        let (node_id, kind, children) = node.parts();
-        match kind {
-            WidgetTreeNodeKind::Header { state } | WidgetTreeNodeKind::Tree { state } => {
-                if self.cached_tree_click(node_id) {
-                    let mut state = state.borrow_mut();
-                    state.state = if state.state.is_expanded() {
-                        NodeStateValue::Closed
-                    } else {
-                        NodeStateValue::Expanded
-                    };
-                }
-                if state.borrow().state.is_expanded() {
-                    self.pre_handle_tree_nodes(children);
-                }
-            }
-            WidgetTreeNodeKind::Container { handle, .. } => {
-                let mut handle = handle.clone();
-                handle.with_mut(|container| {
-                    container.pre_handle_tree_nodes(children);
-                });
-            }
-            WidgetTreeNodeKind::Row { .. } | WidgetTreeNodeKind::Grid { .. } | WidgetTreeNodeKind::Column | WidgetTreeNodeKind::Stack { .. } => {
-                self.pre_handle_tree_nodes(children)
-            }
-            WidgetTreeNodeKind::Widget { .. } | WidgetTreeNodeKind::CustomRender { .. } => {}
-        }
-    }
-
-    fn cached_tree_click(&mut self, node_id: NodeId) -> bool {
-        let Some(cached) = self.tree_cache.prev_layout(node_id).copied() else {
-            return false;
-        };
-
-        self.mouse_over(cached.rect, self.in_hover_root) && self.input.borrow().mouse_pressed.is_left()
-    }
-
     fn record_tree_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
         self.tree_cache.record_layout(node_id, layout);
     }
@@ -279,10 +236,6 @@ impl Container {
             (*state.widget_opt(), *state.behaviour_opt(), state.state)
         };
         let (control, result) = self.render_widget_handle(results, state, rect, None, opt, bopt);
-
-        if control.clicked {
-            state.borrow_mut().clear_pending_state();
-        }
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
         stable_state
     }
@@ -385,7 +338,6 @@ impl Container {
 
     /// Evaluates a prebuilt widget tree using the current container layout.
     pub fn widget_tree(&mut self, results: &mut FrameResults, tree: &WidgetTree) {
-        self.pre_handle_tree_nodes(tree.roots());
         self.layout_tree_nodes(results, tree.roots());
         self.render_tree_nodes(results, tree.roots());
     }

@@ -682,6 +682,18 @@ impl Combo {
         self.last_anchor
     }
 
+    /// Returns `true` when the combo popup should be open this frame.
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    /// Closes the popup and clears any popup-local focus state.
+    pub fn close_popup(&mut self) {
+        self.popup.set_focus(None);
+        self.popup.close();
+        self.open = false;
+    }
+
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let text_w = if self.label.is_empty() {
@@ -718,6 +730,23 @@ impl Combo {
         }
     }
 
+    /// Applies a submitted popup item selection and closes the popup.
+    pub fn select<S: AsRef<str>>(&mut self, index: usize, items: &[S]) -> Option<String> {
+        if items.is_empty() {
+            self.selected = 0;
+            self.label.clear();
+            self.close_popup();
+            return None;
+        }
+
+        self.selected = index.min(items.len() - 1);
+        self.label.clear();
+        self.label.push_str(items[self.selected].as_ref());
+        let selected_label = self.label.clone();
+        self.close_popup();
+        Some(selected_label)
+    }
+
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         if self.clamped {
@@ -728,7 +757,7 @@ impl Combo {
         if control.clicked {
             res |= ResourceState::SUBMIT | ResourceState::ACTIVE;
         }
-        if self.popup.is_open() {
+        if self.open || self.popup.is_open() {
             res |= ResourceState::ACTIVE;
         }
 
@@ -754,4 +783,116 @@ impl Combo {
     }
 }
 
-implement_widget!(Combo, handle_widget, preferred_size_widget);
+impl Widget for Combo {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
+        &self.bopt
+    }
+
+    fn reconcile(&mut self, committed: CommittedWidgetState) {
+        if committed.previous_result.is_submitted() {
+            self.open = !self.open;
+            if !self.open {
+                self.close_popup();
+            }
+        } else if !self.popup.is_open() {
+            self.open = false;
+        }
+    }
+
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+
+    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        self.handle_widget(ctx, control)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AtlasSource, CharEntry, FontEntry, Input, SourceFormat};
+    use std::{cell::RefCell, rc::Rc};
+
+    fn make_test_atlas() -> AtlasHandle {
+        let pixels: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+        let icons: Vec<(&str, Recti)> = [
+            "white",
+            "close",
+            "expand",
+            "collapse",
+            "check",
+            "expand_down",
+        ]
+        .iter()
+        .map(|name| (*name, Recti::new(0, 0, 1, 1)))
+        .collect();
+        let entries = vec![(
+            'a',
+            CharEntry {
+                offset: Vec2i::new(0, 0),
+                advance: Vec2i::new(8, 0),
+                rect: Recti::new(0, 0, 1, 1),
+            },
+        )];
+        let fonts = vec![(
+            "default",
+            FontEntry {
+                line_size: 10,
+                baseline: 8,
+                font_size: 10,
+                entries: &entries,
+            },
+        )];
+        let source = AtlasSource {
+            width: 1,
+            height: 1,
+            pixels: &pixels,
+            icons: &icons,
+            fonts: &fonts,
+            format: SourceFormat::Raw,
+            slots: &[],
+        };
+        AtlasHandle::from(&source)
+    }
+
+    #[test]
+    fn combo_reconcile_toggles_open_state_from_committed_submit() {
+        let atlas = make_test_atlas();
+        let style = Rc::new(Style::default());
+        let input = Rc::new(RefCell::new(Input::default()));
+        let popup = WindowHandle::popup("combo", atlas, style, input);
+        let mut combo = Combo::new(popup);
+
+        combo.reconcile(CommittedWidgetState::new(ResourceState::SUBMIT));
+        assert!(combo.is_open());
+
+        combo.popup.open();
+        combo.reconcile(CommittedWidgetState::new(ResourceState::SUBMIT));
+        assert!(!combo.is_open());
+        assert!(!combo.popup.is_open());
+    }
+
+    #[test]
+    fn combo_select_updates_label_and_closes_popup() {
+        let atlas = make_test_atlas();
+        let style = Rc::new(Style::default());
+        let input = Rc::new(RefCell::new(Input::default()));
+        let popup = WindowHandle::popup("combo", atlas, style, input);
+        let mut combo = Combo::new(popup);
+        let items = ["Apple", "Banana", "Cherry"];
+
+        combo.open = true;
+        combo.popup.open();
+        let selected = combo.select(1, &items);
+
+        assert_eq!(selected.as_deref(), Some("Banana"));
+        assert_eq!(combo.selected, 1);
+        assert!(!combo.is_open());
+        assert!(!combo.popup.is_open());
+    }
+}

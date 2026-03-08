@@ -259,6 +259,109 @@ impl FileDialogState {
         });
     }
 
+    fn sync_retained_view(&mut self) {
+        if self.path_box.borrow().buf != self.current_working_directory {
+            self.path_box.borrow_mut().buf = self.current_working_directory.clone();
+        }
+        self.rebuild_tree();
+    }
+
+    fn navigate_to(&mut self, path: String) -> bool {
+        if path.is_empty() || path == self.current_working_directory {
+            return false;
+        }
+        self.current_working_directory = path;
+        self.selected_folder = None;
+        self.path_box.borrow_mut().buf = self.current_working_directory.clone();
+        true
+    }
+
+    fn render<R: Renderer>(&mut self, ctx: &mut Context<R>) {
+        ctx.dialog(&mut self.win, ContainerOption::NONE, WidgetBehaviourOption::NO_SCROLL, &self.tree);
+    }
+
+    fn apply_navigation_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
+        if results.state_of_handle(&self.up_button).is_submitted() {
+            if let Some(parent) = Path::new(self.current_working_directory.as_str()).parent() {
+                return self.navigate_to(parent.to_string_lossy().to_string());
+            }
+        }
+
+        if results.state_of_handle(&self.home_button).is_submitted() {
+            if let Some(home) = Self::home_dir() {
+                if Path::new(home.as_str()).is_dir() {
+                    return self.navigate_to(home);
+                }
+            }
+        }
+
+        if results.state_of_handle(&self.path_box).is_submitted() || results.state_of_handle(&self.go_button).is_submitted() {
+            let path_input = self.path_box.borrow().buf.clone();
+            if let Some(path) = Self::resolve_directory_path(self.current_working_directory.as_str(), path_input.as_str()) {
+                return self.navigate_to(path);
+            }
+        }
+
+        false
+    }
+
+    fn apply_folder_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
+        let next_directory = self.folder_items.iter().enumerate().find_map(|(index, item)| {
+            if results.state_of_handle(item).is_submitted() {
+                self.folders.get(index).cloned()
+            } else {
+                None
+            }
+        });
+
+        if let Some(path) = next_directory {
+            self.selected_folder = Some(path.clone());
+            return self.navigate_to(path);
+        }
+
+        false
+    }
+
+    fn apply_file_actions(&mut self, results: FrameResultGeneration<'_>) {
+        let selected_file = self.file_items.iter().enumerate().find_map(|(index, item)| {
+            if results.state_of_handle(item).is_submitted() {
+                self.files.get(index).cloned()
+            } else {
+                None
+            }
+        });
+
+        if let Some(name) = selected_file {
+            self.tmp_file_name.borrow_mut().buf = name;
+        }
+    }
+
+    fn apply_completion_actions(&mut self, results: FrameResultGeneration<'_>) {
+        if results.state_of_handle(&self.cancel_button).is_submitted() {
+            self.file_name = None;
+            self.file_path = None;
+            self.win.close();
+        }
+
+        if results.state_of_handle(&self.ok_button).is_submitted() {
+            let typed_name = self.tmp_file_name.borrow().buf.clone();
+            if typed_name.is_empty() {
+                self.file_name = None;
+                self.file_path = None;
+            } else {
+                let selected_path = Self::resolve_selected_path(self.current_working_directory.as_str(), typed_name.as_str());
+                let selected_name = Path::new(selected_path.as_str())
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.to_string())
+                    .unwrap_or(typed_name);
+                self.file_name = Some(selected_name);
+                self.file_path = Some(selected_path);
+            }
+            self.win.close();
+        }
+    }
+
     /// Creates a new dialog window and associated panels.
     pub fn new<R: Renderer>(ctx: &mut Context<R>) -> Self {
         let current_working_directory = std::env::current_dir()
@@ -304,94 +407,12 @@ impl FileDialogState {
 
     /// Renders the dialog and updates the selected file when confirmed.
     pub fn eval<R: Renderer>(&mut self, ctx: &mut Context<R>) {
-        let mut needs_refresh = false;
-        if self.path_box.borrow().buf != self.current_working_directory {
-            self.path_box.borrow_mut().buf = self.current_working_directory.clone();
-        }
-        self.rebuild_tree();
-
-        ctx.dialog(&mut self.win, ContainerOption::NONE, WidgetBehaviourOption::NO_SCROLL, &self.tree);
-
+        self.sync_retained_view();
+        self.render(ctx);
         let results = ctx.committed_results();
-
-        if results.state_of_handle(&self.up_button).is_submitted() {
-            if let Some(parent) = Path::new(self.current_working_directory.as_str()).parent() {
-                let parent_path = parent.to_string_lossy().to_string();
-                if !parent_path.is_empty() && parent_path != self.current_working_directory {
-                    self.current_working_directory = parent_path;
-                    self.selected_folder = None;
-                    self.path_box.borrow_mut().buf = self.current_working_directory.clone();
-                    needs_refresh = true;
-                }
-            }
-        }
-        if results.state_of_handle(&self.home_button).is_submitted() {
-            if let Some(home) = Self::home_dir() {
-                if home != self.current_working_directory && Path::new(home.as_str()).is_dir() {
-                    self.current_working_directory = home;
-                    self.selected_folder = None;
-                    self.path_box.borrow_mut().buf = self.current_working_directory.clone();
-                    needs_refresh = true;
-                }
-            }
-        }
-        if results.state_of_handle(&self.path_box).is_submitted() || results.state_of_handle(&self.go_button).is_submitted() {
-            let path_input = self.path_box.borrow().buf.clone();
-            if let Some(path) = Self::resolve_directory_path(self.current_working_directory.as_str(), path_input.as_str()) {
-                if path != self.current_working_directory {
-                    self.current_working_directory = path;
-                    self.selected_folder = None;
-                    self.path_box.borrow_mut().buf = self.current_working_directory.clone();
-                    needs_refresh = true;
-                }
-            }
-        }
-
-        // Folder selection navigates immediately and triggers a full
-        // item/tree rebuild after evaluation finishes.
-        for (index, item) in self.folder_items.iter().enumerate() {
-            if results.state_of_handle(item).is_submitted() {
-                if let Some(path) = self.folders.get(index) {
-                    self.current_working_directory = path.to_string();
-                    self.selected_folder = Some(path.to_string());
-                    self.path_box.borrow_mut().buf = self.current_working_directory.clone();
-                    needs_refresh = true;
-                }
-            }
-        }
-
-        // File selection only primes the filename field; the dialog still
-        // waits for an explicit Open/Enter confirmation.
-        for (index, item) in self.file_items.iter().enumerate() {
-            if results.state_of_handle(item).is_submitted() {
-                if let Some(name) = self.files.get(index) {
-                    self.tmp_file_name.borrow_mut().buf = name.to_string();
-                }
-            }
-        }
-
-        if results.state_of_handle(&self.cancel_button).is_submitted() {
-            self.file_name = None;
-            self.file_path = None;
-            self.win.close();
-        }
-        if results.state_of_handle(&self.ok_button).is_submitted() {
-            let typed_name = self.tmp_file_name.borrow().buf.clone();
-            if typed_name.is_empty() {
-                self.file_name = None;
-                self.file_path = None;
-            } else {
-                let selected_path = Self::resolve_selected_path(self.current_working_directory.as_str(), typed_name.as_str());
-                let selected_name = Path::new(selected_path.as_str())
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .map(|name| name.to_string())
-                    .unwrap_or(typed_name);
-                self.file_name = Some(selected_name);
-                self.file_path = Some(selected_path);
-            }
-            self.win.close();
-        }
+        let needs_refresh = self.apply_navigation_actions(results) || self.apply_folder_actions(results);
+        self.apply_file_actions(results);
+        self.apply_completion_actions(results);
 
         if needs_refresh {
             // Defer the rebuild until the dialog callback is done so all borrows

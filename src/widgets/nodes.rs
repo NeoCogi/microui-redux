@@ -229,9 +229,6 @@ impl Node {
         res
     }
 
-    pub(crate) fn clear_pending_state(&mut self) {
-        self.pending_state = None;
-    }
 }
 
 impl Widget for Node {

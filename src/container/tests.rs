@@ -484,7 +484,7 @@ fn retained_text_inside_panel_grows_content_height() {
 }
 
 #[test]
-fn tree_nodes_expand_children_in_same_frame_from_cached_rects() {
+fn tree_nodes_expand_children_from_committed_previous_frame_results() {
     let mut container = make_container();
     let input = container.input.clone();
     let header = widget_handle(Node::header("Header", NodeStateValue::Closed));
@@ -492,9 +492,10 @@ fn tree_nodes_expand_children_in_same_frame_from_cached_rects() {
     let seed = 0xfeed_face_u64;
     let mut header_node_id = NodeId::new(0);
     let mut child_node_id = NodeId::new(0);
-
-    begin_test_frame(&mut container, rect(0, 0, 100, 40));
     let mut results = FrameResults::default();
+
+    results.begin_frame();
+    begin_test_frame(&mut container, rect(0, 0, 100, 40));
     let tree = WidgetTreeBuilder::build_with_seed(seed, |tree| {
         header_node_id = tree.header(header.clone(), |tree| {
             child_node_id = tree.widget(child.clone());
@@ -504,26 +505,61 @@ fn tree_nodes_expand_children_in_same_frame_from_cached_rects() {
     assert!(container.current_node_layout(header_node_id).is_some());
     assert!(container.current_node_layout(child_node_id).is_none());
     container.finish();
+    results.finish_frame();
 
     let header_rect = container.previous_node_layout(header_node_id).expect("header cache missing").rect;
     {
         let mut input = input.borrow_mut();
         input.mousemove(header_rect.x + 1, header_rect.y + 1);
-        input.mousedown(header_rect.x + 1, header_rect.y + 1, MouseButton::LEFT);
     }
 
+    results.begin_frame();
     begin_test_frame(&mut container, rect(0, 0, 100, 40));
-    let mut results = FrameResults::default();
     let tree = WidgetTreeBuilder::build_with_seed(seed, |tree| {
         tree.header(header.clone(), |tree| {
             child_node_id = tree.widget(child.clone());
         });
     });
     container.widget_tree(&mut results, &tree);
+    assert!(header.borrow().is_closed());
+    assert!(container.current_node_layout(child_node_id).is_none());
+    container.finish();
+    results.finish_frame();
 
+    {
+        let mut input = input.borrow_mut();
+        input.mousedown(header_rect.x + 1, header_rect.y + 1, MouseButton::LEFT);
+    }
+
+    results.begin_frame();
+    begin_test_frame(&mut container, rect(0, 0, 100, 40));
+    let tree = WidgetTreeBuilder::build_with_seed(seed, |tree| {
+        tree.header(header.clone(), |tree| {
+            child_node_id = tree.widget(child.clone());
+        });
+    });
+    container.widget_tree(&mut results, &tree);
+    assert!(header.borrow().is_closed());
+    assert!(container.current_node_layout(child_node_id).is_none());
+    container.finish();
+    results.finish_frame();
+
+    {
+        let mut input = input.borrow_mut();
+        input.epilogue();
+        input.mouseup(header_rect.x + 1, header_rect.y + 1, MouseButton::LEFT);
+    }
+
+    results.begin_frame();
+    begin_test_frame(&mut container, rect(0, 0, 100, 40));
+    let tree = WidgetTreeBuilder::build_with_seed(seed, |tree| {
+        tree.header(header.clone(), |tree| {
+            child_node_id = tree.widget(child.clone());
+        });
+    });
+    container.widget_tree(&mut results, &tree);
     assert!(header.borrow().is_expanded());
     assert!(container.current_node_layout(child_node_id).is_some());
-    container.finish();
 }
 
 #[test]
@@ -545,6 +581,8 @@ fn retained_tree_node_stays_expanded_after_click_is_committed() {
         });
     });
     container.widget_tree(&mut results, &tree);
+    assert!(header.borrow().is_closed());
+    assert!(container.current_node_layout(child_node_id).is_none());
     container.finish();
     results.finish_frame();
 
@@ -552,6 +590,23 @@ fn retained_tree_node_stays_expanded_after_click_is_committed() {
     {
         let mut input = input.borrow_mut();
         input.mousemove(header_rect.x + 1, header_rect.y + 1);
+    }
+
+    results.begin_frame();
+    begin_test_frame(&mut container, rect(0, 0, 100, 40));
+    let tree = WidgetTreeBuilder::build_with_seed(seed, |tree| {
+        header_node_id = tree.header(header.clone(), |tree| {
+            child_node_id = tree.widget(child.clone());
+        });
+    });
+    container.widget_tree(&mut results, &tree);
+    assert!(header.borrow().is_closed());
+    assert!(container.current_node_layout(child_node_id).is_none());
+    container.finish();
+    results.finish_frame();
+
+    {
+        let mut input = input.borrow_mut();
         input.mousedown(header_rect.x + 1, header_rect.y + 1, MouseButton::LEFT);
     }
 
@@ -563,8 +618,8 @@ fn retained_tree_node_stays_expanded_after_click_is_committed() {
         });
     });
     container.widget_tree(&mut results, &tree);
-    assert!(header.borrow().is_expanded());
-    assert!(container.current_node_layout(child_node_id).is_some());
+    assert!(header.borrow().is_closed());
+    assert!(container.current_node_layout(child_node_id).is_none());
     container.finish();
     results.finish_frame();
 
@@ -573,6 +628,19 @@ fn retained_tree_node_stays_expanded_after_click_is_committed() {
         input.epilogue();
         input.mouseup(header_rect.x + 1, header_rect.y + 1, MouseButton::LEFT);
     }
+
+    results.begin_frame();
+    begin_test_frame(&mut container, rect(0, 0, 100, 40));
+    let tree = WidgetTreeBuilder::build_with_seed(seed, |tree| {
+        tree.header(header.clone(), |tree| {
+            child_node_id = tree.widget(child.clone());
+        });
+    });
+    container.widget_tree(&mut results, &tree);
+    assert!(header.borrow().is_expanded());
+    assert!(container.current_node_layout(child_node_id).is_some());
+    container.finish();
+    results.finish_frame();
 
     results.begin_frame();
     begin_test_frame(&mut container, rect(0, 0, 100, 40));

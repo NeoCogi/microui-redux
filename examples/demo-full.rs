@@ -1051,7 +1051,6 @@ impl State {
     }
 
     fn test_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        let mut combo_changed = false;
         {
             let window = self.demo_window.as_mut().unwrap();
             let mut win = window.rect();
@@ -1089,10 +1088,6 @@ impl State {
         let combo_anchor = self.combo_state.borrow().anchor();
         {
             let results = ctx.committed_results();
-            if results.state_of_handle(&self.combo_state).is_submitted() {
-                let mut combo_state = self.combo_state.borrow_mut();
-                combo_state.open = !combo_state.open;
-            }
             if results.state_of_handle(&self.test_buttons[0]).is_submitted() {
                 button_logs.push("Pressed button 1");
             }
@@ -1146,35 +1141,25 @@ impl State {
         }
 
         let mut popup = self.combo_state.borrow().popup.clone();
-        if self.combo_state.borrow().open {
+        if self.combo_state.borrow().is_open() {
             ctx.open_popup_at(&mut popup, combo_anchor);
         }
 
         ctx.popup(&mut popup, WidgetBehaviourOption::NO_SCROLL, &self.combo_tree);
-        {
+        let combo_log = {
             let results = ctx.committed_results();
+            let mut selected_label = None;
             for (idx, item) in self.combo_items.iter().enumerate() {
                 if results.state_of_handle(item).is_submitted() {
-                    self.combo_state.borrow_mut().selected = idx;
-                    combo_changed = true;
-                    popup.set_focus(None);
+                    selected_label = self.combo_state.borrow_mut().select(idx, &combo_labels);
+                    break;
                 }
             }
-        }
-        if combo_changed {
-            popup.close();
-        }
-
-        if !popup.is_open() {
-            self.combo_state.borrow_mut().open = false;
-        }
-
-        if combo_changed {
-            let selected = self.combo_state.borrow().selected;
-            if let Some(choice) = self.combo_items.get(selected) {
-                let msg = format!("Selected: {}", choice.borrow().label);
-                self.write_log(msg.as_str());
-            }
+            selected_label
+        };
+        if let Some(label) = combo_log {
+            let msg = format!("Selected: {label}");
+            self.write_log(msg.as_str());
         }
 
         if self.open_popup {
