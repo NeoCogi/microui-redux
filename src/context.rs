@@ -59,8 +59,9 @@ use std::io::Cursor;
 use png::{ColorType, Decoder};
 
 use crate::{
-    rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, ImageSource, Input, Recti, Renderer, KeyCode, KeyMode, MouseButton,
-    RendererHandle, Style, TextureId, UNCLIPPED_RECT, Vec2i, WidgetBehaviourOption, WidgetTree, WindowHandle, WindowState, FrameResults,
+    rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, FrameResultGeneration, ImageSource, Input, Recti, Renderer, KeyCode,
+    KeyMode, MouseButton, RendererHandle, Style, TextureId, UNCLIPPED_RECT, Vec2i, WidgetBehaviourOption, WidgetTree, WindowHandle, WindowState,
+    FrameResults,
 };
 
 /// Primary entry point used to drive the UI over a renderer implementation.
@@ -104,7 +105,7 @@ impl<R: Renderer> Context<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{container::Command, widget_handle, AtlasHandle, AtlasSource, CharEntry, FontEntry, SourceFormat, TextBlock, WidgetTreeBuilder};
+    use crate::{container::Command, widget_handle, AtlasHandle, AtlasSource, CharEntry, FontEntry, ResourceState, SourceFormat, TextBlock, WidgetTreeBuilder};
 
     const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
 
@@ -245,6 +246,27 @@ mod tests {
         let resized = window.rect();
         assert!(resized.width > initial_rect.width);
         assert!(resized.height > initial_rect.height);
+    }
+
+    #[test]
+    fn context_result_accessors_expose_committed_and_current_generations() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let committed_widget = 1_u8;
+        let current_widget = 2_u8;
+        let committed_id = (&committed_widget as *const u8).cast::<()>();
+        let current_id = (&current_widget as *const u8).cast::<()>();
+
+        ctx.frame_results.record(committed_id, ResourceState::SUBMIT);
+        ctx.frame_results.finish_frame();
+        ctx.frame_results.begin_frame();
+        ctx.frame_results.record(current_id, ResourceState::CHANGE);
+
+        assert!(ctx.committed_results().state(committed_id).is_submitted());
+        assert!(ctx.committed_results().state(current_id).is_none());
+        assert!(ctx.current_results().state(committed_id).is_none());
+        assert!(ctx.current_results().state(current_id).is_changed());
     }
 }
 
@@ -564,9 +586,28 @@ impl<R: Renderer> Context<R> {
     ///
     /// [`FrameResults::committed`] exposes the previous frame's published
     /// results, while [`FrameResults::current`] exposes the in-progress results
-    /// being written during the current frame.
+    /// being written during the current frame. Application business logic
+    /// should normally prefer [`Context::committed_results`] instead of
+    /// inspecting this shared store directly.
     pub fn frame_results(&self) -> &FrameResults {
         &self.frame_results
+    }
+
+    /// Returns the previous frame's published widget results.
+    ///
+    /// This is the public business-logic view of retained interaction state.
+    /// App code should react to this generation after rendering, accepting the
+    /// one-frame delay as part of the retained pipeline contract.
+    pub fn committed_results(&self) -> FrameResultGeneration<'_> {
+        self.frame_results.committed()
+    }
+
+    /// Returns the in-progress result generation being written by the current frame.
+    ///
+    /// This is mainly useful for framework internals or advanced debugging.
+    /// Normal application/business logic should prefer [`Context::committed_results`].
+    pub fn current_results(&self) -> FrameResultGeneration<'_> {
+        self.frame_results.current()
     }
 
     /// Replaces the current UI style.

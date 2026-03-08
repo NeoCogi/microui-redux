@@ -57,18 +57,18 @@ let tree = WidgetTreeBuilder::build({
 
 ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
 
-let results = ctx.frame_results();
+let results = ctx.committed_results();
 if results.state_of_handle(&name).is_submitted() {
     // react to the textbox submission here
 }
 ```
 
-Retained trees are the supported public authoring path. Post-render business logic lives alongside the window call and reads from `ctx.frame_results()`:
+Retained trees are the supported public authoring path. Post-render business logic lives alongside the window call and reads from `ctx.committed_results()`, which intentionally exposes the previous frame's published interaction generation:
 
 ```rust
 ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
 
-let results = ctx.frame_results();
+let results = ctx.committed_results();
 if results.state_of_handle(&submit_button).is_submitted() {
     save_form();
 }
@@ -156,7 +156,7 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
     - [x] Removed `tree.run(...)` and rewrote the remaining callback-only sections as retained tree structure plus retained display widgets.
 - [x] Reworked dispatch around `FrameResults`.
     - [x] Replaced per-call output slots with a per-frame result registry keyed by widget ID.
-    - [x] `window` / `dialog` / `popup` now render retained trees directly and expose results through `Context::frame_results()`.
+    - [x] `window` / `dialog` / `popup` now render retained trees directly and expose committed business-logic results through `Context::committed_results()`.
     - [x] Added handle-oriented helpers such as `FrameResults::state_of_handle` and `widget_id_of_handle`.
 - [x] Simplified widget batching and handle-backed dispatch.
     - [x] Migrated generic dispatch to `widget_ref(...)` batches and unified container batch helpers.

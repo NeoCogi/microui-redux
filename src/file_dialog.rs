@@ -312,7 +312,7 @@ impl FileDialogState {
 
         ctx.dialog(&mut self.win, ContainerOption::NONE, WidgetBehaviourOption::NO_SCROLL, &self.tree);
 
-        let results = ctx.frame_results();
+        let results = ctx.committed_results();
 
         if results.state_of_handle(&self.up_button).is_submitted() {
             if let Some(parent) = Path::new(self.current_working_directory.as_str()).parent() {

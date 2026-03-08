@@ -922,7 +922,7 @@ impl State {
 
         let mut submitted = false;
         {
-            let results = ctx.frame_results();
+            let results = ctx.committed_results();
             let submit_buf_out = results.state_of_handle(&self.submit_buf);
             let submit_btn_out = results.state_of_handle(&self.submit_button);
             if submit_buf_out.is_submitted() {
@@ -978,7 +978,7 @@ impl State {
             &self.stack_direction_tree,
         );
 
-        let results = ctx.frame_results();
+        let results = ctx.committed_results();
         if results.state_of_handle(&self.stack_direction_buttons[0]).is_submitted() {
             logs.push("Top->Bottom: call 1");
         }
@@ -1016,7 +1016,7 @@ impl State {
             &self.weight_tree,
         );
 
-        let results = ctx.frame_results();
+        let results = ctx.committed_results();
         if results.state_of_handle(&self.weight_buttons[0]).is_submitted() {
             logs.push("Weight row: 1");
         }
@@ -1088,7 +1088,7 @@ impl State {
         let mut tree_logs: Vec<&'static str> = Vec::new();
         let combo_anchor = self.combo_state.borrow().anchor();
         {
-            let results = ctx.frame_results();
+            let results = ctx.committed_results();
             if results.state_of_handle(&self.combo_state).is_submitted() {
                 let mut combo_state = self.combo_state.borrow_mut();
                 combo_state.open = !combo_state.open;
@@ -1152,7 +1152,7 @@ impl State {
 
         ctx.popup(&mut popup, WidgetBehaviourOption::NO_SCROLL, &self.combo_tree);
         {
-            let results = ctx.frame_results();
+            let results = ctx.committed_results();
             for (idx, item) in self.combo_items.iter().enumerate() {
                 if results.state_of_handle(item).is_submitted() {
                     self.combo_state.borrow_mut().selected = idx;
@@ -1188,7 +1188,7 @@ impl State {
         let mut popup_logs: Vec<&'static str> = Vec::new();
         ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), WidgetBehaviourOption::NO_SCROLL, &self.popup_tree);
         {
-            let results = ctx.frame_results();
+            let results = ctx.committed_results();
             if results.state_of_handle(&self.popup_buttons[0]).is_submitted() {
                 popup_logs.push("Hello")
             }

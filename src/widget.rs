@@ -241,8 +241,8 @@ impl FrameResults {
     /// to the previously committed result generation.
     ///
     /// This is a compatibility lookup for code that still expects a single
-    /// result map. New code should prefer [`FrameResults::committed`] or
-    /// [`FrameResults::current`] explicitly.
+    /// result map. New code should prefer [`FrameResults::committed`] for
+    /// business logic or [`FrameResults::current`] for internal/debug access.
     pub fn state(&self, widget_id: WidgetId) -> ResourceState {
         if self.current.is_empty() {
             self.committed_state(widget_id)
@@ -253,7 +253,7 @@ impl FrameResults {
 
     /// Returns the most relevant available state for `widget`.
     ///
-    /// See [`FrameResults::state`] for the lookup behavior.
+    /// See [`FrameResults::state`] for the lookup behavior and compatibility caveat.
     pub fn state_of<W: Widget + ?Sized>(&self, widget: &W) -> ResourceState {
         self.state(widget_id_of(widget))
     }
@@ -269,6 +269,9 @@ impl FrameResults {
     }
 
     /// Returns the most relevant available state for the widget stored in `handle`.
+    ///
+    /// This is a compatibility helper; retained application code should usually
+    /// prefer [`FrameResults::committed_state_of_handle`].
     pub fn state_of_handle<W: Widget>(&self, handle: &WidgetHandle<W>) -> ResourceState {
         self.state(widget_id_of_handle(handle))
     }

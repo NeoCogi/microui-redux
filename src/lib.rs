@@ -62,8 +62,9 @@
 //! engine so scope/scroll/content bookkeeping stays consistent.
 //! Per-frame interaction results are collected in [`FrameResults`], which keeps
 //! committed previous-frame results separate from the current frame's in-progress
-//! result generation so retained widgets can reconcile against stable state while
-//! still exposing same-frame interaction data when needed.
+//! result generation. Retained application/business logic is expected to react
+//! to the committed generation from the previous frame, while current-frame
+//! results remain available for framework internals and debugging.
 
 mod atlas;
 mod canvas;

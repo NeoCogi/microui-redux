@@ -390,7 +390,7 @@ fn main() {
                 &state.tree,
             );
 
-            let results = ctx.frame_results();
+            let results = ctx.committed_results();
             for button in &state.buttons {
                 if results.state_of_handle(&button.widget).is_submitted() {
                     state.calculator.apply(button.action);
