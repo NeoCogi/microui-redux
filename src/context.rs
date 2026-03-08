@@ -574,6 +574,51 @@ mod tests {
     }
 
     #[test]
+    fn title_option_controls_root_window_title_bar_geometry() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let mut titled = ctx.new_window("titled", rect(0, 0, 80, 40));
+        let mut plain = ctx.new_window("plain", rect(100, 0, 80, 40));
+        let tree = WidgetTreeBuilder::build(|_tree| {});
+
+        ctx.frame(|ui| {
+            ui.window(&mut titled, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut plain, ContainerOption::NO_TITLE, WidgetBehaviourOption::NONE, &tree);
+        });
+
+        let titled_inner = titled.inner();
+        assert!(titled_inner.main.body.y > titled_inner.main.rect.y);
+        assert!(titled_inner.main.body.height < titled_inner.main.rect.height);
+        let titled_texts: Vec<String> = titled_inner
+            .main
+            .command_list
+            .iter()
+            .filter_map(|cmd| match cmd {
+                Command::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(titled_texts.iter().any(|text| text == "titled"));
+
+        let plain_inner = plain.inner();
+        assert_eq!(plain_inner.main.body.y, plain_inner.main.rect.y);
+        assert_eq!(plain_inner.main.body.height, plain_inner.main.rect.height);
+        assert_eq!(plain_inner.main.body.x, plain_inner.main.rect.x);
+        assert_eq!(plain_inner.main.body.width, plain_inner.main.rect.width);
+        let plain_texts: Vec<String> = plain_inner
+            .main
+            .command_list
+            .iter()
+            .filter_map(|cmd| match cmd {
+                Command::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(!plain_texts.iter().any(|text| text == "plain"));
+    }
+
+    #[test]
     fn duplicate_widget_dispatch_in_same_tree_panics_with_context() {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
