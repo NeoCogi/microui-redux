@@ -339,6 +339,80 @@ mod tests {
             ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
         });
     }
+
+    #[test]
+    fn reopening_dialog_replaces_old_commands_with_current_frame_commands() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut dialog = ctx.new_dialog("dialog", rect(10, 10, 80, 40));
+        let first_tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("before");
+        });
+        let second_tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("after");
+        });
+        let opt = ContainerOption::NO_TITLE | ContainerOption::NO_CLOSE | ContainerOption::NO_RESIZE;
+
+        dialog.open();
+        ctx.frame(|ui| {
+            ui.dialog(&mut dialog, opt, WidgetBehaviourOption::NONE, &first_tree);
+        });
+
+        dialog.close();
+
+        dialog.open();
+        ctx.frame(|ui| {
+            ui.dialog(&mut dialog, opt, WidgetBehaviourOption::NONE, &second_tree);
+        });
+
+        let inner = dialog.inner();
+        let texts: Vec<String> = inner
+            .main
+            .command_list
+            .iter()
+            .filter_map(|cmd| match cmd {
+                Command::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(texts.iter().any(|text| text == "after"));
+        assert!(!texts.iter().any(|text| text == "before"));
+    }
+
+    #[test]
+    fn reshown_roots_drop_stale_panel_handles_after_a_gap() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut window = ctx.new_window("window", rect(0, 0, 100, 80));
+        let panel = ctx.new_panel("panel");
+        let tree_with_panel = WidgetTreeBuilder::build({
+            let panel = panel.clone();
+            move |tree| {
+                tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                    tree.text("panel child");
+                });
+            }
+        });
+        let tree_without_panel = WidgetTreeBuilder::build(|tree| {
+            tree.text("root only");
+        });
+
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree_with_panel);
+        });
+        assert_eq!(window.inner().main.panel_count(), 1);
+
+        ctx.frame(|_ui| {});
+
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree_without_panel);
+        });
+
+        assert_eq!(window.inner().main.panel_count(), 0);
+    }
 }
 
 impl<R: Renderer> Context<R> {

@@ -253,6 +253,11 @@ impl Container {
         self.content_size
     }
 
+    #[cfg(test)]
+    pub(crate) fn panel_count(&self) -> usize {
+        self.panels.len()
+    }
+
     fn clamp(x: i32, a: i32, b: i32) -> i32 {
         min(b, max(a, x))
     }
