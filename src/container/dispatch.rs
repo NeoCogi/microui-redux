@@ -58,12 +58,13 @@ impl Container {
         input: Option<Rc<InputSnapshot>>,
         opt: WidgetOption,
         bopt: WidgetBehaviourOption,
+        dispatch_site: String,
     ) -> (ControlState, ResourceState) {
         let widget_id = widget.widget_id();
         let control = self.update_control_with_opts(widget_id, rect, opt, bopt);
         let mut ctx = self.widget_ctx(widget_id, rect, input);
         let res = widget.run(&mut ctx, &control);
-        results.record(widget_id, res);
+        results.record_with_context(widget_id, res, dispatch_site);
         (control, res)
     }
 
@@ -84,6 +85,7 @@ impl Container {
         input: Option<Rc<InputSnapshot>>,
         opt: WidgetOption,
         bopt: WidgetBehaviourOption,
+        dispatch_site: String,
     ) -> (ControlState, ResourceState) {
         let widget_id = {
             let state = handle.borrow();
@@ -95,7 +97,7 @@ impl Container {
             let mut state = handle.borrow_mut();
             state.run(&mut ctx, &control)
         };
-        results.record(widget_id, res);
+        results.record_with_context(widget_id, res, dispatch_site);
         (control, res)
     }
 }

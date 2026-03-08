@@ -65,6 +65,10 @@
 use super::*;
 
 impl Container {
+    fn widget_dispatch_site(&self, node_id: NodeId, kind: &str) -> String {
+        format!("container {:?}, tree node {:?} ({})", self.name, node_id, kind)
+    }
+
     /// Returns the previous frame layout for `node_id`, if any.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn previous_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
@@ -154,7 +158,8 @@ impl Container {
         let opt = widget.effective_widget_opt();
         let bopt = widget.effective_behaviour_opt();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
-        let (control, result) = self.render_widget_dyn(results, widget, rect, input, opt, bopt);
+        let dispatch_site = self.widget_dispatch_site(node_id, "widget");
+        let (control, result) = self.render_widget_dyn(results, widget, rect, input, opt, bopt, dispatch_site);
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
     }
 
@@ -172,7 +177,8 @@ impl Container {
             (state.effective_widget_opt(), state.effective_behaviour_opt(), state.needs_input_snapshot())
         };
         let input = if needs_input { Some(self.snapshot_input()) } else { None };
-        let (control, result) = self.render_widget_handle(results, state, rect, input, opt, bopt);
+        let dispatch_site = self.widget_dispatch_site(node_id, "custom render");
+        let (control, result) = self.render_widget_handle(results, state, rect, input, opt, bopt, dispatch_site);
 
         let snapshot = self.snapshot_input();
         let input_ref = snapshot.as_ref();
@@ -229,7 +235,8 @@ impl Container {
             let state = state.borrow();
             (*state.widget_opt(), *state.behaviour_opt(), state.state)
         };
-        let (control, result) = self.render_widget_handle(results, state, rect, None, opt, bopt);
+        let dispatch_site = self.widget_dispatch_site(node_id, "node disclosure");
+        let (control, result) = self.render_widget_handle(results, state, rect, None, opt, bopt, dispatch_site);
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
         stable_state
     }

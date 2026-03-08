@@ -106,8 +106,16 @@ impl<R: Renderer> Context<R> {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        any::Any,
+        panic::{catch_unwind, AssertUnwindSafe},
+    };
+
     use super::*;
-    use crate::{container::Command, widget_handle, AtlasHandle, AtlasSource, CharEntry, FontEntry, ResourceState, SourceFormat, TextBlock, WidgetTreeBuilder};
+    use crate::{
+        container::Command, widget::widget_id_of_handle, widget_handle, AtlasHandle, AtlasSource, CharEntry, ControlState, FontEntry, ResourceState, SourceFormat,
+        TextBlock, Widget, WidgetCtx, WidgetOption, WidgetTreeBuilder,
+    };
 
     const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
 
@@ -168,6 +176,50 @@ mod tests {
             slots: &[],
         };
         AtlasHandle::from(&source)
+    }
+
+    fn panic_message(payload: Box<dyn Any + Send>) -> String {
+        if let Some(message) = payload.downcast_ref::<String>() {
+            return message.clone();
+        }
+        if let Some(message) = payload.downcast_ref::<&str>() {
+            return (*message).to_string();
+        }
+        "<non-string panic payload>".to_string()
+    }
+
+    struct AlwaysSubmitWidget {
+        label: &'static str,
+        opt: WidgetOption,
+        bopt: WidgetBehaviourOption,
+    }
+
+    impl AlwaysSubmitWidget {
+        fn new(label: &'static str) -> Self {
+            Self {
+                label,
+                opt: WidgetOption::NONE,
+                bopt: WidgetBehaviourOption::NONE,
+            }
+        }
+    }
+
+    impl Widget for AlwaysSubmitWidget {
+        fn widget_opt(&self) -> &WidgetOption {
+            &self.opt
+        }
+
+        fn behaviour_opt(&self) -> &WidgetBehaviourOption {
+            &self.bopt
+        }
+
+        fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+            Dimensioni::new((self.label.len() as i32 * 8).max(8), 12)
+        }
+
+        fn run(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+            ResourceState::SUBMIT
+        }
     }
 
     #[test]
@@ -519,6 +571,81 @@ mod tests {
             );
 
         assert!(!has_vertical_scrollbar);
+    }
+
+    #[test]
+    fn duplicate_widget_dispatch_in_same_tree_panics_with_context() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut window = ctx.new_window("primary", rect(0, 0, 80, 40));
+        let shared = widget_handle(AlwaysSubmitWidget::new("shared"));
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.widget(shared.clone());
+            tree.widget(shared.clone());
+        });
+
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            ctx.frame(|ui| {
+                ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            });
+        }))
+        .expect_err("duplicate widget handle should panic");
+        let message = panic_message(panic);
+
+        assert!(message.contains("duplicate widget dispatch"));
+        assert!(message.contains("WidgetHandle"));
+        assert!(message.contains("primary"));
+        assert!(message.contains("tree node"));
+    }
+
+    #[test]
+    fn duplicate_widget_dispatch_across_windows_panics() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut left = ctx.new_window("left", rect(0, 0, 80, 40));
+        let mut right = ctx.new_window("right", rect(90, 0, 80, 40));
+        let shared = widget_handle(AlwaysSubmitWidget::new("shared"));
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.widget(shared.clone());
+        });
+
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            ctx.frame(|ui| {
+                ui.window(&mut left, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+                ui.window(&mut right, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            });
+        }))
+        .expect_err("rendering one widget handle in two windows should panic");
+        let message = panic_message(panic);
+
+        assert!(message.contains("duplicate widget dispatch"));
+        assert!(message.contains("left"));
+        assert!(message.contains("right"));
+    }
+
+    #[test]
+    fn distinct_widget_handles_with_identical_labels_render_normally() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut window = ctx.new_window("window", rect(0, 0, 80, 40));
+        let first = widget_handle(AlwaysSubmitWidget::new("same"));
+        let second = widget_handle(AlwaysSubmitWidget::new("same"));
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.widget(first.clone());
+            tree.widget(second.clone());
+        });
+
+        assert_ne!(widget_id_of_handle(&first), widget_id_of_handle(&second));
+
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+        });
+
+        assert!(ctx.committed_results().state_of_handle(&first).is_submitted());
+        assert!(ctx.committed_results().state_of_handle(&second).is_submitted());
     }
 }
 

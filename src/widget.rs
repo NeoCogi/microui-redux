@@ -115,7 +115,7 @@ pub fn widget_id_of_handle<W: Widget>(handle: &WidgetHandle<W>) -> WidgetId {
 /// Per-frame widget interaction results keyed by [`WidgetId`].
 ///
 /// A single widget state is expected to be dispatched once per frame.
-/// Duplicate dispatches with the same ID trigger a debug assertion.
+/// Duplicate dispatches with the same ID panic in all builds.
 ///
 /// The storage is split into two generations:
 /// - the committed result set published at the end of the previous frame,
@@ -124,6 +124,7 @@ pub fn widget_id_of_handle<W: Widget>(handle: &WidgetHandle<W>) -> WidgetId {
 pub(crate) struct FrameResults {
     committed: HashMap<WidgetId, ResourceState>,
     current: HashMap<WidgetId, ResourceState>,
+    current_dispatch_sites: HashMap<WidgetId, String>,
 }
 
 /// Read-only view over one frame-result generation.
@@ -159,18 +160,40 @@ impl FrameResults {
     /// Previously committed results remain available through [`FrameResults::committed`].
     pub(crate) fn begin_frame(&mut self) {
         self.current.clear();
+        self.current_dispatch_sites.clear();
     }
 
     /// Publishes the current frame as the next committed result generation.
     pub(crate) fn finish_frame(&mut self) {
         std::mem::swap(&mut self.committed, &mut self.current);
         self.current.clear();
+        self.current_dispatch_sites.clear();
     }
 
     /// Records the current frame state under `widget_id`.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn record(&mut self, widget_id: WidgetId, state: ResourceState) {
-        let prev = self.current.insert(widget_id, state);
-        debug_assert!(prev.is_none(), "Widget {:?} was dispatched more than once in the same frame", widget_id);
+        self.record_with_context(widget_id, state, "unknown widget dispatch site");
+    }
+
+    /// Records the current frame state under `widget_id` with a human-readable dispatch site.
+    pub(crate) fn record_with_context(&mut self, widget_id: WidgetId, state: ResourceState, dispatch_site: impl Into<String>) {
+        let dispatch_site = dispatch_site.into();
+        if let Some(first_site) = self.current_dispatch_sites.get(&widget_id) {
+            panic!(
+                "duplicate widget dispatch detected for widget {:p}; a WidgetHandle may only be rendered once per frame. first dispatch: {}. duplicate dispatch: {}.",
+                widget_id, first_site, dispatch_site
+            );
+        }
+
+        let prev_state = self.current.insert(widget_id, state);
+        let prev_site = self.current_dispatch_sites.insert(widget_id, dispatch_site);
+        debug_assert_eq!(
+            prev_state.is_some(),
+            prev_site.is_some(),
+            "widget result and dispatch-site tracking diverged for widget {:p}",
+            widget_id
+        );
     }
 
     /// Returns the committed result generation published by the previous frame.
