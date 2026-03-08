@@ -144,7 +144,10 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
 - `TextBlock` supports wrapped multi-line content while preserving outer padding without adding extra spacing between lines.
 - Custom rendering still goes through retained `custom_render` nodes, which receive layout, input, and clip information through `CustomRenderArgs`.
 
-### Version 0.6-pre
+### Unreleased Branch Toward 0.6
+This repository branch is tracking the unreleased retained-tree work planned for `0.6`.
+The published crate version and current manifest version are still `0.5.0`; the checklist below describes changes that are ahead of that release.
+
 - [x] Replaced the v0.5 public immediate/closure authoring path with retained widget trees.
     - [x] `Context::window`, `dialog`, and `popup` now take `&WidgetTree` instead of UI-building closures.
     - [x] `WidgetTree` nodes cover widgets, embedded containers, headers/tree nodes, row/grid/column/stack groups, and custom render leaves.
