@@ -62,13 +62,15 @@ pub type BackendInitContext = Arc<glow::Context>;
 pub struct BackendInitContext;
 
 pub struct Application<S> {
+    // Drop renderer-backed state before the SDL window/subsystem. Vulkan and wgpu surfaces
+    // borrow native window resources, so the window must outlive `state`, `ctx`, and backend data.
     state: S,
-    sdl_ctx: Sdl,
-    _sdl_vid: VideoSubsystem,
-    window: Window,
     ctx: MicroUI,
     #[cfg(feature = "example-glow")]
     backend: BackendData,
+    window: Window,
+    _sdl_vid: VideoSubsystem,
+    sdl_ctx: Sdl,
 }
 
 impl<S> Application<S> {
@@ -84,12 +86,12 @@ impl<S> Application<S> {
         let mut ctx = microui::Context::new(renderer, Dimensioni::new(size.0 as i32, size.1 as i32));
         Ok(Self {
             state: init_state(init_ctx, &mut ctx),
-            sdl_ctx,
-            _sdl_vid: video,
-            window,
             ctx,
             #[cfg(feature = "example-glow")]
             backend,
+            window,
+            _sdl_vid: video,
+            sdl_ctx,
         })
     }
 

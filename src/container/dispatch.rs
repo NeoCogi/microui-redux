@@ -39,15 +39,8 @@ impl Container {
         self.layout.next_with_preferred(preferred)
     }
 
-    pub(crate) fn layout_widget_dyn(&mut self, results: &FrameResults, widget: &dyn WidgetStateHandleDyn) -> Recti {
-        self.reconcile_widget_dyn(results, widget);
+    pub(crate) fn layout_widget_dyn(&mut self, _results: &FrameResults, widget: &dyn WidgetStateHandleDyn) -> Recti {
         self.measure_widget_rect_dyn(widget)
-    }
-
-    pub(crate) fn reconcile_widget_dyn(&mut self, results: &FrameResults, widget: &dyn WidgetStateHandleDyn) -> WidgetId {
-        let widget_id = widget.widget_id();
-        widget.reconcile(CommittedWidgetState::new(results.committed_state(widget_id)));
-        widget_id
     }
 
     pub(crate) fn measure_widget_rect_dyn(&mut self, widget: &dyn WidgetStateHandleDyn) -> Recti {
@@ -69,25 +62,12 @@ impl Container {
         let widget_id = widget.widget_id();
         let control = self.update_control_with_opts(widget_id, rect, opt, bopt);
         let mut ctx = self.widget_ctx(widget_id, rect, input);
-        let res = widget.render(&mut ctx, &control);
+        let res = widget.run(&mut ctx, &control);
         results.record(widget_id, res);
         (control, res)
     }
 
-    pub(crate) fn reconcile_widget_handle<W: Widget>(&mut self, results: &FrameResults, handle: &WidgetHandle<W>) -> WidgetId {
-        let widget_id = {
-            let state = handle.borrow();
-            widget_id_of(&*state)
-        };
-        {
-            let mut state = handle.borrow_mut();
-            state.reconcile(CommittedWidgetState::new(results.committed_state(widget_id)));
-        }
-        widget_id
-    }
-
-    pub(crate) fn layout_widget_handle<W: Widget>(&mut self, results: &FrameResults, handle: &WidgetHandle<W>) -> Recti {
-        self.reconcile_widget_handle(results, handle);
+    pub(crate) fn layout_widget_handle<W: Widget>(&mut self, _results: &FrameResults, handle: &WidgetHandle<W>) -> Recti {
         self.measure_widget_rect_handle(handle)
     }
 
@@ -113,7 +93,7 @@ impl Container {
         let mut ctx = self.widget_ctx(widget_id, rect, input);
         let res = {
             let mut state = handle.borrow_mut();
-            state.render(&mut ctx, &control)
+            state.run(&mut ctx, &control)
         };
         results.record(widget_id, res);
         (control, res)

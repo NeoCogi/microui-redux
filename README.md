@@ -88,7 +88,7 @@ for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widg
 
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
-- Retained traversal reconciles from the previous committed frame result, calls `Widget::measure`, allocates the widget rectangle, then calls `Widget::render`.
+- Retained traversal measures committed widget state, allocates the widget rectangle, then calls `Widget::run` to sample interaction and update widget-local state.
 - `WidgetTreeBuilder` exposes retained `row`, `grid`, `column`, `stack`, `header`, `tree_node`, `container`, and `custom_render` structure so layout stays declarative instead of closure-driven.
 - `SizePolicy::Weight(value)` distributes available track space by sibling weight ratio (spacing accounted for). In single-track flows, it uses a `0..=100` scale.
 - Returning `<= 0` for either axis from `Widget::measure` still means "use layout fallback/defaults" for that axis.
@@ -157,7 +157,7 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
     - [x] `window` / `dialog` / `popup` now render retained trees directly and expose committed business-logic results through `Context::committed_results()`.
     - [x] Added handle-oriented helpers such as `FrameResultGeneration::state_of_handle` and `widget_id_of_handle`.
 - [x] Simplified retained dispatch and handle-backed widgets.
-    - [x] Unified retained widget dispatch around reconcile/measure/render instead of per-call output slots.
+    - [x] Unified retained widget dispatch around measure/render/frame-commit instead of per-call output slots.
     - [x] Stabilized demo/file-dialog labels by reusing persistent `ListItem` state instead of rebuilding labels every frame.
 - [x] Improved interaction routing and widget input behavior.
     - [x] Mouse coordinates delivered to interactive widgets/custom render callbacks are now relative to the widget rectangle.
@@ -170,7 +170,7 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
 - [x] Widget identity moved fully to pointer-based IDs.
     - [x] Removed `with_id`; focus/hover now use widget trait-object/state pointers.
 - [x] Layout refactor: introduced `LayoutEngine` + specialized flows (`RowFlow`, `StackFlow`) instead of a one-size-fits-all manager.
-    - [x] Preferred sizing pipeline: widget helpers now reconcile retained state, call `Widget::measure`, then allocate rectangles before `Widget::render`.
+    - [x] Preferred sizing pipeline: widget helpers now call `Widget::measure`, allocate rectangles, then run widgets directly against the current frame input.
     - [x] Directional stack support: `StackDirection::{TopToBottom, BottomToTop}` plus `stack_direction` and `stack_with_width_direction`.
 - [x] Context/container API cleanup: `Context` module split, input forwarding helpers, container state encapsulation, and handle views.
 - [x] Widget internals cleanup: helper macroization/simplification, node/widget scaffolding unification, and text widget module split.

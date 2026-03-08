@@ -457,7 +457,6 @@ pub struct Checkbox {
     pub opt: WidgetOption,
     /// Behaviour options applied to the checkbox.
     pub bopt: WidgetBehaviourOption,
-    pending_value: Option<bool>,
 }
 
 impl Checkbox {
@@ -468,7 +467,6 @@ impl Checkbox {
             value,
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
-            pending_value: None,
         }
     }
 
@@ -479,7 +477,6 @@ impl Checkbox {
             value,
             opt,
             bopt: WidgetBehaviourOption::NONE,
-            pending_value: None,
         }
     }
 
@@ -524,26 +521,14 @@ impl Widget for Checkbox {
         &self.bopt
     }
 
-    fn reconcile(&mut self, committed: CommittedWidgetState) {
-        if committed.should_commit_pending() {
-            if let Some(value) = self.pending_value.take() {
-                self.value = value;
-            }
-        } else {
-            self.pending_value = None;
-        }
-    }
-
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let res = self.handle_widget(ctx, control);
         if control.clicked {
-            self.pending_value = Some(!self.value);
-        } else {
-            self.pending_value = None;
+            self.value = !self.value;
         }
         res
     }
@@ -792,8 +777,12 @@ impl Widget for Combo {
         &self.bopt
     }
 
-    fn reconcile(&mut self, committed: CommittedWidgetState) {
-        if committed.previous_result.is_submitted() {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+
+    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        if control.clicked {
             self.open = !self.open;
             if !self.open {
                 self.close_popup();
@@ -801,13 +790,6 @@ impl Widget for Combo {
         } else if !self.popup.is_open() {
             self.open = false;
         }
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
-    }
-
-    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         self.handle_widget(ctx, control)
     }
 }
@@ -861,18 +843,54 @@ mod tests {
     }
 
     #[test]
-    fn combo_reconcile_toggles_open_state_from_committed_submit() {
+    fn combo_run_toggles_open_state() {
         let atlas = make_test_atlas();
         let style = Rc::new(Style::default());
         let input = Rc::new(RefCell::new(Input::default()));
-        let popup = WindowHandle::popup("combo", atlas, style, input);
+        let popup = WindowHandle::popup("combo", atlas.clone(), style.clone(), input);
         let mut combo = Combo::new(popup);
+        let mut commands = Vec::new();
+        let mut clip_stack = Vec::new();
+        let mut focus = None;
+        let mut updated_focus = false;
+        let rect = rect(0, 0, 100, 20);
+        let control = ControlState {
+            hovered: true,
+            focused: true,
+            clicked: true,
+            active: true,
+            scroll_delta: None,
+        };
+        let mut ctx = WidgetCtx::new(
+            widget_id_of(&combo),
+            rect,
+            &mut commands,
+            &mut clip_stack,
+            style.as_ref(),
+            &atlas,
+            &mut focus,
+            &mut updated_focus,
+            true,
+            None,
+        );
 
-        combo.reconcile(CommittedWidgetState::new(ResourceState::SUBMIT));
+        combo.run(&mut ctx, &control);
         assert!(combo.is_open());
 
         combo.popup.open();
-        combo.reconcile(CommittedWidgetState::new(ResourceState::SUBMIT));
+        let mut ctx = WidgetCtx::new(
+            widget_id_of(&combo),
+            rect,
+            &mut commands,
+            &mut clip_stack,
+            style.as_ref(),
+            &atlas,
+            &mut focus,
+            &mut updated_focus,
+            true,
+            None,
+        );
+        combo.run(&mut ctx, &control);
         assert!(!combo.is_open());
         assert!(!combo.popup.is_open());
     }

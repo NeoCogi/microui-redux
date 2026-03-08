@@ -74,17 +74,6 @@ pub struct TextArea {
     preferred_x: Option<i32>,
     dragging_y: bool,
     dragging_x: bool,
-    pending: Option<TextAreaFrameState>,
-}
-
-#[derive(Clone)]
-struct TextAreaFrameState {
-    buf: String,
-    cursor: usize,
-    scroll: Vec2i,
-    preferred_x: Option<i32>,
-    dragging_y: bool,
-    dragging_x: bool,
 }
 
 impl TextArea {
@@ -102,7 +91,6 @@ impl TextArea {
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
-            pending: None,
         }
     }
 
@@ -120,7 +108,6 @@ impl TextArea {
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
-            pending: None,
         }
     }
 
@@ -416,46 +403,23 @@ impl Widget for TextArea {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn reconcile(&mut self, committed: CommittedWidgetState) {
-        if committed.should_commit_pending() {
-            if let Some(pending) = self.pending.take() {
-                self.buf = pending.buf;
-                self.cursor = pending.cursor;
-                self.scroll = pending.scroll;
-                self.preferred_x = pending.preferred_x;
-                self.dragging_y = pending.dragging_y;
-                self.dragging_x = pending.dragging_x;
-            }
-        } else {
-            self.pending = None;
-        }
-    }
-
-    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        let mut draft = self.clone();
-        draft.pending = None;
-        let mut res = draft.handle_widget(ctx, control);
-        let scroll_changed = draft.scroll.x != self.scroll.x || draft.scroll.y != self.scroll.y;
-        let changed = draft.buf != self.buf
-            || draft.cursor != self.cursor
+    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let old_buf = self.buf.clone();
+        let old_cursor = self.cursor;
+        let old_scroll = self.scroll;
+        let old_preferred_x = self.preferred_x;
+        let old_dragging_y = self.dragging_y;
+        let old_dragging_x = self.dragging_x;
+        let mut res = self.handle_widget(ctx, control);
+        let scroll_changed = self.scroll.x != old_scroll.x || self.scroll.y != old_scroll.y;
+        let changed = self.buf != old_buf
+            || self.cursor != old_cursor
             || scroll_changed
-            || draft.preferred_x != self.preferred_x
-            || draft.dragging_y != self.dragging_y
-            || draft.dragging_x != self.dragging_x;
+            || self.preferred_x != old_preferred_x
+            || self.dragging_y != old_dragging_y
+            || self.dragging_x != old_dragging_x;
         if control.focused || changed {
             res |= ResourceState::ACTIVE;
-        }
-        if !res.is_none() {
-            self.pending = Some(TextAreaFrameState {
-                buf: draft.buf,
-                cursor: draft.cursor,
-                scroll: draft.scroll,
-                preferred_x: draft.preferred_x,
-                dragging_y: draft.dragging_y,
-                dragging_x: draft.dragging_x,
-            });
-        } else {
-            self.pending = None;
         }
         res
     }

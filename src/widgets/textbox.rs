@@ -65,13 +65,6 @@ pub struct Textbox {
     pub opt: WidgetOption,
     /// Behaviour options applied to the textbox.
     pub bopt: WidgetBehaviourOption,
-    pending: Option<TextboxFrameState>,
-}
-
-#[derive(Clone)]
-struct TextboxFrameState {
-    buf: String,
-    cursor: usize,
 }
 
 impl Textbox {
@@ -84,7 +77,6 @@ impl Textbox {
             cursor,
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
-            pending: None,
         }
     }
 
@@ -97,7 +89,6 @@ impl Textbox {
             cursor,
             opt,
             bopt: WidgetBehaviourOption::NONE,
-            pending: None,
         }
     }
 
@@ -244,37 +235,13 @@ impl Widget for Textbox {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn reconcile(&mut self, committed: CommittedWidgetState) {
-        if committed.should_commit_pending() {
-            if let Some(pending) = self.pending.take() {
-                self.buf = pending.buf;
-                self.cursor = pending.cursor;
-            }
-        } else {
-            self.pending = None;
-        }
-    }
-
-    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        let mut draft = Textbox {
-            buf: self.buf.clone(),
-            cursor: self.cursor,
-            opt: self.opt,
-            bopt: self.bopt,
-            pending: None,
-        };
-        let mut res = draft.handle_widget(ctx, control);
-        let changed = draft.buf != self.buf || draft.cursor != self.cursor;
+    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let old_buf = self.buf.clone();
+        let old_cursor = self.cursor;
+        let mut res = self.handle_widget(ctx, control);
+        let changed = self.buf != old_buf || self.cursor != old_cursor;
         if control.focused || changed {
             res |= ResourceState::ACTIVE;
-        }
-        if !res.is_none() {
-            self.pending = Some(TextboxFrameState {
-                buf: draft.buf,
-                cursor: draft.cursor,
-            });
-        } else {
-            self.pending = None;
         }
         res
     }

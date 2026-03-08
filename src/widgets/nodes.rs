@@ -97,7 +97,6 @@ pub struct Node {
     /// Behaviour options applied to the node.
     pub bopt: WidgetBehaviourOption,
     kind: NodeKind,
-    pending_state: Option<NodeStateValue>,
 }
 
 impl Node {
@@ -114,7 +113,6 @@ impl Node {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Header,
-            pending_state: None,
         }
     }
 
@@ -126,7 +124,6 @@ impl Node {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Tree,
-            pending_state: None,
         }
     }
 
@@ -143,7 +140,6 @@ impl Node {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Header,
-            pending_state: None,
         }
     }
 
@@ -155,7 +151,6 @@ impl Node {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Tree,
-            pending_state: None,
         }
     }
 
@@ -240,27 +235,18 @@ impl Widget for Node {
         &self.bopt
     }
 
-    fn reconcile(&mut self, committed: CommittedWidgetState) {
-        if committed.should_commit_pending() {
-            if let Some(state) = self.pending_state.take() {
-                self.state = state;
-            }
-        } else {
-            self.pending_state = None;
-        }
-    }
-
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        let expanded = self.state.is_expanded();
+    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let res = self.handle_widget(ctx, control);
         if control.clicked {
-            self.pending_state = Some(if expanded { NodeStateValue::Closed } else { NodeStateValue::Expanded });
-        } else {
-            self.pending_state = None;
+            self.state = if self.state.is_expanded() {
+                NodeStateValue::Closed
+            } else {
+                NodeStateValue::Expanded
+            };
         }
         res
     }

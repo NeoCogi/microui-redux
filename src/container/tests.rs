@@ -158,7 +158,7 @@ impl Widget for TraceWidget {
         Dimensioni::new(10, 10)
     }
 
-    fn render(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn run(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         self.log.borrow_mut().push(format!("render {}", self.name));
         ResourceState::NONE
     }
@@ -214,10 +214,7 @@ fn textbox_left_moves_over_multibyte() {
     let control = container.update_control(textbox_id, rect, &control_state);
     let input = container.snapshot_input();
     let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
-    let res = state.render(&mut ctx, &control);
-
-    assert_eq!(state.cursor, 5);
-    state.reconcile(CommittedWidgetState::new(res));
+    state.run(&mut ctx, &control);
     assert_eq!(state.cursor, 1);
 }
 
@@ -236,17 +233,13 @@ fn textbox_backspace_removes_multibyte() {
     let control = container.update_control(textbox_id, rect, &control_state);
     let input = container.snapshot_input();
     let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
-    let res = state.render(&mut ctx, &control);
-
-    assert_eq!(state.buf, "a\u{1F600}b");
-    assert_eq!(state.cursor, 5);
-    state.reconcile(CommittedWidgetState::new(res));
+    state.run(&mut ctx, &control);
     assert_eq!(state.buf, "ab");
     assert_eq!(state.cursor, 1);
 }
 
 #[test]
-fn node_render_defers_expansion_until_reconcile() {
+fn node_run_updates_expansion_after_click() {
     let mut container = make_container();
     let mut state = Node::header("Header", NodeStateValue::Closed);
     let node_id = widget_id_of(&state);
@@ -259,11 +252,9 @@ fn node_render_defers_expansion_until_reconcile() {
         scroll_delta: None,
     };
     let mut ctx = container.widget_ctx(node_id, rect, None);
-    let res = state.render(&mut ctx, &control);
+    let res = state.run(&mut ctx, &control);
 
     assert!(res.is_changed());
-    assert!(state.is_closed());
-    state.reconcile(CommittedWidgetState::new(res));
     assert!(state.is_expanded());
 }
 
@@ -387,7 +378,7 @@ fn retained_widget_value_commits_on_next_frame() {
     container.widget_tree(&mut results, &tree);
 
     assert!(results.current().state(widget_id_of_handle(&checkbox)).is_changed());
-    assert!(!checkbox.borrow().value);
+    assert!(checkbox.borrow().value);
     container.finish();
     results.finish_frame();
 
@@ -508,7 +499,7 @@ fn tree_nodes_expand_children_from_committed_previous_frame_results() {
         });
     });
     container.widget_tree(&mut results, &tree);
-    assert!(header.borrow().is_closed());
+    assert!(header.borrow().is_expanded());
     assert!(container.current_node_layout(child_node_id).is_none());
     container.finish();
     results.finish_frame();
@@ -587,7 +578,7 @@ fn retained_tree_node_stays_expanded_after_click_is_committed() {
         });
     });
     container.widget_tree(&mut results, &tree);
-    assert!(header.borrow().is_closed());
+    assert!(header.borrow().is_expanded());
     assert!(container.current_node_layout(child_node_id).is_none());
     container.finish();
     results.finish_frame();

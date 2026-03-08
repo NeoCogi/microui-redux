@@ -74,13 +74,6 @@ pub struct Slider {
     pub bopt: WidgetBehaviourOption,
     /// Text editing state for shift-click numeric entry.
     pub edit: NumberEditState,
-    pending: Option<SliderFrameState>,
-}
-
-#[derive(Clone)]
-struct SliderFrameState {
-    value: Real,
-    edit: NumberEditState,
 }
 
 impl Slider {
@@ -95,7 +88,6 @@ impl Slider {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
             edit: NumberEditState::default(),
-            pending: None,
         }
     }
 
@@ -110,7 +102,6 @@ impl Slider {
             opt,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
             edit: NumberEditState::default(),
-            pending: None,
         }
     }
 
@@ -228,32 +219,13 @@ impl Widget for Slider {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn reconcile(&mut self, committed: CommittedWidgetState) {
-        if committed.should_commit_pending() {
-            if let Some(pending) = self.pending.take() {
-                self.value = pending.value;
-                self.edit = pending.edit;
-            }
-        } else {
-            self.pending = None;
-        }
-    }
-
-    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        let mut draft = self.clone();
-        draft.pending = None;
-        let mut res = draft.handle_widget(ctx, control);
-        let changed = draft.value != self.value || draft.edit != self.edit;
-        if draft.edit.editing || changed {
+    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let old_value = self.value;
+        let old_edit = self.edit.clone();
+        let mut res = self.handle_widget(ctx, control);
+        let changed = self.value != old_value || self.edit != old_edit;
+        if self.edit.editing || changed {
             res |= ResourceState::ACTIVE;
-        }
-        if !res.is_none() {
-            self.pending = Some(SliderFrameState {
-                value: draft.value,
-                edit: draft.edit,
-            });
-        } else {
-            self.pending = None;
         }
         res
     }
@@ -282,7 +254,6 @@ pub struct Number {
     pub bopt: WidgetBehaviourOption,
     /// Text editing state for shift-click numeric entry.
     pub edit: NumberEditState,
-    pending: Option<NumberFrameState>,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -296,12 +267,6 @@ pub struct NumberEditState {
     pub cursor: usize,
 }
 
-#[derive(Clone)]
-struct NumberFrameState {
-    value: Real,
-    edit: NumberEditState,
-}
-
 impl Number {
     /// Creates a number input with default widget options.
     pub fn new(value: Real, step: Real, precision: usize) -> Self {
@@ -312,7 +277,6 @@ impl Number {
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             edit: NumberEditState::default(),
-            pending: None,
         }
     }
 
@@ -325,7 +289,6 @@ impl Number {
             opt,
             bopt: WidgetBehaviourOption::NONE,
             edit: NumberEditState::default(),
-            pending: None,
         }
     }
 
@@ -376,32 +339,13 @@ impl Widget for Number {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn reconcile(&mut self, committed: CommittedWidgetState) {
-        if committed.should_commit_pending() {
-            if let Some(pending) = self.pending.take() {
-                self.value = pending.value;
-                self.edit = pending.edit;
-            }
-        } else {
-            self.pending = None;
-        }
-    }
-
-    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        let mut draft = self.clone();
-        draft.pending = None;
-        let mut res = draft.handle_widget(ctx, control);
-        let changed = draft.value != self.value || draft.edit != self.edit;
-        if draft.edit.editing || changed {
+    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let old_value = self.value;
+        let old_edit = self.edit.clone();
+        let mut res = self.handle_widget(ctx, control);
+        let changed = self.value != old_value || self.edit != old_edit;
+        if self.edit.editing || changed {
             res |= ResourceState::ACTIVE;
-        }
-        if !res.is_none() {
-            self.pending = Some(NumberFrameState {
-                value: draft.value,
-                edit: draft.edit,
-            });
-        } else {
-            self.pending = None;
         }
         res
     }
@@ -514,12 +458,11 @@ mod tests {
             scroll_delta: None,
         };
 
-        let res = slider.render(&mut ctx, &control);
+        let res = slider.run(&mut ctx, &control);
 
         assert!(res.is_active());
         assert!(slider.value.is_finite());
         assert_eq!(slider.value, 5.0);
-        slider.reconcile(CommittedWidgetState::new(res));
         assert_eq!(slider.value, 5.0);
     }
 
@@ -562,11 +505,9 @@ mod tests {
             scroll_delta: None,
         };
 
-        let res = slider.render(&mut ctx, &control);
+        let res = slider.run(&mut ctx, &control);
 
         assert!(!res.is_none());
-        assert_eq!(slider.value, 0.0);
-        slider.reconcile(CommittedWidgetState::new(res));
         assert_eq!(slider.value, 50.0);
     }
 }

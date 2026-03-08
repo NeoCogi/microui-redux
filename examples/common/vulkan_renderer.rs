@@ -3109,6 +3109,9 @@ impl Drop for VulkanContext {
             for &semaphore in &self.render_finished_semaphores {
                 self.device.destroy_semaphore(semaphore, None);
             }
+            for &semaphore in &self.transfer_complete_semaphores {
+                self.device.destroy_semaphore(semaphore, None);
+            }
 
             self.cleanup_swapchain();
 

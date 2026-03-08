@@ -63,57 +63,24 @@ use crate::style::Style;
 use crate::widget_ctx::WidgetCtx;
 use crate::widget_tree::WidgetHandle;
 
-/// Committed retained-state view passed into the widget reconcile phase.
-///
-/// This is the previous frame's published interaction result for the widget.
-#[derive(Copy, Clone, Debug)]
-pub struct CommittedWidgetState {
-    /// Interaction result published at the end of the previous frame.
-    pub previous_result: ResourceState,
-}
-
-impl CommittedWidgetState {
-    /// Creates a committed retained-state view from the previous frame result.
-    pub const fn new(previous_result: ResourceState) -> Self {
-        Self { previous_result }
-    }
-
-    /// Returns `true` when the previous frame produced transient widget state
-    /// that should be committed during reconcile.
-    pub fn should_commit_pending(self) -> bool {
-        !self.previous_result.is_none()
-    }
-}
-
-impl Default for CommittedWidgetState {
-    fn default() -> Self {
-        Self::new(ResourceState::NONE)
-    }
-}
-
 /// Trait implemented by persistent widget state structures.
 ///
-/// Widgets participate in three retained phases:
-/// 1. `reconcile`, which consumes previously committed frame state.
-/// 2. `measure`, which reports intrinsic size for the current frame's layout pass.
-/// 3. `render`, which records draw commands and produces the next frame result.
+/// Widgets participate in two retained phases:
+/// 1. `measure`, which reports intrinsic size for the current frame's layout pass.
+/// 2. `run`, which records draw commands, samples interaction, mutates widget-local state,
+///    and produces the current frame result.
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
     /// Returns the behaviour options for this state.
     fn behaviour_opt(&self) -> &WidgetBehaviourOption;
-    /// Applies previously committed frame state to the persistent widget state.
-    ///
-    /// This runs before measurement so retained state changes can influence layout.
-    fn reconcile(&mut self, _committed: CommittedWidgetState) {}
     /// Returns the intrinsic widget size for the current frame's layout pass.
     ///
-    /// Called after [`Widget::reconcile`] each frame so the layout manager can allocate a cell.
     /// `avail` reports the current container body size visible to the widget.
     /// Values less than or equal to zero are treated as "use layout defaults" for that axis.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
-    /// Renders the widget for the current frame and returns the next committed result.
-    fn render(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
+    /// Runs the widget for the current frame and returns the current frame result.
+    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
     /// Returns the effective widget options used by generic dispatch.
     ///
     /// Widgets can override this to apply dynamic option adjustments.
@@ -217,11 +184,6 @@ impl FrameResults {
         FrameResultGeneration::new(&self.current)
     }
 
-    /// Returns the committed result for `widget_id` from the previous frame.
-    pub(crate) fn committed_state(&self, widget_id: WidgetId) -> ResourceState {
-        self.committed().state(widget_id)
-    }
-
 }
 
 #[cfg(test)]
@@ -267,7 +229,7 @@ impl Widget for (WidgetOption, WidgetBehaviourOption) {
         Dimensioni::new(width, height)
     }
 
-    fn render(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn run(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         ResourceState::NONE
     }
 }
