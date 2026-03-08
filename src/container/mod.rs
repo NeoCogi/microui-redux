@@ -60,24 +60,6 @@ use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scrol
 use crate::text_layout::build_text_lines;
 use crate::widget_tree::{TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
 use std::cell::RefCell;
-use std::hash::{Hash, Hasher};
-
-macro_rules! widget_layout {
-    ($(#[$meta:meta])* $name:ident, $state:ty, $builder:expr) => {
-        $(#[$meta])*
-        pub fn $name(&mut self, results: &mut FrameResults, state: &mut $state) -> ResourceState {
-            self.reconcile_widget(results, state);
-            let rect = self.measure_widget_rect(state);
-            ($builder)(self, results, state, rect)
-        }
-    };
-    ($(#[$meta:meta])* $name:ident, $state:ty) => {
-        $(#[$meta])*
-        pub fn $name(&mut self, results: &mut FrameResults, state: &mut $state) -> ResourceState {
-            self.handle_widget(results, state, None)
-        }
-    };
-}
 
 mod command;
 pub use command::{CustomRenderArgs, TextWrap};
@@ -89,7 +71,6 @@ mod interaction;
 mod layout_api;
 mod panels;
 mod tree;
-mod widget_api;
 
 #[cfg(test)]
 mod tests;

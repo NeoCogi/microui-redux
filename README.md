@@ -37,7 +37,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 
 ## Key Concepts
 - **Context**: owns the renderer handle, user input, frame results, and root windows. Each frame starts by feeding input into the context, then calling `context.window(...)`, `context.dialog(...)`, or `context.popup(...)` with retained trees for every visible surface.
-- **Container**: describes one layout surface and remains the internal execution object behind windows, panels, popups, and retained tree nodes.
+- **Container**: the internal execution object behind windows, panels, popups, and retained tree nodes. Application code should normally work through `Context`, `WindowHandle`, `ContainerHandle`, and `WidgetTreeBuilder` instead of authoring widgets directly on a container.
 - **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). These structs hold interaction state and use pointer-derived IDs from their current address.
 - **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and replayed each frame through `Context::window(...)`, `Context::dialog(...)`, or `Context::popup(...)`. Tree nodes cover widgets, panels, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
@@ -57,8 +57,7 @@ let tree = WidgetTreeBuilder::build({
 
 ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
 
-let results = ctx.committed_results();
-if results.state_of_handle(&name).is_submitted() {
+if ctx.committed_results().state_of_handle(&name).is_submitted() {
     // react to the textbox submission here
 }
 ```
@@ -87,34 +86,33 @@ Window, dialog, and popup builders now accept a `WidgetBehaviourOption` to contr
 for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widgets that want to consume scroll, and
 `WidgetBehaviourOption::NONE` for default behavior. Custom widgets receive consumed scroll in `CustomRenderArgs::scroll_delta`.
 
-### Preferred sizing
-- Every built-in widget now reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
-- `Container` widget helpers reconcile from the previous committed frame result, call `Widget::measure`, allocate the widget rectangle, then call `Widget::render`.
-- Returning `<= 0` for either axis still means "use layout fallback/defaults" for that axis.
-- `next_cell()` is the raw layout helper that does not run widget preferred sizing.
-
-### Flow helpers
-- `with_row(widths, height, ...)` configures an explicit multi-slot row track.
-- `with_grid(widths, heights, ...)` configures an explicit row/column track matrix and emits cells row-major.
+### Preferred sizing and retained layout
+- Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
+- Retained traversal reconciles from the previous committed frame result, calls `Widget::measure`, allocates the widget rectangle, then calls `Widget::render`.
+- `WidgetTreeBuilder` exposes retained `row`, `grid`, `column`, `stack`, `header`, `tree_node`, `container`, and `custom_render` structure so layout stays declarative instead of closure-driven.
 - `SizePolicy::Weight(value)` distributes available track space by sibling weight ratio (spacing accounted for). In single-track flows, it uses a `0..=100` scale.
-- `stack(height, ...)` configures a vertical one-slot flow with width `SizePolicy::Remainder(0)`.
-- `stack_direction(height, direction, ...)` is the same as `stack`, but allows `StackDirection::BottomToTop`.
-- `stack_with_width(width, height, ...)` is the same as `stack`, but with explicit width policy.
-- `stack_with_width_direction(width, height, direction, ...)` combines explicit width policy with directional stacking.
-- `column(...)` starts a nested scope; inside it you can choose row or stack flow independently.
+- Returning `<= 0` for either axis from `Widget::measure` still means "use layout fallback/defaults" for that axis.
 
 ## Images and textures
 Some widgets can render an `Image`, which can reference either a slot **or** an uploaded texture at runtime:
 
 ```rust
 let texture = ctx.load_image_from(ImageSource::Png { bytes: include_bytes!("assets/IMAGE.png") })?;
-let mut image_button = Button::with_image(
+let image_button = widget_handle(Button::with_image(
     "External Image",
     Some(Image::Texture(texture)),
     WidgetOption::NONE,
     WidgetFillOption::ALL,
-);
-ui.button(&mut image_button);
+));
+let tree = WidgetTreeBuilder::build({
+    let image_button = image_button.clone();
+    move |tree| tree.widget(image_button.clone())
+});
+
+ctx.window(&mut image_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+if ctx.committed_results().state_of_handle(&image_button).is_submitted() {
+    // react here
+}
 ```
 
 - `Image::Slot` renders an entry from the atlas and benefits from batching.
@@ -142,9 +140,9 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
 `cargo run --bin atlas_export --features "builder save-to-rust" -- --output path/to/atlas.rs`
 
 ## Text rendering and layout
-- Container text widgets automatically center the font’s **baseline** inside each cell, and every line gets a small vertical pad so glyphs never touch the widget borders.
-- `Container::text_with_wrap` supports explicit wrapping modes (`TextWrap::None` or `TextWrap::Word`) and renders wrapped lines back-to-back inside an internal column, so the block keeps the outer padding without adding extra spacing between lines.
-- Custom drawing code can call `Container::draw_text` directly when precise placement is required, or use `draw_control_text` to get automatic alignment/clip handling.
+- Retained text widgets automatically center the font’s **baseline** inside each cell, and every line gets a small vertical pad so glyphs never touch the widget borders.
+- `TextBlock` supports wrapped multi-line content while preserving outer padding without adding extra spacing between lines.
+- Custom rendering still goes through retained `custom_render` nodes, which receive layout, input, and clip information through `CustomRenderArgs`.
 
 ### Version 0.6
 - [x] Added retained widget trees.
@@ -158,8 +156,8 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
     - [x] Replaced per-call output slots with a per-frame result registry keyed by widget ID.
     - [x] `window` / `dialog` / `popup` now render retained trees directly and expose committed business-logic results through `Context::committed_results()`.
     - [x] Added handle-oriented helpers such as `FrameResults::state_of_handle` and `widget_id_of_handle`.
-- [x] Simplified widget batching and handle-backed dispatch.
-    - [x] Migrated generic dispatch to `widget_ref(...)` batches and unified container batch helpers.
+- [x] Simplified retained dispatch and handle-backed widgets.
+    - [x] Unified retained widget dispatch around reconcile/measure/render instead of per-call output slots.
     - [x] Stabilized demo/file-dialog labels by reusing persistent `ListItem` state instead of rebuilding labels every frame.
 - [x] Improved interaction routing and widget input behavior.
     - [x] Mouse coordinates delivered to interactive widgets/custom render callbacks are now relative to the widget rectangle.

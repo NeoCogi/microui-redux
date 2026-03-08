@@ -582,17 +582,6 @@ impl<R: Renderer> Context<R> {
         self.render_window_tree(window, opt, bopt, tree);
     }
 
-    /// Returns the widget interaction result generations for the active frame.
-    ///
-    /// [`FrameResults::committed`] exposes the previous frame's published
-    /// results, while [`FrameResults::current`] exposes the in-progress results
-    /// being written during the current frame. Application business logic
-    /// should normally prefer [`Context::committed_results`] instead of
-    /// inspecting this shared store directly.
-    pub fn frame_results(&self) -> &FrameResults {
-        &self.frame_results
-    }
-
     /// Returns the previous frame's published widget results.
     ///
     /// This is the public business-logic view of retained interaction state.
@@ -606,7 +595,8 @@ impl<R: Renderer> Context<R> {
     ///
     /// This is mainly useful for framework internals or advanced debugging.
     /// Normal application/business logic should prefer [`Context::committed_results`].
-    pub fn current_results(&self) -> FrameResultGeneration<'_> {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn current_results(&self) -> FrameResultGeneration<'_> {
         self.frame_results.current()
     }
 

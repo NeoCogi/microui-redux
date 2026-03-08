@@ -246,25 +246,6 @@ fn textbox_backspace_removes_multibyte() {
 }
 
 #[test]
-fn widget_textbox_backspace_removes_multibyte() {
-    let mut container = make_container();
-    let input = container.input.clone();
-    let mut state = Textbox::new("a\u{1F600}b");
-    container.set_focus(Some(widget_id_of(&state)));
-    state.cursor = 5;
-    let mut results = FrameResults::default();
-    let state_id = widget_id_of(&state);
-
-    input.borrow_mut().keydown(KeyMode::BACKSPACE);
-    let mut runs = [widget_ref(&mut state)];
-    container.widgets(&mut results, &mut runs);
-
-    assert!(results.state(state_id).is_changed());
-    assert_eq!(state.buf, "ab");
-    assert_eq!(state.cursor, 1);
-}
-
-#[test]
 fn node_render_defers_expansion_until_reconcile() {
     let mut container = make_container();
     let mut state = Node::header("Header", NodeStateValue::Closed);
@@ -311,37 +292,22 @@ fn clicking_away_does_not_refocus_stale_hover_widget() {
 }
 
 #[test]
-fn row_widgets_record_states() {
-    let mut container = make_container();
-    let mut button_a = Button::new("A");
-    let mut button_b = Button::new("B");
-    let mut results = FrameResults::default();
-    let button_a_id = widget_id_of(&button_a);
-    let button_b_id = widget_id_of(&button_b);
-    let mut runs = [widget_ref(&mut button_a), widget_ref(&mut button_b)];
-
-    container.row_widgets(&mut results, &[SizePolicy::Auto, SizePolicy::Auto], SizePolicy::Auto, &mut runs);
-
-    assert!(results.state(button_a_id).is_none());
-    assert!(results.state(button_b_id).is_none());
-}
-
-#[test]
 fn widget_tree_records_leaf_states() {
     let mut container = make_container();
     let button_a = widget_handle(Button::new("A"));
     let button_b = widget_handle(Button::new("B"));
     let mut results = FrameResults::default();
 
-    container.build_tree(&mut results, |tree| {
+    let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Auto, SizePolicy::Auto], SizePolicy::Auto, |tree| {
             tree.widget(button_a.clone());
             tree.widget(button_b.clone());
         });
     });
+    container.widget_tree(&mut results, &tree);
 
-    assert!(results.state_of_handle(&button_a).is_none());
-    assert!(results.state_of_handle(&button_b).is_none());
+    assert!(results.current().state(widget_id_of_handle(&button_a)).is_none());
+    assert!(results.current().state(widget_id_of_handle(&button_b)).is_none());
 }
 
 #[test]
@@ -353,12 +319,13 @@ fn widget_tree_measures_all_nodes_before_rendering() {
     let mut results = FrameResults::default();
 
     begin_test_frame(&mut container, rect(0, 0, 100, 20));
-    container.build_tree(&mut results, |tree| {
+    let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Auto, SizePolicy::Auto], SizePolicy::Auto, |tree| {
             tree.widget(first.clone());
             tree.widget(second.clone());
         });
     });
+    container.widget_tree(&mut results, &tree);
 
     assert_eq!(
         &*log.borrow(),
@@ -419,7 +386,7 @@ fn retained_widget_value_commits_on_next_frame() {
     });
     container.widget_tree(&mut results, &tree);
 
-    assert!(results.state_of_handle(&checkbox).is_changed());
+    assert!(results.current().state(widget_id_of_handle(&checkbox)).is_changed());
     assert!(!checkbox.borrow().value);
     container.finish();
     results.finish_frame();
@@ -447,15 +414,16 @@ fn widget_tree_dispatches_panel_children() {
     let button = widget_handle(Button::new("inside"));
     let mut results = FrameResults::default();
 
-    parent.build_tree(&mut results, |tree| {
+    let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
             tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
                 tree.widget(button.clone());
             });
         });
     });
+    parent.widget_tree(&mut results, &tree);
 
-    assert!(results.state_of_handle(&button).is_none());
+    assert!(results.current().state(widget_id_of_handle(&button)).is_none());
 }
 
 #[test]
@@ -471,13 +439,14 @@ fn retained_text_inside_panel_grows_content_height() {
     let mut results = FrameResults::default();
 
     begin_test_frame(&mut parent, rect(0, 0, 60, 20));
-    parent.build_tree(&mut results, |tree| {
+    let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(60)], SizePolicy::Fixed(20), |tree| {
             tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
                 tree.widget(text.clone());
             });
         });
     });
+    parent.widget_tree(&mut results, &tree);
 
     let panel = panel.inner();
     assert!(panel.content_size().y > panel.body().height);
@@ -658,76 +627,57 @@ fn retained_tree_node_stays_expanded_after_click_is_committed() {
 fn panel_hover_root_switches_between_siblings_on_next_frame() {
     let mut parent = make_container();
     let input = parent.input.clone();
-    let mut left = make_panel_handle(&parent, "left");
-    let mut right = make_panel_handle(&parent, "right");
+    let left = make_panel_handle(&parent, "left");
+    let right = make_panel_handle(&parent, "right");
+    let mut results = FrameResults::default();
+    let tree = WidgetTreeBuilder::build(|tree| {
+        tree.row(&[SizePolicy::Fixed(50), SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
+            tree.container(left.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
+            tree.container(right.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
+        });
+    });
 
     input.borrow_mut().mousemove(75, 10);
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
-    parent.with_row(&[SizePolicy::Fixed(50), SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |container| {
-        container.panel(&mut left, ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
-        container.panel(&mut right, ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
-    });
+    parent.widget_tree(&mut results, &tree);
     assert!(!left.inner().in_hover_root);
     assert!(!right.inner().in_hover_root);
     parent.finish();
 
-    let mut left_active = false;
-    let mut right_active = false;
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
-    parent.with_row(&[SizePolicy::Fixed(50), SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |container| {
-        container.panel(&mut left, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
-            left_active = panel.inner().in_hover_root;
-        });
-        container.panel(&mut right, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
-            right_active = panel.inner().in_hover_root;
-        });
-    });
-    assert!(!left_active);
-    assert!(right_active);
+    parent.widget_tree(&mut results, &tree);
+    assert!(!left.inner().in_hover_root);
+    assert!(right.inner().in_hover_root);
     parent.finish();
 
     input.borrow_mut().mousemove(25, 10);
-    left_active = false;
-    right_active = false;
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
-    parent.with_row(&[SizePolicy::Fixed(50), SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |container| {
-        container.panel(&mut left, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
-            left_active = panel.inner().in_hover_root;
-        });
-        container.panel(&mut right, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
-            right_active = panel.inner().in_hover_root;
-        });
-    });
-    assert!(!left_active);
-    assert!(right_active);
+    parent.widget_tree(&mut results, &tree);
+    assert!(!left.inner().in_hover_root);
+    assert!(right.inner().in_hover_root);
     parent.finish();
 
-    left_active = false;
-    right_active = false;
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
-    parent.with_row(&[SizePolicy::Fixed(50), SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |container| {
-        container.panel(&mut left, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
-            left_active = panel.inner().in_hover_root;
-        });
-        container.panel(&mut right, ContainerOption::NONE, WidgetBehaviourOption::NONE, |panel| {
-            right_active = panel.inner().in_hover_root;
-        });
-    });
-    assert!(left_active);
-    assert!(!right_active);
+    parent.widget_tree(&mut results, &tree);
+    assert!(left.inner().in_hover_root);
+    assert!(!right.inner().in_hover_root);
 }
 
 #[test]
 fn parent_widgets_are_only_blocked_while_mouse_is_inside_active_child_rect() {
     let mut parent = make_container();
     let input = parent.input.clone();
-    let mut panel = make_panel_handle(&parent, "panel");
+    let panel = make_panel_handle(&parent, "panel");
+    let mut results = FrameResults::default();
+    let tree = WidgetTreeBuilder::build(|tree| {
+        tree.row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
+            tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
+        });
+    });
 
     input.borrow_mut().mousemove(10, 10);
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
-    parent.with_row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |container| {
-        container.panel(&mut panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
-    });
+    parent.widget_tree(&mut results, &tree);
     parent.finish();
 
     let blocked_button = Button::new("blocked");
@@ -735,9 +685,7 @@ fn parent_widgets_are_only_blocked_while_mouse_is_inside_active_child_rect() {
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
     let blocked = parent.update_control(widget_id_of(&blocked_button), rect(0, 0, 40, 20), &blocked_button);
     assert!(!blocked.hovered);
-    parent.with_row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |container| {
-        container.panel(&mut panel, ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
-    });
+    parent.widget_tree(&mut results, &tree);
     parent.finish();
 
     let free_button = Button::new("free");

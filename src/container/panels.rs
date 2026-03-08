@@ -263,46 +263,6 @@ impl Container {
         container.layout.pop_scope();
     }
 
-    #[inline(never)]
-    pub(crate) fn begin_panel(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, bopt: WidgetBehaviourOption) {
-        let rect = self.layout.next();
-        let panel_id = container_id_of(panel);
-        if self.hit_test_rect(rect, self.in_hover_root) {
-            self.next_hover_root_child = Some(panel_id);
-            self.next_hover_root_child_rect = Some(rect);
-        }
-        let container = &mut panel.inner_mut();
-        container.prepare();
-        container.style = self.style.clone();
-
-        container.rect = rect;
-        if !opt.has_no_frame() {
-            self.draw_frame(rect, ControlColor::PanelBG);
-        }
-
-        container.in_hover_root = self.in_hover_root && self.hover_root_child == Some(panel_id);
-        if self.pending_scroll.is_some() && container.in_hover_root {
-            container.pending_scroll = self.pending_scroll.take();
-        }
-        container.push_container_body(rect, opt, bopt);
-        let clip_rect = container.body;
-        container.push_clip_rect(clip_rect);
-    }
-
-    pub(crate) fn end_panel(&mut self, panel: &mut ContainerHandle) {
-        panel.inner_mut().pop_clip_rect();
-        self.pop_panel(panel);
-        {
-            let mut inner = panel.inner_mut();
-            inner.consume_pending_scroll();
-            let pending = inner.pending_scroll.take();
-            if self.pending_scroll.is_none() {
-                self.pending_scroll = pending;
-            }
-        }
-        self.panels.push(panel.clone())
-    }
-
     pub(crate) fn begin_panel_layout(&mut self, panel: &mut ContainerHandle, _opt: ContainerOption, bopt: WidgetBehaviourOption) {
         let rect = self.layout.next();
         let container = &mut panel.inner_mut();
@@ -353,12 +313,5 @@ impl Container {
             }
         }
         self.panels.push(panel.clone())
-    }
-
-    /// Embeds another container handle inside the current layout.
-    pub fn panel<F: FnOnce(&mut ContainerHandle)>(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, f: F) {
-        self.begin_panel(panel, opt, bopt);
-        f(panel);
-        self.end_panel(panel);
     }
 }

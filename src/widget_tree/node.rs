@@ -89,7 +89,7 @@ pub(crate) enum WidgetTreeNodeKind {
         /// Retained widget state handle.
         widget: Box<dyn WidgetStateHandleDyn>,
     },
-    /// Leaf node that behaves like [`crate::Container::widget_custom_render`].
+    /// Leaf node that records a deferred custom-render callback.
     CustomRender {
         /// Retained widget state handle.
         state: WidgetHandle<Custom>,

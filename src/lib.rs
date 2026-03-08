@@ -60,11 +60,10 @@
 //! per-widget intrinsic text/icon metrics instead of a single shared control size.
 //! Layout internals are flow-based: row tracks and vertical stack flows both run through the same
 //! engine so scope/scroll/content bookkeeping stays consistent.
-//! Per-frame interaction results are collected in [`FrameResults`], which keeps
-//! committed previous-frame results separate from the current frame's in-progress
-//! result generation. Retained application/business logic is expected to react
-//! to the committed generation from the previous frame, while current-frame
-//! results remain available for framework internals and debugging.
+//! Per-frame interaction results are collected internally in [`FrameResults`].
+//! Retained application/business logic reacts through
+//! [`Context::committed_results`], which exposes the previous frame's published
+//! interaction generation as the crate's public retained contract.
 
 mod atlas;
 mod canvas;

@@ -56,59 +56,15 @@ use super::*;
 
 impl Container {
     /// Returns the previous frame layout for `node_id`, if any.
-    pub fn previous_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn previous_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
         self.tree_cache.prev_layout(node_id).copied()
     }
 
     /// Returns the current frame layout for `node_id`, if any.
-    pub fn current_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn current_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
         self.tree_cache.current_layout(node_id).copied()
-    }
-
-    /// Returns the previous frame interaction for `node_id`, if any.
-    pub fn previous_node_interaction(&self, node_id: NodeId) -> Option<NodeInteraction> {
-        self.tree_cache.prev_interaction(node_id).copied()
-    }
-
-    /// Returns the current frame interaction for `node_id`, if any.
-    pub fn current_node_interaction(&self, node_id: NodeId) -> Option<NodeInteraction> {
-        self.tree_cache.current_interaction(node_id).copied()
-    }
-
-    fn run_node_scope(&mut self, results: &mut FrameResults, state: &mut Node) -> NodeStateValue {
-        self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        self.reconcile_widget(results, state);
-        let rect = self.measure_widget_rect(state);
-        let opt = *state.widget_opt();
-        let bopt = *state.behaviour_opt();
-        let (_, result) = self.render_widget(results, state, rect, None, opt, bopt);
-        state.reconcile(CommittedWidgetState::new(result));
-        state.state
-    }
-
-    fn node_scope<F: FnOnce(&mut Self)>(&mut self, results: &mut FrameResults, state: &mut Node, indent: bool, f: F) -> NodeStateValue {
-        let node_state = self.run_node_scope(results, state);
-        if state.state.is_expanded() {
-            if indent {
-                let indent_size = self.style.as_ref().indent;
-                self.layout.adjust_indent(indent_size);
-                f(self);
-                self.layout.adjust_indent(-indent_size);
-            } else {
-                f(self);
-            }
-        }
-        node_state
-    }
-
-    /// Builds a collapsible header row that executes `f` when expanded.
-    pub fn header<F: FnOnce(&mut Self)>(&mut self, results: &mut FrameResults, state: &mut Node, f: F) -> NodeStateValue {
-        self.node_scope(results, state, false, f)
-    }
-
-    /// Builds a tree node with automatic indentation while expanded.
-    pub fn treenode<F: FnOnce(&mut Self)>(&mut self, results: &mut FrameResults, state: &mut Node, f: F) -> NodeStateValue {
-        self.node_scope(results, state, true, f)
     }
 
     fn record_tree_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
@@ -337,38 +293,8 @@ impl Container {
     }
 
     /// Evaluates a prebuilt widget tree using the current container layout.
-    pub fn widget_tree(&mut self, results: &mut FrameResults, tree: &WidgetTree) {
+    pub(crate) fn widget_tree(&mut self, results: &mut FrameResults, tree: &WidgetTree) {
         self.layout_tree_nodes(results, tree.roots());
         self.render_tree_nodes(results, tree.roots());
-    }
-
-    /// Builds a widget tree and evaluates it immediately.
-    #[track_caller]
-    pub fn build_tree(&mut self, results: &mut FrameResults, f: impl FnOnce(&mut WidgetTreeBuilder)) {
-        let location = std::panic::Location::caller();
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        location.file().hash(&mut hasher);
-        location.line().hash(&mut hasher);
-        location.column().hash(&mut hasher);
-        let tree = WidgetTreeBuilder::build_with_seed(hasher.finish(), f);
-        self.widget_tree(results, &tree);
-    }
-
-    /// Same as [`Container::build_tree`], but lets callers provide an explicit
-    /// root key when the same call site builds multiple independent trees.
-    ///
-    /// The key is mixed with the caller location instead of replacing it so a
-    /// reused logical key in unrelated call sites still lands in a distinct
-    /// root namespace.
-    #[track_caller]
-    pub fn build_tree_with_key<K: Hash>(&mut self, key: K, results: &mut FrameResults, f: impl FnOnce(&mut WidgetTreeBuilder)) {
-        let location = std::panic::Location::caller();
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        location.file().hash(&mut hasher);
-        location.line().hash(&mut hasher);
-        location.column().hash(&mut hasher);
-        key.hash(&mut hasher);
-        let tree = WidgetTreeBuilder::build_with_seed(hasher.finish(), f);
-        self.widget_tree(results, &tree);
     }
 }

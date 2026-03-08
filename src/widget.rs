@@ -130,14 +130,6 @@ pub trait Widget {
     }
 }
 
-/// Raw widget dispatch reference used by batch APIs.
-pub type WidgetRef<'a> = &'a mut dyn Widget;
-
-/// Creates a [`WidgetRef`] from a widget state reference.
-pub fn widget_ref<'a, W: Widget>(widget: &'a mut W) -> WidgetRef<'a> {
-    widget as &mut dyn Widget
-}
-
 /// Raw pointer identity used for widget hover/focus tracking.
 pub type WidgetId = *const ();
 
@@ -198,109 +190,43 @@ impl FrameResults {
     /// Clears the in-progress frame results for a new frame.
     ///
     /// Previously committed results remain available through [`FrameResults::committed`].
-    pub fn begin_frame(&mut self) {
+    pub(crate) fn begin_frame(&mut self) {
         self.current.clear();
     }
 
     /// Publishes the current frame as the next committed result generation.
-    pub fn finish_frame(&mut self) {
+    pub(crate) fn finish_frame(&mut self) {
         std::mem::swap(&mut self.committed, &mut self.current);
         self.current.clear();
     }
 
     /// Records the current frame state under `widget_id`.
-    pub fn record(&mut self, widget_id: WidgetId, state: ResourceState) {
+    pub(crate) fn record(&mut self, widget_id: WidgetId, state: ResourceState) {
         let prev = self.current.insert(widget_id, state);
         debug_assert!(prev.is_none(), "Widget {:?} was dispatched more than once in the same frame", widget_id);
     }
 
     /// Returns the committed result generation published by the previous frame.
-    pub fn committed(&self) -> FrameResultGeneration<'_> {
+    pub(crate) fn committed(&self) -> FrameResultGeneration<'_> {
         FrameResultGeneration::new(&self.committed)
     }
 
     /// Returns the in-progress result generation for the current frame.
-    pub fn current(&self) -> FrameResultGeneration<'_> {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn current(&self) -> FrameResultGeneration<'_> {
         FrameResultGeneration::new(&self.current)
     }
 
     /// Returns the committed result for `widget_id` from the previous frame.
-    pub fn committed_state(&self, widget_id: WidgetId) -> ResourceState {
+    pub(crate) fn committed_state(&self, widget_id: WidgetId) -> ResourceState {
         self.committed().state(widget_id)
     }
 
-    /// Returns the in-progress result for `widget_id` in the current frame.
-    pub fn current_state(&self, widget_id: WidgetId) -> ResourceState {
-        self.current().state(widget_id)
-    }
-
-    /// Returns the most relevant available state for `widget_id`.
-    ///
-    /// Once any widget has been rendered in the current frame, this reports only the
-    /// current-frame result set. Before the first current-frame record, it falls back
-    /// to the previously committed result generation.
-    ///
-    /// This is a compatibility lookup for code that still expects a single
-    /// result map. New code should prefer [`FrameResults::committed`] for
-    /// business logic or [`FrameResults::current`] for internal/debug access.
-    pub fn state(&self, widget_id: WidgetId) -> ResourceState {
-        if self.current.is_empty() {
-            self.committed_state(widget_id)
-        } else {
-            self.current_state(widget_id)
-        }
-    }
-
-    /// Returns the most relevant available state for `widget`.
-    ///
-    /// See [`FrameResults::state`] for the lookup behavior and compatibility caveat.
-    pub fn state_of<W: Widget + ?Sized>(&self, widget: &W) -> ResourceState {
-        self.state(widget_id_of(widget))
-    }
-
-    /// Returns the committed result for `widget` from the previous frame.
-    pub fn committed_state_of<W: Widget + ?Sized>(&self, widget: &W) -> ResourceState {
-        self.committed_state(widget_id_of(widget))
-    }
-
-    /// Returns the committed result for the widget stored in `handle`.
-    pub fn committed_state_of_handle<W: Widget>(&self, handle: &WidgetHandle<W>) -> ResourceState {
-        self.committed_state(widget_id_of_handle(handle))
-    }
-
-    /// Returns the most relevant available state for the widget stored in `handle`.
-    ///
-    /// This is a compatibility helper; retained application code should usually
-    /// prefer [`FrameResults::committed_state_of_handle`].
-    pub fn state_of_handle<W: Widget>(&self, handle: &WidgetHandle<W>) -> ResourceState {
-        self.state(widget_id_of_handle(handle))
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn state_does_not_fall_back_to_committed_once_current_frame_is_active() {
-        let committed_widget = 1_u8;
-        let current_widget = 2_u8;
-        let committed_id = (&committed_widget as *const u8).cast::<()>();
-        let current_id = (&current_widget as *const u8).cast::<()>();
-
-        let mut results = FrameResults::default();
-        results.record(committed_id, ResourceState::SUBMIT);
-        results.finish_frame();
-
-        assert!(results.state(committed_id).is_submitted());
-
-        results.begin_frame();
-        results.record(current_id, ResourceState::CHANGE);
-
-        assert!(results.state(committed_id).is_none());
-        assert!(results.state(current_id).is_changed());
-        assert!(results.committed_state(committed_id).is_submitted());
-    }
 
     #[test]
     fn committed_and_current_generation_views_are_explicit() {
