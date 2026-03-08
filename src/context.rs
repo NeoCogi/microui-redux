@@ -268,6 +268,77 @@ mod tests {
         assert!(ctx.current_results().state(committed_id).is_none());
         assert!(ctx.current_results().state(current_id).is_changed());
     }
+
+    #[test]
+    fn closing_window_resets_transient_render_state() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut window = ctx.new_window("window", rect(0, 0, 80, 40));
+
+        {
+            let mut inner = window.inner_mut();
+            inner.main.command_list.push(Command::None);
+            inner.main.clip_stack.push(UNCLIPPED_RECT);
+            inner.main.content_size = Vec2i::new(11, 17);
+            inner.main.scroll = Vec2i::new(3, 5);
+        }
+
+        window.close();
+
+        let inner = window.inner();
+        assert!(inner.main.command_list.is_empty());
+        assert!(inner.main.clip_stack.is_empty());
+        assert_eq!(inner.main.content_size.x, 0);
+        assert_eq!(inner.main.content_size.y, 0);
+        assert_eq!(inner.main.scroll.x, 0);
+        assert_eq!(inner.main.scroll.y, 0);
+    }
+
+    #[test]
+    fn reshown_windows_prepare_on_first_render_after_a_gap() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut window = ctx.new_window("window", rect(20, 20, 80, 40));
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("hello");
+        });
+
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+        });
+        ctx.frame(|_ui| {});
+
+        {
+            let mut inner = window.inner_mut();
+            inner.main.command_list.push(Command::None);
+        }
+
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+        });
+
+        let inner = window.inner();
+        assert!(!inner.main.command_list.iter().any(|cmd| matches!(cmd, Command::None)));
+    }
+
+    #[test]
+    #[should_panic(expected = "rendered more than once in frame")]
+    fn rendering_same_window_twice_in_one_frame_panics() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut window = ctx.new_window("window", rect(0, 0, 80, 40));
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("hello");
+        });
+
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+        });
+    }
 }
 
 impl<R: Renderer> Context<R> {
@@ -339,9 +410,6 @@ impl<R: Renderer> Context<R> {
         self.scroll_target = None;
         self.frame_results.begin_frame();
         self.input.borrow_mut().prelude();
-        for r in &mut self.root_list {
-            r.prepare();
-        }
         self.frame += 1;
         self.root_list.clear();
     }
@@ -419,6 +487,7 @@ impl<R: Renderer> Context<R> {
 
     #[inline(never)]
     fn begin_root_container(&mut self, window: &mut WindowHandle) {
+        window.prepare_for_frame(self.frame);
         self.root_list.push(window.clone());
 
         if window.inner().main.rect.contains(&self.input.borrow().mouse_pos)
@@ -481,7 +550,7 @@ impl<R: Renderer> Context<R> {
             self.end_window(window, opt);
 
             if !window.is_open() {
-                window.inner_mut().main.reset();
+                window.reset_after_close();
             }
         }
     }

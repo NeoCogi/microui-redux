@@ -72,6 +72,7 @@ pub(crate) enum Type {
 pub(crate) struct Window {
     pub(crate) ty: Type,
     pub(crate) win_state: WindowState,
+    last_root_frame: Option<usize>,
     pub(crate) main: Container,
     /// Internal state for the window title bar.
     pub(crate) title_state: Internal,
@@ -90,6 +91,7 @@ impl Window {
         Self {
             ty: Type::Dialog,
             win_state: WindowState::Closed,
+            last_root_frame: None,
             main,
             title_state: Internal::new("!title"),
             close_state: Internal::new("!close"),
@@ -105,6 +107,7 @@ impl Window {
         Self {
             ty: Type::Window,
             win_state: WindowState::Open,
+            last_root_frame: None,
             main,
             title_state: Internal::new("!title"),
             close_state: Internal::new("!close"),
@@ -120,6 +123,7 @@ impl Window {
         Self {
             ty: Type::Popup,
             win_state: WindowState::Closed,
+            last_root_frame: None,
             main,
             title_state: Internal::new("!title"),
             close_state: Internal::new("!close"),
@@ -225,6 +229,24 @@ impl Window {
         container.pop_clip_rect();
     }
 
+    fn prepare_for_root_frame(&mut self, frame: usize) {
+        if self.last_root_frame == Some(frame) {
+            panic!("window {:?} was rendered more than once in frame {}", self.main.name, frame);
+        }
+
+        let contiguous = self.last_root_frame.and_then(|last| last.checked_add(1)) == Some(frame);
+        if !contiguous {
+            self.main.clear_root_frame_state();
+        }
+        self.main.prepare();
+        self.last_root_frame = Some(frame);
+    }
+
+    fn reset_after_close(&mut self) {
+        self.last_root_frame = None;
+        self.main.reset();
+    }
+
     fn finish_resize(&mut self, opt: ContainerOption) {
         if opt.is_auto_sizing() || opt.is_fixed() {
             return;
@@ -297,7 +319,7 @@ impl WindowHandle {
         let mut inner = self.inner_mut();
         inner.win_state = state;
         if matches!(state, WindowState::Closed) {
-            inner.main.reset();
+            inner.reset_after_close();
         }
     }
 
@@ -334,8 +356,8 @@ impl WindowHandle {
         self.0.borrow()
     }
 
-    pub(crate) fn prepare(&mut self) {
-        self.inner_mut().main.prepare()
+    pub(crate) fn prepare_for_frame(&mut self, frame: usize) {
+        self.inner_mut().prepare_for_root_frame(frame)
     }
 
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
@@ -360,6 +382,10 @@ impl WindowHandle {
 
     pub(crate) fn finish_resize(&mut self, opt: ContainerOption) {
         self.inner_mut().finish_resize(opt)
+    }
+
+    pub(crate) fn reset_after_close(&mut self) {
+        self.inner_mut().reset_after_close()
     }
 
     /// Resizes the underlying window rectangle.

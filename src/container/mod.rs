@@ -166,18 +166,29 @@ impl Container {
     }
 
     pub(crate) fn reset(&mut self) {
+        self.command_list.clear();
+        self.clip_stack.clear();
+        self.body = Recti::default();
+        self.content_size = Vec2i::default();
+        self.scroll = Vec2i::default();
         self.hover = None;
         self.focus = None;
+        self.clear_root_frame_state();
+        self.updated_focus = false;
+        self.input_snapshot = None;
+        self.popup_just_opened = false;
+        self.scroll_enabled = true;
+        self.panels.clear();
+        self.tree_cache.clear();
+    }
+
+    pub(crate) fn clear_root_frame_state(&mut self) {
         self.hover_root_child = None;
         self.hover_root_child_rect = None;
         self.next_hover_root_child = None;
         self.next_hover_root_child_rect = None;
-        self.updated_focus = false;
         self.in_hover_root = false;
-        self.input_snapshot = None;
         self.pending_scroll = None;
-        self.scroll_enabled = true;
-        self.tree_cache.clear();
     }
 
     pub(crate) fn prepare(&mut self) {
