@@ -68,11 +68,11 @@ impl Container {
         let mut scroll = self.scroll;
         let mut content_size = self.content_size;
         let padding = self.style.as_ref().padding * 2;
-        content_size.x += padding;
-        content_size.y += padding;
+        content_size.width += padding;
+        content_size.height += padding;
         let body = self.body;
 
-        let maxscroll_y = content_size.y - body.height;
+        let maxscroll_y = content_size.height - body.height;
         if delta.y != 0 && maxscroll_y > 0 && body.height > 0 {
             let new_scroll = Self::clamp(scroll.y + delta.y, 0, maxscroll_y);
             if new_scroll != scroll.y {
@@ -81,7 +81,7 @@ impl Container {
             }
         }
 
-        let maxscroll_x = content_size.x - body.width;
+        let maxscroll_x = content_size.width - body.width;
         if delta.x != 0 && maxscroll_x > 0 && body.width > 0 {
             let new_scroll = Self::clamp(scroll.x + delta.x, 0, maxscroll_x);
             if new_scroll != scroll.x {
@@ -102,25 +102,25 @@ impl Container {
             (style.scrollbar_size, style.padding)
         };
         let sz = scrollbar_size;
-        let mut cs: Vec2i = self.content_size;
-        cs.x += padding * 2;
-        cs.y += padding * 2;
+        let mut cs = self.content_size;
+        cs.width += padding * 2;
+        cs.height += padding * 2;
         let base_body = *body;
-        if cs.y > base_body.height {
+        if cs.height > base_body.height {
             body.width -= sz;
         }
-        if cs.x > base_body.width {
+        if cs.width > base_body.width {
             body.height -= sz;
         }
         let body = *body;
-        let maxscroll_y = scrollbar_max_scroll(cs.y, body.height);
+        let maxscroll_y = scrollbar_max_scroll(cs.height, body.height);
         self.scroll.y = if maxscroll_y > 0 && body.height > 0 {
             Self::clamp(self.scroll.y, 0, maxscroll_y)
         } else {
             0
         };
 
-        let maxscroll_x = scrollbar_max_scroll(cs.x, body.width);
+        let maxscroll_x = scrollbar_max_scroll(cs.width, body.width);
         self.scroll.x = if maxscroll_x > 0 && body.width > 0 {
             Self::clamp(self.scroll.x, 0, maxscroll_x)
         } else {
@@ -146,11 +146,11 @@ impl Container {
             let style = self.style.as_ref();
             (style.scrollbar_size, style.padding, style.thumb_size)
         };
-        let mut cs: Vec2i = self.content_size;
-        cs.x += padding * 2;
-        cs.y += padding * 2;
-        let maxscroll_y = scrollbar_max_scroll(cs.y, body.height);
-        let maxscroll_x = scrollbar_max_scroll(cs.x, body.width);
+        let mut cs = self.content_size;
+        cs.width += padding * 2;
+        cs.height += padding * 2;
+        let maxscroll_y = scrollbar_max_scroll(cs.height, body.height);
+        let maxscroll_x = scrollbar_max_scroll(cs.width, body.width);
         let mut clip_rect = body;
         if maxscroll_y > 0 && body.height > 0 {
             clip_rect.width += scrollbar_size;
@@ -179,12 +179,12 @@ impl Container {
                 let _ = self.scrollbar_y_state.run(&mut ctx, &control);
             }
             if control.active {
-                let delta = scrollbar_drag_delta(ScrollAxis::Vertical, self.input.borrow().mouse_delta, cs.y, base);
+                let delta = scrollbar_drag_delta(ScrollAxis::Vertical, self.input.borrow().mouse_delta, cs.height, base);
                 self.scroll.y += delta;
             }
             self.scroll.y = Self::clamp(self.scroll.y, 0, maxscroll_y);
             self.draw_frame(base, ControlColor::ScrollBase);
-            let thumb = scrollbar_thumb(ScrollAxis::Vertical, base, body.height, cs.y, self.scroll.y, thumb_size);
+            let thumb = scrollbar_thumb(ScrollAxis::Vertical, base, body.height, cs.height, self.scroll.y, thumb_size);
             self.draw_frame(thumb, ControlColor::ScrollThumb);
         } else {
             self.scroll.y = 0;
@@ -210,12 +210,12 @@ impl Container {
                 let _ = self.scrollbar_x_state.run(&mut ctx, &control);
             }
             if control.active {
-                let delta = scrollbar_drag_delta(ScrollAxis::Horizontal, self.input.borrow().mouse_delta, cs.x, base);
+                let delta = scrollbar_drag_delta(ScrollAxis::Horizontal, self.input.borrow().mouse_delta, cs.width, base);
                 self.scroll.x += delta;
             }
             self.scroll.x = Self::clamp(self.scroll.x, 0, maxscroll_x);
             self.draw_frame(base, ControlColor::ScrollBase);
-            let thumb = scrollbar_thumb(ScrollAxis::Horizontal, base, body.width, cs.x, self.scroll.x, thumb_size);
+            let thumb = scrollbar_thumb(ScrollAxis::Horizontal, base, body.width, cs.width, self.scroll.x, thumb_size);
             self.draw_frame(thumb, ControlColor::ScrollThumb);
         } else {
             self.scroll.x = 0;
@@ -257,7 +257,7 @@ impl Container {
         let container = &mut panel.inner_mut();
 
         if let Some(lm) = layout_max {
-            container.content_size = Vec2i::new(lm.x - layout_body.x, lm.y - layout_body.y);
+            container.content_size = Dimensioni::new(lm.x - layout_body.x, lm.y - layout_body.y);
         }
 
         container.layout.pop_scope();

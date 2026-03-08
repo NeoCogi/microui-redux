@@ -60,8 +60,11 @@ use png::{ColorType, Decoder};
 
 use crate::{
     rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, FrameResultGeneration, ImageSource, Input, Recti, Renderer, KeyCode, KeyMode,
-    MouseButton, RendererHandle, Style, TextureId, UNCLIPPED_RECT, Vec2i, WidgetBehaviourOption, WidgetTree, WindowHandle, WindowState, FrameResults,
+    MouseButton, RendererHandle, Style, TextureId, UNCLIPPED_RECT, WidgetBehaviourOption, WidgetTree, WindowHandle, WindowState, FrameResults,
 };
+
+#[cfg(test)]
+use crate::Vec2i;
 
 /// Primary entry point used to drive the UI over a renderer implementation.
 pub struct Context<R: Renderer> {
@@ -280,7 +283,7 @@ mod tests {
             let mut inner = window.inner_mut();
             inner.main.command_list.push(Command::None);
             inner.main.clip_stack.push(UNCLIPPED_RECT);
-            inner.main.content_size = Vec2i::new(11, 17);
+            inner.main.content_size = Dimensioni::new(11, 17);
             inner.main.scroll = Vec2i::new(3, 5);
         }
 
@@ -289,8 +292,8 @@ mod tests {
         let inner = window.inner();
         assert!(inner.main.command_list.is_empty());
         assert!(inner.main.clip_stack.is_empty());
-        assert_eq!(inner.main.content_size.x, 0);
-        assert_eq!(inner.main.content_size.y, 0);
+        assert_eq!(inner.main.content_size.width, 0);
+        assert_eq!(inner.main.content_size.height, 0);
         assert_eq!(inner.main.scroll.x, 0);
         assert_eq!(inner.main.scroll.y, 0);
     }
@@ -504,8 +507,8 @@ mod tests {
         });
 
         let inner = window.inner();
-        assert!(inner.main.body.width >= inner.main.content_size.x);
-        assert!(inner.main.body.height >= inner.main.content_size.y);
+        assert!(inner.main.body.width >= inner.main.content_size.width);
+        assert!(inner.main.body.height >= inner.main.content_size.height);
         assert!(inner.main.body.height > 0);
         assert!(inner.main.body.y > inner.main.rect.y);
 
@@ -692,7 +695,7 @@ impl<R: Renderer> Context<R> {
         let layout_body = container.layout.current_body();
         match container.layout.current_max() {
             None => (),
-            Some(lm) => container.content_size = Vec2i::new(lm.x - layout_body.x, lm.y - layout_body.y),
+            Some(lm) => container.content_size = Dimensioni::new(lm.x - layout_body.x, lm.y - layout_body.y),
         }
         container.render_active_scrollbars();
         container.consume_pending_scroll();

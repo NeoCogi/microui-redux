@@ -118,7 +118,7 @@ fn make_container() -> Container {
 fn begin_test_frame(container: &mut Container, body: Recti) {
     container.prepare();
     container.rect = body;
-    container.content_size = Vec2i::default();
+    container.content_size = Dimensioni::default();
     container.push_container_body(body, ContainerOption::NONE, WidgetBehaviourOption::NONE);
 }
 
@@ -173,7 +173,7 @@ fn scrollbars_use_current_body() {
     container.style = Rc::new(style);
 
     container.body = rect(0, 0, 1, 1);
-    container.content_size = Vec2i::new(0, 0);
+    container.content_size = Dimensioni::new(0, 0);
 
     let mut body = rect(0, 0, 100, 100);
     container.scrollbars(&mut body);
@@ -190,7 +190,7 @@ fn scrollbars_shrink_body_when_needed() {
     style.scrollbar_size = 10;
     container.style = Rc::new(style);
 
-    container.content_size = Vec2i::new(200, 200);
+    container.content_size = Dimensioni::new(200, 200);
 
     let mut body = rect(0, 0, 100, 100);
     container.scrollbars(&mut body);
@@ -437,7 +437,7 @@ fn retained_text_inside_panel_grows_content_height() {
     parent.widget_tree(&mut results, &tree);
 
     let panel = panel.inner();
-    assert!(panel.content_size().y > panel.body().height);
+    assert!(panel.content_size().height > panel.body().height);
 }
 
 #[test]

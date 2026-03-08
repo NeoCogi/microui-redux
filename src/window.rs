@@ -103,13 +103,13 @@ impl Window {
     }
 
     fn apply_auto_size(container: &mut Container, opt: ContainerOption) {
-        if !opt.is_auto_sizing() || (container.content_size.x <= 0 && container.content_size.y <= 0) {
+        if !opt.is_auto_sizing() || (container.content_size.width <= 0 && container.content_size.height <= 0) {
             return;
         }
 
         let padding = container.style.as_ref().padding.max(0) * 2;
-        let target_body_width = container.content_size.x.saturating_add(padding);
-        let target_body_height = container.content_size.y.saturating_add(padding);
+        let target_body_width = container.content_size.width.saturating_add(padding);
+        let target_body_height = container.content_size.height.saturating_add(padding);
         let body = Self::body_rect_for(container, opt);
         let chrome_width = container.rect.width - body.width;
         let chrome_height = container.rect.height - body.height;
@@ -268,7 +268,7 @@ impl Window {
         // Auto-size should measure desired content against the raw body rect rather than inheriting
         // last frame's scrollbar decision or scroll offset.
         self.main.scroll = Vec2i::default();
-        self.main.content_size = Vec2i::default();
+        self.main.content_size = Dimensioni::default();
         self.main.configure_container_body(body, bopt);
         let content_size = self.main.measure_widget_tree_content(results, tree);
         self.main.scroll = saved_scroll;
