@@ -51,6 +51,7 @@
 // IN THE SOFTWARE.
 //
 use super::*;
+use crate::{widget::FrameResults, widget_tree::WidgetTree};
 use std::cell::{Ref, RefMut};
 
 #[derive(Clone, Copy, Debug)]
@@ -83,6 +84,40 @@ pub(crate) struct Window {
 }
 
 impl Window {
+    fn titlebar_height(container: &Container) -> i32 {
+        let style = container.style.as_ref();
+        let font_height = container.atlas.get_font_height(style.font) as i32;
+        let padding = style.padding.max(0);
+        let min_title_h = font_height + (padding / 2).max(1) * 2;
+        style.title_height.max(min_title_h)
+    }
+
+    fn body_rect_for(container: &Container, opt: ContainerOption) -> Recti {
+        let mut body = container.rect;
+        if !opt.has_no_title() {
+            let title_h = Self::titlebar_height(container);
+            body.y += title_h;
+            body.height -= title_h;
+        }
+        body
+    }
+
+    fn apply_auto_size(container: &mut Container, opt: ContainerOption) {
+        if !opt.is_auto_sizing() || (container.content_size.x <= 0 && container.content_size.y <= 0) {
+            return;
+        }
+
+        let padding = container.style.as_ref().padding.max(0) * 2;
+        let target_body_width = container.content_size.x.saturating_add(padding);
+        let target_body_height = container.content_size.y.saturating_add(padding);
+        let body = Self::body_rect_for(container, opt);
+        let chrome_width = container.rect.width - body.width;
+        let chrome_height = container.rect.height - body.height;
+
+        container.rect.width = (target_body_width + chrome_width).max(0);
+        container.rect.height = (target_body_height + chrome_height).max(0);
+    }
+
     /// Creates a dialog window that starts closed.
     pub fn dialog(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
@@ -150,46 +185,30 @@ impl Window {
             resize_state: _,
             ..
         } = self;
-        let mut body = container.rect;
-        let r = body;
+        Self::apply_auto_size(container, opt);
+
+        let r = container.rect;
         if !opt.has_no_frame() {
             container.draw_frame(r, ControlColor::WindowBG);
         }
         if !opt.has_no_title() {
             let mut tr: Recti = r;
-            // Guard against a too-small title bar: enforce enough room for the font plus padding so
-            // the title text/close button stay visible even if the style is set to zero.
-            let (font, padding, title_height, title_text_color) = {
-                let style = container.style.as_ref();
-                (
-                    style.font,
-                    style.padding.max(0),
-                    style.title_height,
-                    style.colors[ControlColor::TitleText as usize],
-                )
-            };
-            let font_height = container.atlas.get_font_height(font) as i32;
-            let min_title_h = font_height + (padding / 2).max(1) * 2;
-            tr.height = title_height.max(min_title_h);
+            let title_text_color = container.style.as_ref().colors[ControlColor::TitleText as usize];
+            tr.height = Self::titlebar_height(container);
             container.draw_frame(tr, ControlColor::TitleBG);
 
-            // TODO: Is this necessary?
-            if !opt.has_no_title() {
-                let title_id = widget_id_of(title_state);
-                let control_state = (title_state.opt, title_state.bopt);
-                let control = container.update_control(title_id, tr, &control_state);
-                {
-                    let mut ctx = container.widget_ctx(title_id, tr, None);
-                    let _ = title_state.run(&mut ctx, &control);
-                }
-                let name = container.name.clone(); // Necessary due to borrow checker limitations
-                container.draw_control_text(&name, tr, ControlColor::TitleText, WidgetOption::NONE);
-                if control.active {
-                    container.rect.x += container.input.borrow().mouse_delta.x;
-                    container.rect.y += container.input.borrow().mouse_delta.y;
-                }
-                body.y += tr.height;
-                body.height -= tr.height;
+            let title_id = widget_id_of(title_state);
+            let control_state = (title_state.opt, title_state.bopt);
+            let control = container.update_control(title_id, tr, &control_state);
+            {
+                let mut ctx = container.widget_ctx(title_id, tr, None);
+                let _ = title_state.run(&mut ctx, &control);
+            }
+            let name = container.name.clone(); // Necessary due to borrow checker limitations
+            container.draw_control_text(&name, tr, ControlColor::TitleText, WidgetOption::NONE);
+            if control.active {
+                container.rect.x += container.input.borrow().mouse_delta.x;
+                container.rect.y += container.input.borrow().mouse_delta.y;
             }
             if !opt.has_no_close() {
                 let close_id = widget_id_of(close_state);
@@ -207,12 +226,8 @@ impl Window {
                 }
             }
         }
+        let body = Self::body_rect_for(container, opt);
         container.configure_container_body(body, bopt);
-        if opt.is_auto_sizing() && (container.content_size.x > 0 || container.content_size.y > 0) {
-            let r_1 = container.layout.current_body();
-            container.rect.width = container.content_size.x + (container.rect.width - r_1.width);
-            container.rect.height = container.content_size.y + (container.rect.height - r_1.height);
-        }
 
         if is_popup && container.popup_just_opened {
             // Skip the auto-close check on the same frame the popup is opened.
@@ -245,6 +260,19 @@ impl Window {
     fn reset_after_close(&mut self) {
         self.last_root_frame = None;
         self.main.reset();
+    }
+
+    fn measure_auto_size(&mut self, results: &FrameResults, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
+        let body = Self::body_rect_for(&self.main, opt);
+        let saved_scroll = self.main.scroll;
+        // Auto-size should measure desired content against the raw body rect rather than inheriting
+        // last frame's scrollbar decision or scroll offset.
+        self.main.scroll = Vec2i::default();
+        self.main.content_size = Vec2i::default();
+        self.main.configure_container_body(body, bopt);
+        let content_size = self.main.measure_widget_tree_content(results, tree);
+        self.main.scroll = saved_scroll;
+        self.main.content_size = content_size;
     }
 
     fn finish_resize(&mut self, opt: ContainerOption) {
@@ -374,6 +402,10 @@ impl WindowHandle {
 
     pub(crate) fn begin_window(&mut self, opt: ContainerOption, bopt: WidgetBehaviourOption) {
         self.0.borrow_mut().begin_window(opt, bopt)
+    }
+
+    pub(crate) fn measure_auto_size(&mut self, results: &FrameResults, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
+        self.inner_mut().measure_auto_size(results, opt, bopt, tree)
     }
 
     pub(crate) fn end_window(&mut self) {

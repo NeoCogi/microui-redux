@@ -413,6 +413,110 @@ mod tests {
 
         assert_eq!(window.inner().main.panel_count(), 0);
     }
+
+    #[test]
+    fn newly_opened_popup_auto_sizes_on_first_frame() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut popup = ctx.new_popup("popup");
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("hello popup");
+        });
+
+        ctx.mousemove(40, 50);
+        ctx.open_popup(&mut popup);
+        ctx.frame(|ui| {
+            ui.popup(&mut popup, WidgetBehaviourOption::NONE, &tree);
+        });
+
+        let inner = popup.inner();
+        assert!(inner.main.rect.width > 1);
+        assert!(inner.main.rect.height > 1);
+        assert!(inner.main.body.width > 0);
+        assert!(inner.main.body.height > 0);
+    }
+
+    #[test]
+    fn auto_sized_titled_window_uses_current_frame_content_size() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut window = ctx.new_window("window", rect(0, 0, 1, 1));
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("hello\nhello\nhello");
+        });
+
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::AUTO_SIZE, WidgetBehaviourOption::NONE, &tree);
+        });
+
+        let inner = window.inner();
+        assert!(inner.main.rect.width > 1);
+        assert!(inner.main.rect.height > 1);
+        assert!(inner.main.body.y > inner.main.rect.y);
+        assert!(inner.main.body.height > 0);
+    }
+
+    #[test]
+    fn popup_content_changes_resize_without_a_frame_lag() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut popup = ctx.new_popup("popup");
+        let short_tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("a");
+        });
+        let long_tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("hello popup with much longer content");
+        });
+
+        ctx.mousemove(60, 60);
+        ctx.open_popup(&mut popup);
+        ctx.frame(|ui| {
+            ui.popup(&mut popup, WidgetBehaviourOption::NONE, &short_tree);
+        });
+        let first_width = popup.rect().width;
+
+        ctx.frame(|ui| {
+            ui.popup(&mut popup, WidgetBehaviourOption::NONE, &long_tree);
+        });
+
+        assert!(popup.rect().width > first_width);
+    }
+
+    #[test]
+    fn auto_sized_titled_window_body_fits_current_content_same_frame() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut style = Style::default();
+        style.padding = 0;
+        style.scrollbar_size = 10;
+        ctx.set_style(&style);
+        let mut window = ctx.new_window("window", rect(0, 0, 1, 1));
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("hello\nhello\nhello\nhello");
+        });
+
+        ctx.frame(|ui| {
+            ui.window(&mut window, ContainerOption::AUTO_SIZE, WidgetBehaviourOption::NONE, &tree);
+        });
+
+        let inner = window.inner();
+        assert!(inner.main.body.width >= inner.main.content_size.x);
+        assert!(inner.main.body.height >= inner.main.content_size.y);
+        assert!(inner.main.body.height > 0);
+        assert!(inner.main.body.y > inner.main.rect.y);
+
+        let body = inner.main.body;
+        let has_vertical_scrollbar =
+            inner.main.command_list.iter().any(
+                |cmd| matches!(cmd, Command::Recti { rect, .. } if rect.x == body.x + body.width && rect.width == style.scrollbar_size && rect.height > 0),
+            );
+
+        assert!(!has_vertical_scrollbar);
+    }
 }
 
 impl<R: Renderer> Context<R> {
@@ -615,10 +719,16 @@ impl<R: Renderer> Context<R> {
     }
 
     fn render_window_tree(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
+        if window.is_open() {
+            window.inner_mut().main.style = self.style.clone();
+            if opt.is_auto_sizing() {
+                window.measure_auto_size(&self.frame_results, opt, bopt, tree);
+            }
+        }
+
         if self.begin_window(window, opt, bopt) {
             {
                 let mut inner = window.inner_mut();
-                inner.main.style = self.style.clone();
                 inner.main.widget_tree(&mut self.frame_results, tree);
             }
             self.end_window(window, opt);

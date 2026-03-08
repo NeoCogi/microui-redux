@@ -348,4 +348,22 @@ impl Container {
         self.layout_tree_nodes(results, tree.roots());
         self.render_tree_nodes(results, tree.roots());
     }
+
+    /// Measures a prebuilt widget tree using the current container layout without rendering it.
+    pub(crate) fn measure_widget_tree_content(&mut self, results: &FrameResults, tree: &WidgetTree) -> Vec2i {
+        self.layout_tree_nodes(results, tree.roots());
+
+        let content_size = match self.layout.current_max() {
+            Some(max_rect) => {
+                let body = self.layout.current_body();
+                Vec2i::new(max_rect.x - body.x, max_rect.y - body.y)
+            }
+            None => Vec2i::default(),
+        };
+
+        // Discard provisional cache entries from the measurement-only pass so the real render pass
+        // can record the current frame layout and interaction exactly once.
+        self.tree_cache.begin_frame();
+        content_size
+    }
 }
