@@ -66,9 +66,16 @@ use crate::{
 };
 
 /// Shared ownership handle for retained widget state.
+///
+/// Cloning a handle shares one widget state object. Handles may be cloned freely for ownership
+/// convenience, but the same handle must not be rendered in multiple tree positions during one
+/// frame; duplicate dispatch will panic.
 pub type WidgetHandle<T> = Rc<RefCell<T>>;
 
 /// Wraps widget state into a retained handle.
+///
+/// The returned handle may be cloned to share ownership, but each frame may dispatch that handle
+/// at most once.
 pub fn widget_handle<T>(value: T) -> WidgetHandle<T> {
     Rc::new(RefCell::new(value))
 }
