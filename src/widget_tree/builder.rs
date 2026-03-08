@@ -43,7 +43,7 @@ use crate::{
     input::{ContainerOption, WidgetBehaviourOption},
     layout::{SizePolicy, StackDirection},
     widget::Widget,
-    ColorSwatch, ContainerHandle, Custom, CustomRenderArgs, ListItem, Node, TextBlock, TextWrap,
+    ContainerHandle, Custom, CustomRenderArgs, Node, TextBlock, TextWrap,
 };
 
 use super::{erased_widget_state, widget_handle, NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetTree, WidgetTreeNode, WidgetTreeNodeKind};
@@ -72,11 +72,65 @@ impl BuilderFrame {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+/// Optional metadata applied when inserting one retained node.
+///
+/// This keeps identity and placement concerns in one place so the builder API
+/// does not need separate `keyed_*` and `*_with_policy` method families.
+pub struct NodeOptions {
+    policy: Policy,
+    key: Option<u64>,
+}
+
+impl Default for NodeOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NodeOptions {
+    /// Creates default options with automatic placement and no explicit key.
+    pub const fn new() -> Self {
+        Self {
+            policy: Policy::auto(),
+            key: None,
+        }
+    }
+
+    /// Creates options with an explicit placement policy.
+    pub const fn with_policy(policy: Policy) -> Self {
+        Self { policy, key: None }
+    }
+
+    /// Creates options keyed from the provided value.
+    pub fn keyed<K: Hash>(key: K) -> Self {
+        Self::new().key(key)
+    }
+
+    /// Replaces the placement policy.
+    pub const fn policy(mut self, policy: Policy) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// Stores a stable hashed key for this node.
+    pub fn key<K: Hash>(mut self, key: K) -> Self {
+        self.key = Some(hash_builder_key(key));
+        self
+    }
+}
+
+fn hash_builder_key<K: Hash>(key: K) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    key.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Builder that creates a retained widget tree.
 ///
 /// Unkeyed methods derive IDs from sibling order and remain stable only while
-/// the surrounding structure stays in the same order. Keyed methods should be
-/// used for dynamic or reorderable children.
+/// the surrounding structure stays in the same order. Use `*_with` together
+/// with [`NodeOptions::keyed`] for dynamic or reorderable children.
 pub struct WidgetTreeBuilder {
     frames: Vec<BuilderFrame>,
 }
@@ -124,28 +178,12 @@ impl WidgetTreeBuilder {
 
     /// Adds an unkeyed widget leaf node.
     pub fn widget<W: Widget + 'static>(&mut self, widget: WidgetHandle<W>) -> NodeId {
-        self.widget_with_policy(Policy::auto(), widget)
+        self.widget_with(NodeOptions::new(), widget)
     }
 
-    /// Adds an unkeyed widget leaf node with explicit policy metadata.
-    pub fn widget_with_policy<W: Widget + 'static>(&mut self, policy: Policy, widget: WidgetHandle<W>) -> NodeId {
-        self.push_leaf(policy, WidgetTreeNodeKind::Widget { widget: erased_widget_state(widget) }, None::<u64>)
-    }
-
-    /// Adds a keyed widget leaf node.
-    pub fn keyed_widget<K: Hash, W: Widget + 'static>(&mut self, key: K, widget: WidgetHandle<W>) -> NodeId {
-        self.keyed_widget_with_policy(key, Policy::auto(), widget)
-    }
-
-    /// Adds a keyed widget leaf node with explicit policy metadata.
-    pub fn keyed_widget_with_policy<K: Hash, W: Widget + 'static>(&mut self, key: K, policy: Policy, widget: WidgetHandle<W>) -> NodeId {
-        self.push_leaf(policy, WidgetTreeNodeKind::Widget { widget: erased_widget_state(widget) }, Some(key))
-    }
-
-    /// Adds a text label node.
-    pub fn label(&mut self, text: impl Into<String>) -> NodeId {
-        let text = text.into();
-        self.widget(widget_handle(TextBlock::new(text)))
+    /// Adds a widget leaf node with optional identity and placement metadata.
+    pub fn widget_with<W: Widget + 'static>(&mut self, options: NodeOptions, widget: WidgetHandle<W>) -> NodeId {
+        self.push_leaf(options, WidgetTreeNodeKind::Widget { widget: erased_widget_state(widget) })
     }
 
     /// Adds a text block without wrapping.
@@ -160,242 +198,130 @@ impl WidgetTreeBuilder {
         self.widget(widget_handle(TextBlock::with_wrap(text, wrap)))
     }
 
-    /// Adds an unkeyed read-only list-item label.
-    pub fn list_label(&mut self, text: impl Into<String>) -> NodeId {
-        self.widget(widget_handle(ListItem::with_opt(text, crate::WidgetOption::NO_INTERACT | crate::WidgetOption::NO_FRAME)))
-    }
-
-    /// Adds an unkeyed color swatch widget.
-    pub fn color_swatch(&mut self, swatch: WidgetHandle<ColorSwatch>) -> NodeId {
-        self.widget(swatch)
-    }
-
     /// Adds a custom-render widget node.
     pub fn custom_render<F>(&mut self, state: WidgetHandle<Custom>, f: F) -> NodeId
     where
         F: FnMut(Dimensioni, &CustomRenderArgs) + 'static,
     {
-        self.custom_render_with_policy(Policy::auto(), state, f)
+        self.custom_render_with(NodeOptions::new(), state, f)
     }
 
-    /// Adds a custom-render widget node with explicit policy metadata.
-    pub fn custom_render_with_policy<F>(&mut self, policy: Policy, state: WidgetHandle<Custom>, f: F) -> NodeId
+    /// Adds a custom-render widget node with optional identity and placement metadata.
+    pub fn custom_render_with<F>(&mut self, options: NodeOptions, state: WidgetHandle<Custom>, f: F) -> NodeId
     where
         F: FnMut(Dimensioni, &CustomRenderArgs) + 'static,
     {
         let render: TreeCustomRender = Rc::new(RefCell::new(Box::new(f)));
-        self.push_leaf(policy, WidgetTreeNodeKind::CustomRender { state, render }, None::<u64>)
+        self.push_leaf(options, WidgetTreeNodeKind::CustomRender { state, render })
     }
 
     /// Adds an unkeyed embedded container node.
     pub fn container(&mut self, handle: ContainerHandle, opt: ContainerOption, behaviour: WidgetBehaviourOption, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.container_with_policy(Policy::auto(), handle, opt, behaviour, f)
+        self.container_with(NodeOptions::new(), handle, opt, behaviour, f)
     }
 
-    /// Adds an embedded container node with explicit policy metadata.
-    pub fn container_with_policy(
+    /// Adds an embedded container node with optional identity and placement metadata.
+    pub fn container_with(
         &mut self,
-        policy: Policy,
+        options: NodeOptions,
         handle: ContainerHandle,
         opt: ContainerOption,
         behaviour: WidgetBehaviourOption,
         f: impl FnOnce(&mut Self),
     ) -> NodeId {
-        self.push_group(policy, WidgetTreeNodeKind::Container { handle, opt, behaviour }, None::<u64>, f)
-    }
-
-    /// Adds a keyed embedded container node.
-    pub fn keyed_container<K: Hash>(
-        &mut self,
-        key: K,
-        handle: ContainerHandle,
-        opt: ContainerOption,
-        behaviour: WidgetBehaviourOption,
-        f: impl FnOnce(&mut Self),
-    ) -> NodeId {
-        self.keyed_container_with_policy(key, Policy::auto(), handle, opt, behaviour, f)
-    }
-
-    /// Adds a keyed embedded container node with explicit policy metadata.
-    pub fn keyed_container_with_policy<K: Hash>(
-        &mut self,
-        key: K,
-        policy: Policy,
-        handle: ContainerHandle,
-        opt: ContainerOption,
-        behaviour: WidgetBehaviourOption,
-        f: impl FnOnce(&mut Self),
-    ) -> NodeId {
-        self.push_group(policy, WidgetTreeNodeKind::Container { handle, opt, behaviour }, Some(key), f)
+        self.push_group(options, WidgetTreeNodeKind::Container { handle, opt, behaviour }, f)
     }
 
     /// Adds an unkeyed collapsible header node.
     pub fn header(&mut self, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.header_with_policy(Policy::auto(), state, f)
+        self.header_with(NodeOptions::new(), state, f)
     }
 
-    /// Adds an unkeyed collapsible header node with explicit policy metadata.
-    pub fn header_with_policy(&mut self, policy: Policy, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(policy, WidgetTreeNodeKind::Header { state }, None::<u64>, f)
-    }
-
-    /// Adds a keyed collapsible header node.
-    pub fn keyed_header<K: Hash>(&mut self, key: K, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.keyed_header_with_policy(key, Policy::auto(), state, f)
-    }
-
-    /// Adds a keyed collapsible header node with explicit policy metadata.
-    pub fn keyed_header_with_policy<K: Hash>(&mut self, key: K, policy: Policy, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(policy, WidgetTreeNodeKind::Header { state }, Some(key), f)
+    /// Adds a collapsible header node with optional identity and placement metadata.
+    pub fn header_with(&mut self, options: NodeOptions, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
+        self.push_group(options, WidgetTreeNodeKind::Header { state }, f)
     }
 
     /// Adds an unkeyed tree node that indents its children while expanded.
-    pub fn treenode(&mut self, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.treenode_with_policy(Policy::auto(), state, f)
+    pub fn tree_node(&mut self, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
+        self.tree_node_with(NodeOptions::new(), state, f)
     }
 
-    /// Adds an unkeyed tree node with explicit policy metadata.
-    pub fn treenode_with_policy(&mut self, policy: Policy, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(policy, WidgetTreeNodeKind::Tree { state }, None::<u64>, f)
-    }
-
-    /// Adds a keyed tree node.
-    pub fn keyed_treenode<K: Hash>(&mut self, key: K, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.keyed_treenode_with_policy(key, Policy::auto(), state, f)
-    }
-
-    /// Adds a keyed tree node with explicit policy metadata.
-    pub fn keyed_treenode_with_policy<K: Hash>(&mut self, key: K, policy: Policy, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(policy, WidgetTreeNodeKind::Tree { state }, Some(key), f)
+    /// Adds a tree node with optional identity and placement metadata.
+    pub fn tree_node_with(&mut self, options: NodeOptions, state: WidgetHandle<Node>, f: impl FnOnce(&mut Self)) -> NodeId {
+        self.push_group(options, WidgetTreeNodeKind::Tree { state }, f)
     }
 
     /// Adds an unkeyed row flow group.
     pub fn row(&mut self, widths: &[SizePolicy], height: SizePolicy, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.row_with_policy(Policy::auto(), widths, height, f)
+        self.row_with(NodeOptions::new(), widths, height, f)
     }
 
-    /// Adds an unkeyed row flow group with explicit policy metadata.
-    pub fn row_with_policy(&mut self, policy: Policy, widths: &[SizePolicy], height: SizePolicy, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(policy, WidgetTreeNodeKind::Row { widths: widths.to_vec(), height }, None::<u64>, f)
-    }
-
-    /// Adds a keyed row flow group.
-    pub fn keyed_row<K: Hash>(&mut self, key: K, widths: &[SizePolicy], height: SizePolicy, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.keyed_row_with_policy(key, Policy::auto(), widths, height, f)
-    }
-
-    /// Adds a keyed row flow group with explicit policy metadata.
-    pub fn keyed_row_with_policy<K: Hash>(&mut self, key: K, policy: Policy, widths: &[SizePolicy], height: SizePolicy, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(policy, WidgetTreeNodeKind::Row { widths: widths.to_vec(), height }, Some(key), f)
+    /// Adds a row flow group with optional identity and placement metadata.
+    pub fn row_with(&mut self, options: NodeOptions, widths: &[SizePolicy], height: SizePolicy, f: impl FnOnce(&mut Self)) -> NodeId {
+        self.push_group(options, WidgetTreeNodeKind::Row { widths: widths.to_vec(), height }, f)
     }
 
     /// Adds an unkeyed grid flow group.
     pub fn grid(&mut self, widths: &[SizePolicy], heights: &[SizePolicy], f: impl FnOnce(&mut Self)) -> NodeId {
-        self.grid_with_policy(Policy::auto(), widths, heights, f)
+        self.grid_with(NodeOptions::new(), widths, heights, f)
     }
 
-    /// Adds an unkeyed grid flow group with explicit policy metadata.
-    pub fn grid_with_policy(&mut self, policy: Policy, widths: &[SizePolicy], heights: &[SizePolicy], f: impl FnOnce(&mut Self)) -> NodeId {
+    /// Adds a grid flow group with optional identity and placement metadata.
+    pub fn grid_with(&mut self, options: NodeOptions, widths: &[SizePolicy], heights: &[SizePolicy], f: impl FnOnce(&mut Self)) -> NodeId {
         self.push_group(
-            policy,
+            options,
             WidgetTreeNodeKind::Grid {
                 widths: widths.to_vec(),
                 heights: heights.to_vec(),
             },
-            None::<u64>,
-            f,
-        )
-    }
-
-    /// Adds a keyed grid flow group.
-    pub fn keyed_grid<K: Hash>(&mut self, key: K, widths: &[SizePolicy], heights: &[SizePolicy], f: impl FnOnce(&mut Self)) -> NodeId {
-        self.keyed_grid_with_policy(key, Policy::auto(), widths, heights, f)
-    }
-
-    /// Adds a keyed grid flow group with explicit policy metadata.
-    pub fn keyed_grid_with_policy<K: Hash>(
-        &mut self,
-        key: K,
-        policy: Policy,
-        widths: &[SizePolicy],
-        heights: &[SizePolicy],
-        f: impl FnOnce(&mut Self),
-    ) -> NodeId {
-        self.push_group(
-            policy,
-            WidgetTreeNodeKind::Grid {
-                widths: widths.to_vec(),
-                heights: heights.to_vec(),
-            },
-            Some(key),
             f,
         )
     }
 
     /// Adds an unkeyed nested column scope.
     pub fn column(&mut self, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.column_with_policy(Policy::auto(), f)
+        self.column_with(NodeOptions::new(), f)
     }
 
-    /// Adds an unkeyed nested column scope with explicit policy metadata.
-    pub fn column_with_policy(&mut self, policy: Policy, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(policy, WidgetTreeNodeKind::Column, None::<u64>, f)
-    }
-
-    /// Adds a keyed nested column scope.
-    pub fn keyed_column<K: Hash>(&mut self, key: K, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.keyed_column_with_policy(key, Policy::auto(), f)
-    }
-
-    /// Adds a keyed nested column scope with explicit policy metadata.
-    pub fn keyed_column_with_policy<K: Hash>(&mut self, key: K, policy: Policy, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(policy, WidgetTreeNodeKind::Column, Some(key), f)
+    /// Adds a nested column scope with optional identity and placement metadata.
+    pub fn column_with(&mut self, options: NodeOptions, f: impl FnOnce(&mut Self)) -> NodeId {
+        self.push_group(options, WidgetTreeNodeKind::Column, f)
     }
 
     /// Adds an unkeyed stack scope.
     pub fn stack(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.stack_with_policy(Policy::auto(), width, height, direction, f)
+        self.stack_with(NodeOptions::new(), width, height, direction, f)
     }
 
-    /// Adds an unkeyed stack scope with explicit policy metadata.
-    pub fn stack_with_policy(&mut self, policy: Policy, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(policy, WidgetTreeNodeKind::Stack { width, height, direction }, None::<u64>, f)
-    }
-
-    /// Adds a keyed stack scope.
-    pub fn keyed_stack<K: Hash>(&mut self, key: K, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.keyed_stack_with_policy(key, Policy::auto(), width, height, direction, f)
-    }
-
-    /// Adds a keyed stack scope with explicit policy metadata.
-    pub fn keyed_stack_with_policy<K: Hash>(
+    /// Adds a stack scope with optional identity and placement metadata.
+    pub fn stack_with(
         &mut self,
-        key: K,
-        policy: Policy,
+        options: NodeOptions,
         width: SizePolicy,
         height: SizePolicy,
         direction: StackDirection,
         f: impl FnOnce(&mut Self),
     ) -> NodeId {
-        self.push_group(policy, WidgetTreeNodeKind::Stack { width, height, direction }, Some(key), f)
+        self.push_group(options, WidgetTreeNodeKind::Stack { width, height, direction }, f)
     }
 
-    fn push_leaf<K: Hash>(&mut self, policy: Policy, kind: WidgetTreeNodeKind, key: Option<K>) -> NodeId {
-        let id = self.alloc_id(kind.tag(), key);
-        self.current_frame_mut().nodes.push(WidgetTreeNode { id, policy, kind, children: Vec::new() });
+    fn push_leaf(&mut self, options: NodeOptions, kind: WidgetTreeNodeKind) -> NodeId {
+        let id = self.alloc_id(kind.tag(), options.key);
+        self.current_frame_mut().nodes.push(WidgetTreeNode { id, policy: options.policy, kind, children: Vec::new() });
         id
     }
 
-    fn push_group<K: Hash>(&mut self, policy: Policy, kind: WidgetTreeNodeKind, key: Option<K>, f: impl FnOnce(&mut Self)) -> NodeId {
-        let id = self.alloc_id(kind.tag(), key);
+    fn push_group(&mut self, options: NodeOptions, kind: WidgetTreeNodeKind, f: impl FnOnce(&mut Self)) -> NodeId {
+        let id = self.alloc_id(kind.tag(), options.key);
         self.frames.push(BuilderFrame::child(id.raw() as u64));
         f(self);
         let frame = self.frames.pop().expect("child frame missing");
-        self.current_frame_mut().nodes.push(WidgetTreeNode { id, policy, kind, children: frame.nodes });
+        self.current_frame_mut().nodes.push(WidgetTreeNode { id, policy: options.policy, kind, children: frame.nodes });
         id
     }
 
-    fn alloc_id<K: Hash>(&mut self, tag: u8, key: Option<K>) -> NodeId {
+    fn alloc_id(&mut self, tag: u8, key: Option<u64>) -> NodeId {
         let frame = self.current_frame_mut();
         let ordinal = frame.next_auto;
         frame.next_auto += 1;

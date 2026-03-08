@@ -483,7 +483,7 @@ impl State {
                     tree.widget(sliders[1].clone());
                     tree.widget(sliders[2].clone());
                     tree.widget(sliders[3].clone());
-                    tree.color_swatch(swatch.clone());
+                    tree.widget(swatch.clone());
                 });
             }
 
@@ -781,17 +781,17 @@ impl State {
             Self::section(tree, &tree_and_text_header, |tree| {
                 tree.row(&tree_widths, SizePolicy::Auto, |tree| {
                     tree.column(|tree| {
-                        tree.treenode(test1_tn.clone(), |tree| {
-                            tree.treenode(test1a_tn.clone(), |tree| {
+                        tree.tree_node(test1_tn.clone(), |tree| {
+                            tree.tree_node(test1a_tn.clone(), |tree| {
                                 tree.widget(tree_label_hello.clone());
                                 tree.widget(tree_label_world.clone());
                             });
-                            tree.treenode(test1b_tn.clone(), |tree| {
+                            tree.tree_node(test1b_tn.clone(), |tree| {
                                 tree.widget(tree_button0.clone());
                                 tree.widget(tree_button1.clone());
                             });
                         });
-                        tree.treenode(test2_tn.clone(), |tree| {
+                        tree.tree_node(test2_tn.clone(), |tree| {
                             tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
                                 tree.widget(tree_button2.clone());
                                 tree.widget(tree_button3.clone());
@@ -801,7 +801,7 @@ impl State {
                                 tree.widget(tree_button5.clone());
                             });
                         });
-                        tree.treenode(test3_tn.clone(), |tree| {
+                        tree.tree_node(test3_tn.clone(), |tree| {
                             tree.widget(checkbox0.clone());
                             tree.widget(checkbox1.clone());
                             tree.widget(checkbox2.clone());
@@ -840,7 +840,7 @@ impl State {
                             tree.widget(slider_blue.clone());
                         });
                     });
-                    tree.color_swatch(background_swatch.clone());
+                    tree.widget(background_swatch.clone());
                 });
             });
 

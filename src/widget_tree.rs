@@ -41,7 +41,7 @@ mod cache;
 mod node;
 mod retained;
 
-pub use builder::WidgetTreeBuilder;
+pub use builder::{NodeOptions, WidgetTreeBuilder};
 pub use cache::{NodeFrameState, NodeInteraction, NodeLayout, WidgetTreeCache};
 pub use node::{NodeId, Policy, WidgetTree, WidgetTreeNode};
 pub use retained::{widget_handle, WidgetHandle};
@@ -134,13 +134,13 @@ mod tests {
         let button_b = widget_handle(Button::new("B"));
 
         let tree_a = WidgetTreeBuilder::build(|builder| {
-            builder.keyed_widget("a", button_a.clone());
-            builder.keyed_widget("b", button_b.clone());
+            builder.widget_with(NodeOptions::keyed("a"), button_a.clone());
+            builder.widget_with(NodeOptions::keyed("b"), button_b.clone());
         });
         let ids_a: Vec<NodeId> = tree_a.roots().iter().map(WidgetTreeNode::id).collect();
         let tree_b = WidgetTreeBuilder::build(|builder| {
-            builder.keyed_widget("b", button_b.clone());
-            builder.keyed_widget("a", button_a.clone());
+            builder.widget_with(NodeOptions::keyed("b"), button_b.clone());
+            builder.widget_with(NodeOptions::keyed("a"), button_a.clone());
         });
         let ids_b: Vec<NodeId> = tree_b.roots().iter().map(WidgetTreeNode::id).collect();
 
@@ -154,8 +154,8 @@ mod tests {
         let button_b = widget_handle(Button::new("B"));
 
         let tree = WidgetTreeBuilder::build(|builder| {
-            builder.row_with_policy(
-                Policy::fill(),
+            builder.row_with(
+                NodeOptions::with_policy(Policy::fill()),
                 &[SizePolicy::Fixed(40), SizePolicy::Remainder(0)],
                 SizePolicy::Fixed(24),
                 |builder| {
@@ -186,8 +186,8 @@ mod tests {
         let leaf = widget_handle((crate::WidgetOption::NONE, crate::WidgetBehaviourOption::NONE));
 
         let tree = WidgetTreeBuilder::build(|builder| {
-            builder.container_with_policy(
-                Policy::fill(),
+            builder.container_with(
+                NodeOptions::with_policy(Policy::fill()),
                 handle.clone(),
                 crate::ContainerOption::NONE,
                 crate::WidgetBehaviourOption::NONE,

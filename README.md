@@ -49,7 +49,7 @@ let tree = WidgetTreeBuilder::build({
     let name = name.clone();
     move |tree| {
         tree.row(&[SizePolicy::Fixed(120), SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
-            tree.label("Name");
+            tree.text("Name");
             tree.widget(name.clone());
         });
     }
