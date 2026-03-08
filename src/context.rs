@@ -59,9 +59,8 @@ use std::io::Cursor;
 use png::{ColorType, Decoder};
 
 use crate::{
-    rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, FrameResultGeneration, ImageSource, Input, Recti, Renderer, KeyCode,
-    KeyMode, MouseButton, RendererHandle, Style, TextureId, UNCLIPPED_RECT, Vec2i, WidgetBehaviourOption, WidgetTree, WindowHandle, WindowState,
-    FrameResults,
+    rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, FrameResultGeneration, ImageSource, Input, Recti, Renderer, KeyCode, KeyMode,
+    MouseButton, RendererHandle, Style, TextureId, UNCLIPPED_RECT, Vec2i, WidgetBehaviourOption, WidgetTree, WindowHandle, WindowState, FrameResults,
 };
 
 /// Primary entry point used to drive the UI over a renderer implementation.
@@ -194,9 +193,10 @@ mod tests {
 
         let inner = window.inner();
         let body = inner.main.body;
-        let has_vertical_scrollbar = inner.main.command_list.iter().any(|cmd| {
-            matches!(cmd, Command::Recti { rect, .. } if rect.x == body.x + body.width && rect.width == style.scrollbar_size && rect.height > 0)
-        });
+        let has_vertical_scrollbar =
+            inner.main.command_list.iter().any(
+                |cmd| matches!(cmd, Command::Recti { rect, .. } if rect.x == body.x + body.width && rect.width == style.scrollbar_size && rect.height > 0),
+            );
 
         assert!(has_vertical_scrollbar);
     }
@@ -471,13 +471,7 @@ impl<R: Renderer> Context<R> {
         window.finish_resize(opt);
     }
 
-    fn render_window_tree(
-        &mut self,
-        window: &mut WindowHandle,
-        opt: ContainerOption,
-        bopt: WidgetBehaviourOption,
-        tree: &WidgetTree,
-    ) {
+    fn render_window_tree(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
         if self.begin_window(window, opt, bopt) {
             {
                 let mut inner = window.inner_mut();
@@ -493,13 +487,7 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Opens a window and renders the provided retained widget tree into it.
-    pub fn window(
-        &mut self,
-        window: &mut WindowHandle,
-        opt: ContainerOption,
-        bopt: WidgetBehaviourOption,
-        tree: &WidgetTree,
-    ) {
+    pub fn window(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
         self.render_window_tree(window, opt, bopt, tree);
     }
 
@@ -509,13 +497,7 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Renders a dialog window if it is currently open.
-    pub fn dialog(
-        &mut self,
-        window: &mut WindowHandle,
-        opt: ContainerOption,
-        bopt: WidgetBehaviourOption,
-        tree: &WidgetTree,
-    ) {
+    pub fn dialog(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
         if window.is_open() {
             self.next_hover_root = Some(window.clone());
             self.hover_root = self.next_hover_root.clone();

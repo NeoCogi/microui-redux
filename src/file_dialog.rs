@@ -201,14 +201,16 @@ impl FileDialogState {
             let font_height = container.atlas.get_font_height(style.font) as i32;
             let vertical_pad = std::cmp::max(1, padding / 2);
             let icon_height = container.atlas.get_icon_size(EXPAND_DOWN_ICON).height;
-            (
-                std::cmp::max(font_height + vertical_pad * 2, icon_height),
-                style.spacing.max(0),
-            )
+            (std::cmp::max(font_height + vertical_pad * 2, icon_height), style.spacing.max(0))
         };
 
         self.tree = WidgetTreeBuilder::build(|tree| {
-            let toolbar_widths = [SizePolicy::Fixed(56), SizePolicy::Fixed(56), SizePolicy::Remainder(56 + spacing), SizePolicy::Fixed(56)];
+            let toolbar_widths = [
+                SizePolicy::Fixed(56),
+                SizePolicy::Fixed(56),
+                SizePolicy::Remainder(56 + spacing),
+                SizePolicy::Fixed(56),
+            ];
             let pane_widths = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
             let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
             let action_widths = [SizePolicy::Remainder(96 * 2 + spacing * 2), SizePolicy::Fixed(96), SizePolicy::Fixed(96)];

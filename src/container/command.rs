@@ -51,6 +51,10 @@
 // IN THE SOFTWARE.
 //
 //! Command definitions and callback payloads recorded during container traversal.
+//!
+//! Containers record these commands as a backend-neutral intermediate representation. The layout
+//! and widget passes only describe *what* should be drawn or invoked; the final canvas/backend
+//! consumes this list later when the container flushes its command list.
 
 use super::*;
 
@@ -87,7 +91,10 @@ pub enum TextWrap {
 
 /// Draw commands recorded during container traversal.
 pub(crate) enum Command {
-    /// Pushes or pops a clip rectangle.
+    /// Pushes a clip rectangle onto the container clip stack.
+    ///
+    /// The consumer decides whether this means push/replace/pop based on surrounding command-list
+    /// state; the recorded payload is just the effective rectangle to clip against.
     Clip {
         /// Rect to clip against.
         rect: Recti,
@@ -140,8 +147,13 @@ pub(crate) enum Command {
         payload: Rc<dyn Fn(usize, usize) -> Color4b>,
     },
     /// Invokes a user callback for custom rendering.
+    ///
+    /// This keeps custom drawing inside the same traversal and clipping pipeline as the built-in
+    /// widgets, but lets the backend-specific renderer decide how the callback is executed.
     CustomRender(CustomRenderArgs, Box<dyn FnMut(Dimensioni, &CustomRenderArgs)>),
     /// Sentinel used when no command is enqueued.
+    ///
+    /// This is mainly a convenience for `Default` and placeholder command-list storage.
     None,
 }
 

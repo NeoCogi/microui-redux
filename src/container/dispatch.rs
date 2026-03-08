@@ -98,5 +98,4 @@ impl Container {
         results.record(widget_id, res);
         (control, res)
     }
-
 }

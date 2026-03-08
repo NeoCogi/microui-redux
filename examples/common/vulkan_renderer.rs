@@ -30,7 +30,7 @@
 //
 // -----------------------------------------------------------------------------
 //
-// Vulkan renderer optimizations (current status):
+// Vulkan renderer overview:
 // - UI and custom geometry uploads go through per-frame staging/device buffers that grow with
 //   demand, stay resident, and are referenced via ring offsets to avoid reallocations.
 // - Staging buffers remain persistently mapped; command submission uses reusable per-frame
@@ -151,6 +151,9 @@ const MESH_VERT_SPV: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), 
 const MESH_FRAG_SPV: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/vulkan/mesh.frag.spv"));
 
 pub struct VulkanRenderer {
+    // `VulkanRenderer` is the high-level microui `Renderer` implementation. It batches UI quads
+    // into `vertices`, records custom render jobs into `commands`, and delegates all Vulkan object
+    // lifetime and frame submission concerns to `VulkanContext`.
     atlas: AtlasHandle,
     last_atlas_update_id: usize,
     textures: HashMap<TextureId, VulkanTexture>,
@@ -167,7 +170,10 @@ pub struct VulkanRenderer {
 }
 
 impl VulkanRenderer {
+    /// Closes the current UI vertex batch so later commands preserve draw ordering.
     fn flush_ui_batch(&mut self) {
+        // Custom render jobs must preserve ordering relative to the UI that came before them. The
+        // command list therefore stores UI draws as explicit "draw up to this vertex index" cuts.
         let end = self.vertices.len();
         if end > self.current_batch_end {
             self.commands.push(FrameCommand::DrawTo(end));
@@ -175,6 +181,7 @@ impl VulkanRenderer {
         }
     }
 
+    /// Creates the high-level Vulkan renderer and its backing Vulkan context.
     pub fn new(window: &Window, atlas: AtlasHandle, width: u32, height: u32) -> Result<Self> {
         let context = VulkanContext::new(window, width, height)?;
         let swapchain_generation = context.swapchain_generation();
@@ -196,11 +203,14 @@ impl VulkanRenderer {
         })
     }
 
+    /// Recreates the swapchain when the SDL window size diverges from the cached Vulkan extent.
     fn ensure_swapchain_extent(&mut self, width: u32, height: u32) -> Result<()> {
         if width == 0 || height == 0 {
             return Ok(()); // Minimized window; skip until it has a size.
         }
 
+        // The SDL window size is the source of truth; the Vulkan context rebuilds the swapchain on
+        // demand when the cached extent diverges from it.
         let extent = self.context.extent();
         if extent.width != width || extent.height != height {
             self.context.recreate_swapchain(width, height)?;
@@ -209,17 +219,21 @@ impl VulkanRenderer {
         Ok(())
     }
 
+    /// Rebinds renderer-owned texture descriptors after a swapchain/UI resource rebuild.
     fn handle_swapchain_updates(&mut self) {
         let generation = self.context.swapchain_generation();
         if self.last_swapchain_generation != generation {
             self.last_swapchain_generation = generation;
             self.last_atlas_update_id = usize::MAX;
+            // Texture descriptor sets belong to the UI descriptor pool, so a swapchain/UI rebuild
+            // invalidates them even though the logical texture map stays the same.
             if let Err(err) = self.rebind_texture_descriptors() {
                 eprintln!("[microui-redux][vulkan] failed to rebind texture descriptors: {err}");
             }
         }
     }
 
+    /// Allocates fresh descriptor sets for every renderer-owned texture image.
     fn rebind_texture_descriptors(&mut self) -> Result<()> {
         for texture in self.textures.values_mut() {
             let descriptor = self.context.allocate_texture_descriptor(&texture.image)?;
@@ -228,6 +242,7 @@ impl VulkanRenderer {
         Ok(())
     }
 
+    /// Queues a backend-specific custom render job after flushing earlier UI geometry.
     pub(crate) fn enqueue_custom_render<C: VulkanCustomRenderer + 'static>(&mut self, area: CustomRenderArea, cmd: C) {
         self.flush_ui_batch();
         self.commands.push(FrameCommand::Custom(CustomRenderJob {
@@ -238,6 +253,7 @@ impl VulkanRenderer {
         }));
     }
 
+    /// Converts a microui clear color into the Vulkan clear value used for the render pass.
     fn color_to_vk_clear(color: Color) -> vk::ClearValue {
         let to_float = |c: u8| c as f32 / 255.0;
         vk::ClearValue {
@@ -247,10 +263,13 @@ impl VulkanRenderer {
         }
     }
 
+    /// Uploads the atlas when its pixels changed or when UI resources were recreated.
     fn sync_atlas(&mut self) {
         if self.device_lost {
             return;
         }
+        // The atlas is treated like another renderer-owned texture: if the atlas pixels changed or
+        // the UI resources were recreated, upload it before the frame records any draw commands.
         let needs_upload = self.last_atlas_update_id != self.atlas.get_last_update_id() || !self.context.ui_has_atlas();
         if needs_upload {
             if let Err(err) = self.context.upload_atlas(&self.atlas) {
@@ -267,7 +286,10 @@ impl Renderer for VulkanRenderer {
         self.atlas.clone()
     }
 
+    /// Starts a new frame, syncing window size, swapchain generation, and atlas state.
     fn begin(&mut self, width: i32, height: i32, clr: Color) {
+        // `begin` only resets CPU-side batching state and keeps the GPU-side context synchronized
+        // with window size / atlas changes. Actual command buffer recording happens in `end`.
         self.frame_index = self.frame_index.wrapping_add(1);
         self.width = width as u32;
         self.height = height as u32;
@@ -286,16 +308,19 @@ impl Renderer for VulkanRenderer {
         self.sync_atlas();
     }
 
+    /// Appends a quad to the buffered UI vertex stream.
     fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) {
         self.vertices.extend_from_slice(&[*v0, *v1, *v2, *v0, *v2, *v3]);
     }
 
+    /// Turns the currently buffered UI vertices into an explicit draw command boundary.
     fn flush(&mut self) {
         // Match the GL renderer expectation: turn buffered UI vertices into a draw command before
         // custom rendering happens.
         self.flush_ui_batch();
     }
 
+    /// Finalizes the frame by submitting the queued UI and custom commands to Vulkan.
     fn end(&mut self) {
         self.flush_ui_batch();
         if self.device_lost {
@@ -305,6 +330,8 @@ impl Renderer for VulkanRenderer {
             return;
         }
         let mut commands = std::mem::take(&mut self.commands);
+        // `draw_frame` consumes the queued UI/custom jobs and may drain `commands`; taking the vec
+        // avoids reallocating a fresh command buffer every frame.
         if let Err(err) = self.context.draw_frame(
             Self::color_to_vk_clear(self.clear_color),
             &self.vertices,
@@ -325,6 +352,7 @@ impl Renderer for VulkanRenderer {
         self.current_batch_end = 0;
     }
 
+    /// Creates a renderer-owned sampled texture and tracks it by `TextureId`.
     fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) {
         if self.device_lost {
             return;
@@ -337,12 +365,14 @@ impl Renderer for VulkanRenderer {
         }
     }
 
+    /// Destroys a renderer-owned sampled texture if it is still tracked.
     fn destroy_texture(&mut self, id: TextureId) {
         if let Some(mut texture) = self.textures.remove(&id) {
             texture.image.destroy(&self.context.device);
         }
     }
 
+    /// Queues a textured custom draw that samples from a renderer-owned texture.
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
         if self.device_lost {
             return;
@@ -1747,6 +1777,8 @@ impl MeshResources {
     }
 }
 pub(crate) struct VulkanContext {
+    // `VulkanContext` owns the actual Vulkan objects and implements the frame graph used by the
+    // example renderer: acquire -> upload/record -> submit -> present -> recreate on demand.
     entry: Entry,
     instance: ash::Instance,
     surface_loader: Surface,
@@ -1786,7 +1818,10 @@ pub(crate) struct VulkanContext {
 }
 
 impl VulkanContext {
+    /// Creates the Vulkan instance/device state and the first set of swapchain-dependent resources.
     fn new(window: &Window, width: u32, height: u32) -> Result<Self> {
+        // Context creation front-loads the permanent objects: instance/device/queues, the shared
+        // command pool, and the initial swapchain-dependent resources.
         let entry = Entry::linked();
         let app_name = CString::new("microui-redux-examples").unwrap();
         let engine_name = CString::new("microui-redux").unwrap();
@@ -1872,11 +1907,14 @@ impl VulkanContext {
         ctx.recreate_swapchain(width, height)?;
         ctx.create_sync_objects()?;
         ctx.allocate_transfer_command_buffers()?;
+        // UI resources depend on the render pass and swapchain format, so they are initialized only
+        // after the first swapchain build succeeded.
         ctx.ui = Some(UiResources::new(&ctx)?);
 
         Ok(ctx)
     }
 
+    /// Picks the first physical device that exposes both graphics and present queue families.
     fn select_physical_device(instance: &ash::Instance, surface_loader: &Surface, surface: vk::SurfaceKHR) -> Result<(vk::PhysicalDevice, QueueFamilyIndices)> {
         let devices = unsafe { instance.enumerate_physical_devices() }.map_err(|err| format!("enumerate_physical_devices failed: {err:?}"))?;
 
@@ -1889,6 +1927,7 @@ impl VulkanContext {
         Err("no suitable Vulkan physical device found".into())
     }
 
+    /// Finds queue families that can render and present to the supplied surface.
     fn find_queue_families(
         instance: &ash::Instance,
         surface_loader: &Surface,
@@ -1925,6 +1964,7 @@ impl VulkanContext {
         }
     }
 
+    /// Creates the logical device and queues needed by the example renderer.
     fn create_logical_device(instance: &ash::Instance, physical_device: vk::PhysicalDevice, indices: &QueueFamilyIndices) -> Result<ash::Device> {
         let unique_indices = if indices.graphics_family == indices.present_family {
             vec![indices.graphics_family]
@@ -1955,6 +1995,7 @@ impl VulkanContext {
         unsafe { instance.create_device(physical_device, &device_info, None) }.map_err(|err| format!("create_device failed: {err:?}"))
     }
 
+    /// Rebuilds all swapchain-dependent resources for a new window extent.
     fn recreate_swapchain(&mut self, width: u32, height: u32) -> Result<()> {
         if self.device_lost {
             return Err("cannot recreate swapchain: device is lost".into());
@@ -1967,6 +2008,8 @@ impl VulkanContext {
             self.device.device_wait_idle().map_err(|err| self.handle_vk_error("device_wait_idle", err))?;
         }
 
+        // Rebuild all resources tied to the window surface size or swapchain format. Permanent
+        // objects like the device, queues, and command pool stay alive across this boundary.
         self.cleanup_swapchain();
         self.create_swapchain(width, height)?;
         self.create_image_views()?;
@@ -1975,6 +2018,8 @@ impl VulkanContext {
         self.framebuffers = self.create_framebuffers()?;
         self.allocate_command_buffers()?;
         if let Some(mut ui) = self.ui.take() {
+            // The UI pipeline references the old render pass / descriptor pool, so it must be
+            // recreated after any swapchain rebuild as well.
             ui.destroy(&self.device);
         }
         self.ui = Some(UiResources::new(self)?);
@@ -1983,6 +2028,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Creates the Vulkan swapchain that backs presentation to the SDL window.
     fn create_swapchain(&mut self, width: u32, height: u32) -> Result<()> {
         let surface_caps = unsafe {
             self.surface_loader
@@ -2041,6 +2087,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Creates image views for every swapchain image.
     fn create_image_views(&mut self) -> Result<()> {
         self.swapchain_image_views = self
             .swapchain_images
@@ -2071,6 +2118,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Builds the render pass used for UI and mesh drawing.
     fn create_render_pass(&self) -> Result<vk::RenderPass> {
         let color_attachment = vk::AttachmentDescription::builder()
             .format(self.swapchain_format)
@@ -2128,6 +2176,7 @@ impl VulkanContext {
         unsafe { self.device.create_render_pass(&render_pass_info, None) }.map_err(|err| format!("create_render_pass failed: {err:?}"))
     }
 
+    /// Creates one framebuffer per swapchain image view.
     fn create_framebuffers(&self) -> Result<Vec<vk::Framebuffer>> {
         self.swapchain_image_views
             .iter()
@@ -2147,6 +2196,7 @@ impl VulkanContext {
             .collect()
     }
 
+    /// Creates the shared command pool used for graphics and transient copy work.
     fn create_command_pool(&self) -> Result<vk::CommandPool> {
         let pool_info = vk::CommandPoolCreateInfo::builder()
             .queue_family_index(self.queue_indices.graphics_family)
@@ -2154,6 +2204,7 @@ impl VulkanContext {
         unsafe { self.device.create_command_pool(&pool_info, None) }.map_err(|err| format!("create_command_pool failed: {err:?}"))
     }
 
+    /// Allocates one graphics command buffer per swapchain image.
     fn allocate_command_buffers(&mut self) -> Result<()> {
         if !self.command_buffers.is_empty() {
             unsafe {
@@ -2170,6 +2221,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Allocates reusable transfer command buffers, one per frame-in-flight slot.
     fn allocate_transfer_command_buffers(&mut self) -> Result<()> {
         if !self.transfer_command_buffers.is_empty() {
             unsafe {
@@ -2188,6 +2240,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Creates per-frame semaphores and fences used by acquire, transfer, and present.
     fn create_sync_objects(&mut self) -> Result<()> {
         let semaphore_info = vk::SemaphoreCreateInfo::default();
         let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED).build();
@@ -2226,8 +2279,11 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Destroys resources that depend on the current swapchain and framebuffer set.
     fn cleanup_swapchain(&mut self) {
         unsafe {
+            // Only swapchain-dependent resources are destroyed here. The permanent command pool,
+            // device, queues, and synchronization objects live until `Drop`.
             if let Some(mut mesh) = self.mesh.take() {
                 mesh.destroy(&self.device);
             }
@@ -2261,6 +2317,7 @@ impl VulkanContext {
         }
     }
 
+    /// Executes one complete Vulkan frame from acquire through submit and present.
     fn draw_frame(
         &mut self,
         clear_value: vk::ClearValue,
@@ -2273,6 +2330,8 @@ impl VulkanContext {
         if self.device_lost {
             return Err("device is lost; VulkanContext is disabled".into());
         }
+        // `draw_frame` is the per-frame orchestration entry point. By the time it runs, the higher
+        // level renderer has already collected UI vertices plus ordered custom jobs.
         self.logical_width = width.max(1);
         self.logical_height = height.max(1);
         let frame = self.current_frame;
@@ -2283,6 +2342,8 @@ impl VulkanContext {
                 .map_err(|err| self.handle_vk_error("wait_for_fences", err))?;
         }
 
+        // Reset per-frame upload cursors only after the frame fence signaled. Retired GPU buffers
+        // are likewise only reclaimed once this frame slot is no longer in flight.
         self.reset_transfer_state(frame)?;
         self.reset_ui_offset(frame);
         if let Some(ref mut mesh) = self.mesh {
@@ -2315,6 +2376,7 @@ impl VulkanContext {
             self.device.reset_fences(&[fence]).map_err(|err| self.handle_vk_error("reset_fences", err))?;
         }
 
+        // UI drawing and custom rendering share one graphics command buffer per acquired image.
         let command_buffer = self.command_buffers[image_index as usize];
         self.record_command_buffer(command_buffer, image_index, clear_value, vertices, width, height, _frame_index, commands)?;
         let transfer_semaphore = self.submit_transfer_commands()?;
@@ -2377,7 +2439,10 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Estimates this frame's upload budget and grows GPU/staging buffers before recording begins.
     fn preflight_frame_resources(&mut self, vertices: &[Vertex], commands: &[FrameCommand]) -> Result<()> {
+        // Pre-compute the worst-case upload budget for this frame before any command buffer
+        // recording begins. That keeps the actual record path free of buffer growth decisions.
         let mut budget = FrameResourceBudget::default();
         let mut cursor = 0usize;
         for command in commands {
@@ -2428,6 +2493,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Records the graphics command buffer by replaying queued UI and custom commands in order.
     fn record_command_buffer(
         &mut self,
         command_buffer: vk::CommandBuffer,
@@ -2439,6 +2505,9 @@ impl VulkanContext {
         _frame_index: u64,
         commands: &mut Vec<FrameCommand>,
     ) -> Result<()> {
+        // Graphics recording is intentionally linear: begin render pass, replay the queued UI /
+        // custom jobs in order, then end the pass. The `commands` vec is drained here so the
+        // higher-level renderer can reuse its allocation next frame.
         let begin_info = vk::CommandBufferBeginInfo::builder();
         unsafe {
             self.device
@@ -2482,6 +2551,9 @@ impl VulkanContext {
                     }
                 }
                 FrameCommand::Custom(mut job) => {
+                    // Custom callbacks may need mutable access to the context and its helper
+                    // recorders. Temporarily returning UI resources to `self` avoids nested
+                    // mutable borrows while keeping command ordering intact.
                     if let Some(ui_resources) = ui.take() {
                         self.ui = Some(ui_resources);
                     }
@@ -2510,6 +2582,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Chooses the preferred swapchain surface format, falling back to the first available one.
     fn choose_surface_format(available_formats: &[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR {
         available_formats
             .iter()
@@ -2518,6 +2591,7 @@ impl VulkanContext {
             .unwrap_or_else(|| available_formats[0])
     }
 
+    /// Finds a depth format supported for depth-stencil attachments on the selected device.
     fn find_depth_format(instance: &ash::Instance, physical_device: vk::PhysicalDevice) -> Result<vk::Format> {
         let candidates = [vk::Format::D32_SFLOAT, vk::Format::D32_SFLOAT_S8_UINT, vk::Format::D24_UNORM_S8_UINT];
         for &format in &candidates {
@@ -2529,6 +2603,7 @@ impl VulkanContext {
         Err("no supported depth format found".into())
     }
 
+    /// Prefers mailbox presentation when available, otherwise falls back to FIFO.
     fn choose_present_mode(available_present_modes: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
         if available_present_modes.iter().any(|&mode| mode == vk::PresentModeKHR::MAILBOX) {
             vk::PresentModeKHR::MAILBOX
@@ -2537,6 +2612,7 @@ impl VulkanContext {
         }
     }
 
+    /// Resolves the swapchain extent from surface caps and the requested window size.
     fn choose_extent(capabilities: &vk::SurfaceCapabilitiesKHR, width: u32, height: u32) -> vk::Extent2D {
         if capabilities.current_extent.width != u32::MAX {
             capabilities.current_extent
@@ -2548,6 +2624,7 @@ impl VulkanContext {
         }
     }
 
+    /// Converts a Vulkan error into a user-facing string and latches device-lost state.
     fn handle_vk_error(&mut self, op: &str, err: vk::Result) -> String {
         if err == vk::Result::ERROR_DEVICE_LOST {
             self.device_lost = true;
@@ -2557,20 +2634,25 @@ impl VulkanContext {
         }
     }
 
+    /// Returns whether the device has entered a permanent device-lost state.
     fn is_device_lost(&self) -> bool {
         self.device_lost
     }
 
+    /// Returns the current swapchain extent.
     fn extent(&self) -> vk::Extent2D {
         self.extent
     }
+    /// Returns the generation counter that increments on every swapchain rebuild.
     fn swapchain_generation(&self) -> u64 {
         self.swapchain_generation
     }
+    /// Returns whether UI resources currently own a live atlas image.
     fn ui_has_atlas(&self) -> bool {
         self.ui.as_ref().map(|ui| ui.atlas.is_some()).unwrap_or(false)
     }
 
+    /// Uploads the shared microui atlas into the current UI resources.
     fn upload_atlas(&mut self, atlas: &AtlasHandle) -> Result<()> {
         if let Some(mut ui) = self.ui.take() {
             let result = ui.upload_atlas(self, atlas);
@@ -2581,10 +2663,12 @@ impl VulkanContext {
         }
     }
 
+    /// Returns the descriptor set used for atlas-backed UI draws, if initialized.
     fn ui_descriptor_set(&self) -> Option<vk::DescriptorSet> {
         self.ui.as_ref().map(|ui| ui.descriptor_set)
     }
 
+    /// Records a custom UI draw using an explicit descriptor set instead of the shared atlas.
     fn draw_custom_vertices(
         &mut self,
         command_buffer: vk::CommandBuffer,
@@ -2609,6 +2693,7 @@ impl VulkanContext {
         result
     }
 
+    /// Resets per-frame UI upload cursors and retires buffers for the completed frame slot.
     fn reset_ui_offset(&mut self, frame: usize) {
         if let Some(ref mut ui) = self.ui {
             ui.reset_frame_offsets(frame);
@@ -2616,6 +2701,7 @@ impl VulkanContext {
         }
     }
 
+    /// Records a UI draw using the provided descriptor set and optional custom clip area.
     fn draw_vertices_with_descriptor(
         &mut self,
         command_buffer: vk::CommandBuffer,
@@ -2634,6 +2720,7 @@ impl VulkanContext {
         result
     }
 
+    /// Records a 3D mesh submission against the shared mesh pipeline resources.
     fn record_mesh(&mut self, command_buffer: vk::CommandBuffer, submission: &MeshSubmission, area: &CustomRenderArea) -> Result<()> {
         let mut resources = match self.mesh.take() {
             Some(resources) => resources,
@@ -2644,6 +2731,7 @@ impl VulkanContext {
         result
     }
 
+    /// Creates a Vulkan buffer and allocates/binds memory matching the requested usage.
     fn create_buffer(&self, size: vk::DeviceSize, usage: vk::BufferUsageFlags, properties: vk::MemoryPropertyFlags) -> Result<Buffer> {
         let info = vk::BufferCreateInfo::builder().size(size).usage(usage).sharing_mode(vk::SharingMode::EXCLUSIVE);
         let buffer = unsafe { self.device.create_buffer(&info, None) }.map_err(|err| format!("create_buffer failed: {err:?}"))?;
@@ -2657,10 +2745,12 @@ impl VulkanContext {
         Ok(Buffer { buffer, memory, size })
     }
 
+    /// Writes data into a buffer starting at offset zero.
     fn write_buffer(&self, buffer: &Buffer, data: &[u8]) -> Result<()> {
         self.write_buffer_offset(buffer, 0, data)
     }
 
+    /// Maps buffer memory, copies `data` into it at `offset`, and unmaps it again.
     fn write_buffer_offset(&self, buffer: &Buffer, offset: vk::DeviceSize, data: &[u8]) -> Result<()> {
         if data.is_empty() {
             return Ok(());
@@ -2676,6 +2766,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Creates a sampled 2D image resource suitable for atlas or texture uploads.
     fn create_image_resource(&self, width: u32, height: u32) -> Result<ImageResource> {
         let format = vk::Format::R8G8B8A8_UNORM;
         let extent3d = vk::Extent3D { width, height, depth: 1 };
@@ -2722,6 +2813,7 @@ impl VulkanContext {
         })
     }
 
+    /// Recreates the per-swapchain-image depth attachments for the current extent.
     fn create_depth_images(&mut self) -> Result<()> {
         self.depth_images.clear();
         let mut attachments = Vec::with_capacity(self.swapchain_images.len());
@@ -2732,6 +2824,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Creates one depth attachment image and transitions it into attachment layout.
     fn create_depth_attachment(&self, extent: vk::Extent2D) -> Result<ImageResource> {
         let format = self.depth_format;
         let image_info = vk::ImageCreateInfo::builder()
@@ -2791,10 +2884,12 @@ impl VulkanContext {
         })
     }
 
+    /// Returns whether the chosen depth format also carries a stencil component.
     fn has_stencil_component(format: vk::Format) -> bool {
         matches!(format, vk::Format::D32_SFLOAT_S8_UINT | vk::Format::D24_UNORM_S8_UINT)
     }
 
+    /// Uploads a staging buffer into an image and transitions it to shader-read layout.
     fn copy_buffer_to_image(&self, buffer: &Buffer, image: &mut ImageResource) -> Result<()> {
         self.single_time_commands(|cmd| {
             self.transition_image_layout(
@@ -2847,6 +2942,7 @@ impl VulkanContext {
         }
     }
 
+    /// Begins or reuses the current frame's transfer command buffer.
     fn begin_transfer_command_buffer(&mut self) -> Result<vk::CommandBuffer> {
         let frame = self.current_frame;
         if self.transfer_command_buffers.is_empty() {
@@ -2867,6 +2963,7 @@ impl VulkanContext {
         Ok(command_buffer)
     }
 
+    /// Queues a buffer-to-buffer transfer plus the barrier required for later GPU reads.
     fn record_transfer_copy(
         &mut self,
         src: vk::Buffer,
@@ -2891,6 +2988,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Ends the current frame's transfer command buffer if recording started.
     fn end_transfer_recording_if_needed(&mut self, frame: usize) -> Result<()> {
         if self.transfer_recording.get(frame).copied().unwrap_or(false) {
             let command_buffer = self.transfer_command_buffers[frame];
@@ -2904,6 +3002,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Submits the current frame's transfer work and returns the semaphore it signals, if any.
     fn submit_transfer_commands(&mut self) -> Result<Option<vk::Semaphore>> {
         let frame = self.current_frame;
         let has_work = self.transfer_has_work.get(frame).copied().unwrap_or(false);
@@ -2926,6 +3025,7 @@ impl VulkanContext {
         Ok(Some(semaphore))
     }
 
+    /// Resets transfer bookkeeping for the current frame slot before new uploads are recorded.
     fn reset_transfer_state(&mut self, frame: usize) -> Result<()> {
         if self.transfer_command_buffers.is_empty() {
             return Ok(());
@@ -2945,6 +3045,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Inserts the buffer memory barrier that makes transfer writes visible to later pipeline stages.
     fn buffer_barrier_transfer(&self, command_buffer: vk::CommandBuffer, buffer: vk::Buffer, offset: u64, size: u64, dst_access: vk::AccessFlags) {
         if size == 0 {
             return;
@@ -2972,6 +3073,7 @@ impl VulkanContext {
         }
     }
 
+    /// Creates a sampled texture image from raw RGBA pixels and allocates its descriptor set.
     fn create_texture_resource(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<VulkanTexture> {
         let width_u32 = u32::try_from(width).map_err(|_| "texture width out of range".to_string())?;
         let height_u32 = u32::try_from(height).map_err(|_| "texture height out of range".to_string())?;
@@ -2991,6 +3093,7 @@ impl VulkanContext {
         Ok(VulkanTexture { image, descriptor_set })
     }
 
+    /// Allocates a texture descriptor set from the UI descriptor pool for the supplied image.
     fn allocate_texture_descriptor(&mut self, image: &ImageResource) -> Result<vk::DescriptorSet> {
         let mut ui = self.ui.take().ok_or_else(|| "UI resources not initialized".to_string())?;
         let descriptor_set = ui.allocate_texture_descriptor(self, image)?;
@@ -2998,6 +3101,7 @@ impl VulkanContext {
         Ok(descriptor_set)
     }
 
+    /// Runs a one-off command buffer for setup work like image layout transitions.
     fn single_time_commands<F: FnOnce(vk::CommandBuffer)>(&self, f: F) -> Result<()> {
         let alloc_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(self.command_pool)
@@ -3032,6 +3136,7 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Records an image layout transition barrier for the supplied image/subresource range.
     fn transition_image_layout(
         &self,
         cmd: vk::CommandBuffer,
@@ -3084,6 +3189,7 @@ impl VulkanContext {
         }
     }
 
+    /// Finds a device memory type that satisfies the allocation bitmask and property flags.
     fn find_memory_type(&self, type_filter: u32, properties: vk::MemoryPropertyFlags) -> Result<u32> {
         let mem_properties = unsafe { self.instance.get_physical_device_memory_properties(self.physical_device) };
         for (index, memory_type) in mem_properties.memory_types.iter().enumerate() {
@@ -3098,6 +3204,9 @@ impl VulkanContext {
 impl Drop for VulkanContext {
     fn drop(&mut self) {
         unsafe {
+            // The drop order mirrors creation order in reverse: wait for the device to go idle,
+            // destroy per-frame sync/swapchain resources, then tear down the command pool, surface,
+            // device, and finally the instance.
             self.device.device_wait_idle().ok();
 
             for &fence in &self.in_flight_fences {

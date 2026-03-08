@@ -233,7 +233,12 @@ impl Window {
         let container = &mut self.main;
         let sz = container.style.as_ref().title_height;
         let resize_id = widget_id_of(&self.resize_state);
-        let rect = rect(container.rect.x + container.rect.width - sz, container.rect.y + container.rect.height - sz, sz, sz);
+        let rect = rect(
+            container.rect.x + container.rect.width - sz,
+            container.rect.y + container.rect.height - sz,
+            sz,
+            sz,
+        );
         let control_state = (self.resize_state.opt, self.resize_state.bopt);
         let control = container.update_control(resize_id, rect, &control_state);
         {

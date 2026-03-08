@@ -1171,7 +1171,11 @@ impl State {
         }
 
         let mut popup_logs: Vec<&'static str> = Vec::new();
-        ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), WidgetBehaviourOption::NO_SCROLL, &self.popup_tree);
+        ctx.popup(
+            &mut self.popup_window.as_mut().unwrap().clone(),
+            WidgetBehaviourOption::NO_SCROLL,
+            &self.popup_tree,
+        );
         {
             let results = ctx.committed_results();
             if results.state_of_handle(&self.popup_buttons[0]).is_submitted() {

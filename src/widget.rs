@@ -183,7 +183,6 @@ impl FrameResults {
     pub(crate) fn current(&self) -> FrameResultGeneration<'_> {
         FrameResultGeneration::new(&self.current)
     }
-
 }
 
 #[cfg(test)]

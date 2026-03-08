@@ -54,6 +54,9 @@ type RendererBackend = vulkan_renderer::VulkanRenderer;
 #[cfg(feature = "example-wgpu")]
 type RendererBackend = wgpu_renderer::WgpuRenderer;
 
+// The example app keeps one concrete renderer backend behind the shared microui `Context`. The
+// rest of the example code only talks to `MicroUI`, while backend initialization stays feature-
+// gated in this file.
 type MicroUI = microui::Context<RendererBackend>;
 
 #[cfg(feature = "example-glow")]
@@ -74,7 +77,10 @@ pub struct Application<S> {
 }
 
 impl<S> Application<S> {
+    /// Creates the example application by initializing SDL, the chosen backend, and user state.
     pub fn new<F: FnMut(BackendInitContext, &mut MicroUI) -> S>(atlas: AtlasHandle, mut init_state: F) -> Result<Self, String> {
+        // SDL/video/window setup is backend-dependent, but state construction always receives a
+        // ready-to-use microui `Context` plus any backend-specific initialization payload.
         let sdl_ctx = sdl2::init().map_err(|err| err.to_string())?;
         let video = sdl_ctx.video().map_err(|err| err.to_string())?;
         let (bundle, init_ctx) = init_backend(&video, atlas)?;
@@ -95,6 +101,7 @@ impl<S> Application<S> {
         })
     }
 
+    /// Runs the SDL event loop, forwarding input into microui and invoking the user frame callback.
     pub fn event_loop<F: Fn(&mut MicroUI, &mut S)>(&mut self, f: F) {
         #[cfg(feature = "example-glow")]
         self.window.gl_make_current(&self.backend.gl_ctx).unwrap();
@@ -103,6 +110,8 @@ impl<S> Application<S> {
         'running: loop {
             let (width, height) = self.window.size();
 
+            // Start the UI frame before polling events so the event handlers can mutate the fresh
+            // frame input state directly.
             self.ctx.begin(width as i32, height as i32, color(0x7F, 0x7F, 0x7F, 255));
 
             fn map_mouse_button(sdl_mb: sdl2::mouse::MouseButton) -> microui::MouseButton {
@@ -137,6 +146,8 @@ impl<S> Application<S> {
                     _ => microui::KeyCode::NONE,
                 }
             }
+            // SDL events are translated into the narrower microui input vocabulary here. This
+            // keeps the rest of the demo code backend-agnostic.
             for event in event_pump.poll_iter() {
                 match event {
                     Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
@@ -179,7 +190,9 @@ impl<S> Application<S> {
                 }
             }
 
+            // User state builds retained trees, reads committed results, and updates app data.
             f(&mut self.ctx, &mut self.state);
+            // `end` flushes traversal, command recording, and backend presentation for the frame.
             self.ctx.end();
             #[cfg(feature = "example-glow")]
             self.window.gl_swap_window();
@@ -190,7 +203,9 @@ impl<S> Application<S> {
 }
 
 #[cfg(feature = "example-glow")]
+/// Initializes the OpenGL example backend and returns the window, renderer, and GL init context.
 fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBundle, BackendInitContext), String> {
+    // The GL example owns an explicit SDL GL context in addition to the microui renderer.
     let gl_attr = video.gl_attr();
     gl_attr.set_context_profile(GLProfile::GLES);
     gl_attr.set_context_version(3, 0);
@@ -220,7 +235,10 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
 }
 
 #[cfg(feature = "example-vulkan")]
+/// Initializes the Vulkan example backend and returns the window, renderer, and init marker.
 fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBundle, BackendInitContext), String> {
+    // Vulkan and wgpu derive their native surfaces from the SDL window itself, so the renderer is
+    // created immediately from that window handle and then stored inside the microui `Context`.
     let window = video.window("Window", 800, 600).resizable().vulkan().build().map_err(|err| err.to_string())?;
     let (width, height) = window.size();
     let renderer = RendererHandle::new(vulkan_renderer::VulkanRenderer::new(&window, atlas, width, height)?);
@@ -230,6 +248,7 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
 }
 
 #[cfg(feature = "example-wgpu")]
+/// Initializes the wgpu example backend and returns the window, renderer, and init marker.
 fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBundle, BackendInitContext), String> {
     let window = video.window("Window", 800, 600).resizable().build().map_err(|err| err.to_string())?;
     let (width, height) = window.size();

@@ -37,6 +37,12 @@ use rs_math3d::{Vec3f, Vec4f};
 use sdl2::video::Window;
 use wgpu::util::DeviceExt;
 
+// WGPU backend overview:
+// - UI/custom draws are described as `RenderCommand`s while building the frame.
+// - `end` packs all vertex payloads into one upload buffer, then replays the commands in a single
+//   render pass while switching bind groups/scissor state between draws.
+// - The swapchain surface is reconfigured on resize and the atlas texture is kept in sync lazily.
+
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 /// CPU-side vertex used by mesh submissions in the demo path.
@@ -96,6 +102,7 @@ struct GpuVertex {
 }
 
 impl GpuVertex {
+    /// Converts the generic microui vertex layout into the packed wgpu vertex format.
     fn from_vertex(v: &Vertex) -> Self {
         let pos = v.position();
         let uv = v.tex_coord();
@@ -165,6 +172,7 @@ pub struct WgpuRenderer {
 }
 
 impl WgpuRenderer {
+    /// Returns the atlas UV used as a solid-white sample for colored primitive draws.
     fn white_uv_center(&self) -> Vec2f {
         // Colored primitives sample the center of the white icon in the atlas and rely on
         // vertex color for final shading.
@@ -176,16 +184,19 @@ impl WgpuRenderer {
         )
     }
 
+    /// Reinterprets a plain-old-data value as a byte slice for queue/buffer uploads.
     fn as_bytes<T>(value: &T) -> &[u8] {
         // SAFETY: `value` lives for the returned slice lifetime and we preserve size/alignment.
         unsafe { slice::from_raw_parts((value as *const T).cast::<u8>(), mem::size_of::<T>()) }
     }
 
+    /// Reinterprets a slice of plain-old-data values as bytes for queue/buffer uploads.
     fn slice_as_bytes<T>(values: &[T]) -> &[u8] {
         // SAFETY: same rationale as `as_bytes`, but for contiguous slices.
         unsafe { slice::from_raw_parts(values.as_ptr().cast::<u8>(), std::mem::size_of_val(values)) }
     }
 
+    /// Creates a sampled RGBA texture plus the bind group used to draw with it.
     fn create_gpu_texture(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -255,6 +266,7 @@ impl WgpuRenderer {
         Ok(GpuTexture { _texture: texture, bind_group })
     }
 
+    /// Records the boundary between the current UI batch and later render commands.
     fn flush_ui_batch(&mut self) {
         // UI quads are appended continuously; this records a boundary in command order so
         // later custom draws can interleave correctly.
@@ -265,6 +277,7 @@ impl WgpuRenderer {
         }
     }
 
+    /// Uploads atlas pixels into the GPU atlas texture when the atlas change id advanced.
     fn sync_atlas(&mut self) {
         // Atlas updates are tracked by monotonic id; skip GPU upload when unchanged.
         if self.atlas_last_update_id == self.atlas.get_last_update_id() {
@@ -299,6 +312,7 @@ impl WgpuRenderer {
         self.atlas_last_update_id = self.atlas.get_last_update_id();
     }
 
+    /// Reconfigures the surface when the requested frame size changes.
     fn configure_surface(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
@@ -312,6 +326,7 @@ impl WgpuRenderer {
         }
     }
 
+    /// Grows the shared staging vertex buffer to fit a full frame upload.
     fn ensure_staging_capacity(&mut self, byte_count: usize) {
         if byte_count <= self.staging_vertex_capacity {
             return;
@@ -328,6 +343,7 @@ impl WgpuRenderer {
         self.staging_vertex_capacity = target;
     }
 
+    /// Converts a signed UI clip rectangle into a clamped wgpu scissor rectangle.
     fn clip_to_scissor(clip: Recti, surface_width: u32, surface_height: u32) -> Option<(u32, u32, u32, u32)> {
         // Convert signed UI clip rect into a clamped, positive scissor rectangle.
         if clip.width <= 0 || clip.height <= 0 {
@@ -346,6 +362,7 @@ impl WgpuRenderer {
         Some((x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32))
     }
 
+    /// Expands one quad into two triangles in the backend vertex format.
     fn append_quad(dst: &mut Vec<GpuVertex>, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) {
         // Expand quad into two triangles in clockwise draw order.
         dst.extend_from_slice(&[
@@ -358,6 +375,7 @@ impl WgpuRenderer {
         ]);
     }
 
+    /// Builds the single render pipeline shared by atlas, textured, and colored UI draws.
     fn create_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout, wgpu::Sampler) {
         // One pipeline is enough for all UI/custom draws: position + uv + color, alpha blend.
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -474,7 +492,9 @@ impl WgpuRenderer {
         (pipeline, bind_group_layout, sampler)
     }
 
+    /// Creates the wgpu renderer, surface configuration, pipeline, and persistent atlas texture.
     pub fn new(window: &Window, atlas: AtlasHandle, width: u32, height: u32) -> Result<Self, String> {
+        // SDL owns the native window/display handles; wgpu only borrows them to create the surface.
         let instance = wgpu::Instance::default();
 
         let raw_window_handle = window
@@ -493,6 +513,7 @@ impl WgpuRenderer {
                 .map_err(|err| format!("failed to create wgpu surface: {err}"))?
         };
 
+        // Pick one adapter/device pair up front; the examples do not hot-switch adapters.
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
@@ -510,6 +531,7 @@ impl WgpuRenderer {
         ))
         .map_err(|err| format!("failed to request wgpu device: {err}"))?;
 
+        // Surface configuration defines the swapchain textures wgpu will present into.
         let mut config = surface
             .get_default_config(&adapter, width.max(1), height.max(1))
             .ok_or_else(|| "surface is not supported by adapter".to_string())?;
@@ -584,15 +606,18 @@ impl WgpuRenderer {
         Ok(renderer)
     }
 
+    /// Queues arbitrary colored triangles that should still respect the UI clip space.
     pub fn enqueue_colored_vertices(&mut self, area: CustomRenderArea, vertices: Vec<Vertex>) {
         if vertices.is_empty() {
             return;
         }
         self.flush_ui_batch();
+        // Colored draws still use the atlas bind group; their UVs point at the white icon center.
         let vertices = vertices.iter().map(GpuVertex::from_vertex).collect();
         self.commands.push(RenderCommand::DrawColored { area, vertices });
     }
 
+    /// Converts a mesh submission into colored screen-space triangles and reuses the colored path.
     pub fn enqueue_mesh_draw(&mut self, area: CustomRenderArea, submission: MeshSubmission) {
         if submission.mesh.is_empty() {
             return;
@@ -601,6 +626,8 @@ impl WgpuRenderer {
             return;
         }
 
+        // Like the GL fallback path, this demo renderer shades from normals on the CPU and then
+        // draws the result as ordinary colored triangles.
         let white_uv = self.white_uv_center();
 
         #[derive(Clone)]
@@ -680,6 +707,7 @@ impl Renderer for WgpuRenderer {
         self.atlas.clone()
     }
 
+    /// Starts a new frame by resetting CPU-side queues, syncing surface size, and updating uniforms.
     fn begin(&mut self, width: i32, height: i32, clr: Color) {
         // Reset per-frame CPU-side command/vertex queues.
         self.width = width.max(0) as u32;
@@ -700,14 +728,17 @@ impl Renderer for WgpuRenderer {
         self.queue.write_buffer(&self.uniform_buffer, 0, Self::as_bytes(&uniforms));
     }
 
+    /// Appends one UI quad to the CPU-side UI vertex batch.
     fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) {
         Self::append_quad(&mut self.ui_vertices, v0, v1, v2, v3);
     }
 
+    /// Closes the current UI batch so later commands preserve ordering.
     fn flush(&mut self) {
         self.flush_ui_batch();
     }
 
+    /// Acquires a surface frame, uploads all queued vertices, records the render pass, and presents.
     fn end(&mut self) {
         self.flush_ui_batch();
         self.sync_atlas();
@@ -716,6 +747,7 @@ impl Renderer for WgpuRenderer {
             return;
         }
 
+        // Acquire the current swapchain texture, handling common resize/lost-surface recovery.
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
@@ -758,6 +790,7 @@ impl Renderer for WgpuRenderer {
         }
 
         let mut ui_start = 0usize;
+        // Build a concrete list of draw ranges backed by one packed upload buffer.
         let mut prepared_draws: Vec<PreparedDraw> = Vec::new();
         let mut packed_upload: Vec<u8> = Vec::new();
 
@@ -792,7 +825,7 @@ impl Renderer for WgpuRenderer {
             }
 
             // Pack every draw's vertex payload into one contiguous upload buffer so we only
-            // issue one queue.write_buffer call.
+            // issue one queue.write_buffer call for the entire frame.
             let bytes = Self::slice_as_bytes(vertices);
             let vertex_offset = packed_upload.len() as u64;
             let vertex_size = bytes.len() as u64;
@@ -812,6 +845,8 @@ impl Renderer for WgpuRenderer {
         }
 
         {
+            // The render pass replays each prepared draw by switching bind groups/scissors and
+            // slicing the shared staging vertex buffer to the right subrange.
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("microui.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -862,6 +897,7 @@ impl Renderer for WgpuRenderer {
         frame.present();
     }
 
+    /// Creates a renderer-owned sampled texture and its bind group.
     fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) {
         if width <= 0 || height <= 0 {
             return;
@@ -886,15 +922,19 @@ impl Renderer for WgpuRenderer {
         self.textures.insert(id, texture);
     }
 
+    /// Drops a renderer-owned texture by removing it from the bind-group map.
     fn destroy_texture(&mut self, id: TextureId) {
         self.textures.remove(&id);
     }
 
+    /// Queues one textured quad that samples from a renderer-owned texture.
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
         if !self.textures.contains_key(&id) {
             return;
         }
 
+        // Textured draws must preserve ordering with surrounding UI draws, so flush the current
+        // atlas batch before appending the explicit texture command.
         self.flush_ui_batch();
         let mut quad = Vec::with_capacity(6);
         Self::append_quad(&mut quad, &vertices[0], &vertices[1], &vertices[2], &vertices[3]);

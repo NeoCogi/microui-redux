@@ -51,6 +51,16 @@
 // IN THE SOFTWARE.
 //
 //! Retained widget-tree traversal and cache management.
+//!
+//! The retained tree path is intentionally split into two passes:
+//! 1. a layout pass that measures widgets, allocates rectangles, and records geometry into the
+//!    per-frame tree cache;
+//! 2. a render pass that reuses the cached rectangles, samples interaction, and records
+//!    `NodeInteraction` entries for the same tree nodes.
+//!
+//! Keeping those passes separate lets the retained path reason about geometry deterministically:
+//! widgets do not advance layout while rendering, containers can recurse into children using
+//! already-computed rectangles, and tests can inspect the cache after either phase.
 
 use super::*;
 
@@ -67,14 +77,17 @@ impl Container {
         self.tree_cache.current_layout(node_id).copied()
     }
 
+    /// Stores the current frame geometry snapshot for a retained tree node.
     fn record_tree_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
         self.tree_cache.record_layout(node_id, layout);
     }
 
+    /// Stores the current frame control/result snapshot for a retained tree node.
     fn record_tree_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
         self.tree_cache.record_interaction(node_id, interaction);
     }
 
+    /// Returns the current frame layout for `node_id` or panics if layout was skipped.
     fn current_tree_layout_or_panic(&self, node_id: NodeId) -> NodeLayout {
         self.tree_cache
             .current_layout(node_id)
@@ -82,10 +95,15 @@ impl Container {
             .unwrap_or_else(|| panic!("tree node {:?} missing current layout", node_id))
     }
 
+    /// Synthesizes a structural node rect by unioning the current frame bounds of its children.
     fn record_tree_group_from_children(&mut self, node_id: NodeId, children: &[WidgetTreeNode]) {
         let mut bounds: Option<Recti> = None;
         for child in children {
             if let Some(child_state) = self.tree_cache.current_layout(child.id()) {
+                // Structural nodes like rows, grids, and columns do not have their own widget
+                // state; their effective bounds are the union of their children for the current
+                // frame. That cached group rect is useful for debugging/tests and keeps the cache
+                // shape uniform across leaf and non-leaf nodes.
                 bounds = Some(match bounds {
                     Some(existing_rect) => {
                         let min_x = existing_rect.x.min(child_state.rect.x);
@@ -104,24 +122,34 @@ impl Container {
         }
     }
 
+    /// Runs the retained layout pass for a slice of sibling tree nodes.
     fn layout_tree_nodes(&mut self, results: &FrameResults, nodes: &[WidgetTreeNode]) {
         for node in nodes {
             self.layout_tree_node(results, node);
         }
     }
 
+    /// Runs the retained render pass for a slice of sibling tree nodes.
     fn render_tree_nodes(&mut self, results: &mut FrameResults, nodes: &[WidgetTreeNode]) {
         for node in nodes {
             self.render_tree_node(results, node);
         }
     }
 
+    /// Measures a leaf widget node and records its allocated rectangle in the tree cache.
     fn layout_tree_widget(&mut self, results: &FrameResults, node_id: NodeId, widget: &dyn WidgetStateHandleDyn) {
+        // Measurement goes through the same generic widget dispatch used elsewhere in the
+        // container. The retained path just captures the allocated rectangle in the tree cache
+        // instead of consuming it immediately.
         let rect = self.layout_widget_dyn(results, widget);
         self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
     }
 
+    /// Replays a leaf widget node using the rectangle captured during the layout pass.
     fn render_tree_widget(&mut self, results: &mut FrameResults, node_id: NodeId, widget: &dyn WidgetStateHandleDyn) {
+        // Rendering must reuse the rect produced during layout. If a node reaches render without a
+        // cached layout entry, the retained traversal is internally inconsistent and should fail
+        // loudly instead of silently inventing geometry.
         let rect = self.current_tree_layout_or_panic(node_id).rect;
         let opt = widget.effective_widget_opt();
         let bopt = widget.effective_behaviour_opt();
@@ -130,11 +158,13 @@ impl Container {
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
     }
 
+    /// Measures a retained custom-render node and records its allocated rectangle.
     fn layout_tree_custom_render(&mut self, results: &FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>) {
         let rect = self.layout_widget_handle(results, state);
         self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Vec2i::default()));
     }
 
+    /// Executes a retained custom-render node and records both interaction and callback payload.
     fn render_tree_custom_render(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>, render: &TreeCustomRender) {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
         let (opt, bopt, needs_input) = {
@@ -148,6 +178,10 @@ impl Container {
         let input_ref = snapshot.as_ref();
         let mouse_event = self.input_to_mouse_event(&control, input_ref, rect);
 
+        // Custom render callbacks are fed the same normalized interaction payload that built-in
+        // widgets observe. This keeps the custom path aligned with the retained widget contract:
+        // geometry comes from the retained pass, input is localized to the widget rect, and the
+        // backend-specific drawing work is deferred through the command list.
         let active = control.focused && self.in_hover_root;
         let key_mods = if active { input_ref.key_mods } else { KeyMode::NONE };
         let key_codes = if active { input_ref.key_codes } else { KeyCode::NONE };
@@ -174,7 +208,10 @@ impl Container {
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
     }
 
+    /// Measures a header/tree disclosure node and returns the stable expansion state used this frame.
     fn layout_tree_node_scope(&mut self, results: &FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
+        // Header/tree nodes always reserve a full-width row for the disclosure widget itself. The
+        // returned stable state decides whether children participate in the current layout pass.
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let rect = self.layout_widget_handle(results, state);
         let stable_state = {
@@ -185,6 +222,7 @@ impl Container {
         stable_state
     }
 
+    /// Renders a header/tree disclosure node and returns the stable expansion state observed this frame.
     fn render_tree_node_scope(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
         let (opt, bopt, stable_state) = {
@@ -196,6 +234,7 @@ impl Container {
         stable_state
     }
 
+    /// Performs the layout pass for one retained tree node, recursing into children when needed.
     fn layout_tree_node(&mut self, results: &FrameResults, node: &WidgetTreeNode) {
         let (node_id, kind, children) = node.parts();
         match kind {
@@ -207,6 +246,8 @@ impl Container {
             }
             WidgetTreeNodeKind::Container { handle, opt, behaviour } => {
                 let mut handle = handle.clone();
+                // Containers are nested retained sub-contexts. The parent records the panel bounds,
+                // then lets the child container execute the same layout pass against its own body.
                 self.begin_panel_layout(&mut handle, *opt, *behaviour);
                 handle.with_mut(|container| {
                     container.layout_tree_nodes(results, children);
@@ -216,12 +257,15 @@ impl Container {
                 self.record_tree_layout(node_id, NodeLayout::new(rect, body, content_size));
             }
             WidgetTreeNodeKind::Header { state } => {
+                // Headers gate child participation entirely. In the strict retained model the
+                // current stable state decides whether descendants exist for this frame.
                 if self.layout_tree_node_scope(results, node_id, state).is_expanded() {
                     self.layout_tree_nodes(results, children);
                 }
             }
             WidgetTreeNodeKind::Tree { state } => {
                 if self.layout_tree_node_scope(results, node_id, state).is_expanded() {
+                    // Tree nodes differ from plain headers only by indenting their descendants.
                     let indent_size = self.style.as_ref().indent;
                     self.layout.adjust_indent(indent_size);
                     self.layout_tree_nodes(results, children);
@@ -229,6 +273,8 @@ impl Container {
                 }
             }
             WidgetTreeNodeKind::Row { widths, height } => {
+                // Structural layout nodes do not run widgets themselves; they only establish a new
+                // layout scope for descendants and then synthesize a cached group rect afterward.
                 self.with_row(widths, *height, |container| {
                     container.layout_tree_nodes(results, children);
                 });
@@ -255,6 +301,7 @@ impl Container {
         }
     }
 
+    /// Performs the render pass for one retained tree node using cached layout from the first pass.
     fn render_tree_node(&mut self, results: &mut FrameResults, node: &WidgetTreeNode) {
         let (node_id, kind, children) = node.parts();
         match kind {
@@ -267,6 +314,9 @@ impl Container {
             WidgetTreeNodeKind::Container { handle, opt, behaviour } => {
                 let mut handle = handle.clone();
                 let layout = self.current_tree_layout_or_panic(node_id);
+                // The render pass re-enters the panel with the layout snapshot already frozen.
+                // Scrollbars, body clipping, and child drawing therefore use the same geometry that
+                // was computed during the first pass.
                 self.begin_panel_render(&mut handle, *opt, *behaviour, layout);
                 handle.with_mut(|container| {
                     container.render_tree_nodes(results, children);
@@ -283,10 +333,9 @@ impl Container {
                     self.render_tree_nodes(results, children);
                 }
             }
-            WidgetTreeNodeKind::Row { .. }
-            | WidgetTreeNodeKind::Grid { .. }
-            | WidgetTreeNodeKind::Column
-            | WidgetTreeNodeKind::Stack { .. } => {
+            WidgetTreeNodeKind::Row { .. } | WidgetTreeNodeKind::Grid { .. } | WidgetTreeNodeKind::Column | WidgetTreeNodeKind::Stack { .. } => {
+                // Structural nodes simply forward rendering to descendants because their own cached
+                // bounds were already synthesized during layout.
                 self.render_tree_nodes(results, children);
             }
         }
@@ -294,6 +343,8 @@ impl Container {
 
     /// Evaluates a prebuilt widget tree using the current container layout.
     pub(crate) fn widget_tree(&mut self, results: &mut FrameResults, tree: &WidgetTree) {
+        // Layout must always happen before rendering so the retained cache contains every rect the
+        // second pass expects to reuse.
         self.layout_tree_nodes(results, tree.roots());
         self.render_tree_nodes(results, tree.roots());
     }

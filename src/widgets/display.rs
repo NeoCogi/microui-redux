@@ -133,21 +133,12 @@ impl TextBlock {
         let color = ctx.style().colors[ControlColor::Text as usize];
         let line_height = ctx.atlas().get_font_height(font) as i32;
         let baseline = ctx.atlas().get_font_baseline(font);
-        let max_width = if self.wrap == TextWrap::Word {
-            bounds.width.max(1)
-        } else {
-            i32::MAX / 4
-        };
+        let max_width = if self.wrap == TextWrap::Word { bounds.width.max(1) } else { i32::MAX / 4 };
         let lines = text_lines(self.text.as_str(), self.wrap, max_width, font, ctx.atlas());
 
         ctx.push_clip_rect(bounds);
         for (idx, line) in lines.iter().enumerate() {
-            let line_rect = rect(
-                bounds.x,
-                bounds.y + idx as i32 * line_height,
-                bounds.width,
-                line_height,
-            );
+            let line_rect = rect(bounds.x, bounds.y + idx as i32 * line_height, bounds.width, line_height);
             let line_top = baseline_aligned_top(line_rect, line_height, baseline);
             let slice = &self.text[line.start..line.end];
             if !slice.is_empty() {

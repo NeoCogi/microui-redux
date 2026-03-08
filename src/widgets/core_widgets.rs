@@ -802,17 +802,10 @@ mod tests {
 
     fn make_test_atlas() -> AtlasHandle {
         let pixels: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
-        let icons: Vec<(&str, Recti)> = [
-            "white",
-            "close",
-            "expand",
-            "collapse",
-            "check",
-            "expand_down",
-        ]
-        .iter()
-        .map(|name| (*name, Recti::new(0, 0, 1, 1)))
-        .collect();
+        let icons: Vec<(&str, Recti)> = ["white", "close", "expand", "collapse", "check", "expand_down"]
+            .iter()
+            .map(|name| (*name, Recti::new(0, 0, 1, 1)))
+            .collect();
         let entries = vec![(
             'a',
             CharEntry {

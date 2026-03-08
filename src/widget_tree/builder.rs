@@ -91,10 +91,7 @@ impl Default for NodeOptions {
 impl NodeOptions {
     /// Creates default options with automatic placement and no explicit key.
     pub const fn new() -> Self {
-        Self {
-            policy: Policy::auto(),
-            key: None,
-        }
+        Self { policy: Policy::auto(), key: None }
     }
 
     /// Creates options with an explicit placement policy.
@@ -295,20 +292,18 @@ impl WidgetTreeBuilder {
     }
 
     /// Adds a stack scope with optional identity and placement metadata.
-    pub fn stack_with(
-        &mut self,
-        options: NodeOptions,
-        width: SizePolicy,
-        height: SizePolicy,
-        direction: StackDirection,
-        f: impl FnOnce(&mut Self),
-    ) -> NodeId {
+    pub fn stack_with(&mut self, options: NodeOptions, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: impl FnOnce(&mut Self)) -> NodeId {
         self.push_group(options, WidgetTreeNodeKind::Stack { width, height, direction }, f)
     }
 
     fn push_leaf(&mut self, options: NodeOptions, kind: WidgetTreeNodeKind) -> NodeId {
         let id = self.alloc_id(kind.tag(), options.key);
-        self.current_frame_mut().nodes.push(WidgetTreeNode { id, policy: options.policy, kind, children: Vec::new() });
+        self.current_frame_mut().nodes.push(WidgetTreeNode {
+            id,
+            policy: options.policy,
+            kind,
+            children: Vec::new(),
+        });
         id
     }
 
@@ -317,7 +312,12 @@ impl WidgetTreeBuilder {
         self.frames.push(BuilderFrame::child(id.raw() as u64));
         f(self);
         let frame = self.frames.pop().expect("child frame missing");
-        self.current_frame_mut().nodes.push(WidgetTreeNode { id, policy: options.policy, kind, children: frame.nodes });
+        self.current_frame_mut().nodes.push(WidgetTreeNode {
+            id,
+            policy: options.policy,
+            kind,
+            children: frame.nodes,
+        });
         id
     }
 

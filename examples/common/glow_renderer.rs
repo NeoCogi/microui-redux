@@ -36,6 +36,14 @@ use microui_redux::*;
 use glow::*;
 use rs_math3d::{Vec3f, Vec4f};
 
+// GL backend overview:
+// - Regular UI quads are accumulated into CPU-side vertex/index buffers and emitted in one batch
+//   from `flush`.
+// - Special-case draws (external textures, solid custom vertices, mesh demos) flush the UI batch
+//   first, then issue immediate GL commands so ordering stays correct without a larger command
+//   graph.
+// - The atlas texture is updated lazily whenever its change id advances.
+
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct MeshVertex {
@@ -83,6 +91,7 @@ pub struct CustomRenderArea {
 }
 
 pub(crate) trait GLCustomRenderer {
+    /// Records backend-specific GL commands inside the supplied logical/clip area.
     fn record(&mut self, gl: &glow::Context, framebuffer_size: (u32, u32), area: &CustomRenderArea);
 }
 
@@ -112,6 +121,9 @@ void main()
 }";
 
 pub struct GLRenderer {
+    // `GLRenderer` is deliberately simple: it keeps one shader program plus shared VBO/IBO state
+    // for ordinary UI draws, and falls back to explicit immediate draw calls for custom work that
+    // cannot be folded into the batch easily.
     gl: Arc<glow::Context>,
     verts: Vec<Vertex>,
     indices: Vec<u16>,
@@ -131,6 +143,7 @@ pub struct GLRenderer {
 }
 
 impl GLRenderer {
+    /// Returns the atlas UV used as a "white texel" when drawing solid-colored primitives.
     fn white_uv_center(&self) -> Vec2f {
         let atlas = self.get_atlas();
         let rect = atlas.get_icon_rect(WHITE_ICON);
@@ -141,6 +154,7 @@ impl GLRenderer {
         )
     }
 
+    /// Converts a UI clip rectangle into GL scissor coordinates with bottom-left origin.
     fn scissor_from_ui(&self, clip: Recti) -> Option<(i32, i32, i32, i32)> {
         if clip.width <= 0 || clip.height <= 0 {
             return None;
@@ -150,6 +164,7 @@ impl GLRenderer {
         Some((x, y, clip.width, clip.height))
     }
 
+    /// Uploads atlas pixels to the GL texture when the atlas change id advanced.
     fn update_atlas(&mut self) {
         let gl = &self.gl;
         if self.last_update_id != self.atlas.get_last_update_id() {
@@ -189,7 +204,8 @@ impl GLRenderer {
     pub fn new(gl: Arc<glow::Context>, atlas: AtlasHandle, width: u32, height: u32) -> Self {
         assert_eq!(core::mem::size_of::<Vertex>(), 20);
         unsafe {
-            // init texture
+            // Bootstrap the persistent atlas texture and the shared buffers/program used by the
+            // ordinary UI batching path.
             let tex_o = gl.create_texture().unwrap();
             debug_assert!(gl.get_error() == 0);
             gl.bind_texture(glow::TEXTURE_2D, Some(tex_o));
@@ -245,6 +261,7 @@ impl Renderer for GLRenderer {
         self.atlas.clone()
     }
 
+    /// Flushes the accumulated UI quad batch through the shared atlas pipeline.
     fn flush(&mut self) {
         self.update_atlas();
         if self.verts.len() == 0 || self.indices.len() == 0 {
@@ -253,7 +270,7 @@ impl Renderer for GLRenderer {
 
         let gl = &self.gl;
         unsafe {
-            // opengl rendering states
+            // Configure fixed-function state for alpha-blended 2D UI.
             gl.viewport(0, 0, self.width as i32, self.height as i32);
             gl.scissor(0, 0, self.width as i32, self.height as i32);
             gl.enable(glow::BLEND);
@@ -267,18 +284,18 @@ impl Renderer for GLRenderer {
             gl.enable(glow::SCISSOR_TEST);
             debug_assert!(gl.get_error() == 0);
 
-            // set the program
+            // Bind the shared UI shader program.
             gl.use_program(Some(self.program));
             debug_assert!(gl.get_error() == 0);
 
-            // set the texture
+            // Bind the atlas texture on texture unit 0.
             gl.bind_texture(glow::TEXTURE_2D, Some(self.tex_o));
             gl.active_texture(glow::TEXTURE0 + 0);
             let tex_uniform_id = gl.get_uniform_location(self.program, "uTexture").unwrap();
             gl.uniform_1_i32(Some(&tex_uniform_id), 0);
             debug_assert_eq!(gl.get_error(), 0);
 
-            // set the viewport
+            // Upload the orthographic transform that maps UI pixel coordinates into clip space.
             let viewport = gl.get_uniform_location(self.program, "uTransform").unwrap();
             let tm = ortho4(0.0, self.width as f32, self.height as f32, 0.0, -1.0, 1.0);
             let tm_ptr = tm.col.as_ptr() as *const _ as *const f32;
@@ -286,7 +303,7 @@ impl Renderer for GLRenderer {
             gl.uniform_matrix_4_f32_slice(Some(&viewport), false, &slice);
             debug_assert_eq!(gl.get_error(), 0);
 
-            // set the vertex buffer
+            // Resolve attribute locations and bind the shared vertex/index buffers.
             let pos_attrib_id = gl.get_attrib_location(self.program, "vertexPosition").unwrap();
             let tex_attrib_id = gl.get_attrib_location(self.program, "vertexTexCoord").unwrap();
             let col_attrib_id = gl.get_attrib_location(self.program, "vertexColor").unwrap();
@@ -294,16 +311,17 @@ impl Renderer for GLRenderer {
             gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.ibo));
             debug_assert!(gl.get_error() == 0);
 
-            // update the vertex buffer
+            // Stream the current CPU-side batch into the GL buffers.
             let vertices_u8: &[u8] = core::slice::from_raw_parts(self.verts.as_ptr() as *const u8, self.verts.len() * core::mem::size_of::<Vertex>());
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_u8, glow::DYNAMIC_DRAW);
             debug_assert!(gl.get_error() == 0);
 
-            // update the index buffer
+            // Indices are streamed separately because the UI batch is stored as de-duplicated quads.
             let indices_u8: &[u8] = core::slice::from_raw_parts(self.indices.as_ptr() as *const u8, self.indices.len() * core::mem::size_of::<u16>());
             gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, indices_u8, glow::DYNAMIC_DRAW);
             debug_assert!(gl.get_error() == 0);
 
+            // Vertex layout matches `Vertex { pos, uv, color }`.
             gl.enable_vertex_attrib_array(pos_attrib_id);
             gl.enable_vertex_attrib_array(tex_attrib_id);
             gl.enable_vertex_attrib_array(col_attrib_id);
@@ -314,6 +332,7 @@ impl Renderer for GLRenderer {
             gl.vertex_attrib_pointer_f32(col_attrib_id, 4, glow::UNSIGNED_BYTE, true, 20, 16);
             debug_assert!(gl.get_error() == 0);
 
+            // One indexed draw submits the whole accumulated batch.
             gl.draw_elements(glow::TRIANGLES, self.indices.len() as i32, glow::UNSIGNED_SHORT, 0);
             debug_assert!(gl.get_error() == 0);
 
@@ -324,11 +343,13 @@ impl Renderer for GLRenderer {
             gl.use_program(None);
             debug_assert!(gl.get_error() == 0);
 
+            // The batch was consumed; start clean next frame / next flush.
             self.verts.clear();
             self.indices.clear();
         }
     }
 
+    /// Appends one quad to the UI batch, flushing first if the `u16` index budget would overflow.
     fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) {
         if self.verts.len() + 4 >= 65536 || self.indices.len() + 6 >= 65536 {
             self.flush();
@@ -347,12 +368,14 @@ impl Renderer for GLRenderer {
         self.verts.push(v2.clone());
         self.verts.push(v3.clone());
 
-        // This is needed so that the update happens immediately (not the most optimized way)
+        // Atlas mutations need to become visible before more draws are appended, otherwise later
+        // quads would sample stale atlas pixels.
         if self.last_update_id != self.atlas.get_last_update_id() {
             self.flush()
         }
     }
 
+    /// Starts a new GL frame by clearing the backbuffer and updating cached size.
     fn begin(&mut self, width: i32, height: i32, clr: Color) {
         self.width = width as u32;
         self.height = height as u32;
@@ -366,13 +389,16 @@ impl Renderer for GLRenderer {
         }
     }
 
+    /// Finishes the frame by flushing any remaining batched UI geometry.
     fn end(&mut self) {
         self.flush();
     }
 
+    /// Creates a GL texture for a renderer-owned external image.
     fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) {
         let gl = &self.gl;
         unsafe {
+            // User textures share the same nearest-neighbor setup as the atlas.
             let tex = gl.create_texture().expect("failed to create texture");
             gl.bind_texture(glow::TEXTURE_2D, Some(tex));
             gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
@@ -403,11 +429,14 @@ impl Renderer for GLRenderer {
         }
     }
 
+    /// Draws one textured quad using a renderer-owned texture outside the atlas batch.
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
         let tex = match self.textures.get(&id) {
             Some(tex) => *tex,
             None => return,
         };
+        // External textures cannot be folded into the atlas batch because they change the bound
+        // GL texture object, so flush first and then submit a one-off draw.
         self.flush();
         let gl = &self.gl;
         unsafe {
@@ -440,6 +469,7 @@ impl Renderer for GLRenderer {
             let vertices_u8: &[u8] = core::slice::from_raw_parts(vertices.as_ptr() as *const u8, vertices.len() * core::mem::size_of::<Vertex>());
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_u8, glow::DYNAMIC_DRAW);
 
+            // Expand the quad into two triangles in-place.
             let indices: [u16; 6] = [0, 1, 2, 2, 3, 0];
             let indices_u8: &[u8] = core::slice::from_raw_parts(indices.as_ptr() as *const u8, indices.len() * core::mem::size_of::<u16>());
             gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, indices_u8, glow::DYNAMIC_DRAW);
@@ -462,11 +492,13 @@ impl Renderer for GLRenderer {
 }
 
 impl GLRenderer {
+    /// Flushes the UI batch and hands control to a backend-specific custom GL recorder.
     pub(crate) fn enqueue_custom_render<C: GLCustomRenderer + 'static>(&mut self, area: CustomRenderArea, mut cmd: C) {
         self.flush();
         cmd.record(&self.gl, (self.width, self.height), &area);
     }
 
+    /// Draws arbitrary colored triangles by sampling a white atlas texel and modulating by vertex color.
     pub fn enqueue_colored_vertices(&mut self, area: CustomRenderArea, vertices: Vec<Vertex>) {
         if vertices.is_empty() {
             return;
@@ -476,6 +508,7 @@ impl GLRenderer {
         unsafe {
             gl.viewport(0, 0, self.width as i32, self.height as i32);
             if let Some((sx, sy, sw, sh)) = self.scissor_from_ui(area.clip) {
+                // Custom colored draws still respect the logical UI clip rectangle.
                 gl.scissor(sx, sy, sw, sh);
             }
             gl.enable(glow::BLEND);
@@ -485,6 +518,7 @@ impl GLRenderer {
             gl.enable(glow::SCISSOR_TEST);
 
             gl.use_program(Some(self.program));
+            // Sample the atlas so the shader path stays identical to normal UI; UVs point at white.
             gl.bind_texture(glow::TEXTURE_2D, Some(self.tex_o));
             gl.active_texture(glow::TEXTURE0 + 0);
             if let Some(tex_uniform_id) = gl.get_uniform_location(self.program, "uTexture") {
@@ -502,6 +536,7 @@ impl GLRenderer {
             let tex_attrib_id = gl.get_attrib_location(self.program, "vertexTexCoord").unwrap();
             let col_attrib_id = gl.get_attrib_location(self.program, "vertexColor").unwrap();
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+            // Colored draws are emitted with non-indexed triangles, so only ARRAY_BUFFER is needed.
             gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
 
             let vertices_u8: &[u8] = core::slice::from_raw_parts(vertices.as_ptr() as *const u8, vertices.len() * core::mem::size_of::<Vertex>());
@@ -520,10 +555,12 @@ impl GLRenderer {
             gl.disable_vertex_attrib_array(tex_attrib_id);
             gl.disable_vertex_attrib_array(col_attrib_id);
             gl.use_program(None);
+            // Restore full-frame scissor so later UI draws do not inherit this clip.
             gl.scissor(0, 0, self.width as i32, self.height as i32);
         }
     }
 
+    /// Converts a mesh submission into colored screen-space triangles and reuses the colored-vertex path.
     pub fn enqueue_mesh_draw(&mut self, _area: CustomRenderArea, _submission: MeshSubmission) {
         if _submission.mesh.is_empty() {
             return;
@@ -532,6 +569,7 @@ impl GLRenderer {
         if _area.rect.width <= 0 || _area.rect.height <= 0 {
             return;
         }
+        // The demo mesh path shades from normals on the CPU and samples a white atlas texel.
         let white_uv = self.white_uv_center();
         #[derive(Clone)]
         struct Tri {
@@ -552,7 +590,7 @@ impl GLRenderer {
                 let v = &positions[*src_idx];
                 *dst = *pvm * Vec4f::new(v.position[0], v.position[1], v.position[2], 1.0);
             }
-            // Basic backface culling in clip space (approximate).
+            // Basic backface culling in clip space keeps the software path inexpensive.
             let a = clip_space[0];
             let b = clip_space[1];
             let c = clip_space[2];
@@ -592,7 +630,7 @@ impl GLRenderer {
             }
         }
 
-        // Painter's algorithm: draw farthest triangles first so nearer ones occlude.
+        // Painter's algorithm is sufficient here because the GL UI pass does not keep a depth buffer.
         tris.sort_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut verts: Vec<Vertex> = Vec::with_capacity(tris.len() * 3);
@@ -604,6 +642,7 @@ impl GLRenderer {
     }
 }
 
+/// Compiles and links a GL program from vertex/fragment shader sources.
 pub fn create_program(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str) -> Result<NativeProgram, io::Error> {
     unsafe {
         let program = gl.create_program().expect("Cannot create program");
@@ -612,6 +651,7 @@ pub fn create_program(gl: &glow::Context, vertex_shader_source: &str, fragment_s
 
         let mut shaders = Vec::with_capacity(shader_sources.len());
 
+        // Compile both stages first so we can bail out with a useful shader log if needed.
         for (shader_type, shader_source) in shader_sources.iter() {
             let shader = gl.create_shader(*shader_type).expect("Cannot create shader");
             gl.shader_source(shader, shader_source);
@@ -628,6 +668,7 @@ pub fn create_program(gl: &glow::Context, vertex_shader_source: &str, fragment_s
             shaders.push(shader);
         }
 
+        // Link once both stages compiled successfully.
         gl.link_program(program);
         if !gl.get_program_link_status(program) {
             let error_string = format!("{}", gl.get_program_info_log(program));
@@ -647,6 +688,7 @@ pub fn create_program(gl: &glow::Context, vertex_shader_source: &str, fragment_s
     }
 }
 
+/// Returns the active vertex attributes declared by a GL program.
 pub fn get_active_program_attributes(gl: &glow::Context, program: NativeProgram) -> Vec<ActiveAttribute> {
     let mut attribs = Vec::new();
     unsafe {
@@ -662,6 +704,7 @@ pub fn get_active_program_attributes(gl: &glow::Context, program: NativeProgram)
     attribs
 }
 
+/// Returns the active uniforms declared by a GL program.
 pub fn get_active_program_uniforms(gl: &glow::Context, program: NativeProgram) -> Vec<ActiveUniform> {
     let mut unis = Vec::new();
     unsafe {
@@ -781,6 +824,7 @@ unsafe impl Sync for PolyMeshRenderer {}
 unsafe impl Send for PolyMeshRenderer {}
 
 impl PolyMeshRenderer {
+    /// Creates GL buffers/programs for the demo mesh renderer and caches their bindings.
     pub fn create(driver: &glow::Context, max_tri_count: usize) -> Self {
         let max_vertex_count = max_tri_count * 3;
         let max_index_count = max_tri_count * 6;
@@ -804,6 +848,7 @@ impl PolyMeshRenderer {
             buff
         };
 
+        // Cache attribute/uniform lookups once so the render path can stay simple.
         let model_program = create_program(driver, POLYMESH_VERTEX_SHADER, POLYMESH_PIXEL_SHADER).unwrap();
         let model_attribs = get_active_program_attributes(driver, model_program)
             .iter()
@@ -847,12 +892,14 @@ impl PolyMeshRenderer {
         }
     }
 
+    /// Renders a polymesh as wireframe lines, flushing in chunks when the staging budget fills.
     pub fn render_wire<T: PolymeshTrait>(&mut self, gl: &glow::Context, pvm: &Mat4f, _view_model: &Mat4f, pmesh: &T) {
         self.vertices.clear();
         self.indices.clear();
 
         let pos_attr = self.solid_attribs["position"];
 
+        // Wireframe uses a minimal shader and only the position attribute.
         unsafe {
             gl.disable(glow::BLEND);
             debug_assert!(gl.get_error() == 0);
@@ -884,6 +931,7 @@ impl PolyMeshRenderer {
             let vertex_count = p.vertex_count();
             if self.indices.len() + (vertex_count - 2) * 2 > self.max_index_count || self.vertices.len() + vertex_count > self.max_vertex_count {
                 unsafe {
+                    // Chunked upload: when the CPU buffers fill, stream what we have and continue.
                     // update the vertex buffer
                     let vertices_u8: &[u8] = core::slice::from_raw_parts(
                         self.vertices.as_ptr() as *const u8,
@@ -917,6 +965,7 @@ impl PolyMeshRenderer {
                 });
             }
 
+            // Convert polygon boundary into independent line segments.
             for i in 0..vertex_count as u32 {
                 self.indices.push(vid + i);
                 self.indices.push(vid + ((i + 1) % (vertex_count as u32)));
@@ -953,6 +1002,7 @@ impl PolyMeshRenderer {
         }
     }
 
+    /// Renders a polymesh as filled triangles using the demo model shader.
     pub fn render<T: PolymeshTrait>(&mut self, gl: &glow::Context, pvm: &Mat4f, view_model: &Mat4f, pmesh: &T) {
         self.vertices.clear();
         self.indices.clear();
@@ -962,6 +1012,7 @@ impl PolyMeshRenderer {
         let uv_attr = self.model_attribs["uv"];
 
         unsafe {
+            // Filled mesh rendering uses the full model shader and a depth-tested triangle pass.
             gl.disable(glow::BLEND);
             debug_assert!(gl.get_error() == 0);
             gl.disable(glow::CULL_FACE);
@@ -1001,6 +1052,7 @@ impl PolyMeshRenderer {
             let vertex_count = p.vertex_count();
             if self.indices.len() + (vertex_count - 2) * 2 > self.max_index_count || self.vertices.len() + vertex_count > self.max_vertex_count {
                 unsafe {
+                    // Flush partial mesh data when the staging vectors hit their configured budget.
                     // update the vertex buffer
                     let vertices_u8: &[u8] = core::slice::from_raw_parts(
                         self.vertices.as_ptr() as *const u8,
@@ -1035,9 +1087,11 @@ impl PolyMeshRenderer {
                 let position = pmesh.get_vertex_position(v.pos());
                 let normal = pmesh.get_vertex_normal(v.normal());
                 let uv = pmesh.get_vertex_uv(v.tex());
+                // Expand indexed polymesh data into the tightly packed vertex stream the shader expects.
                 self.vertices.push(PolymeshRenderVertex { position, normal, uv });
             }
 
+            // Triangulate the polygon as a fan rooted at the first vertex.
             for i in 2..vertex_count as u32 {
                 self.indices.push(vid);
                 self.indices.push(vid + i - 1);
@@ -1047,6 +1101,7 @@ impl PolyMeshRenderer {
 
         if self.indices.len() > 0 {
             unsafe {
+                // Submit the last partial batch after the polygon walk finishes.
                 // update the vertex buffer
                 let vertices_u8: &[u8] = core::slice::from_raw_parts(
                     self.vertices.as_ptr() as *const u8,

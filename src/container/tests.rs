@@ -347,10 +347,7 @@ fn retained_widget_value_commits_on_next_frame() {
     container.finish();
     results.finish_frame();
 
-    let checkbox_rect = container
-        .previous_node_layout(checkbox_node_id)
-        .expect("checkbox layout missing")
-        .rect;
+    let checkbox_rect = container.previous_node_layout(checkbox_node_id).expect("checkbox layout missing").rect;
     {
         let mut input = input.borrow_mut();
         input.mousemove(checkbox_rect.x + 1, checkbox_rect.y + 1);
