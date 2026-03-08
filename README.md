@@ -33,7 +33,7 @@ cargo +nightly build \
 ```
 Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 
-![random](https://github.com/NeoCogi/microui-redux/raw/master/res/microui.png)
+![random](res/microui-0.6.png)
 
 ## Key Concepts
 - **Context**: owns the renderer handle, user input, frame results, and root windows. Each frame starts by feeding input into the context, then calling `context.window(...)`, `context.dialog(...)`, or `context.popup(...)` with retained trees for every visible surface.
@@ -144,27 +144,35 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
 - `TextBlock` supports wrapped multi-line content while preserving outer padding without adding extra spacing between lines.
 - Custom rendering still goes through retained `custom_render` nodes, which receive layout, input, and clip information through `CustomRenderArgs`.
 
-### Version 0.6
-- [x] Added retained widget trees.
-    - [x] New `WidgetTree` / `WidgetTreeBuilder` API with stable `NodeId`s and reusable widget/layout hierarchy.
-    - [x] `Context::window`, `dialog`, and `popup` render retained trees directly through the normal container/widget paths.
-    - [x] Tree nodes now cover widgets, panels, headers/tree nodes, row/grid/column/stack groups, and custom render widgets.
-- [x] Migrated shipped UI to the retained model.
-    - [x] `examples/simple`, `examples/calculator`, `examples/demo-full`, and the file dialog now build trees once and replay them every frame.
-    - [x] Removed `tree.run(...)` and rewrote the remaining callback-only sections as retained tree structure plus retained display widgets.
-- [x] Reworked dispatch around retained frame-result generations.
-    - [x] Replaced per-call output slots with an internal per-frame result registry keyed by widget ID.
-    - [x] `window` / `dialog` / `popup` now render retained trees directly and expose committed business-logic results through `Context::committed_results()`.
-    - [x] Added handle-oriented helpers such as `FrameResultGeneration::state_of_handle` and `widget_id_of_handle`.
-- [x] Simplified retained dispatch and handle-backed widgets.
-    - [x] Unified retained widget dispatch around measure/render/frame-commit instead of per-call output slots.
-    - [x] Stabilized demo/file-dialog labels by reusing persistent `ListItem` state instead of rebuilding labels every frame.
-- [x] Improved interaction routing and widget input behavior.
-    - [x] Mouse coordinates delivered to interactive widgets/custom render callbacks are now relative to the widget rectangle.
-    - [x] Fixed stale hover refocus behavior and refined root/panel hover routing for nested retained containers.
-- [x] Expanded layout/rendering coverage for the new API surface.
-    - [x] Added weight-based layout sizing and updated the calculator/demo examples accordingly.
-    - [x] Hardened Vulkan frame resource lifetime handling for dynamic UI/custom rendering workloads.
+### Version 0.6-pre
+- [x] Replaced the v0.5 public immediate/closure authoring path with retained widget trees.
+    - [x] `Context::window`, `dialog`, and `popup` now take `&WidgetTree` instead of UI-building closures.
+    - [x] `WidgetTree` nodes cover widgets, embedded containers, headers/tree nodes, row/grid/column/stack groups, and custom render leaves.
+    - [x] The public immediate widget-helper surface and `tree.run(...)` escape hatch are gone from the supported API.
+- [x] Added a retained composition API with stable node identity and a smaller builder surface.
+    - [x] `WidgetTree` / `WidgetTreeBuilder` provide reusable retained widget/layout hierarchies with stable `NodeId`s.
+    - [x] `WidgetTreeBuilder` is centered on one `NodeOptions` value that carries optional keys and optional placement metadata.
+    - [x] The old `keyed_*` / `*_with_policy` builder matrix was collapsed into one default insertion method plus one `*_with(NodeOptions, ...)` overload per structural concept.
+- [x] Reworked retained execution around explicit layout and interaction generations.
+    - [x] Retained traversal now runs a layout pass and a `Widget::run` pass, reusing cached geometry instead of advancing layout while rendering.
+    - [x] `WidgetTreeCache` stores layout and interaction separately across previous/current generations.
+    - [x] The temporary runtime adapter tree was removed; retained traversal now walks `WidgetTreeNode` values directly.
+- [x] Tightened the widget/runtime contract compared to v0.5.
+    - [x] Widgets now implement `measure` + `run`; the intermediate `reconcile` / frame-commit design was removed.
+    - [x] Persistent widget state stays inside the widget handle and mutates during `run`.
+    - [x] Pointer-derived widget IDs remain the source of focus, hover, and result lookup, with `widget_id_of` and `widget_id_of_handle` as the public helpers.
+- [x] Made committed retained results the strict public business-logic contract.
+    - [x] Per-frame widget results are recorded internally by widget ID and published as the previous frame's committed generation.
+    - [x] `Context::committed_results()` is the public app-facing results API, including `FrameResultGeneration::state_of_handle`.
+    - [x] Current-frame results stay internal; `FrameResults` and `current_results()` are no longer part of the public surface.
+- [x] Migrated shipped UI and supporting widgets to the retained-only model.
+    - [x] `examples/simple`, `examples/calculator`, `examples/demo-full`, and `FileDialogState` now build retained trees and react through committed results.
+    - [x] Retained display widgets such as `TextBlock` replaced callback-only display glue.
+    - [x] Demo/file-dialog lists now reuse persistent `ListItem` state instead of rebuilding transient labels every frame.
+- [x] Hardened retained interaction, layout, and renderer integration.
+    - [x] Mouse input delivered to widgets and custom render callbacks is localized to the widget rectangle.
+    - [x] Root windows and nested panels now share the retained scrollbar/clip/resize ordering needed for correct scrolling and bottom-right resize behavior.
+    - [x] Weight-based sizing, directional stacks, wrapped text blocks, retained custom rendering, and the glow/vulkan/wgpu example backends were all kept aligned with the retained execution path.
 
 ### Version 0.5
 - [x] Widget identity moved fully to pointer-based IDs.
