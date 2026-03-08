@@ -245,6 +245,24 @@ impl RowFlow {
             }
         }
     }
+
+    fn weight_reference_space(policies: &[SizePolicy], default_size: i32, total_space: i32) -> i32 {
+        if policies.iter().any(|policy| matches!(policy, SizePolicy::Remainder(_))) {
+            return total_space.max(0);
+        }
+
+        let reserved = policies
+            .iter()
+            .map(|policy| match *policy {
+                SizePolicy::Auto => default_size.max(0),
+                SizePolicy::Fixed(value) => value.max(0),
+                SizePolicy::Weight(_) => 0,
+                SizePolicy::Remainder(_) => 0,
+            })
+            .sum::<i32>();
+
+        total_space.saturating_sub(reserved).max(0)
+    }
 }
 
 impl LayoutFlow for RowFlow {
@@ -271,6 +289,11 @@ impl LayoutFlow for RowFlow {
         let row_spacing = ctx.spacing.saturating_mul(slot_count.saturating_sub(1));
         let row_reference_width = scope.body.width.saturating_sub(scope.indent).saturating_sub(row_spacing);
         let row_width_weight = SizePolicy::total_weight(&self.widths);
+        let row_weight_reference_width = if row_width_weight.is_some() {
+            Self::weight_reference_space(&self.widths, ctx.default_width, row_reference_width)
+        } else {
+            row_reference_width
+        };
         let row_reference_height = match row_count_hint {
             Some(row_count) => scope.body.height.saturating_sub(ctx.spacing.saturating_mul(row_count.saturating_sub(1))),
             None => scope.body.height,
@@ -283,7 +306,7 @@ impl LayoutFlow for RowFlow {
         // Resolve dimensions from policy + remaining space inside scope bounds.
         let available_width = scope.body.width.saturating_sub(x);
         let available_height = scope.body.height.saturating_sub(y);
-        let width = width_policy.resolve_with_reference(ctx.default_width, available_width, row_reference_width, row_width_weight);
+        let width = width_policy.resolve_with_reference(ctx.default_width, available_width, row_weight_reference_width, row_width_weight);
         let height = height_policy.resolve_with_reference(ctx.default_height, available_height, row_reference_height, row_height_weight);
 
         self.item_index = self.item_index.saturating_add(1);
@@ -748,6 +771,43 @@ mod tests {
         assert_eq!(c.width, expected);
         assert_eq!(d.width, expected);
         assert_eq!(d.x + d.width, body.x + body.width);
+    }
+
+    #[test]
+    fn row_weight_uses_space_left_after_fixed_tracks() {
+        let mut layout = LayoutManager::default();
+        layout.style = Style::default();
+        let body = rect(0, 0, 240, 80);
+        layout.reset(body, vec2(0, 0));
+        layout.set_default_cell_height(10);
+        layout.row(
+            &[
+                SizePolicy::Fixed(80),
+                SizePolicy::Weight(1.0),
+                SizePolicy::Weight(1.0),
+                SizePolicy::Weight(1.0),
+                SizePolicy::Weight(1.0),
+                SizePolicy::Weight(1.0),
+            ],
+            SizePolicy::Fixed(10),
+        );
+
+        let label = layout.next();
+        let a = layout.next();
+        let b = layout.next();
+        let c = layout.next();
+        let d = layout.next();
+        let swatch = layout.next();
+        let spacing = layout.style.spacing;
+        let expected = (body.width - label.width - spacing * 5) / 5;
+
+        assert_eq!(label.width, 80);
+        assert_eq!(a.width, expected);
+        assert_eq!(b.width, expected);
+        assert_eq!(c.width, expected);
+        assert_eq!(d.width, expected);
+        assert_eq!(swatch.width, expected);
+        assert_eq!(swatch.x + swatch.width, body.x + body.width);
     }
 
     #[test]

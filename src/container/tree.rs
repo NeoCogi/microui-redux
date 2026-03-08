@@ -110,22 +110,23 @@ impl Container {
         self.node_scope(results, state, true, f)
     }
 
-    fn run_tree_nodes(&mut self, results: &mut FrameResults, nodes: &[RuntimeTreeNode<'_>]) {
+    fn run_tree_nodes(&mut self, results: &mut FrameResults, nodes: &[WidgetTreeNode]) {
         for node in nodes {
             self.run_tree_node(results, node);
         }
     }
 
-    fn pre_handle_tree_nodes(&mut self, nodes: &[RuntimeTreeNode<'_>]) {
+    fn pre_handle_tree_nodes(&mut self, nodes: &[WidgetTreeNode]) {
         for node in nodes {
             self.pre_handle_tree_node(node);
         }
     }
 
-    fn pre_handle_tree_node(&mut self, node: &RuntimeTreeNode<'_>) {
-        match node.kind() {
-            RuntimeTreeNodeKind::Header { state } | RuntimeTreeNodeKind::Tree { state } => {
-                if self.cached_tree_click(node.id()) {
+    fn pre_handle_tree_node(&mut self, node: &WidgetTreeNode) {
+        let (node_id, kind, children) = node.parts();
+        match kind {
+            WidgetTreeNodeKind::Header { state } | WidgetTreeNodeKind::Tree { state } => {
+                if self.cached_tree_click(node_id) {
                     let mut state = state.borrow_mut();
                     state.state = if state.state.is_expanded() {
                         NodeStateValue::Closed
@@ -134,19 +135,19 @@ impl Container {
                     };
                 }
                 if state.borrow().state.is_expanded() {
-                    self.pre_handle_tree_nodes(node.children());
+                    self.pre_handle_tree_nodes(children);
                 }
             }
-            RuntimeTreeNodeKind::Container { handle, .. } => {
+            WidgetTreeNodeKind::Container { handle, .. } => {
                 let mut handle = handle.clone();
                 handle.with_mut(|container| {
-                    container.pre_handle_tree_nodes(node.children());
+                    container.pre_handle_tree_nodes(children);
                 });
             }
-            RuntimeTreeNodeKind::Row { .. } | RuntimeTreeNodeKind::Grid { .. } | RuntimeTreeNodeKind::Column | RuntimeTreeNodeKind::Stack { .. } => {
-                self.pre_handle_tree_nodes(node.children())
+            WidgetTreeNodeKind::Row { .. } | WidgetTreeNodeKind::Grid { .. } | WidgetTreeNodeKind::Column | WidgetTreeNodeKind::Stack { .. } => {
+                self.pre_handle_tree_nodes(children)
             }
-            RuntimeTreeNodeKind::Widget { .. } | RuntimeTreeNodeKind::CustomRender { .. } => {}
+            WidgetTreeNodeKind::Widget { .. } | WidgetTreeNodeKind::CustomRender { .. } => {}
         }
     }
 
@@ -166,7 +167,7 @@ impl Container {
         self.tree_cache.record_interaction(node_id, interaction);
     }
 
-    fn record_tree_group_from_children(&mut self, node_id: NodeId, children: &[RuntimeTreeNode<'_>]) {
+    fn record_tree_group_from_children(&mut self, node_id: NodeId, children: &[WidgetTreeNode]) {
         let mut bounds: Option<Recti> = None;
         for child in children {
             if let Some(child_state) = self.tree_cache.current_layout(child.id()) {
@@ -259,69 +260,69 @@ impl Container {
         stable_state
     }
 
-    fn run_tree_node(&mut self, results: &mut FrameResults, node: &RuntimeTreeNode<'_>) {
-        match node.kind() {
-            RuntimeTreeNodeKind::Widget { widget } => {
-                self.handle_tree_widget(results, node.id(), *widget);
+    fn run_tree_node(&mut self, results: &mut FrameResults, node: &WidgetTreeNode) {
+        let (node_id, kind, children) = node.parts();
+        match kind {
+            WidgetTreeNodeKind::Widget { widget } => {
+                self.handle_tree_widget(results, node_id, &**widget);
             }
-            RuntimeTreeNodeKind::CustomRender { state, render } => {
-                self.handle_tree_custom_render(results, node.id(), state, render);
+            WidgetTreeNodeKind::CustomRender { state, render } => {
+                self.handle_tree_custom_render(results, node_id, state, render);
             }
-            RuntimeTreeNodeKind::Container { handle, opt, behaviour } => {
+            WidgetTreeNodeKind::Container { handle, opt, behaviour } => {
                 let mut handle = handle.clone();
                 self.begin_panel(&mut handle, *opt, *behaviour);
                 handle.with_mut(|container| {
-                    container.run_tree_nodes(results, node.children());
+                    container.run_tree_nodes(results, children);
                 });
                 self.end_panel(&mut handle);
                 let (rect, body, content_size) = handle.with(|container| (container.rect(), container.body(), container.content_size()));
-                self.record_tree_layout(node.id(), NodeLayout::new(rect, body, content_size));
+                self.record_tree_layout(node_id, NodeLayout::new(rect, body, content_size));
             }
-            RuntimeTreeNodeKind::Header { state } => {
-                if self.run_tree_node_scope(results, node.id(), state).is_expanded() {
-                    self.run_tree_nodes(results, node.children());
+            WidgetTreeNodeKind::Header { state } => {
+                if self.run_tree_node_scope(results, node_id, state).is_expanded() {
+                    self.run_tree_nodes(results, children);
                 }
             }
-            RuntimeTreeNodeKind::Tree { state } => {
-                if self.run_tree_node_scope(results, node.id(), state).is_expanded() {
+            WidgetTreeNodeKind::Tree { state } => {
+                if self.run_tree_node_scope(results, node_id, state).is_expanded() {
                     let indent_size = self.style.as_ref().indent;
                     self.layout.adjust_indent(indent_size);
-                    self.run_tree_nodes(results, node.children());
+                    self.run_tree_nodes(results, children);
                     self.layout.adjust_indent(-indent_size);
                 }
             }
-            RuntimeTreeNodeKind::Row { widths, height } => {
+            WidgetTreeNodeKind::Row { widths, height } => {
                 self.with_row(widths, *height, |container| {
-                    container.run_tree_nodes(results, node.children());
+                    container.run_tree_nodes(results, children);
                 });
-                self.record_tree_group_from_children(node.id(), node.children());
+                self.record_tree_group_from_children(node_id, children);
             }
-            RuntimeTreeNodeKind::Grid { widths, heights } => {
+            WidgetTreeNodeKind::Grid { widths, heights } => {
                 self.with_grid(widths, heights, |container| {
-                    container.run_tree_nodes(results, node.children());
+                    container.run_tree_nodes(results, children);
                 });
-                self.record_tree_group_from_children(node.id(), node.children());
+                self.record_tree_group_from_children(node_id, children);
             }
-            RuntimeTreeNodeKind::Column => {
+            WidgetTreeNodeKind::Column => {
                 self.column(|container| {
-                    container.run_tree_nodes(results, node.children());
+                    container.run_tree_nodes(results, children);
                 });
-                self.record_tree_group_from_children(node.id(), node.children());
+                self.record_tree_group_from_children(node_id, children);
             }
-            RuntimeTreeNodeKind::Stack { width, height, direction } => {
+            WidgetTreeNodeKind::Stack { width, height, direction } => {
                 self.stack_with_width_direction(*width, *height, *direction, |container| {
-                    container.run_tree_nodes(results, node.children());
+                    container.run_tree_nodes(results, children);
                 });
-                self.record_tree_group_from_children(node.id(), node.children());
+                self.record_tree_group_from_children(node_id, children);
             }
         }
     }
 
     /// Evaluates a prebuilt widget tree using the current container layout.
     pub fn widget_tree(&mut self, results: &mut FrameResults, tree: &WidgetTree) {
-        let runtime_roots = tree.runtime_roots();
-        self.pre_handle_tree_nodes(&runtime_roots);
-        self.run_tree_nodes(results, &runtime_roots);
+        self.pre_handle_tree_nodes(tree.roots());
+        self.run_tree_nodes(results, tree.roots());
     }
 
     /// Builds a widget tree and evaluates it immediately.

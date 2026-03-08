@@ -29,10 +29,10 @@
 //
 // The retained widget tree owns the long-lived UI structure. Composite nodes
 // such as headers, tree nodes, and embedded containers store their child lists
-// here and keep stable NodeIds across frames. Each frame the container derives
-// a short-lived runtime tree from these retained nodes, uses the previous-frame
-// cache for structural pre-handle, then traverses the runtime tree through the
-// normal layout and widget paths. Layout and interaction are cached in separate
+// here and keep stable NodeIds across frames. Each frame the container uses the
+// previous-frame cache for structural pre-handle, then traverses the retained
+// nodes directly through the normal layout and widget paths. Layout and
+// interaction are cached in separate
 // generations so previous-frame geometry can be consulted without conflating it
 // with current-frame widget results.
 
@@ -40,7 +40,6 @@ mod builder;
 mod cache;
 mod node;
 mod retained;
-mod runtime;
 
 pub use builder::WidgetTreeBuilder;
 pub use cache::{NodeFrameState, NodeInteraction, NodeLayout, WidgetTreeCache};
@@ -49,7 +48,6 @@ pub use retained::{widget_handle, WidgetHandle};
 
 pub(crate) use node::WidgetTreeNodeKind;
 pub(crate) use retained::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
-pub(crate) use runtime::{RuntimeTreeNode, RuntimeTreeNodeKind};
 
 #[cfg(test)]
 mod tests {

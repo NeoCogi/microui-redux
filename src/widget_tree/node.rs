@@ -38,7 +38,7 @@ use crate::{
 
 use super::{TreeCustomRender, WidgetHandle, WidgetStateHandleDyn};
 
-/// Stable identifier assigned to a retained or runtime node.
+/// Stable identifier assigned to a retained node.
 pub type NodeId = Id;
 
 /// Placement policy metadata attached to a retained node.
