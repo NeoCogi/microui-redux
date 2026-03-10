@@ -63,7 +63,7 @@ use common::wgpu_renderer::{CustomRenderArea, MeshBuffers, MeshSubmission, MeshV
 #[cfg(feature = "builder")]
 use microui_redux::builder;
 use microui_redux::*;
-use rand::{rng, Rng};
+use rand::{RngExt, rng};
 use std::{
     cell::RefCell,
     f32::consts::PI,

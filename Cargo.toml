@@ -42,17 +42,17 @@ bitflags = "2.4.1"
 rs-math3d = "0.10"
 png = { version = "0.18", optional = true }
 sdl2 = { version = "0.38", features = ["raw-window-handle"], optional = true }
-glow = { version = "0.16", optional = true }
+glow = { version = "0.17", optional = true }
 ash = { version = "0.38", default-features = false, features = [
     "linked",
 ], optional = true }
 ash-window-handle = { package = "ash-window", version = "0.13", optional = true }
 raw-window-handle = { version = "0.6", optional = true }
-wgpu = { version = "0.20", optional = true }
+wgpu = { version = "28", optional = true }
 pollster = { version = "0.4", optional = true }
 
 [dev-dependencies]
-rand = "0.9"
+rand = "0.10"
 
 [[bin]]
 name = "atlas_export"
