@@ -226,14 +226,14 @@ impl WgpuRenderer {
         if let Some(bytes) = pixels {
             // Upload initial texel payload when provided; atlas bootstrap uses None then sync.
             queue.write_texture(
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: &texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
                 bytes,
-                wgpu::ImageDataLayout {
+                wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(width.saturating_mul(4)),
                     rows_per_image: Some(height),
@@ -289,14 +289,14 @@ impl WgpuRenderer {
             // Atlas stores `Color`; reinterpret as packed RGBA bytes for write_texture.
             let pixel_slice: &[u8] = unsafe { slice::from_raw_parts(pixel_ptr, pixels.len() * 4) };
             self.queue.write_texture(
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: &self.atlas_texture._texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
                 pixel_slice,
-                wgpu::ImageDataLayout {
+                wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some((width as u32).saturating_mul(4)),
                     rows_per_image: Some(height as u32),
@@ -422,14 +422,14 @@ impl WgpuRenderer {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("microui.pipeline_layout"),
             bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -437,7 +437,7 @@ impl WgpuRenderer {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: mem::size_of::<GpuVertex>() as u64,
@@ -463,7 +463,7 @@ impl WgpuRenderer {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
@@ -486,7 +486,8 @@ impl WgpuRenderer {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
+            multiview_mask: None,
+            cache: None,
         });
 
         (pipeline, bind_group_layout, sampler)
@@ -519,16 +520,16 @@ impl WgpuRenderer {
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
         }))
-        .ok_or_else(|| "failed to request wgpu adapter".to_string())?;
+        .map_err(|err| format!("failed to request wgpu adapter: {err}"))?;
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("microui.wgpu.device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-            },
-            None,
-        ))
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("microui.wgpu.device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            memory_hints: wgpu::MemoryHints::Performance,
+            trace: wgpu::Trace::Off,
+        }))
         .map_err(|err| format!("failed to request wgpu device: {err}"))?;
 
         // Surface configuration defines the swapchain textures wgpu will present into.
@@ -765,6 +766,10 @@ impl Renderer for WgpuRenderer {
                 // Skip frame on transient timeout.
                 return;
             }
+            Err(wgpu::SurfaceError::Other) => {
+                eprintln!("[microui-redux][wgpu] surface returned an unspecified error");
+                return;
+            }
             Err(wgpu::SurfaceError::OutOfMemory) => {
                 eprintln!("[microui-redux][wgpu] surface out of memory");
                 return;
@@ -851,6 +856,7 @@ impl Renderer for WgpuRenderer {
                 label: Some("microui.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -865,6 +871,7 @@ impl Renderer for WgpuRenderer {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_scissor_rect(0, 0, self.config.width, self.config.height);
