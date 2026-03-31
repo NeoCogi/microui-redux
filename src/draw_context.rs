@@ -51,6 +51,7 @@
 // IN THE SOFTWARE.
 //
 use crate::*;
+use crate::graphics::{clip_relation, intersect_clip_rect};
 use std::cmp::{max, min};
 use std::rc::Rc;
 
@@ -80,7 +81,7 @@ impl<'a> DrawCtx<'a> {
 
     pub(crate) fn push_clip_rect(&mut self, rect: Recti) {
         let last = self.current_clip_rect();
-        self.clip_stack.push(rect.intersect(&last).unwrap_or_default());
+        self.clip_stack.push(intersect_clip_rect(last, rect));
     }
 
     pub(crate) fn pop_clip_rect(&mut self) {
@@ -96,14 +97,7 @@ impl<'a> DrawCtx<'a> {
     }
 
     pub(crate) fn check_clip(&self, r: Recti) -> Clip {
-        let cr = self.current_clip_rect();
-        if r.x > cr.x + cr.width || r.x + r.width < cr.x || r.y > cr.y + cr.height || r.y + r.height < cr.y {
-            return Clip::All;
-        }
-        if r.x >= cr.x && r.x + r.width <= cr.x + cr.width && r.y >= cr.y && r.y + r.height <= cr.y + cr.height {
-            return Clip::None;
-        }
-        Clip::Part
+        clip_relation(r, self.current_clip_rect())
     }
 
     pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {

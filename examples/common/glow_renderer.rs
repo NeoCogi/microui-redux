@@ -375,6 +375,27 @@ impl Renderer for GLRenderer {
         }
     }
 
+    /// Appends one triangle to the normal indexed UI batch, flushing first if the `u16` budget
+    /// would overflow.
+    fn push_triangle_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex) {
+        if self.verts.len() + 3 >= 65536 || self.indices.len() + 3 >= 65536 {
+            self.flush();
+        }
+
+        let is = self.verts.len() as u16;
+        self.indices.push(is + 0);
+        self.indices.push(is + 1);
+        self.indices.push(is + 2);
+
+        self.verts.push(*v0);
+        self.verts.push(*v1);
+        self.verts.push(*v2);
+
+        if self.last_update_id != self.atlas.get_last_update_id() {
+            self.flush()
+        }
+    }
+
     /// Starts a new GL frame by clearing the backbuffer and updating cached size.
     fn begin(&mut self, width: i32, height: i32, clr: Color) {
         self.width = width as u32;
@@ -498,8 +519,13 @@ impl GLRenderer {
         cmd.record(&self.gl, (self.width, self.height), &area);
     }
 
-    /// Draws arbitrary colored triangles by sampling a white atlas texel and modulating by vertex color.
+    /// Draws arbitrary colored triangles while preserving the clip rectangle carried by `area`.
     pub fn enqueue_colored_vertices(&mut self, area: CustomRenderArea, vertices: Vec<Vertex>) {
+        self.draw_colored_vertices(area.clip, vertices.as_slice());
+    }
+
+    /// Draws arbitrary colored triangles by sampling a white atlas texel and modulating by vertex color.
+    fn draw_colored_vertices(&mut self, clip: Recti, vertices: &[Vertex]) {
         if vertices.is_empty() {
             return;
         }
@@ -507,7 +533,7 @@ impl GLRenderer {
         let gl = &self.gl;
         unsafe {
             gl.viewport(0, 0, self.width as i32, self.height as i32);
-            if let Some((sx, sy, sw, sh)) = self.scissor_from_ui(area.clip) {
+            if let Some((sx, sy, sw, sh)) = self.scissor_from_ui(clip) {
                 // Custom colored draws still respect the logical UI clip rectangle.
                 gl.scissor(sx, sy, sw, sh);
             }
@@ -638,7 +664,7 @@ impl GLRenderer {
             verts.extend_from_slice(&tri.verts);
         }
 
-        self.enqueue_colored_vertices(_area, verts);
+        self.draw_colored_vertices(_area.clip, verts.as_slice());
     }
 }
 

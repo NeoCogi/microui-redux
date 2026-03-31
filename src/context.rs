@@ -113,8 +113,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        container::Command, widget::widget_id_of_handle, widget_handle, AtlasHandle, AtlasSource, CharEntry, ControlState, FontEntry, ResourceState, SourceFormat,
-        TextBlock, Widget, WidgetCtx, WidgetOption, WidgetTreeBuilder,
+        container::Command, widget::widget_id_of_handle, widget_handle, AtlasHandle, AtlasSource, CharEntry, ControlState, FontEntry, ResourceState,
+        SourceFormat, TextBlock, Widget, WidgetCtx, WidgetOption, WidgetTreeBuilder,
     };
 
     const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
@@ -129,6 +129,7 @@ mod tests {
         }
         fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
         fn push_quad_vertices(&mut self, _v0: &crate::canvas::Vertex, _v1: &crate::canvas::Vertex, _v2: &crate::canvas::Vertex, _v3: &crate::canvas::Vertex) {}
+        fn push_triangle_vertices(&mut self, _v0: &crate::canvas::Vertex, _v1: &crate::canvas::Vertex, _v2: &crate::canvas::Vertex) {}
         fn flush(&mut self) {}
         fn end(&mut self) {}
         fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) {}

@@ -66,6 +66,8 @@ pub trait Renderer {
     fn begin(&mut self, width: i32, height: i32, clr: Color);
     /// Pushes four vertices representing a quad to the backend.
     fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex);
+    /// Pushes one triangle into the backend's current UI batch.
+    fn push_triangle_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex);
     /// Flushes any buffered geometry to the GPU.
     fn flush(&mut self);
     /// Ends the frame, finalizing any outstanding GPU work.
