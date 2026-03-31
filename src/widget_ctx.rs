@@ -89,6 +89,10 @@ impl<'a> WidgetCtx<'a> {
         Recti::new(rect.x - self.rect.x, rect.y - self.rect.y, rect.width, rect.height)
     }
 
+    fn local_pos_for(&self, pos: Vec2i) -> Vec2i {
+        pos - Vec2i::new(self.rect.x, self.rect.y)
+    }
+
     /// Creates a widget context for the given widget ID and rectangle.
     pub(crate) fn new(
         id: WidgetId,
@@ -165,15 +169,32 @@ impl<'a> WidgetCtx<'a> {
     /// Executes `f` with a widget-local 2D graphics builder.
     ///
     /// Geometry passed through this API uses coordinates relative to the current widget's top-left
-    /// corner instead of container space. The builder owns its own local clip stack, translates
-    /// vertices into screen space once while recording, and flushes its retained triangle batches
-    /// automatically when the closure returns.
+    /// corner instead of container space. The builder forwards widget-local clips onto the shared
+    /// draw-context clip stack, translates vertices into screen space once while recording, and
+    /// flushes its retained triangle batches automatically when the closure returns.
     pub fn graphics<F>(&mut self, f: F)
     where
         F: FnOnce(&mut Graphics<'_, 'a>),
     {
-        let mut graphics = Graphics::new(&mut self.draw, self.rect);
+        let mut graphics = self.begin_graphics();
         f(&mut graphics);
+    }
+
+    /// Returns a widget-local graphics builder whose clip root is the widget rect itself.
+    ///
+    /// Use this for custom widget-local geometry. The builder starts clipped to the visible part
+    /// of the widget, so local clips can only reduce visibility further.
+    pub fn begin_graphics(&mut self) -> Graphics<'_, 'a> {
+        Graphics::new(&mut self.draw, self.rect)
+    }
+
+    // Internal widget paint helpers need local coordinates but must preserve the legacy draw
+    // semantics where borders may extend a pixel beyond the widget rect. Starting the graphics
+    // builder from the current container clip instead of the widget rect keeps that behavior while
+    // still routing paint through `Graphics`.
+    fn begin_widget_paint(&mut self) -> Graphics<'_, 'a> {
+        let clip_root = self.draw.current_clip_rect();
+        Graphics::new_with_clip_root(&mut self.draw, self.rect, clip_root)
     }
 
     fn current_clip_rect(&self) -> Recti {
@@ -199,40 +220,58 @@ impl<'a> WidgetCtx<'a> {
     }
 
     pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
-        self.draw.draw_rect(rect, color);
+        let rect = self.local_rect_for(rect);
+        let mut graphics = self.begin_widget_paint();
+        graphics.draw_rect(rect, color);
     }
 
     /// Draws a 1-pixel box outline using the supplied color.
     pub fn draw_box(&mut self, r: Recti, color: Color) {
-        self.draw.draw_box(r, color);
+        let rect = self.local_rect_for(r);
+        let mut graphics = self.begin_widget_paint();
+        graphics.draw_box(rect, color);
     }
 
     pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
-        self.draw.draw_text(font, text, pos, color);
+        let pos = self.local_pos_for(pos);
+        let mut graphics = self.begin_widget_paint();
+        graphics.draw_text(font, text, pos, color);
     }
 
     pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
-        self.draw.draw_icon(id, rect, color);
+        let rect = self.local_rect_for(rect);
+        let mut graphics = self.begin_widget_paint();
+        graphics.draw_icon(id, rect, color);
     }
 
     pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
-        self.draw.push_image(image, rect, color);
+        let rect = self.local_rect_for(rect);
+        let mut graphics = self.begin_widget_paint();
+        graphics.draw_image(image, rect, color);
     }
 
     pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        self.draw.draw_slot_with_function(id, rect, color, f);
+        let rect = self.local_rect_for(rect);
+        let mut graphics = self.begin_widget_paint();
+        graphics.draw_slot_with_function(id, rect, color, f);
     }
 
     pub(crate) fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
-        self.draw.draw_frame(rect, colorid);
+        let rect = self.local_rect_for(rect);
+        let mut graphics = self.begin_widget_paint();
+        graphics.draw_frame(rect, colorid);
     }
 
     pub(crate) fn draw_widget_frame(&mut self, control: &ControlState, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        self.draw.draw_widget_frame(control.focused, control.hovered, rect, colorid, opt);
+        let rect = self.local_rect_for(rect);
+        let mut graphics = self.begin_widget_paint();
+        graphics.draw_widget_frame(control.focused, control.hovered, rect, colorid, opt);
     }
 
     pub(crate) fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        self.draw.draw_control_text(text, rect, colorid, opt);
+        let rect = self.local_rect_for(rect);
+        let mut graphics = self.begin_widget_paint();
+        graphics.draw_control_text(text, rect, colorid, opt);
     }
 
     pub(crate) fn mouse_over(&self, rect: Recti) -> bool {
