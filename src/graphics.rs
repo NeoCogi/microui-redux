@@ -33,7 +33,7 @@
 //! The rest of the UI draw path is largely rectangle-oriented and mostly works in container
 //! coordinates. This module adds a dedicated widget-local geometry builder that:
 //! - accepts points relative to the current widget origin,
-//! - keeps its own widget-local clip stack,
+//! - forwards widget-local clips onto the shared draw-context clip stack,
 //! - clips tessellated triangles against the current widget-local clip rect in software,
 //! - emits already-clipped retained triangle commands that do not depend on backend scissor state.
 //!
@@ -42,33 +42,12 @@
 //! larger triangle batch even if it uses nested local clip scopes internally.
 
 use crate::container::Command;
-use crate::draw_context::DrawCtx;
+use crate::draw_context::{control_text_position, intersect_clip_rect, DrawCtx};
 use crate::*;
+use std::rc::Rc;
 
 const GEOM_EPS: f32 = 1.0e-5;
 const GEOM_EPS_SQ: f32 = GEOM_EPS * GEOM_EPS;
-
-/// Returns the intersection of `rect` with `limit`, defaulting to an empty rect when disjoint.
-pub(crate) fn intersect_clip_rect(limit: Recti, rect: Recti) -> Recti {
-    rect.intersect(&limit).unwrap_or_default()
-}
-
-/// Returns whether `bounds` is fully visible, partially visible, or fully outside `clip`.
-pub(crate) fn clip_relation(bounds: Recti, clip: Recti) -> Clip {
-    if bounds.width <= 0 || bounds.height <= 0 || clip.width <= 0 || clip.height <= 0 {
-        return Clip::All;
-    }
-
-    if bounds.x > clip.x + clip.width || bounds.x + bounds.width < clip.x || bounds.y > clip.y + clip.height || bounds.y + bounds.height < clip.y {
-        return Clip::All;
-    }
-
-    if bounds.x >= clip.x && bounds.x + bounds.width <= clip.x + clip.width && bounds.y >= clip.y && bounds.y + bounds.height <= clip.y + clip.height {
-        return Clip::None;
-    }
-
-    Clip::Part
-}
 
 // Applies an integer translation without changing extents. Geometry code uses this to hop
 // between widget-local and screen-space rectangles while keeping clip math reusable.
@@ -391,9 +370,9 @@ where
 ///
 /// Coordinates passed to this builder are local to the widget rectangle that created it:
 /// `(0, 0)` is the widget's top-left corner, while `(width, height)` is the bottom-right corner.
-/// Nested clips are also widget-local and are always intersected with the current clip stack, so a
-/// widget-local clip can only reduce visibility and can never expand beyond the area the widget
-/// already owns.
+/// Nested clips are also widget-local and are pushed onto the shared draw-context clip stack after
+/// being translated into screen space, so a widget-local clip can only reduce visibility and can
+/// never expand beyond the area the widget already owns.
 ///
 /// The builder tessellates higher-level shapes into triangles immediately and software-clips every
 /// triangle against the current widget-local clip rectangle before storing it. Because the emitted
@@ -404,17 +383,24 @@ pub struct Graphics<'a, 'b> {
     widget_rect: Recti,
     widget_origin: Vec2f,
     white_uv: Vec2f,
-    clip_stack: Vec<Recti>,
+    clip_base_depth: usize,
     vertices: Vec<Vertex>,
 }
 
 impl<'a, 'b> Graphics<'a, 'b> {
     pub(crate) fn new(draw: &'a mut DrawCtx<'b>, widget_rect: Recti) -> Self {
-        // The graphics builder starts with the widget's currently visible area, not the full widget
-        // bounds. That keeps local clips monotonic and avoids recording geometry into areas the
-        // outer draw pipeline has already clipped away.
-        let visible_screen = intersect_clip_rect(draw.current_clip_rect(), widget_rect);
-        let local_base = translate_rect(visible_screen, Vec2i::new(-widget_rect.x, -widget_rect.y));
+        Self::new_with_clip_root(draw, widget_rect, widget_rect)
+    }
+
+    // Public widget-local graphics keep their clip root inside the widget bounds. Internal widget
+    // paint adapters can supply a wider clip root to preserve legacy frame overflow behavior while
+    // still reusing the same local-coordinate drawing code.
+    pub(crate) fn new_with_clip_root(draw: &'a mut DrawCtx<'b>, widget_rect: Recti, clip_root: Recti) -> Self {
+        // The builder records how deep the shared clip stack was before it started, then pushes one
+        // root clip in screen space. All later widget-local clip changes are translated onto that
+        // same stack, and drop restores the previous depth so the outer traversal state is intact.
+        let clip_base_depth = draw.clip_depth();
+        draw.push_clip_rect(clip_root);
         let white_rect = draw.atlas().get_icon_rect(WHITE_ICON);
         let atlas_dim = draw.atlas().get_texture_dimension();
         let white_uv = Vec2f::new(
@@ -427,7 +413,7 @@ impl<'a, 'b> Graphics<'a, 'b> {
             widget_rect,
             widget_origin: Vec2f::new(widget_rect.x as f32, widget_rect.y as f32),
             white_uv,
-            clip_stack: vec![local_base],
+            clip_base_depth,
             vertices: Vec::with_capacity(96),
         }
     }
@@ -442,19 +428,19 @@ impl<'a, 'b> Graphics<'a, 'b> {
 
     /// Returns the current widget-local clip rectangle.
     ///
-    /// The returned rect is already intersected with the widget rect and all earlier clip scopes,
-    /// so callers can treat it as the maximum visible area available to subsequent geometry.
+    /// The returned rect is derived from the shared draw-context clip stack. It is therefore
+    /// already intersected with the widget root and all earlier local clip scopes.
     pub fn current_clip_rect(&self) -> Recti {
-        self.clip_stack.last().copied().unwrap_or_default()
+        self.screen_to_local_rect(self.draw.current_clip_rect())
     }
 
     /// Narrows the current clip by intersecting it with `rect`.
     ///
-    /// The clip is expressed in widget-local coordinates. The new clip becomes the top of the
-    /// local clip stack and can never expand past the current clip.
+    /// The clip is expressed in widget-local coordinates, translated into screen space, and pushed
+    /// onto the shared draw-context stack. Because `DrawCtx::push_clip_rect` intersects against
+    /// the current top, this can never expand the visible area.
     pub fn push_clip_rect(&mut self, rect: Recti) {
-        let clip = intersect_clip_rect(self.current_clip_rect(), rect);
-        self.clip_stack.push(clip);
+        self.draw.push_clip_rect(self.local_to_screen_rect(rect));
     }
 
     /// Replaces the current clip with an intersection against `rect`.
@@ -462,18 +448,14 @@ impl<'a, 'b> Graphics<'a, 'b> {
     /// Unlike `push_clip_rect`, this keeps the current stack depth. The replacement is still
     /// monotonic: it intersects with the existing top clip instead of replacing it wholesale.
     pub fn set_clip_rect(&mut self, rect: Recti) {
-        let clip = intersect_clip_rect(self.current_clip_rect(), rect);
-        if let Some(top) = self.clip_stack.last_mut() {
-            *top = clip;
-        } else {
-            self.clip_stack.push(clip);
-        }
+        let clip = intersect_clip_rect(self.draw.current_clip_rect(), self.local_to_screen_rect(rect));
+        self.draw.replace_current_clip_rect(clip);
     }
 
     /// Restores the previous widget-local clip rectangle.
     pub fn pop_clip_rect(&mut self) {
-        if self.clip_stack.len() > 1 {
-            self.clip_stack.pop();
+        if self.draw.clip_depth() > self.clip_base_depth + 1 {
+            self.draw.pop_clip_rect();
         }
     }
 
@@ -481,6 +463,119 @@ impl<'a, 'b> Graphics<'a, 'b> {
     pub fn with_clip<F: FnOnce(&mut Self)>(&mut self, rect: Recti, f: F) {
         self.push_clip_rect(rect);
         f(self);
+        self.pop_clip_rect();
+    }
+
+    /// Fills a solid axis-aligned rectangle in widget-local coordinates.
+    ///
+    /// Rectangles are routed through the same triangle path as every other filled primitive so the
+    /// widget paint stack only has one geometry implementation to maintain.
+    pub fn draw_rect(&mut self, rect: Recti, color: Color) {
+        if rect.width <= 0 || rect.height <= 0 || color.a == 0 {
+            return;
+        }
+
+        let x0 = rect.x as f32;
+        let y0 = rect.y as f32;
+        let x1 = (rect.x + rect.width) as f32;
+        let y1 = (rect.y + rect.height) as f32;
+        self.push_quad_local(Vec2f::new(x0, y0), Vec2f::new(x1, y0), Vec2f::new(x1, y1), Vec2f::new(x0, y1), color);
+    }
+
+    /// Draws a 1-pixel outline around `rect`.
+    ///
+    /// The outline is decomposed into four filled edge rectangles so it stays on the same clipped
+    /// triangle path as every other solid primitive.
+    pub fn draw_box(&mut self, rect: Recti, color: Color) {
+        self.draw_rect(Recti::new(rect.x + 1, rect.y, rect.width - 2, 1), color);
+        self.draw_rect(Recti::new(rect.x + 1, rect.y + rect.height - 1, rect.width - 2, 1), color);
+        self.draw_rect(Recti::new(rect.x, rect.y, 1, rect.height), color);
+        self.draw_rect(Recti::new(rect.x + rect.width - 1, rect.y, 1, rect.height), color);
+    }
+
+    /// Draws text using widget-local coordinates for the glyph origin.
+    ///
+    /// Text itself still reuses the existing retained text command, but the graphics builder owns
+    /// the local-to-screen translation and the clip-state wrapping so widgets no longer have to
+    /// decide which paint API to use.
+    pub fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
+        if text.is_empty() || color.a == 0 {
+            return;
+        }
+
+        let size = self.draw.atlas().get_text_size(font, text);
+        let bounds = Recti::new(pos.x, pos.y, size.width, size.height);
+        let screen_pos = self.local_to_screen_pos(pos);
+        let text = text.to_string();
+        self.emit_clipped_command(bounds, |draw| {
+            draw.push_command(Command::Text { text, pos: screen_pos, color, font });
+        });
+    }
+
+    /// Draws one icon rectangle using widget-local coordinates.
+    pub fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
+        let screen_rect = self.local_to_screen_rect(rect);
+        self.emit_clipped_command(rect, |draw| {
+            draw.push_command(Command::Icon { id, rect: screen_rect, color });
+        });
+    }
+
+    /// Draws one image rectangle using widget-local coordinates.
+    pub fn draw_image(&mut self, image: Image, rect: Recti, color: Color) {
+        let screen_rect = self.local_to_screen_rect(rect);
+        self.emit_clipped_command(rect, |draw| {
+            draw.push_command(Command::Image { image, rect: screen_rect, color });
+        });
+    }
+
+    /// Re-renders a slot and then draws it using widget-local coordinates.
+    pub fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
+        let screen_rect = self.local_to_screen_rect(rect);
+        self.emit_clipped_command(rect, |draw| {
+            draw.push_command(Command::SlotRedraw { id, rect: screen_rect, color, payload });
+        });
+    }
+
+    /// Draws one framed control using the current style colors.
+    pub fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
+        let color = self.draw.style().colors[colorid as usize];
+        self.draw_rect(rect, color);
+        if colorid == ControlColor::ScrollBase || colorid == ControlColor::ScrollThumb || colorid == ControlColor::TitleBG {
+            return;
+        }
+
+        let border = self.draw.style().colors[ControlColor::Border as usize];
+        if border.a != 0 {
+            self.draw_box(expand_rect(rect, 1), border);
+        }
+    }
+
+    /// Draws one widget frame using the same focus/hover color promotion as the legacy widget
+    /// helpers.
+    pub fn draw_widget_frame(&mut self, focused: bool, hovered: bool, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
+        if opt.has_no_frame() {
+            return;
+        }
+        if focused {
+            colorid.focus();
+        } else if hovered {
+            colorid.hover();
+        }
+        self.draw_frame(rect, colorid);
+    }
+
+    /// Draws centered or aligned control text inside `rect`.
+    ///
+    /// This reuses the shared control-text positioning helper from `DrawCtx` so widget and
+    /// container labels stay visually identical even though widgets now paint through `Graphics`.
+    pub fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        let (font, color, pos) = {
+            let style = self.draw.style();
+            let atlas = self.draw.atlas();
+            (style.font, style.colors[colorid as usize], control_text_position(style, atlas, text, rect, opt))
+        };
+        self.push_clip_rect(rect);
+        self.draw_text(font, text, pos, color);
         self.pop_clip_rect();
     }
 
@@ -600,10 +695,47 @@ impl<'a, 'b> Graphics<'a, 'b> {
         point + self.widget_origin
     }
 
+    // Converts the current widget-local clip into the screen-space clip consumed by retained text,
+    // icon, image, and slot commands.
+    fn current_screen_clip_rect(&self) -> Recti {
+        self.draw.current_clip_rect()
+    }
+
+    // Converts widget-local integer positions into the screen-space coordinates used by the rest
+    // of the retained command stream.
+    fn local_to_screen_pos(&self, pos: Vec2i) -> Vec2i {
+        pos + Vec2i::new(self.widget_rect.x, self.widget_rect.y)
+    }
+
+    // Converts widget-local integer rectangles into screen-space rectangles while preserving
+    // extents.
+    fn local_to_screen_rect(&self, rect: Recti) -> Recti {
+        translate_rect(rect, Vec2i::new(self.widget_rect.x, self.widget_rect.y))
+    }
+
+    // Converts the shared screen-space clip back into widget-local coordinates so the tessellator
+    // can software-clip generated triangles before they ever reach the retained command stream.
+    fn screen_to_local_rect(&self, rect: Recti) -> Recti {
+        translate_rect(rect, Vec2i::new(-self.widget_rect.x, -self.widget_rect.y))
+    }
+
     // Translates a local-space vertex into the shared screen-space vertex representation while
     // keeping its interpolated UV/color data intact.
     fn to_screen_vertex(&self, vertex: Vertex) -> Vertex {
         Vertex::new(self.to_screen_point(vertex.position()), vertex.tex_coord(), vertex.color())
+    }
+
+    // Flushes any pending triangle batch, then emits a retained non-triangle command clipped
+    // against the current local clip rect. This keeps ordering correct when widgets mix text,
+    // images, and solid geometry inside one graphics builder.
+    fn emit_clipped_command<F>(&mut self, bounds_local: Recti, emit: F)
+    where
+        F: FnOnce(&mut DrawCtx<'b>),
+    {
+        self.flush_batch();
+        let clip = self.current_screen_clip_rect();
+        let bounds = self.local_to_screen_rect(bounds_local);
+        self.draw.emit_clipped(bounds, clip, emit);
     }
 
     // Emits a convex polygon as a triangle fan rooted at the first point. This is the fastest path
@@ -655,6 +787,7 @@ impl<'a, 'b> Graphics<'a, 'b> {
 impl<'a, 'b> Drop for Graphics<'a, 'b> {
     fn drop(&mut self) {
         self.flush_batch();
+        self.draw.pop_clip_rect_to(self.clip_base_depth);
     }
 }
 
@@ -662,6 +795,7 @@ impl<'a, 'b> Drop for Graphics<'a, 'b> {
 mod tests {
     use super::*;
     use crate::container::Command;
+    use crate::draw_context::clip_relation;
 
     fn assert_rect_eq(actual: Recti, expected: Recti) {
         assert_eq!(
@@ -763,6 +897,30 @@ mod tests {
         let clip_count = commands.iter().filter(|cmd| matches!(cmd, Command::Clip { .. })).count();
         assert_eq!(triangle_count, 1);
         assert_eq!(clip_count, 0);
+    }
+
+    #[test]
+    fn graphics_restores_shared_clip_stack_on_drop() {
+        let atlas = AtlasHandle::from(&AtlasSource {
+            width: 1,
+            height: 1,
+            pixels: &[255, 255, 255, 255],
+            icons: &[("white", Recti::new(0, 0, 1, 1))],
+            fonts: &[],
+            format: SourceFormat::Raw,
+            slots: &[],
+        });
+        let style = Style::default();
+        let mut commands = Vec::new();
+        let mut clip_stack = vec![rect(0, 0, 200, 200)];
+        let mut draw = DrawCtx::new(&mut commands, &mut clip_stack, &style, &atlas);
+        {
+            let mut graphics = Graphics::new(&mut draw, rect(20, 30, 50, 50));
+            graphics.push_clip_rect(rect(0, 0, 5, 5));
+            assert_rect_eq(graphics.current_clip_rect(), rect(0, 0, 5, 5));
+        }
+
+        assert_rect_eq(draw.current_clip_rect(), rect(0, 0, 200, 200));
     }
 
     #[test]

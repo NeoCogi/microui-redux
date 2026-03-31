@@ -51,15 +51,77 @@
 // IN THE SOFTWARE.
 //
 use crate::*;
-use crate::graphics::{clip_relation, intersect_clip_rect};
 use std::cmp::{max, min};
 use std::rc::Rc;
+
+/// Returns the intersection of `rect` with `limit`, defaulting to an empty rect when disjoint.
+pub(crate) fn intersect_clip_rect(limit: Recti, rect: Recti) -> Recti {
+    rect.intersect(&limit).unwrap_or_default()
+}
+
+/// Returns whether `bounds` is fully visible, partially visible, or fully outside `clip`.
+pub(crate) fn clip_relation(bounds: Recti, clip: Recti) -> Clip {
+    if bounds.width <= 0 || bounds.height <= 0 || clip.width <= 0 || clip.height <= 0 {
+        return Clip::All;
+    }
+
+    if bounds.x > clip.x + clip.width || bounds.x + bounds.width < clip.x || bounds.y > clip.y + clip.height || bounds.y + bounds.height < clip.y {
+        return Clip::All;
+    }
+
+    if bounds.x >= clip.x && bounds.x + bounds.width <= clip.x + clip.width && bounds.y >= clip.y && bounds.y + bounds.height <= clip.y + clip.height {
+        return Clip::None;
+    }
+
+    Clip::Part
+}
 
 pub(crate) struct DrawCtx<'a> {
     commands: &'a mut Vec<Command>,
     clip_stack: &'a mut Vec<Recti>,
     style: &'a Style,
     atlas: &'a AtlasHandle,
+}
+
+/// Returns the top-aligned y coordinate that best preserves the font baseline inside `rect`.
+///
+/// Widgets and the graphics builder both use this to keep single-line labels visually centered
+/// without letting a short control crop the ascent or descent unevenly.
+pub(crate) fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32) -> i32 {
+    if rect.height >= line_height {
+        return rect.y + (rect.height - line_height) / 2;
+    }
+
+    let baseline_center = rect.y + rect.height / 2;
+    let min_top = rect.y + rect.height - line_height;
+    let max_top = rect.y;
+    clamp_i32(baseline_center - baseline, min_top, max_top)
+}
+
+#[inline]
+fn clamp_i32(x: i32, a: i32, b: i32) -> i32 {
+    min(b, max(a, x))
+}
+
+/// Computes the text origin for one control label inside `rect`.
+///
+/// The returned point is in the same coordinate space as `rect`, which lets both `DrawCtx` and
+/// `Graphics` reuse the exact same centering and padding rules.
+pub(crate) fn control_text_position(style: &Style, atlas: &AtlasHandle, text: &str, rect: Recti, opt: WidgetOption) -> Vec2i {
+    let font = style.font;
+    let tsize = atlas.get_text_size(font, text);
+    let padding = style.padding;
+    let line_height = atlas.get_font_height(font) as i32;
+    let baseline = atlas.get_font_baseline(font);
+    let y = baseline_aligned_top(rect, line_height, baseline);
+    let x = if opt.is_aligned_center() {
+        rect.x + (rect.width - tsize.width) / 2
+    } else if opt.is_aligned_right() {
+        rect.x + rect.width - tsize.width - padding
+    } else {
+        rect.x + padding
+    };
+    vec2(x, y)
 }
 
 impl<'a> DrawCtx<'a> {
@@ -79,6 +141,12 @@ impl<'a> DrawCtx<'a> {
         self.clip_stack.last().copied().unwrap_or(UNCLIPPED_RECT)
     }
 
+    // `Graphics` forwards widget-local clips onto the shared draw-context clip stack, so it needs
+    // to know how much of the stack existed before it started and to restore that depth on drop.
+    pub(crate) fn clip_depth(&self) -> usize {
+        self.clip_stack.len()
+    }
+
     pub(crate) fn push_clip_rect(&mut self, rect: Recti) {
         let last = self.current_clip_rect();
         self.clip_stack.push(intersect_clip_rect(last, rect));
@@ -88,12 +156,50 @@ impl<'a> DrawCtx<'a> {
         self.clip_stack.pop();
     }
 
+    // Replaces the current top-of-stack clip with an already-intersected rect. `Graphics`
+    // computes the monotonic intersection in widget-local terms and then overwrites the shared
+    // screen-space clip without growing the stack.
+    pub(crate) fn replace_current_clip_rect(&mut self, rect: Recti) {
+        if let Some(top) = self.clip_stack.last_mut() {
+            *top = rect;
+        } else {
+            self.clip_stack.push(rect);
+        }
+    }
+
+    // Restores the clip stack to a previously recorded depth. This keeps temporary graphics
+    // builders from leaking their local clip scopes back into the outer container traversal.
+    pub(crate) fn pop_clip_rect_to(&mut self, depth: usize) {
+        while self.clip_stack.len() > depth {
+            self.clip_stack.pop();
+        }
+    }
+
     pub(crate) fn push_command(&mut self, cmd: Command) {
         self.commands.push(cmd);
     }
 
     pub(crate) fn set_clip(&mut self, rect: Recti) {
         self.push_command(Command::Clip { rect });
+    }
+
+    // Reuses the same clip-state wrapper for text, icons, images, and slot redraws so both the
+    // legacy draw-context path and the graphics builder can emit those commands consistently.
+    pub(crate) fn emit_clipped<F>(&mut self, bounds: Recti, clip: Recti, emit: F)
+    where
+        F: FnOnce(&mut Self),
+    {
+        let clipped = clip_relation(bounds, clip);
+        if clipped == Clip::All {
+            return;
+        }
+        if clipped == Clip::Part {
+            self.set_clip(clip);
+        }
+        emit(self);
+        if clipped != Clip::None {
+            self.set_clip(UNCLIPPED_RECT);
+        }
     }
 
     pub(crate) fn check_clip(&self, r: Recti) -> Clip {
@@ -115,75 +221,38 @@ impl<'a> DrawCtx<'a> {
     }
 
     pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
-        let tsize = self.atlas.get_text_size(font, text);
-        let rect = rect(pos.x, pos.y, tsize.width, tsize.height);
-        let clipped = self.check_clip(rect);
-        match clipped {
-            Clip::All => return,
-            Clip::Part => {
-                let clip = self.current_clip_rect();
-                self.set_clip(clip)
-            }
-            _ => (),
-        }
-
-        self.push_command(Command::Text {
-            text: String::from(text),
-            pos,
-            color,
-            font,
+        let size = self.atlas.get_text_size(font, text);
+        let bounds = rect(pos.x, pos.y, size.width, size.height);
+        let clip = self.current_clip_rect();
+        self.emit_clipped(bounds, clip, |draw| {
+            draw.push_command(Command::Text {
+                text: String::from(text),
+                pos,
+                color,
+                font,
+            });
         });
-        if clipped != Clip::None {
-            self.set_clip(UNCLIPPED_RECT);
-        }
     }
 
     pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
-        let clipped = self.check_clip(rect);
-        match clipped {
-            Clip::All => return,
-            Clip::Part => {
-                let clip = self.current_clip_rect();
-                self.set_clip(clip)
-            }
-            _ => (),
-        }
-        self.push_command(Command::Icon { id, rect, color });
-        if clipped != Clip::None {
-            self.set_clip(UNCLIPPED_RECT);
-        }
+        let clip = self.current_clip_rect();
+        self.emit_clipped(rect, clip, |draw| {
+            draw.push_command(Command::Icon { id, rect, color });
+        });
     }
 
     pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
-        let clipped = self.check_clip(rect);
-        match clipped {
-            Clip::All => return,
-            Clip::Part => {
-                let clip = self.current_clip_rect();
-                self.set_clip(clip)
-            }
-            _ => (),
-        }
-        self.push_command(Command::Image { image, rect, color });
-        if clipped != Clip::None {
-            self.set_clip(UNCLIPPED_RECT);
-        }
+        let clip = self.current_clip_rect();
+        self.emit_clipped(rect, clip, |draw| {
+            draw.push_command(Command::Image { image, rect, color });
+        });
     }
 
     pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        let clipped = self.check_clip(rect);
-        match clipped {
-            Clip::All => return,
-            Clip::Part => {
-                let clip = self.current_clip_rect();
-                self.set_clip(clip)
-            }
-            _ => (),
-        }
-        self.push_command(Command::SlotRedraw { id, rect, color, payload: f });
-        if clipped != Clip::None {
-            self.set_clip(UNCLIPPED_RECT);
-        }
+        let clip = self.current_clip_rect();
+        self.emit_clipped(rect, clip, |draw| {
+            draw.push_command(Command::SlotRedraw { id, rect, color, payload: f });
+        });
     }
 
     pub(crate) fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
@@ -211,39 +280,12 @@ impl<'a> DrawCtx<'a> {
     }
 
     pub(crate) fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let mut pos = Vec2i { x: 0, y: 0 };
         let font = self.style.font;
-        let tsize = self.atlas.get_text_size(font, text);
-        let padding = self.style.padding;
         let color = self.style.colors[colorid as usize];
-        let line_height = self.atlas.get_font_height(font) as i32;
-        let baseline = self.atlas.get_font_baseline(font);
+        let pos = control_text_position(self.style, self.atlas, text, rect, opt);
 
         self.push_clip_rect(rect);
-        pos.y = Self::baseline_aligned_top(rect, line_height, baseline);
-        if opt.is_aligned_center() {
-            pos.x = rect.x + (rect.width - tsize.width) / 2;
-        } else if opt.is_aligned_right() {
-            pos.x = rect.x + rect.width - tsize.width - padding;
-        } else {
-            pos.x = rect.x + padding;
-        }
         self.draw_text(font, text, pos, color);
         self.pop_clip_rect();
-    }
-
-    fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32) -> i32 {
-        if rect.height >= line_height {
-            return rect.y + (rect.height - line_height) / 2;
-        }
-
-        let baseline_center = rect.y + rect.height / 2;
-        let min_top = rect.y + rect.height - line_height;
-        let max_top = rect.y;
-        Self::clamp(baseline_center - baseline, min_top, max_top)
-    }
-
-    fn clamp(x: i32, a: i32, b: i32) -> i32 {
-        min(b, max(a, x))
     }
 }
