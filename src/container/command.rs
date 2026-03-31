@@ -152,8 +152,10 @@ pub(crate) enum Command {
     /// clips these triangles in software before emission, so replay can treat them as plain UI
     /// geometry and batch them alongside the rest of the frame.
     Triangle {
-        /// Packed triangle-list vertices in screen space.
-        vertices: Vec<Vertex>,
+        /// Index of the first triangle vertex inside the container-owned arena.
+        vertex_start: usize,
+        /// Number of consecutive vertices in the triangle list.
+        vertex_count: usize,
     },
     /// Invokes a user callback for custom rendering.
     ///

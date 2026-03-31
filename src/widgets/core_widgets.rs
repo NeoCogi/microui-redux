@@ -843,6 +843,7 @@ mod tests {
         let popup = WindowHandle::popup("combo", atlas.clone(), style.clone(), input);
         let mut combo = Combo::new(popup);
         let mut commands = Vec::new();
+        let mut triangle_vertices = Vec::new();
         let mut clip_stack = Vec::new();
         let mut focus = None;
         let mut updated_focus = false;
@@ -858,6 +859,7 @@ mod tests {
             widget_id_of(&combo),
             rect,
             &mut commands,
+            &mut triangle_vertices,
             &mut clip_stack,
             style.as_ref(),
             &atlas,
@@ -875,6 +877,7 @@ mod tests {
             widget_id_of(&combo),
             rect,
             &mut commands,
+            &mut triangle_vertices,
             &mut clip_stack,
             style.as_ref(),
             &atlas,

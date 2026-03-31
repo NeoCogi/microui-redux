@@ -78,6 +78,7 @@ pub(crate) fn clip_relation(bounds: Recti, clip: Recti) -> Clip {
 
 pub(crate) struct DrawCtx<'a> {
     commands: &'a mut Vec<Command>,
+    triangle_vertices: &'a mut Vec<Vertex>,
     clip_stack: &'a mut Vec<Recti>,
     style: &'a Style,
     atlas: &'a AtlasHandle,
@@ -125,8 +126,20 @@ pub(crate) fn control_text_position(style: &Style, atlas: &AtlasHandle, text: &s
 }
 
 impl<'a> DrawCtx<'a> {
-    pub(crate) fn new(commands: &'a mut Vec<Command>, clip_stack: &'a mut Vec<Recti>, style: &'a Style, atlas: &'a AtlasHandle) -> Self {
-        Self { commands, clip_stack, style, atlas }
+    pub(crate) fn new(
+        commands: &'a mut Vec<Command>,
+        triangle_vertices: &'a mut Vec<Vertex>,
+        clip_stack: &'a mut Vec<Recti>,
+        style: &'a Style,
+        atlas: &'a AtlasHandle,
+    ) -> Self {
+        Self {
+            commands,
+            triangle_vertices,
+            clip_stack,
+            style,
+            atlas,
+        }
     }
 
     pub(crate) fn style(&self) -> &Style {
@@ -177,6 +190,19 @@ impl<'a> DrawCtx<'a> {
 
     pub(crate) fn push_command(&mut self, cmd: Command) {
         self.commands.push(cmd);
+    }
+
+    // Retained widget graphics append all triangle vertices into one container-owned arena, and
+    // individual commands store ranges into that arena instead of owning separate `Vec<Vertex>`
+    // allocations.
+    pub(crate) fn triangle_vertex_count(&self) -> usize {
+        self.triangle_vertices.len()
+    }
+
+    pub(crate) fn push_triangle_vertices(&mut self, v0: Vertex, v1: Vertex, v2: Vertex) {
+        self.triangle_vertices.push(v0);
+        self.triangle_vertices.push(v1);
+        self.triangle_vertices.push(v2);
     }
 
     pub(crate) fn set_clip(&mut self, rect: Recti) {

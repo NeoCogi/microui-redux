@@ -57,6 +57,7 @@ use super::*;
 impl Container {
     #[inline(never)]
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
+        let triangle_vertices: &[Vertex] = &self.triangle_vertices;
         for command in self.command_list.drain(0..) {
             match command {
                 Command::Text { text, pos, color, font } => {
@@ -77,8 +78,9 @@ impl Container {
                 Command::SlotRedraw { rect, id, color, payload } => {
                     canvas.draw_slot_with_function(id, rect, color, payload.clone());
                 }
-                Command::Triangle { vertices } => {
-                    canvas.draw_triangles(vertices.as_slice());
+                Command::Triangle { vertex_start, vertex_count } => {
+                    let end = vertex_start + vertex_count;
+                    canvas.draw_triangles(&triangle_vertices[vertex_start..end]);
                 }
                 Command::CustomRender(mut cra, mut f) => {
                     canvas.flush();
@@ -97,13 +99,21 @@ impl Container {
             }
         }
 
+        self.triangle_vertices.clear();
+
         for panel in &mut self.panels {
             panel.render(canvas)
         }
     }
 
     fn draw_ctx(&mut self) -> DrawCtx<'_> {
-        DrawCtx::new(&mut self.command_list, &mut self.clip_stack, self.style.as_ref(), &self.atlas)
+        DrawCtx::new(
+            &mut self.command_list,
+            &mut self.triangle_vertices,
+            &mut self.clip_stack,
+            self.style.as_ref(),
+            &self.atlas,
+        )
     }
 
     /// Pushes a new clip rectangle combined with the previous clip.

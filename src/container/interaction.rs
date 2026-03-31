@@ -173,6 +173,7 @@ impl Container {
             widget_id,
             rect,
             &mut self.command_list,
+            &mut self.triangle_vertices,
             &mut self.clip_stack,
             self.style.as_ref(),
             &self.atlas,

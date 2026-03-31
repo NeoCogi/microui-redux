@@ -57,6 +57,7 @@ use std::rc::Rc;
 use rs_math3d::{Color4b, Recti, Vec2i};
 
 use crate::atlas::{AtlasHandle, FontId, IconId, SlotId};
+use crate::canvas::Vertex;
 use crate::container::Command;
 use crate::draw_context::DrawCtx;
 use crate::graphics::Graphics;
@@ -98,6 +99,7 @@ impl<'a> WidgetCtx<'a> {
         id: WidgetId,
         rect: Recti,
         commands: &'a mut Vec<Command>,
+        triangle_vertices: &'a mut Vec<Vertex>,
         clip_stack: &'a mut Vec<Recti>,
         style: &'a Style,
         atlas: &'a AtlasHandle,
@@ -109,7 +111,7 @@ impl<'a> WidgetCtx<'a> {
         Self {
             id,
             rect,
-            draw: DrawCtx::new(commands, clip_stack, style, atlas),
+            draw: DrawCtx::new(commands, triangle_vertices, clip_stack, style, atlas),
             focus,
             updated_focus,
             in_hover_root,
