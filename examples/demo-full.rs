@@ -99,6 +99,584 @@ struct TriangleState {
     angle: f32,
 }
 
+#[derive(Clone)]
+struct GraphicsDemo {
+    phase: f32,
+    opt: WidgetOption,
+    bopt: WidgetBehaviourOption,
+}
+
+impl GraphicsDemo {
+    fn new() -> Self {
+        Self {
+            phase: 0.0,
+            opt: WidgetOption::NONE,
+            bopt: WidgetBehaviourOption::NONE,
+        }
+    }
+}
+
+impl Widget for GraphicsDemo {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
+        &self.bopt
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        Dimensioni::new(240, 200)
+    }
+
+    fn needs_input_snapshot(&self) -> bool {
+        true
+    }
+
+    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let bounds = ctx.rect();
+        let local_width = bounds.width.max(0) as f32;
+        let local_height = bounds.height.max(0) as f32;
+        if local_width <= 0.0 || local_height <= 0.0 {
+            return ResourceState::NONE;
+        }
+
+        self.phase = (self.phase + 0.025) % (PI * 2.0);
+        let clip_rect = rect(18, 18, (bounds.width - 36).max(0), (bounds.height - 36).max(0));
+        let animated_center = Vec2f::new(
+            local_width * 0.5 + self.phase.cos() * (local_width * 0.16),
+            local_height * 0.5 + self.phase.sin() * (local_height * 0.12),
+        );
+        let star_center = if control.hovered {
+            ctx.input()
+                .map(|input| Vec2f::new(input.mouse_pos.x as f32, input.mouse_pos.y as f32))
+                .unwrap_or(animated_center)
+        } else {
+            animated_center
+        };
+        let star_center = Vec2f::new(star_center.x.clamp(0.0, local_width), star_center.y.clamp(0.0, local_height));
+
+        ctx.graphics(|g| {
+            let local = g.local_rect();
+            let outer = rect(8, 8, (local.width - 16).max(0), (local.height - 16).max(0));
+            let background = [
+                Vec2f::new(0.0, 0.0),
+                Vec2f::new(local_width, 0.0),
+                Vec2f::new(local_width, local_height),
+                Vec2f::new(0.0, local_height),
+            ];
+
+            g.fill_polygon(background.as_slice(), color(34, 38, 44, 255));
+            stroke_graphics_rect(g, outer, 2.0, color(65, 70, 76, 255));
+            stroke_graphics_rect(g, clip_rect, 1.5, color(240, 210, 110, 255));
+
+            g.stroke_line(
+                Vec2f::new(12.0, 12.0),
+                Vec2f::new(local_width - 12.0, local_height - 12.0),
+                3.0,
+                color(70, 145, 220, 180),
+            );
+            g.stroke_line(
+                Vec2f::new(local_width - 12.0, 12.0),
+                Vec2f::new(12.0, local_height - 12.0),
+                3.0,
+                color(220, 95, 110, 180),
+            );
+
+            g.with_clip(clip_rect, |g| {
+                for idx in 0..4 {
+                    let t = self.phase + idx as f32 * 0.45;
+                    let y = clip_rect.y as f32 + clip_rect.height as f32 * (0.15 + idx as f32 * 0.2);
+                    g.stroke_line(
+                        Vec2f::new(-32.0, y + t.sin() * 10.0),
+                        Vec2f::new(local_width + 32.0, y + t.cos() * 26.0),
+                        7.0 - idx as f32,
+                        color(60 + idx as u8 * 30, 140 + idx as u8 * 18, 225, 130),
+                    );
+                }
+
+                let star = build_star_polygon(star_center, 58.0, 26.0, 5, self.phase);
+                g.fill_polygon(star.as_slice(), color(255, 180, 70, 225));
+
+                let sweep = build_star_polygon(
+                    Vec2f::new(local_width * 0.35 + self.phase.sin() * 18.0, local_height * 0.72),
+                    34.0,
+                    14.0,
+                    4,
+                    -self.phase * 1.3,
+                );
+                g.fill_polygon(sweep.as_slice(), color(90, 220, 180, 190));
+            });
+        });
+
+        ResourceState::NONE
+    }
+}
+
+const FALLOFF_MIN_NODE_GAP: f32 = 0.08;
+const FALLOFF_HANDLE_X_MAX: f32 = 0.5;
+const FALLOFF_PICK_RADIUS: f32 = 9.0;
+const FALLOFF_SEGMENT_STEPS: usize = 24;
+
+#[derive(Clone, Copy)]
+struct FalloffNode {
+    pos: Vec2f,
+    in_x: f32,
+    in_y: f32,
+    out_x: f32,
+    out_y: f32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FalloffTarget {
+    Anchor(usize),
+    InHandle(usize),
+    OutHandle(usize),
+}
+
+#[derive(Clone)]
+struct FalloffEditor {
+    nodes: Vec<FalloffNode>,
+    active: Option<FalloffTarget>,
+    hovered: Option<FalloffTarget>,
+    opt: WidgetOption,
+    bopt: WidgetBehaviourOption,
+}
+
+impl FalloffEditor {
+    fn new() -> Self {
+        let mut editor = Self {
+            nodes: vec![
+                FalloffNode {
+                    pos: Vec2f::new(0.0, 1.0),
+                    in_x: 0.0,
+                    in_y: 1.0,
+                    out_x: 0.22,
+                    out_y: 1.0,
+                },
+                FalloffNode {
+                    pos: Vec2f::new(0.23, 0.94),
+                    in_x: 0.18,
+                    in_y: 0.97,
+                    out_x: 0.28,
+                    out_y: 0.70,
+                },
+                FalloffNode {
+                    pos: Vec2f::new(0.57, 0.31),
+                    in_x: 0.24,
+                    in_y: 0.46,
+                    out_x: 0.24,
+                    out_y: 0.10,
+                },
+                FalloffNode {
+                    pos: Vec2f::new(1.0, 0.0),
+                    in_x: 0.20,
+                    in_y: 0.0,
+                    out_x: 0.0,
+                    out_y: 0.0,
+                },
+            ],
+            active: None,
+            hovered: None,
+            opt: WidgetOption::HOLD_FOCUS,
+            bopt: WidgetBehaviourOption::NONE,
+        };
+        editor.sanitize();
+        editor
+    }
+
+    // The editor keeps a small inner margin so markers and thick strokes can sit inside the
+    // widget without fighting the outer container frame.
+    fn graph_rect(bounds: Recti) -> Recti {
+        rect(14, 14, (bounds.width - 28).max(0), (bounds.height - 28).max(0))
+    }
+
+    // Endpoints stay pinned to a classic brush falloff shape while interior anchors remain sorted
+    // on x. Handle x values are stored as relative factors in [0, 0.5], which guarantees every
+    // segment satisfies P0.x <= P1.x <= P2.x <= P3.x and therefore stays x-monotone.
+    fn sanitize(&mut self) {
+        if self.nodes.len() < 2 {
+            return;
+        }
+
+        let last = self.nodes.len() - 1;
+        self.nodes[0].pos = Vec2f::new(0.0, 1.0);
+        self.nodes[last].pos = Vec2f::new(1.0, 0.0);
+
+        for idx in 0..self.nodes.len() {
+            self.nodes[idx].in_x = self.nodes[idx].in_x.clamp(0.0, FALLOFF_HANDLE_X_MAX);
+            self.nodes[idx].out_x = self.nodes[idx].out_x.clamp(0.0, FALLOFF_HANDLE_X_MAX);
+            self.nodes[idx].in_y = self.nodes[idx].in_y.clamp(0.0, 1.0);
+            self.nodes[idx].out_y = self.nodes[idx].out_y.clamp(0.0, 1.0);
+            self.nodes[idx].pos.y = self.nodes[idx].pos.y.clamp(0.0, 1.0);
+        }
+
+        for idx in 1..last {
+            let left = self.nodes[idx - 1].pos.x + FALLOFF_MIN_NODE_GAP;
+            let right = self.nodes[idx + 1].pos.x - FALLOFF_MIN_NODE_GAP;
+            self.nodes[idx].pos.x = if left <= right {
+                self.nodes[idx].pos.x.clamp(left, right)
+            } else {
+                (left + right) * 0.5
+            };
+        }
+
+        self.nodes[0].in_x = 0.0;
+        self.nodes[0].in_y = self.nodes[0].pos.y;
+        self.nodes[last].out_x = 0.0;
+        self.nodes[last].out_y = self.nodes[last].pos.y;
+    }
+
+    // Converts normalized falloff coordinates into widget-local pixels. The editor stores data in
+    // normalized space so the same control logic works no matter how the window is resized.
+    fn graph_to_local(graph: Recti, point: Vec2f) -> Vec2f {
+        let width = graph.width.max(1) as f32;
+        let height = graph.height.max(1) as f32;
+        Vec2f::new(
+            graph.x as f32 + point.x.clamp(0.0, 1.0) * width,
+            graph.y as f32 + (1.0 - point.y.clamp(0.0, 1.0)) * height,
+        )
+    }
+
+    // Converts widget-local pixels back into normalized falloff coordinates and clamps them into
+    // the visible graph domain so dragging outside the rect still yields stable endpoint behavior.
+    fn local_to_graph(graph: Recti, point: Vec2f) -> Vec2f {
+        let width = graph.width.max(1) as f32;
+        let height = graph.height.max(1) as f32;
+        Vec2f::new(
+            ((point.x - graph.x as f32) / width).clamp(0.0, 1.0),
+            (1.0 - (point.y - graph.y as f32) / height).clamp(0.0, 1.0),
+        )
+    }
+
+    // Each incoming handle is parameterized relative to the span from the previous anchor. That
+    // keeps the monotonicity invariant local to one segment and avoids cross-segment repair logic.
+    fn in_handle_graph(&self, idx: usize) -> Vec2f {
+        let node = self.nodes[idx];
+        let prev = self.nodes[idx - 1].pos;
+        let span = (node.pos.x - prev.x).max(0.0);
+        Vec2f::new(node.pos.x - span * node.in_x, node.in_y)
+    }
+
+    // Outgoing handles use the same relative-x representation against the next anchor. Limiting
+    // the factor to 0.5 guarantees the two handles for a segment cannot cross on x.
+    fn out_handle_graph(&self, idx: usize) -> Vec2f {
+        let node = self.nodes[idx];
+        let next = self.nodes[idx + 1].pos;
+        let span = (next.x - node.pos.x).max(0.0);
+        Vec2f::new(node.pos.x + span * node.out_x, node.out_y)
+    }
+
+    fn target_local(&self, graph: Recti, target: FalloffTarget) -> Vec2f {
+        match target {
+            FalloffTarget::Anchor(idx) => Self::graph_to_local(graph, self.nodes[idx].pos),
+            FalloffTarget::InHandle(idx) => Self::graph_to_local(graph, self.in_handle_graph(idx)),
+            FalloffTarget::OutHandle(idx) => Self::graph_to_local(graph, self.out_handle_graph(idx)),
+        }
+    }
+
+    // Exposes one cubic segment in Bernstein control-point form so sampling and drawing both reuse
+    // the same handle reconstruction logic.
+    fn segment_points(&self, seg: usize) -> [Vec2f; 4] {
+        [
+            self.nodes[seg].pos,
+            self.out_handle_graph(seg),
+            self.in_handle_graph(seg + 1),
+            self.nodes[seg + 1].pos,
+        ]
+    }
+
+    // Standard cubic Bezier evaluation. The editor relies on dense line sampling rather than
+    // adding a dedicated curve primitive to the renderer.
+    fn eval_segment(&self, seg: usize, t: f32) -> Vec2f {
+        let [p0, p1, p2, p3] = self.segment_points(seg);
+        let omt = 1.0 - t;
+        let omt2 = omt * omt;
+        let t2 = t * t;
+        p0 * (omt2 * omt) + p1 * (3.0 * omt2 * t) + p2 * (3.0 * omt * t2) + p3 * (t2 * t)
+    }
+
+    // Samples the full piecewise curve in local pixels. A single sampled polyline feeds both the
+    // filled-under-curve polygon and the visible stroke, which keeps draw work coherent.
+    fn sample_curve_local(&self, graph: Recti, steps_per_segment: usize) -> Vec<Vec2f> {
+        let steps = steps_per_segment.max(4);
+        let mut points = Vec::with_capacity((self.nodes.len() - 1) * steps + 1);
+        points.push(Self::graph_to_local(graph, self.nodes[0].pos));
+        for seg in 0..self.nodes.len() - 1 {
+            for step in 1..=steps {
+                let t = step as f32 / steps as f32;
+                points.push(Self::graph_to_local(graph, self.eval_segment(seg, t)));
+            }
+        }
+        points
+    }
+
+    // Hit testing is resolved in local pixel space because markers are displayed in pixels, not in
+    // normalized graph units. Only draggable controls participate.
+    fn pick_target(&self, graph: Recti, mouse_local: Vec2f) -> Option<FalloffTarget> {
+        let mut best = None;
+        let mut best_dist_sq = FALLOFF_PICK_RADIUS * FALLOFF_PICK_RADIUS;
+
+        for idx in 0..self.nodes.len() {
+            if idx > 0 && idx + 1 < self.nodes.len() {
+                let target = FalloffTarget::Anchor(idx);
+                let pos = self.target_local(graph, target);
+                let dx = pos.x - mouse_local.x;
+                let dy = pos.y - mouse_local.y;
+                let dist_sq = dx * dx + dy * dy;
+                if dist_sq <= best_dist_sq {
+                    best = Some(target);
+                    best_dist_sq = dist_sq;
+                }
+            }
+
+            if idx > 0 {
+                let target = FalloffTarget::InHandle(idx);
+                let pos = self.target_local(graph, target);
+                let dx = pos.x - mouse_local.x;
+                let dy = pos.y - mouse_local.y;
+                let dist_sq = dx * dx + dy * dy;
+                if dist_sq <= best_dist_sq {
+                    best = Some(target);
+                    best_dist_sq = dist_sq;
+                }
+            }
+
+            if idx + 1 < self.nodes.len() {
+                let target = FalloffTarget::OutHandle(idx);
+                let pos = self.target_local(graph, target);
+                let dx = pos.x - mouse_local.x;
+                let dy = pos.y - mouse_local.y;
+                let dist_sq = dx * dx + dy * dy;
+                if dist_sq <= best_dist_sq {
+                    best = Some(target);
+                    best_dist_sq = dist_sq;
+                }
+            }
+        }
+
+        best
+    }
+
+    // Dragging writes directly back into the normalized representation. Anchor x is clamped
+    // between neighboring anchors, while handle x updates only the relative factor that belongs to
+    // its segment.
+    fn drag_target(&mut self, target: FalloffTarget, point: Vec2f) {
+        match target {
+            FalloffTarget::Anchor(idx) => {
+                if idx == 0 || idx + 1 == self.nodes.len() {
+                    return;
+                }
+
+                let left = self.nodes[idx - 1].pos.x + FALLOFF_MIN_NODE_GAP;
+                let right = self.nodes[idx + 1].pos.x - FALLOFF_MIN_NODE_GAP;
+                self.nodes[idx].pos.x = if left <= right { point.x.clamp(left, right) } else { (left + right) * 0.5 };
+                self.nodes[idx].pos.y = point.y.clamp(0.0, 1.0);
+            }
+            FalloffTarget::InHandle(idx) => {
+                if idx == 0 {
+                    return;
+                }
+                let anchor = self.nodes[idx].pos;
+                let prev = self.nodes[idx - 1].pos;
+                let span = (anchor.x - prev.x).max(FALLOFF_MIN_NODE_GAP * 0.25);
+                self.nodes[idx].in_x = ((anchor.x - point.x) / span).clamp(0.0, FALLOFF_HANDLE_X_MAX);
+                self.nodes[idx].in_y = point.y.clamp(0.0, 1.0);
+            }
+            FalloffTarget::OutHandle(idx) => {
+                if idx + 1 >= self.nodes.len() {
+                    return;
+                }
+                let anchor = self.nodes[idx].pos;
+                let next = self.nodes[idx + 1].pos;
+                let span = (next.x - anchor.x).max(FALLOFF_MIN_NODE_GAP * 0.25);
+                self.nodes[idx].out_x = ((point.x - anchor.x) / span).clamp(0.0, FALLOFF_HANDLE_X_MAX);
+                self.nodes[idx].out_y = point.y.clamp(0.0, 1.0);
+            }
+        }
+
+        self.sanitize();
+    }
+}
+
+impl Widget for FalloffEditor {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
+        &self.bopt
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        Dimensioni::new(300, 220)
+    }
+
+    fn needs_input_snapshot(&self) -> bool {
+        true
+    }
+
+    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        let bounds = ctx.rect();
+        let graph = Self::graph_rect(bounds);
+        if graph.width <= 0 || graph.height <= 0 {
+            return ResourceState::NONE;
+        }
+
+        let mut changed = false;
+        let input = ctx.input();
+
+        if !control.focused && !control.active {
+            self.active = None;
+        }
+
+        if let Some(input) = input {
+            let mouse_local = Vec2f::new(input.mouse_pos.x as f32, input.mouse_pos.y as f32);
+            self.hovered = if control.hovered { self.pick_target(graph, mouse_local) } else { None };
+
+            if control.clicked {
+                self.active = if graph.contains(&Vec2i::new(mouse_local.x as i32, mouse_local.y as i32)) {
+                    self.pick_target(graph, mouse_local)
+                } else {
+                    None
+                };
+            } else if !control.active {
+                self.active = None;
+            }
+
+            if control.active && (input.mouse_delta.x != 0 || input.mouse_delta.y != 0) {
+                if let Some(target) = self.active {
+                    let point = Self::local_to_graph(graph, mouse_local);
+                    self.drag_target(target, point);
+                    changed = true;
+                }
+            }
+        } else {
+            self.hovered = None;
+            self.active = None;
+        }
+
+        let curve = self.sample_curve_local(graph, FALLOFF_SEGMENT_STEPS);
+
+        ctx.graphics(|g| {
+            let local = g.local_rect();
+            let background = [
+                Vec2f::new(0.0, 0.0),
+                Vec2f::new(local.width as f32, 0.0),
+                Vec2f::new(local.width as f32, local.height as f32),
+                Vec2f::new(0.0, local.height as f32),
+            ];
+            g.fill_polygon(background.as_slice(), color(25, 29, 34, 255));
+            stroke_graphics_rect(
+                g,
+                rect(6, 6, (local.width - 12).max(0), (local.height - 12).max(0)),
+                1.5,
+                color(62, 68, 76, 255),
+            );
+            stroke_graphics_rect(g, graph, 1.5, color(88, 96, 106, 255));
+
+            g.with_clip(graph, |g| {
+                for idx in 1..4 {
+                    let x = graph.x as f32 + graph.width as f32 * idx as f32 / 4.0;
+                    let y = graph.y as f32 + graph.height as f32 * idx as f32 / 4.0;
+                    g.stroke_line(
+                        Vec2f::new(x, graph.y as f32),
+                        Vec2f::new(x, (graph.y + graph.height) as f32),
+                        1.0,
+                        color(46, 53, 60, 255),
+                    );
+                    g.stroke_line(
+                        Vec2f::new(graph.x as f32, y),
+                        Vec2f::new((graph.x + graph.width) as f32, y),
+                        1.0,
+                        color(46, 53, 60, 255),
+                    );
+                }
+
+                let mut fill = Vec::with_capacity(curve.len() + 2);
+                fill.extend(curve.iter().copied());
+                fill.push(Vec2f::new((graph.x + graph.width) as f32, (graph.y + graph.height) as f32));
+                fill.push(Vec2f::new(graph.x as f32, (graph.y + graph.height) as f32));
+                g.fill_polygon(fill.as_slice(), color(74, 156, 216, 70));
+
+                for pair in curve.windows(2) {
+                    g.stroke_line(pair[0], pair[1], 3.0, color(111, 205, 251, 255));
+                }
+            });
+
+            for seg in 0..self.nodes.len() - 1 {
+                let anchor_a = Self::graph_to_local(graph, self.nodes[seg].pos);
+                let anchor_b = Self::graph_to_local(graph, self.nodes[seg + 1].pos);
+                let handle_a = Self::graph_to_local(graph, self.out_handle_graph(seg));
+                let handle_b = Self::graph_to_local(graph, self.in_handle_graph(seg + 1));
+                g.stroke_line(anchor_a, handle_a, 1.5, color(154, 122, 88, 255));
+                g.stroke_line(handle_b, anchor_b, 1.5, color(154, 122, 88, 255));
+            }
+
+            for idx in 0..self.nodes.len() {
+                if idx > 0 {
+                    let target = FalloffTarget::InHandle(idx);
+                    let center = self.target_local(graph, target);
+                    let radius = if self.active == Some(target) {
+                        6.0
+                    } else if self.hovered == Some(target) {
+                        5.0
+                    } else {
+                        4.0
+                    };
+                    let marker = build_diamond_polygon(center, radius);
+                    g.fill_polygon(marker.as_slice(), color(235, 194, 92, 255));
+                }
+
+                if idx + 1 < self.nodes.len() {
+                    let target = FalloffTarget::OutHandle(idx);
+                    let center = self.target_local(graph, target);
+                    let radius = if self.active == Some(target) {
+                        6.0
+                    } else if self.hovered == Some(target) {
+                        5.0
+                    } else {
+                        4.0
+                    };
+                    let marker = build_diamond_polygon(center, radius);
+                    g.fill_polygon(marker.as_slice(), color(235, 194, 92, 255));
+                }
+
+                let center = Self::graph_to_local(graph, self.nodes[idx].pos);
+                let target = FalloffTarget::Anchor(idx);
+                let radius = if idx == 0 || idx + 1 == self.nodes.len() {
+                    4.5
+                } else if self.active == Some(target) {
+                    6.5
+                } else if self.hovered == Some(target) {
+                    5.5
+                } else {
+                    5.0
+                };
+                let marker = build_square_polygon(center, radius);
+                let color = if idx == 0 || idx + 1 == self.nodes.len() {
+                    color(220, 228, 236, 255)
+                } else {
+                    color(250, 250, 250, 255)
+                };
+                g.fill_polygon(marker.as_slice(), color);
+            }
+        });
+
+        if self.active.is_some() {
+            let mut state = ResourceState::ACTIVE;
+            if changed {
+                state |= ResourceState::CHANGE;
+            }
+            state
+        } else if changed {
+            ResourceState::CHANGE
+        } else {
+            ResourceState::NONE
+        }
+    }
+}
+
 struct SuzaneData {
     view_3d: View3D,
     mesh: MeshBuffers,
@@ -138,6 +716,8 @@ struct State {
     popup_window: Option<WindowHandle>,
     log_output: Option<ContainerHandle>,
     triangle_window: Option<WindowHandle>,
+    graphics_window: Option<WindowHandle>,
+    falloff_window: Option<WindowHandle>,
     suzane_window: Option<WindowHandle>,
     stack_direction_window: Option<WindowHandle>,
     weight_window: Option<WindowHandle>,
@@ -174,11 +754,15 @@ struct State {
     triangle_data: Arc<RwLock<TriangleState>>,
     suzane_data: Arc<RwLock<SuzaneData>>,
     triangle_widget: WidgetHandle<Custom>,
+    graphics_widget: WidgetHandle<GraphicsDemo>,
+    falloff_widget: WidgetHandle<FalloffEditor>,
     suzane_widget: WidgetHandle<Custom>,
     background_swatch: WidgetHandle<ColorSwatch>,
     style_tree: WidgetTree,
     log_tree: WidgetTree,
     triangle_tree: WidgetTree,
+    graphics_tree: WidgetTree,
+    falloff_tree: WidgetTree,
     suzane_tree: WidgetTree,
     stack_direction_tree: WidgetTree,
     weight_tree: WidgetTree,
@@ -343,6 +927,8 @@ impl State {
             popup_window: Some(ctx.new_popup("Test Popup")),
             log_output: Some(ctx.new_panel("Log Output")),
             triangle_window: Some(ctx.new_window("Triangle Window", rect(200, 100, 200, 200))),
+            graphics_window: Some(ctx.new_window("Graphics Window", rect(820, 40, 280, 240))),
+            falloff_window: Some(ctx.new_window("Brush Falloff", rect(820, 300, 320, 260))),
             suzane_window: Some(ctx.new_window("Suzane Window", rect(220, 220, 300, 300))),
             stack_direction_window: Some(ctx.new_window("Stack Direction Demo", rect(530, 40, 280, 220))),
             weight_window: Some(ctx.new_window("Weight Demo", rect(530, 270, 280, 260))),
@@ -415,11 +1001,15 @@ impl State {
             triangle_data,
             suzane_data,
             triangle_widget: widget_handle(Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::NONE)),
+            graphics_widget: widget_handle(GraphicsDemo::new()),
+            falloff_widget: widget_handle(FalloffEditor::new()),
             suzane_widget: widget_handle(Custom::with_opt("Suzane", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::GRAB_SCROLL)),
             background_swatch: widget_handle(ColorSwatch::new(color(90, 95, 100, 0xFF))),
             style_tree: WidgetTree::default(),
             log_tree: WidgetTree::default(),
             triangle_tree: WidgetTree::default(),
+            graphics_tree: WidgetTree::default(),
+            falloff_tree: WidgetTree::default(),
             suzane_tree: WidgetTree::default(),
             stack_direction_tree: WidgetTree::default(),
             weight_tree: WidgetTree::default(),
@@ -594,6 +1184,20 @@ impl State {
                         });
                     }
                 });
+            });
+        });
+
+        let graphics_widget = self.graphics_widget.clone();
+        self.graphics_tree = WidgetTreeBuilder::build(move |tree| {
+            tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
+                tree.widget(graphics_widget.clone());
+            });
+        });
+
+        let falloff_widget = self.falloff_widget.clone();
+        self.falloff_tree = WidgetTreeBuilder::build(move |tree| {
+            tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
+                tree.widget(falloff_widget.clone());
             });
         });
 
@@ -956,6 +1560,30 @@ impl State {
         );
     }
 
+    fn graphics_window(&mut self, ctx: &mut Context<BackendRenderer>) {
+        if self.graphics_window.is_none() {
+            return;
+        }
+        ctx.window(
+            &mut self.graphics_window.as_mut().unwrap().clone(),
+            ContainerOption::NONE,
+            WidgetBehaviourOption::NONE,
+            &self.graphics_tree,
+        );
+    }
+
+    fn falloff_window(&mut self, ctx: &mut Context<BackendRenderer>) {
+        if self.falloff_window.is_none() {
+            return;
+        }
+        ctx.window(
+            &mut self.falloff_window.as_mut().unwrap().clone(),
+            ContainerOption::NONE,
+            WidgetBehaviourOption::NONE,
+            &self.falloff_tree,
+        );
+    }
+
     fn stack_direction_window(&mut self, ctx: &mut Context<BackendRenderer>) {
         if self.stack_direction_window.is_none() {
             return;
@@ -1227,6 +1855,8 @@ impl State {
             self.log_window(ctx);
             self.test_window(ctx);
             self.triangle_window(ctx);
+            self.graphics_window(ctx);
+            self.falloff_window(ctx);
             self.suzane_window(ctx);
             self.stack_direction_window(ctx);
             self.weight_window(ctx);
@@ -1264,6 +1894,50 @@ fn area_from_args(args: &CustomRenderArgs) -> CustomRenderArea {
         .intersect(&args.view)
         .unwrap_or_else(|| rect(args.content_area.x, args.content_area.y, 0, 0));
     CustomRenderArea { rect: args.content_area, clip }
+}
+
+fn stroke_graphics_rect(graphics: &mut Graphics<'_, '_>, rect: Recti, width: f32, color: Color) {
+    if rect.width <= 0 || rect.height <= 0 {
+        return;
+    }
+
+    let x0 = rect.x as f32;
+    let y0 = rect.y as f32;
+    let x1 = (rect.x + rect.width) as f32;
+    let y1 = (rect.y + rect.height) as f32;
+    graphics.stroke_line(Vec2f::new(x0, y0), Vec2f::new(x1, y0), width, color);
+    graphics.stroke_line(Vec2f::new(x1, y0), Vec2f::new(x1, y1), width, color);
+    graphics.stroke_line(Vec2f::new(x1, y1), Vec2f::new(x0, y1), width, color);
+    graphics.stroke_line(Vec2f::new(x0, y1), Vec2f::new(x0, y0), width, color);
+}
+
+fn build_star_polygon(center: Vec2f, outer_radius: f32, inner_radius: f32, spikes: usize, angle: f32) -> Vec<Vec2f> {
+    let spikes = spikes.max(2);
+    let mut points = Vec::with_capacity(spikes * 2);
+    for idx in 0..spikes * 2 {
+        let radius = if idx % 2 == 0 { outer_radius } else { inner_radius };
+        let theta = angle + idx as f32 * PI / spikes as f32;
+        points.push(Vec2f::new(center.x + theta.cos() * radius, center.y + theta.sin() * radius));
+    }
+    points
+}
+
+fn build_square_polygon(center: Vec2f, radius: f32) -> [Vec2f; 4] {
+    [
+        Vec2f::new(center.x - radius, center.y - radius),
+        Vec2f::new(center.x + radius, center.y - radius),
+        Vec2f::new(center.x + radius, center.y + radius),
+        Vec2f::new(center.x - radius, center.y + radius),
+    ]
+}
+
+fn build_diamond_polygon(center: Vec2f, radius: f32) -> [Vec2f; 4] {
+    [
+        Vec2f::new(center.x, center.y - radius),
+        Vec2f::new(center.x + radius, center.y),
+        Vec2f::new(center.x, center.y + radius),
+        Vec2f::new(center.x - radius, center.y),
+    ]
 }
 
 fn build_triangle_vertices(area: Recti, white_uv: Vec2f, angle: f32) -> Vec<Vertex> {

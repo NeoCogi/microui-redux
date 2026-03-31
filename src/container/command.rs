@@ -146,6 +146,15 @@ pub(crate) enum Command {
         /// Callback generating pixels.
         payload: Rc<dyn Fn(usize, usize) -> Color4b>,
     },
+    /// Draws a triangle list using already transformed screen-space vertices.
+    ///
+    /// Every three consecutive vertices form one solid triangle. The widget-local graphics path
+    /// clips these triangles in software before emission, so replay can treat them as plain UI
+    /// geometry and batch them alongside the rest of the frame.
+    Triangle {
+        /// Packed triangle-list vertices in screen space.
+        vertices: Vec<Vertex>,
+    },
     /// Invokes a user callback for custom rendering.
     ///
     /// This keeps custom drawing inside the same traversal and clipping pipeline as the built-in

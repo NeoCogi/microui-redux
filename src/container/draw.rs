@@ -77,6 +77,9 @@ impl Container {
                 Command::SlotRedraw { rect, id, color, payload } => {
                     canvas.draw_slot_with_function(id, rect, color, payload.clone());
                 }
+                Command::Triangle { vertices } => {
+                    canvas.draw_triangles(vertices.as_slice());
+                }
                 Command::CustomRender(mut cra, mut f) => {
                     canvas.flush();
                     let prev_clip = canvas.current_clip_rect();

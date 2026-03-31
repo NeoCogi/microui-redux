@@ -59,6 +59,7 @@ use rs_math3d::{Color4b, Recti, Vec2i};
 use crate::atlas::{AtlasHandle, FontId, IconId, SlotId};
 use crate::container::Command;
 use crate::draw_context::DrawCtx;
+use crate::graphics::Graphics;
 use crate::input::{Clip, ControlColor, ControlState, InputSnapshot, WidgetOption};
 use crate::style::{Color, Image, Style};
 use crate::widget::WidgetId;
@@ -159,6 +160,20 @@ impl<'a> WidgetCtx<'a> {
         self.push_clip_rect(rect);
         f(self);
         self.pop_clip_rect();
+    }
+
+    /// Executes `f` with a widget-local 2D graphics builder.
+    ///
+    /// Geometry passed through this API uses coordinates relative to the current widget's top-left
+    /// corner instead of container space. The builder owns its own local clip stack, translates
+    /// vertices into screen space once while recording, and flushes its retained triangle batches
+    /// automatically when the closure returns.
+    pub fn graphics<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut Graphics<'_, 'a>),
+    {
+        let mut graphics = Graphics::new(&mut self.draw, self.rect);
+        f(&mut graphics);
     }
 
     fn current_clip_rect(&self) -> Recti {

@@ -313,6 +313,11 @@ impl Renderer for VulkanRenderer {
         self.vertices.extend_from_slice(&[*v0, *v1, *v2, *v0, *v2, *v3]);
     }
 
+    /// Appends one triangle to the buffered UI vertex stream without forcing a separate draw job.
+    fn push_triangle_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex) {
+        self.vertices.extend_from_slice(&[*v0, *v1, *v2]);
+    }
+
     /// Turns the currently buffered UI vertices into an explicit draw command boundary.
     fn flush(&mut self) {
         // Match the GL renderer expectation: turn buffered UI vertices into a draw command before

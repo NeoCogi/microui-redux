@@ -28,6 +28,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 use super::*;
+use crate::graphics::clip_triangle_vertices_to_rect;
 use std::{borrow::BorrowMut, collections::HashMap};
 
 #[derive(Default, Copy, Clone)]
@@ -251,6 +252,29 @@ impl<R: Renderer> Canvas<R> {
         self.clip
     }
 
+    /// Draws a triangle list using the canvas' current clip state.
+    ///
+    /// Triangles are clipped in software and then appended to the renderer's regular UI batch,
+    /// which keeps retained widget graphics on the same batching path as the rest of the UI.
+    pub fn draw_triangles(&mut self, vertices: &[Vertex]) {
+        if vertices.is_empty() {
+            return;
+        }
+        let frame_bounds = Recti::new(0, 0, self.current_dim.width.max(0), self.current_dim.height.max(0));
+        let clip = self.clip.intersect(&frame_bounds).unwrap_or_default();
+        if clip.width <= 0 || clip.height <= 0 {
+            return;
+        }
+
+        self.renderer.scope_mut(move |r| {
+            for triangle in vertices.chunks_exact(3) {
+                clip_triangle_vertices_to_rect(triangle[0], triangle[1], triangle[2], clip, |a, b, c| {
+                    r.push_triangle_vertices(&a, &b, &c);
+                });
+            }
+        });
+    }
+
     /// Begins a new drawing pass and resets the clip rectangle.
     pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
         self.current_dim = Dimensioni::new(width, height);
@@ -374,6 +398,7 @@ mod tests {
         }
         fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
         fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {}
+        fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
         fn flush(&mut self) {}
         fn end(&mut self) {}
         fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) {}

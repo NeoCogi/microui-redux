@@ -734,6 +734,12 @@ impl Renderer for WgpuRenderer {
         Self::append_quad(&mut self.ui_vertices, v0, v1, v2, v3);
     }
 
+    /// Appends one already-triangulated UI triangle to the shared CPU-side UI vertex batch.
+    fn push_triangle_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex) {
+        self.ui_vertices
+            .extend_from_slice(&[GpuVertex::from_vertex(v0), GpuVertex::from_vertex(v1), GpuVertex::from_vertex(v2)]);
+    }
+
     /// Closes the current UI batch so later commands preserve ordering.
     fn flush(&mut self) {
         self.flush_ui_batch();
