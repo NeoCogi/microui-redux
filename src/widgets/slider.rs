@@ -422,6 +422,7 @@ mod tests {
         let atlas = make_test_atlas();
         let style = Style::default();
         let mut commands = Vec::new();
+        let mut triangle_vertices = Vec::new();
         let mut clip_stack = Vec::new();
         let mut focus = None;
         let mut updated_focus = false;
@@ -442,6 +443,7 @@ mod tests {
             slider_id,
             rect,
             &mut commands,
+            &mut triangle_vertices,
             &mut clip_stack,
             &style,
             &atlas,
@@ -471,6 +473,7 @@ mod tests {
         let atlas = make_test_atlas();
         let style = Style::default();
         let mut commands = Vec::new();
+        let mut triangle_vertices = Vec::new();
         let mut clip_stack = Vec::new();
         let mut focus = None;
         let mut updated_focus = false;
@@ -489,6 +492,7 @@ mod tests {
             slider_id,
             rect,
             &mut commands,
+            &mut triangle_vertices,
             &mut clip_stack,
             &style,
             &atlas,

@@ -94,6 +94,8 @@ pub struct Container {
     pub(crate) zindex: i32,
     /// Recorded draw commands for this frame.
     pub(crate) command_list: Vec<Command>,
+    /// Shared triangle vertex arena referenced by retained triangle commands.
+    pub(crate) triangle_vertices: Vec<Vertex>,
     /// Stack of clip rectangles applied while drawing.
     pub(crate) clip_stack: Vec<Recti>,
     pub(crate) layout: LayoutManager,
@@ -143,6 +145,7 @@ impl Container {
             scroll: Vec2i::default(),
             zindex: 0,
             command_list: Vec::default(),
+            triangle_vertices: Vec::default(),
             clip_stack: Vec::default(),
             hover: None,
             focus: None,
@@ -167,6 +170,7 @@ impl Container {
 
     pub(crate) fn reset(&mut self) {
         self.command_list.clear();
+        self.triangle_vertices.clear();
         self.clip_stack.clear();
         self.body = Recti::default();
         self.content_size = Dimensioni::default();

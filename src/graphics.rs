@@ -39,7 +39,9 @@
 //!
 //! Because clipping happens before commands are emitted, clip-stack changes no longer need to
 //! fragment the retained command stream. A single graphics closure can therefore accumulate one
-//! larger triangle batch even if it uses nested local clip scopes internally.
+//! larger triangle batch even if it uses nested local clip scopes internally. The actual triangle
+//! vertices live in the container-owned arena held by `DrawCtx`, so individual widgets do not
+//! allocate their own per-batch vertex vectors.
 
 use crate::container::Command;
 use crate::draw_context::{control_text_position, intersect_clip_rect, DrawCtx};
@@ -53,6 +55,12 @@ const GEOM_EPS_SQ: f32 = GEOM_EPS * GEOM_EPS;
 // between widget-local and screen-space rectangles while keeping clip math reusable.
 fn translate_rect(rect: Recti, offset: Vec2i) -> Recti {
     Recti::new(rect.x + offset.x, rect.y + offset.y, rect.width, rect.height)
+}
+
+// Applies the widget's screen-space origin to one retained triangle vertex without disturbing its
+// UV or color payload.
+fn translate_vertex(vertex: Vertex, offset: Vec2f) -> Vertex {
+    Vertex::new(vertex.position() + offset, vertex.tex_coord(), vertex.color())
 }
 
 // Computes a conservative integer bounding box for a set of floating-point positions. The helper
@@ -384,7 +392,8 @@ pub struct Graphics<'a, 'b> {
     widget_origin: Vec2f,
     white_uv: Vec2f,
     clip_base_depth: usize,
-    vertices: Vec<Vertex>,
+    triangle_batch_start: usize,
+    triangle_batch_count: usize,
 }
 
 impl<'a, 'b> Graphics<'a, 'b> {
@@ -407,6 +416,7 @@ impl<'a, 'b> Graphics<'a, 'b> {
             (white_rect.x as f32 + white_rect.width as f32 * 0.5) / atlas_dim.width as f32,
             (white_rect.y as f32 + white_rect.height as f32 * 0.5) / atlas_dim.height as f32,
         );
+        let triangle_batch_start = draw.triangle_vertex_count();
 
         Self {
             draw,
@@ -414,7 +424,8 @@ impl<'a, 'b> Graphics<'a, 'b> {
             widget_origin: Vec2f::new(widget_rect.x as f32, widget_rect.y as f32),
             white_uv,
             clip_base_depth,
-            vertices: Vec::with_capacity(96),
+            triangle_batch_start,
+            triangle_batch_count: 0,
         }
     }
 
@@ -689,12 +700,6 @@ impl<'a, 'b> Graphics<'a, 'b> {
         }
     }
 
-    // Converts one local vertex into the screen-space position expected by the shared `Vertex`
-    // type and the renderer backends.
-    fn to_screen_point(&self, point: Vec2f) -> Vec2f {
-        point + self.widget_origin
-    }
-
     // Converts the current widget-local clip into the screen-space clip consumed by retained text,
     // icon, image, and slot commands.
     fn current_screen_clip_rect(&self) -> Recti {
@@ -717,12 +722,6 @@ impl<'a, 'b> Graphics<'a, 'b> {
     // can software-clip generated triangles before they ever reach the retained command stream.
     fn screen_to_local_rect(&self, rect: Recti) -> Recti {
         translate_rect(rect, Vec2i::new(-self.widget_rect.x, -self.widget_rect.y))
-    }
-
-    // Translates a local-space vertex into the shared screen-space vertex representation while
-    // keeping its interpolated UV/color data intact.
-    fn to_screen_vertex(&self, vertex: Vertex) -> Vertex {
-        Vertex::new(self.to_screen_point(vertex.position()), vertex.tex_coord(), vertex.color())
     }
 
     // Flushes any pending triangle batch, then emits a retained non-triangle command clipped
@@ -755,32 +754,41 @@ impl<'a, 'b> Graphics<'a, 'b> {
     }
 
     // Clips one local triangle against the current local clip and appends the surviving triangles
-    // in screen space. Clipping here means later clip-stack changes no longer need to fragment the
-    // retained command stream.
+    // into the shared container-owned arena. Clipping here means later clip-stack changes no
+    // longer need to fragment the retained command stream.
     fn push_triangle_local(&mut self, a: Vec2f, b: Vec2f, c: Vec2f, color: Color4b) {
         let clip = self.current_clip_rect();
+        let widget_origin = self.widget_origin;
         clip_triangle_vertices_to_rect(
             Vertex::new(a, self.white_uv, color),
             Vertex::new(b, self.white_uv, color),
             Vertex::new(c, self.white_uv, color),
             clip,
             |va, vb, vc| {
-                self.vertices.push(self.to_screen_vertex(va));
-                self.vertices.push(self.to_screen_vertex(vb));
-                self.vertices.push(self.to_screen_vertex(vc));
+                self.draw.push_triangle_vertices(
+                    translate_vertex(va, widget_origin),
+                    translate_vertex(vb, widget_origin),
+                    translate_vertex(vc, widget_origin),
+                );
+                self.triangle_batch_count += 3;
             },
         );
     }
 
     // Finalizes the current triangle batch. At this point every triangle has already been clipped
-    // in software, so replay only needs a plain triangle command and no extra clip-state changes.
+    // in software, so replay only needs the range into the shared arena and no extra clip-state
+    // changes.
     fn flush_batch(&mut self) {
-        if self.vertices.is_empty() {
+        if self.triangle_batch_count == 0 {
             return;
         }
 
-        let vertices = std::mem::take(&mut self.vertices);
-        self.draw.push_command(Command::Triangle { vertices });
+        self.draw.push_command(Command::Triangle {
+            vertex_start: self.triangle_batch_start,
+            vertex_count: self.triangle_batch_count,
+        });
+        self.triangle_batch_start = self.draw.triangle_vertex_count();
+        self.triangle_batch_count = 0;
     }
 }
 
@@ -851,15 +859,17 @@ mod tests {
         });
         let style = Style::default();
         let mut commands = Vec::new();
+        let mut triangle_vertices = Vec::new();
         let mut clip_stack = vec![rect(0, 0, 200, 200)];
-        let mut draw = DrawCtx::new(&mut commands, &mut clip_stack, &style, &atlas);
+        let mut draw = DrawCtx::new(&mut commands, &mut triangle_vertices, &mut clip_stack, &style, &atlas);
         {
             let mut graphics = Graphics::new(&mut draw, rect(20, 30, 50, 50));
             graphics.push_triangle_local(Vec2f::new(0.0, 0.0), Vec2f::new(10.0, 0.0), Vec2f::new(0.0, 10.0), color4b(255, 255, 255, 255));
         }
 
         match &commands[0] {
-            Command::Triangle { vertices } => {
+            Command::Triangle { vertex_start, vertex_count } => {
+                let vertices = &triangle_vertices[*vertex_start..*vertex_start + *vertex_count];
                 let a = vertices[0].position();
                 let b = vertices[1].position();
                 let c = vertices[2].position();
@@ -884,8 +894,9 @@ mod tests {
         });
         let style = Style::default();
         let mut commands = Vec::new();
+        let mut triangle_vertices = Vec::new();
         let mut clip_stack = vec![rect(0, 0, 200, 200)];
-        let mut draw = DrawCtx::new(&mut commands, &mut clip_stack, &style, &atlas);
+        let mut draw = DrawCtx::new(&mut commands, &mut triangle_vertices, &mut clip_stack, &style, &atlas);
         {
             let mut graphics = Graphics::new(&mut draw, rect(0, 0, 50, 50));
             graphics.stroke_line(Vec2f::new(0.0, 0.0), Vec2f::new(10.0, 0.0), 2.0, color(255, 0, 0, 255));
@@ -912,8 +923,9 @@ mod tests {
         });
         let style = Style::default();
         let mut commands = Vec::new();
+        let mut triangle_vertices = Vec::new();
         let mut clip_stack = vec![rect(0, 0, 200, 200)];
-        let mut draw = DrawCtx::new(&mut commands, &mut clip_stack, &style, &atlas);
+        let mut draw = DrawCtx::new(&mut commands, &mut triangle_vertices, &mut clip_stack, &style, &atlas);
         {
             let mut graphics = Graphics::new(&mut draw, rect(20, 30, 50, 50));
             graphics.push_clip_rect(rect(0, 0, 5, 5));
@@ -936,8 +948,9 @@ mod tests {
         });
         let style = Style::default();
         let mut commands = Vec::new();
+        let mut triangle_vertices = Vec::new();
         let mut clip_stack = vec![rect(0, 0, 200, 200)];
-        let mut draw = DrawCtx::new(&mut commands, &mut clip_stack, &style, &atlas);
+        let mut draw = DrawCtx::new(&mut commands, &mut triangle_vertices, &mut clip_stack, &style, &atlas);
         {
             let mut graphics = Graphics::new(&mut draw, rect(20, 30, 50, 50));
             graphics.push_clip_rect(rect(0, 0, 5, 5));
@@ -945,7 +958,8 @@ mod tests {
         }
 
         match &commands[0] {
-            Command::Triangle { vertices } => {
+            Command::Triangle { vertex_start, vertex_count } => {
+                let vertices = &triangle_vertices[*vertex_start..*vertex_start + *vertex_count];
                 assert!(!vertices.is_empty());
                 for vertex in vertices {
                     let pos = vertex.position();
