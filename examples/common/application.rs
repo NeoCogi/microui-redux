@@ -217,7 +217,7 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
     gl_attr.set_context_version(3, 0);
     gl_attr.set_depth_size(24);
 
-    let window = video.window("Window", 800, 600).resizable().opengl().build().map_err(|err| err.to_string())?;
+    let window = video.window("Window", 1024, 768).resizable().opengl().build().map_err(|err| err.to_string())?;
     let gl_ctx = window.gl_create_context().map_err(|err| err.to_string())?;
     window.gl_make_current(&gl_ctx).map_err(|err| err.to_string())?;
 
@@ -245,7 +245,7 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
 fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBundle, BackendInitContext), String> {
     // Vulkan and wgpu derive their native surfaces from the SDL window itself, so the renderer is
     // created immediately from that window handle and then stored inside the microui `Context`.
-    let window = video.window("Window", 800, 600).resizable().vulkan().build().map_err(|err| err.to_string())?;
+    let window = video.window("Window", 1024, 768).resizable().vulkan().build().map_err(|err| err.to_string())?;
     let (width, height) = window.size();
     let renderer = RendererHandle::new(vulkan_renderer::VulkanRenderer::new(&window, atlas, width, height)?);
     let init_ctx = BackendInitContext;
@@ -256,7 +256,7 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
 #[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
 /// Initializes the wgpu example backend and returns the window, renderer, and init marker.
 fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBundle, BackendInitContext), String> {
-    let window = video.window("Window", 800, 600).resizable().build().map_err(|err| err.to_string())?;
+    let window = video.window("Window", 1024, 768).resizable().build().map_err(|err| err.to_string())?;
     let (width, height) = window.size();
     let renderer = RendererHandle::new(wgpu_renderer::WgpuRenderer::new(&window, atlas, width, height)?);
     let init_ctx = BackendInitContext;
