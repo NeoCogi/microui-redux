@@ -53,12 +53,12 @@
 use crate::*;
 use std::rc::Rc;
 
-fn text_size(style: &Style, atlas: &AtlasHandle, text: &str) -> Dimensioni {
-    atlas.get_text_size(style.font, text)
+fn text_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, text: &str) -> Dimensioni {
+    atlas.get_text_size(style.resolve_font_choice(font), text)
 }
 
-fn content_height(style: &Style, atlas: &AtlasHandle, visual_height: i32) -> i32 {
-    let font_height = atlas.get_font_height(style.font) as i32;
+fn content_height(style: &Style, atlas: &AtlasHandle, font: FontChoice, visual_height: i32) -> i32 {
+    let font_height = atlas.get_font_height(style.resolve_font_choice(font)) as i32;
     let vertical_pad = (style.padding / 2).max(1);
     (font_height.max(visual_height) + vertical_pad * 2).max(0)
 }
@@ -112,6 +112,8 @@ pub enum ButtonContent {
 pub struct Button {
     /// Content rendered inside the button.
     pub content: ButtonContent,
+    /// Font selection used for the button label.
+    pub font: FontChoice,
     /// Widget options applied to the button.
     pub opt: WidgetOption,
     /// Behaviour options applied to the button.
@@ -125,6 +127,7 @@ impl Button {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             content: ButtonContent::Text { label: label.into(), icon: None },
+            font: FontChoice::default(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             fill: WidgetFillOption::ALL,
@@ -135,6 +138,7 @@ impl Button {
     pub fn with_opt(label: impl Into<String>, opt: WidgetOption) -> Self {
         Self {
             content: ButtonContent::Text { label: label.into(), icon: None },
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::NONE,
             fill: WidgetFillOption::ALL,
@@ -145,6 +149,7 @@ impl Button {
     pub fn with_image(label: impl Into<String>, image: Option<Image>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::Image { label: label.into(), image },
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::NONE,
             fill,
@@ -155,6 +160,7 @@ impl Button {
     pub fn with_slot(label: impl Into<String>, slot: SlotId, paint: Rc<dyn Fn(usize, usize) -> Color4b>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::Slot { label: label.into(), slot, paint },
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::NONE,
             fill,
@@ -173,7 +179,7 @@ impl Button {
             ButtonContent::Text { label, icon } => {
                 if !label.is_empty() {
                     has_text = true;
-                    text_w = text_size(style, atlas, label).width;
+                    text_w = text_size(style, atlas, self.font, label).width;
                 }
                 if let Some(icon) = icon {
                     let size = atlas.get_icon_size(*icon);
@@ -184,7 +190,7 @@ impl Button {
             ButtonContent::Image { label, image } => {
                 if !label.is_empty() {
                     has_text = true;
-                    text_w = text_size(style, atlas, label).width;
+                    text_w = text_size(style, atlas, self.font, label).width;
                 }
                 if let Some(Image::Slot(slot)) = image {
                     let size = atlas.get_slot_size(*slot);
@@ -195,7 +201,7 @@ impl Button {
             ButtonContent::Slot { label, slot, .. } => {
                 if !label.is_empty() {
                     has_text = true;
-                    text_w = text_size(style, atlas, label).width;
+                    text_w = text_size(style, atlas, self.font, label).width;
                 }
                 let size = atlas.get_slot_size(*slot);
                 visual_w = size.width;
@@ -213,7 +219,7 @@ impl Button {
             }
         }
 
-        let height = content_height(style, atlas, visual_h);
+        let height = content_height(style, atlas, self.font, visual_h);
         Dimensioni::new(width.max(0), height)
     }
 
@@ -228,10 +234,11 @@ impl Button {
                 ctx.draw_frame(rect, colorid);
             }
         }
+        let font = ctx.style().resolve_font_choice(self.font);
         match &self.content {
             ButtonContent::Text { label, icon } => {
                 if !label.is_empty() {
-                    ctx.draw_control_text(label, rect, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, rect, ControlColor::Text, self.opt);
                 }
                 if let Some(icon) = icon {
                     let color = ctx.style().colors[ControlColor::Text as usize];
@@ -240,7 +247,7 @@ impl Button {
             }
             ButtonContent::Image { label, image } => {
                 if !label.is_empty() {
-                    ctx.draw_control_text(label, rect, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, rect, ControlColor::Text, self.opt);
                 }
                 if let Some(image) = *image {
                     let color = ctx.style().colors[ControlColor::Text as usize];
@@ -249,7 +256,7 @@ impl Button {
             }
             ButtonContent::Slot { label, slot, paint } => {
                 if !label.is_empty() {
-                    ctx.draw_control_text(label, rect, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, rect, ControlColor::Text, self.opt);
                 }
                 let color = ctx.style().colors[ControlColor::Text as usize];
                 ctx.draw_slot_with_function(*slot, rect, color, paint.clone());
@@ -268,6 +275,8 @@ pub struct ListItem {
     pub label: String,
     /// Optional atlas icon rendered alongside the label.
     pub icon: Option<IconId>,
+    /// Font selection used for the list item label.
+    pub font: FontChoice,
     /// Widget options applied to the list item.
     pub opt: WidgetOption,
     /// Behaviour options applied to the list item.
@@ -280,6 +289,7 @@ impl ListItem {
         Self {
             label: label.into(),
             icon: None,
+            font: FontChoice::default(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
         }
@@ -290,6 +300,7 @@ impl ListItem {
         Self {
             label: label.into(),
             icon: None,
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::NONE,
         }
@@ -300,6 +311,7 @@ impl ListItem {
         Self {
             label: label.into(),
             icon: Some(icon),
+            font: FontChoice::default(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
         }
@@ -310,6 +322,7 @@ impl ListItem {
         Self {
             label: label.into(),
             icon: Some(icon),
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::NONE,
         }
@@ -325,9 +338,9 @@ impl ListItem {
             visual_h = size.height;
         }
         if !self.label.is_empty() {
-            width += text_size(style, atlas, &self.label).width;
+            width += text_size(style, atlas, self.font, &self.label).width;
         }
-        let height = content_height(style, atlas, visual_h);
+        let height = content_height(style, atlas, self.font, visual_h);
         Dimensioni::new(width.max(0), height)
     }
 
@@ -364,7 +377,8 @@ impl ListItem {
         }
 
         if !self.label.is_empty() {
-            ctx.draw_control_text(&self.label, text_rect, ControlColor::Text, self.opt);
+            let font = ctx.style().resolve_font_choice(self.font);
+            ctx.draw_control_text_with_font(font, &self.label, text_rect, ControlColor::Text, self.opt);
         }
         res
     }
@@ -379,6 +393,8 @@ pub struct ListBox {
     pub label: String,
     /// Optional image rendered alongside the label.
     pub image: Option<Image>,
+    /// Font selection used for the list box label.
+    pub font: FontChoice,
     /// Widget options applied to the list box.
     pub opt: WidgetOption,
     /// Behaviour options applied to the list box.
@@ -391,6 +407,7 @@ impl ListBox {
         Self {
             label: label.into(),
             image,
+            font: FontChoice::default(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
         }
@@ -401,6 +418,7 @@ impl ListBox {
         Self {
             label: label.into(),
             image,
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::NONE,
         }
@@ -411,14 +429,14 @@ impl ListBox {
         let mut width = padding * 2;
         let mut visual_h = 0;
         if !self.label.is_empty() {
-            width += text_size(style, atlas, &self.label).width;
+            width += text_size(style, atlas, self.font, &self.label).width;
         }
         if let Some(Image::Slot(slot)) = self.image {
             let size = atlas.get_slot_size(slot);
             width = width.max(size.width + padding * 2);
             visual_h = size.height;
         }
-        let height = content_height(style, atlas, visual_h);
+        let height = content_height(style, atlas, self.font, visual_h);
         Dimensioni::new(width.max(0), height)
     }
 
@@ -434,7 +452,8 @@ impl ListBox {
             }
         }
         if !self.label.is_empty() {
-            ctx.draw_control_text(&self.label, rect, ControlColor::Text, self.opt);
+            let font = ctx.style().resolve_font_choice(self.font);
+            ctx.draw_control_text_with_font(font, &self.label, rect, ControlColor::Text, self.opt);
         }
         if let Some(image) = self.image {
             let color = ctx.style().colors[ControlColor::Text as usize];
@@ -453,6 +472,8 @@ pub struct Checkbox {
     pub label: String,
     /// Current value of the checkbox.
     pub value: bool,
+    /// Font selection used for the checkbox label.
+    pub font: FontChoice,
     /// Widget options applied to the checkbox.
     pub opt: WidgetOption,
     /// Behaviour options applied to the checkbox.
@@ -465,6 +486,7 @@ impl Checkbox {
         Self {
             label: label.into(),
             value,
+            font: FontChoice::default(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
         }
@@ -475,6 +497,7 @@ impl Checkbox {
         Self {
             label: label.into(),
             value,
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::NONE,
         }
@@ -483,10 +506,10 @@ impl Checkbox {
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let check_icon = atlas.get_icon_size(CHECK_ICON);
-        let height = content_height(style, atlas, check_icon.height);
+        let height = content_height(style, atlas, self.font, check_icon.height);
         let mut width = padding * 2 + height;
         if !self.label.is_empty() {
-            width += text_size(style, atlas, &self.label).width + padding;
+            width += text_size(style, atlas, self.font, &self.label).width + padding;
         }
         Dimensioni::new(width.max(0), height)
     }
@@ -506,7 +529,8 @@ impl Checkbox {
         }
         let text_rect = rect(bounds.x + box_rect.width, bounds.y, bounds.width - box_rect.width, bounds.height);
         if !self.label.is_empty() {
-            ctx.draw_control_text(&self.label, text_rect, ControlColor::Text, self.opt);
+            let font = ctx.style().resolve_font_choice(self.font);
+            ctx.draw_control_text_with_font(font, &self.label, text_rect, ControlColor::Text, self.opt);
         }
         res
     }
@@ -565,10 +589,10 @@ impl Custom {
         let text_w = if self.name.is_empty() {
             0
         } else {
-            text_size(style, atlas, self.name.as_str()).width
+            text_size(style, atlas, FontChoice::default(), self.name.as_str()).width
         };
         let width = padding * 2 + text_w;
-        let height = content_height(style, atlas, 0);
+        let height = content_height(style, atlas, FontChoice::default(), 0);
         Dimensioni::new(width.max(0), height)
     }
 
@@ -602,9 +626,13 @@ impl Internal {
 
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
-        let text_w = if self.tag.is_empty() { 0 } else { text_size(style, atlas, self.tag).width };
+        let text_w = if self.tag.is_empty() {
+            0
+        } else {
+            text_size(style, atlas, FontChoice::default(), self.tag).width
+        };
         let width = padding * 2 + text_w;
-        let height = content_height(style, atlas, 0);
+        let height = content_height(style, atlas, FontChoice::default(), 0);
         Dimensioni::new(width.max(0), height)
     }
 
@@ -628,6 +656,8 @@ pub struct Combo {
     pub opt: WidgetOption,
     /// Behaviour options applied to the combo header.
     pub bopt: WidgetBehaviourOption,
+    /// Font selection used for the combo label.
+    pub font: FontChoice,
     label: String,
     clamped: bool,
     last_anchor: Recti,
@@ -642,6 +672,7 @@ impl Combo {
             open: false,
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
+            font: FontChoice::default(),
             label: String::new(),
             clamped: false,
             last_anchor: Recti::default(),
@@ -656,6 +687,7 @@ impl Combo {
             open: false,
             opt,
             bopt,
+            font: FontChoice::default(),
             label: String::new(),
             clamped: false,
             last_anchor: Recti::default(),
@@ -684,11 +716,11 @@ impl Combo {
         let text_w = if self.label.is_empty() {
             0
         } else {
-            text_size(style, atlas, self.label.as_str()).width
+            text_size(style, atlas, self.font, self.label.as_str()).width
         };
         let indicator = atlas.get_icon_size(EXPAND_DOWN_ICON);
         let width = (padding * 3 + text_w + indicator.width).max(0);
-        let height = content_height(style, atlas, indicator.height);
+        let height = content_height(style, atlas, self.font, indicator.height);
         Dimensioni::new(width, height)
     }
 
@@ -758,7 +790,8 @@ impl Combo {
         let mut text_rect = header;
         let reserved_width = indicator_size.width;
         text_rect.width = (text_rect.width - reserved_width).max(0);
-        ctx.draw_control_text(self.label.as_str(), text_rect, ControlColor::Text, self.opt);
+        let font = ctx.style().resolve_font_choice(self.font);
+        ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, ControlColor::Text, self.opt);
 
         ctx.draw_widget_frame(control, indicator, ControlColor::Button, self.opt);
         let icon_color = ctx.style().colors[ControlColor::Text as usize];

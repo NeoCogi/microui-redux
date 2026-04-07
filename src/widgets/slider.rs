@@ -68,6 +68,8 @@ pub struct Slider {
     pub step: Real,
     /// Number of digits after the decimal point when rendering.
     pub precision: usize,
+    /// Font selection used for the slider value display.
+    pub font: FontChoice,
     /// Widget options applied to the slider.
     pub opt: WidgetOption,
     /// Behaviour options applied to the slider.
@@ -85,6 +87,7 @@ impl Slider {
             high,
             step: 0.0,
             precision: 0,
+            font: FontChoice::default(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
             edit: NumberEditState::default(),
@@ -99,6 +102,7 @@ impl Slider {
             high,
             step,
             precision,
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
             edit: NumberEditState::default(),
@@ -108,10 +112,11 @@ impl Slider {
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let mut label = String::new();
         let _ = write!(label, "{:.*}", self.precision, self.value);
-        let text_w = atlas.get_text_size(style.font, label.as_str()).width;
+        let font = style.resolve_font_choice(self.font);
+        let text_w = atlas.get_text_size(font, label.as_str()).width;
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
-        let font_height = atlas.get_font_height(style.font) as i32;
+        let font_height = atlas.get_font_height(font) as i32;
         let thumb_size = style.thumb_size.max(0);
         let width = (text_w + padding * 2 + thumb_size).max(0);
         let height = (font_height.max(thumb_size) + vertical_pad * 2).max(0);
@@ -123,7 +128,8 @@ impl Slider {
         let base = ctx.rect();
         let last = self.value;
         let mut v = last;
-        if !number_textbox_handle(ctx, control, &mut self.edit, self.precision, &mut v).is_none() {
+        let font = ctx.style().resolve_font_choice(self.font);
+        if !number_textbox_handle(ctx, control, &mut self.edit, self.precision, font, &mut v).is_none() {
             return res;
         }
         if let Some(delta) = control.scroll_delta {
@@ -173,12 +179,19 @@ impl Slider {
         ctx.draw_widget_frame(control, thumb, ControlColor::Button, self.opt);
         self.edit.buf.clear();
         let _ = write!(self.edit.buf, "{:.*}", self.precision, self.value);
-        ctx.draw_control_text(self.edit.buf.as_str(), base, ControlColor::Text, self.opt);
+        ctx.draw_control_text_with_font(font, self.edit.buf.as_str(), base, ControlColor::Text, self.opt);
         res
     }
 }
 
-fn number_textbox_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, edit: &mut NumberEditState, precision: usize, value: &mut Real) -> ResourceState {
+fn number_textbox_handle(
+    ctx: &mut WidgetCtx<'_>,
+    control: &ControlState,
+    edit: &mut NumberEditState,
+    precision: usize,
+    font: FontId,
+    value: &mut Real,
+) -> ResourceState {
     let shift_click = {
         let input = ctx.input_or_default();
         input.mouse_pressed.is_left() && input.key_mods.is_shift() && control.hovered
@@ -192,7 +205,7 @@ fn number_textbox_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, edit: 
     }
 
     if edit.editing {
-        let res = textbox_handle(ctx, control, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE);
+        let res = textbox_handle(ctx, control, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE, font);
         if res.is_submitted() || !control.focused {
             if let Ok(v) = edit.buf.parse::<f32>() {
                 *value = v as Real;
@@ -248,6 +261,8 @@ pub struct Number {
     pub step: Real,
     /// Number of digits after the decimal point when rendering.
     pub precision: usize,
+    /// Font selection used for the number display.
+    pub font: FontChoice,
     /// Widget options applied to the number input.
     pub opt: WidgetOption,
     /// Behaviour options applied to the number input.
@@ -274,6 +289,7 @@ impl Number {
             value,
             step,
             precision,
+            font: FontChoice::default(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             edit: NumberEditState::default(),
@@ -286,6 +302,7 @@ impl Number {
             value,
             step,
             precision,
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::NONE,
             edit: NumberEditState::default(),
@@ -295,10 +312,11 @@ impl Number {
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let mut label = String::new();
         let _ = write!(label, "{:.*}", self.precision, self.value);
-        let text_w = atlas.get_text_size(style.font, label.as_str()).width;
+        let font = style.resolve_font_choice(self.font);
+        let text_w = atlas.get_text_size(font, label.as_str()).width;
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
-        let font_height = atlas.get_font_height(style.font) as i32;
+        let font_height = atlas.get_font_height(font) as i32;
         let width = (text_w + padding * 2).max(0);
         let height = (font_height + vertical_pad * 2).max(0);
         Dimensioni::new(width, height)
@@ -308,7 +326,8 @@ impl Number {
         let mut res = ResourceState::NONE;
         let base = ctx.rect();
         let last = self.value;
-        if !number_textbox_handle(ctx, control, &mut self.edit, self.precision, &mut self.value).is_none() {
+        let font = ctx.style().resolve_font_choice(self.font);
+        if !number_textbox_handle(ctx, control, &mut self.edit, self.precision, font, &mut self.value).is_none() {
             return res;
         }
         let input = ctx.input_or_default();
@@ -321,7 +340,7 @@ impl Number {
         ctx.draw_widget_frame(control, base, ControlColor::Base, self.opt);
         self.edit.buf.clear();
         let _ = write!(self.edit.buf, "{:.*}", self.precision, self.value);
-        ctx.draw_control_text(self.edit.buf.as_str(), base, ControlColor::Text, self.opt);
+        ctx.draw_control_text_with_font(font, self.edit.buf.as_str(), base, ControlColor::Text, self.opt);
         res
     }
 }

@@ -37,6 +37,8 @@ use std::{
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=assets/NORMAL.ttf");
+    println!("cargo:rerun-if-changed=assets/BOLD.ttf");
+    println!("cargo:rerun-if-changed=assets/CONSOLE.ttf");
     println!("cargo:rerun-if-changed=assets/WHITE.png");
     println!("cargo:rerun-if-changed=assets/CLOSE.png");
     println!("cargo:rerun-if-changed=assets/PLUS.png");

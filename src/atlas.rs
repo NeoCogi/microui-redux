@@ -88,7 +88,7 @@ impl Debug for Font {
     }
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 /// Handle referencing a font stored in the atlas.
 pub struct FontId(usize);
 
@@ -258,6 +258,16 @@ pub mod builder {
 
     #[derive(Clone)]
     /// Configuration for constructing an atlas from disk assets.
+    pub struct FontAsset<'a> {
+        /// Stable font key stored in the atlas font table.
+        pub name: &'a str,
+        /// Path to the source font file.
+        pub path: &'a str,
+        /// Pixel size baked into the atlas.
+        pub size: usize,
+    }
+
+    /// Configuration for constructing an atlas from disk assets.
     #[cfg(feature = "builder")]
     pub struct Config<'a> {
         /// Width of the atlas texture in pixels.
@@ -282,10 +292,17 @@ pub mod builder {
         pub closed_folder_16_icon: String,
         /// Path to the file icon.
         pub file_16_icon: String,
-        /// Path to the default font file.
+        /// Legacy fallback font path used when [`Config::fonts`] is empty.
         pub default_font: String,
-        /// Size of the default font.
+        /// Legacy fallback font size used when [`Config::fonts`] is empty.
         pub default_font_size: usize,
+        /// Fonts baked into the atlas.
+        ///
+        /// Use the conventional keys `body`, `small`, `title`, `heading`, and `mono`
+        /// to populate the built-in semantic roles through [`Style::bind_named_fonts`].
+        /// When this slice is empty, [`Config::default_font`] and
+        /// [`Config::default_font_size`] are used instead for single-font atlases.
+        pub fonts: &'a [FontAsset<'a>],
         /// Dimensions of additional slots to reserve in the atlas.
         pub slots: &'a [Dimensioni],
     }
@@ -323,7 +340,16 @@ pub mod builder {
             builder.add_icon(&config.open_folder_16_icon)?;
             builder.add_icon(&config.closed_folder_16_icon)?;
             builder.add_icon(&config.file_16_icon)?;
-            builder.add_font(&config.default_font, config.default_font_size)?;
+            if config.fonts.is_empty() {
+                if config.default_font.is_empty() {
+                    return Err(Error::new(ErrorKind::Other, "Atlas config must provide either `fonts` or `default_font`"));
+                }
+                builder.add_font(config.default_font.as_str(), config.default_font_size)?;
+            } else {
+                for font in config.fonts {
+                    builder.add_font_named(font.name, font.path, font.size)?;
+                }
+            }
 
             for slot in config.slots {
                 builder.add_slot(*slot)?;
@@ -344,6 +370,15 @@ pub mod builder {
 
         /// Adds a font at the requested size and returns its [`FontId`].
         pub fn add_font(&mut self, path: &str, size: usize) -> Result<FontId> {
+            let name = format!("{}-{}", Self::format_path(path), size);
+            self.add_font_named(name.as_str(), path, size)
+        }
+
+        /// Adds a font with an explicit atlas key and returns its [`FontId`].
+        pub fn add_font_named(&mut self, name: &str, path: &str, size: usize) -> Result<FontId> {
+            if self.atlas.fonts.iter().any(|(existing, _)| existing == name) {
+                return Err(Error::new(ErrorKind::Other, format!("Font name '{}' already exists in the atlas", name)));
+            }
             let font = Self::load_font(path)?;
             let mut entries = HashMap::new();
             let mut min_y = i32::MAX;
@@ -380,7 +415,7 @@ pub mod builder {
                 font_size: size,
                 entries,
             };
-            self.atlas.fonts.push((Self::format_path(path), font.clone()));
+            self.atlas.fonts.push((name.to_string(), font.clone()));
             Ok(FontId(id))
         }
 
@@ -735,6 +770,16 @@ impl AtlasHandle {
         self.0.borrow().fonts.iter().enumerate().map(|(i, font)| (font.0.clone(), FontId(i))).collect()
     }
 
+    /// Looks up a font by its stored atlas name.
+    pub fn font_id(&self, name: &str) -> Option<FontId> {
+        self.0
+            .borrow()
+            .fonts
+            .iter()
+            .enumerate()
+            .find_map(|(idx, (font_name, _))| (font_name == name).then_some(FontId(idx)))
+    }
+
     /// Returns a list of available slot identifiers.
     pub fn clone_slot_table(&self) -> Vec<SlotId> {
         self.0.borrow().slots.iter().enumerate().map(|(i, _)| SlotId(i)).collect()
@@ -753,6 +798,11 @@ impl AtlasHandle {
     /// Returns the baseline offset (in pixels) for the specified font.
     pub fn get_font_baseline(&self, font: FontId) -> i32 {
         self.0.borrow().fonts[font.0].1.baseline
+    }
+
+    /// Returns the baked pixel size requested for the specified font.
+    pub fn get_font_size(&self, font: FontId) -> usize {
+        self.0.borrow().fonts[font.0].1.font_size
     }
 
     /// Returns the dimensions of an icon.

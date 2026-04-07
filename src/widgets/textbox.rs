@@ -61,6 +61,8 @@ pub struct Textbox {
     pub buf: String,
     /// Current cursor position within the buffer (byte index).
     pub cursor: usize,
+    /// Font selection used for the textbox content.
+    pub font: FontChoice,
     /// Widget options applied to the textbox.
     pub opt: WidgetOption,
     /// Behaviour options applied to the textbox.
@@ -75,6 +77,7 @@ impl Textbox {
         Self {
             buf,
             cursor,
+            font: FontChoice::default(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
         }
@@ -87,6 +90,7 @@ impl Textbox {
         Self {
             buf,
             cursor,
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::NONE,
         }
@@ -95,11 +99,12 @@ impl Textbox {
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
-        let font_height = atlas.get_font_height(style.font) as i32;
+        let font = style.resolve_font_choice(self.font);
+        let font_height = atlas.get_font_height(font) as i32;
         let text_w = if self.buf.is_empty() {
             0
         } else {
-            atlas.get_text_size(style.font, self.buf.as_str()).width
+            atlas.get_text_size(font, self.buf.as_str()).width
         };
         let mut width = (text_w + padding * 2 + 1).max(0);
         if avail.width > 0 {
@@ -110,11 +115,19 @@ impl Textbox {
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        textbox_handle(ctx, control, &mut self.buf, &mut self.cursor, self.opt)
+        let font = ctx.style().resolve_font_choice(self.font);
+        textbox_handle(ctx, control, &mut self.buf, &mut self.cursor, self.opt, font)
     }
 }
 
-pub(crate) fn textbox_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, buf: &mut String, cursor: &mut usize, opt: WidgetOption) -> ResourceState {
+pub(crate) fn textbox_handle(
+    ctx: &mut WidgetCtx<'_>,
+    control: &ControlState,
+    buf: &mut String,
+    cursor: &mut usize,
+    opt: WidgetOption,
+    font: FontId,
+) -> ResourceState {
     let mut res = ResourceState::NONE;
     let r = ctx.rect();
     if !control.focused {
@@ -154,7 +167,6 @@ pub(crate) fn textbox_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, bu
 
     ctx.draw_widget_frame(control, r, ControlColor::Base, opt);
 
-    let font = ctx.style().font;
     let line_height = ctx.atlas().get_font_height(font) as i32;
     let baseline = ctx.atlas().get_font_baseline(font);
     let descent = (line_height - baseline).max(0);
@@ -217,7 +229,7 @@ pub(crate) fn textbox_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, bu
         ctx.draw_rect(rect(textx + caret_offset, caret_top, 1, caret_height), color);
         ctx.pop_clip_rect();
     } else {
-        ctx.draw_control_text(buf.as_str(), r, ControlColor::Text, opt);
+        ctx.draw_control_text_with_font(font, buf.as_str(), r, ControlColor::Text, opt);
     }
     res
 }

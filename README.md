@@ -41,6 +41,8 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 - **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). These structs hold interaction state and use pointer-derived IDs from their current address.
 - **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and replayed each frame through `Context::window(...)`, `Context::dialog(...)`, or `Context::popup(...)`. Tree nodes cover widgets, panels, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
+- **Graphics**: widget-local primitive drawing exposed through `WidgetCtx::graphics(...)` and the `Graphics` builder. It covers rectangles, frames, text/icons/images, thick line strokes, filled polygons, and nested local clip scopes.
+- **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override their own `font: FontChoice`.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
 
 ```rust
@@ -120,6 +122,74 @@ if ctx.committed_results().state_of_handle(&image_button).is_submitted() {
 - `WidgetFillOption` controls which interaction states draw a filled background; use `WidgetFillOption::ALL` to keep the default normal/hover/click fills.
 - Use `Context::load_image_rgba`/`load_image_from` and `Context::free_image` to manage the lifetime of external textures.
 
+## Graphics primitives
+- `WidgetCtx::graphics(...)` exposes a widget-local `Graphics` builder for custom widgets and paint code.
+- The builder provides `draw_rect`, `draw_box`, `draw_text`, `draw_icon`, `draw_image`, `draw_frame`, `draw_widget_frame`, `draw_control_text`, `stroke_line`, `fill_polygon`, and local clip helpers such as `with_clip`.
+- Filled shapes and strokes are tessellated into retained triangles and clipped in software before replay, so primitive rendering stays consistent across glow, Vulkan, and WGPU backends.
+- `examples/demo-full` includes a dedicated graphics window that exercises the primitive API.
+
+## Fonts and typography
+- Atlas building supports multiple baked fonts and sizes through `builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.
+- `Context::new(...)` binds the conventional atlas keys `body`, `small`, `title`, `heading`, and `mono` onto the default `Style`. `Context::set_style(...)` also rebinds any font fields that are still left at their default/unset values, so tweaking colors or spacing on top of `Style::default()` keeps the intended body/title sizes.
+- Text-bearing widgets expose `font: FontChoice`, so you can either select a semantic role (`FontRole::Heading.into()`) or a concrete baked font ID (`atlas.font_id("caption").unwrap().into()`).
+- Font sizes are selected by choosing another baked font variant, not by scaling one bitmap font at runtime.
+- `examples/demo-full` uses this directly: `NORMAL.ttf` for control/body text, `BOLD.ttf` for window titles, and `CONSOLE.ttf` for the log window’s input/output text.
+
+```rust
+use microui_redux::{builder, FontRole, TextBlock};
+
+const FONTS: &[builder::FontAsset<'static>] = &[
+    builder::FontAsset {
+        name: "body",
+        path: "assets/NORMAL.ttf",
+        size: 12,
+    },
+    builder::FontAsset {
+        name: "small",
+        path: "assets/NORMAL.ttf",
+        size: 10,
+    },
+    builder::FontAsset {
+        name: "title",
+        path: "assets/BOLD.ttf",
+        size: 16,
+    },
+    builder::FontAsset {
+        name: "heading",
+        path: "assets/NORMAL.ttf",
+        size: 18,
+    },
+    builder::FontAsset {
+        name: "mono",
+        path: "assets/CONSOLE.ttf",
+        size: 12,
+    },
+];
+
+let config = builder::Config {
+    texture_width: 512,
+    texture_height: 256,
+    white_icon: "assets/WHITE.png".into(),
+    close_icon: "assets/CLOSE.png".into(),
+    expand_icon: "assets/PLUS.png".into(),
+    collapse_icon: "assets/MINUS.png".into(),
+    check_icon: "assets/CHECK.png".into(),
+    expand_down_icon: "assets/EXPAND_DOWN.png".into(),
+    open_folder_16_icon: "assets/OPEN_FOLDER_16.png".into(),
+    closed_folder_16_icon: "assets/CLOSED_FOLDER_16.png".into(),
+    file_16_icon: "assets/FILE_16.png".into(),
+    default_font: "assets/NORMAL.ttf".into(),
+    default_font_size: 12,
+    fonts: FONTS,
+    slots: &[],
+};
+
+let mut title = TextBlock::new("Inspector");
+title.font = FontRole::Heading.into();
+```
+
+If `fonts` is empty, `builder::Config` falls back to `default_font` + `default_font_size` for the old single-font atlas layout.
+
 ## Cargo features
 - `builder` *(default)* – enables the runtime atlas builder and PNG decoding helpers used by the examples.
 - `png_source` – allows serialized atlases and `ImageSource::Png { .. }` uploads to stay compressed.
@@ -144,9 +214,8 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
 - `TextBlock` supports wrapped multi-line content while preserving outer padding without adding extra spacing between lines.
 - Custom rendering still goes through retained `custom_render` nodes, which receive layout, input, and clip information through `CustomRenderArgs`.
 
-### Unreleased Branch Toward 0.6
-This repository branch is tracking the unreleased retained-tree work planned for `0.6`.
-The published crate version and current manifest version are still `0.5.0`; the checklist below describes changes that are ahead of that release.
+### Version 0.6
+Version `0.6.0` is the retained-tree release. Compared to `0.5.0`, it replaces the public immediate/closure authoring path with retained widget trees and committed interaction results.
 
 - [x] Replaced the v0.5 public immediate/closure authoring path with retained widget trees.
     - [x] `Context::window`, `dialog`, and `popup` now take `&WidgetTree` instead of UI-building closures.
@@ -164,6 +233,13 @@ The published crate version and current manifest version are still `0.5.0`; the 
     - [x] Widgets now implement `measure` + `run`; the intermediate `reconcile` / frame-commit design was removed.
     - [x] Persistent widget state stays inside the widget handle and mutates during `run`.
     - [x] Pointer-derived widget IDs remain the source of focus, hover, and result lookup, with `widget_id_of` and `widget_id_of_handle` as the public helpers.
+- [x] Added widget-local graphics primitives as a first-class paint path.
+    - [x] `WidgetCtx::graphics(...)` and `Graphics` expose rectangles, frames, text/icons/images, thick line strokes, polygon fills, and nested local clip scopes.
+    - [x] Primitives are tessellated into retained triangles and software-clipped before replay, keeping backend behavior consistent without fragmenting batches on clip changes.
+- [x] Added multi-font atlas support with semantic typography roles.
+    - [x] Runtime atlas building and offline/prebuilt atlas export now share the same multi-font config surface.
+    - [x] `Style` binds semantic roles (`body`, `small`, `title`, `heading`, `mono`) from atlas font names, and text-bearing widgets can override their font per instance through `FontChoice`.
+    - [x] Different text sizes are represented as separate baked font variants instead of runtime bitmap scaling.
 - [x] Made committed retained results the strict public business-logic contract.
     - [x] Per-frame widget results are recorded internally by widget ID and published as the previous frame's committed generation.
     - [x] `Context::committed_results()` is the public app-facing results API, including `FrameResultGeneration::state_of_handle`.

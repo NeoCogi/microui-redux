@@ -108,8 +108,7 @@ fn clamp_i32(x: i32, a: i32, b: i32) -> i32 {
 ///
 /// The returned point is in the same coordinate space as `rect`, which lets both `DrawCtx` and
 /// `Graphics` reuse the exact same centering and padding rules.
-pub(crate) fn control_text_position(style: &Style, atlas: &AtlasHandle, text: &str, rect: Recti, opt: WidgetOption) -> Vec2i {
-    let font = style.font;
+pub(crate) fn control_text_position_with_font(style: &Style, atlas: &AtlasHandle, font: FontId, text: &str, rect: Recti, opt: WidgetOption) -> Vec2i {
     let tsize = atlas.get_text_size(font, text);
     let padding = style.padding;
     let line_height = atlas.get_font_height(font) as i32;
@@ -305,10 +304,9 @@ impl<'a> DrawCtx<'a> {
         self.draw_frame(rect, colorid);
     }
 
-    pub(crate) fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let font = self.style.font;
+    pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let color = self.style.colors[colorid as usize];
-        let pos = control_text_position(self.style, self.atlas, text, rect, opt);
+        let pos = control_text_position_with_font(self.style, self.atlas, font, text, rect, opt);
 
         self.push_clip_rect(rect);
         self.draw_text(font, text, pos, color);

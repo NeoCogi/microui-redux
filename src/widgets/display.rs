@@ -84,6 +84,8 @@ pub struct TextBlock {
     pub text: String,
     /// Wrapping mode used for layout and rendering.
     pub wrap: TextWrap,
+    /// Font selection used for the block text.
+    pub font: FontChoice,
     /// Widget options applied to the block.
     pub opt: WidgetOption,
     /// Behaviour options applied to the block.
@@ -101,6 +103,7 @@ impl TextBlock {
         Self {
             text: text.into(),
             wrap,
+            font: FontChoice::default(),
             opt: WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME,
             bopt: WidgetBehaviourOption::NONE,
         }
@@ -111,13 +114,14 @@ impl TextBlock {
             return Dimensioni::new(0, 0);
         }
 
-        let line_height = atlas.get_font_height(style.font) as i32;
+        let font = style.resolve_font_choice(self.font);
+        let line_height = atlas.get_font_height(font) as i32;
         let max_width = if self.wrap == TextWrap::Word && avail.width > 0 {
             avail.width.max(1)
         } else {
             i32::MAX / 4
         };
-        let lines = text_lines(self.text.as_str(), self.wrap, max_width, style.font, atlas);
+        let lines = text_lines(self.text.as_str(), self.wrap, max_width, font, atlas);
         let width = lines.iter().map(|line| line.width).max().unwrap_or(0).max(0);
         let height = line_height.saturating_mul((lines.len() as i32).max(1)).max(0);
         Dimensioni::new(width, height)
@@ -129,7 +133,7 @@ impl TextBlock {
         }
 
         let bounds = ctx.rect();
-        let font = ctx.style().font;
+        let font = ctx.style().resolve_font_choice(self.font);
         let color = ctx.style().colors[ControlColor::Text as usize];
         let line_height = ctx.atlas().get_font_height(font) as i32;
         let baseline = ctx.atlas().get_font_baseline(font);
@@ -160,6 +164,8 @@ pub struct ColorSwatch {
     pub fill: Color,
     /// Optional label rendered on top of the swatch.
     pub label: String,
+    /// Font selection used for the label.
+    pub font: FontChoice,
     /// Widget options applied to the swatch.
     pub opt: WidgetOption,
     /// Behaviour options applied to the swatch.
@@ -172,6 +178,7 @@ impl ColorSwatch {
         Self {
             fill,
             label: String::new(),
+            font: FontChoice::default(),
             opt: WidgetOption::NO_INTERACT | WidgetOption::ALIGN_CENTER,
             bopt: WidgetBehaviourOption::NONE,
         }
@@ -179,12 +186,13 @@ impl ColorSwatch {
 
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
+        let font = style.resolve_font_choice(self.font);
         let label_width = if self.label.is_empty() {
             0
         } else {
-            atlas.get_text_size(style.font, self.label.as_str()).width.max(0)
+            atlas.get_text_size(font, self.label.as_str()).width.max(0)
         };
-        let height = (atlas.get_font_height(style.font) as i32 + padding * 2).max(24);
+        let height = (atlas.get_font_height(font) as i32 + padding * 2).max(24);
         Dimensioni::new((label_width + padding * 2).max(24), height)
     }
 
@@ -194,7 +202,8 @@ impl ColorSwatch {
         let border = ctx.style().colors[ControlColor::Border as usize];
         ctx.draw_box(rect, border);
         if !self.label.is_empty() {
-            ctx.draw_control_text(self.label.as_str(), rect, ControlColor::Text, self.opt);
+            let font = ctx.style().resolve_font_choice(self.font);
+            ctx.draw_control_text_with_font(font, self.label.as_str(), rect, ControlColor::Text, self.opt);
         }
         ResourceState::NONE
     }
