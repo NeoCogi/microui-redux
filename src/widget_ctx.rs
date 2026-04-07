@@ -270,10 +270,10 @@ impl<'a> WidgetCtx<'a> {
         graphics.draw_widget_frame(control.focused, control.hovered, rect, colorid, opt);
     }
 
-    pub(crate) fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+    pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let rect = self.local_rect_for(rect);
         let mut graphics = self.begin_widget_paint();
-        graphics.draw_control_text(text, rect, colorid, opt);
+        graphics.draw_control_text_with_font(font, text, rect, colorid, opt);
     }
 
     pub(crate) fn mouse_over(&self, rect: Recti) -> bool {

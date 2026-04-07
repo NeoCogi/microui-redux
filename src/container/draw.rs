@@ -183,7 +183,13 @@ impl Container {
     #[inline(never)]
     /// Draws multi-line text within the container without wrapping.
     pub fn text(&mut self, text: &str) {
-        self.text_with_wrap(text, TextWrap::None);
+        self.text_with_font_wrap(self.style.as_ref().font, text, TextWrap::None);
+    }
+
+    #[inline(never)]
+    /// Draws multi-line text within the container without wrapping using an explicit font.
+    pub fn text_with_font(&mut self, font: FontId, text: &str) {
+        self.text_with_font_wrap(font, text, TextWrap::None);
     }
 
     #[inline(never)]
@@ -191,11 +197,16 @@ impl Container {
     /// The block is rendered inside an internal column with zero spacing so consecutive
     /// lines sit back-to-back while the outer widget spacing/padding remains intact.
     pub fn text_with_wrap(&mut self, text: &str, wrap: TextWrap) {
+        self.text_with_font_wrap(self.style.as_ref().font, text, wrap);
+    }
+
+    #[inline(never)]
+    /// Draws multi-line text within the container using the provided wrapping mode and font.
+    pub fn text_with_font_wrap(&mut self, font: FontId, text: &str, wrap: TextWrap) {
         if text.is_empty() {
             return;
         }
         let style = self.style.as_ref();
-        let font = style.font;
         let color = style.colors[ControlColor::Text as usize];
         let line_height = self.atlas.get_font_height(font) as i32;
         let baseline = self.atlas.get_font_baseline(font);
@@ -257,7 +268,13 @@ impl Container {
     #[inline(never)]
     /// Draws widget text with the appropriate alignment flags.
     pub fn draw_control_text(&mut self, str: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        self.draw_control_text_with_font(self.style.as_ref().font, str, rect, colorid, opt);
+    }
+
+    #[inline(never)]
+    /// Draws widget text with the appropriate alignment flags using an explicit font.
+    pub fn draw_control_text_with_font(&mut self, font: FontId, str: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let mut draw = self.draw_ctx();
-        draw.draw_control_text(str, rect, colorid, opt);
+        draw.draw_control_text_with_font(font, str, rect, colorid, opt);
     }
 }

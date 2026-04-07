@@ -86,7 +86,7 @@ pub(crate) struct Window {
 impl Window {
     fn titlebar_height(container: &Container) -> i32 {
         let style = container.style.as_ref();
-        let font_height = container.atlas.get_font_height(style.font) as i32;
+        let font_height = container.atlas.get_font_height(style.title_font) as i32;
         let padding = style.padding.max(0);
         let min_title_h = font_height + (padding / 2).max(1) * 2;
         style.title_height.max(min_title_h)
@@ -205,7 +205,7 @@ impl Window {
                 let _ = title_state.run(&mut ctx, &control);
             }
             let name = container.name.clone(); // Necessary due to borrow checker limitations
-            container.draw_control_text(&name, tr, ControlColor::TitleText, WidgetOption::NONE);
+            container.draw_control_text_with_font(container.style.as_ref().title_font, &name, tr, ControlColor::TitleText, WidgetOption::NONE);
             if control.active {
                 container.rect.x += container.input.borrow().mouse_delta.x;
                 container.rect.y += container.input.borrow().mouse_delta.y;

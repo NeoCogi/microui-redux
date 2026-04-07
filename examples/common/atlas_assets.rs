@@ -61,9 +61,37 @@ pub fn default_slots() -> Vec<Dimensioni> {
 
 #[cfg(feature = "builder")]
 pub fn atlas_config<'a>(slots: &'a [Dimensioni]) -> builder::Config<'a> {
+    const FONTS: &[builder::FontAsset<'static>] = &[
+        builder::FontAsset {
+            name: "body",
+            path: "assets/NORMAL.ttf",
+            size: 12,
+        },
+        builder::FontAsset {
+            name: "small",
+            path: "assets/NORMAL.ttf",
+            size: 10,
+        },
+        builder::FontAsset {
+            name: "title",
+            path: "assets/BOLD.ttf",
+            size: 12,
+        },
+        builder::FontAsset {
+            name: "heading",
+            path: "assets/NORMAL.ttf",
+            size: 18,
+        },
+        builder::FontAsset {
+            name: "mono",
+            path: "assets/CONSOLE.ttf",
+            size: 14,
+        },
+    ];
+
     builder::Config {
         texture_height: 256,
-        texture_width: 256,
+        texture_width: 512,
         white_icon: String::from("assets/WHITE.png"),
         close_icon: String::from("assets/CLOSE.png"),
         expand_icon: String::from("assets/PLUS.png"),
@@ -75,6 +103,7 @@ pub fn atlas_config<'a>(slots: &'a [Dimensioni]) -> builder::Config<'a> {
         file_16_icon: String::from("assets/FILE_16.png"),
         default_font: String::from("assets/NORMAL.ttf"),
         default_font_size: 12,
+        fonts: FONTS,
         slots,
     }
 }

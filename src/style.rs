@@ -54,7 +54,7 @@
 
 use rs_math3d::{Recti, Vec2i};
 
-use crate::atlas::{FontId, SlotId};
+use crate::atlas::{AtlasHandle, FontId, SlotId};
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
@@ -70,6 +70,62 @@ pub struct Color {
     pub a: u8,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+/// Semantic font roles used by the built-in widgets and default style.
+pub enum FontRole {
+    /// Default body text used by most widgets.
+    #[default]
+    Body,
+    /// Compact supporting text.
+    Small,
+    /// Window titles and similar chrome text.
+    Title,
+    /// Larger display text.
+    Heading,
+    /// Monospace-style text.
+    Mono,
+}
+
+impl FontRole {
+    /// Returns the conventional atlas font name used by [`Style::bind_named_fonts`].
+    pub fn atlas_name(self) -> &'static str {
+        match self {
+            Self::Body => "body",
+            Self::Small => "small",
+            Self::Title => "title",
+            Self::Heading => "heading",
+            Self::Mono => "mono",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// Selects either a semantic font role from [`Style`] or a specific [`FontId`].
+pub enum FontChoice {
+    /// Resolve through a [`FontRole`] stored on the style.
+    Role(FontRole),
+    /// Use the provided concrete font directly.
+    Id(FontId),
+}
+
+impl Default for FontChoice {
+    fn default() -> Self {
+        Self::Role(FontRole::Body)
+    }
+}
+
+impl From<FontRole> for FontChoice {
+    fn from(role: FontRole) -> Self {
+        Self::Role(role)
+    }
+}
+
+impl From<FontId> for FontChoice {
+    fn from(font: FontId) -> Self {
+        Self::Id(font)
+    }
+}
+
 /// Describes the interface the atlas uses to query font metadata.
 pub trait Font {
     /// Returns the font's display name.
@@ -83,8 +139,16 @@ pub trait Font {
 #[derive(Copy, Clone)]
 /// Collection of visual constants that drive widget appearance.
 pub struct Style {
-    /// Font used for all text rendering.
+    /// Default body font used for general text rendering.
     pub font: FontId,
+    /// Font used for compact supporting text.
+    pub small_font: FontId,
+    /// Font used for window titles and similar chrome text.
+    pub title_font: FontId,
+    /// Font used for larger display text.
+    pub heading_font: FontId,
+    /// Font used for monospace-style text.
+    pub mono_font: FontId,
     /// Default width used by layouts when no preferred width is supplied.
     pub default_cell_width: i32,
     /// Inner padding applied to most widgets.
@@ -158,6 +222,10 @@ impl Default for Style {
     fn default() -> Self {
         Self {
             font: FontId::default(),
+            small_font: FontId::default(),
+            title_font: FontId::default(),
+            heading_font: FontId::default(),
+            mono_font: FontId::default(),
             default_cell_width: 68,
             padding: 5,
             spacing: 4,
@@ -185,6 +253,96 @@ impl Default for Style {
     }
 }
 
+impl FontChoice {
+    /// Creates a semantic font selection.
+    pub fn role(role: FontRole) -> Self {
+        Self::Role(role)
+    }
+
+    /// Creates a concrete font selection.
+    pub fn id(font: FontId) -> Self {
+        Self::Id(font)
+    }
+
+    /// Resolves this choice against `style`.
+    pub fn resolve(self, style: &Style) -> FontId {
+        style.resolve_font_choice(self)
+    }
+}
+
+impl Style {
+    /// Returns the concrete font ID for the provided semantic role.
+    pub fn resolve_font_role(&self, role: FontRole) -> FontId {
+        match role {
+            FontRole::Body => self.font,
+            FontRole::Small => self.small_font,
+            FontRole::Title => self.title_font,
+            FontRole::Heading => self.heading_font,
+            FontRole::Mono => self.mono_font,
+        }
+    }
+
+    /// Returns the concrete font ID for `choice`.
+    pub fn resolve_font_choice(&self, choice: FontChoice) -> FontId {
+        match choice {
+            FontChoice::Role(role) => self.resolve_font_role(role),
+            FontChoice::Id(font) => font,
+        }
+    }
+
+    /// Binds semantic font roles only for fields that still use default/unset font IDs.
+    ///
+    /// This is intended for compatibility paths such as [`Context::set_style`], where callers
+    /// often start from [`Style::default`] and only tweak colors or spacing. Explicit non-default
+    /// font IDs are preserved.
+    pub fn bind_default_named_fonts(&mut self, atlas: &AtlasHandle) {
+        let default_font = FontId::default();
+        if self.font == default_font {
+            if let Some(font) = atlas.font_id(FontRole::Body.atlas_name()) {
+                self.font = font;
+            }
+        }
+        if self.small_font == default_font {
+            self.small_font = atlas.font_id(FontRole::Small.atlas_name()).unwrap_or(self.font);
+        }
+        if self.title_font == default_font {
+            self.title_font = atlas.font_id(FontRole::Title.atlas_name()).unwrap_or(self.font);
+        }
+        if self.heading_font == default_font {
+            self.heading_font = atlas.font_id(FontRole::Heading.atlas_name()).unwrap_or(self.font);
+        }
+        if self.mono_font == default_font {
+            self.mono_font = atlas.font_id(FontRole::Mono.atlas_name()).unwrap_or(self.font);
+        }
+    }
+
+    /// Returns a copy of the style with semantic font roles rebound from `atlas`.
+    pub fn with_named_fonts(mut self, atlas: &AtlasHandle) -> Self {
+        self.bind_named_fonts(atlas);
+        self
+    }
+
+    /// Binds semantic font roles from conventional atlas names when they exist.
+    ///
+    /// The lookup names are:
+    /// - [`FontRole::Body`] => `body`
+    /// - [`FontRole::Small`] => `small`
+    /// - [`FontRole::Title`] => `title`
+    /// - [`FontRole::Heading`] => `heading`
+    /// - [`FontRole::Mono`] => `mono`
+    ///
+    /// Missing roles fall back to the resolved body font.
+    pub fn bind_named_fonts(&mut self, atlas: &AtlasHandle) {
+        if let Some(font) = atlas.font_id(FontRole::Body.atlas_name()) {
+            self.font = font;
+        }
+        self.small_font = atlas.font_id(FontRole::Small.atlas_name()).unwrap_or(self.font);
+        self.title_font = atlas.font_id(FontRole::Title.atlas_name()).unwrap_or(self.font);
+        self.heading_font = atlas.font_id(FontRole::Heading.atlas_name()).unwrap_or(self.font);
+        self.mono_font = atlas.font_id(FontRole::Mono.atlas_name()).unwrap_or(self.font);
+    }
+}
+
 /// Convenience constructor for [`Vec2i`].
 pub fn vec2(x: i32, y: i32) -> Vec2i {
     Vec2i { x, y }
@@ -203,4 +361,105 @@ pub fn color(r: u8, g: u8, b: u8, a: u8) -> Color {
 /// Expands (or shrinks) a rectangle uniformly on all sides.
 pub fn expand_rect(r: Recti, n: i32) -> Recti {
     rect(r.x - n, r.y - n, r.width + n * 2, r.height + n * 2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AtlasHandle, AtlasSource, CharEntry, FontEntry, SourceFormat};
+
+    fn make_test_atlas(fonts: &[(&str, usize)]) -> AtlasHandle {
+        let pixels = [0xFF, 0xFF, 0xFF, 0xFF];
+        let entries = [
+            (
+                '_',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+            (
+                'a',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+        ];
+        let font_entries: Vec<_> = fonts
+            .iter()
+            .map(|(name, size)| {
+                (
+                    *name,
+                    FontEntry {
+                        line_size: *size,
+                        baseline: *size as i32 - 2,
+                        font_size: *size,
+                        entries: &entries,
+                    },
+                )
+            })
+            .collect();
+        let source = AtlasSource {
+            width: 1,
+            height: 1,
+            pixels: &pixels,
+            icons: &[],
+            fonts: font_entries.as_slice(),
+            format: SourceFormat::Raw,
+            slots: &[],
+        };
+        AtlasHandle::from(&source)
+    }
+
+    #[test]
+    fn font_choice_conversions_preserve_selected_font() {
+        let atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12), (FontRole::Heading.atlas_name(), 18)]);
+        let heading = atlas.font_id(FontRole::Heading.atlas_name()).unwrap();
+
+        assert_eq!(FontChoice::from(FontRole::Heading), FontChoice::role(FontRole::Heading));
+        assert_eq!(FontChoice::from(heading), FontChoice::id(heading));
+    }
+
+    #[test]
+    fn bind_named_fonts_uses_conventional_role_names() {
+        let atlas = make_test_atlas(&[
+            (FontRole::Body.atlas_name(), 12),
+            (FontRole::Small.atlas_name(), 10),
+            (FontRole::Title.atlas_name(), 16),
+            (FontRole::Heading.atlas_name(), 18),
+        ]);
+
+        let style = Style::default().with_named_fonts(&atlas);
+
+        assert_eq!(style.font, atlas.font_id(FontRole::Body.atlas_name()).unwrap());
+        assert_eq!(style.small_font, atlas.font_id(FontRole::Small.atlas_name()).unwrap());
+        assert_eq!(style.title_font, atlas.font_id(FontRole::Title.atlas_name()).unwrap());
+        assert_eq!(style.heading_font, atlas.font_id(FontRole::Heading.atlas_name()).unwrap());
+        assert_eq!(style.mono_font, style.font);
+    }
+
+    #[test]
+    fn bind_default_named_fonts_replaces_unset_font_fields_only() {
+        let atlas = make_test_atlas(&[
+            (FontRole::Small.atlas_name(), 10),
+            (FontRole::Body.atlas_name(), 12),
+            (FontRole::Title.atlas_name(), 16),
+            (FontRole::Heading.atlas_name(), 18),
+        ]);
+
+        let mut style = Style::default();
+        style.bind_default_named_fonts(&atlas);
+        assert_eq!(style.font, atlas.font_id(FontRole::Body.atlas_name()).unwrap());
+        assert_eq!(style.small_font, atlas.font_id(FontRole::Small.atlas_name()).unwrap());
+        assert_eq!(style.title_font, atlas.font_id(FontRole::Title.atlas_name()).unwrap());
+        assert_eq!(style.heading_font, atlas.font_id(FontRole::Heading.atlas_name()).unwrap());
+
+        let explicit_title = atlas.font_id(FontRole::Title.atlas_name()).unwrap();
+        style.font = explicit_title;
+        style.bind_default_named_fonts(&atlas);
+        assert_eq!(style.font, explicit_title);
+    }
 }

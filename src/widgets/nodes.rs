@@ -92,6 +92,8 @@ pub struct Node {
     pub label: String,
     /// Current expansion state.
     pub state: NodeStateValue,
+    /// Font selection used for the node label.
+    pub font: FontChoice,
     /// Widget options applied to the node.
     pub opt: WidgetOption,
     /// Behaviour options applied to the node.
@@ -110,6 +112,7 @@ impl Node {
         Self {
             label: label.into(),
             state,
+            font: FontChoice::default(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Header,
@@ -121,6 +124,7 @@ impl Node {
         Self {
             label: label.into(),
             state,
+            font: FontChoice::default(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Tree,
@@ -137,6 +141,7 @@ impl Node {
         Self {
             label: label.into(),
             state,
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Header,
@@ -148,6 +153,7 @@ impl Node {
         Self {
             label: label.into(),
             state,
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::NONE,
             kind: NodeKind::Tree,
@@ -177,12 +183,13 @@ impl Node {
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
-        let font_height = atlas.get_font_height(style.font) as i32;
+        let font = style.resolve_font_choice(self.font);
+        let font_height = atlas.get_font_height(font) as i32;
         let icon = atlas.get_icon_size(EXPAND_ICON);
         let text_w = if self.label.is_empty() {
             0
         } else {
-            atlas.get_text_size(style.font, self.label.as_str()).width
+            atlas.get_text_size(font, self.label.as_str()).width
         };
         let height = (font_height.max(icon.height) + vertical_pad * 2).max(0);
         let consumed = (height - padding).max(icon.width);
@@ -216,7 +223,8 @@ impl Node {
         );
         r.x += r.height - padding;
         r.width -= r.height - padding;
-        ctx.draw_control_text(self.label.as_str(), r, ControlColor::Text, self.opt);
+        let font = ctx.style().resolve_font_choice(self.font);
+        ctx.draw_control_text_with_font(font, self.label.as_str(), r, ControlColor::Text, self.opt);
 
         if control.clicked {
             res |= ResourceState::CHANGE;

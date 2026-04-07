@@ -44,7 +44,7 @@
 //! allocate their own per-batch vertex vectors.
 
 use crate::container::Command;
-use crate::draw_context::{control_text_position, intersect_clip_rect, DrawCtx};
+use crate::draw_context::{control_text_position_with_font, intersect_clip_rect, DrawCtx};
 use crate::*;
 use std::rc::Rc;
 
@@ -580,10 +580,19 @@ impl<'a, 'b> Graphics<'a, 'b> {
     /// This reuses the shared control-text positioning helper from `DrawCtx` so widget and
     /// container labels stay visually identical even though widgets now paint through `Graphics`.
     pub fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        self.draw_control_text_with_font(self.draw.style().font, text, rect, colorid, opt);
+    }
+
+    /// Draws centered or aligned control text using an explicit font.
+    pub fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let (font, color, pos) = {
             let style = self.draw.style();
             let atlas = self.draw.atlas();
-            (style.font, style.colors[colorid as usize], control_text_position(style, atlas, text, rect, opt))
+            (
+                font,
+                style.colors[colorid as usize],
+                control_text_position_with_font(style, atlas, font, text, rect, opt),
+            )
         };
         self.push_clip_rect(rect);
         self.draw_text(font, text, pos, color);

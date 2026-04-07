@@ -67,6 +67,8 @@ pub struct TextArea {
     pub scroll: Vec2i,
     /// Wrapping mode used when rendering the buffer.
     pub wrap: TextWrap,
+    /// Font selection used for the text area's content.
+    pub font: FontChoice,
     /// Widget options applied to the text area.
     pub opt: WidgetOption,
     /// Behaviour options applied to the text area.
@@ -86,6 +88,7 @@ impl TextArea {
             cursor,
             scroll: vec2(0, 0),
             wrap: TextWrap::None,
+            font: FontChoice::default(),
             opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
             preferred_x: None,
@@ -103,6 +106,7 @@ impl TextArea {
             cursor,
             scroll: vec2(0, 0),
             wrap: TextWrap::None,
+            font: FontChoice::default(),
             opt,
             bopt: WidgetBehaviourOption::GRAB_SCROLL,
             preferred_x: None,
@@ -113,15 +117,16 @@ impl TextArea {
 
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
+        let font = style.resolve_font_choice(self.font);
         let max_width = if self.wrap == TextWrap::Word && avail.width > 0 {
             (avail.width - padding * 2).max(1)
         } else {
             i32::MAX / 4
         };
-        let lines = build_text_lines(self.buf.as_str(), self.wrap, max_width, style.font, atlas);
+        let lines = build_text_lines(self.buf.as_str(), self.wrap, max_width, font, atlas);
         let text_w = lines.iter().map(|line| line.width).max().unwrap_or(0);
         let line_count = (lines.len() as i32).max(1);
-        let line_height = atlas.get_font_height(style.font) as i32;
+        let line_height = atlas.get_font_height(font) as i32;
         let mut width = text_w.saturating_add(padding * 2).max(0);
         let mut height = line_height.saturating_mul(line_count).saturating_add(padding * 2).max(0);
         if avail.width > 0 {
@@ -134,11 +139,12 @@ impl TextArea {
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        textarea_handle(ctx, control, self)
+        let font = ctx.style().resolve_font_choice(self.font);
+        textarea_handle(ctx, control, self, font)
     }
 }
 
-fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea) -> ResourceState {
+fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea, font: FontId) -> ResourceState {
     let mut res = ResourceState::NONE;
     let bounds = ctx.rect();
     let local_bounds = rect(0, 0, bounds.width, bounds.height);
@@ -172,7 +178,6 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     }
 
     let style = ctx.style();
-    let font = style.font;
     let padding = style.padding;
     let scrollbar_size = style.scrollbar_size;
     let thumb_size = style.thumb_size;

@@ -87,9 +87,11 @@ pub struct Context<R: Renderer> {
 impl<R: Renderer> Context<R> {
     /// Creates a new UI context around the provided renderer and dimensions.
     pub fn new(renderer: RendererHandle<R>, dim: Dimensioni) -> Self {
+        let canvas = Canvas::from(renderer, dim);
+        let style = Style::default().with_named_fonts(&canvas.get_atlas());
         Self {
-            canvas: Canvas::from(renderer, dim),
-            style: Rc::new(Style::default()),
+            canvas,
+            style: Rc::new(style),
             last_zindex: 0,
             frame: 0,
             hover_root: None,
@@ -179,6 +181,68 @@ mod tests {
         AtlasHandle::from(&source)
     }
 
+    fn make_named_font_test_atlas() -> AtlasHandle {
+        let pixels: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+        let icons: Vec<(&str, Recti)> = ICON_NAMES.iter().map(|name| (*name, Recti::new(0, 0, 1, 1))).collect();
+        let entries = vec![
+            (
+                '_',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+            (
+                'a',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(8, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+        ];
+        let fonts = vec![
+            (
+                "small",
+                FontEntry {
+                    line_size: 10,
+                    baseline: 8,
+                    font_size: 10,
+                    entries: &entries,
+                },
+            ),
+            (
+                "body",
+                FontEntry {
+                    line_size: 12,
+                    baseline: 9,
+                    font_size: 12,
+                    entries: &entries,
+                },
+            ),
+            (
+                "title",
+                FontEntry {
+                    line_size: 16,
+                    baseline: 12,
+                    font_size: 16,
+                    entries: &entries,
+                },
+            ),
+        ];
+        let source = AtlasSource {
+            width: 1,
+            height: 1,
+            pixels: &pixels,
+            icons: &icons,
+            fonts: &fonts,
+            format: SourceFormat::Raw,
+            slots: &[],
+        };
+        AtlasHandle::from(&source)
+    }
+
     fn panic_message(payload: Box<dyn Any + Send>) -> String {
         if let Some(message) = payload.downcast_ref::<String>() {
             return message.clone();
@@ -255,6 +319,25 @@ mod tests {
             );
 
         assert!(has_vertical_scrollbar);
+    }
+
+    #[test]
+    fn set_style_rebinds_default_font_fields_from_named_atlas() {
+        let atlas = make_named_font_test_atlas();
+        let body = atlas.font_id("body").unwrap();
+        let small = atlas.font_id("small").unwrap();
+        let title = atlas.font_id("title").unwrap();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+
+        let mut style = Style::default();
+        style.padding = 0;
+        style.scrollbar_size = 10;
+        ctx.set_style(&style);
+
+        assert_eq!(ctx.style.font, body);
+        assert_eq!(ctx.style.small_font, small);
+        assert_eq!(ctx.style.title_font, title);
     }
 
     #[test]
@@ -1012,8 +1095,15 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Replaces the current UI style.
+    ///
+    /// Unset/default font fields are rebound automatically from the current atlas when it exposes
+    /// the conventional `body` / `small` / `title` / `heading` / `mono` font names. Use
+    /// [`Style::with_named_fonts`] or [`Style::bind_named_fonts`] when you want to force all
+    /// semantic roles to those atlas bindings explicitly.
     pub fn set_style(&mut self, style: &Style) {
-        self.style = Rc::new(style.clone())
+        let mut resolved = style.clone();
+        resolved.bind_default_named_fonts(&self.canvas.get_atlas());
+        self.style = Rc::new(resolved)
     }
 
     /// Returns the underlying canvas used for rendering.

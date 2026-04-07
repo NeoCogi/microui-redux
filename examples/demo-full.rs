@@ -715,6 +715,7 @@ struct State {
     log_window: Option<WindowHandle>,
     popup_window: Option<WindowHandle>,
     log_output: Option<ContainerHandle>,
+    typography_window: Option<WindowHandle>,
     triangle_window: Option<WindowHandle>,
     graphics_window: Option<WindowHandle>,
     falloff_window: Option<WindowHandle>,
@@ -740,6 +741,9 @@ struct State {
     test3_tn: WidgetHandle<Node>,
     submit_button: WidgetHandle<Button>,
     log_text: WidgetHandle<TextBlock>,
+    typography_heading: WidgetHandle<TextBlock>,
+    typography_body: WidgetHandle<TextBlock>,
+    typography_button: WidgetHandle<Button>,
     test_buttons: [WidgetHandle<Button>; 6],
     tree_buttons: [WidgetHandle<Button>; 6],
     popup_buttons: [WidgetHandle<Button>; 2],
@@ -760,6 +764,7 @@ struct State {
     background_swatch: WidgetHandle<ColorSwatch>,
     style_tree: WidgetTree,
     log_tree: WidgetTree,
+    typography_tree: WidgetTree,
     triangle_tree: WidgetTree,
     graphics_tree: WidgetTree,
     falloff_tree: WidgetTree,
@@ -868,6 +873,18 @@ impl State {
         let mut text_area =
             TextArea::new("This is a multi-line TextArea.\nYou can type, scroll, and resize the window.\n\nTry adding more lines to see the scrollbars.");
         text_area.wrap = TextWrap::Word;
+        let mut submit_buf = Textbox::new("");
+        submit_buf.font = FontRole::Mono.into();
+        let mut log_text = TextBlock::new("");
+        log_text.font = FontRole::Mono.into();
+        let mut typography_heading = TextBlock::new("NORMAL.ttf at 18px");
+        typography_heading.font = FontRole::Heading.into();
+        let mut typography_body = TextBlock::with_wrap(
+            "NORMAL.ttf at 12px remains the control font. Window titles use BOLD.ttf, and the log window uses CONSOLE.ttf for input and output.",
+            TextWrap::Word,
+        );
+        typography_body.font = FontRole::Body.into();
+        let style = Style::default().with_named_fonts(&ctx.canvas().get_atlas());
         let mut state = Self {
             renderer,
             bg: [90.0, 95.0, 100.0],
@@ -876,7 +893,7 @@ impl State {
             style_value_sliders,
             logbuf: Rc::new(RefCell::new(String::new())),
             logbuf_updated: false,
-            submit_buf: widget_handle(Textbox::new("")),
+            submit_buf: widget_handle(submit_buf),
             text_area: widget_handle(text_area),
             combo_state: widget_handle(Combo::new(ctx.new_popup("Combo Box Popup"))),
             combo_items: [
@@ -920,12 +937,13 @@ impl State {
             ],
             tree_labels: [static_label("Hello"), static_label("world")],
             background_labels: [static_label("Red:"), static_label("Green:"), static_label("Blue:")],
-            style: Style::default(),
+            style,
             demo_window: Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450))),
             style_window: Some(ctx.new_window("Style Editor", rect(350, 250, 300, 240))),
             log_window: Some(ctx.new_window("Log Window", rect(350, 40, 300, 200))),
             popup_window: Some(ctx.new_popup("Test Popup")),
             log_output: Some(ctx.new_panel("Log Output")),
+            typography_window: Some(ctx.new_window("Typography Demo", rect(40, 500, 300, 170))),
             triangle_window: Some(ctx.new_window("Triangle Window", rect(200, 100, 200, 200))),
             graphics_window: Some(ctx.new_window("Graphics Window", rect(820, 40, 280, 240))),
             falloff_window: Some(ctx.new_window("Brush Falloff", rect(820, 300, 320, 260))),
@@ -948,7 +966,10 @@ impl State {
             test2_tn: widget_handle(Node::tree("Test 2", NodeStateValue::Closed)),
             test3_tn: widget_handle(Node::tree("Test 3", NodeStateValue::Closed)),
             submit_button: widget_handle(Button::with_opt("Submit", WidgetOption::ALIGN_CENTER)),
-            log_text: widget_handle(TextBlock::new("")),
+            log_text: widget_handle(log_text),
+            typography_heading: widget_handle(typography_heading),
+            typography_body: widget_handle(typography_body),
+            typography_button: widget_handle(Button::with_opt("Control Preview", WidgetOption::ALIGN_CENTER)),
             test_buttons: [
                 widget_handle(Button::with_opt("Button 1", WidgetOption::ALIGN_CENTER)),
                 widget_handle(Button::with_opt("Button 2", WidgetOption::ALIGN_CENTER)),
@@ -1007,6 +1028,7 @@ impl State {
             background_swatch: widget_handle(ColorSwatch::new(color(90, 95, 100, 0xFF))),
             style_tree: WidgetTree::default(),
             log_tree: WidgetTree::default(),
+            typography_tree: WidgetTree::default(),
             triangle_tree: WidgetTree::default(),
             graphics_tree: WidgetTree::default(),
             falloff_tree: WidgetTree::default(),
@@ -1090,6 +1112,17 @@ impl State {
             tree.row(&submit_row, SizePolicy::Auto, |tree| {
                 tree.widget(submit_buf.clone());
                 tree.widget(submit_button.clone());
+            });
+        });
+
+        let typography_heading = self.typography_heading.clone();
+        let typography_body = self.typography_body.clone();
+        let typography_button = self.typography_button.clone();
+        self.typography_tree = WidgetTreeBuilder::build(move |tree| {
+            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                tree.widget(typography_heading.clone());
+                tree.widget(typography_body.clone());
+                tree.widget(typography_button.clone());
             });
         });
 
@@ -1536,6 +1569,18 @@ impl State {
         }
     }
 
+    fn typography_window(&mut self, ctx: &mut Context<BackendRenderer>) {
+        if self.typography_window.is_none() {
+            return;
+        }
+        ctx.window(
+            &mut self.typography_window.as_mut().unwrap().clone(),
+            ContainerOption::NONE,
+            WidgetBehaviourOption::NONE,
+            &self.typography_tree,
+        );
+    }
+
     fn triangle_window(&mut self, ctx: &mut Context<BackendRenderer>) {
         if self.triangle_window.is_none() {
             return;
@@ -1853,6 +1898,7 @@ impl State {
         ctx.frame(|ctx| {
             self.style_window(ctx);
             self.log_window(ctx);
+            self.typography_window(ctx);
             self.test_window(ctx);
             self.triangle_window(ctx);
             self.graphics_window(ctx);
