@@ -29,7 +29,7 @@ cargo +nightly build \
   -Z build-std-features=optimize_for_size \
   --example demo-full \
   --no-default-features \
-  --features "example-wgpu png_source"
+  --features "example-wgpu builder"
 ```
 Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 
@@ -194,17 +194,21 @@ If `fonts` is empty, `builder::Config` falls back to `default_font` + `default_f
 - `builder` *(default)* – enables the runtime atlas builder and PNG decoding helpers used by the examples.
 - `png_source` – allows serialized atlases and `ImageSource::Png { .. }` uploads to stay compressed.
 - `save-to-rust` – enables `AtlasHandle::to_rust_files` to emit the current atlas as Rust code for embedding.
+- `prebuilt-atlas` – opt-in example atlas embedding; without it, examples build their atlas at runtime.
 - `example-backend` – shared internal gate used by examples; pair it with exactly one concrete backend.
 - `example-glow` / `example-vulkan` / `example-wgpu` – concrete example backends; choose exactly one when running examples.
 
 Disabling default features leaves only the raw RGBA upload path (`ImageSource::Raw { .. }`):
 `cargo build --no-default-features`
 
-The demos require `builder`, so run them with `--no-default-features` plus `builder`:
+The demos build their atlas at runtime unless you opt into `prebuilt-atlas`, so `--no-default-features` example builds should include `builder`:
 `cargo run --example demo-full --no-default-features --features "example-vulkan builder"`
 
 Equivalent command using the shared gate explicitly:
 `cargo run --example demo-full --no-default-features --features "example-backend example-vulkan builder"`
+
+To embed the generated atlas instead, add `prebuilt-atlas` explicitly:
+`cargo run --example demo-full --no-default-features --features "example-vulkan prebuilt-atlas"`
 
 To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for PNG bytes) and call `AtlasHandle::to_rust_files`, or use the helper binary:
 `cargo run --bin atlas_export --features "builder save-to-rust" -- --output path/to/atlas.rs`
