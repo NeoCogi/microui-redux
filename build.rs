@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    if env::var("CARGO_FEATURE_BUILDER").is_ok() {
+    if env::var("CARGO_FEATURE_PREBUILT_ATLAS").is_err() {
         return Ok(());
     }
 

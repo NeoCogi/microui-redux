@@ -59,7 +59,7 @@ pub fn default_slots() -> Vec<Dimensioni> {
     vec![Dimensioni::new(64, 64), Dimensioni::new(24, 32), Dimensioni::new(64, 24)]
 }
 
-#[cfg(feature = "builder")]
+#[cfg(all(not(feature = "prebuilt-atlas"), feature = "builder"))]
 pub fn atlas_config<'a>(slots: &'a [Dimensioni]) -> builder::Config<'a> {
     const FONTS: &[builder::FontAsset<'static>] = &[
         builder::FontAsset {
@@ -108,12 +108,12 @@ pub fn atlas_config<'a>(slots: &'a [Dimensioni]) -> builder::Config<'a> {
     }
 }
 
-#[cfg(feature = "builder")]
+#[cfg(all(not(feature = "prebuilt-atlas"), feature = "builder"))]
 pub fn load_atlas(slots: &[Dimensioni]) -> AtlasHandle {
     builder::Builder::from_config(&atlas_config(slots)).expect("valid atlas config").to_atlas()
 }
 
-#[cfg(not(feature = "builder"))]
+#[cfg(feature = "prebuilt-atlas")]
 mod prebuilt {
     use microui_redux::AtlasHandle;
     include!(concat!(env!("OUT_DIR"), "/prebuilt_atlas.rs"));
@@ -123,7 +123,12 @@ mod prebuilt {
     }
 }
 
-#[cfg(not(feature = "builder"))]
+#[cfg(feature = "prebuilt-atlas")]
 pub fn load_atlas(_slots: &[Dimensioni]) -> AtlasHandle {
     prebuilt::load()
 }
+
+#[cfg(all(not(feature = "prebuilt-atlas"), not(feature = "builder")))]
+compile_error!(
+    "examples/common/atlas_assets.rs requires either the `builder` feature for runtime atlas generation or the `prebuilt-atlas` feature for embedded atlas data"
+);
