@@ -57,53 +57,77 @@ use super::*;
 impl Container {
     #[inline(never)]
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
-        let triangle_vertices: &[Vertex] = &self.triangle_vertices;
-        for command in self.command_list.drain(0..) {
-            match command {
-                Command::Text { text, pos, color, font } => {
-                    canvas.draw_chars(font, &text, pos, color);
-                }
-                Command::Recti { rect, color } => {
-                    canvas.draw_rect(rect, color);
-                }
-                Command::Icon { id, rect, color } => {
-                    canvas.draw_icon(id, rect, color);
-                }
-                Command::Clip { rect } => {
-                    canvas.set_clip_rect(rect);
-                }
-                Command::Image { rect, image, color } => {
-                    canvas.draw_image(image, rect, color);
-                }
-                Command::SlotRedraw { rect, id, color, payload } => {
-                    canvas.draw_slot_with_function(id, rect, color, payload.clone());
-                }
-                Command::Triangle { vertex_start, vertex_count } => {
-                    let end = vertex_start + vertex_count;
-                    canvas.draw_triangles(&triangle_vertices[vertex_start..end]);
-                }
-                Command::CustomRender(mut cra, mut f) => {
-                    canvas.flush();
-                    let prev_clip = canvas.current_clip_rect();
-                    let merged_clip = match prev_clip.intersect(&cra.view) {
-                        Some(rect) => rect,
-                        None => Recti::new(cra.content_area.x, cra.content_area.y, 0, 0),
-                    };
-                    canvas.set_clip_rect(merged_clip);
-                    cra.view = merged_clip;
-                    (*f)(canvas.current_dimension(), &cra);
-                    canvas.flush();
-                    canvas.set_clip_rect(prev_clip);
-                }
-                Command::None => (),
+        let mut commands = std::mem::take(&mut self.command_list);
+        while !commands.is_empty() {
+            let custom_index = commands.iter().position(|command| matches!(command, Command::CustomRender(_, _)));
+            let batch_len = custom_index.unwrap_or(commands.len());
+            if batch_len > 0 {
+                Self::render_batch(canvas, &self.triangle_vertices, commands.drain(..batch_len));
+            }
+
+            if custom_index.is_none() {
+                break;
+            }
+
+            if let Some(Command::CustomRender(mut cra, mut f)) = commands.drain(..1).next() {
+                // Custom render callbacks may use RendererHandle directly, so keep them outside
+                // the batched renderer lock.
+                canvas.flush();
+                let prev_clip = canvas.current_clip_rect();
+                let merged_clip = match prev_clip.intersect(&cra.view) {
+                    Some(rect) => rect,
+                    None => Recti::new(cra.content_area.x, cra.content_area.y, 0, 0),
+                };
+                canvas.set_clip_rect(merged_clip);
+                cra.view = merged_clip;
+                (*f)(canvas.current_dimension(), &cra);
+                canvas.flush();
+                canvas.set_clip_rect(prev_clip);
             }
         }
+        self.command_list = commands;
 
         self.triangle_vertices.clear();
 
         for panel in &mut self.panels {
             panel.render(canvas)
         }
+    }
+
+    fn render_batch<R, I>(canvas: &mut Canvas<R>, triangle_vertices: &[Vertex], commands: I)
+    where
+        R: Renderer,
+        I: IntoIterator<Item = Command>,
+    {
+        canvas.render_scope(|canvas| {
+            for command in commands {
+                match command {
+                    Command::Text { text, pos, color, font } => {
+                        canvas.draw_chars(font, &text, pos, color);
+                    }
+                    Command::Recti { rect, color } => {
+                        canvas.draw_rect(rect, color);
+                    }
+                    Command::Icon { id, rect, color } => {
+                        canvas.draw_icon(id, rect, color);
+                    }
+                    Command::Clip { rect } => {
+                        canvas.set_clip_rect(rect);
+                    }
+                    Command::Image { rect, image, color } => {
+                        canvas.draw_image(image, rect, color);
+                    }
+                    Command::SlotRedraw { rect, id, color, payload } => {
+                        canvas.draw_slot_with_function(id, rect, color, payload);
+                    }
+                    Command::Triangle { vertex_start, vertex_count } => {
+                        let end = vertex_start + vertex_count;
+                        canvas.draw_triangles(&triangle_vertices[vertex_start..end]);
+                    }
+                    Command::CustomRender(_, _) | Command::None => (),
+                }
+            }
+        });
     }
 
     fn draw_ctx(&mut self) -> DrawCtx<'_> {

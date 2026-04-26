@@ -27,9 +27,9 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
-use super::*;
 use crate::graphics::clip_triangle_vertices_to_rect;
-use std::{borrow::BorrowMut, collections::HashMap};
+use super::*;
+use std::collections::HashMap;
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
@@ -66,6 +66,9 @@ impl Vertex {
 pub struct Canvas<R: Renderer> {
     current_dim: Dimensioni,
     renderer: RendererHandle<R>,
+    atlas: AtlasHandle,
+    atlas_dim: Dimensioni,
+    white_icon_rect: Recti,
     clip: Recti,
     next_texture_id: u32,
     textures: HashMap<TextureId, TextureInfo>,
@@ -81,9 +84,15 @@ struct TextureInfo {
 impl<R: Renderer> Canvas<R> {
     /// Creates a canvas around the provided renderer handle.
     pub fn from(renderer: RendererHandle<R>, dim: Dimensioni) -> Self {
+        let atlas = renderer.scope(|r| r.get_atlas());
+        let atlas_dim = atlas.get_texture_dimension();
+        let white_icon_rect = atlas.get_icon_rect(WHITE_ICON);
         Self {
             current_dim: dim,
             renderer,
+            atlas,
+            atlas_dim,
+            white_icon_rect,
             clip: Recti::new(0, 0, dim.width, dim.height),
             next_texture_id: 1,
             textures: HashMap::new(),
@@ -93,7 +102,7 @@ impl<R: Renderer> Canvas<R> {
 
     /// Returns the atlas associated with the renderer.
     pub fn get_atlas(&self) -> AtlasHandle {
-        self.renderer.scope(|r| r.get_atlas())
+        self.atlas.clone()
     }
 
     #[inline(never)]
@@ -146,100 +155,66 @@ impl<R: Renderer> Canvas<R> {
         if rects.is_empty() {
             return;
         }
-        let atlas_dim = self.renderer.scope(|r| r.get_atlas()).get_texture_dimension();
-        let clip = self.clip;
-        self.renderer.scope_mut(move |r| {
-            for (dst, src, color) in rects {
-                if let Some((dst, src)) = Self::clip_rect(*dst, *src, clip) {
-                    let x = src.x as f32 / atlas_dim.width as f32;
-                    let y = src.y as f32 / atlas_dim.height as f32;
-                    let w = src.width as f32 / atlas_dim.width as f32;
-                    let h = src.height as f32 / atlas_dim.height as f32;
-
-                    let mut v0 = Vertex::default();
-                    let mut v1 = Vertex::default();
-                    let mut v2 = Vertex::default();
-                    let mut v3 = Vertex::default();
-
-                    // tex coordinates
-                    v0.tex.x = x;
-                    v0.tex.y = y;
-                    v1.tex.x = x + w;
-                    v1.tex.y = y;
-                    v2.tex.x = x + w;
-                    v2.tex.y = y + h;
-                    v3.tex.x = x;
-                    v3.tex.y = y + h;
-
-                    // position
-                    v0.pos.x = dst.x as f32;
-                    v0.pos.y = dst.y as f32;
-                    v1.pos.x = dst.x as f32 + dst.width as f32;
-                    v1.pos.y = dst.y as f32;
-                    v2.pos.x = dst.x as f32 + dst.width as f32;
-                    v2.pos.y = dst.y as f32 + dst.height as f32;
-                    v3.pos.x = dst.x as f32;
-                    v3.pos.y = dst.y as f32 + dst.height as f32;
-
-                    // color
-                    v0.color = color4b(color.r, color.g, color.b, color.a);
-                    v1.color = v0.color;
-                    v2.color = v0.color;
-                    v3.color = v0.color;
-
-                    r.push_quad_vertices(&v0, &v1, &v2, &v3);
-                }
-            }
-        })
+        self.render_scope(|frame| frame.push_rects(rects));
     }
 
     /// Draws a solid colored rectangle.
     pub fn draw_rect(&mut self, rect: Recti, color: Color) {
-        let icon_rect = self.renderer.scope(|r| r.get_atlas()).get_icon_rect(WHITE_ICON);
-        self.push_rect(rect, icon_rect, color);
+        self.render_scope(|frame| frame.draw_rect(rect, color));
     }
 
     #[inline(never)]
     /// Draws UTF-8 text using the supplied font.
     pub fn draw_chars(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
-        let atlas = self.renderer.scope(|r| r.get_atlas());
-        let mut rect_batch = std::mem::take(&mut self.rect_batch);
-        rect_batch.clear();
-        {
-            let rect_batch = &mut rect_batch;
-            atlas.draw_string(font, text, |_, _, dst, src| {
-                let dst = Rect::new(pos.x + dst.x, pos.y + dst.y, dst.width, dst.height);
-                rect_batch.push((dst, src, color));
-            });
+        if text.is_empty() {
+            return;
         }
-        self.push_rects(rect_batch.as_slice());
-        self.rect_batch = rect_batch;
+        self.render_scope(|frame| frame.draw_chars(font, text, pos, color));
     }
 
     /// Draws an icon centered inside the provided rectangle.
     pub fn draw_icon(&mut self, id: IconId, r: Recti, color: Color) {
-        let src = self.renderer.scope(|r| r.get_atlas()).get_icon_rect(id);
-        let x = r.x + (r.width - src.width) / 2;
-        let y = r.y + (r.height - src.height) / 2;
-        self.push_rect(rect(x, y, src.width, src.height), src, color);
+        self.render_scope(|frame| frame.draw_icon(id, r, color));
     }
 
     /// Draws an atlas slot centered inside the provided rectangle.
     pub fn draw_slot(&mut self, id: SlotId, r: Recti, color: Color) {
-        let src = self.renderer.scope(|r| r.get_atlas()).get_slot_rect(id);
-        let x = r.x + (r.width - src.width) / 2;
-        let y = r.y + (r.height - src.height) / 2;
-        self.push_rect(rect(x, y, src.width, src.height), src, color);
+        self.render_scope(|frame| frame.draw_slot(id, r, color));
     }
 
     /// Renders a slot with the callback before drawing it.
     pub fn draw_slot_with_function(&mut self, id: SlotId, r: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        let src = self.renderer.scope(|r| r.get_atlas()).get_slot_rect(id);
-        let pl = payload.clone();
-        self.renderer.scope_mut(move |r| r.get_atlas().borrow_mut().render_slot(id, pl.clone()));
-        let x = r.x + (r.width - src.width) / 2;
-        let y = r.y + (r.height - src.height) / 2;
-        self.push_rect(rect(x, y, src.width, src.height), src, color);
+        self.render_scope(|frame| frame.draw_slot_with_function(id, r, color, payload));
+    }
+
+    pub(crate) fn render_scope<Res, F: FnOnce(&mut CanvasFrame<'_, R>) -> Res>(&mut self, f: F) -> Res {
+        let Self {
+            current_dim,
+            renderer,
+            atlas,
+            atlas_dim,
+            white_icon_rect,
+            clip,
+            textures,
+            rect_batch,
+            ..
+        } = self;
+        let current_dim = *current_dim;
+        let atlas_dim = *atlas_dim;
+        let white_icon_rect = *white_icon_rect;
+        renderer.scope_mut(|renderer| {
+            let mut frame = CanvasFrame {
+                renderer,
+                current_dim,
+                atlas,
+                atlas_dim,
+                white_icon_rect,
+                clip,
+                textures,
+                rect_batch,
+            };
+            f(&mut frame)
+        })
     }
 
     /// Sets the clip rectangle used for subsequent draw calls.
@@ -260,19 +235,7 @@ impl<R: Renderer> Canvas<R> {
         if vertices.is_empty() {
             return;
         }
-        let frame_bounds = Recti::new(0, 0, self.current_dim.width.max(0), self.current_dim.height.max(0));
-        let clip = self.clip.intersect(&frame_bounds).unwrap_or_default();
-        if clip.width <= 0 || clip.height <= 0 {
-            return;
-        }
-
-        self.renderer.scope_mut(move |r| {
-            for triangle in vertices.chunks_exact(3) {
-                clip_triangle_vertices_to_rect(triangle[0], triangle[1], triangle[2], clip, |a, b, c| {
-                    r.push_triangle_vertices(&a, &b, &c);
-                });
-            }
-        });
+        self.render_scope(|frame| frame.draw_triangles(vertices));
     }
 
     /// Begins a new drawing pass and resets the clip rectangle.
@@ -321,19 +284,159 @@ impl<R: Renderer> Canvas<R> {
     /// Draws either an atlas slot or an external texture inside `rect`.
     pub fn draw_image(&mut self, image: Image, rect: Recti, color: Color) {
         match image {
+            Image::Slot(slot) => self.render_scope(|frame| frame.draw_slot(slot, rect, color)),
+            Image::Texture(tex) if self.textures.contains_key(&tex) => self.render_scope(|frame| frame.draw_texture(tex, rect, color)),
+            Image::Texture(_) => (),
+        }
+    }
+}
+
+pub(crate) struct CanvasFrame<'a, R: Renderer> {
+    renderer: &'a mut R,
+    current_dim: Dimensioni,
+    atlas: &'a AtlasHandle,
+    atlas_dim: Dimensioni,
+    white_icon_rect: Recti,
+    clip: &'a mut Recti,
+    textures: &'a HashMap<TextureId, TextureInfo>,
+    rect_batch: &'a mut Vec<(Recti, Recti, Color)>,
+}
+
+impl<R: Renderer> CanvasFrame<'_, R> {
+    #[inline(never)]
+    pub(crate) fn push_rect(&mut self, dst: Recti, src: Recti, color: Color) {
+        let rects = [(dst, src, color)];
+        self.push_rects(&rects);
+    }
+
+    #[inline(never)]
+    pub(crate) fn push_rects(&mut self, rects: &[(Recti, Recti, Color)]) {
+        if rects.is_empty() {
+            return;
+        }
+        let atlas_dim = self.atlas_dim;
+        let clip = *self.clip;
+        for (dst, src, color) in rects {
+            if let Some((dst, src)) = Canvas::<R>::clip_rect(*dst, *src, clip) {
+                let x = src.x as f32 / atlas_dim.width as f32;
+                let y = src.y as f32 / atlas_dim.height as f32;
+                let w = src.width as f32 / atlas_dim.width as f32;
+                let h = src.height as f32 / atlas_dim.height as f32;
+
+                let mut v0 = Vertex::default();
+                let mut v1 = Vertex::default();
+                let mut v2 = Vertex::default();
+                let mut v3 = Vertex::default();
+
+                // tex coordinates
+                v0.tex.x = x;
+                v0.tex.y = y;
+                v1.tex.x = x + w;
+                v1.tex.y = y;
+                v2.tex.x = x + w;
+                v2.tex.y = y + h;
+                v3.tex.x = x;
+                v3.tex.y = y + h;
+
+                // position
+                v0.pos.x = dst.x as f32;
+                v0.pos.y = dst.y as f32;
+                v1.pos.x = dst.x as f32 + dst.width as f32;
+                v1.pos.y = dst.y as f32;
+                v2.pos.x = dst.x as f32 + dst.width as f32;
+                v2.pos.y = dst.y as f32 + dst.height as f32;
+                v3.pos.x = dst.x as f32;
+                v3.pos.y = dst.y as f32 + dst.height as f32;
+
+                // color
+                v0.color = color4b(color.r, color.g, color.b, color.a);
+                v1.color = v0.color;
+                v2.color = v0.color;
+                v3.color = v0.color;
+
+                self.renderer.push_quad_vertices(&v0, &v1, &v2, &v3);
+            }
+        }
+    }
+
+    pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
+        self.push_rect(rect, self.white_icon_rect, color);
+    }
+
+    #[inline(never)]
+    pub(crate) fn draw_chars(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
+        let mut rect_batch = std::mem::take(self.rect_batch);
+        rect_batch.clear();
+        {
+            let rect_batch = &mut rect_batch;
+            self.atlas.draw_string(font, text, |_, _, dst, src| {
+                let dst = Rect::new(pos.x + dst.x, pos.y + dst.y, dst.width, dst.height);
+                rect_batch.push((dst, src, color));
+            });
+        }
+        self.push_rects(rect_batch.as_slice());
+        *self.rect_batch = rect_batch;
+    }
+
+    pub(crate) fn draw_icon(&mut self, id: IconId, r: Recti, color: Color) {
+        let src = self.atlas.get_icon_rect(id);
+        let x = r.x + (r.width - src.width) / 2;
+        let y = r.y + (r.height - src.height) / 2;
+        self.push_rect(rect(x, y, src.width, src.height), src, color);
+    }
+
+    pub(crate) fn draw_slot(&mut self, id: SlotId, r: Recti, color: Color) {
+        let src = self.atlas.get_slot_rect(id);
+        let x = r.x + (r.width - src.width) / 2;
+        let y = r.y + (r.height - src.height) / 2;
+        self.push_rect(rect(x, y, src.width, src.height), src, color);
+    }
+
+    pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, r: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
+        let src = self.atlas.get_slot_rect(id);
+        let mut atlas = self.atlas.clone();
+        atlas.render_slot(id, payload);
+        let x = r.x + (r.width - src.width) / 2;
+        let y = r.y + (r.height - src.height) / 2;
+        self.push_rect(rect(x, y, src.width, src.height), src, color);
+    }
+
+    pub(crate) fn set_clip_rect(&mut self, rect: Recti) {
+        *self.clip = rect;
+    }
+
+    pub(crate) fn draw_triangles(&mut self, vertices: &[Vertex]) {
+        if vertices.is_empty() {
+            return;
+        }
+        let frame_bounds = Recti::new(0, 0, self.current_dim.width.max(0), self.current_dim.height.max(0));
+        let clip = (*self.clip).intersect(&frame_bounds).unwrap_or_default();
+        if clip.width <= 0 || clip.height <= 0 {
+            return;
+        }
+
+        for triangle in vertices.chunks_exact(3) {
+            clip_triangle_vertices_to_rect(triangle[0], triangle[1], triangle[2], clip, |a, b, c| {
+                self.renderer.push_triangle_vertices(&a, &b, &c);
+            });
+        }
+    }
+
+    pub(crate) fn draw_image(&mut self, image: Image, rect: Recti, color: Color) {
+        match image {
             Image::Slot(slot) => self.draw_slot(slot, rect, color),
             Image::Texture(tex) => self.draw_texture(tex, rect, color),
         }
     }
 
-    fn draw_texture(&mut self, texture: TextureId, rect: Recti, color: Color) {
+    pub(crate) fn draw_texture(&mut self, texture: TextureId, rect: Recti, color: Color) {
         let info = match self.textures.get(&texture) {
             Some(info) => *info,
             None => return,
         };
         let src = Recti::new(0, 0, info.width, info.height);
-        let clip = self.clip;
-        if let Some((dst, src)) = Self::clip_rect(rect, src, clip) {
+        let clip = *self.clip;
+        if let Some((dst, src)) = Canvas::<R>::clip_rect(rect, src, clip) {
             let mut v0 = Vertex::default();
             let mut v1 = Vertex::default();
             let mut v2 = Vertex::default();
@@ -369,7 +472,7 @@ impl<R: Renderer> Canvas<R> {
             v2.color = color;
             v3.color = color;
 
-            self.renderer.scope_mut(|r| r.draw_texture(texture, [v0, v1, v2, v3]));
+            self.renderer.draw_texture(texture, [v0, v1, v2, v3]);
         }
     }
 }
@@ -389,6 +492,7 @@ impl<R: Renderer> Drop for Canvas<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     struct NoopRenderer;
 
@@ -404,6 +508,72 @@ mod tests {
         fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) {}
         fn destroy_texture(&mut self, _id: TextureId) {}
         fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
+    }
+
+    struct CountingRenderer {
+        atlas: AtlasHandle,
+        get_atlas_calls: Rc<Cell<usize>>,
+        quad_count: Rc<Cell<usize>>,
+    }
+
+    impl Renderer for CountingRenderer {
+        fn get_atlas(&self) -> AtlasHandle {
+            self.get_atlas_calls.set(self.get_atlas_calls.get() + 1);
+            self.atlas.clone()
+        }
+        fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
+        fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {
+            self.quad_count.set(self.quad_count.get() + 1);
+        }
+        fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
+        fn flush(&mut self) {}
+        fn end(&mut self) {}
+        fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) {}
+        fn destroy_texture(&mut self, _id: TextureId) {}
+        fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
+    }
+
+    fn make_test_atlas() -> AtlasHandle {
+        let pixels: [u8; 64] = [0xFF; 64];
+        let icons = [("white", Recti::new(0, 0, 1, 1))];
+        let entries = [
+            (
+                '_',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(1, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+            (
+                'a',
+                CharEntry {
+                    offset: Vec2i::new(0, 0),
+                    advance: Vec2i::new(1, 0),
+                    rect: Recti::new(0, 0, 1, 1),
+                },
+            ),
+        ];
+        let fonts = [(
+            "default",
+            FontEntry {
+                line_size: 1,
+                baseline: 1,
+                font_size: 1,
+                entries: &entries,
+            },
+        )];
+        let slots = [Recti::new(1, 0, 1, 1)];
+        let source = AtlasSource {
+            width: 4,
+            height: 4,
+            pixels: &pixels,
+            icons: &icons,
+            fonts: &fonts,
+            format: SourceFormat::Raw,
+            slots: &slots,
+        };
+        AtlasHandle::from(&source)
     }
 
     fn assert_rect_eq(actual: Recti, expected: Recti) {
@@ -439,5 +609,31 @@ mod tests {
         let src = Recti::new(0, 0, 10, 10);
         let clip = Recti::new(50, 50, 10, 10);
         assert!(Canvas::<NoopRenderer>::clip_rect(dst, src, clip).is_none());
+    }
+
+    #[test]
+    fn atlas_draw_commands_reuse_canvas_cached_atlas() {
+        let get_atlas_calls = Rc::new(Cell::new(0));
+        let quad_count = Rc::new(Cell::new(0));
+        let renderer = RendererHandle::new(CountingRenderer {
+            atlas: make_test_atlas(),
+            get_atlas_calls: get_atlas_calls.clone(),
+            quad_count: quad_count.clone(),
+        });
+        let mut canvas = Canvas::from(renderer, Dimensioni::new(16, 16));
+
+        canvas.draw_rect(Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+        canvas.draw_chars(FontId::default(), "aa", Vec2i::new(0, 0), color(255, 255, 255, 255));
+        canvas.draw_icon(WHITE_ICON, Recti::new(0, 0, 3, 3), color(255, 255, 255, 255));
+        canvas.draw_slot(SlotId::default(), Recti::new(0, 0, 3, 3), color(255, 255, 255, 255));
+        canvas.draw_slot_with_function(
+            SlotId::default(),
+            Recti::new(0, 0, 3, 3),
+            color(255, 255, 255, 255),
+            Rc::new(|_, _| color4b(255, 255, 255, 255)),
+        );
+
+        assert_eq!(get_atlas_calls.get(), 1);
+        assert_eq!(quad_count.get(), 6);
     }
 }
