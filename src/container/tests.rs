@@ -302,6 +302,63 @@ fn widget_tree_records_leaf_states() {
 }
 
 #[test]
+fn widget_node_policy_overrides_auto_cell_size() {
+    let mut container = make_container();
+    let button = widget_handle(Button::new("A"));
+    let mut results = FrameResults::default();
+    let mut node_id = NodeId::new(0);
+
+    begin_test_frame(&mut container, rect(0, 0, 100, 40));
+    let tree = WidgetTreeBuilder::build(|tree| {
+        node_id = tree.widget_with(NodeOptions::with_policy(Policy::fixed(42, 13)), button.clone());
+    });
+    container.widget_tree(&mut results, &tree);
+
+    let layout = container.current_node_layout(node_id).expect("widget layout missing");
+    assert_eq!(layout.rect.width, 42);
+    assert_eq!(layout.rect.height, 13);
+}
+
+#[test]
+fn structural_node_policy_allocates_outer_scope() {
+    let mut container = make_container();
+    let first = widget_handle(Button::new("A"));
+    let second = widget_handle(Button::new("B"));
+    let after = widget_handle(Button::new("C"));
+    let mut results = FrameResults::default();
+    let mut row_id = NodeId::new(0);
+    let mut first_id = NodeId::new(0);
+    let mut second_id = NodeId::new(0);
+    let mut after_id = NodeId::new(0);
+
+    begin_test_frame(&mut container, rect(0, 0, 100, 60));
+    let tree = WidgetTreeBuilder::build(|tree| {
+        row_id = tree.row_with(
+            NodeOptions::with_policy(Policy::fixed(60, 20)),
+            &[SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)],
+            SizePolicy::Fixed(10),
+            |tree| {
+                first_id = tree.widget(first.clone());
+                second_id = tree.widget(second.clone());
+            },
+        );
+        after_id = tree.widget(after.clone());
+    });
+    container.widget_tree(&mut results, &tree);
+
+    let row_layout = container.current_node_layout(row_id).expect("row layout missing");
+    let first_layout = container.current_node_layout(first_id).expect("first layout missing");
+    let second_layout = container.current_node_layout(second_id).expect("second layout missing");
+    let after_layout = container.current_node_layout(after_id).expect("following widget layout missing");
+
+    assert_eq!(row_layout.rect.width, 60);
+    assert_eq!(row_layout.rect.height, 20);
+    assert!(first_layout.rect.x >= row_layout.rect.x);
+    assert!(second_layout.rect.x + second_layout.rect.width <= row_layout.rect.x + row_layout.rect.width);
+    assert!(after_layout.rect.y >= row_layout.rect.y + row_layout.rect.height);
+}
+
+#[test]
 fn widget_tree_measures_all_nodes_before_rendering() {
     let mut container = make_container();
     let log = Rc::new(RefCell::new(Vec::new()));
