@@ -100,7 +100,7 @@ impl<R: Renderer> RendererHandle<R> {
     }
 
     /// Executes the provided closure with a shared reference to the renderer.
-    pub fn scope<Res, F: Fn(&R) -> Res>(&self, f: F) -> Res {
+    pub fn scope<Res, F: FnOnce(&R) -> Res>(&self, f: F) -> Res {
         match self.handle.read() {
             Ok(guard) => f(&*guard),
             Err(poisoned) => {
@@ -111,7 +111,7 @@ impl<R: Renderer> RendererHandle<R> {
     }
 
     /// Executes the provided closure with a mutable reference to the renderer.
-    pub fn scope_mut<Res, F: FnMut(&mut R) -> Res>(&mut self, mut f: F) -> Res {
+    pub fn scope_mut<Res, F: FnOnce(&mut R) -> Res>(&mut self, f: F) -> Res {
         match self.handle.write() {
             Ok(mut guard) => f(&mut *guard),
             Err(poisoned) => {
