@@ -521,6 +521,37 @@ mod tests {
     }
 
     #[test]
+    fn open_dialog_does_not_bump_zindex_every_frame() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let mut background = ctx.new_window("background", rect(0, 0, 100, 80));
+        let mut dialog = ctx.new_dialog("dialog", rect(10, 10, 80, 40));
+        let background_tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("background");
+        });
+        let dialog_tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("dialog");
+        });
+
+        ctx.open_dialog(&mut dialog);
+        ctx.frame(|ui| {
+            ui.window(&mut background, ContainerOption::NONE, WidgetBehaviourOption::NONE, &background_tree);
+            ui.dialog(&mut dialog, ContainerOption::NONE, WidgetBehaviourOption::NONE, &dialog_tree);
+        });
+
+        let first_zindex = dialog.zindex();
+        assert!(first_zindex > background.zindex());
+
+        ctx.frame(|ui| {
+            ui.window(&mut background, ContainerOption::NONE, WidgetBehaviourOption::NONE, &background_tree);
+            ui.dialog(&mut dialog, ContainerOption::NONE, WidgetBehaviourOption::NONE, &dialog_tree);
+        });
+
+        assert_eq!(dialog.zindex(), first_zindex);
+    }
+
+    #[test]
     fn reshown_roots_drop_stale_panel_handles_after_a_gap() {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
@@ -922,6 +953,12 @@ impl<R: Renderer> Context<R> {
         window.inner_mut().main.zindex = self.last_zindex;
     }
 
+    fn bring_to_front_if_behind(&mut self, window: &mut WindowHandle) {
+        if window.zindex() < self.last_zindex {
+            self.bring_to_front(window);
+        }
+    }
+
     #[inline(never)]
     fn begin_root_container(&mut self, window: &mut WindowHandle) {
         window.prepare_for_frame(self.frame);
@@ -1005,7 +1042,11 @@ impl<R: Renderer> Context<R> {
 
     /// Marks a dialog window as open for the next frame.
     pub fn open_dialog(&mut self, window: &mut WindowHandle) {
+        let was_open = window.is_open();
         window.inner_mut().win_state = WindowState::Open;
+        if !was_open {
+            self.bring_to_front(window);
+        }
     }
 
     /// Renders a dialog window if it is currently open.
@@ -1014,7 +1055,7 @@ impl<R: Renderer> Context<R> {
             self.next_hover_root = Some(window.clone());
             self.hover_root = self.next_hover_root.clone();
             window.inner_mut().main.in_hover_root = true;
-            self.bring_to_front(window);
+            self.bring_to_front_if_behind(window);
 
             self.render_window_tree(window, opt, bopt, tree);
         }
