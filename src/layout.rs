@@ -176,6 +176,20 @@ struct ResolveCtx {
     default_width: i32,
     // Height fallback after preferred-size resolution.
     default_height: i32,
+    // Optional node-local width policy override.
+    width_override: Option<SizePolicy>,
+    // Optional node-local height policy override.
+    height_override: Option<SizePolicy>,
+}
+
+impl ResolveCtx {
+    fn width_policy(&self, fallback: SizePolicy) -> SizePolicy {
+        self.width_override.unwrap_or(fallback)
+    }
+
+    fn height_policy(&self, fallback: SizePolicy) -> SizePolicy {
+        self.height_override.unwrap_or(fallback)
+    }
 }
 
 trait LayoutFlow {
@@ -281,7 +295,9 @@ impl LayoutFlow for RowFlow {
         } else {
             self.widths.get(self.item_index).copied().unwrap_or(SizePolicy::Auto)
         };
+        let width_policy = ctx.width_policy(width_policy);
         let (height_policy, row_count_hint) = self.current_height_policy();
+        let height_policy = ctx.height_policy(height_policy);
 
         let x = scope.cursor.x;
         let y = scope.cursor.y;
@@ -360,16 +376,16 @@ impl LayoutFlow for StackFlow {
     fn next_local(&mut self, scope: &mut ScopeState, ctx: ResolveCtx) -> Recti {
         let x = scope.indent;
         let available_width = scope.body.width.saturating_sub(x);
-        let width = self.width.resolve_with_reference(ctx.default_width, available_width, available_width, None);
+        let width_policy = ctx.width_policy(self.width);
+        let width = width_policy.resolve_with_reference(ctx.default_width, available_width, available_width, None);
 
         match self.direction {
             StackDirection::TopToBottom => {
                 // Top-down stacks continue from the scope's row cursor.
                 let y = scope.next_row;
                 let available_height = scope.body.height.saturating_sub(y);
-                let height = self
-                    .height
-                    .resolve_with_reference(ctx.default_height, available_height, scope.body.height, None);
+                let height_policy = ctx.height_policy(self.height);
+                let height = height_policy.resolve_with_reference(ctx.default_height, available_height, scope.body.height, None);
 
                 // Move directly to the next stacked row.
                 let next = y.saturating_add(height).saturating_add(ctx.spacing);
@@ -381,9 +397,8 @@ impl LayoutFlow for StackFlow {
             StackDirection::BottomToTop => {
                 // Bottom-up stacks are anchored to the scope bottom and use local offset.
                 let available_height = scope.body.height.saturating_sub(self.offset);
-                let height = self
-                    .height
-                    .resolve_with_reference(ctx.default_height, available_height, scope.body.height, None);
+                let height_policy = ctx.height_policy(self.height);
+                let height = height_policy.resolve_with_reference(ctx.default_height, available_height, scope.body.height, None);
                 let y = scope.body.height.saturating_sub(self.offset).saturating_sub(height);
                 self.offset = self.offset.saturating_add(height).saturating_add(ctx.spacing);
                 rect(x, y, width, height)
@@ -547,7 +562,26 @@ impl LayoutEngine {
     }
 
     pub fn end_column(&mut self) {
-        let finished = self.stack.pop().expect("cannot end column without an active child layout");
+        self.end_nested_scope("cannot end column without an active child layout");
+    }
+
+    pub(crate) fn begin_node_scope_with_policies(&mut self, preferred: Dimensioni, width: SizePolicy, height: SizePolicy) -> Recti {
+        let layout_rect = self.next_with_policies(preferred, width, height);
+        self.push_scope_with_flow(layout_rect, vec2(0, 0), FlowState::default());
+        layout_rect
+    }
+
+    pub(crate) fn end_node_scope(&mut self) -> Dimensioni {
+        self.end_nested_scope("cannot end node scope without an active child layout")
+    }
+
+    fn end_nested_scope(&mut self, panic_message: &'static str) -> Dimensioni {
+        let finished = self.stack.pop().expect(panic_message);
+        let content_size = finished
+            .scope
+            .max
+            .map(|max_rect| Dimensioni::new((max_rect.x - finished.scope.body.x).max(0), (max_rect.y - finished.scope.body.y).max(0)))
+            .unwrap_or_default();
         let parent = self.top_mut();
 
         // Merge child cursor/row extents back into parent-local space.
@@ -566,6 +600,8 @@ impl LayoutEngine {
                 parent.scope.max = Some(Vec2i::new(max(am.x, bm.x), max(am.y, bm.y)));
             }
         }
+
+        content_size
     }
 
     pub fn row(&mut self, widths: &[SizePolicy], height: SizePolicy) {
@@ -606,11 +642,29 @@ impl LayoutEngine {
     }
 
     pub fn next_with_preferred(&mut self, preferred: Dimensioni) -> Recti {
+        self.next_with_policies(preferred, SizePolicy::Auto, SizePolicy::Auto)
+    }
+
+    pub(crate) fn next_with_policies(&mut self, preferred: Dimensioni, width: SizePolicy, height: SizePolicy) -> Recti {
         let spacing = self.style.spacing;
         let (default_width, default_height) = self.fallback_dimensions(preferred);
+        let width_override = match width {
+            SizePolicy::Auto => None,
+            policy => Some(policy),
+        };
+        let height_override = match height {
+            SizePolicy::Auto => None,
+            policy => Some(policy),
+        };
         let mut local = {
             let frame = self.top_mut();
-            let ctx = ResolveCtx { spacing, default_width, default_height };
+            let ctx = ResolveCtx {
+                spacing,
+                default_width,
+                default_height,
+                width_override,
+                height_override,
+            };
             frame.flow.next_local(&mut frame.scope, ctx)
         };
 

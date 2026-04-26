@@ -265,8 +265,8 @@ impl Container {
         container.layout.pop_scope();
     }
 
-    pub(crate) fn begin_panel_layout(&mut self, panel: &mut ContainerHandle, _opt: ContainerOption, bopt: WidgetBehaviourOption) {
-        let rect = self.layout.next();
+    pub(crate) fn begin_panel_layout(&mut self, panel: &mut ContainerHandle, _opt: ContainerOption, bopt: WidgetBehaviourOption, policy: Policy) {
+        let rect = self.layout.next_with_policies(Dimensioni::default(), policy.width, policy.height);
         let container = &mut panel.inner_mut();
         container.prepare();
         container.style = self.style.clone();

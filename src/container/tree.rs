@@ -141,11 +141,11 @@ impl Container {
     }
 
     /// Measures a leaf widget node and records its allocated rectangle in the tree cache.
-    fn layout_tree_widget(&mut self, results: &FrameResults, node_id: NodeId, widget: &dyn WidgetStateHandleDyn) {
+    fn layout_tree_widget(&mut self, node_id: NodeId, policy: Policy, widget: &dyn WidgetStateHandleDyn) {
         // Measurement goes through the same generic widget dispatch used elsewhere in the
         // container. The retained path just captures the allocated rectangle in the tree cache
         // instead of consuming it immediately.
-        let rect = self.layout_widget_dyn(results, widget);
+        let rect = self.measure_widget_rect_dyn_with_policy(widget, policy);
         self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Dimensioni::default()));
     }
 
@@ -164,8 +164,8 @@ impl Container {
     }
 
     /// Measures a retained custom-render node and records its allocated rectangle.
-    fn layout_tree_custom_render(&mut self, results: &FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>) {
-        let rect = self.layout_widget_handle(results, state);
+    fn layout_tree_custom_render(&mut self, node_id: NodeId, policy: Policy, state: &WidgetHandle<Custom>) {
+        let rect = self.measure_widget_rect_handle_with_policy(state, policy);
         self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Dimensioni::default()));
     }
 
@@ -215,17 +215,30 @@ impl Container {
     }
 
     /// Measures a header/tree disclosure node and returns the stable expansion state used this frame.
-    fn layout_tree_node_scope(&mut self, results: &FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
+    fn layout_tree_node_scope(&mut self, node_id: NodeId, policy: Policy, state: &WidgetHandle<Node>) -> NodeStateValue {
         // Header/tree nodes always reserve a full-width row for the disclosure widget itself. The
         // returned stable state decides whether children participate in the current layout pass.
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        let rect = self.layout_widget_handle(results, state);
+        let rect = self.measure_widget_rect_handle_with_policy(state, policy);
         let stable_state = {
             let state = state.borrow();
             state.state
         };
         self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Dimensioni::default()));
         stable_state
+    }
+
+    fn layout_policy_group<F: FnOnce(&mut Self)>(&mut self, node_id: NodeId, policy: Policy, children: &[WidgetTreeNode], f: F) {
+        if policy == Policy::auto() {
+            f(self);
+            self.record_tree_group_from_children(node_id, children);
+            return;
+        }
+
+        let rect = self.layout.begin_node_scope_with_policies(Dimensioni::default(), policy.width, policy.height);
+        f(self);
+        let content_size = self.layout.end_node_scope();
+        self.record_tree_layout(node_id, NodeLayout::new(rect, rect, content_size));
     }
 
     /// Renders a header/tree disclosure node and returns the stable expansion state observed this frame.
@@ -244,18 +257,19 @@ impl Container {
     /// Performs the layout pass for one retained tree node, recursing into children when needed.
     fn layout_tree_node(&mut self, results: &FrameResults, node: &WidgetTreeNode) {
         let (node_id, kind, children) = node.parts();
+        let policy = node.policy();
         match kind {
             WidgetTreeNodeKind::Widget { widget } => {
-                self.layout_tree_widget(results, node_id, &**widget);
+                self.layout_tree_widget(node_id, policy, &**widget);
             }
             WidgetTreeNodeKind::CustomRender { state, .. } => {
-                self.layout_tree_custom_render(results, node_id, state);
+                self.layout_tree_custom_render(node_id, policy, state);
             }
             WidgetTreeNodeKind::Container { handle, opt, behaviour } => {
                 let mut handle = handle.clone();
                 // Containers are nested retained sub-contexts. The parent records the panel bounds,
                 // then lets the child container execute the same layout pass against its own body.
-                self.begin_panel_layout(&mut handle, *opt, *behaviour);
+                self.begin_panel_layout(&mut handle, *opt, *behaviour, policy);
                 handle.with_mut(|container| {
                     container.layout_tree_nodes(results, children);
                 });
@@ -266,12 +280,12 @@ impl Container {
             WidgetTreeNodeKind::Header { state } => {
                 // Headers gate child participation entirely. In the strict retained model the
                 // current stable state decides whether descendants exist for this frame.
-                if self.layout_tree_node_scope(results, node_id, state).is_expanded() {
+                if self.layout_tree_node_scope(node_id, policy, state).is_expanded() {
                     self.layout_tree_nodes(results, children);
                 }
             }
             WidgetTreeNodeKind::Tree { state } => {
-                if self.layout_tree_node_scope(results, node_id, state).is_expanded() {
+                if self.layout_tree_node_scope(node_id, policy, state).is_expanded() {
                     // Tree nodes differ from plain headers only by indenting their descendants.
                     let indent_size = self.style.as_ref().indent;
                     self.layout.adjust_indent(indent_size);
@@ -282,28 +296,38 @@ impl Container {
             WidgetTreeNodeKind::Row { widths, height } => {
                 // Structural layout nodes do not run widgets themselves; they only establish a new
                 // layout scope for descendants and then synthesize a cached group rect afterward.
-                self.with_row(widths, *height, |container| {
-                    container.layout_tree_nodes(results, children);
+                self.layout_policy_group(node_id, policy, children, |container| {
+                    container.with_row(widths, *height, |container| {
+                        container.layout_tree_nodes(results, children);
+                    });
                 });
-                self.record_tree_group_from_children(node_id, children);
             }
             WidgetTreeNodeKind::Grid { widths, heights } => {
-                self.with_grid(widths, heights, |container| {
-                    container.layout_tree_nodes(results, children);
+                self.layout_policy_group(node_id, policy, children, |container| {
+                    container.with_grid(widths, heights, |container| {
+                        container.layout_tree_nodes(results, children);
+                    });
                 });
-                self.record_tree_group_from_children(node_id, children);
             }
             WidgetTreeNodeKind::Column => {
-                self.column(|container| {
-                    container.layout_tree_nodes(results, children);
-                });
-                self.record_tree_group_from_children(node_id, children);
+                if policy == Policy::auto() {
+                    self.column(|container| {
+                        container.layout_tree_nodes(results, children);
+                    });
+                    self.record_tree_group_from_children(node_id, children);
+                } else {
+                    let rect = self.layout.begin_node_scope_with_policies(Dimensioni::default(), policy.width, policy.height);
+                    self.layout_tree_nodes(results, children);
+                    let content_size = self.layout.end_node_scope();
+                    self.record_tree_layout(node_id, NodeLayout::new(rect, rect, content_size));
+                }
             }
             WidgetTreeNodeKind::Stack { width, height, direction } => {
-                self.stack_with_width_direction(*width, *height, *direction, |container| {
-                    container.layout_tree_nodes(results, children);
+                self.layout_policy_group(node_id, policy, children, |container| {
+                    container.stack_with_width_direction(*width, *height, *direction, |container| {
+                        container.layout_tree_nodes(results, children);
+                    });
                 });
-                self.record_tree_group_from_children(node_id, children);
             }
         }
     }

@@ -32,22 +32,18 @@
 use super::*;
 
 impl Container {
-    pub(crate) fn measure_widget_rect<W: Widget + ?Sized>(&mut self, state: &W) -> Recti {
+    pub(crate) fn measure_widget_rect_with_policy<W: Widget + ?Sized>(&mut self, state: &W, policy: Policy) -> Recti {
         let body = self.layout.current_body();
         let avail = Dimensioni::new(body.width.max(0), body.height.max(0));
         let preferred = state.measure(self.style.as_ref(), &self.atlas, avail);
-        self.layout.next_with_preferred(preferred)
+        self.layout.next_with_policies(preferred, policy.width, policy.height)
     }
 
-    pub(crate) fn layout_widget_dyn(&mut self, _results: &FrameResults, widget: &dyn WidgetStateHandleDyn) -> Recti {
-        self.measure_widget_rect_dyn(widget)
-    }
-
-    pub(crate) fn measure_widget_rect_dyn(&mut self, widget: &dyn WidgetStateHandleDyn) -> Recti {
+    pub(crate) fn measure_widget_rect_dyn_with_policy(&mut self, widget: &dyn WidgetStateHandleDyn, policy: Policy) -> Recti {
         let body = self.layout.current_body();
         let avail = Dimensioni::new(body.width.max(0), body.height.max(0));
         let preferred = widget.measure(self.style.as_ref(), &self.atlas, avail);
-        self.layout.next_with_preferred(preferred)
+        self.layout.next_with_policies(preferred, policy.width, policy.height)
     }
 
     pub(crate) fn render_widget_dyn(
@@ -68,13 +64,9 @@ impl Container {
         (control, res)
     }
 
-    pub(crate) fn layout_widget_handle<W: Widget>(&mut self, _results: &FrameResults, handle: &WidgetHandle<W>) -> Recti {
-        self.measure_widget_rect_handle(handle)
-    }
-
-    pub(crate) fn measure_widget_rect_handle<W: Widget>(&mut self, handle: &WidgetHandle<W>) -> Recti {
+    pub(crate) fn measure_widget_rect_handle_with_policy<W: Widget>(&mut self, handle: &WidgetHandle<W>, policy: Policy) -> Recti {
         let state = handle.borrow();
-        self.measure_widget_rect(&*state)
+        self.measure_widget_rect_with_policy(&*state, policy)
     }
 
     pub(crate) fn render_widget_handle<W: Widget>(
