@@ -512,8 +512,8 @@ mod tests {
 
     struct CountingRenderer {
         atlas: AtlasHandle,
-        get_atlas_calls: Rc<Cell<usize>>,
-        quad_count: Rc<Cell<usize>>,
+        get_atlas_calls: Cell<usize>,
+        quad_count: usize,
     }
 
     impl Renderer for CountingRenderer {
@@ -523,7 +523,7 @@ mod tests {
         }
         fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
         fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {
-            self.quad_count.set(self.quad_count.get() + 1);
+            self.quad_count += 1;
         }
         fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
         fn flush(&mut self) {}
@@ -613,12 +613,10 @@ mod tests {
 
     #[test]
     fn atlas_draw_commands_reuse_canvas_cached_atlas() {
-        let get_atlas_calls = Rc::new(Cell::new(0));
-        let quad_count = Rc::new(Cell::new(0));
         let renderer = RendererHandle::new(CountingRenderer {
             atlas: make_test_atlas(),
-            get_atlas_calls: get_atlas_calls.clone(),
-            quad_count: quad_count.clone(),
+            get_atlas_calls: Cell::new(0),
+            quad_count: 0,
         });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(16, 16));
 
@@ -633,7 +631,9 @@ mod tests {
             Rc::new(|_, _| color4b(255, 255, 255, 255)),
         );
 
-        assert_eq!(get_atlas_calls.get(), 1);
-        assert_eq!(quad_count.get(), 6);
+        canvas.renderer_handle().scope(|renderer| {
+            assert_eq!(renderer.get_atlas_calls.get(), 1);
+            assert_eq!(renderer.quad_count, 6);
+        });
     }
 }
