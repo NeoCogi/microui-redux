@@ -265,13 +265,27 @@ impl<R: Renderer> Canvas<R> {
         self.renderer.clone()
     }
 
-    /// Uploads raw RGBA pixels as a renderer-owned texture.
-    pub fn load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId {
+    /// Attempts to upload raw RGBA pixels as a renderer-owned texture.
+    ///
+    /// Dimensions and byte length are checked before an id is allocated or backend state is
+    /// mutated. The texture is tracked by the canvas only after the backend reports success.
+    pub fn try_load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
+        crate::atlas::validate_rgba_buffer(width, height, pixels.len())?;
+        let next_texture_id = self.next_texture_id.checked_add(1).ok_or_else(|| String::from("Texture id space exhausted"))?;
         let id = TextureId(self.next_texture_id);
-        self.next_texture_id += 1;
+        self.renderer.scope_mut(|r| r.create_texture(id, width, height, pixels))?;
+        self.next_texture_id = next_texture_id;
         self.textures.insert(id, TextureInfo { width, height });
-        self.renderer.scope_mut(|r| r.create_texture(id, width, height, pixels));
-        id
+        Ok(id)
+    }
+
+    /// Uploads raw RGBA pixels as a renderer-owned texture.
+    ///
+    /// Panics if the RGBA dimensions/byte length are invalid or the backend rejects the upload.
+    /// Prefer [`Canvas::try_load_texture_rgba`] when callers can handle upload failure.
+    #[track_caller]
+    pub fn load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId {
+        self.try_load_texture_rgba(width, height, pixels).expect("failed to upload RGBA texture")
     }
 
     /// Destroys a texture allocated via [`Canvas::load_texture_rgba`].
@@ -505,7 +519,9 @@ mod tests {
         fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
         fn flush(&mut self) {}
         fn end(&mut self) {}
-        fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) {}
+        fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+            Ok(())
+        }
         fn destroy_texture(&mut self, _id: TextureId) {}
         fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
     }
@@ -528,8 +544,40 @@ mod tests {
         fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
         fn flush(&mut self) {}
         fn end(&mut self) {}
-        fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) {}
+        fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+            Ok(())
+        }
         fn destroy_texture(&mut self, _id: TextureId) {}
+        fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
+    }
+
+    struct TextureUploadRenderer {
+        atlas: AtlasHandle,
+        create_calls: usize,
+        destroy_calls: usize,
+        fail_upload: bool,
+    }
+
+    impl Renderer for TextureUploadRenderer {
+        fn get_atlas(&self) -> AtlasHandle {
+            self.atlas.clone()
+        }
+        fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
+        fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {}
+        fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
+        fn flush(&mut self) {}
+        fn end(&mut self) {}
+        fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+            self.create_calls += 1;
+            if self.fail_upload {
+                Err(String::from("backend rejected texture"))
+            } else {
+                Ok(())
+            }
+        }
+        fn destroy_texture(&mut self, _id: TextureId) {
+            self.destroy_calls += 1;
+        }
         fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
     }
 
@@ -634,6 +682,63 @@ mod tests {
         canvas.renderer_handle().scope(|renderer| {
             assert_eq!(renderer.get_atlas_calls.get(), 1);
             assert_eq!(renderer.quad_count, 6);
+        });
+    }
+
+    #[test]
+    fn texture_upload_rejects_invalid_rgba_before_allocating_id() {
+        let renderer = RendererHandle::new(TextureUploadRenderer {
+            atlas: make_test_atlas(),
+            create_calls: 0,
+            destroy_calls: 0,
+            fail_upload: false,
+        });
+        let mut canvas = Canvas::from(renderer.clone(), Dimensioni::new(16, 16));
+
+        let err = canvas.try_load_texture_rgba(2, 2, &[0xFF; 4]).unwrap_err();
+        assert_eq!(err, "Expected 16 RGBA bytes, received 4");
+        assert_eq!(canvas.next_texture_id, 1);
+        assert!(canvas.textures.is_empty());
+        renderer.scope(|renderer| {
+            assert_eq!(renderer.create_calls, 0);
+            assert_eq!(renderer.destroy_calls, 0);
+        });
+    }
+
+    #[test]
+    fn texture_upload_rejects_huge_mismatched_buffer_before_backend_call() {
+        let renderer = RendererHandle::new(TextureUploadRenderer {
+            atlas: make_test_atlas(),
+            create_calls: 0,
+            destroy_calls: 0,
+            fail_upload: false,
+        });
+        let mut canvas = Canvas::from(renderer.clone(), Dimensioni::new(16, 16));
+
+        let err = canvas.try_load_texture_rgba(i32::MAX, i32::MAX, &[]).unwrap_err();
+        assert!(err.contains("RGBA bytes"));
+        assert_eq!(canvas.next_texture_id, 1);
+        assert!(canvas.textures.is_empty());
+        renderer.scope(|renderer| assert_eq!(renderer.create_calls, 0));
+    }
+
+    #[test]
+    fn texture_upload_rolls_back_when_backend_rejects_texture() {
+        let renderer = RendererHandle::new(TextureUploadRenderer {
+            atlas: make_test_atlas(),
+            create_calls: 0,
+            destroy_calls: 0,
+            fail_upload: true,
+        });
+        let mut canvas = Canvas::from(renderer.clone(), Dimensioni::new(16, 16));
+
+        let err = canvas.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap_err();
+        assert_eq!(err, "backend rejected texture");
+        assert_eq!(canvas.next_texture_id, 1);
+        assert!(canvas.textures.is_empty());
+        renderer.scope(|renderer| {
+            assert_eq!(renderer.create_calls, 1);
+            assert_eq!(renderer.destroy_calls, 0);
         });
     }
 }

@@ -911,12 +911,12 @@ impl Renderer for WgpuRenderer {
     }
 
     /// Creates a renderer-owned sampled texture and its bind group.
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) {
+    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String> {
         if width <= 0 || height <= 0 {
-            return;
+            return Err(String::from("texture dimensions must be positive"));
         }
 
-        let texture = match Self::create_gpu_texture(
+        let texture = Self::create_gpu_texture(
             &self.device,
             &self.queue,
             &self.bind_group_layout,
@@ -925,14 +925,9 @@ impl Renderer for WgpuRenderer {
             width as u32,
             height as u32,
             Some(pixels),
-        ) {
-            Ok(texture) => texture,
-            Err(err) => {
-                eprintln!("[microui-redux][wgpu] create texture failed: {err}");
-                return;
-            }
-        };
+        )?;
         self.textures.insert(id, texture);
+        Ok(())
     }
 
     /// Drops a renderer-owned texture by removing it from the bind-group map.

@@ -358,16 +358,13 @@ impl Renderer for VulkanRenderer {
     }
 
     /// Creates a renderer-owned sampled texture and tracks it by `TextureId`.
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) {
+    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<()> {
         if self.device_lost {
-            return;
+            return Err(String::from("Vulkan device is lost"));
         }
-        match self.context.create_texture_resource(width, height, pixels) {
-            Ok(texture) => {
-                self.textures.insert(id, texture);
-            }
-            Err(err) => eprintln!("[microui-redux][vulkan] create_texture failed: {err}"),
-        }
+        let texture = self.context.create_texture_resource(width, height, pixels)?;
+        self.textures.insert(id, texture);
+        Ok(())
     }
 
     /// Destroys a renderer-owned sampled texture if it is still tracked.

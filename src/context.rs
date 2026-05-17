@@ -134,7 +134,9 @@ mod tests {
         fn push_triangle_vertices(&mut self, _v0: &crate::canvas::Vertex, _v1: &crate::canvas::Vertex, _v2: &crate::canvas::Vertex) {}
         fn flush(&mut self) {}
         fn end(&mut self) {}
-        fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) {}
+        fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+            Ok(())
+        }
         fn destroy_texture(&mut self, _id: TextureId) {}
         fn draw_texture(&mut self, _id: TextureId, _vertices: [crate::canvas::Vertex; 4]) {}
     }
@@ -1152,9 +1154,21 @@ impl<R: Renderer> Context<R> {
         &self.canvas
     }
 
+    /// Attempts to upload an RGBA image to the renderer and returns its [`TextureId`].
+    ///
+    /// Dimensions and byte length are validated before an id is allocated. Backend upload errors
+    /// are returned without recording texture state in the canvas.
+    pub fn try_load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
+        self.canvas.try_load_texture_rgba(width, height, pixels)
+    }
+
     /// Uploads an RGBA image to the renderer and returns its [`TextureId`].
+    ///
+    /// Panics if the RGBA dimensions/byte length are invalid or the backend rejects the upload.
+    /// Prefer [`Context::try_load_image_rgba`] when callers can handle upload failure.
+    #[track_caller]
     pub fn load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId {
-        self.canvas.load_texture_rgba(width, height, pixels)
+        self.try_load_image_rgba(width, height, pixels).expect("failed to upload RGBA image")
     }
 
     /// Deletes a previously uploaded texture.
@@ -1166,27 +1180,13 @@ impl<R: Renderer> Context<R> {
     /// `png_source` (or `builder`) feature is enabled.
     pub fn load_image_from(&mut self, source: ImageSource) -> Result<TextureId, String> {
         match source {
-            ImageSource::Raw { width, height, pixels } => {
-                Self::assert_rgba_len(width, height, pixels.len())?;
-                Ok(self.load_image_rgba(width, height, pixels))
-            }
+            ImageSource::Raw { width, height, pixels } => self.try_load_image_rgba(width, height, pixels),
             #[cfg(any(feature = "builder", feature = "png_source"))]
             ImageSource::Png { bytes } => {
                 let (width, height, rgba) = Self::decode_png(bytes)?;
-                Ok(self.load_image_rgba(width, height, rgba.as_slice()))
+                self.try_load_image_rgba(width, height, rgba.as_slice())
             }
         }
-    }
-
-    fn assert_rgba_len(width: i32, height: i32, len: usize) -> Result<(), String> {
-        if width <= 0 || height <= 0 {
-            return Err(String::from("Image dimensions must be positive"));
-        }
-        let expected = width as usize * height as usize * 4;
-        if len != expected {
-            return Err(format!("Expected {} RGBA bytes, received {}", expected, len));
-        }
-        Ok(())
     }
 
     #[cfg(any(feature = "builder", feature = "png_source"))]
@@ -1200,7 +1200,9 @@ impl<R: Renderer> Context<R> {
         let mut buf = vec![0; buf_size];
         let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
         let raw = &buf[..info.buffer_size()];
-        let mut rgba = Vec::with_capacity((info.width as usize) * (info.height as usize) * 4);
+        let width = i32::try_from(info.width).map_err(|_| String::from("PNG width exceeds supported range"))?;
+        let height = i32::try_from(info.height).map_err(|_| String::from("PNG height exceeds supported range"))?;
+        let mut rgba = Vec::with_capacity(crate::atlas::checked_rgba_byte_len(width, height)?);
         match info.color_type {
             ColorType::Rgba => rgba.extend_from_slice(raw),
             ColorType::Rgb => {
@@ -1225,6 +1227,6 @@ impl<R: Renderer> Context<R> {
                 return Err("Unsupported PNG color type".into());
             }
         }
-        Ok((info.width as i32, info.height as i32, rgba))
+        Ok((width, height, rgba))
     }
 }

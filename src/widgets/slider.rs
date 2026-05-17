@@ -137,10 +137,10 @@ impl Slider {
             if range != 0.0 {
                 let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
                 if wheel != 0 {
-                    let step_amount = if self.step != 0. { self.step } else { range / 100.0 };
+                    let step_amount = if self.step != 0. { self.step.abs() } else { range / 100.0 };
                     v += wheel as Real * step_amount;
                     if self.step != 0. {
-                        v = (v + self.step / 2 as Real) / self.step * self.step;
+                        v = snap_slider_value(v, self.low, self.step);
                     }
                 }
             }
@@ -150,19 +150,13 @@ impl Slider {
         if control.focused && (!input.mouse_down.is_none() || input.mouse_pressed.is_left()) && base.width > 0 && range != 0.0 {
             v = self.low + input.mouse_pos.x as Real * range / base.width as Real;
             if self.step != 0. {
-                v = (v + self.step / 2 as Real) / self.step * self.step;
+                v = snap_slider_value(v, self.low, self.step);
             }
         }
         if range == 0.0 {
             v = self.low;
         }
-        v = if self.high < (if self.low > v { self.low } else { v }) {
-            self.high
-        } else if self.low > v {
-            self.low
-        } else {
-            v
-        };
+        v = clamp_slider_value(v, self.low, self.high);
         self.value = v;
         if last != v {
             res |= ResourceState::CHANGE;
@@ -181,6 +175,23 @@ impl Slider {
         let _ = write!(self.edit.buf, "{:.*}", self.precision, self.value);
         ctx.draw_control_text_with_font(font, self.edit.buf.as_str(), base, ControlColor::Text, self.opt);
         res
+    }
+}
+
+fn snap_slider_value(value: Real, low: Real, step: Real) -> Real {
+    let step = step.abs();
+    if step == 0.0 { value } else { low + ((value - low) / step).round() * step }
+}
+
+fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
+    let min = low.min(high);
+    let max = low.max(high);
+    if value < min {
+        min
+    } else if value > max {
+        max
+    } else {
+        value
     }
 }
 
@@ -436,6 +447,35 @@ mod tests {
         AtlasHandle::from(&source)
     }
 
+    fn run_slider_once(slider: &mut Slider, rect: Recti, input: InputSnapshot, control: ControlState) -> ResourceState {
+        let atlas = make_test_atlas();
+        let style = Style::default();
+        let mut commands = Vec::new();
+        let mut triangle_vertices = Vec::new();
+        let mut clip_stack = Vec::new();
+        let mut focus = None;
+        let mut updated_focus = false;
+        let slider_id = widget_id_of(slider);
+        let mut ctx = WidgetCtx::new(
+            slider_id,
+            rect,
+            &mut commands,
+            &mut triangle_vertices,
+            &mut clip_stack,
+            &style,
+            &atlas,
+            &mut focus,
+            &mut updated_focus,
+            true,
+            Some(Rc::new(input)),
+        );
+        slider.run(&mut ctx, &control)
+    }
+
+    fn assert_real_close(actual: Real, expected: Real) {
+        assert!((actual - expected).abs() < 1.0e-5, "expected {expected}, got {actual}");
+    }
+
     #[test]
     fn slider_zero_range_keeps_value() {
         let atlas = make_test_atlas();
@@ -485,6 +525,46 @@ mod tests {
         assert!(slider.value.is_finite());
         assert_eq!(slider.value, 5.0);
         assert_eq!(slider.value, 5.0);
+    }
+
+    #[test]
+    fn slider_wheel_snaps_fractional_step_from_lower_bound() {
+        let mut slider = Slider::with_opt(1.15, 1.0, 2.0, 0.2, 2, WidgetOption::NONE);
+        let control = ControlState {
+            hovered: true,
+            focused: false,
+            clicked: false,
+            active: false,
+            scroll_delta: Some(vec2(0, 1)),
+        };
+
+        let res = run_slider_once(&mut slider, rect(0, 0, 100, 20), InputSnapshot::default(), control);
+
+        assert!(res.is_changed());
+        assert_real_close(slider.value, 1.4);
+    }
+
+    #[test]
+    fn slider_drag_snaps_fractional_step_from_lower_bound() {
+        let mut slider = Slider::with_opt(10.0, 10.0, 20.0, 0.25, 2, WidgetOption::NONE);
+        let input = InputSnapshot {
+            mouse_pos: vec2(33, 10),
+            mouse_down: MouseButton::LEFT,
+            mouse_pressed: MouseButton::LEFT,
+            ..Default::default()
+        };
+        let control = ControlState {
+            hovered: true,
+            focused: true,
+            clicked: false,
+            active: true,
+            scroll_delta: None,
+        };
+
+        let res = run_slider_once(&mut slider, rect(0, 0, 100, 20), input, control);
+
+        assert!(res.is_changed());
+        assert_real_close(slider.value, 13.25);
     }
 
     #[test]

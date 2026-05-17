@@ -73,7 +73,10 @@ pub trait Renderer {
     /// Ends the frame, finalizing any outstanding GPU work.
     fn end(&mut self);
     /// Creates a texture owned by the renderer.
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]);
+    ///
+    /// The caller validates RGBA dimensions and byte length before calling this method. Backends
+    /// should return an error without retaining `id` when GPU texture creation or upload fails.
+    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String>;
     /// Destroys a previously created texture.
     fn destroy_texture(&mut self, id: TextureId);
     /// Draws the provided textured quad.
