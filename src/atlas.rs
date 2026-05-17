@@ -155,19 +155,10 @@ pub const FILE_16_ICON: IconId = IconId(8);
 pub fn load_image_bytes(source: ImageSource) -> std::io::Result<(usize, usize, Vec<Color4b>)> {
     match source {
         ImageSource::Raw { width, height, pixels } => {
-            if width <= 0 || height <= 0 {
-                return Err(Error::new(ErrorKind::Other, "Image dimensions must be positive"));
-            }
+            let expected = validate_rgba_buffer(width, height, pixels.len()).map_err(|err| Error::new(ErrorKind::Other, err))?;
             let width_usize = width as usize;
             let height_usize = height as usize;
-            let expected = width_usize * height_usize * 4;
-            if pixels.len() != expected {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    format!("Expected {} RGBA bytes, found {}", expected, pixels.len()),
-                ));
-            }
-            let mut colors = Vec::with_capacity(width_usize * height_usize);
+            let mut colors = Vec::with_capacity(expected / 4);
             for chunk in pixels.chunks_exact(4) {
                 colors.push(color4b(chunk[0], chunk[1], chunk[2], chunk[3]));
             }
@@ -176,6 +167,26 @@ pub fn load_image_bytes(source: ImageSource) -> std::io::Result<(usize, usize, V
         #[cfg(any(feature = "builder", feature = "png_source"))]
         ImageSource::Png { bytes } => decode_png_to_colors(bytes),
     }
+}
+
+pub(crate) fn checked_rgba_byte_len(width: i32, height: i32) -> std::result::Result<usize, String> {
+    if width <= 0 || height <= 0 {
+        return Err(String::from("Image dimensions must be positive"));
+    }
+    let pixel_count = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| String::from("Image dimensions overflow RGBA byte count"))?;
+    pixel_count
+        .checked_mul(4)
+        .ok_or_else(|| String::from("Image dimensions overflow RGBA byte count"))
+}
+
+pub(crate) fn validate_rgba_buffer(width: i32, height: i32, len: usize) -> std::result::Result<usize, String> {
+    let expected = checked_rgba_byte_len(width, height)?;
+    if len != expected {
+        return Err(format!("Expected {} RGBA bytes, received {}", expected, len));
+    }
+    Ok(expected)
 }
 
 #[cfg(any(feature = "builder", feature = "png_source"))]
@@ -204,7 +215,10 @@ fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Colo
         ColorType::Rgba => 4,
     };
 
-    let mut pixels = vec![Color4b::default(); (info.width * info.height) as usize];
+    let pixel_count = (info.width as usize)
+        .checked_mul(info.height as usize)
+        .ok_or_else(|| Error::new(ErrorKind::Other, "PNG dimensions overflow pixel count"))?;
+    let mut pixels = vec![Color4b::default(); pixel_count];
     let line_size = info.line_size;
     for y in 0..info.height {
         let line = &img_data[(y as usize * line_size)..((y as usize + 1) * line_size)];

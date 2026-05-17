@@ -416,11 +416,11 @@ impl Renderer for GLRenderer {
     }
 
     /// Creates a GL texture for a renderer-owned external image.
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) {
+    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String> {
         let gl = &self.gl;
         unsafe {
             // User textures share the same nearest-neighbor setup as the atlas.
-            let tex = gl.create_texture().expect("failed to create texture");
+            let tex = gl.create_texture().map_err(|err| format!("failed to create texture: {err}"))?;
             gl.bind_texture(glow::TEXTURE_2D, Some(tex));
             gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
             gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
@@ -437,9 +437,16 @@ impl Renderer for GLRenderer {
                 glow::UNSIGNED_BYTE,
                 PixelUnpackData::Slice(Some(pixels)),
             );
+            let err = gl.get_error();
+            if err != 0 {
+                gl.bind_texture(glow::TEXTURE_2D, None);
+                gl.delete_texture(tex);
+                return Err(format!("OpenGL texture upload failed with error 0x{err:04x}"));
+            }
             gl.bind_texture(glow::TEXTURE_2D, None);
             self.textures.insert(id, tex);
         }
+        Ok(())
     }
 
     fn destroy_texture(&mut self, id: TextureId) {

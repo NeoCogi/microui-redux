@@ -120,7 +120,7 @@ if ctx.committed_results().state_of_handle(&image_button).is_submitted() {
 - `Image::Slot` renders an entry from the atlas and benefits from batching.
 - `Image::Texture` targets renderer-owned textures (the backend handles binding when drawing).
 - `WidgetFillOption` controls which interaction states draw a filled background; use `WidgetFillOption::ALL` to keep the default normal/hover/click fills.
-- Use `Context::load_image_rgba`/`load_image_from` and `Context::free_image` to manage the lifetime of external textures.
+- Use `Context::try_load_image_rgba`/`load_image_from` and `Context::free_image` to manage the lifetime of external textures; `load_image_rgba` is a panicking convenience wrapper for already-validated RGBA buffers.
 
 ## Graphics primitives
 - `WidgetCtx::graphics(...)` exposes a widget-local `Graphics` builder for custom widgets and paint code.
