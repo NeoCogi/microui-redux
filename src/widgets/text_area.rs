@@ -433,6 +433,10 @@ impl Widget for TextArea {
         self.opt | WidgetOption::HOLD_FOCUS
     }
 
+    fn focus_policy(&self) -> FocusPolicy {
+        FocusPolicy::HoldUntilBlur
+    }
+
     fn needs_input_snapshot(&self) -> bool {
         true
     }

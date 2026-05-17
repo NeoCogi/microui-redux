@@ -116,9 +116,9 @@ impl<S> Application<S> {
         'running: loop {
             let (width, height) = self.window.size();
 
-            // Start the UI frame before polling events so the event handlers can mutate the fresh
-            // frame input state directly.
-            self.ctx.begin(width as i32, height as i32, color(0x7F, 0x7F, 0x7F, 255));
+            // Start the renderer draw pass before polling events; UI traversal runs after input
+            // translation through `Context::run_ui_frame` in the user callback.
+            self.ctx.begin_render_frame(width as i32, height as i32, color(0x7F, 0x7F, 0x7F, 255));
 
             fn map_mouse_button(sdl_mb: sdl2::mouse::MouseButton) -> microui::MouseButton {
                 match sdl_mb {
@@ -198,8 +198,8 @@ impl<S> Application<S> {
 
             // User state builds retained trees, reads committed results, and updates app data.
             f(&mut self.ctx, &mut self.state);
-            // `end` flushes traversal, command recording, and backend presentation for the frame.
-            self.ctx.end();
+            // End the renderer pass after the user callback has run UI traversal.
+            self.ctx.end_render_frame();
             #[cfg(feature = "example-glow")]
             self.window.gl_swap_window();
 

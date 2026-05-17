@@ -80,6 +80,12 @@ pub trait Renderer {
     /// Destroys a previously created texture.
     fn destroy_texture(&mut self, id: TextureId);
     /// Draws the provided textured quad.
+    ///
+    /// `Canvas` clips the quad against the active UI clip rectangle and adjusts texture
+    /// coordinates before calling this method. Backends should therefore treat `vertices` as final
+    /// pre-clipped screen-space geometry and should not expect a separate clip rectangle for this
+    /// draw. Backends that batch atlas geometry must preserve command order by flushing or closing
+    /// the active atlas batch before drawing or queuing this external texture command.
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
 

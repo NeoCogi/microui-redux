@@ -148,6 +148,29 @@ mod tests {
     }
 
     #[test]
+    fn inserting_keyed_widget_does_not_shift_later_unkeyed_ids() {
+        let button_a = widget_handle(Button::new("A"));
+        let button_b = widget_handle(Button::new("B"));
+        let keyed = widget_handle(Button::new("keyed"));
+
+        let tree_a = WidgetTreeBuilder::build(|builder| {
+            builder.widget(button_a.clone());
+            builder.widget(button_b.clone());
+        });
+        let ids_a: Vec<NodeId> = tree_a.roots().iter().map(WidgetTreeNode::id).collect();
+
+        let tree_b = WidgetTreeBuilder::build(|builder| {
+            builder.widget(button_a.clone());
+            builder.widget_with(NodeOptions::keyed("inserted"), keyed.clone());
+            builder.widget(button_b.clone());
+        });
+        let ids_b: Vec<NodeId> = tree_b.roots().iter().map(WidgetTreeNode::id).collect();
+
+        assert_eq!(ids_a[0], ids_b[0]);
+        assert_eq!(ids_a[1], ids_b[2]);
+    }
+
+    #[test]
     fn row_nodes_capture_children_and_track_policy() {
         let button_a = widget_handle(Button::new("A"));
         let button_b = widget_handle(Button::new("B"));

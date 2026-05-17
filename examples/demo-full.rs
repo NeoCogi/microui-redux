@@ -1895,7 +1895,7 @@ impl State {
             self.fps = if self.fps == 0.0 { inst_fps } else { self.fps * 0.9 + inst_fps * 0.1 };
         }
 
-        ctx.frame(|ctx| {
+        ctx.run_ui_frame(|ctx| {
             self.style_window(ctx);
             self.log_window(ctx);
             self.typography_window(ctx);

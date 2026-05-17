@@ -64,6 +64,28 @@ use crate::style::Style;
 use crate::widget_ctx::WidgetCtx;
 use crate::widget_tree::WidgetHandle;
 
+/// High-level focus behavior requested by a widget.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FocusPolicy {
+    /// Focus is only needed for the click interaction and clears when the button is released.
+    Momentary,
+    /// Focus remains after release until the widget explicitly clears it or another click moves it.
+    HoldUntilBlur,
+    /// Focus captures a pointer drag and clears when the drag button is released.
+    DragCapture,
+}
+
+impl FocusPolicy {
+    /// Derives a policy from legacy widget options.
+    pub fn from_widget_options(opt: WidgetOption) -> Self {
+        if opt.is_holding_focus() { Self::HoldUntilBlur } else { Self::Momentary }
+    }
+
+    pub(crate) fn releases_on_mouse_up(self) -> bool {
+        matches!(self, Self::Momentary | Self::DragCapture)
+    }
+}
+
 /// Trait implemented by persistent widget state structures.
 ///
 /// Widgets participate in two retained phases:
@@ -91,6 +113,10 @@ pub trait Widget {
     /// Returns the effective behavior options used by generic dispatch.
     fn effective_behaviour_opt(&self) -> WidgetBehaviourOption {
         *self.behaviour_opt()
+    }
+    /// Returns the focus behavior used by generic dispatch.
+    fn focus_policy(&self) -> FocusPolicy {
+        FocusPolicy::from_widget_options(self.effective_widget_opt())
     }
     /// Returns whether this widget needs per-frame input snapshots.
     fn needs_input_snapshot(&self) -> bool {

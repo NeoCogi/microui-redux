@@ -457,14 +457,15 @@ impl Renderer for GLRenderer {
         }
     }
 
-    /// Draws one textured quad using a renderer-owned texture outside the atlas batch.
+    /// Draws one pre-clipped textured quad using a renderer-owned texture outside the atlas batch.
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
         let tex = match self.textures.get(&id) {
             Some(tex) => *tex,
             None => return,
         };
         // External textures cannot be folded into the atlas batch because they change the bound
-        // GL texture object, so flush first and then submit a one-off draw.
+        // GL texture object. `Canvas` has already clipped the vertices, so the one-off draw uses
+        // the full framebuffer scissor and relies on the submitted quad geometry for clipping.
         self.flush();
         let gl = &self.gl;
         unsafe {

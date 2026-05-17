@@ -374,7 +374,7 @@ fn main() {
     .unwrap();
 
     fw.event_loop(|ctx, state| {
-        ctx.frame(|ctx| {
+        ctx.run_ui_frame(|ctx| {
             let dim = ctx.canvas().current_dimension();
             state.window.set_size(&dim);
             {

@@ -146,7 +146,7 @@ impl FocusProbe {
     fn new(focused: Rc<Cell<bool>>) -> Self {
         Self {
             focused,
-            opt: WidgetOption::HOLD_FOCUS,
+            opt: WidgetOption::NONE,
             bopt: WidgetBehaviourOption::NONE,
         }
     }
@@ -168,6 +168,10 @@ impl Widget for FocusProbe {
     fn run(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         self.focused.set(control.focused);
         ResourceState::NONE
+    }
+
+    fn focus_policy(&self) -> FocusPolicy {
+        FocusPolicy::HoldUntilBlur
     }
 }
 
@@ -318,6 +322,20 @@ fn clicking_away_does_not_refocus_stale_hover_widget() {
     let control = container.update_control(button_id, button_rect, &button);
     assert!(!control.hovered);
     assert!(!control.focused);
+}
+
+#[test]
+fn focus_policy_holds_focus_without_hold_focus_widget_option() {
+    let mut container = make_container();
+    let focused = Rc::new(Cell::new(false));
+    let probe = FocusProbe::new(focused);
+    let probe_id = widget_id_of(&probe);
+    container.set_focus(Some(probe_id));
+
+    let control = container.update_control(probe_id, rect(0, 0, 50, 20), &probe);
+
+    assert!(control.focused);
+    assert!(!probe.widget_opt().is_holding_focus());
 }
 
 #[test]

@@ -272,7 +272,7 @@ impl<R: Renderer> Canvas<R> {
     pub fn try_load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
         crate::atlas::validate_rgba_buffer(width, height, pixels.len())?;
         let next_texture_id = self.next_texture_id.checked_add(1).ok_or_else(|| String::from("Texture id space exhausted"))?;
-        let id = TextureId(self.next_texture_id);
+        let id = TextureId::new(self.next_texture_id, width, height);
         self.renderer.scope_mut(|r| r.create_texture(id, width, height, pixels))?;
         self.next_texture_id = next_texture_id;
         self.textures.insert(id, TextureInfo { width, height });
@@ -581,6 +581,29 @@ mod tests {
         fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
     }
 
+    struct TextureDrawRenderer {
+        atlas: AtlasHandle,
+        drawn: Vec<(TextureId, [Vertex; 4])>,
+    }
+
+    impl Renderer for TextureDrawRenderer {
+        fn get_atlas(&self) -> AtlasHandle {
+            self.atlas.clone()
+        }
+        fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
+        fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {}
+        fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
+        fn flush(&mut self) {}
+        fn end(&mut self) {}
+        fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+            Ok(())
+        }
+        fn destroy_texture(&mut self, _id: TextureId) {}
+        fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
+            self.drawn.push((id, vertices));
+        }
+    }
+
     fn make_test_atlas() -> AtlasHandle {
         let pixels: [u8; 64] = [0xFF; 64];
         let icons = [("white", Recti::new(0, 0, 1, 1))];
@@ -629,6 +652,11 @@ mod tests {
             (actual.x, actual.y, actual.width, actual.height),
             (expected.x, expected.y, expected.width, expected.height)
         );
+    }
+
+    fn assert_vec2f_eq(actual: Vec2f, expected: Vec2f) {
+        assert!((actual.x - expected.x).abs() < 1.0e-6, "expected x {}, got {}", expected.x, actual.x);
+        assert!((actual.y - expected.y).abs() < 1.0e-6, "expected y {}, got {}", expected.y, actual.y);
     }
 
     #[test]
@@ -739,6 +767,31 @@ mod tests {
         renderer.scope(|renderer| {
             assert_eq!(renderer.create_calls, 1);
             assert_eq!(renderer.destroy_calls, 0);
+        });
+    }
+
+    #[test]
+    fn external_texture_draw_submits_preclipped_vertices_and_uvs() {
+        let renderer = RendererHandle::new(TextureDrawRenderer {
+            atlas: make_test_atlas(),
+            drawn: Vec::new(),
+        });
+        let mut canvas = Canvas::from(renderer.clone(), Dimensioni::new(32, 32));
+        let texture = canvas.try_load_texture_rgba(20, 20, &[0xFF; 20 * 20 * 4]).unwrap();
+
+        canvas.set_clip_rect(Recti::new(5, 5, 10, 10));
+        canvas.draw_image(Image::Texture(texture), Recti::new(0, 0, 20, 20), color(255, 255, 255, 255));
+
+        renderer.scope(|renderer| {
+            assert_eq!(renderer.drawn.len(), 1);
+            let (id, vertices) = &renderer.drawn[0];
+            assert_eq!(*id, texture);
+            assert_vec2f_eq(vertices[0].position(), Vec2f::new(5.0, 5.0));
+            assert_vec2f_eq(vertices[1].position(), Vec2f::new(15.0, 5.0));
+            assert_vec2f_eq(vertices[2].position(), Vec2f::new(15.0, 15.0));
+            assert_vec2f_eq(vertices[3].position(), Vec2f::new(5.0, 15.0));
+            assert_vec2f_eq(vertices[0].tex_coord(), Vec2f::new(0.25, 0.25));
+            assert_vec2f_eq(vertices[2].tex_coord(), Vec2f::new(0.75, 0.75));
         });
     }
 }

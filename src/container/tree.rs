@@ -168,9 +168,10 @@ impl Container {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
         let opt = widget.effective_widget_opt();
         let bopt = widget.effective_behaviour_opt();
+        let focus_policy = widget.focus_policy();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let dispatch_site = self.widget_dispatch_site(node_id, "widget");
-        let (control, result) = self.render_widget_dyn(results, Some(node_id), widget, rect, input, opt, bopt, dispatch_site);
+        let (control, result) = self.render_widget_dyn(results, Some(node_id), widget, rect, input, opt, bopt, focus_policy, dispatch_site);
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
     }
 
@@ -183,13 +184,18 @@ impl Container {
     /// Executes a retained custom-render node and records both interaction and callback payload.
     fn render_tree_custom_render(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>, render: &TreeCustomRender) {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
-        let (opt, bopt, needs_input) = {
+        let (opt, bopt, focus_policy, needs_input) = {
             let state = state.borrow();
-            (state.effective_widget_opt(), state.effective_behaviour_opt(), state.needs_input_snapshot())
+            (
+                state.effective_widget_opt(),
+                state.effective_behaviour_opt(),
+                state.focus_policy(),
+                state.needs_input_snapshot(),
+            )
         };
         let input = if needs_input { Some(self.snapshot_input()) } else { None };
         let dispatch_site = self.widget_dispatch_site(node_id, "custom render");
-        let (control, result) = self.render_widget_handle(results, Some(node_id), state, rect, input, opt, bopt, dispatch_site);
+        let (control, result) = self.render_widget_handle(results, Some(node_id), state, rect, input, opt, bopt, focus_policy, dispatch_site);
 
         let snapshot = self.snapshot_input();
         let input_ref = snapshot.as_ref();
@@ -252,12 +258,12 @@ impl Container {
     /// Renders a header/tree disclosure node and returns the stable expansion state observed this frame.
     fn render_tree_node_scope(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
-        let (opt, bopt, stable_state) = {
+        let (opt, bopt, focus_policy, stable_state) = {
             let state = state.borrow();
-            (*state.widget_opt(), *state.behaviour_opt(), state.state)
+            (state.effective_widget_opt(), state.effective_behaviour_opt(), state.focus_policy(), state.state)
         };
         let dispatch_site = self.widget_dispatch_site(node_id, "node disclosure");
-        let (control, result) = self.render_widget_handle(results, Some(node_id), state, rect, None, opt, bopt, dispatch_site);
+        let (control, result) = self.render_widget_handle(results, Some(node_id), state, rect, None, opt, bopt, focus_policy, dispatch_site);
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
         stable_state
     }
@@ -282,7 +288,7 @@ impl Container {
                     // Containers are nested retained sub-contexts. The parent records the panel bounds,
                     // then lets the child container execute the same layout pass against its own body.
                     self.begin_panel_layout(&mut handle, *opt, *behaviour, policy);
-                    handle.with_mut(|container| {
+                    handle.with_inner_mut(|container| {
                         container.layout_tree_nodes(results, children);
                     });
                     self.end_panel_layout(&mut handle);
@@ -362,7 +368,7 @@ impl Container {
                 // Scrollbars, body clipping, and child drawing therefore use the same geometry that
                 // was computed during the first pass.
                 self.begin_panel_render(&mut handle, *opt, *behaviour, layout);
-                handle.with_mut(|container| {
+                handle.with_inner_mut(|container| {
                     container.render_tree_nodes(results, children);
                 });
                 self.end_panel_render(&mut handle);

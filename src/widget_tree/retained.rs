@@ -60,7 +60,7 @@ use crate::{
     atlas::AtlasHandle,
     input::{ControlState, ResourceState, WidgetBehaviourOption, WidgetOption},
     style::Style,
-    widget::{widget_id_of, Widget, WidgetId},
+    widget::{widget_id_of, FocusPolicy, Widget, WidgetId},
     widget_ctx::WidgetCtx,
     CustomRenderCommand,
 };
@@ -86,6 +86,7 @@ pub(crate) trait WidgetStateHandleDyn {
     fn widget_id(&self) -> WidgetId;
     fn effective_widget_opt(&self) -> WidgetOption;
     fn effective_behaviour_opt(&self) -> WidgetBehaviourOption;
+    fn focus_policy(&self) -> FocusPolicy;
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     fn needs_input_snapshot(&self) -> bool;
     fn run(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
@@ -109,6 +110,11 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
     fn effective_behaviour_opt(&self) -> WidgetBehaviourOption {
         let widget = self.handle.borrow();
         widget.effective_behaviour_opt()
+    }
+
+    fn focus_policy(&self) -> FocusPolicy {
+        let widget = self.handle.borrow();
+        widget.focus_policy()
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

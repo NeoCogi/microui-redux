@@ -374,7 +374,7 @@ impl Renderer for VulkanRenderer {
         }
     }
 
-    /// Queues a textured custom draw that samples from a renderer-owned texture.
+    /// Queues a pre-clipped textured custom draw that samples from a renderer-owned texture.
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
         if self.device_lost {
             return;
@@ -387,6 +387,8 @@ impl Renderer for VulkanRenderer {
         let mut quad = Vec::with_capacity(6);
         quad.extend_from_slice(&[vertices[0], vertices[1], vertices[2], vertices[0], vertices[2], vertices[3]]);
 
+        // `Canvas` already clipped the quad and adjusted UVs, so the texture command's draw area
+        // is just the submitted geometry bounds used to preserve ordering.
         let area_rect = rect_from_vertices(&vertices);
         let area = CustomRenderArea { rect: area_rect, clip: area_rect };
 

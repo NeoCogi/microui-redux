@@ -63,6 +63,66 @@ fn content_height(style: &Style, atlas: &AtlasHandle, font: FontChoice, visual_h
     (font_height.max(visual_height) + vertical_pad * 2).max(0)
 }
 
+fn inline_content_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, label: &str, visual_size: Option<Dimensioni>) -> Dimensioni {
+    let padding = style.padding.max(0);
+    let text_size = if label.is_empty() {
+        Dimensioni::default()
+    } else {
+        text_size(style, atlas, font, label)
+    };
+    let visual_size = visual_size.unwrap_or_default();
+    let has_text = !label.is_empty();
+    let has_visual = visual_size.width > 0 && visual_size.height > 0;
+
+    let mut width = padding * 2 + text_size.width.max(0);
+    if has_visual {
+        width += visual_size.width.max(0);
+        if has_text {
+            width += padding;
+        }
+    }
+
+    let height = content_height(style, atlas, font, visual_size.height);
+    Dimensioni::new(width.max(0), height)
+}
+
+#[derive(Copy, Clone)]
+struct InlineContentLayout {
+    visual: Option<Recti>,
+    text: Recti,
+}
+
+fn layout_inline_content(bounds: Recti, style: &Style, label: &str, visual_size: Option<Dimensioni>) -> InlineContentLayout {
+    let padding = style.padding.max(0);
+    let visual_size = visual_size.unwrap_or_default();
+    let has_visual = visual_size.width > 0 && visual_size.height > 0;
+    let has_text = !label.is_empty();
+
+    if !has_visual {
+        return InlineContentLayout { visual: None, text: bounds };
+    }
+
+    let visual_width = visual_size.width.min((bounds.width - padding * 2).max(0)).max(0);
+    let visual_height = visual_size.height.min(bounds.height.max(0)).max(0);
+    let visual_y = bounds.y + ((bounds.height - visual_height) / 2).max(0);
+
+    if !has_text {
+        let visual_x = bounds.x + ((bounds.width - visual_width) / 2).max(0);
+        let visual = rect(visual_x, visual_y, visual_width, visual_height);
+        return InlineContentLayout {
+            visual: Some(visual),
+            text: Recti::default(),
+        };
+    }
+
+    let visual_x = bounds.x + padding;
+    let visual = rect(visual_x, visual_y, visual_width, visual_height);
+    let text_x = visual.x + visual.width;
+    let right = bounds.x + bounds.width;
+    let text = rect(text_x, bounds.y, (right - text_x).max(0), bounds.height);
+    InlineContentLayout { visual: Some(visual), text }
+}
+
 fn widget_fill_color(control: &ControlState, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
     if control.focused && fill.fill_click() {
         let mut color = base;
@@ -168,59 +228,20 @@ impl Button {
     }
 
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        let padding = style.padding.max(0);
-        let mut width = padding * 2;
-        let mut visual_w = 0;
-        let mut visual_h = 0;
-        let mut text_w = 0;
-        let mut has_text = false;
-
         match &self.content {
             ButtonContent::Text { label, icon } => {
-                if !label.is_empty() {
-                    has_text = true;
-                    text_w = text_size(style, atlas, self.font, label).width;
-                }
-                if let Some(icon) = icon {
-                    let size = atlas.get_icon_size(*icon);
-                    visual_w = size.width;
-                    visual_h = size.height;
-                }
+                let visual = icon.map(|icon| atlas.get_icon_size(icon));
+                inline_content_size(style, atlas, self.font, label, visual)
             }
             ButtonContent::Image { label, image } => {
-                if !label.is_empty() {
-                    has_text = true;
-                    text_w = text_size(style, atlas, self.font, label).width;
-                }
-                if let Some(Image::Slot(slot)) = image {
-                    let size = atlas.get_slot_size(*slot);
-                    visual_w = size.width;
-                    visual_h = size.height;
-                }
+                let visual = image.map(|image| image.size(atlas));
+                inline_content_size(style, atlas, self.font, label, visual)
             }
             ButtonContent::Slot { label, slot, .. } => {
-                if !label.is_empty() {
-                    has_text = true;
-                    text_w = text_size(style, atlas, self.font, label).width;
-                }
-                let size = atlas.get_slot_size(*slot);
-                visual_w = size.width;
-                visual_h = size.height;
+                let visual = Some(atlas.get_slot_size(*slot));
+                inline_content_size(style, atlas, self.font, label, visual)
             }
         }
-
-        if has_text {
-            width += text_w.max(0);
-        }
-        if visual_w > 0 {
-            width += visual_w.max(0);
-            if has_text {
-                width += padding;
-            }
-        }
-
-        let height = content_height(style, atlas, self.font, visual_h);
-        Dimensioni::new(width.max(0), height)
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -237,29 +258,37 @@ impl Button {
         let font = ctx.style().resolve_font_choice(self.font);
         match &self.content {
             ButtonContent::Text { label, icon } => {
+                let visual_size = icon.map(|icon| ctx.atlas().get_icon_size(icon));
+                let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, rect, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.opt);
                 }
-                if let Some(icon) = icon {
+                if let (Some(icon), Some(visual)) = (icon, layout.visual) {
                     let color = ctx.style().colors[ControlColor::Text as usize];
-                    ctx.draw_icon(*icon, rect, color);
+                    ctx.draw_icon(*icon, visual, color);
                 }
             }
             ButtonContent::Image { label, image } => {
+                let visual_size = image.map(|image| image.size(ctx.atlas()));
+                let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, rect, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.opt);
                 }
-                if let Some(image) = *image {
+                if let (Some(image), Some(visual)) = (*image, layout.visual) {
                     let color = ctx.style().colors[ControlColor::Text as usize];
-                    ctx.push_image(image, rect, color);
+                    ctx.push_image(image, visual, color);
                 }
             }
             ButtonContent::Slot { label, slot, paint } => {
+                let visual_size = Some(ctx.atlas().get_slot_size(*slot));
+                let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, rect, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.opt);
                 }
-                let color = ctx.style().colors[ControlColor::Text as usize];
-                ctx.draw_slot_with_function(*slot, rect, color, paint.clone());
+                if let Some(visual) = layout.visual {
+                    let color = ctx.style().colors[ControlColor::Text as usize];
+                    ctx.draw_slot_with_function(*slot, visual, color, paint.clone());
+                }
             }
         }
         res
@@ -425,19 +454,8 @@ impl ListBox {
     }
 
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        let padding = style.padding.max(0);
-        let mut width = padding * 2;
-        let mut visual_h = 0;
-        if !self.label.is_empty() {
-            width += text_size(style, atlas, self.font, &self.label).width;
-        }
-        if let Some(Image::Slot(slot)) = self.image {
-            let size = atlas.get_slot_size(slot);
-            width = width.max(size.width + padding * 2);
-            visual_h = size.height;
-        }
-        let height = content_height(style, atlas, self.font, visual_h);
-        Dimensioni::new(width.max(0), height)
+        let visual = self.image.map(|image| image.size(atlas));
+        inline_content_size(style, atlas, self.font, &self.label, visual)
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -451,13 +469,15 @@ impl ListBox {
                 ctx.draw_frame(rect, colorid);
             }
         }
+        let visual_size = self.image.map(|image| image.size(ctx.atlas()));
+        let layout = layout_inline_content(rect, ctx.style(), &self.label, visual_size);
         if !self.label.is_empty() {
             let font = ctx.style().resolve_font_choice(self.font);
-            ctx.draw_control_text_with_font(font, &self.label, rect, ControlColor::Text, self.opt);
+            ctx.draw_control_text_with_font(font, &self.label, layout.text, ControlColor::Text, self.opt);
         }
-        if let Some(image) = self.image {
+        if let (Some(image), Some(visual)) = (self.image, layout.visual) {
             let color = ctx.style().colors[ControlColor::Text as usize];
-            ctx.push_image(image, rect, color);
+            ctx.push_image(image, visual, color);
         }
         res
     }
@@ -834,7 +854,7 @@ mod tests {
     use std::{cell::RefCell, rc::Rc};
 
     fn make_test_atlas() -> AtlasHandle {
-        let pixels: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+        let pixels: [u8; 256] = [0xFF; 256];
         let icons: Vec<(&str, Recti)> = ["white", "close", "expand", "collapse", "check", "expand_down"]
             .iter()
             .map(|name| (*name, Recti::new(0, 0, 1, 1)))
@@ -856,16 +876,48 @@ mod tests {
                 entries: &entries,
             },
         )];
+        let slots = [Recti::new(0, 0, 6, 4)];
         let source = AtlasSource {
-            width: 1,
-            height: 1,
+            width: 8,
+            height: 8,
             pixels: &pixels,
             icons: &icons,
             fonts: &fonts,
             format: SourceFormat::Raw,
-            slots: &[],
+            slots: &slots,
         };
         AtlasHandle::from(&source)
+    }
+
+    #[test]
+    fn image_widgets_measure_external_texture_dimensions() {
+        let atlas = make_test_atlas();
+        let style = Style::default();
+        let texture = TextureId::new(7, 13, 5);
+
+        let button = Button::with_image("aa", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL);
+        let button_size = button.measure(&style, &atlas, Dimensioni::default());
+
+        assert_eq!(button_size.width, style.padding * 2 + texture.width() + style.padding + 16);
+        assert_eq!(button_size.height, 14);
+
+        let list_box = ListBox::new("a", Some(Image::Texture(texture)));
+        let list_size = list_box.measure(&style, &atlas, Dimensioni::default());
+
+        assert_eq!(list_size.width, style.padding * 2 + texture.width() + style.padding + 8);
+        assert_eq!(list_size.height, 14);
+    }
+
+    #[test]
+    fn inline_image_layout_keeps_visual_and_text_rects_separate() {
+        let style = Style::default();
+        let layout = layout_inline_content(rect(10, 20, 60, 18), &style, "aa", Some(Dimensioni::new(13, 5)));
+        let visual = layout.visual.expect("visual rect");
+
+        assert_eq!(visual.x, 10 + style.padding);
+        assert_eq!(visual.width, 13);
+        assert!(layout.text.x >= visual.x + visual.width);
+        assert!(layout.text.width > 0);
     }
 
     #[test]
