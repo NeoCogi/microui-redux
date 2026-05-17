@@ -811,17 +811,37 @@ mod tests {
 }
 
 impl<R: Renderer> Context<R> {
-    /// Begins a new draw pass on the underlying canvas.
-    pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
+    /// Begins a renderer draw pass for the current viewport.
+    ///
+    /// Call this once after determining the viewport size and before presenting UI commands for
+    /// the frame. Input events may be collected before or after this call, as long as
+    /// [`Context::run_ui_frame`] runs after the input state has been updated.
+    pub fn begin_render_frame(&mut self, width: i32, height: i32, clr: Color) {
         self.canvas.begin(width, height, clr);
     }
 
-    /// Flushes recorded draw commands to the renderer and ends the draw pass.
-    pub fn end(&mut self) {
+    /// Flushes recorded root commands to the renderer and ends the draw pass.
+    pub fn end_render_frame(&mut self) {
         for r in &mut self.root_list {
             r.render(&mut self.canvas);
         }
         self.canvas.end()
+    }
+
+    /// Begins a new draw pass on the underlying canvas.
+    ///
+    /// Prefer [`Context::begin_render_frame`] in new code; this method remains as a compatibility
+    /// alias.
+    pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
+        self.begin_render_frame(width, height, clr);
+    }
+
+    /// Flushes recorded draw commands to the renderer and ends the draw pass.
+    ///
+    /// Prefer [`Context::end_render_frame`] in new code; this method remains as a compatibility
+    /// alias.
+    pub fn end(&mut self) {
+        self.end_render_frame()
     }
 
     /// Returns a handle to the underlying renderer.
@@ -915,15 +935,27 @@ impl<R: Renderer> Context<R> {
         self.root_list.sort_by(|a, b| a.zindex().cmp(&b.zindex()));
     }
 
-    /// Runs the UI for a single frame by wrapping input/layout bookkeeping.
-    /// Rendering still requires calling [`Context::begin`] and [`Context::end`].
-    pub fn frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
+    /// Runs the retained UI traversal and publishes frame results.
+    ///
+    /// This wraps input prelude/epilogue, root bookkeeping, retained layout, widget execution, and
+    /// result commit. Renderer presentation remains explicit through
+    /// [`Context::begin_render_frame`] and [`Context::end_render_frame`].
+    pub fn run_ui_frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
         self.frame_begin();
 
         // execute the frame function
         f(self);
 
         self.frame_end();
+    }
+
+    /// Runs the UI for a single frame by wrapping input/layout bookkeeping.
+    ///
+    /// Prefer [`Context::run_ui_frame`] in new code; this method remains as a compatibility alias.
+    /// Rendering still requires calling [`Context::begin_render_frame`] and
+    /// [`Context::end_render_frame`].
+    pub fn frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
+        self.run_ui_frame(f);
     }
 
     /// Creates a new movable window rooted at the provided rectangle.

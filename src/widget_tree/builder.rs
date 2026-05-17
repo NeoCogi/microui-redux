@@ -125,9 +125,12 @@ fn hash_builder_key<K: Hash>(key: K) -> u64 {
 
 /// Builder that creates a retained widget tree.
 ///
-/// Unkeyed methods derive IDs from sibling order and remain stable only while
-/// the surrounding structure stays in the same order. Use `*_with` together
-/// with [`NodeOptions::keyed`] for dynamic or reorderable children.
+/// Unkeyed methods derive IDs from the order of other unkeyed siblings and
+/// remain stable only while that unkeyed structure stays in the same order.
+/// Keyed nodes use a separate identity path and do not advance the unkeyed
+/// sibling counter, so inserting a keyed node does not shift later unkeyed IDs.
+/// Use `*_with` together with [`NodeOptions::keyed`] for dynamic or reorderable
+/// children.
 pub struct WidgetTreeBuilder {
     frames: Vec<BuilderFrame>,
 }
@@ -323,8 +326,14 @@ impl WidgetTreeBuilder {
 
     fn alloc_id(&mut self, tag: u8, key: Option<u64>) -> NodeId {
         let frame = self.current_frame_mut();
-        let ordinal = frame.next_auto;
-        frame.next_auto += 1;
+        let ordinal = match key {
+            Some(_) => None,
+            None => {
+                let ordinal = frame.next_auto;
+                frame.next_auto += 1;
+                Some(ordinal)
+            }
+        };
 
         let mut hasher = DefaultHasher::new();
         frame.scope_seed.hash(&mut hasher);
@@ -336,7 +345,7 @@ impl WidgetTreeBuilder {
             }
             None => {
                 0u8.hash(&mut hasher);
-                ordinal.hash(&mut hasher);
+                ordinal.expect("unkeyed ordinal missing").hash(&mut hasher);
             }
         }
         NodeId::new(hasher.finish())

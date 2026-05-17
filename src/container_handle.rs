@@ -54,13 +54,14 @@
 
 use std::{
     cell::{Ref, RefCell, RefMut},
-    ops::{Deref, DerefMut},
+    ops::Deref,
     rc::Rc,
 };
 
 use crate::canvas::Canvas;
 use crate::container::Container;
 use crate::render::Renderer;
+use crate::{Clip, Color, ContainerOption, ControlColor, Dimensioni, FontId, IconId, Recti, SlotId, TextWrap, Vec2i, WidgetBehaviourOption, WidgetId, WidgetOption};
 
 pub(crate) type ContainerId = *const ();
 
@@ -110,9 +111,140 @@ impl<'a> Deref for ContainerViewMut<'a> {
     }
 }
 
-impl<'a> DerefMut for ContainerViewMut<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.inner
+impl<'a> ContainerViewMut<'a> {
+    /// Returns the container outer rectangle.
+    pub fn rect(&self) -> Recti {
+        self.inner.rect()
+    }
+
+    /// Updates the container outer rectangle.
+    pub fn set_rect(&mut self, rect: Recti) {
+        self.inner.set_rect(rect);
+    }
+
+    /// Returns the current body rectangle.
+    pub fn body(&self) -> Recti {
+        self.inner.body()
+    }
+
+    /// Returns the current scroll offset.
+    pub fn scroll(&self) -> Vec2i {
+        self.inner.scroll()
+    }
+
+    /// Updates the current scroll offset.
+    pub fn set_scroll(&mut self, scroll: Vec2i) {
+        self.inner.set_scroll(scroll);
+    }
+
+    /// Returns the measured content size.
+    pub fn content_size(&self) -> Dimensioni {
+        self.inner.content_size()
+    }
+
+    /// Manually updates which widget owns focus.
+    pub fn set_focus(&mut self, widget_id: Option<WidgetId>) {
+        self.inner.set_focus(widget_id);
+    }
+
+    /// Pushes a new clip rectangle combined with the previous clip.
+    pub fn push_clip_rect(&mut self, rect: Recti) {
+        self.inner.push_clip_rect(rect);
+    }
+
+    /// Restores the previous clip rectangle from the stack.
+    pub fn pop_clip_rect(&mut self) {
+        self.inner.pop_clip_rect();
+    }
+
+    /// Returns the active clip rectangle.
+    pub fn get_clip_rect(&mut self) -> Recti {
+        self.inner.get_clip_rect()
+    }
+
+    /// Determines whether `rect` is visible under the current clip.
+    pub fn check_clip(&mut self, rect: Recti) -> Clip {
+        self.inner.check_clip(rect)
+    }
+
+    /// Adjusts the current clip rectangle.
+    pub fn set_clip(&mut self, rect: Recti) {
+        self.inner.set_clip(rect);
+    }
+
+    /// Records a filled rectangle draw command.
+    pub fn draw_rect(&mut self, rect: Recti, color: Color) {
+        self.inner.draw_rect(rect, color);
+    }
+
+    /// Records a rectangle outline.
+    pub fn draw_box(&mut self, rect: Recti, color: Color) {
+        self.inner.draw_box(rect, color);
+    }
+
+    /// Records a text draw command.
+    pub fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
+        self.inner.draw_text(font, text, pos, color);
+    }
+
+    /// Records an icon draw command.
+    pub fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
+        self.inner.draw_icon(id, rect, color);
+    }
+
+    /// Records a slot draw command.
+    pub fn draw_slot(&mut self, id: SlotId, rect: Recti, color: Color) {
+        self.inner.draw_slot(id, rect, color);
+    }
+
+    /// Draws multi-line text without wrapping.
+    pub fn text(&mut self, text: &str) {
+        self.inner.text(text);
+    }
+
+    /// Draws multi-line text without wrapping using an explicit font.
+    pub fn text_with_font(&mut self, font: FontId, text: &str) {
+        self.inner.text_with_font(font, text);
+    }
+
+    /// Draws multi-line text using the provided wrapping mode.
+    pub fn text_with_wrap(&mut self, text: &str, wrap: TextWrap) {
+        self.inner.text_with_wrap(text, wrap);
+    }
+
+    /// Draws multi-line text using the provided wrapping mode and font.
+    pub fn text_with_font_wrap(&mut self, font: FontId, text: &str, wrap: TextWrap) {
+        self.inner.text_with_font_wrap(font, text, wrap);
+    }
+
+    /// Records a standard UI frame.
+    pub fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
+        self.inner.draw_frame(rect, colorid);
+    }
+
+    /// Records a standard widget frame.
+    pub fn draw_widget_frame(&mut self, widget_id: WidgetId, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        self.inner.draw_widget_frame(widget_id, rect, colorid, opt);
+    }
+
+    /// Records a standard container frame.
+    pub fn draw_container_frame(&mut self, widget_id: WidgetId, rect: Recti, colorid: ControlColor, opt: ContainerOption) {
+        self.inner.draw_container_frame(widget_id, rect, colorid, opt);
+    }
+
+    /// Records control text using the style's body font.
+    pub fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        self.inner.draw_control_text(text, rect, colorid, opt);
+    }
+
+    /// Records control text using an explicit font.
+    pub fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        self.inner.draw_control_text_with_font(font, text, rect, colorid, opt);
+    }
+
+    /// Configures the body rectangle for standalone panel-style drawing.
+    pub fn push_container_body(&mut self, body: Recti, opt: ContainerOption, bopt: WidgetBehaviourOption) {
+        self.inner.push_container_body(body, opt, bopt);
     }
 }
 
@@ -152,5 +284,10 @@ impl ContainerHandle {
         let mut container = self.0.borrow_mut();
         let mut view = ContainerViewMut::new(&mut container);
         f(&mut view)
+    }
+
+    pub(crate) fn with_inner_mut<R>(&mut self, f: impl FnOnce(&mut Container) -> R) -> R {
+        let mut container = self.0.borrow_mut();
+        f(&mut container)
     }
 }

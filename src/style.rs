@@ -52,7 +52,7 @@
 //
 //! Visual primitives and lightweight geometry helpers used across the crate.
 
-use rs_math3d::{Recti, Vec2i};
+use rs_math3d::{Dimensioni, Recti, Vec2i};
 
 use crate::atlas::{AtlasHandle, FontId, SlotId};
 
@@ -172,12 +172,35 @@ pub type Real = f32;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 /// Handle referencing a renderer-owned texture.
-pub struct TextureId(pub(crate) u32);
+pub struct TextureId {
+    raw: u32,
+    width: i32,
+    height: i32,
+}
 
 impl TextureId {
+    pub(crate) fn new(raw: u32, width: i32, height: i32) -> Self {
+        Self { raw, width, height }
+    }
+
     /// Returns the raw numeric identifier stored inside the handle.
     pub fn raw(self) -> u32 {
-        self.0
+        self.raw
+    }
+
+    /// Returns the texture width in pixels.
+    pub fn width(self) -> i32 {
+        self.width
+    }
+
+    /// Returns the texture height in pixels.
+    pub fn height(self) -> i32 {
+        self.height
+    }
+
+    /// Returns the texture dimensions in pixels.
+    pub fn size(self) -> Dimensioni {
+        Dimensioni::new(self.width, self.height)
     }
 }
 
@@ -188,6 +211,16 @@ pub enum Image {
     Slot(SlotId),
     /// Reference to an external texture ID.
     Texture(TextureId),
+}
+
+impl Image {
+    /// Returns the intrinsic pixel dimensions for the image.
+    pub fn size(self, atlas: &AtlasHandle) -> Dimensioni {
+        match self {
+            Self::Slot(slot) => atlas.get_slot_size(slot),
+            Self::Texture(texture) => texture.size(),
+        }
+    }
 }
 
 #[derive(Copy, Clone)]

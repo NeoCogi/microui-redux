@@ -78,7 +78,14 @@ impl Container {
         self.hit_test_rect(rect, in_hover_root && !self.pointer_blocked_by_child())
     }
 
-    pub(crate) fn update_control_for(&mut self, interaction_id: InteractionId, rect: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ControlState {
+    pub(crate) fn update_control_for(
+        &mut self,
+        interaction_id: InteractionId,
+        rect: Recti,
+        opt: WidgetOption,
+        bopt: WidgetBehaviourOption,
+        focus_policy: FocusPolicy,
+    ) -> ControlState {
         let in_hover_root = self.interaction.in_hover_root;
         let mouseover = self.mouse_over(rect, in_hover_root);
         if self.interaction.focus == Some(interaction_id) {
@@ -94,7 +101,7 @@ impl Container {
             let should_clear_focus = {
                 let input = self.input.borrow();
                 let pressed_outside = !input.mouse_pressed.is_none() && !mouseover;
-                let released_without_hold_focus = input.mouse_down.is_none() && !opt.is_holding_focus();
+                let released_without_hold_focus = input.mouse_down.is_none() && focus_policy.releases_on_mouse_up();
                 pressed_outside || released_without_hold_focus
             };
             if should_clear_focus {
@@ -143,13 +150,20 @@ impl Container {
     }
 
     pub(crate) fn update_control_with_opts(&mut self, widget_id: WidgetId, rect: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ControlState {
-        self.update_control_for(InteractionId::widget(widget_id), rect, opt, bopt)
+        let focus_policy = FocusPolicy::from_widget_options(opt);
+        self.update_control_for(InteractionId::widget(widget_id), rect, opt, bopt, focus_policy)
     }
 
     #[inline(never)]
     /// Updates hover/focus state for the widget described by `widget_id` and optionally consumes scroll.
     pub fn update_control<W: Widget + ?Sized>(&mut self, widget_id: WidgetId, rect: Recti, state: &W) -> ControlState {
-        self.update_control_with_opts(widget_id, rect, *state.widget_opt(), *state.behaviour_opt())
+        self.update_control_for(
+            InteractionId::widget(widget_id),
+            rect,
+            state.effective_widget_opt(),
+            state.effective_behaviour_opt(),
+            state.focus_policy(),
+        )
     }
 
     pub(crate) fn snapshot_input(&mut self) -> Rc<InputSnapshot> {

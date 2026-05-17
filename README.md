@@ -36,7 +36,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 ![random](res/microui-0.6.png)
 
 ## Key Concepts
-- **Context**: owns the renderer handle, user input, frame results, and root windows. Each frame starts by feeding input into the context, then calling `context.window(...)`, `context.dialog(...)`, or `context.popup(...)` with retained trees for every visible surface.
+- **Context**: owns the renderer handle, user input, frame results, and root windows. A frame has explicit phases: `begin_render_frame(...)` starts renderer work, input events are fed into the context, `run_ui_frame(...)` traverses retained trees with `context.window(...)`, `context.dialog(...)`, or `context.popup(...)`, and `end_render_frame()` presents recorded root commands.
 - **Container**: the internal execution object behind windows, panels, popups, and retained tree nodes. Application code should normally work through `Context`, `WindowHandle`, `ContainerHandle`, and `WidgetTreeBuilder` instead of authoring widgets directly on a container.
 - **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). These structs hold interaction state and use pointer-derived IDs from their current address.
@@ -57,7 +57,9 @@ let tree = WidgetTreeBuilder::build({
     }
 });
 
-ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+ctx.run_ui_frame(|ctx| {
+    ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+});
 
 if ctx.committed_results().state_of_handle(&name).is_submitted() {
     // react to the textbox submission here
@@ -67,7 +69,9 @@ if ctx.committed_results().state_of_handle(&name).is_submitted() {
 Retained trees are the supported public authoring path. Post-render business logic lives alongside the window call and reads from `ctx.committed_results()`, which intentionally exposes the previous frame's published interaction generation:
 
 ```rust
-ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+ctx.run_ui_frame(|ctx| {
+    ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+});
 
 let results = ctx.committed_results();
 if results.state_of_handle(&submit_button).is_submitted() {
@@ -111,7 +115,9 @@ let tree = WidgetTreeBuilder::build({
     move |tree| tree.widget(image_button.clone())
 });
 
-ctx.window(&mut image_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+ctx.run_ui_frame(|ctx| {
+    ctx.window(&mut image_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+});
 if ctx.committed_results().state_of_handle(&image_button).is_submitted() {
     // react here
 }

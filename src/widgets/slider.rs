@@ -258,6 +258,14 @@ impl Widget for Slider {
         if self.edit.editing { self.opt | WidgetOption::HOLD_FOCUS } else { self.opt }
     }
 
+    fn focus_policy(&self) -> FocusPolicy {
+        if self.edit.editing {
+            FocusPolicy::HoldUntilBlur
+        } else {
+            FocusPolicy::DragCapture
+        }
+    }
+
     fn needs_input_snapshot(&self) -> bool {
         true
     }
@@ -382,6 +390,14 @@ impl Widget for Number {
 
     fn effective_widget_opt(&self) -> WidgetOption {
         if self.edit.editing { self.opt | WidgetOption::HOLD_FOCUS } else { self.opt }
+    }
+
+    fn focus_policy(&self) -> FocusPolicy {
+        if self.edit.editing {
+            FocusPolicy::HoldUntilBlur
+        } else {
+            FocusPolicy::DragCapture
+        }
     }
 
     fn needs_input_snapshot(&self) -> bool {

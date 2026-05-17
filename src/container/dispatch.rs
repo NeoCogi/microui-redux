@@ -55,11 +55,12 @@ impl Container {
         input: Option<Rc<InputSnapshot>>,
         opt: WidgetOption,
         bopt: WidgetBehaviourOption,
+        focus_policy: FocusPolicy,
         dispatch_site: String,
     ) -> (ControlState, ResourceState) {
         let widget_id = widget.widget_id();
         let interaction_id = node_id.map(InteractionId::node).unwrap_or_else(|| InteractionId::widget(widget_id));
-        let control = self.update_control_for(interaction_id, rect, opt, bopt);
+        let control = self.update_control_for(interaction_id, rect, opt, bopt, focus_policy);
         let mut ctx = self.widget_ctx_for(widget_id, interaction_id, rect, input);
         let res = widget.run(&mut ctx, &control);
         match node_id {
@@ -83,6 +84,7 @@ impl Container {
         input: Option<Rc<InputSnapshot>>,
         opt: WidgetOption,
         bopt: WidgetBehaviourOption,
+        focus_policy: FocusPolicy,
         dispatch_site: String,
     ) -> (ControlState, ResourceState) {
         let widget_id = {
@@ -90,7 +92,7 @@ impl Container {
             widget_id_of(&*state)
         };
         let interaction_id = node_id.map(InteractionId::node).unwrap_or_else(|| InteractionId::widget(widget_id));
-        let control = self.update_control_for(interaction_id, rect, opt, bopt);
+        let control = self.update_control_for(interaction_id, rect, opt, bopt, focus_policy);
         let mut ctx = self.widget_ctx_for(widget_id, interaction_id, rect, input);
         let res = {
             let mut state = handle.borrow_mut();

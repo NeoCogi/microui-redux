@@ -935,14 +935,15 @@ impl Renderer for WgpuRenderer {
         self.textures.remove(&id);
     }
 
-    /// Queues one textured quad that samples from a renderer-owned texture.
+    /// Queues one pre-clipped textured quad that samples from a renderer-owned texture.
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
         if !self.textures.contains_key(&id) {
             return;
         }
 
         // Textured draws must preserve ordering with surrounding UI draws, so flush the current
-        // atlas batch before appending the explicit texture command.
+        // atlas batch before appending the explicit texture command. `Canvas` already clipped the
+        // quad and adjusted UVs, so no additional scissor is needed here.
         self.flush_ui_batch();
         let mut quad = Vec::with_capacity(6);
         Self::append_quad(&mut quad, &vertices[0], &vertices[1], &vertices[2], &vertices[3]);
