@@ -57,8 +57,8 @@ use super::*;
 impl Container {
     /// Manually updates which widget owns focus.
     pub fn set_focus(&mut self, widget_id: Option<WidgetId>) {
-        self.focus = widget_id;
-        self.updated_focus = true;
+        self.interaction.focus = widget_id.map(InteractionId::widget);
+        self.interaction.updated_focus = true;
     }
 
     pub(crate) fn hit_test_rect(&mut self, rect: Recti, in_hover_root: bool) -> bool {
@@ -67,7 +67,7 @@ impl Container {
     }
 
     fn pointer_blocked_by_child(&self) -> bool {
-        match self.hover_root_child_rect {
+        match self.interaction.hover_root_child_rect {
             Some(rect) => rect.contains(&self.input.borrow().mouse_pos),
             None => false,
         }
@@ -78,19 +78,19 @@ impl Container {
         self.hit_test_rect(rect, in_hover_root && !self.pointer_blocked_by_child())
     }
 
-    pub(crate) fn update_control_with_opts(&mut self, widget_id: WidgetId, rect: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ControlState {
-        let in_hover_root = self.in_hover_root;
+    pub(crate) fn update_control_for(&mut self, interaction_id: InteractionId, rect: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ControlState {
+        let in_hover_root = self.interaction.in_hover_root;
         let mouseover = self.mouse_over(rect, in_hover_root);
-        if self.focus == Some(widget_id) {
-            self.updated_focus = true;
+        if self.interaction.focus == Some(interaction_id) {
+            self.interaction.updated_focus = true;
         }
         if opt.is_not_interactive() {
             return ControlState::default();
         }
         if mouseover && self.input.borrow().mouse_down.is_none() {
-            self.hover = Some(widget_id);
+            self.interaction.hover = Some(interaction_id);
         }
-        if self.focus == Some(widget_id) {
+        if self.interaction.focus == Some(interaction_id) {
             let should_clear_focus = {
                 let input = self.input.borrow();
                 let pressed_outside = !input.mouse_pressed.is_none() && !mouseover;
@@ -101,32 +101,33 @@ impl Container {
                 self.set_focus(None);
             }
         }
-        if self.hover == Some(widget_id) {
+        if self.interaction.hover == Some(interaction_id) {
             if !mouseover {
-                self.hover = None;
+                self.interaction.hover = None;
             } else if !self.input.borrow().mouse_pressed.is_none() {
-                self.set_focus(Some(widget_id));
+                self.interaction.focus = Some(interaction_id);
+                self.interaction.updated_focus = true;
             }
         }
 
         let mut scroll = None;
-        if bopt.is_grab_scroll() && self.hover == Some(widget_id) {
-            if let Some(delta) = self.pending_scroll {
+        if bopt.is_grab_scroll() && self.interaction.hover == Some(interaction_id) {
+            if let Some(delta) = self.interaction.pending_scroll {
                 if delta.x != 0 || delta.y != 0 {
-                    self.pending_scroll = None;
+                    self.interaction.pending_scroll = None;
                     scroll = Some(delta);
                 }
             }
         }
 
-        if self.focus == Some(widget_id) {
+        if self.interaction.focus == Some(interaction_id) {
             let mouse_pos = self.input.borrow().mouse_pos;
             let origin = vec2(self.body.x, self.body.y);
             self.input.borrow_mut().rel_mouse_pos = mouse_pos - origin;
         }
 
-        let focused = self.focus == Some(widget_id);
-        let hovered = self.hover == Some(widget_id);
+        let focused = self.interaction.focus == Some(interaction_id);
+        let hovered = self.interaction.hover == Some(interaction_id);
         let (clicked, active) = {
             let input = self.input.borrow();
             (focused && input.mouse_pressed.is_left(), focused && input.mouse_down.is_left())
@@ -141,6 +142,10 @@ impl Container {
         }
     }
 
+    pub(crate) fn update_control_with_opts(&mut self, widget_id: WidgetId, rect: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ControlState {
+        self.update_control_for(InteractionId::widget(widget_id), rect, opt, bopt)
+    }
+
     #[inline(never)]
     /// Updates hover/focus state for the widget described by `widget_id` and optionally consumes scroll.
     pub fn update_control<W: Widget + ?Sized>(&mut self, widget_id: WidgetId, rect: Recti, state: &W) -> ControlState {
@@ -148,7 +153,7 @@ impl Container {
     }
 
     pub(crate) fn snapshot_input(&mut self) -> Rc<InputSnapshot> {
-        if let Some(snapshot) = &self.input_snapshot {
+        if let Some(snapshot) = &self.interaction.input_snapshot {
             return snapshot.clone();
         }
 
@@ -164,22 +169,33 @@ impl Container {
             key_code_pressed: input.key_code_pressed,
             text_input: input.input_text.clone(),
         });
-        self.input_snapshot = Some(snapshot.clone());
+        self.interaction.input_snapshot = Some(snapshot.clone());
         snapshot
     }
 
     pub(crate) fn widget_ctx(&mut self, widget_id: WidgetId, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'_> {
-        WidgetCtx::new(
+        self.widget_ctx_for(widget_id, InteractionId::widget(widget_id), rect, input)
+    }
+
+    pub(crate) fn widget_ctx_for(
+        &mut self,
+        widget_id: WidgetId,
+        interaction_id: InteractionId,
+        rect: Recti,
+        input: Option<Rc<InputSnapshot>>,
+    ) -> WidgetCtx<'_> {
+        WidgetCtx::new_with_interaction(
             widget_id,
+            interaction_id,
             rect,
-            &mut self.command_list,
-            &mut self.triangle_vertices,
-            &mut self.clip_stack,
+            &mut self.draw.commands,
+            &mut self.draw.triangle_vertices,
+            &mut self.draw.clip_stack,
             self.style.as_ref(),
             &self.atlas,
-            &mut self.focus,
-            &mut self.updated_focus,
-            self.in_hover_root,
+            &mut self.interaction.focus,
+            &mut self.interaction.updated_focus,
+            self.interaction.in_hover_root,
             input,
         )
     }

@@ -914,7 +914,7 @@ mod tests {
         }
 
         let triangle_count = commands.iter().filter(|cmd| matches!(cmd, Command::Triangle { .. })).count();
-        let clip_count = commands.iter().filter(|cmd| matches!(cmd, Command::Clip { .. })).count();
+        let clip_count = commands.iter().filter(|cmd| matches!(cmd, Command::PushClip { .. } | Command::PopClip)).count();
         assert_eq!(triangle_count, 1);
         assert_eq!(clip_count, 0);
     }

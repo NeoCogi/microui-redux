@@ -52,7 +52,10 @@
 //
 use super::*;
 use crate::{AtlasSource, FontEntry, SourceFormat};
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
 
@@ -110,7 +113,7 @@ fn make_container() -> Container {
     let atlas = make_test_atlas();
     let input = Rc::new(RefCell::new(Input::default()));
     let mut container = Container::new("test", atlas, Rc::new(Style::default()), input);
-    container.in_hover_root = true;
+    container.interaction.in_hover_root = true;
     container.push_container_body(rect(0, 0, 100, 30), ContainerOption::NONE, WidgetBehaviourOption::NONE);
     container
 }
@@ -131,6 +134,41 @@ struct TraceWidget {
     log: Rc<RefCell<Vec<String>>>,
     opt: WidgetOption,
     bopt: WidgetBehaviourOption,
+}
+
+struct FocusProbe {
+    focused: Rc<Cell<bool>>,
+    opt: WidgetOption,
+    bopt: WidgetBehaviourOption,
+}
+
+impl FocusProbe {
+    fn new(focused: Rc<Cell<bool>>) -> Self {
+        Self {
+            focused,
+            opt: WidgetOption::HOLD_FOCUS,
+            bopt: WidgetBehaviourOption::NONE,
+        }
+    }
+}
+
+impl Widget for FocusProbe {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
+        &self.bopt
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        Dimensioni::new(30, 10)
+    }
+
+    fn run(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        self.focused.set(control.focused);
+        ResourceState::NONE
+    }
 }
 
 impl TraceWidget {
@@ -288,17 +326,21 @@ fn widget_tree_records_leaf_states() {
     let button_a = widget_handle(Button::new("A"));
     let button_b = widget_handle(Button::new("B"));
     let mut results = FrameResults::default();
+    let mut button_a_node = NodeId::new(0);
+    let mut button_b_node = NodeId::new(0);
 
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Auto, SizePolicy::Auto], SizePolicy::Auto, |tree| {
-            tree.widget(button_a.clone());
-            tree.widget(button_b.clone());
+            button_a_node = tree.widget(button_a.clone());
+            button_b_node = tree.widget(button_b.clone());
         });
     });
     container.widget_tree(&mut results, &tree);
 
     assert!(results.current().state(widget_id_of_handle(&button_a)).is_none());
     assert!(results.current().state(widget_id_of_handle(&button_b)).is_none());
+    assert!(results.current().state_of_node(button_a_node).is_none());
+    assert!(results.current().state_of_node(button_b_node).is_none());
 }
 
 #[test]
@@ -469,6 +511,136 @@ fn widget_tree_dispatches_panel_children() {
     parent.widget_tree(&mut results, &tree);
 
     assert!(results.current().state(widget_id_of_handle(&button)).is_none());
+}
+
+#[test]
+fn measurement_tree_does_not_mutate_live_root_or_panel_state() {
+    let mut parent = make_container();
+    let panel = make_panel_handle(&parent, "panel");
+    let text = widget_handle(TextBlock::new("panel child"));
+    let results = FrameResults::default();
+    let mut panel_node_id = NodeId::new(0);
+
+    begin_test_frame(&mut parent, rect(0, 0, 80, 30));
+    let tree = WidgetTreeBuilder::build(|tree| {
+        panel_node_id = tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+            tree.widget(text.clone());
+        });
+    });
+
+    let measured = parent.measure_widget_tree_content(&results, &tree);
+
+    assert!(measured.width > 0);
+    assert!(measured.height > 0);
+    assert!(parent.current_node_layout(panel_node_id).is_none());
+    let panel = panel.inner();
+    let rect = panel.rect();
+    let body = panel.body();
+    let content_size = panel.content_size();
+    assert_eq!((rect.x, rect.y, rect.width, rect.height), (0, 0, 0, 0));
+    assert_eq!((body.x, body.y, body.width, body.height), (0, 0, 0, 0));
+    assert_eq!((content_size.width, content_size.height), (0, 0));
+}
+
+#[test]
+fn embedded_panel_render_command_preserves_tree_order() {
+    let mut parent = make_container();
+    let panel = make_panel_handle(&parent, "panel");
+    let before = widget_handle(TextBlock::new("before"));
+    let inside = widget_handle(TextBlock::new("inside"));
+    let after = widget_handle(TextBlock::new("after"));
+    let mut results = FrameResults::default();
+
+    begin_test_frame(&mut parent, rect(0, 0, 120, 60));
+    let tree = WidgetTreeBuilder::build(|tree| {
+        tree.widget(before.clone());
+        tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+            tree.widget(inside.clone());
+        });
+        tree.widget(after.clone());
+    });
+    parent.widget_tree(&mut results, &tree);
+
+    let before_idx = parent
+        .draw
+        .commands
+        .iter()
+        .position(|cmd| matches!(cmd, Command::Text { text, .. } if text == "before"))
+        .expect("before text missing");
+    let panel_idx = parent
+        .draw
+        .commands
+        .iter()
+        .position(|cmd| matches!(cmd, Command::Panel { .. }))
+        .expect("panel command missing");
+    let after_idx = parent
+        .draw
+        .commands
+        .iter()
+        .position(|cmd| matches!(cmd, Command::Text { text, .. } if text == "after"))
+        .expect("after text missing");
+
+    assert!(before_idx < panel_idx);
+    assert!(panel_idx < after_idx);
+}
+
+#[test]
+fn partial_draw_clip_commands_are_balanced_push_pop() {
+    let mut container = make_container();
+    begin_test_frame(&mut container, rect(0, 0, 80, 30));
+
+    container.push_clip_rect(rect(0, 0, 8, 30));
+    container.draw_text(FontId::default(), "aaaa", vec2(0, 0), color(255, 255, 255, 255));
+    container.pop_clip_rect();
+
+    let push_idx = container
+        .draw
+        .commands
+        .iter()
+        .position(|cmd| matches!(cmd, Command::PushClip { .. }))
+        .expect("push clip missing");
+    let text_idx = container
+        .draw
+        .commands
+        .iter()
+        .position(|cmd| matches!(cmd, Command::Text { text, .. } if text == "aaaa"))
+        .expect("text command missing");
+    let pop_idx = container
+        .draw
+        .commands
+        .iter()
+        .position(|cmd| matches!(cmd, Command::PopClip))
+        .expect("pop clip missing");
+
+    assert!(push_idx < text_idx);
+    assert!(text_idx < pop_idx);
+}
+
+#[test]
+fn retained_focus_follows_stable_node_id_when_widget_handle_changes() {
+    let mut container = make_container();
+    let mut results = FrameResults::default();
+    let second_focus = Rc::new(Cell::new(false));
+    let mut focused_node_id = NodeId::new(0);
+
+    begin_test_frame(&mut container, rect(0, 0, 80, 30));
+    let first = widget_handle(FocusProbe::new(Rc::new(Cell::new(false))));
+    let tree = WidgetTreeBuilder::build(|tree| {
+        focused_node_id = tree.widget_with(NodeOptions::keyed("stable-probe"), first.clone());
+    });
+    container.widget_tree(&mut results, &tree);
+    container.interaction.focus = Some(InteractionId::node(focused_node_id));
+    container.interaction.updated_focus = true;
+    container.finish();
+
+    begin_test_frame(&mut container, rect(0, 0, 80, 30));
+    let second = widget_handle(FocusProbe::new(second_focus.clone()));
+    let tree = WidgetTreeBuilder::build(|tree| {
+        tree.widget_with(NodeOptions::keyed("stable-probe"), second.clone());
+    });
+    container.widget_tree(&mut results, &tree);
+
+    assert!(second_focus.get());
 }
 
 #[test]
@@ -685,27 +857,27 @@ fn panel_hover_root_switches_between_siblings_on_next_frame() {
     input.borrow_mut().mousemove(75, 10);
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
     parent.widget_tree(&mut results, &tree);
-    assert!(!left.inner().in_hover_root);
-    assert!(!right.inner().in_hover_root);
+    assert!(!left.inner().interaction.in_hover_root);
+    assert!(!right.inner().interaction.in_hover_root);
     parent.finish();
 
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
     parent.widget_tree(&mut results, &tree);
-    assert!(!left.inner().in_hover_root);
-    assert!(right.inner().in_hover_root);
+    assert!(!left.inner().interaction.in_hover_root);
+    assert!(right.inner().interaction.in_hover_root);
     parent.finish();
 
     input.borrow_mut().mousemove(25, 10);
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
     parent.widget_tree(&mut results, &tree);
-    assert!(!left.inner().in_hover_root);
-    assert!(right.inner().in_hover_root);
+    assert!(!left.inner().interaction.in_hover_root);
+    assert!(right.inner().interaction.in_hover_root);
     parent.finish();
 
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
     parent.widget_tree(&mut results, &tree);
-    assert!(left.inner().in_hover_root);
-    assert!(!right.inner().in_hover_root);
+    assert!(left.inner().interaction.in_hover_root);
+    assert!(!right.inner().interaction.in_hover_root);
 }
 
 #[test]

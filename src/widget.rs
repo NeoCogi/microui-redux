@@ -58,6 +58,7 @@ use std::collections::HashMap;
 use rs_math3d::Dimensioni;
 
 use crate::atlas::{AtlasHandle, EXPAND_DOWN_ICON};
+use crate::id::Id;
 use crate::input::{ControlState, ResourceState, WidgetBehaviourOption, WidgetOption};
 use crate::style::Style;
 use crate::widget_ctx::WidgetCtx;
@@ -100,6 +101,29 @@ pub trait Widget {
 /// Raw pointer identity used for widget hover/focus tracking.
 pub type WidgetId = *const ();
 
+/// Internal interaction identity used by focus, hover, and retained results.
+///
+/// Retained widgets use their stable `NodeId` while immediate/manual widgets keep the historical
+/// pointer identity. That lets retained interaction survive state-handle movement and keeps
+/// pointer IDs as an explicit fallback for APIs such as manual focus.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) enum InteractionId {
+    /// Pointer-derived identity for immediate widgets and manual focus.
+    Widget(WidgetId),
+    /// Stable retained-tree node identity.
+    Node(Id),
+}
+
+impl InteractionId {
+    pub(crate) fn widget(widget_id: WidgetId) -> Self {
+        Self::Widget(widget_id)
+    }
+
+    pub(crate) fn node(node_id: Id) -> Self {
+        Self::Node(node_id)
+    }
+}
+
 /// Returns the pointer identity for a widget state object.
 /// Use this when calling APIs such as `Container::set_focus`.
 pub fn widget_id_of<W: Widget + ?Sized>(widget: &W) -> WidgetId {
@@ -125,17 +149,21 @@ pub(crate) struct FrameResults {
     committed: HashMap<WidgetId, ResourceState>,
     current: HashMap<WidgetId, ResourceState>,
     current_dispatch_sites: HashMap<WidgetId, String>,
+    committed_nodes: HashMap<Id, ResourceState>,
+    current_nodes: HashMap<Id, ResourceState>,
+    current_node_dispatch_sites: HashMap<Id, String>,
 }
 
 /// Read-only view over one frame-result generation.
 #[derive(Copy, Clone)]
 pub struct FrameResultGeneration<'a> {
     entries: &'a HashMap<WidgetId, ResourceState>,
+    node_entries: &'a HashMap<Id, ResourceState>,
 }
 
 impl<'a> FrameResultGeneration<'a> {
-    fn new(entries: &'a HashMap<WidgetId, ResourceState>) -> Self {
-        Self { entries }
+    fn new(entries: &'a HashMap<WidgetId, ResourceState>, node_entries: &'a HashMap<Id, ResourceState>) -> Self {
+        Self { entries, node_entries }
     }
 
     /// Returns the state for `widget_id` in this generation.
@@ -152,6 +180,11 @@ impl<'a> FrameResultGeneration<'a> {
     pub fn state_of_handle<W: Widget>(&self, handle: &WidgetHandle<W>) -> ResourceState {
         self.state(widget_id_of_handle(handle))
     }
+
+    /// Returns the state for a retained tree node in this generation.
+    pub fn state_of_node(&self, node_id: Id) -> ResourceState {
+        self.node_entries.get(&node_id).copied().unwrap_or(ResourceState::NONE)
+    }
 }
 
 impl FrameResults {
@@ -161,13 +194,18 @@ impl FrameResults {
     pub(crate) fn begin_frame(&mut self) {
         self.current.clear();
         self.current_dispatch_sites.clear();
+        self.current_nodes.clear();
+        self.current_node_dispatch_sites.clear();
     }
 
     /// Publishes the current frame as the next committed result generation.
     pub(crate) fn finish_frame(&mut self) {
         std::mem::swap(&mut self.committed, &mut self.current);
+        std::mem::swap(&mut self.committed_nodes, &mut self.current_nodes);
         self.current.clear();
         self.current_dispatch_sites.clear();
+        self.current_nodes.clear();
+        self.current_node_dispatch_sites.clear();
     }
 
     /// Records the current frame state under `widget_id`.
@@ -196,15 +234,24 @@ impl FrameResults {
         );
     }
 
+    /// Records a retained node result under both stable node identity and legacy widget identity.
+    pub(crate) fn record_retained_with_context(&mut self, node_id: Id, widget_id: WidgetId, state: ResourceState, dispatch_site: impl Into<String>) {
+        let dispatch_site = dispatch_site.into();
+        self.current_nodes.entry(node_id).or_insert(state);
+        self.current_node_dispatch_sites.entry(node_id).or_insert_with(|| dispatch_site.clone());
+
+        self.record_with_context(widget_id, state, dispatch_site);
+    }
+
     /// Returns the committed result generation published by the previous frame.
     pub(crate) fn committed(&self) -> FrameResultGeneration<'_> {
-        FrameResultGeneration::new(&self.committed)
+        FrameResultGeneration::new(&self.committed, &self.committed_nodes)
     }
 
     /// Returns the in-progress result generation for the current frame.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn current(&self) -> FrameResultGeneration<'_> {
-        FrameResultGeneration::new(&self.current)
+        FrameResultGeneration::new(&self.current, &self.current_nodes)
     }
 }
 
