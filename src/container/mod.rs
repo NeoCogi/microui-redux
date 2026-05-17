@@ -78,84 +78,84 @@ mod tests;
 
 /// Core UI building block that records commands and hosts layouts.
 pub struct Container {
-    pub(crate) atlas: AtlasHandle,
+    atlas: AtlasHandle,
     /// Style used when drawing widgets in the container.
-    pub(crate) style: Rc<Style>,
+    style: Rc<Style>,
     /// Human-readable name for the container.
-    pub(crate) name: String,
+    name: String,
     /// Outer rectangle including frame and title.
-    pub(crate) rect: Recti,
+    rect: Recti,
     /// Inner rectangle excluding frame/title.
-    pub(crate) body: Recti,
+    body: Recti,
     /// Size of the content region based on layout traversal.
-    pub(crate) content_size: Dimensioni,
+    content_size: Dimensioni,
     /// Accumulated scroll offset.
-    pub(crate) scroll: Vec2i,
+    scroll: Vec2i,
     /// Z-index used to order overlapping windows.
-    pub(crate) zindex: i32,
-    pub(crate) draw: DrawState,
-    pub(crate) layout: LayoutManager,
-    pub(crate) interaction: InteractionState,
+    zindex: i32,
+    draw: DrawState,
+    layout: LayoutManager,
+    interaction: InteractionState,
     /// Internal state for the vertical scrollbar.
-    pub(crate) scrollbar_y_state: Internal,
+    scrollbar_y_state: Internal,
     /// Internal state for the horizontal scrollbar.
-    pub(crate) scrollbar_x_state: Internal,
+    scrollbar_x_state: Internal,
     /// Shared access to the input state.
-    pub(crate) input: Rc<RefCell<Input>>,
+    input: Rc<RefCell<Input>>,
     /// Determines whether container scrollbars and scroll consumption are enabled.
     scroll_enabled: bool,
     /// True when this container is a scratch container used only for measurement.
     measurement_mode: bool,
-    pub(crate) tree: TreeState,
-    pub(crate) panels: PanelState,
+    tree: TreeState,
+    panels: PanelState,
 }
 
 #[derive(Default)]
-pub(crate) struct DrawState {
+struct DrawState {
     /// Recorded draw commands for this frame.
-    pub(crate) commands: Vec<Command>,
+    commands: Vec<Command>,
     /// Shared triangle vertex arena referenced by retained triangle commands.
-    pub(crate) triangle_vertices: Vec<Vertex>,
+    triangle_vertices: Vec<Vertex>,
     /// Stack of clip rectangles applied while drawing.
-    pub(crate) clip_stack: Vec<Recti>,
+    clip_stack: Vec<Recti>,
 }
 
 #[derive(Default)]
-pub(crate) struct InteractionState {
+struct InteractionState {
     /// ID of the widget currently hovered, if any.
-    pub(crate) hover: Option<InteractionId>,
+    hover: Option<InteractionId>,
     /// ID of the widget currently focused, if any.
-    pub(crate) focus: Option<InteractionId>,
+    focus: Option<InteractionId>,
     /// Child container that currently owns pointer routing inside this container.
-    pub(crate) hover_root_child: Option<ContainerId>,
+    hover_root_child: Option<ContainerId>,
     /// Rectangle occupied by the child container that currently owns pointer routing.
-    pub(crate) hover_root_child_rect: Option<Recti>,
+    hover_root_child_rect: Option<Recti>,
     /// Child container selected to own pointer routing on the next frame.
-    pub(crate) next_hover_root_child: Option<ContainerId>,
+    next_hover_root_child: Option<ContainerId>,
     /// Rectangle for the child container selected to own pointer routing on the next frame.
-    pub(crate) next_hover_root_child_rect: Option<Recti>,
+    next_hover_root_child_rect: Option<Recti>,
     /// Tracks whether focus changed this frame.
-    pub(crate) updated_focus: bool,
+    updated_focus: bool,
     /// Cached per-frame input snapshot for widgets that need it.
-    pub(crate) input_snapshot: Option<Rc<InputSnapshot>>,
+    input_snapshot: Option<Rc<InputSnapshot>>,
     /// Whether this container is the current hover root.
-    pub(crate) in_hover_root: bool,
+    in_hover_root: bool,
     /// Tracks whether a popup was just opened this frame to avoid instant auto-close.
-    pub(crate) popup_just_opened: bool,
+    popup_just_opened: bool,
     /// Pending scroll delta that can be consumed by the active container/widget.
-    pub(crate) pending_scroll: Option<Vec2i>,
+    pending_scroll: Option<Vec2i>,
 }
 
 #[derive(Default)]
-pub(crate) struct TreeState {
+struct TreeState {
     /// Previous/current frame cache for tree node geometry and interaction state.
-    pub(crate) cache: WidgetTreeCache,
+    cache: WidgetTreeCache,
 }
 
 #[derive(Default)]
-pub(crate) struct PanelState {
+struct PanelState {
     /// Embedded panels active in the current retained traversal.
-    pub(crate) active: Vec<ContainerHandle>,
+    active: Vec<ContainerHandle>,
 }
 
 impl Container {
@@ -239,6 +239,23 @@ impl Container {
         self.interaction.pending_scroll = delta;
     }
 
+    pub(crate) fn begin_root_command_scope(&mut self, pending_scroll: Option<Vec2i>) {
+        self.seed_pending_scroll(pending_scroll);
+        self.draw.clip_stack.push(UNCLIPPED_RECT);
+    }
+
+    pub(crate) fn finish_root_command_scope(&mut self) {
+        self.pop_clip_rect();
+
+        let layout_body = self.layout.current_body();
+        if let Some(lm) = self.layout.current_max() {
+            self.set_content_size(Dimensioni::new(lm.x - layout_body.x, lm.y - layout_body.y));
+        }
+        self.render_active_scrollbars();
+        self.consume_pending_scroll();
+        self.layout.pop_scope();
+    }
+
     /// Resets transient per-frame state after widgets have been processed.
     pub fn finish(&mut self) {
         for panel in &mut self.panels.active {
@@ -265,6 +282,25 @@ impl Container {
         self.rect = rect;
     }
 
+    pub(crate) fn set_rect_size(&mut self, size: Dimensioni) {
+        self.rect.width = size.width;
+        self.rect.height = size.height;
+    }
+
+    pub(crate) fn translate_rect(&mut self, delta: Vec2i) {
+        self.rect.x += delta.x;
+        self.rect.y += delta.y;
+    }
+
+    pub(crate) fn resize_rect_by(&mut self, delta: Vec2i, min_size: Dimensioni) {
+        self.rect.width = (self.rect.width + delta.x).max(min_size.width);
+        self.rect.height = (self.rect.height + delta.y).max(min_size.height);
+    }
+
+    pub(crate) fn contains_point(&self, point: Vec2i) -> bool {
+        self.rect.contains(&point)
+    }
+
     /// Returns the inner container body rectangle.
     pub fn body(&self) -> Recti {
         self.body
@@ -283,6 +319,78 @@ impl Container {
     /// Returns the content size derived from layout traversal.
     pub fn content_size(&self) -> Dimensioni {
         self.content_size
+    }
+
+    pub(crate) fn set_content_size(&mut self, content_size: Dimensioni) {
+        self.content_size = content_size;
+    }
+
+    pub(crate) fn clear_content_and_scroll(&mut self) {
+        self.content_size = Dimensioni::default();
+        self.scroll = Vec2i::default();
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn atlas(&self) -> &AtlasHandle {
+        &self.atlas
+    }
+
+    pub(crate) fn style(&self) -> &Style {
+        self.style.as_ref()
+    }
+
+    pub(crate) fn set_style_handle(&mut self, style: Rc<Style>) {
+        self.style = style;
+    }
+
+    pub(crate) fn input(&self) -> &Rc<RefCell<Input>> {
+        &self.input
+    }
+
+    pub(crate) fn zindex(&self) -> i32 {
+        self.zindex
+    }
+
+    pub(crate) fn set_zindex(&mut self, zindex: i32) {
+        self.zindex = zindex;
+    }
+
+    pub(crate) fn in_hover_root(&self) -> bool {
+        self.interaction.in_hover_root
+    }
+
+    pub(crate) fn set_in_hover_root(&mut self, in_hover_root: bool) {
+        self.interaction.in_hover_root = in_hover_root;
+    }
+
+    pub(crate) fn popup_just_opened(&self) -> bool {
+        self.interaction.popup_just_opened
+    }
+
+    pub(crate) fn clear_popup_just_opened(&mut self) {
+        self.interaction.popup_just_opened = false;
+    }
+
+    pub(crate) fn mark_popup_just_opened(&mut self) {
+        self.interaction.popup_just_opened = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_commands(&self) -> &[Command] {
+        &self.draw.commands
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_push_command(&mut self, command: Command) {
+        self.draw.commands.push(command);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_push_clip(&mut self, rect: Recti) {
+        self.draw.clip_stack.push(rect);
     }
 
     #[cfg(test)]

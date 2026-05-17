@@ -617,6 +617,33 @@ fn partial_draw_clip_commands_are_balanced_push_pop() {
 }
 
 #[test]
+fn set_clip_updates_live_clip_state() {
+    let mut container = make_container();
+    begin_test_frame(&mut container, rect(0, 0, 80, 30));
+
+    container.set_clip(rect(0, 0, 10, 10));
+
+    assert!(container.check_clip(rect(12, 0, 4, 4)) == Clip::All);
+    container.draw_rect(rect(12, 0, 4, 4), color(255, 255, 255, 255));
+    assert!(
+        !container
+            .draw
+            .commands
+            .iter()
+            .any(|cmd| matches!(cmd, Command::Recti { rect, .. } if rect.x == 12))
+    );
+
+    container.draw_rect(rect(2, 2, 4, 4), color(255, 255, 255, 255));
+    assert!(
+        container
+            .draw
+            .commands
+            .iter()
+            .any(|cmd| matches!(cmd, Command::Recti { rect, .. } if rect.x == 2 && rect.y == 2))
+    );
+}
+
+#[test]
 fn retained_focus_follows_stable_node_id_when_widget_handle_changes() {
     let mut container = make_container();
     let mut results = FrameResults::default();

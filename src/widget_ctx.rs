@@ -247,7 +247,7 @@ impl<'a> WidgetCtx<'a> {
 
     /// Sets the current clip rectangle for subsequent draw commands.
     pub fn set_clip(&mut self, rect: Recti) {
-        self.draw.set_clip(rect);
+        self.draw.set_current_clip_rect(rect);
     }
 
     /// Returns the clipping relation between `r` and the current clip rect.
