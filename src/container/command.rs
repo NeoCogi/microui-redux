@@ -80,6 +80,25 @@ pub struct CustomRenderArgs {
     pub text_input: String,
 }
 
+/// Backend extension callback invoked from a retained custom-render node.
+///
+/// This API is intentionally explicit about being renderer-extension work rather than portable UI
+/// geometry. Implementations usually capture a concrete renderer handle and enqueue backend-owned
+/// draw work using the clipped [`CustomRenderArgs`] payload.
+pub trait CustomRenderCommand {
+    /// Records backend-specific draw work for the current frame.
+    fn render(&mut self, dim: Dimensioni, args: &CustomRenderArgs);
+}
+
+impl<F> CustomRenderCommand for F
+where
+    F: FnMut(Dimensioni, &CustomRenderArgs),
+{
+    fn render(&mut self, dim: Dimensioni, args: &CustomRenderArgs) {
+        self(dim, args);
+    }
+}
+
 /// Controls how text should wrap when rendered inside a container.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TextWrap {
@@ -91,14 +110,13 @@ pub enum TextWrap {
 
 /// Draw commands recorded during container traversal.
 pub(crate) enum Command {
-    /// Pushes a clip rectangle onto the container clip stack.
-    ///
-    /// The consumer decides whether this means push/replace/pop based on surrounding command-list
-    /// state; the recorded payload is just the effective rectangle to clip against.
-    Clip {
+    /// Pushes an effective clip rectangle for subsequent replayed commands.
+    PushClip {
         /// Rect to clip against.
         rect: Recti,
     },
+    /// Pops the most recent replay clip rectangle.
+    PopClip,
     /// Draws a solid rectangle.
     Recti {
         /// Target rectangle.
@@ -157,11 +175,16 @@ pub(crate) enum Command {
         /// Number of consecutive vertices in the triangle list.
         vertex_count: usize,
     },
-    /// Invokes a user callback for custom rendering.
+    /// Renders an embedded retained panel at its tree position.
+    Panel {
+        /// Panel handle whose command list should be replayed here.
+        handle: ContainerHandle,
+    },
+    /// Invokes a backend extension callback for custom rendering.
     ///
     /// This keeps custom drawing inside the same traversal and clipping pipeline as the built-in
-    /// widgets, but lets the backend-specific renderer decide how the callback is executed.
-    CustomRender(CustomRenderArgs, Box<dyn FnMut(Dimensioni, &CustomRenderArgs)>),
+    /// widgets, while making the backend-specific escape hatch explicit at the command boundary.
+    BackendCustomRender(CustomRenderArgs, Box<dyn CustomRenderCommand>),
     /// Sentinel used when no command is enqueued.
     ///
     /// This is mainly a convenience for `Default` and placeholder command-list storage.

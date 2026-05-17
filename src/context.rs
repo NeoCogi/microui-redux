@@ -316,7 +316,7 @@ mod tests {
         let inner = window.inner();
         let body = inner.main.body;
         let has_vertical_scrollbar =
-            inner.main.command_list.iter().any(
+            inner.main.draw.commands.iter().any(
                 |cmd| matches!(cmd, Command::Recti { rect, .. } if rect.x == body.x + body.width && rect.width == style.scrollbar_size && rect.height > 0),
             );
 
@@ -419,8 +419,8 @@ mod tests {
 
         {
             let mut inner = window.inner_mut();
-            inner.main.command_list.push(Command::None);
-            inner.main.clip_stack.push(UNCLIPPED_RECT);
+            inner.main.draw.commands.push(Command::None);
+            inner.main.draw.clip_stack.push(UNCLIPPED_RECT);
             inner.main.content_size = Dimensioni::new(11, 17);
             inner.main.scroll = Vec2i::new(3, 5);
         }
@@ -428,8 +428,8 @@ mod tests {
         window.close();
 
         let inner = window.inner();
-        assert!(inner.main.command_list.is_empty());
-        assert!(inner.main.clip_stack.is_empty());
+        assert!(inner.main.draw.commands.is_empty());
+        assert!(inner.main.draw.clip_stack.is_empty());
         assert_eq!(inner.main.content_size.width, 0);
         assert_eq!(inner.main.content_size.height, 0);
         assert_eq!(inner.main.scroll.x, 0);
@@ -453,7 +453,7 @@ mod tests {
 
         {
             let mut inner = window.inner_mut();
-            inner.main.command_list.push(Command::None);
+            inner.main.draw.commands.push(Command::None);
         }
 
         ctx.frame(|ui| {
@@ -461,7 +461,7 @@ mod tests {
         });
 
         let inner = window.inner();
-        assert!(!inner.main.command_list.iter().any(|cmd| matches!(cmd, Command::None)));
+        assert!(!inner.main.draw.commands.iter().any(|cmd| matches!(cmd, Command::None)));
     }
 
     #[test]
@@ -510,7 +510,8 @@ mod tests {
         let inner = dialog.inner();
         let texts: Vec<String> = inner
             .main
-            .command_list
+            .draw
+            .commands
             .iter()
             .filter_map(|cmd| match cmd {
                 Command::Text { text, .. } => Some(text.clone()),
@@ -683,7 +684,7 @@ mod tests {
 
         let body = inner.main.body;
         let has_vertical_scrollbar =
-            inner.main.command_list.iter().any(
+            inner.main.draw.commands.iter().any(
                 |cmd| matches!(cmd, Command::Recti { rect, .. } if rect.x == body.x + body.width && rect.width == style.scrollbar_size && rect.height > 0),
             );
 
@@ -709,7 +710,8 @@ mod tests {
         assert!(titled_inner.main.body.height < titled_inner.main.rect.height);
         let titled_texts: Vec<String> = titled_inner
             .main
-            .command_list
+            .draw
+            .commands
             .iter()
             .filter_map(|cmd| match cmd {
                 Command::Text { text, .. } => Some(text.clone()),
@@ -725,7 +727,8 @@ mod tests {
         assert_eq!(plain_inner.main.body.width, plain_inner.main.rect.width);
         let plain_texts: Vec<String> = plain_inner
             .main
-            .command_list
+            .draw
+            .commands
             .iter()
             .filter_map(|cmd| match cmd {
                 Command::Text { text, .. } => Some(text.clone()),
@@ -905,10 +908,10 @@ impl<R: Renderer> Context<R> {
         self.hover_root = self.next_hover_root.clone();
         self.next_hover_root = None;
         for r in &mut self.root_list {
-            r.inner_mut().main.in_hover_root = false;
+            r.inner_mut().main.interaction.in_hover_root = false;
         }
         match &mut self.hover_root {
-            Some(window) => window.inner_mut().main.in_hover_root = true,
+            Some(window) => window.inner_mut().main.interaction.in_hover_root = true,
             _ => (),
         }
 
@@ -973,13 +976,13 @@ impl<R: Renderer> Context<R> {
         }
         let container = &mut window.inner_mut().main;
         let scroll_delta = self.input.borrow().scroll_delta;
-        let pending_scroll = if container.in_hover_root && (scroll_delta.x != 0 || scroll_delta.y != 0) {
+        let pending_scroll = if container.interaction.in_hover_root && (scroll_delta.x != 0 || scroll_delta.y != 0) {
             Some(scroll_delta)
         } else {
             None
         };
         container.seed_pending_scroll(pending_scroll);
-        container.clip_stack.push(UNCLIPPED_RECT);
+        container.draw.clip_stack.push(UNCLIPPED_RECT);
     }
 
     #[inline(never)]
@@ -1056,7 +1059,7 @@ impl<R: Renderer> Context<R> {
         if window.is_open() {
             self.next_hover_root = Some(window.clone());
             self.hover_root = self.next_hover_root.clone();
-            window.inner_mut().main.in_hover_root = true;
+            window.inner_mut().main.interaction.in_hover_root = true;
             self.bring_to_front_if_behind(window);
 
             self.render_window_tree(window, opt, bopt, tree);
@@ -1077,8 +1080,8 @@ impl<R: Renderer> Context<R> {
             } else {
                 inner.main.rect = rect(mouse_pos.x, mouse_pos.y, 1, 1);
                 inner.win_state = WindowState::Open;
-                inner.main.in_hover_root = true;
-                inner.main.popup_just_opened = true;
+                inner.main.interaction.in_hover_root = true;
+                inner.main.interaction.popup_just_opened = true;
             }
         }
         if !was_open {
@@ -1102,8 +1105,8 @@ impl<R: Renderer> Context<R> {
             } else {
                 inner.main.rect = anchor;
                 inner.win_state = WindowState::Open;
-                inner.main.in_hover_root = true;
-                inner.main.popup_just_opened = true;
+                inner.main.interaction.in_hover_root = true;
+                inner.main.interaction.popup_just_opened = true;
             }
         }
         if !was_open {

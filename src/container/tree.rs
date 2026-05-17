@@ -64,6 +64,16 @@
 
 use super::*;
 
+struct RetainedCustomRenderCommand {
+    render: TreeCustomRender,
+}
+
+impl CustomRenderCommand for RetainedCustomRenderCommand {
+    fn render(&mut self, dim: Dimensioni, args: &CustomRenderArgs) {
+        self.render.borrow_mut().render(dim, args);
+    }
+}
+
 impl Container {
     fn widget_dispatch_site(&self, node_id: NodeId, kind: &str) -> String {
         format!("container {:?}, tree node {:?} ({})", self.name, node_id, kind)
@@ -72,28 +82,29 @@ impl Container {
     /// Returns the previous frame layout for `node_id`, if any.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn previous_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
-        self.tree_cache.prev_layout(node_id).copied()
+        self.tree.cache.prev_layout(node_id).copied()
     }
 
     /// Returns the current frame layout for `node_id`, if any.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn current_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
-        self.tree_cache.current_layout(node_id).copied()
+        self.tree.cache.current_layout(node_id).copied()
     }
 
     /// Stores the current frame geometry snapshot for a retained tree node.
     fn record_tree_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
-        self.tree_cache.record_layout(node_id, layout);
+        self.tree.cache.record_layout(node_id, layout);
     }
 
     /// Stores the current frame control/result snapshot for a retained tree node.
     fn record_tree_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
-        self.tree_cache.record_interaction(node_id, interaction);
+        self.tree.cache.record_interaction(node_id, interaction);
     }
 
     /// Returns the current frame layout for `node_id` or panics if layout was skipped.
     fn current_tree_layout_or_panic(&self, node_id: NodeId) -> NodeLayout {
-        self.tree_cache
+        self.tree
+            .cache
             .current_layout(node_id)
             .copied()
             .unwrap_or_else(|| panic!("tree node {:?} missing current layout", node_id))
@@ -103,7 +114,7 @@ impl Container {
     fn record_tree_group_from_children(&mut self, node_id: NodeId, children: &[WidgetTreeNode]) {
         let mut bounds: Option<Recti> = None;
         for child in children {
-            if let Some(child_state) = self.tree_cache.current_layout(child.id()) {
+            if let Some(child_state) = self.tree.cache.current_layout(child.id()) {
                 // Structural nodes like rows, grids, and columns do not have their own widget
                 // state; their effective bounds are the union of their children for the current
                 // frame. That cached group rect is useful for debugging/tests and keeps the cache
@@ -127,7 +138,7 @@ impl Container {
     }
 
     /// Runs the retained layout pass for a slice of sibling tree nodes.
-    fn layout_tree_nodes(&mut self, results: &FrameResults, nodes: &[WidgetTreeNode]) {
+    pub(crate) fn layout_tree_nodes(&mut self, results: &FrameResults, nodes: &[WidgetTreeNode]) {
         for node in nodes {
             self.layout_tree_node(results, node);
         }
@@ -159,7 +170,7 @@ impl Container {
         let bopt = widget.effective_behaviour_opt();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let dispatch_site = self.widget_dispatch_site(node_id, "widget");
-        let (control, result) = self.render_widget_dyn(results, widget, rect, input, opt, bopt, dispatch_site);
+        let (control, result) = self.render_widget_dyn(results, Some(node_id), widget, rect, input, opt, bopt, dispatch_site);
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
     }
 
@@ -178,7 +189,7 @@ impl Container {
         };
         let input = if needs_input { Some(self.snapshot_input()) } else { None };
         let dispatch_site = self.widget_dispatch_site(node_id, "custom render");
-        let (control, result) = self.render_widget_handle(results, state, rect, input, opt, bopt, dispatch_site);
+        let (control, result) = self.render_widget_handle(results, Some(node_id), state, rect, input, opt, bopt, dispatch_site);
 
         let snapshot = self.snapshot_input();
         let input_ref = snapshot.as_ref();
@@ -188,7 +199,7 @@ impl Container {
         // widgets observe. This keeps the custom path aligned with the retained widget contract:
         // geometry comes from the retained pass, input is localized to the widget rect, and the
         // backend-specific drawing work is deferred through the command list.
-        let active = control.focused && self.in_hover_root;
+        let active = control.focused && self.interaction.in_hover_root;
         let key_mods = if active { input_ref.key_mods } else { KeyMode::NONE };
         let key_codes = if active { input_ref.key_codes } else { KeyCode::NONE };
         let text_input = if active { input_ref.text_input.clone() } else { String::new() };
@@ -204,12 +215,9 @@ impl Container {
             text_input,
         };
         let render = render.clone();
-        self.command_list.push(Command::CustomRender(
-            cra,
-            Box::new(move |dim, args| {
-                (*render.borrow_mut())(dim, args);
-            }),
-        ));
+        self.draw
+            .commands
+            .push(Command::BackendCustomRender(cra, Box::new(RetainedCustomRenderCommand { render })));
 
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
     }
@@ -249,7 +257,7 @@ impl Container {
             (*state.widget_opt(), *state.behaviour_opt(), state.state)
         };
         let dispatch_site = self.widget_dispatch_site(node_id, "node disclosure");
-        let (control, result) = self.render_widget_handle(results, state, rect, None, opt, bopt, dispatch_site);
+        let (control, result) = self.render_widget_handle(results, Some(node_id), state, rect, None, opt, bopt, dispatch_site);
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
         stable_state
     }
@@ -266,16 +274,21 @@ impl Container {
                 self.layout_tree_custom_render(node_id, policy, state);
             }
             WidgetTreeNodeKind::Container { handle, opt, behaviour } => {
-                let mut handle = handle.clone();
-                // Containers are nested retained sub-contexts. The parent records the panel bounds,
-                // then lets the child container execute the same layout pass against its own body.
-                self.begin_panel_layout(&mut handle, *opt, *behaviour, policy);
-                handle.with_mut(|container| {
-                    container.layout_tree_nodes(results, children);
-                });
-                self.end_panel_layout(&mut handle);
-                let (rect, body, content_size) = handle.with(|container| (container.rect(), container.body(), container.content_size()));
-                self.record_tree_layout(node_id, NodeLayout::new(rect, body, content_size));
+                if self.measurement_mode {
+                    let layout = self.measure_panel_layout(handle, *behaviour, policy, results, children);
+                    self.record_tree_layout(node_id, layout);
+                } else {
+                    let mut handle = handle.clone();
+                    // Containers are nested retained sub-contexts. The parent records the panel bounds,
+                    // then lets the child container execute the same layout pass against its own body.
+                    self.begin_panel_layout(&mut handle, *opt, *behaviour, policy);
+                    handle.with_mut(|container| {
+                        container.layout_tree_nodes(results, children);
+                    });
+                    self.end_panel_layout(&mut handle);
+                    let (rect, body, content_size) = handle.with(|container| (container.rect(), container.body(), container.content_size()));
+                    self.record_tree_layout(node_id, NodeLayout::new(rect, body, content_size));
+                }
             }
             WidgetTreeNodeKind::Header { state } => {
                 // Headers gate child participation entirely. In the strict retained model the
@@ -382,19 +395,15 @@ impl Container {
 
     /// Measures a prebuilt widget tree using the current container layout without rendering it.
     pub(crate) fn measure_widget_tree_content(&mut self, results: &FrameResults, tree: &WidgetTree) -> Dimensioni {
-        self.layout_tree_nodes(results, tree.roots());
+        let mut scratch = self.measurement_scratch();
+        scratch.layout_tree_nodes(results, tree.roots());
 
-        let content_size = match self.layout.current_max() {
+        match scratch.layout.current_max() {
             Some(max_rect) => {
-                let body = self.layout.current_body();
+                let body = scratch.layout.current_body();
                 Dimensioni::new(max_rect.x - body.x, max_rect.y - body.y)
             }
             None => Dimensioni::default(),
-        };
-
-        // Discard provisional cache entries from the measurement-only pass so the real render pass
-        // can record the current frame layout and interaction exactly once.
-        self.tree_cache.begin_frame();
-        content_size
+        }
     }
 }

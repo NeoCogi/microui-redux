@@ -76,9 +76,9 @@ if results.state_of_handle(&submit_button).is_submitted() {
 ```
 
 ### Widget IDs
-Widget IDs default to the address of the widget state. This is stable as long as the state stays at a fixed address, but it can change if the state lives inside a `Vec` that grows/shrinks (reallocation moves items). If that happens, focus/hover continuity follows the new addresses.
+Retained-tree focus and hover use the stable `NodeId` assigned by `WidgetTreeBuilder`, so keyed retained nodes keep interaction continuity even when the backing widget handle changes. `ctx.committed_results().state_of_node(node_id)` exposes the same stable lookup for retained nodes.
 
-When setting focus manually, pass a widget pointer ID from `widget_id_of` or `widget_id_of_handle`:
+Pointer-derived widget IDs remain available for manual focus and handle-oriented result lookup. When setting focus manually, pass a widget pointer ID from `widget_id_of` or `widget_id_of_handle`:
 
 ```rust
 my_window.set_focus(Some(widget_id_of_handle(&my_textbox_handle)));
@@ -236,7 +236,7 @@ Version `0.6.0` is the retained-tree release. Compared to `0.5.0`, it replaces t
 - [x] Tightened the widget/runtime contract compared to v0.5.
     - [x] Widgets now implement `measure` + `run`; the intermediate `reconcile` / frame-commit design was removed.
     - [x] Persistent widget state stays inside the widget handle and mutates during `run`.
-    - [x] Pointer-derived widget IDs remain the source of focus, hover, and result lookup, with `widget_id_of` and `widget_id_of_handle` as the public helpers.
+    - [x] Retained focus/hover and retained result lookup can use stable `NodeId`s; pointer-derived IDs remain as the manual-handle fallback through `widget_id_of` and `widget_id_of_handle`.
 - [x] Added widget-local graphics primitives as a first-class paint path.
     - [x] `WidgetCtx::graphics(...)` and `Graphics` expose rectangles, frames, text/icons/images, thick line strokes, polygon fills, and nested local clip scopes.
     - [x] Primitives are tessellated into retained triangles and software-clipped before replay, keeping backend behavior consistent without fragmenting batches on clip changes.
@@ -245,8 +245,8 @@ Version `0.6.0` is the retained-tree release. Compared to `0.5.0`, it replaces t
     - [x] `Style` binds semantic roles (`body`, `small`, `title`, `heading`, `mono`) from atlas font names, and text-bearing widgets can override their font per instance through `FontChoice`.
     - [x] Different text sizes are represented as separate baked font variants instead of runtime bitmap scaling.
 - [x] Made committed retained results the strict public business-logic contract.
-    - [x] Per-frame widget results are recorded internally by widget ID and published as the previous frame's committed generation.
-    - [x] `Context::committed_results()` is the public app-facing results API, including `FrameResultGeneration::state_of_handle`.
+    - [x] Per-frame widget results are recorded internally by retained node ID and widget ID, then published as the previous frame's committed generation.
+    - [x] `Context::committed_results()` is the public app-facing results API, including `FrameResultGeneration::state_of_node` and `FrameResultGeneration::state_of_handle`.
     - [x] Current-frame results stay internal; `FrameResults` and `current_results()` are no longer part of the public surface.
 - [x] Migrated shipped UI and supporting widgets to the retained-only model.
     - [x] `examples/simple`, `examples/calculator`, `examples/demo-full`, and `FileDialogState` now build retained trees and react through committed results.

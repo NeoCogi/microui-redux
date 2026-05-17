@@ -49,6 +49,7 @@ impl Container {
     pub(crate) fn render_widget_dyn(
         &mut self,
         results: &mut FrameResults,
+        node_id: Option<NodeId>,
         widget: &dyn WidgetStateHandleDyn,
         rect: Recti,
         input: Option<Rc<InputSnapshot>>,
@@ -57,10 +58,14 @@ impl Container {
         dispatch_site: String,
     ) -> (ControlState, ResourceState) {
         let widget_id = widget.widget_id();
-        let control = self.update_control_with_opts(widget_id, rect, opt, bopt);
-        let mut ctx = self.widget_ctx(widget_id, rect, input);
+        let interaction_id = node_id.map(InteractionId::node).unwrap_or_else(|| InteractionId::widget(widget_id));
+        let control = self.update_control_for(interaction_id, rect, opt, bopt);
+        let mut ctx = self.widget_ctx_for(widget_id, interaction_id, rect, input);
         let res = widget.run(&mut ctx, &control);
-        results.record_with_context(widget_id, res, dispatch_site);
+        match node_id {
+            Some(node_id) => results.record_retained_with_context(node_id, widget_id, res, dispatch_site),
+            None => results.record_with_context(widget_id, res, dispatch_site),
+        }
         (control, res)
     }
 
@@ -72,6 +77,7 @@ impl Container {
     pub(crate) fn render_widget_handle<W: Widget>(
         &mut self,
         results: &mut FrameResults,
+        node_id: Option<NodeId>,
         handle: &WidgetHandle<W>,
         rect: Recti,
         input: Option<Rc<InputSnapshot>>,
@@ -83,13 +89,17 @@ impl Container {
             let state = handle.borrow();
             widget_id_of(&*state)
         };
-        let control = self.update_control_with_opts(widget_id, rect, opt, bopt);
-        let mut ctx = self.widget_ctx(widget_id, rect, input);
+        let interaction_id = node_id.map(InteractionId::node).unwrap_or_else(|| InteractionId::widget(widget_id));
+        let control = self.update_control_for(interaction_id, rect, opt, bopt);
+        let mut ctx = self.widget_ctx_for(widget_id, interaction_id, rect, input);
         let res = {
             let mut state = handle.borrow_mut();
             state.run(&mut ctx, &control)
         };
-        results.record_with_context(widget_id, res, dispatch_site);
+        match node_id {
+            Some(node_id) => results.record_retained_with_context(node_id, widget_id, res, dispatch_site),
+            None => results.record_with_context(widget_id, res, dispatch_site),
+        }
         (control, res)
     }
 }

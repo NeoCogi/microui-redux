@@ -63,14 +63,15 @@ use crate::draw_context::DrawCtx;
 use crate::graphics::Graphics;
 use crate::input::{Clip, ControlColor, ControlState, InputSnapshot, WidgetOption};
 use crate::style::{Color, Image, Style};
-use crate::widget::WidgetId;
+use crate::widget::{InteractionId, WidgetId};
 
 /// Shared context passed to widget handlers.
 pub struct WidgetCtx<'a> {
     id: WidgetId,
+    interaction_id: InteractionId,
     rect: Recti,
     draw: DrawCtx<'a>,
-    focus: &'a mut Option<WidgetId>,
+    focus: &'a mut Option<InteractionId>,
     updated_focus: &'a mut bool,
     in_hover_root: bool,
     input: Option<Rc<InputSnapshot>>,
@@ -103,13 +104,46 @@ impl<'a> WidgetCtx<'a> {
         clip_stack: &'a mut Vec<Recti>,
         style: &'a Style,
         atlas: &'a AtlasHandle,
-        focus: &'a mut Option<WidgetId>,
+        focus: &'a mut Option<InteractionId>,
+        updated_focus: &'a mut bool,
+        in_hover_root: bool,
+        input: Option<Rc<InputSnapshot>>,
+    ) -> Self {
+        Self::new_with_interaction(
+            id,
+            InteractionId::widget(id),
+            rect,
+            commands,
+            triangle_vertices,
+            clip_stack,
+            style,
+            atlas,
+            focus,
+            updated_focus,
+            in_hover_root,
+            input,
+        )
+    }
+
+    /// Creates a widget context with a stable interaction identity distinct from the widget
+    /// pointer. Retained tree dispatch uses this so focus and hover follow `NodeId`.
+    pub(crate) fn new_with_interaction(
+        id: WidgetId,
+        interaction_id: InteractionId,
+        rect: Recti,
+        commands: &'a mut Vec<Command>,
+        triangle_vertices: &'a mut Vec<Vertex>,
+        clip_stack: &'a mut Vec<Recti>,
+        style: &'a Style,
+        atlas: &'a AtlasHandle,
+        focus: &'a mut Option<InteractionId>,
         updated_focus: &'a mut bool,
         in_hover_root: bool,
         input: Option<Rc<InputSnapshot>>,
     ) -> Self {
         Self {
             id,
+            interaction_id,
             rect,
             draw: DrawCtx::new(commands, triangle_vertices, clip_stack, style, atlas),
             focus,
@@ -141,7 +175,7 @@ impl<'a> WidgetCtx<'a> {
 
     /// Sets focus to this widget for the current frame.
     pub fn set_focus(&mut self) {
-        *self.focus = Some(self.id);
+        *self.focus = Some(self.interaction_id);
         *self.updated_focus = true;
     }
 

@@ -57,41 +57,47 @@ use super::*;
 impl Container {
     #[inline(never)]
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
-        let mut commands = std::mem::take(&mut self.command_list);
+        let mut commands = std::mem::take(&mut self.draw.commands);
         while !commands.is_empty() {
-            let custom_index = commands.iter().position(|command| matches!(command, Command::CustomRender(_, _)));
-            let batch_len = custom_index.unwrap_or(commands.len());
+            let special_index = commands
+                .iter()
+                .position(|command| matches!(command, Command::BackendCustomRender(_, _) | Command::Panel { .. }));
+            let batch_len = special_index.unwrap_or(commands.len());
             if batch_len > 0 {
-                Self::render_batch(canvas, &self.triangle_vertices, commands.drain(..batch_len));
+                Self::render_batch(canvas, &self.draw.triangle_vertices, commands.drain(..batch_len));
             }
 
-            if custom_index.is_none() {
+            if special_index.is_none() {
                 break;
             }
 
-            if let Some(Command::CustomRender(mut cra, mut f)) = commands.drain(..1).next() {
-                // Custom render callbacks may use RendererHandle directly, so keep them outside
-                // the batched renderer lock.
-                canvas.flush();
-                let prev_clip = canvas.current_clip_rect();
-                let merged_clip = match prev_clip.intersect(&cra.view) {
-                    Some(rect) => rect,
-                    None => Recti::new(cra.content_area.x, cra.content_area.y, 0, 0),
-                };
-                canvas.set_clip_rect(merged_clip);
-                cra.view = merged_clip;
-                (*f)(canvas.current_dimension(), &cra);
-                canvas.flush();
-                canvas.set_clip_rect(prev_clip);
+            match commands.drain(..1).next() {
+                Some(Command::BackendCustomRender(mut cra, mut f)) => {
+                    // Backend extension callbacks may use RendererHandle directly, so keep them
+                    // outside the batched renderer lock.
+                    canvas.flush();
+                    let prev_clip = canvas.current_clip_rect();
+                    let merged_clip = match prev_clip.intersect(&cra.view) {
+                        Some(rect) => rect,
+                        None => Recti::new(cra.content_area.x, cra.content_area.y, 0, 0),
+                    };
+                    canvas.set_clip_rect(merged_clip);
+                    cra.view = merged_clip;
+                    f.render(canvas.current_dimension(), &cra);
+                    canvas.flush();
+                    canvas.set_clip_rect(prev_clip);
+                }
+                Some(Command::Panel { mut handle }) => {
+                    canvas.flush();
+                    handle.render(canvas);
+                    canvas.flush();
+                }
+                _ => (),
             }
         }
-        self.command_list = commands;
+        self.draw.commands = commands;
 
-        self.triangle_vertices.clear();
-
-        for panel in &mut self.panels {
-            panel.render(canvas)
-        }
+        self.draw.triangle_vertices.clear();
     }
 
     fn render_batch<R, I>(canvas: &mut Canvas<R>, triangle_vertices: &[Vertex], commands: I)
@@ -99,7 +105,10 @@ impl Container {
         R: Renderer,
         I: IntoIterator<Item = Command>,
     {
+        let base_clip = canvas.current_clip_rect();
         canvas.render_scope(|canvas| {
+            let mut clip_stack = vec![base_clip];
+            canvas.set_clip_rect(base_clip);
             for command in commands {
                 match command {
                     Command::Text { text, pos, color, font } => {
@@ -111,8 +120,18 @@ impl Container {
                     Command::Icon { id, rect, color } => {
                         canvas.draw_icon(id, rect, color);
                     }
-                    Command::Clip { rect } => {
-                        canvas.set_clip_rect(rect);
+                    Command::PushClip { rect } => {
+                        let current = clip_stack.last().copied().unwrap_or(base_clip);
+                        let next = current.intersect(&rect).unwrap_or_default();
+                        clip_stack.push(next);
+                        canvas.set_clip_rect(next);
+                    }
+                    Command::PopClip => {
+                        if clip_stack.len() > 1 {
+                            clip_stack.pop();
+                        }
+                        let current = clip_stack.last().copied().unwrap_or(base_clip);
+                        canvas.set_clip_rect(current);
                     }
                     Command::Image { rect, image, color } => {
                         canvas.draw_image(image, rect, color);
@@ -124,17 +143,18 @@ impl Container {
                         let end = vertex_start + vertex_count;
                         canvas.draw_triangles(&triangle_vertices[vertex_start..end]);
                     }
-                    Command::CustomRender(_, _) | Command::None => (),
+                    Command::Panel { .. } | Command::BackendCustomRender(_, _) | Command::None => (),
                 }
             }
+            canvas.set_clip_rect(base_clip);
         });
     }
 
     fn draw_ctx(&mut self) -> DrawCtx<'_> {
         DrawCtx::new(
-            &mut self.command_list,
-            &mut self.triangle_vertices,
-            &mut self.clip_stack,
+            &mut self.draw.commands,
+            &mut self.draw.triangle_vertices,
+            &mut self.draw.clip_stack,
             self.style.as_ref(),
             &self.atlas,
         )
@@ -268,8 +288,9 @@ impl Container {
 
     /// Draws a widget background, applying hover/focus accents when needed.
     pub fn draw_widget_frame(&mut self, widget_id: WidgetId, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let focused = self.focus == Some(widget_id);
-        let hovered = self.hover == Some(widget_id);
+        let interaction_id = InteractionId::widget(widget_id);
+        let focused = self.interaction.focus == Some(interaction_id);
+        let hovered = self.interaction.hover == Some(interaction_id);
         let mut draw = self.draw_ctx();
         draw.draw_widget_frame(focused, hovered, rect, colorid, opt);
     }
@@ -280,9 +301,10 @@ impl Container {
             return;
         }
 
-        if self.focus == Some(widget_id) {
+        let interaction_id = InteractionId::widget(widget_id);
+        if self.interaction.focus == Some(interaction_id) {
             colorid.focus()
-        } else if self.hover == Some(widget_id) {
+        } else if self.interaction.hover == Some(interaction_id) {
             colorid.hover()
         }
         let mut draw = self.draw_ctx();

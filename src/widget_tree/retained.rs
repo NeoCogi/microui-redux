@@ -62,7 +62,7 @@ use crate::{
     style::Style,
     widget::{widget_id_of, Widget, WidgetId},
     widget_ctx::WidgetCtx,
-    CustomRenderArgs,
+    CustomRenderCommand,
 };
 
 /// Shared ownership handle for retained widget state.
@@ -80,7 +80,7 @@ pub fn widget_handle<T>(value: T) -> WidgetHandle<T> {
     Rc::new(RefCell::new(value))
 }
 
-pub(crate) type TreeCustomRender = Rc<RefCell<Box<dyn FnMut(Dimensioni, &CustomRenderArgs) + 'static>>>;
+pub(crate) type TreeCustomRender = Rc<RefCell<Box<dyn CustomRenderCommand + 'static>>>;
 
 pub(crate) trait WidgetStateHandleDyn {
     fn widget_id(&self) -> WidgetId;

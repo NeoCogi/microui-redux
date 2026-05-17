@@ -229,10 +229,10 @@ impl Window {
         let body = Self::body_rect_for(container, opt);
         container.configure_container_body(body, bopt);
 
-        if is_popup && container.popup_just_opened {
+        if is_popup && container.interaction.popup_just_opened {
             // Skip the auto-close check on the same frame the popup is opened.
-            container.popup_just_opened = false;
-        } else if is_popup && !container.input.borrow().mouse_pressed.is_none() && !container.in_hover_root {
+            container.interaction.popup_just_opened = false;
+        } else if is_popup && !container.input.borrow().mouse_pressed.is_none() && !container.interaction.in_hover_root {
             *win_state = WindowState::Closed;
         }
         let body = container.body;
@@ -264,15 +264,13 @@ impl Window {
 
     fn measure_auto_size(&mut self, results: &FrameResults, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
         let body = Self::body_rect_for(&self.main, opt);
-        let saved_scroll = self.main.scroll;
         // Auto-size should measure desired content against the raw body rect rather than inheriting
         // last frame's scrollbar decision or scroll offset.
-        self.main.scroll = Vec2i::default();
-        self.main.content_size = Dimensioni::default();
-        self.main.configure_container_body(body, bopt);
-        let content_size = self.main.measure_widget_tree_content(results, tree);
-        self.main.scroll = saved_scroll;
-        self.main.content_size = content_size;
+        let mut scratch = self.main.measurement_scratch();
+        scratch.scroll = Vec2i::default();
+        scratch.content_size = Dimensioni::default();
+        scratch.configure_container_body(body, bopt);
+        self.main.content_size = scratch.measure_widget_tree_content(results, tree);
     }
 
     fn finish_resize(&mut self, opt: ContainerOption) {

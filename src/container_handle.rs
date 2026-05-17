@@ -130,6 +130,7 @@ impl ContainerHandle {
     }
 
     /// Returns an immutable borrow of the underlying container.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn inner<'a>(&'a self) -> Ref<'a, Container> {
         self.0.borrow()
     }

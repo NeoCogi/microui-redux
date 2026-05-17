@@ -59,7 +59,7 @@ impl Container {
         if !self.scroll_enabled {
             return;
         }
-        let delta = match self.pending_scroll {
+        let delta = match self.interaction.pending_scroll {
             Some(delta) if delta.x != 0 || delta.y != 0 => delta,
             _ => return,
         };
@@ -92,7 +92,7 @@ impl Container {
 
         if consumed {
             self.scroll = scroll;
-            self.pending_scroll = None;
+            self.interaction.pending_scroll = None;
         }
     }
 
@@ -167,14 +167,14 @@ impl Container {
                 let mut ctx = WidgetCtx::new(
                     scrollbar_y_id,
                     base,
-                    &mut self.command_list,
-                    &mut self.triangle_vertices,
-                    &mut self.clip_stack,
+                    &mut self.draw.commands,
+                    &mut self.draw.triangle_vertices,
+                    &mut self.draw.clip_stack,
                     self.style.as_ref(),
                     &self.atlas,
-                    &mut self.focus,
-                    &mut self.updated_focus,
-                    self.in_hover_root,
+                    &mut self.interaction.focus,
+                    &mut self.interaction.updated_focus,
+                    self.interaction.in_hover_root,
                     None,
                 );
                 let _ = self.scrollbar_y_state.run(&mut ctx, &control);
@@ -199,14 +199,14 @@ impl Container {
                 let mut ctx = WidgetCtx::new(
                     scrollbar_x_id,
                     base,
-                    &mut self.command_list,
-                    &mut self.triangle_vertices,
-                    &mut self.clip_stack,
+                    &mut self.draw.commands,
+                    &mut self.draw.triangle_vertices,
+                    &mut self.draw.clip_stack,
                     self.style.as_ref(),
                     &self.atlas,
-                    &mut self.focus,
-                    &mut self.updated_focus,
-                    self.in_hover_root,
+                    &mut self.interaction.focus,
+                    &mut self.interaction.updated_focus,
+                    self.interaction.in_hover_root,
                     None,
                 );
                 let _ = self.scrollbar_x_state.run(&mut ctx, &control);
@@ -253,11 +253,9 @@ impl Container {
         self.render_active_scrollbars();
     }
 
-    fn pop_panel(&mut self, panel: &mut ContainerHandle) {
-        let layout_body = panel.inner().layout.current_body();
-        let layout_max = panel.inner().layout.current_max();
-        let container = &mut panel.inner_mut();
-
+    fn pop_panel_container(container: &mut Container) {
+        let layout_body = container.layout.current_body();
+        let layout_max = container.layout.current_max();
         if let Some(lm) = layout_max {
             container.content_size = Dimensioni::new(lm.x - layout_body.x, lm.y - layout_body.y);
         }
@@ -265,24 +263,45 @@ impl Container {
         container.layout.pop_scope();
     }
 
-    pub(crate) fn begin_panel_layout(&mut self, panel: &mut ContainerHandle, _opt: ContainerOption, bopt: WidgetBehaviourOption, policy: Policy) {
+    fn begin_panel_layout_container(&mut self, container: &mut Container, bopt: WidgetBehaviourOption, policy: Policy) {
         let rect = self.layout.next_with_policies(Dimensioni::default(), policy.width, policy.height);
-        let container = &mut panel.inner_mut();
         container.prepare();
         container.style = self.style.clone();
         container.rect = rect;
         container.configure_container_body(rect, bopt);
     }
 
+    pub(crate) fn begin_panel_layout(&mut self, panel: &mut ContainerHandle, _opt: ContainerOption, bopt: WidgetBehaviourOption, policy: Policy) {
+        let container = &mut panel.inner_mut();
+        self.begin_panel_layout_container(container, bopt, policy);
+    }
+
     pub(crate) fn end_panel_layout(&mut self, panel: &mut ContainerHandle) {
-        self.pop_panel(panel);
+        let container = &mut panel.inner_mut();
+        Self::pop_panel_container(container);
+    }
+
+    pub(crate) fn measure_panel_layout(
+        &mut self,
+        panel: &ContainerHandle,
+        bopt: WidgetBehaviourOption,
+        policy: Policy,
+        results: &FrameResults,
+        children: &[WidgetTreeNode],
+    ) -> NodeLayout {
+        let mut scratch = panel.with(|container| container.measurement_scratch());
+        scratch.measurement_mode = true;
+        self.begin_panel_layout_container(&mut scratch, bopt, policy);
+        scratch.layout_tree_nodes(results, children);
+        Self::pop_panel_container(&mut scratch);
+        NodeLayout::new(scratch.rect(), scratch.body(), scratch.content_size())
     }
 
     pub(crate) fn begin_panel_render(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, layout: NodeLayout) {
         let panel_id = container_id_of(panel);
-        if self.hit_test_rect(layout.rect, self.in_hover_root) {
-            self.next_hover_root_child = Some(panel_id);
-            self.next_hover_root_child_rect = Some(layout.rect);
+        if self.hit_test_rect(layout.rect, self.interaction.in_hover_root) {
+            self.interaction.next_hover_root_child = Some(panel_id);
+            self.interaction.next_hover_root_child_rect = Some(layout.rect);
         }
 
         let container = &mut panel.inner_mut();
@@ -296,9 +315,9 @@ impl Container {
             self.draw_frame(layout.rect, ControlColor::PanelBG);
         }
 
-        container.in_hover_root = self.in_hover_root && self.hover_root_child == Some(panel_id);
-        if self.pending_scroll.is_some() && container.in_hover_root {
-            container.pending_scroll = self.pending_scroll.take();
+        container.interaction.in_hover_root = self.interaction.in_hover_root && self.interaction.hover_root_child == Some(panel_id);
+        if self.interaction.pending_scroll.is_some() && container.interaction.in_hover_root {
+            container.interaction.pending_scroll = self.interaction.pending_scroll.take();
         }
         container.render_active_scrollbars();
         container.push_clip_rect(layout.body);
@@ -309,11 +328,12 @@ impl Container {
         {
             let mut inner = panel.inner_mut();
             inner.consume_pending_scroll();
-            let pending = inner.pending_scroll.take();
-            if self.pending_scroll.is_none() {
-                self.pending_scroll = pending;
+            let pending = inner.interaction.pending_scroll.take();
+            if self.interaction.pending_scroll.is_none() {
+                self.interaction.pending_scroll = pending;
             }
         }
-        self.panels.push(panel.clone())
+        self.draw.commands.push(Command::Panel { handle: panel.clone() });
+        self.panels.active.push(panel.clone())
     }
 }

@@ -205,7 +205,11 @@ impl<'a> DrawCtx<'a> {
     }
 
     pub(crate) fn set_clip(&mut self, rect: Recti) {
-        self.push_command(Command::Clip { rect });
+        self.push_command(Command::PushClip { rect });
+    }
+
+    pub(crate) fn unset_clip(&mut self) {
+        self.push_command(Command::PopClip);
     }
 
     // Reuses the same clip-state wrapper for text, icons, images, and slot redraws so both the
@@ -223,7 +227,7 @@ impl<'a> DrawCtx<'a> {
         }
         emit(self);
         if clipped != Clip::None {
-            self.set_clip(UNCLIPPED_RECT);
+            self.unset_clip();
         }
     }
 

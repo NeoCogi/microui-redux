@@ -58,11 +58,12 @@ use super::*;
 use crate::draw_context::DrawCtx;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::text_layout::build_text_lines;
+use crate::widget::{InteractionId, WidgetId};
 use crate::widget_tree::{Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
 use std::cell::RefCell;
 
 mod command;
-pub use command::{CustomRenderArgs, TextWrap};
+pub use command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
 pub(crate) use command::Command;
 
 mod dispatch;
@@ -92,45 +93,69 @@ pub struct Container {
     pub(crate) scroll: Vec2i,
     /// Z-index used to order overlapping windows.
     pub(crate) zindex: i32,
-    /// Recorded draw commands for this frame.
-    pub(crate) command_list: Vec<Command>,
-    /// Shared triangle vertex arena referenced by retained triangle commands.
-    pub(crate) triangle_vertices: Vec<Vertex>,
-    /// Stack of clip rectangles applied while drawing.
-    pub(crate) clip_stack: Vec<Recti>,
+    pub(crate) draw: DrawState,
     pub(crate) layout: LayoutManager,
-    /// ID of the widget currently hovered, if any.
-    pub(crate) hover: Option<WidgetId>,
-    /// ID of the widget currently focused, if any.
-    pub(crate) focus: Option<WidgetId>,
-    /// Child container that currently owns pointer routing inside this container.
-    hover_root_child: Option<ContainerId>,
-    /// Rectangle occupied by the child container that currently owns pointer routing.
-    hover_root_child_rect: Option<Recti>,
-    /// Child container selected to own pointer routing on the next frame.
-    next_hover_root_child: Option<ContainerId>,
-    /// Rectangle for the child container selected to own pointer routing on the next frame.
-    next_hover_root_child_rect: Option<Recti>,
-    /// Tracks whether focus changed this frame.
-    pub(crate) updated_focus: bool,
+    pub(crate) interaction: InteractionState,
     /// Internal state for the vertical scrollbar.
     pub(crate) scrollbar_y_state: Internal,
     /// Internal state for the horizontal scrollbar.
     pub(crate) scrollbar_x_state: Internal,
     /// Shared access to the input state.
     pub(crate) input: Rc<RefCell<Input>>,
+    /// Determines whether container scrollbars and scroll consumption are enabled.
+    scroll_enabled: bool,
+    /// True when this container is a scratch container used only for measurement.
+    measurement_mode: bool,
+    pub(crate) tree: TreeState,
+    pub(crate) panels: PanelState,
+}
+
+#[derive(Default)]
+pub(crate) struct DrawState {
+    /// Recorded draw commands for this frame.
+    pub(crate) commands: Vec<Command>,
+    /// Shared triangle vertex arena referenced by retained triangle commands.
+    pub(crate) triangle_vertices: Vec<Vertex>,
+    /// Stack of clip rectangles applied while drawing.
+    pub(crate) clip_stack: Vec<Recti>,
+}
+
+#[derive(Default)]
+pub(crate) struct InteractionState {
+    /// ID of the widget currently hovered, if any.
+    pub(crate) hover: Option<InteractionId>,
+    /// ID of the widget currently focused, if any.
+    pub(crate) focus: Option<InteractionId>,
+    /// Child container that currently owns pointer routing inside this container.
+    pub(crate) hover_root_child: Option<ContainerId>,
+    /// Rectangle occupied by the child container that currently owns pointer routing.
+    pub(crate) hover_root_child_rect: Option<Recti>,
+    /// Child container selected to own pointer routing on the next frame.
+    pub(crate) next_hover_root_child: Option<ContainerId>,
+    /// Rectangle for the child container selected to own pointer routing on the next frame.
+    pub(crate) next_hover_root_child_rect: Option<Recti>,
+    /// Tracks whether focus changed this frame.
+    pub(crate) updated_focus: bool,
     /// Cached per-frame input snapshot for widgets that need it.
-    input_snapshot: Option<Rc<InputSnapshot>>,
+    pub(crate) input_snapshot: Option<Rc<InputSnapshot>>,
     /// Whether this container is the current hover root.
     pub(crate) in_hover_root: bool,
     /// Tracks whether a popup was just opened this frame to avoid instant auto-close.
     pub(crate) popup_just_opened: bool,
-    pending_scroll: Option<Vec2i>,
-    /// Determines whether container scrollbars and scroll consumption are enabled.
-    scroll_enabled: bool,
+    /// Pending scroll delta that can be consumed by the active container/widget.
+    pub(crate) pending_scroll: Option<Vec2i>,
+}
+
+#[derive(Default)]
+pub(crate) struct TreeState {
     /// Previous/current frame cache for tree node geometry and interaction state.
-    tree_cache: WidgetTreeCache,
-    panels: Vec<ContainerHandle>,
+    pub(crate) cache: WidgetTreeCache,
+}
+
+#[derive(Default)]
+pub(crate) struct PanelState {
+    /// Embedded panels active in the current retained traversal.
+    pub(crate) active: Vec<ContainerHandle>,
 }
 
 impl Container {
@@ -144,87 +169,90 @@ impl Container {
             content_size: Dimensioni::default(),
             scroll: Vec2i::default(),
             zindex: 0,
-            command_list: Vec::default(),
-            triangle_vertices: Vec::default(),
-            clip_stack: Vec::default(),
-            hover: None,
-            focus: None,
-            hover_root_child: None,
-            hover_root_child_rect: None,
-            next_hover_root_child: None,
-            next_hover_root_child_rect: None,
-            updated_focus: false,
+            draw: DrawState::default(),
+            interaction: InteractionState::default(),
             layout: LayoutManager::default(),
             scrollbar_y_state: Internal::new("!scrollbary"),
             scrollbar_x_state: Internal::new("!scrollbarx"),
-            popup_just_opened: false,
-            in_hover_root: false,
             input,
-            input_snapshot: None,
-            pending_scroll: None,
             scroll_enabled: true,
-            tree_cache: WidgetTreeCache::default(),
-            panels: Default::default(),
+            measurement_mode: false,
+            tree: TreeState::default(),
+            panels: PanelState::default(),
         }
     }
 
     pub(crate) fn reset(&mut self) {
-        self.command_list.clear();
-        self.triangle_vertices.clear();
-        self.clip_stack.clear();
+        self.draw.commands.clear();
+        self.draw.triangle_vertices.clear();
+        self.draw.clip_stack.clear();
         self.body = Recti::default();
         self.content_size = Dimensioni::default();
         self.scroll = Vec2i::default();
-        self.hover = None;
-        self.focus = None;
+        self.interaction.hover = None;
+        self.interaction.focus = None;
         self.clear_root_frame_state();
-        self.updated_focus = false;
-        self.input_snapshot = None;
-        self.popup_just_opened = false;
+        self.interaction.updated_focus = false;
+        self.interaction.input_snapshot = None;
+        self.interaction.popup_just_opened = false;
         self.scroll_enabled = true;
-        self.panels.clear();
-        self.tree_cache.clear();
+        self.measurement_mode = false;
+        self.panels.active.clear();
+        self.tree.cache.clear();
     }
 
     pub(crate) fn clear_root_frame_state(&mut self) {
-        self.hover_root_child = None;
-        self.hover_root_child_rect = None;
-        self.next_hover_root_child = None;
-        self.next_hover_root_child_rect = None;
-        self.in_hover_root = false;
-        self.pending_scroll = None;
+        self.interaction.hover_root_child = None;
+        self.interaction.hover_root_child_rect = None;
+        self.interaction.next_hover_root_child = None;
+        self.interaction.next_hover_root_child_rect = None;
+        self.interaction.in_hover_root = false;
+        self.interaction.pending_scroll = None;
     }
 
     pub(crate) fn prepare(&mut self) {
-        self.command_list.clear();
-        assert!(self.clip_stack.is_empty());
-        self.panels.clear();
-        self.input_snapshot = None;
-        self.next_hover_root_child = None;
-        self.next_hover_root_child_rect = None;
-        self.pending_scroll = None;
+        self.draw.commands.clear();
+        assert!(self.draw.clip_stack.is_empty());
+        self.panels.active.clear();
+        self.interaction.input_snapshot = None;
+        self.interaction.next_hover_root_child = None;
+        self.interaction.next_hover_root_child_rect = None;
+        self.interaction.pending_scroll = None;
         self.scroll_enabled = true;
-        self.tree_cache.begin_frame();
+        self.tree.cache.begin_frame();
+    }
+
+    pub(crate) fn measurement_scratch(&self) -> Self {
+        let mut scratch = Container::new(&self.name, self.atlas.clone(), self.style.clone(), self.input.clone());
+        scratch.rect = self.rect;
+        scratch.body = self.body;
+        scratch.content_size = self.content_size;
+        scratch.scroll = self.scroll;
+        scratch.zindex = self.zindex;
+        scratch.layout = self.layout.clone();
+        scratch.scroll_enabled = self.scroll_enabled;
+        scratch.measurement_mode = true;
+        scratch
     }
 
     pub(crate) fn seed_pending_scroll(&mut self, delta: Option<Vec2i>) {
-        self.pending_scroll = delta;
+        self.interaction.pending_scroll = delta;
     }
 
     /// Resets transient per-frame state after widgets have been processed.
     pub fn finish(&mut self) {
-        for panel in &mut self.panels {
+        for panel in &mut self.panels.active {
             panel.finish();
         }
-        if !self.updated_focus {
-            self.focus = None;
+        if !self.interaction.updated_focus {
+            self.interaction.focus = None;
         }
-        self.updated_focus = false;
-        self.hover_root_child = self.next_hover_root_child;
-        self.hover_root_child_rect = self.next_hover_root_child_rect;
-        self.next_hover_root_child = None;
-        self.next_hover_root_child_rect = None;
-        self.tree_cache.finish_frame();
+        self.interaction.updated_focus = false;
+        self.interaction.hover_root_child = self.interaction.next_hover_root_child;
+        self.interaction.hover_root_child_rect = self.interaction.next_hover_root_child_rect;
+        self.interaction.next_hover_root_child = None;
+        self.interaction.next_hover_root_child_rect = None;
+        self.tree.cache.finish_frame();
     }
 
     /// Returns the outer container rectangle.
@@ -259,7 +287,7 @@ impl Container {
 
     #[cfg(test)]
     pub(crate) fn panel_count(&self) -> usize {
-        self.panels.len()
+        self.panels.active.len()
     }
 
     fn clamp(x: i32, a: i32, b: i32) -> i32 {
