@@ -85,15 +85,15 @@ pub(crate) struct Window {
 
 impl Window {
     fn titlebar_height(container: &Container) -> i32 {
-        let style = container.style.as_ref();
-        let font_height = container.atlas.get_font_height(style.title_font) as i32;
+        let style = container.style();
+        let font_height = container.atlas().get_font_height(style.title_font) as i32;
         let padding = style.padding.max(0);
         let min_title_h = font_height + (padding / 2).max(1) * 2;
         style.title_height.max(min_title_h)
     }
 
     fn body_rect_for(container: &Container, opt: ContainerOption) -> Recti {
-        let mut body = container.rect;
+        let mut body = container.rect();
         if !opt.has_no_title() {
             let title_h = Self::titlebar_height(container);
             body.y += title_h;
@@ -103,25 +103,28 @@ impl Window {
     }
 
     fn apply_auto_size(container: &mut Container, opt: ContainerOption) {
-        if !opt.is_auto_sizing() || (container.content_size.width <= 0 && container.content_size.height <= 0) {
+        let content_size = container.content_size();
+        if !opt.is_auto_sizing() || (content_size.width <= 0 && content_size.height <= 0) {
             return;
         }
 
-        let padding = container.style.as_ref().padding.max(0) * 2;
-        let target_body_width = container.content_size.width.saturating_add(padding);
-        let target_body_height = container.content_size.height.saturating_add(padding);
+        let padding = container.style().padding.max(0) * 2;
+        let target_body_width = content_size.width.saturating_add(padding);
+        let target_body_height = content_size.height.saturating_add(padding);
         let body = Self::body_rect_for(container, opt);
-        let chrome_width = container.rect.width - body.width;
-        let chrome_height = container.rect.height - body.height;
+        let mut window_rect = container.rect();
+        let chrome_width = window_rect.width - body.width;
+        let chrome_height = window_rect.height - body.height;
 
-        container.rect.width = (target_body_width + chrome_width).max(0);
-        container.rect.height = (target_body_height + chrome_height).max(0);
+        window_rect.width = (target_body_width + chrome_width).max(0);
+        window_rect.height = (target_body_height + chrome_height).max(0);
+        container.set_rect(window_rect);
     }
 
     /// Creates a dialog window that starts closed.
     pub fn dialog(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
-        main.rect = initial_rect;
+        main.set_rect(initial_rect);
 
         Self {
             ty: Type::Dialog,
@@ -137,7 +140,7 @@ impl Window {
     /// Creates a standard window that starts open.
     pub fn window(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
-        main.rect = initial_rect;
+        main.set_rect(initial_rect);
 
         Self {
             ty: Type::Window,
@@ -153,7 +156,7 @@ impl Window {
     /// Creates a popup window that starts closed.
     pub fn popup(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
-        main.rect = initial_rect;
+        main.set_rect(initial_rect);
 
         Self {
             ty: Type::Popup,
@@ -187,13 +190,13 @@ impl Window {
         } = self;
         Self::apply_auto_size(container, opt);
 
-        let r = container.rect;
+        let r = container.rect();
         if !opt.has_no_frame() {
             container.draw_frame(r, ControlColor::WindowBG);
         }
         if !opt.has_no_title() {
             let mut tr: Recti = r;
-            let title_text_color = container.style.as_ref().colors[ControlColor::TitleText as usize];
+            let title_text_color = container.style().colors[ControlColor::TitleText as usize];
             tr.height = Self::titlebar_height(container);
             container.draw_frame(tr, ControlColor::TitleBG);
 
@@ -204,11 +207,11 @@ impl Window {
                 let mut ctx = container.widget_ctx(title_id, tr, None);
                 let _ = title_state.run(&mut ctx, &control);
             }
-            let name = container.name.clone(); // Necessary due to borrow checker limitations
-            container.draw_control_text_with_font(container.style.as_ref().title_font, &name, tr, ControlColor::TitleText, WidgetOption::NONE);
+            let name = container.name().to_string(); // Necessary due to borrow checker limitations
+            container.draw_control_text_with_font(container.style().title_font, &name, tr, ControlColor::TitleText, WidgetOption::NONE);
             if control.active {
-                container.rect.x += container.input.borrow().mouse_delta.x;
-                container.rect.y += container.input.borrow().mouse_delta.y;
+                let delta = container.input().borrow().mouse_delta;
+                container.translate_rect(delta);
             }
             if !opt.has_no_close() {
                 let close_id = widget_id_of(close_state);
@@ -229,13 +232,13 @@ impl Window {
         let body = Self::body_rect_for(container, opt);
         container.configure_container_body(body, bopt);
 
-        if is_popup && container.interaction.popup_just_opened {
+        if is_popup && container.popup_just_opened() {
             // Skip the auto-close check on the same frame the popup is opened.
-            container.interaction.popup_just_opened = false;
-        } else if is_popup && !container.input.borrow().mouse_pressed.is_none() && !container.interaction.in_hover_root {
+            container.clear_popup_just_opened();
+        } else if is_popup && !container.input().borrow().mouse_pressed.is_none() && !container.in_hover_root() {
             *win_state = WindowState::Closed;
         }
-        let body = container.body;
+        let body = container.body();
         container.push_clip_rect(body);
     }
 
@@ -246,7 +249,7 @@ impl Window {
 
     fn prepare_for_root_frame(&mut self, frame: usize) {
         if self.last_root_frame == Some(frame) {
-            panic!("window {:?} was rendered more than once in frame {}", self.main.name, frame);
+            panic!("window {:?} was rendered more than once in frame {}", self.main.name(), frame);
         }
 
         let contiguous = self.last_root_frame.and_then(|last| last.checked_add(1)) == Some(frame);
@@ -267,10 +270,9 @@ impl Window {
         // Auto-size should measure desired content against the raw body rect rather than inheriting
         // last frame's scrollbar decision or scroll offset.
         let mut scratch = self.main.measurement_scratch();
-        scratch.scroll = Vec2i::default();
-        scratch.content_size = Dimensioni::default();
+        scratch.clear_content_and_scroll();
         scratch.configure_container_body(body, bopt);
-        self.main.content_size = scratch.measure_widget_tree_content(results, tree);
+        self.main.set_content_size(scratch.measure_widget_tree_content(results, tree));
     }
 
     fn finish_resize(&mut self, opt: ContainerOption) {
@@ -279,11 +281,12 @@ impl Window {
         }
 
         let container = &mut self.main;
-        let sz = container.style.as_ref().title_height;
+        let sz = container.style().title_height;
         let resize_id = widget_id_of(&self.resize_state);
+        let container_rect = container.rect();
         let rect = rect(
-            container.rect.x + container.rect.width - sz,
-            container.rect.y + container.rect.height - sz,
+            container_rect.x + container_rect.width - sz,
+            container_rect.y + container_rect.height - sz,
             sz,
             sz,
         );
@@ -294,16 +297,8 @@ impl Window {
             let _ = self.resize_state.run(&mut ctx, &control);
         }
         if control.active {
-            container.rect.width = if 96 > container.rect.width + container.input.borrow().mouse_delta.x {
-                96
-            } else {
-                container.rect.width + container.input.borrow().mouse_delta.x
-            };
-            container.rect.height = if 64 > container.rect.height + container.input.borrow().mouse_delta.y {
-                64
-            } else {
-                container.rect.height + container.input.borrow().mouse_delta.y
-            };
+            let delta = container.input().borrow().mouse_delta;
+            container.resize_rect_by(delta, Dimensioni::new(96, 64));
         }
     }
 }
@@ -361,12 +356,12 @@ impl WindowHandle {
 
     /// Returns the current window rectangle.
     pub fn rect(&self) -> Recti {
-        self.inner().main.rect
+        self.inner().main.rect()
     }
 
     /// Replaces the current window rectangle.
     pub fn set_rect(&mut self, rect: Recti) {
-        self.inner_mut().main.rect = rect;
+        self.inner_mut().main.set_rect(rect);
     }
 
     /// Sets the focused widget inside the window's root container.
@@ -395,7 +390,39 @@ impl WindowHandle {
     }
 
     pub(crate) fn zindex(&self) -> i32 {
-        self.0.borrow().main.zindex
+        self.0.borrow().main.zindex()
+    }
+
+    pub(crate) fn set_zindex(&mut self, zindex: i32) {
+        self.inner_mut().main.set_zindex(zindex);
+    }
+
+    pub(crate) fn set_root_style(&mut self, style: Rc<Style>) {
+        self.inner_mut().main.set_style_handle(style);
+    }
+
+    pub(crate) fn root_contains_point(&self, point: Vec2i) -> bool {
+        self.inner().main.contains_point(point)
+    }
+
+    pub(crate) fn root_in_hover_root(&self) -> bool {
+        self.inner().main.in_hover_root()
+    }
+
+    pub(crate) fn set_root_hover_active(&mut self, active: bool) {
+        self.inner_mut().main.set_in_hover_root(active);
+    }
+
+    pub(crate) fn mark_popup_just_opened(&mut self) {
+        self.inner_mut().main.mark_popup_just_opened();
+    }
+
+    pub(crate) fn begin_root_command_scope(&mut self, pending_scroll: Option<Vec2i>) {
+        self.inner_mut().main.begin_root_command_scope(pending_scroll);
+    }
+
+    pub(crate) fn finish_root_command_scope(&mut self) {
+        self.inner_mut().main.finish_root_command_scope();
     }
 
     pub(crate) fn begin_window(&mut self, opt: ContainerOption, bopt: WidgetBehaviourOption) {
@@ -420,7 +447,6 @@ impl WindowHandle {
 
     /// Resizes the underlying window rectangle.
     pub fn set_size(&mut self, size: &Dimensioni) {
-        self.inner_mut().main.rect.width = size.width;
-        self.inner_mut().main.rect.height = size.height;
+        self.inner_mut().main.set_rect_size(*size);
     }
 }

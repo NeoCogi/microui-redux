@@ -185,7 +185,7 @@ impl Container {
     /// Adjusts the current clip rectangle.
     pub fn set_clip(&mut self, rect: Recti) {
         let mut draw = self.draw_ctx();
-        draw.set_clip(rect);
+        draw.set_current_clip_rect(rect);
     }
 
     /// Records a filled rectangle draw command.

@@ -196,11 +196,11 @@ impl FileDialogState {
         let (control_height, spacing) = {
             let win = self.win.inner();
             let container = &win.main;
-            let style = container.style.as_ref();
+            let style = container.style();
             let padding = style.padding.max(0);
-            let font_height = container.atlas.get_font_height(style.font) as i32;
+            let font_height = container.atlas().get_font_height(style.font) as i32;
             let vertical_pad = std::cmp::max(1, padding / 2);
-            let icon_height = container.atlas.get_icon_size(EXPAND_DOWN_ICON).height;
+            let icon_height = container.atlas().get_icon_size(EXPAND_DOWN_ICON).height;
             (std::cmp::max(font_height + vertical_pad * 2, icon_height), style.spacing.max(0))
         };
 

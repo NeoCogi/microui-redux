@@ -60,11 +60,11 @@ use png::{ColorType, Decoder};
 
 use crate::{
     rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, FrameResultGeneration, ImageSource, Input, Recti, Renderer, KeyCode, KeyMode,
-    MouseButton, RendererHandle, Style, TextureId, UNCLIPPED_RECT, WidgetBehaviourOption, WidgetTree, WindowHandle, WindowState, FrameResults,
+    MouseButton, RendererHandle, Style, TextureId, WidgetBehaviourOption, WidgetTree, WindowHandle, FrameResults,
 };
 
 #[cfg(test)]
-use crate::Vec2i;
+use crate::{UNCLIPPED_RECT, Vec2i};
 
 /// Primary entry point used to drive the UI over a renderer implementation.
 pub struct Context<R: Renderer> {
@@ -314,9 +314,9 @@ mod tests {
         });
 
         let inner = window.inner();
-        let body = inner.main.body;
+        let body = inner.main.body();
         let has_vertical_scrollbar =
-            inner.main.draw.commands.iter().any(
+            inner.main.debug_commands().iter().any(
                 |cmd| matches!(cmd, Command::Recti { rect, .. } if rect.x == body.x + body.width && rect.width == style.scrollbar_size && rect.height > 0),
             );
 
@@ -419,21 +419,20 @@ mod tests {
 
         {
             let mut inner = window.inner_mut();
-            inner.main.draw.commands.push(Command::None);
-            inner.main.draw.clip_stack.push(UNCLIPPED_RECT);
-            inner.main.content_size = Dimensioni::new(11, 17);
-            inner.main.scroll = Vec2i::new(3, 5);
+            inner.main.debug_push_command(Command::None);
+            inner.main.debug_push_clip(UNCLIPPED_RECT);
+            inner.main.set_content_size(Dimensioni::new(11, 17));
+            inner.main.set_scroll(Vec2i::new(3, 5));
         }
 
         window.close();
 
         let inner = window.inner();
-        assert!(inner.main.draw.commands.is_empty());
-        assert!(inner.main.draw.clip_stack.is_empty());
-        assert_eq!(inner.main.content_size.width, 0);
-        assert_eq!(inner.main.content_size.height, 0);
-        assert_eq!(inner.main.scroll.x, 0);
-        assert_eq!(inner.main.scroll.y, 0);
+        assert!(inner.main.debug_commands().is_empty());
+        assert_eq!(inner.main.content_size().width, 0);
+        assert_eq!(inner.main.content_size().height, 0);
+        assert_eq!(inner.main.scroll().x, 0);
+        assert_eq!(inner.main.scroll().y, 0);
     }
 
     #[test]
@@ -453,7 +452,7 @@ mod tests {
 
         {
             let mut inner = window.inner_mut();
-            inner.main.draw.commands.push(Command::None);
+            inner.main.debug_push_command(Command::None);
         }
 
         ctx.frame(|ui| {
@@ -461,7 +460,7 @@ mod tests {
         });
 
         let inner = window.inner();
-        assert!(!inner.main.draw.commands.iter().any(|cmd| matches!(cmd, Command::None)));
+        assert!(!inner.main.debug_commands().iter().any(|cmd| matches!(cmd, Command::None)));
     }
 
     #[test]
@@ -510,8 +509,7 @@ mod tests {
         let inner = dialog.inner();
         let texts: Vec<String> = inner
             .main
-            .draw
-            .commands
+            .debug_commands()
             .iter()
             .filter_map(|cmd| match cmd {
                 Command::Text { text, .. } => Some(text.clone()),
@@ -604,10 +602,10 @@ mod tests {
         });
 
         let inner = popup.inner();
-        assert!(inner.main.rect.width > 1);
-        assert!(inner.main.rect.height > 1);
-        assert!(inner.main.body.width > 0);
-        assert!(inner.main.body.height > 0);
+        assert!(inner.main.rect().width > 1);
+        assert!(inner.main.rect().height > 1);
+        assert!(inner.main.body().width > 0);
+        assert!(inner.main.body().height > 0);
     }
 
     #[test]
@@ -625,10 +623,10 @@ mod tests {
         });
 
         let inner = window.inner();
-        assert!(inner.main.rect.width > 1);
-        assert!(inner.main.rect.height > 1);
-        assert!(inner.main.body.y > inner.main.rect.y);
-        assert!(inner.main.body.height > 0);
+        assert!(inner.main.rect().width > 1);
+        assert!(inner.main.rect().height > 1);
+        assert!(inner.main.body().y > inner.main.rect().y);
+        assert!(inner.main.body().height > 0);
     }
 
     #[test]
@@ -677,14 +675,14 @@ mod tests {
         });
 
         let inner = window.inner();
-        assert!(inner.main.body.width >= inner.main.content_size.width);
-        assert!(inner.main.body.height >= inner.main.content_size.height);
-        assert!(inner.main.body.height > 0);
-        assert!(inner.main.body.y > inner.main.rect.y);
+        assert!(inner.main.body().width >= inner.main.content_size().width);
+        assert!(inner.main.body().height >= inner.main.content_size().height);
+        assert!(inner.main.body().height > 0);
+        assert!(inner.main.body().y > inner.main.rect().y);
 
-        let body = inner.main.body;
+        let body = inner.main.body();
         let has_vertical_scrollbar =
-            inner.main.draw.commands.iter().any(
+            inner.main.debug_commands().iter().any(
                 |cmd| matches!(cmd, Command::Recti { rect, .. } if rect.x == body.x + body.width && rect.width == style.scrollbar_size && rect.height > 0),
             );
 
@@ -706,12 +704,11 @@ mod tests {
         });
 
         let titled_inner = titled.inner();
-        assert!(titled_inner.main.body.y > titled_inner.main.rect.y);
-        assert!(titled_inner.main.body.height < titled_inner.main.rect.height);
+        assert!(titled_inner.main.body().y > titled_inner.main.rect().y);
+        assert!(titled_inner.main.body().height < titled_inner.main.rect().height);
         let titled_texts: Vec<String> = titled_inner
             .main
-            .draw
-            .commands
+            .debug_commands()
             .iter()
             .filter_map(|cmd| match cmd {
                 Command::Text { text, .. } => Some(text.clone()),
@@ -721,14 +718,13 @@ mod tests {
         assert!(titled_texts.iter().any(|text| text == "titled"));
 
         let plain_inner = plain.inner();
-        assert_eq!(plain_inner.main.body.y, plain_inner.main.rect.y);
-        assert_eq!(plain_inner.main.body.height, plain_inner.main.rect.height);
-        assert_eq!(plain_inner.main.body.x, plain_inner.main.rect.x);
-        assert_eq!(plain_inner.main.body.width, plain_inner.main.rect.width);
+        assert_eq!(plain_inner.main.body().y, plain_inner.main.rect().y);
+        assert_eq!(plain_inner.main.body().height, plain_inner.main.rect().height);
+        assert_eq!(plain_inner.main.body().x, plain_inner.main.rect().x);
+        assert_eq!(plain_inner.main.body().width, plain_inner.main.rect().width);
         let plain_texts: Vec<String> = plain_inner
             .main
-            .draw
-            .commands
+            .debug_commands()
             .iter()
             .filter_map(|cmd| match cmd {
                 Command::Text { text, .. } => Some(text.clone()),
@@ -908,10 +904,10 @@ impl<R: Renderer> Context<R> {
         self.hover_root = self.next_hover_root.clone();
         self.next_hover_root = None;
         for r in &mut self.root_list {
-            r.inner_mut().main.interaction.in_hover_root = false;
+            r.set_root_hover_active(false);
         }
         match &mut self.hover_root {
-            Some(window) => window.inner_mut().main.interaction.in_hover_root = true,
+            Some(window) => window.set_root_hover_active(true),
             _ => (),
         }
 
@@ -955,7 +951,7 @@ impl<R: Renderer> Context<R> {
     /// Bumps the window's Z order so it renders above others.
     pub fn bring_to_front(&mut self, window: &mut WindowHandle) {
         self.last_zindex += 1;
-        window.inner_mut().main.zindex = self.last_zindex;
+        window.set_zindex(self.last_zindex);
     }
 
     fn bring_to_front_if_behind(&mut self, window: &mut WindowHandle) {
@@ -969,35 +965,23 @@ impl<R: Renderer> Context<R> {
         window.prepare_for_frame(self.frame);
         self.root_list.push(window.clone());
 
-        if window.inner().main.rect.contains(&self.input.borrow().mouse_pos)
+        if window.root_contains_point(self.input.borrow().mouse_pos)
             && (self.next_hover_root.is_none() || window.zindex() > self.next_hover_root.as_ref().unwrap().zindex())
         {
             self.next_hover_root = Some(window.clone());
         }
-        let container = &mut window.inner_mut().main;
         let scroll_delta = self.input.borrow().scroll_delta;
-        let pending_scroll = if container.interaction.in_hover_root && (scroll_delta.x != 0 || scroll_delta.y != 0) {
+        let pending_scroll = if window.root_in_hover_root() && (scroll_delta.x != 0 || scroll_delta.y != 0) {
             Some(scroll_delta)
         } else {
             None
         };
-        container.seed_pending_scroll(pending_scroll);
-        container.draw.clip_stack.push(UNCLIPPED_RECT);
+        window.begin_root_command_scope(pending_scroll);
     }
 
     #[inline(never)]
     fn end_root_container(&mut self, window: &mut WindowHandle) {
-        let container = &mut window.inner_mut().main;
-        container.pop_clip_rect();
-
-        let layout_body = container.layout.current_body();
-        match container.layout.current_max() {
-            None => (),
-            Some(lm) => container.content_size = Dimensioni::new(lm.x - layout_body.x, lm.y - layout_body.y),
-        }
-        container.render_active_scrollbars();
-        container.consume_pending_scroll();
-        container.layout.pop_scope();
+        window.finish_root_command_scope();
     }
 
     #[inline(never)]
@@ -1021,7 +1005,7 @@ impl<R: Renderer> Context<R> {
 
     fn render_window_tree(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
         if window.is_open() {
-            window.inner_mut().main.style = self.style.clone();
+            window.set_root_style(self.style.clone());
             if opt.is_auto_sizing() {
                 window.measure_auto_size(&self.frame_results, opt, bopt, tree);
             }
@@ -1048,7 +1032,7 @@ impl<R: Renderer> Context<R> {
     /// Marks a dialog window as open for the next frame.
     pub fn open_dialog(&mut self, window: &mut WindowHandle) {
         let was_open = window.is_open();
-        window.inner_mut().win_state = WindowState::Open;
+        window.open();
         if !was_open {
             self.bring_to_front(window);
         }
@@ -1059,7 +1043,7 @@ impl<R: Renderer> Context<R> {
         if window.is_open() {
             self.next_hover_root = Some(window.clone());
             self.hover_root = self.next_hover_root.clone();
-            window.inner_mut().main.interaction.in_hover_root = true;
+            window.set_root_hover_active(true);
             self.bring_to_front_if_behind(window);
 
             self.render_window_tree(window, opt, bopt, tree);
@@ -1070,19 +1054,16 @@ impl<R: Renderer> Context<R> {
     pub fn open_popup(&mut self, window: &mut WindowHandle) {
         let was_open = window.is_open();
         let mouse_pos = self.input.borrow().mouse_pos;
-        {
-            let mut inner = window.inner_mut();
-            if was_open {
-                let mut rect = inner.main.rect;
-                rect.x = mouse_pos.x;
-                rect.y = mouse_pos.y;
-                inner.main.rect = rect;
-            } else {
-                inner.main.rect = rect(mouse_pos.x, mouse_pos.y, 1, 1);
-                inner.win_state = WindowState::Open;
-                inner.main.interaction.in_hover_root = true;
-                inner.main.interaction.popup_just_opened = true;
-            }
+        if was_open {
+            let mut rect = window.rect();
+            rect.x = mouse_pos.x;
+            rect.y = mouse_pos.y;
+            window.set_rect(rect);
+        } else {
+            window.set_rect(rect(mouse_pos.x, mouse_pos.y, 1, 1));
+            window.open();
+            window.set_root_hover_active(true);
+            window.mark_popup_just_opened();
         }
         if !was_open {
             self.next_hover_root = Some(window.clone());
@@ -1094,20 +1075,17 @@ impl<R: Renderer> Context<R> {
     /// Shows a popup anchored at the provided rectangle instead of the mouse cursor.
     pub fn open_popup_at(&mut self, window: &mut WindowHandle, anchor: Recti) {
         let was_open = window.is_open();
-        {
-            let mut inner = window.inner_mut();
-            if was_open {
-                let mut rect = inner.main.rect;
-                rect.x = anchor.x;
-                rect.y = anchor.y;
-                rect.width = anchor.width;
-                inner.main.rect = rect;
-            } else {
-                inner.main.rect = anchor;
-                inner.win_state = WindowState::Open;
-                inner.main.interaction.in_hover_root = true;
-                inner.main.interaction.popup_just_opened = true;
-            }
+        if was_open {
+            let mut rect = window.rect();
+            rect.x = anchor.x;
+            rect.y = anchor.y;
+            rect.width = anchor.width;
+            window.set_rect(rect);
+        } else {
+            window.set_rect(anchor);
+            window.open();
+            window.set_root_hover_active(true);
+            window.mark_popup_just_opened();
         }
         if !was_open {
             self.next_hover_root = Some(window.clone());

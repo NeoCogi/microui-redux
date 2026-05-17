@@ -204,11 +204,15 @@ impl<'a> DrawCtx<'a> {
         self.triangle_vertices.push(v2);
     }
 
-    pub(crate) fn set_clip(&mut self, rect: Recti) {
+    pub(crate) fn set_current_clip_rect(&mut self, rect: Recti) {
+        self.replace_current_clip_rect(rect);
+    }
+
+    fn push_replay_clip(&mut self, rect: Recti) {
         self.push_command(Command::PushClip { rect });
     }
 
-    pub(crate) fn unset_clip(&mut self) {
+    fn pop_replay_clip(&mut self) {
         self.push_command(Command::PopClip);
     }
 
@@ -223,11 +227,11 @@ impl<'a> DrawCtx<'a> {
             return;
         }
         if clipped == Clip::Part {
-            self.set_clip(clip);
+            self.push_replay_clip(clip);
         }
         emit(self);
         if clipped != Clip::None {
-            self.unset_clip();
+            self.pop_replay_clip();
         }
     }
 
