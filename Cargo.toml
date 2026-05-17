@@ -76,6 +76,10 @@ name = "calculator"
 path = "examples/calculator.rs"
 required-features = ["example-backend"]
 
+[[example]]
+name = "texture-clipping-smoke"
+path = "examples/texture-clipping-smoke.rs"
+
 # small size executable
 [profile.release]
 overflow-checks = false
