@@ -167,11 +167,11 @@ impl Container {
         // loudly instead of silently inventing geometry.
         let rect = self.current_tree_layout_or_panic(node_id).rect;
         let opt = widget.effective_widget_opt();
-        let bopt = widget.effective_behaviour_opt();
+        let scroll_behavior = widget.effective_scroll_behavior();
         let focus_policy = widget.focus_policy();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let dispatch_site = self.widget_dispatch_site(node_id, "widget");
-        let (control, result) = self.render_widget_dyn(results, Some(node_id), widget, rect, input, opt, bopt, focus_policy, dispatch_site);
+        let (control, result) = self.render_widget_dyn(results, Some(node_id), widget, rect, input, opt, scroll_behavior, focus_policy, dispatch_site);
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
     }
 
@@ -184,18 +184,18 @@ impl Container {
     /// Executes a retained custom-render node and records both interaction and callback payload.
     fn render_tree_custom_render(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>, render: &TreeCustomRender) {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
-        let (opt, bopt, focus_policy, needs_input) = {
+        let (opt, scroll_behavior, focus_policy, needs_input) = {
             let state = state.borrow();
             (
                 state.effective_widget_opt(),
-                state.effective_behaviour_opt(),
+                state.effective_scroll_behavior(),
                 state.focus_policy(),
                 state.needs_input_snapshot(),
             )
         };
         let input = if needs_input { Some(self.snapshot_input()) } else { None };
         let dispatch_site = self.widget_dispatch_site(node_id, "custom render");
-        let (control, result) = self.render_widget_handle(results, Some(node_id), state, rect, input, opt, bopt, focus_policy, dispatch_site);
+        let (control, result) = self.render_widget_handle(results, Some(node_id), state, rect, input, opt, scroll_behavior, focus_policy, dispatch_site);
 
         let snapshot = self.snapshot_input();
         let input_ref = snapshot.as_ref();
@@ -215,7 +215,7 @@ impl Container {
             mouse_event,
             scroll_delta: control.scroll_delta,
             widget_opt: opt,
-            behaviour_opt: bopt,
+            scroll_behavior,
             key_mods,
             key_codes,
             text_input,
@@ -258,12 +258,17 @@ impl Container {
     /// Renders a header/tree disclosure node and returns the stable expansion state observed this frame.
     fn render_tree_node_scope(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
-        let (opt, bopt, focus_policy, stable_state) = {
+        let (opt, scroll_behavior, focus_policy, stable_state) = {
             let state = state.borrow();
-            (state.effective_widget_opt(), state.effective_behaviour_opt(), state.focus_policy(), state.state)
+            (
+                state.effective_widget_opt(),
+                state.effective_scroll_behavior(),
+                state.focus_policy(),
+                state.state,
+            )
         };
         let dispatch_site = self.widget_dispatch_site(node_id, "node disclosure");
-        let (control, result) = self.render_widget_handle(results, Some(node_id), state, rect, None, opt, bopt, focus_policy, dispatch_site);
+        let (control, result) = self.render_widget_handle(results, Some(node_id), state, rect, None, opt, scroll_behavior, focus_policy, dispatch_site);
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
         stable_state
     }
@@ -279,15 +284,15 @@ impl Container {
             WidgetTreeNodeKind::CustomRender { state, .. } => {
                 self.layout_tree_custom_render(node_id, policy, state);
             }
-            WidgetTreeNodeKind::Container { handle, opt, behaviour } => {
+            WidgetTreeNodeKind::Container { handle, opt, scroll_behavior } => {
                 if self.measurement_mode {
-                    let layout = self.measure_panel_layout(handle, *behaviour, policy, results, children);
+                    let layout = self.measure_panel_layout(handle, *scroll_behavior, policy, results, children);
                     self.record_tree_layout(node_id, layout);
                 } else {
                     let mut handle = handle.clone();
                     // Containers are nested retained sub-contexts. The parent records the panel bounds,
                     // then lets the child container execute the same layout pass against its own body.
-                    self.begin_panel_layout(&mut handle, *opt, *behaviour, policy);
+                    self.begin_panel_layout(&mut handle, *opt, *scroll_behavior, policy);
                     handle.with_inner_mut(|container| {
                         container.layout_tree_nodes(results, children);
                     });
@@ -361,13 +366,13 @@ impl Container {
             WidgetTreeNodeKind::CustomRender { state, render } => {
                 self.render_tree_custom_render(results, node_id, state, render);
             }
-            WidgetTreeNodeKind::Container { handle, opt, behaviour } => {
+            WidgetTreeNodeKind::Container { handle, opt, scroll_behavior } => {
                 let mut handle = handle.clone();
                 let layout = self.current_tree_layout_or_panic(node_id);
                 // The render pass re-enters the panel with the layout snapshot already frozen.
                 // Scrollbars, body clipping, and child drawing therefore use the same geometry that
                 // was computed during the first pass.
-                self.begin_panel_render(&mut handle, *opt, *behaviour, layout);
+                self.begin_panel_render(&mut handle, *opt, *scroll_behavior, layout);
                 handle.with_inner_mut(|container| {
                     container.render_tree_nodes(results, children);
                 });

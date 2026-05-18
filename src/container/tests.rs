@@ -114,7 +114,7 @@ fn make_container() -> Container {
     let input = Rc::new(RefCell::new(Input::default()));
     let mut container = Container::new("test", atlas, Rc::new(Style::default()), input);
     container.interaction.in_hover_root = true;
-    container.push_container_body(rect(0, 0, 100, 30), ContainerOption::NONE, WidgetBehaviourOption::NONE);
+    container.push_container_body(rect(0, 0, 100, 30), ContainerOption::NONE, ScrollBehavior::NONE);
     container
 }
 
@@ -122,7 +122,7 @@ fn begin_test_frame(container: &mut Container, body: Recti) {
     container.prepare();
     container.rect = body;
     container.content_size = Dimensioni::default();
-    container.push_container_body(body, ContainerOption::NONE, WidgetBehaviourOption::NONE);
+    container.push_container_body(body, ContainerOption::NONE, ScrollBehavior::NONE);
 }
 
 fn make_panel_handle(container: &Container, name: &str) -> ContainerHandle {
@@ -133,13 +133,13 @@ struct TraceWidget {
     name: &'static str,
     log: Rc<RefCell<Vec<String>>>,
     opt: WidgetOption,
-    bopt: WidgetBehaviourOption,
+    scroll_behavior: ScrollBehavior,
 }
 
 struct FocusProbe {
     focused: Rc<Cell<bool>>,
     opt: WidgetOption,
-    bopt: WidgetBehaviourOption,
+    scroll_behavior: ScrollBehavior,
 }
 
 impl FocusProbe {
@@ -147,7 +147,7 @@ impl FocusProbe {
         Self {
             focused,
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 }
@@ -157,8 +157,8 @@ impl Widget for FocusProbe {
         &self.opt
     }
 
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-        &self.bopt
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.scroll_behavior
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
@@ -181,7 +181,7 @@ impl TraceWidget {
             name,
             log,
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 }
@@ -191,8 +191,8 @@ impl Widget for TraceWidget {
         &self.opt
     }
 
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-        &self.bopt
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.scroll_behavior
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
@@ -252,7 +252,7 @@ fn textbox_left_moves_over_multibyte() {
 
     input.borrow_mut().keydown_code(KeyCode::LEFT);
     let rect = container.layout.next();
-    let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.bopt);
+    let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.scroll_behavior);
     let control = container.update_control(textbox_id, rect, &control_state);
     let input = container.snapshot_input();
     let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
@@ -271,7 +271,7 @@ fn textbox_backspace_removes_multibyte() {
 
     input.borrow_mut().keydown(KeyMode::BACKSPACE);
     let rect = container.layout.next();
-    let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.bopt);
+    let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.scroll_behavior);
     let control = container.update_control(textbox_id, rect, &control_state);
     let input = container.snapshot_input();
     let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
@@ -521,7 +521,7 @@ fn widget_tree_dispatches_panel_children() {
 
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
-            tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+            tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                 tree.widget(button.clone());
             });
         });
@@ -541,7 +541,7 @@ fn measurement_tree_does_not_mutate_live_root_or_panel_state() {
 
     begin_test_frame(&mut parent, rect(0, 0, 80, 30));
     let tree = WidgetTreeBuilder::build(|tree| {
-        panel_node_id = tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+        panel_node_id = tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
             tree.widget(text.clone());
         });
     });
@@ -572,7 +572,7 @@ fn embedded_panel_render_command_preserves_tree_order() {
     begin_test_frame(&mut parent, rect(0, 0, 120, 60));
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.widget(before.clone());
-        tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+        tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
             tree.widget(inside.clone());
         });
         tree.widget(after.clone());
@@ -703,7 +703,7 @@ fn retained_text_inside_panel_grows_content_height() {
     begin_test_frame(&mut parent, rect(0, 0, 60, 20));
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(60)], SizePolicy::Fixed(20), |tree| {
-            tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+            tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                 tree.widget(text.clone());
             });
         });
@@ -894,8 +894,8 @@ fn panel_hover_root_switches_between_siblings_on_next_frame() {
     let mut results = FrameResults::default();
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(50), SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
-            tree.container(left.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
-            tree.container(right.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
+            tree.container(left.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
+            tree.container(right.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
         });
     });
 
@@ -933,7 +933,7 @@ fn parent_widgets_are_only_blocked_while_mouse_is_inside_active_child_rect() {
     let mut results = FrameResults::default();
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
-            tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |_| {});
+            tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
         });
     });
 

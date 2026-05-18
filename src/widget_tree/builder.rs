@@ -40,7 +40,7 @@ use std::{
 use rs_math3d::Dimensioni;
 
 use crate::{
-    input::{ContainerOption, WidgetBehaviourOption},
+    input::{ContainerOption, ScrollBehavior},
     layout::{SizePolicy, StackDirection},
     widget::Widget,
     ContainerHandle, Custom, CustomRenderArgs, Node, TextBlock, TextWrap,
@@ -216,8 +216,8 @@ impl WidgetTreeBuilder {
     }
 
     /// Adds an unkeyed embedded container node.
-    pub fn container(&mut self, handle: ContainerHandle, opt: ContainerOption, behaviour: WidgetBehaviourOption, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.container_with(NodeOptions::new(), handle, opt, behaviour, f)
+    pub fn container(&mut self, handle: ContainerHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut Self)) -> NodeId {
+        self.container_with(NodeOptions::new(), handle, opt, scroll_behavior, f)
     }
 
     /// Adds an embedded container node with optional identity and placement metadata.
@@ -226,10 +226,10 @@ impl WidgetTreeBuilder {
         options: NodeOptions,
         handle: ContainerHandle,
         opt: ContainerOption,
-        behaviour: WidgetBehaviourOption,
+        scroll_behavior: ScrollBehavior,
         f: impl FnOnce(&mut Self),
     ) -> NodeId {
-        self.push_group(options, WidgetTreeNodeKind::Container { handle, opt, behaviour }, f)
+        self.push_group(options, WidgetTreeNodeKind::Container { handle, opt, scroll_behavior }, f)
     }
 
     /// Adds an unkeyed collapsible header node.

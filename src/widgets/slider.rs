@@ -72,8 +72,8 @@ pub struct Slider {
     pub font: FontChoice,
     /// Widget options applied to the slider.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the slider.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the slider.
+    pub scroll_behavior: ScrollBehavior,
     /// Text editing state for shift-click numeric entry.
     pub edit: NumberEditState,
 }
@@ -89,7 +89,7 @@ impl Slider {
             precision: 0,
             font: FontChoice::default(),
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::GRAB_SCROLL,
+            scroll_behavior: ScrollBehavior::GRAB_SCROLL,
             edit: NumberEditState::default(),
         }
     }
@@ -104,7 +104,7 @@ impl Slider {
             precision,
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::GRAB_SCROLL,
+            scroll_behavior: ScrollBehavior::GRAB_SCROLL,
             edit: NumberEditState::default(),
         }
     }
@@ -235,8 +235,8 @@ impl Widget for Slider {
         &self.opt
     }
 
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-        &self.bopt
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
@@ -284,8 +284,8 @@ pub struct Number {
     pub font: FontChoice,
     /// Widget options applied to the number input.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the number input.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the number input.
+    pub scroll_behavior: ScrollBehavior,
     /// Text editing state for shift-click numeric entry.
     pub edit: NumberEditState,
 }
@@ -310,7 +310,7 @@ impl Number {
             precision,
             font: FontChoice::default(),
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
             edit: NumberEditState::default(),
         }
     }
@@ -323,7 +323,7 @@ impl Number {
             precision,
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
             edit: NumberEditState::default(),
         }
     }
@@ -369,8 +369,8 @@ impl Widget for Number {
         &self.opt
     }
 
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-        &self.bopt
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

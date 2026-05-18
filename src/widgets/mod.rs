@@ -63,8 +63,8 @@ macro_rules! implement_widget {
             fn widget_opt(&self) -> &WidgetOption {
                 &self.opt
             }
-            fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-                &self.bopt
+            fn scroll_behavior(&self) -> ScrollBehavior {
+                self.scroll_behavior
             }
             fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
                 self.$measure(style, atlas, avail)

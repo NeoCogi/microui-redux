@@ -71,8 +71,8 @@ pub struct TextArea {
     pub font: FontChoice,
     /// Widget options applied to the text area.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the text area.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the text area.
+    pub scroll_behavior: ScrollBehavior,
     preferred_x: Option<i32>,
     dragging_y: bool,
     dragging_x: bool,
@@ -90,7 +90,7 @@ impl TextArea {
             wrap: TextWrap::None,
             font: FontChoice::default(),
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::GRAB_SCROLL,
+            scroll_behavior: ScrollBehavior::GRAB_SCROLL,
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
@@ -108,7 +108,7 @@ impl TextArea {
             wrap: TextWrap::None,
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::GRAB_SCROLL,
+            scroll_behavior: ScrollBehavior::GRAB_SCROLL,
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
@@ -400,8 +400,8 @@ impl Widget for TextArea {
         &self.opt
     }
 
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-        &self.bopt
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

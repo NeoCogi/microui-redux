@@ -88,8 +88,8 @@ pub struct TextBlock {
     pub font: FontChoice,
     /// Widget options applied to the block.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the block.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the block.
+    pub scroll_behavior: ScrollBehavior,
 }
 
 impl TextBlock {
@@ -105,7 +105,7 @@ impl TextBlock {
             wrap,
             font: FontChoice::default(),
             opt: WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
@@ -168,8 +168,8 @@ pub struct ColorSwatch {
     pub font: FontChoice,
     /// Widget options applied to the swatch.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the swatch.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the swatch.
+    pub scroll_behavior: ScrollBehavior,
 }
 
 impl ColorSwatch {
@@ -180,7 +180,7 @@ impl ColorSwatch {
             label: String::new(),
             font: FontChoice::default(),
             opt: WidgetOption::NO_INTERACT | WidgetOption::ALIGN_CENTER,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 

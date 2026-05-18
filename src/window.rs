@@ -178,7 +178,7 @@ impl Window {
     }
 
     #[inline(never)]
-    fn begin_window(&mut self, opt: ContainerOption, bopt: WidgetBehaviourOption) {
+    fn begin_window(&mut self, opt: ContainerOption, scroll_behavior: ScrollBehavior) {
         let is_popup = self.is_popup();
         let Window {
             win_state,
@@ -201,7 +201,7 @@ impl Window {
             container.draw_frame(tr, ControlColor::TitleBG);
 
             let title_id = widget_id_of(title_state);
-            let control_state = (title_state.opt, title_state.bopt);
+            let control_state = (title_state.opt, title_state.scroll_behavior);
             let control = container.update_control(title_id, tr, &control_state);
             {
                 let mut ctx = container.widget_ctx(title_id, tr, None);
@@ -218,7 +218,7 @@ impl Window {
                 let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
                 let color = title_text_color;
                 container.draw_icon(CLOSE_ICON, r, color);
-                let control_state = (close_state.opt, close_state.bopt);
+                let control_state = (close_state.opt, close_state.scroll_behavior);
                 let control = container.update_control(close_id, r, &control_state);
                 {
                     let mut ctx = container.widget_ctx(close_id, r, None);
@@ -230,7 +230,7 @@ impl Window {
             }
         }
         let body = Self::body_rect_for(container, opt);
-        container.configure_container_body(body, bopt);
+        container.configure_container_body(body, scroll_behavior);
 
         if is_popup && container.popup_just_opened() {
             // Skip the auto-close check on the same frame the popup is opened.
@@ -265,13 +265,13 @@ impl Window {
         self.main.reset();
     }
 
-    fn measure_auto_size(&mut self, results: &FrameResults, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
+    fn measure_auto_size(&mut self, results: &FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         let body = Self::body_rect_for(&self.main, opt);
         // Auto-size should measure desired content against the raw body rect rather than inheriting
         // last frame's scrollbar decision or scroll offset.
         let mut scratch = self.main.measurement_scratch();
         scratch.clear_content_and_scroll();
-        scratch.configure_container_body(body, bopt);
+        scratch.configure_container_body(body, scroll_behavior);
         self.main.set_content_size(scratch.measure_widget_tree_content(results, tree));
     }
 
@@ -290,7 +290,7 @@ impl Window {
             sz,
             sz,
         );
-        let control_state = (self.resize_state.opt, self.resize_state.bopt);
+        let control_state = (self.resize_state.opt, self.resize_state.scroll_behavior);
         let control = container.update_control(resize_id, rect, &control_state);
         {
             let mut ctx = container.widget_ctx(resize_id, rect, None);
@@ -425,12 +425,12 @@ impl WindowHandle {
         self.inner_mut().main.finish_root_command_scope();
     }
 
-    pub(crate) fn begin_window(&mut self, opt: ContainerOption, bopt: WidgetBehaviourOption) {
-        self.0.borrow_mut().begin_window(opt, bopt)
+    pub(crate) fn begin_window(&mut self, opt: ContainerOption, scroll_behavior: ScrollBehavior) {
+        self.0.borrow_mut().begin_window(opt, scroll_behavior)
     }
 
-    pub(crate) fn measure_auto_size(&mut self, results: &FrameResults, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
-        self.inner_mut().measure_auto_size(results, opt, bopt, tree)
+    pub(crate) fn measure_auto_size(&mut self, results: &FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
+        self.inner_mut().measure_auto_size(results, opt, scroll_behavior, tree)
     }
 
     pub(crate) fn end_window(&mut self) {

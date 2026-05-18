@@ -96,8 +96,8 @@ pub struct Node {
     pub font: FontChoice,
     /// Widget options applied to the node.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the node.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the node.
+    pub scroll_behavior: ScrollBehavior,
     kind: NodeKind,
 }
 
@@ -114,7 +114,7 @@ impl Node {
             state,
             font: FontChoice::default(),
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
             kind: NodeKind::Header,
         }
     }
@@ -126,7 +126,7 @@ impl Node {
             state,
             font: FontChoice::default(),
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
             kind: NodeKind::Tree,
         }
     }
@@ -143,7 +143,7 @@ impl Node {
             state,
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
             kind: NodeKind::Header,
         }
     }
@@ -155,7 +155,7 @@ impl Node {
             state,
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
             kind: NodeKind::Tree,
         }
     }
@@ -238,8 +238,8 @@ impl Widget for Node {
         &self.opt
     }
 
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-        &self.bopt
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

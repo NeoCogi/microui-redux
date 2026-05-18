@@ -83,7 +83,7 @@ impl Container {
         interaction_id: InteractionId,
         rect: Recti,
         opt: WidgetOption,
-        bopt: WidgetBehaviourOption,
+        scroll_behavior: ScrollBehavior,
         focus_policy: FocusPolicy,
     ) -> ControlState {
         let in_hover_root = self.interaction.in_hover_root;
@@ -118,7 +118,7 @@ impl Container {
         }
 
         let mut scroll = None;
-        if bopt.is_grab_scroll() && self.interaction.hover == Some(interaction_id) {
+        if scroll_behavior.is_grab_scroll() && self.interaction.hover == Some(interaction_id) {
             if let Some(delta) = self.interaction.pending_scroll {
                 if delta.x != 0 || delta.y != 0 {
                     self.interaction.pending_scroll = None;
@@ -149,9 +149,9 @@ impl Container {
         }
     }
 
-    pub(crate) fn update_control_with_opts(&mut self, widget_id: WidgetId, rect: Recti, opt: WidgetOption, bopt: WidgetBehaviourOption) -> ControlState {
+    pub(crate) fn update_control_with_opts(&mut self, widget_id: WidgetId, rect: Recti, opt: WidgetOption, scroll_behavior: ScrollBehavior) -> ControlState {
         let focus_policy = FocusPolicy::from_widget_options(opt);
-        self.update_control_for(InteractionId::widget(widget_id), rect, opt, bopt, focus_policy)
+        self.update_control_for(InteractionId::widget(widget_id), rect, opt, scroll_behavior, focus_policy)
     }
 
     #[inline(never)]
@@ -161,7 +161,7 @@ impl Container {
             InteractionId::widget(widget_id),
             rect,
             state.effective_widget_opt(),
-            state.effective_behaviour_opt(),
+            state.effective_scroll_behavior(),
             state.focus_policy(),
         )
     }

@@ -65,8 +65,8 @@ pub struct Textbox {
     pub font: FontChoice,
     /// Widget options applied to the textbox.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the textbox.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the textbox.
+    pub scroll_behavior: ScrollBehavior,
 }
 
 impl Textbox {
@@ -79,7 +79,7 @@ impl Textbox {
             cursor,
             font: FontChoice::default(),
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
@@ -92,7 +92,7 @@ impl Textbox {
             cursor,
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
@@ -239,8 +239,8 @@ impl Widget for Textbox {
         &self.opt
     }
 
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-        &self.bopt
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
