@@ -36,6 +36,8 @@ use microui_redux::*;
 use glow::*;
 use rs_math3d::{Vec3f, Vec4f};
 
+use super::mesh::{CustomRenderArea, MeshSubmission};
+
 // GL backend overview:
 // - Regular UI quads are accumulated into CPU-side vertex/index buffers and emitted in one batch
 //   from `flush`.
@@ -43,52 +45,6 @@ use rs_math3d::{Vec3f, Vec4f};
 //   first, then issue immediate GL commands so ordering stays correct without a larger command
 //   graph.
 // - The atlas texture is updated lazily whenever its change id advances.
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct MeshVertex {
-    pub position: [f32; 3],
-    pub normal: [f32; 3],
-    pub uv: [f32; 2],
-}
-
-#[derive(Clone)]
-pub struct MeshBuffers {
-    vertices: Arc<[MeshVertex]>,
-    indices: Arc<[u32]>,
-}
-
-impl MeshBuffers {
-    pub fn from_vecs(vertices: Vec<MeshVertex>, indices: Vec<u32>) -> Self {
-        Self {
-            vertices: vertices.into(),
-            indices: indices.into(),
-        }
-    }
-
-    pub fn vertices(&self) -> &[MeshVertex] {
-        &self.vertices
-    }
-    pub fn indices(&self) -> &[u32] {
-        &self.indices
-    }
-    pub fn is_empty(&self) -> bool {
-        self.vertices.is_empty() || self.indices.is_empty()
-    }
-}
-
-#[derive(Clone)]
-pub struct MeshSubmission {
-    pub mesh: MeshBuffers,
-    pub pvm: Mat4f,
-    pub view_model: Mat4f,
-}
-
-#[derive(Clone, Copy)]
-pub struct CustomRenderArea {
-    pub rect: Recti,
-    pub clip: Recti,
-}
 
 pub(crate) trait GLCustomRenderer {
     /// Records backend-specific GL commands inside the supplied logical/clip area.

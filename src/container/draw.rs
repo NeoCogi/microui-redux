@@ -53,6 +53,7 @@
 //! Draw-command recording helpers that operate on container-local state.
 
 use super::*;
+use crate::text_layout::{baseline_aligned_top, build_display_text_lines};
 
 impl Container {
     #[inline(never)]
@@ -254,17 +255,10 @@ impl Container {
             ui.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(line_height));
             let first_rect = ui.layout.next();
             let max_width = first_rect.width;
-            let mut lines = build_text_lines(text, wrap, max_width, font, &ui.atlas);
-            if text.ends_with('\n') {
-                if let Some(last) = lines.last() {
-                    if last.start == text.len() && last.end == text.len() {
-                        lines.pop();
-                    }
-                }
-            }
+            let lines = build_display_text_lines(text, wrap, max_width, font, &ui.atlas);
             for (idx, line) in lines.iter().enumerate() {
                 let r = if idx == 0 { first_rect } else { ui.layout.next() };
-                let line_top = Self::baseline_aligned_top(r, line_height, baseline);
+                let line_top = baseline_aligned_top(r, line_height, baseline);
                 let slice = &text[line.start..line.end];
                 if !slice.is_empty() {
                     ui.draw_text(font, slice, vec2(r.x, line_top), color);

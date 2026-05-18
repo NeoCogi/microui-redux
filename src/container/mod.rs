@@ -57,7 +57,6 @@
 use super::*;
 use crate::draw_context::DrawCtx;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
-use crate::text_layout::build_text_lines;
 use crate::widget::{FocusPolicy, InteractionId, WidgetId};
 use crate::widget_tree::{Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
 use std::cell::RefCell;
@@ -400,21 +399,5 @@ impl Container {
 
     fn clamp(x: i32, a: i32, b: i32) -> i32 {
         min(b, max(a, x))
-    }
-
-    // Baseline alignment is shared by text blocks and control labels.
-    fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32) -> i32 {
-        if rect.height >= line_height {
-            return rect.y + (rect.height - line_height) / 2;
-        }
-
-        let baseline_center = rect.y + rect.height / 2;
-        let min_top = rect.y + rect.height - line_height;
-        let max_top = rect.y;
-        Self::clamp(baseline_center - baseline, min_top, max_top)
-    }
-
-    fn vertical_text_padding(padding: i32) -> i32 {
-        max(1, padding / 2)
     }
 }

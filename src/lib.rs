@@ -51,6 +51,25 @@
 // IN THE SOFTWARE.
 //
 #![deny(missing_docs)]
+// `clippy::pedantic` is useful as an occasional review tool for this crate, but these categories
+// are intentionally outside the local lint profile. The UI/rendering path performs many bounded
+// pixel/UV casts, internal modules use crate preludes heavily, and the immediate-mode public API
+// should not grow `#[must_use]` or pedantic doc-section noise mechanically.
+#![allow(
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    clippy::module_name_repetitions,
+    clippy::must_use_candidate,
+    clippy::similar_names,
+    clippy::struct_field_names,
+    clippy::too_many_arguments,
+    clippy::wildcard_imports
+)]
 //! `microui-redux` provides a GUI toolkit inspired by [rxi/microui](https://github.com/rxi/microui).
 //! The crate uses retained [`WidgetTree`] values as the public UI authoring model while keeping Microui's
 //! compact frame-driven execution and renderer integration.

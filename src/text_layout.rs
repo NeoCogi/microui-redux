@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-use crate::{AtlasHandle, FontId, TextWrap};
+use crate::{vec2, AtlasHandle, Dimensioni, FontId, Recti, Style, TextWrap, Vec2i, WidgetOption};
 
 #[derive(Clone, Copy)]
 pub(crate) struct TextLine {
@@ -135,4 +135,49 @@ pub(crate) fn build_text_lines(buf: &str, wrap: TextWrap, max_width: i32, font: 
         lines.push(TextLine { start: 0, end: 0, width: 0 });
     }
     lines
+}
+
+pub(crate) fn build_display_text_lines(buf: &str, wrap: TextWrap, max_width: i32, font: FontId, atlas: &AtlasHandle) -> Vec<TextLine> {
+    let mut lines = build_text_lines(buf, wrap, max_width, font, atlas);
+    if buf.ends_with('\n') && lines.last().is_some_and(|last| last.start == buf.len() && last.end == buf.len()) {
+        lines.pop();
+    }
+    lines
+}
+
+pub(crate) fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32) -> i32 {
+    if rect.height >= line_height {
+        return rect.y + (rect.height - line_height) / 2;
+    }
+
+    let baseline_center = rect.y + rect.height / 2;
+    let min_top = rect.y + rect.height - line_height;
+    let max_top = rect.y;
+    (baseline_center - baseline).clamp(min_top, max_top)
+}
+
+pub(crate) fn vertical_text_padding(padding: i32) -> i32 {
+    (padding / 2).max(1)
+}
+
+pub(crate) fn text_block_size(lines: &[TextLine], line_height: i32) -> Dimensioni {
+    let width = lines.iter().map(|line| line.width).max().unwrap_or(0).max(0);
+    let height = line_height.saturating_mul((lines.len() as i32).max(1)).max(0);
+    Dimensioni::new(width, height)
+}
+
+pub(crate) fn control_text_position_with_font(style: &Style, atlas: &AtlasHandle, font: FontId, text: &str, rect: Recti, opt: WidgetOption) -> Vec2i {
+    let tsize = atlas.get_text_size(font, text);
+    let padding = style.padding;
+    let line_height = atlas.get_font_height(font) as i32;
+    let baseline = atlas.get_font_baseline(font);
+    let y = baseline_aligned_top(rect, line_height, baseline);
+    let x = if opt.is_aligned_center() {
+        rect.x + (rect.width - tsize.width) / 2
+    } else if opt.is_aligned_right() {
+        rect.x + rect.width - tsize.width - padding
+    } else {
+        rect.x + padding
+    };
+    vec2(x, y)
 }

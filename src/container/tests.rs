@@ -109,6 +109,34 @@ fn make_test_atlas() -> AtlasHandle {
     AtlasHandle::from(&source)
 }
 
+struct TestRenderer {
+    atlas: AtlasHandle,
+}
+
+impl Renderer for TestRenderer {
+    fn get_atlas(&self) -> AtlasHandle {
+        self.atlas.clone()
+    }
+
+    fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
+
+    fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {}
+
+    fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
+
+    fn flush(&mut self) {}
+
+    fn end(&mut self) {}
+
+    fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn destroy_texture(&mut self, _id: TextureId) {}
+
+    fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
+}
+
 fn make_container() -> Container {
     let atlas = make_test_atlas();
     let input = Rc::new(RefCell::new(Input::default()));
@@ -955,4 +983,126 @@ fn parent_widgets_are_only_blocked_while_mouse_is_inside_active_child_rect() {
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
     let free = parent.update_control(widget_id_of(&free_button), rect(60, 0, 30, 20), &free_button);
     assert!(free.hovered);
+}
+
+#[test]
+fn scoped_row_restores_template_but_preserves_cursor_advancement() {
+    let mut container = make_container();
+    begin_test_frame(&mut container, rect(0, 0, 120, 80));
+    container.layout.row(&[SizePolicy::Fixed(20), SizePolicy::Fixed(30)], SizePolicy::Fixed(10));
+
+    let first = container.layout.next();
+    let mut scoped = Vec::new();
+    container.with_row(&[SizePolicy::Fixed(15), SizePolicy::Fixed(15)], SizePolicy::Fixed(10), |ui| {
+        scoped.push(ui.layout.next());
+        scoped.push(ui.layout.next());
+    });
+    let after_scope = container.layout.next();
+    let next_after_scope = container.layout.next();
+
+    assert_eq!(first.width, 20);
+    assert_eq!(scoped[0].width, 15);
+    assert_eq!(scoped[1].width, 15);
+    assert_eq!(after_scope.width, 20);
+    assert_eq!(next_after_scope.width, 30);
+    assert_eq!(after_scope.y, scoped[0].y);
+    assert!(after_scope.x >= scoped[1].x + scoped[1].width + container.style().spacing);
+}
+
+#[test]
+fn scoped_stack_restores_previous_row_template_after_advancing_layout() {
+    let mut container = make_container();
+    begin_test_frame(&mut container, rect(0, 0, 120, 80));
+    container.layout.row(&[SizePolicy::Fixed(22), SizePolicy::Fixed(33)], SizePolicy::Fixed(10));
+
+    let mut stacked = Vec::new();
+    container.stack_with_width_direction(SizePolicy::Fixed(44), SizePolicy::Fixed(8), StackDirection::TopToBottom, |ui| {
+        stacked.push(ui.layout.next());
+        stacked.push(ui.layout.next());
+    });
+    let after_scope = container.layout.next();
+    let next_after_scope = container.layout.next();
+
+    assert_eq!(stacked[0].width, 44);
+    assert_eq!(stacked[1].width, 44);
+    assert_eq!(after_scope.width, 22);
+    assert_eq!(next_after_scope.width, 33);
+    assert!(after_scope.y >= stacked[1].y + stacked[1].height + container.style().spacing);
+}
+
+#[test]
+fn retained_image_button_emits_separate_image_and_text_commands() {
+    let mut container = make_container();
+    let texture = TextureId::new(42, 13, 5);
+    let button = widget_handle(Button::with_image(
+        "aa",
+        Some(Image::Texture(texture)),
+        WidgetOption::NONE,
+        WidgetFillOption::ALL,
+    ));
+    let mut results = FrameResults::default();
+    let mut button_node = NodeId::new(0);
+
+    begin_test_frame(&mut container, rect(0, 0, 120, 40));
+    let tree = WidgetTreeBuilder::build(|tree| {
+        button_node = tree.widget(button.clone());
+    });
+    container.widget_tree(&mut results, &tree);
+
+    let layout = container.current_node_layout(button_node).expect("button layout missing");
+    let padding = container.style().padding;
+    assert_eq!(layout.rect.width, padding * 2 + texture.width() + padding + 16);
+    assert_eq!(layout.rect.height, 14);
+
+    let image_rect = container
+        .draw
+        .commands
+        .iter()
+        .find_map(|cmd| match cmd {
+            Command::Image { rect, image: Image::Texture(id), .. } if *id == texture => Some(*rect),
+            _ => None,
+        })
+        .expect("image command missing");
+    let text_pos = container
+        .draw
+        .commands
+        .iter()
+        .find_map(|cmd| match cmd {
+            Command::Text { text, pos, .. } if text == "aa" => Some(*pos),
+            _ => None,
+        })
+        .expect("text command missing");
+
+    assert!(image_rect.x + image_rect.width <= text_pos.x);
+}
+
+#[test]
+fn retained_custom_render_callback_receives_content_clipped_view() {
+    let mut container = make_container();
+    let custom = widget_handle(Custom::new("custom"));
+    let observed = Rc::new(RefCell::new(None));
+    let observed_for_render = observed.clone();
+    let mut results = FrameResults::default();
+
+    begin_test_frame(&mut container, rect(0, 0, 120, 40));
+    container.push_clip_rect(rect(8, 8, 16, 8));
+    let tree = WidgetTreeBuilder::build(move |tree| {
+        tree.custom_render_with(NodeOptions::with_policy(Policy::fixed(40, 20)), custom.clone(), move |_dim, args| {
+            *observed_for_render.borrow_mut() = Some((args.content_area, args.view));
+        });
+    });
+    container.widget_tree(&mut results, &tree);
+    container.pop_clip_rect();
+
+    let mut canvas = Canvas::from(RendererHandle::new(TestRenderer { atlas: container.atlas.clone() }), Dimensioni::new(120, 40));
+    container.render(&mut canvas);
+
+    let (content_area, view) = observed.borrow().as_ref().copied().expect("custom render callback was not invoked");
+    let expected_view = content_area.intersect(&rect(8, 8, 16, 8)).unwrap();
+    assert_eq!(content_area.width, 40);
+    assert_eq!(content_area.height, 20);
+    assert_eq!(
+        (view.x, view.y, view.width, view.height),
+        (expected_view.x, expected_view.y, expected_view.width, expected_view.height)
+    );
 }

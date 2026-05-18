@@ -44,7 +44,8 @@
 //! allocate their own per-batch vertex vectors.
 
 use crate::container::Command;
-use crate::draw_context::{control_text_position_with_font, intersect_clip_rect, DrawCtx};
+use crate::draw_context::{intersect_clip_rect, DrawCtx};
+use crate::text_layout::control_text_position_with_font;
 use crate::*;
 use std::rc::Rc;
 
@@ -551,12 +552,7 @@ impl<'a, 'b> Graphics<'a, 'b> {
     pub fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
         let color = self.draw.style().colors[colorid as usize];
         self.draw_rect(rect, color);
-        if colorid == ControlColor::ScrollBase || colorid == ControlColor::ScrollThumb || colorid == ControlColor::TitleBG {
-            return;
-        }
-
-        let border = self.draw.style().colors[ControlColor::Border as usize];
-        if border.a != 0 {
+        if let Some(border) = self.draw.style().frame_border_color(colorid) {
             self.draw_box(expand_rect(rect, 1), border);
         }
     }

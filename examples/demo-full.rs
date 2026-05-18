@@ -53,13 +53,22 @@
 #[path = "./common/mod.rs"]
 mod common;
 
-use common::{application::Application, application::BackendInitContext, atlas_assets, camera::Camera, obj_loader::Obj, polymesh::PolyMesh, view3d::View3D};
+use common::{
+    application::Application,
+    application::BackendInitContext,
+    atlas_assets,
+    camera::Camera,
+    mesh::{CustomRenderArea, MeshBuffers, MeshSubmission, MeshVertex},
+    obj_loader::Obj,
+    polymesh::PolyMesh,
+    view3d::View3D,
+};
 #[cfg(feature = "example-glow")]
-use common::glow_renderer::{CustomRenderArea, GLRenderer as BackendRenderer, MeshBuffers, MeshSubmission, MeshVertex};
+use common::glow_renderer::GLRenderer as BackendRenderer;
 #[cfg(all(not(feature = "example-glow"), feature = "example-vulkan"))]
-use common::vulkan_renderer::{CustomRenderArea, MeshBuffers, MeshSubmission, MeshVertex, VulkanRenderer as BackendRenderer};
+use common::vulkan_renderer::VulkanRenderer as BackendRenderer;
 #[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
-use common::wgpu_renderer::{CustomRenderArea, MeshBuffers, MeshSubmission, MeshVertex, WgpuRenderer as BackendRenderer};
+use common::wgpu_renderer::WgpuRenderer as BackendRenderer;
 #[cfg(feature = "builder")]
 use microui_redux::builder;
 use microui_redux::*;
@@ -677,7 +686,7 @@ impl Widget for FalloffEditor {
     }
 }
 
-struct SuzaneData {
+struct SuzanneData {
     view_3d: View3D,
     mesh: MeshBuffers,
 }
@@ -719,7 +728,7 @@ struct State {
     triangle_window: Option<WindowHandle>,
     graphics_window: Option<WindowHandle>,
     falloff_window: Option<WindowHandle>,
-    suzane_window: Option<WindowHandle>,
+    suzanne_window: Option<WindowHandle>,
     stack_direction_window: Option<WindowHandle>,
     weight_window: Option<WindowHandle>,
     dialog_window: Option<FileDialogState>,
@@ -756,11 +765,11 @@ struct State {
     open_dialog: bool,
     white_uv: Vec2f,
     triangle_data: Arc<RwLock<TriangleState>>,
-    suzane_data: Arc<RwLock<SuzaneData>>,
+    suzanne_data: Arc<RwLock<SuzanneData>>,
     triangle_widget: WidgetHandle<Custom>,
     graphics_widget: WidgetHandle<GraphicsDemo>,
     falloff_widget: WidgetHandle<FalloffEditor>,
-    suzane_widget: WidgetHandle<Custom>,
+    suzanne_widget: WidgetHandle<Custom>,
     background_swatch: WidgetHandle<ColorSwatch>,
     style_tree: WidgetTree,
     log_tree: WidgetTree,
@@ -768,7 +777,7 @@ struct State {
     triangle_tree: WidgetTree,
     graphics_tree: WidgetTree,
     falloff_tree: WidgetTree,
-    suzane_tree: WidgetTree,
+    suzanne_tree: WidgetTree,
     stack_direction_tree: WidgetTree,
     weight_tree: WidgetTree,
     demo_tree: WidgetTree,
@@ -793,13 +802,13 @@ impl State {
         });
 
         let triangle_data = Arc::new(RwLock::new(TriangleState { angle: 0.0 }));
-        let suzane_path = demo_asset_path("assets/suzane.obj");
-        let suzane_bytes = fs::read(&suzane_path).unwrap_or_else(|err| panic!("Failed to read {}: {err}", suzane_path.display()));
-        let pm_suzane = Obj::from_byte_stream(suzane_bytes.as_slice())
-            .unwrap_or_else(|err| panic!("Failed to parse {}: {err}", suzane_path.display()))
+        let suzanne_path = demo_asset_path("assets/suzanne.obj");
+        let suzanne_bytes = fs::read(&suzanne_path).unwrap_or_else(|err| panic!("Failed to read {}: {err}", suzanne_path.display()));
+        let pm_suzanne = Obj::from_byte_stream(suzanne_bytes.as_slice())
+            .unwrap_or_else(|err| panic!("Failed to parse {}: {err}", suzanne_path.display()))
             .to_polymesh();
-        let bounds = pm_suzane.calculate_bounding_box();
-        let mesh_buffers = build_mesh_buffers(&pm_suzane);
+        let bounds = pm_suzanne.calculate_bounding_box();
+        let mesh_buffers = build_mesh_buffers(&pm_suzanne);
         let view_3d = View3D::new(
             Camera::new(
                 bounds.center(),
@@ -813,7 +822,7 @@ impl State {
             Dimension::new(600, 600),
             bounds,
         );
-        let suzane_data = Arc::new(RwLock::new(SuzaneData { view_3d, mesh: mesh_buffers }));
+        let suzanne_data = Arc::new(RwLock::new(SuzanneData { view_3d, mesh: mesh_buffers }));
 
         let rng = Rc::new(RefCell::new(rng()));
         let green_paint: Rc<dyn Fn(usize, usize) -> Color4b> = Rc::new(|_x, _y| color4b(0x00, 0xFF, 0x00, 0xFF));
@@ -947,7 +956,7 @@ impl State {
             triangle_window: Some(ctx.new_window("Triangle Window", rect(200, 100, 200, 200))),
             graphics_window: Some(ctx.new_window("Graphics Window", rect(820, 40, 280, 240))),
             falloff_window: Some(ctx.new_window("Brush Falloff", rect(820, 300, 320, 260))),
-            suzane_window: Some(ctx.new_window("Suzane Window", rect(220, 220, 300, 300))),
+            suzanne_window: Some(ctx.new_window("Suzanne Window", rect(220, 220, 300, 300))),
             stack_direction_window: Some(ctx.new_window("Stack Direction Demo", rect(530, 40, 280, 220))),
             weight_window: Some(ctx.new_window("Weight Demo", rect(530, 270, 280, 260))),
             dialog_window: Some(FileDialogState::new(ctx)),
@@ -1020,11 +1029,11 @@ impl State {
             open_dialog: false,
             white_uv,
             triangle_data,
-            suzane_data,
+            suzanne_data,
             triangle_widget: widget_handle(Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS, ScrollBehavior::NONE)),
             graphics_widget: widget_handle(GraphicsDemo::new()),
             falloff_widget: widget_handle(FalloffEditor::new()),
-            suzane_widget: widget_handle(Custom::with_opt("Suzane", WidgetOption::HOLD_FOCUS, ScrollBehavior::GRAB_SCROLL)),
+            suzanne_widget: widget_handle(Custom::with_opt("Suzanne", WidgetOption::HOLD_FOCUS, ScrollBehavior::GRAB_SCROLL)),
             background_swatch: widget_handle(ColorSwatch::new(color(90, 95, 100, 0xFF))),
             style_tree: WidgetTree::default(),
             log_tree: WidgetTree::default(),
@@ -1032,7 +1041,7 @@ impl State {
             triangle_tree: WidgetTree::default(),
             graphics_tree: WidgetTree::default(),
             falloff_tree: WidgetTree::default(),
-            suzane_tree: WidgetTree::default(),
+            suzanne_tree: WidgetTree::default(),
             stack_direction_tree: WidgetTree::default(),
             weight_tree: WidgetTree::default(),
             demo_tree: WidgetTree::default(),
@@ -1152,24 +1161,24 @@ impl State {
             });
         });
 
-        let suzane_widget = self.suzane_widget.clone();
-        let suzane_data = self.suzane_data.clone();
+        let suzanne_widget = self.suzanne_widget.clone();
+        let suzanne_data = self.suzanne_data.clone();
         let renderer = self.renderer.clone();
-        self.suzane_tree = WidgetTreeBuilder::build(move |tree| {
+        self.suzanne_tree = WidgetTreeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                let suzane_data = suzane_data.clone();
+                let suzanne_data = suzanne_data.clone();
                 let renderer = renderer.clone();
-                tree.custom_render(suzane_widget.clone(), move |_dim, cra| {
+                tree.custom_render(suzanne_widget.clone(), move |_dim, cra| {
                     if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                         return;
                     }
-                    if let Ok(mut suzane) = suzane_data.write() {
-                        suzane.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
-                        let _ = suzane.view_3d.update(cra.mouse_event);
+                    if let Ok(mut suzanne) = suzanne_data.write() {
+                        suzanne.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
+                        let _ = suzanne.view_3d.update(cra.mouse_event);
                         if let Some(delta) = cra.scroll_delta {
                             let axis = if delta.y != 0 { delta.y } else { delta.x };
                             if axis != 0 {
-                                suzane.view_3d.apply_scroll(axis as f32);
+                                suzanne.view_3d.apply_scroll(axis as f32);
                             }
                         }
                         if !matches!(cra.mouse_event, MouseEvent::Drag { .. }) && cra.scroll_delta.is_none() {
@@ -1190,15 +1199,15 @@ impl State {
                             if delta.x != 0 || delta.y != 0 {
                                 let center = Vec2i::new(cra.content_area.width / 2, cra.content_area.height / 2);
                                 let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
-                                suzane.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
+                                suzanne.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
                             }
                             for ch in cra.text_input.chars() {
                                 match ch {
                                     'w' | 'W' => {
-                                        let _ = suzane.view_3d.apply_scroll(-0.5);
+                                        let _ = suzanne.view_3d.apply_scroll(-0.5);
                                     }
                                     's' | 'S' => {
-                                        let _ = suzane.view_3d.apply_scroll(0.5);
+                                        let _ = suzanne.view_3d.apply_scroll(0.5);
                                     }
                                     _ => {}
                                 }
@@ -1207,9 +1216,9 @@ impl State {
 
                         let area = area_from_args(cra);
                         let submission = MeshSubmission {
-                            mesh: suzane.mesh.clone(),
-                            pvm: suzane.view_3d.pvm(),
-                            view_model: suzane.view_3d.view_matrix(),
+                            mesh: suzanne.mesh.clone(),
+                            pvm: suzanne.view_3d.pvm(),
+                            view_model: suzanne.view_3d.view_matrix(),
                         };
                         let mut renderer = renderer.clone();
                         renderer.scope_mut(|r| {
@@ -1593,15 +1602,15 @@ impl State {
         );
     }
 
-    fn suzane_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        if self.suzane_window.is_none() {
+    fn suzanne_window(&mut self, ctx: &mut Context<BackendRenderer>) {
+        if self.suzanne_window.is_none() {
             return;
         }
         ctx.window(
-            &mut self.suzane_window.as_mut().unwrap().clone(),
+            &mut self.suzanne_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
             ScrollBehavior::NONE,
-            &self.suzane_tree,
+            &self.suzanne_tree,
         );
     }
 
@@ -1899,7 +1908,7 @@ impl State {
             self.triangle_window(ctx);
             self.graphics_window(ctx);
             self.falloff_window(ctx);
-            self.suzane_window(ctx);
+            self.suzanne_window(ctx);
             self.stack_direction_window(ctx);
             self.weight_window(ctx);
         })

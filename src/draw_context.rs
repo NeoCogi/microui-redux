@@ -51,8 +51,8 @@
 // IN THE SOFTWARE.
 //
 use crate::container::Command;
+use crate::text_layout::control_text_position_with_font;
 use crate::*;
-use std::cmp::{max, min};
 
 /// Returns the intersection of `rect` with `limit`, defaulting to an empty rect when disjoint.
 pub(crate) fn intersect_clip_rect(limit: Recti, rect: Recti) -> Recti {
@@ -82,46 +82,6 @@ pub(crate) struct DrawCtx<'a> {
     clip_stack: &'a mut Vec<Recti>,
     style: &'a Style,
     atlas: &'a AtlasHandle,
-}
-
-/// Returns the top-aligned y coordinate that best preserves the font baseline inside `rect`.
-///
-/// Widgets and the graphics builder both use this to keep single-line labels visually centered
-/// without letting a short control crop the ascent or descent unevenly.
-pub(crate) fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32) -> i32 {
-    if rect.height >= line_height {
-        return rect.y + (rect.height - line_height) / 2;
-    }
-
-    let baseline_center = rect.y + rect.height / 2;
-    let min_top = rect.y + rect.height - line_height;
-    let max_top = rect.y;
-    clamp_i32(baseline_center - baseline, min_top, max_top)
-}
-
-#[inline]
-fn clamp_i32(x: i32, a: i32, b: i32) -> i32 {
-    min(b, max(a, x))
-}
-
-/// Computes the text origin for one control label inside `rect`.
-///
-/// The returned point is in the same coordinate space as `rect`, which lets both `DrawCtx` and
-/// `Graphics` reuse the exact same centering and padding rules.
-pub(crate) fn control_text_position_with_font(style: &Style, atlas: &AtlasHandle, font: FontId, text: &str, rect: Recti, opt: WidgetOption) -> Vec2i {
-    let tsize = atlas.get_text_size(font, text);
-    let padding = style.padding;
-    let line_height = atlas.get_font_height(font) as i32;
-    let baseline = atlas.get_font_baseline(font);
-    let y = baseline_aligned_top(rect, line_height, baseline);
-    let x = if opt.is_aligned_center() {
-        rect.x + (rect.width - tsize.width) / 2
-    } else if opt.is_aligned_right() {
-        rect.x + rect.width - tsize.width - padding
-    } else {
-        rect.x + padding
-    };
-    vec2(x, y)
 }
 
 impl<'a> DrawCtx<'a> {
@@ -284,11 +244,7 @@ impl<'a> DrawCtx<'a> {
     pub(crate) fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
         let color = self.style.colors[colorid as usize];
         self.draw_rect(rect, color);
-        if colorid == ControlColor::ScrollBase || colorid == ControlColor::ScrollThumb || colorid == ControlColor::TitleBG {
-            return;
-        }
-        let border_color = self.style.colors[ControlColor::Border as usize];
-        if border_color.a != 0 {
+        if let Some(border_color) = self.style.frame_border_color(colorid) {
             self.draw_box(expand_rect(rect, 1), border_color);
         }
     }

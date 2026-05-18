@@ -209,9 +209,10 @@ impl Container {
         let key_mods = if active { input_ref.key_mods } else { KeyMode::NONE };
         let key_codes = if active { input_ref.key_codes } else { KeyCode::NONE };
         let text_input = if active { input_ref.text_input.clone() } else { String::new() };
+        let view = self.get_clip_rect().intersect(&rect).unwrap_or_else(|| Recti::new(rect.x, rect.y, 0, 0));
         let cra = CustomRenderArgs {
             content_area: rect,
-            view: self.get_clip_rect(),
+            view,
             mouse_event,
             scroll_delta: control.scroll_delta,
             widget_opt: opt,
