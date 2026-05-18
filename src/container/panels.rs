@@ -240,7 +240,7 @@ impl Container {
         self.layout.reset(expand_rect(body, layout_padding), scroll);
         self.layout.style = style_clone;
         let font_height = self.atlas.get_font_height(font) as i32;
-        let vertical_pad = Self::vertical_text_padding(style_padding);
+        let vertical_pad = crate::text_layout::vertical_text_padding(style_padding);
         let icon_height = self.atlas.get_icon_size(EXPAND_DOWN_ICON).height;
         let default_height = max(font_height + vertical_pad * 2, icon_height);
         self.layout.set_default_cell_height(default_height);

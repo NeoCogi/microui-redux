@@ -18,7 +18,7 @@ $ cargo run --example demo-full --features example-wgpu     # WGPU backend
 `example-backend` is only a shared gate for example code paths; it is **not** runnable by itself.
 Running with only `--features example-backend` will fail intentionally at compile time.
 
-`demo-full` now loads `examples/FACEPALM.png` and `assets/suzane.obj` from disk at runtime (no `include_bytes!` for those files).
+`demo-full` now loads `examples/FACEPALM.png` and `assets/suzanne.obj` from disk at runtime (no `include_bytes!` for those files).
 
 For a smaller release executable, use nightly + rebuilt `std`:
 ```bash

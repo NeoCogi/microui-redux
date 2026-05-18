@@ -51,31 +51,8 @@
 // IN THE SOFTWARE.
 //
 
-use crate::text_layout::build_text_lines;
+use crate::text_layout::{baseline_aligned_top, build_display_text_lines, text_block_size};
 use crate::*;
-
-fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32) -> i32 {
-    if rect.height >= line_height {
-        return rect.y + (rect.height - line_height) / 2;
-    }
-
-    let baseline_center = rect.y + rect.height / 2;
-    let min_top = rect.y + rect.height - line_height;
-    let max_top = rect.y;
-    (baseline_center - baseline).clamp(min_top, max_top)
-}
-
-fn text_lines<'a>(text: &'a str, wrap: TextWrap, max_width: i32, font: FontId, atlas: &AtlasHandle) -> Vec<crate::text_layout::TextLine> {
-    let mut lines = build_text_lines(text, wrap, max_width, font, atlas);
-    if text.ends_with('\n') {
-        if let Some(last) = lines.last() {
-            if last.start == text.len() && last.end == text.len() {
-                lines.pop();
-            }
-        }
-    }
-    lines
-}
 
 #[derive(Clone)]
 /// Non-interactive retained text block that can optionally wrap.
@@ -121,10 +98,8 @@ impl TextBlock {
         } else {
             i32::MAX / 4
         };
-        let lines = text_lines(self.text.as_str(), self.wrap, max_width, font, atlas);
-        let width = lines.iter().map(|line| line.width).max().unwrap_or(0).max(0);
-        let height = line_height.saturating_mul((lines.len() as i32).max(1)).max(0);
-        Dimensioni::new(width, height)
+        let lines = build_display_text_lines(self.text.as_str(), self.wrap, max_width, font, atlas);
+        text_block_size(&lines, line_height)
     }
 
     fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
@@ -138,7 +113,7 @@ impl TextBlock {
         let line_height = ctx.atlas().get_font_height(font) as i32;
         let baseline = ctx.atlas().get_font_baseline(font);
         let max_width = if self.wrap == TextWrap::Word { bounds.width.max(1) } else { i32::MAX / 4 };
-        let lines = text_lines(self.text.as_str(), self.wrap, max_width, font, ctx.atlas());
+        let lines = build_display_text_lines(self.text.as_str(), self.wrap, max_width, font, ctx.atlas());
 
         ctx.push_clip_rect(bounds);
         for (idx, line) in lines.iter().enumerate() {

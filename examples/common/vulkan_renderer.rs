@@ -43,12 +43,14 @@
 //   across window resizes.
 //
 
-use std::{collections::HashMap, convert::TryFrom, ffi::CString, io::Cursor, mem, ptr, sync::Arc};
+use std::{collections::HashMap, convert::TryFrom, ffi::CString, io::Cursor, mem, ptr};
 
 use ash::{khr, util::read_spv, vk, Entry};
 use microui_redux::*;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use sdl2::video::Window;
+
+use super::mesh::{CustomRenderArea, MeshSubmission, MeshVertex};
 
 type Result<T> = std::result::Result<T, String>;
 type Surface = khr::surface::Instance;
@@ -546,52 +548,6 @@ struct ImageResource {
     extent: vk::Extent2D,
     format: vk::Format,
     layout: vk::ImageLayout,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct MeshVertex {
-    pub position: [f32; 3],
-    pub normal: [f32; 3],
-    pub uv: [f32; 2],
-}
-
-#[derive(Clone)]
-pub struct MeshBuffers {
-    vertices: Arc<[MeshVertex]>,
-    indices: Arc<[u32]>,
-}
-
-impl MeshBuffers {
-    pub fn from_vecs(vertices: Vec<MeshVertex>, indices: Vec<u32>) -> Self {
-        Self {
-            vertices: vertices.into(),
-            indices: indices.into(),
-        }
-    }
-
-    pub fn vertices(&self) -> &[MeshVertex] {
-        &self.vertices
-    }
-    pub fn indices(&self) -> &[u32] {
-        &self.indices
-    }
-    pub fn is_empty(&self) -> bool {
-        self.vertices.is_empty() || self.indices.is_empty()
-    }
-}
-
-#[derive(Clone)]
-pub struct MeshSubmission {
-    pub mesh: MeshBuffers,
-    pub pvm: Mat4f,
-    pub view_model: Mat4f,
-}
-
-#[derive(Clone, Copy)]
-pub struct CustomRenderArea {
-    pub rect: Recti,
-    pub clip: Recti,
 }
 
 pub(crate) trait VulkanCustomRenderer: Send {

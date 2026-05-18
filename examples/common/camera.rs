@@ -66,7 +66,7 @@ impl Camera {
         }
     }
 
-    pub fn tracball_rotate(&self, viewport: Dimensioni, from: &Vec2f, to: &Vec2f) -> Self {
+    pub fn trackball_rotate(&self, viewport: Dimensioni, from: &Vec2f, to: &Vec2f) -> Self {
         if (*to - *from).length().abs() == 0.0 {
             return *self;
         }

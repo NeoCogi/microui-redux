@@ -84,7 +84,7 @@ impl View3D {
                 let p = self.normalize_pointer_pos(&prev);
                 let c = self.normalize_pointer_pos(&curr);
 
-                self.camera = self.camera.tracball_rotate(self.dimension, &p, &c);
+                self.camera = self.camera.trackball_rotate(self.dimension, &p, &c);
                 UpdateResult::Handled
             }
 

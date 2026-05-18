@@ -56,6 +56,9 @@ use super::*;
 
 impl Container {
     /// Temporarily overrides the row definition and restores it after `f` executes.
+    ///
+    /// Only the flow template is restored. Children emitted inside the scope still advance the
+    /// parent cursor/content extents, so the next sibling starts after the scoped children.
     pub(crate) fn with_row<F: FnOnce(&mut Self)>(&mut self, widths: &[SizePolicy], height: SizePolicy, f: F) {
         let snapshot = self.layout.snapshot_flow_state();
         self.layout.row(widths, height);
@@ -65,7 +68,9 @@ impl Container {
 
     /// Temporarily overrides the layout with explicit column and row tracks and restores it after `f`.
     ///
-    /// Widgets are emitted row-major within the provided track matrix.
+    /// Widgets are emitted row-major within the provided track matrix. Like [`Container::with_row`],
+    /// this restores the active flow template but preserves cursor/content advancement caused by
+    /// emitted children.
     pub(crate) fn with_grid<F: FnOnce(&mut Self)>(&mut self, widths: &[SizePolicy], heights: &[SizePolicy], f: F) {
         let snapshot = self.layout.snapshot_flow_state();
         self.layout.grid(widths, heights);
@@ -73,7 +78,10 @@ impl Container {
         self.layout.restore_flow_state(snapshot);
     }
 
-    /// Same as [`Container::stack_with_width`], but controls whether items are emitted top-down or bottom-up.
+    /// Temporarily uses a stack flow and controls whether items are emitted top-down or bottom-up.
+    ///
+    /// The stack template is restored after the closure while the cells emitted inside the closure
+    /// remain part of the parent layout's consumed content.
     pub(crate) fn stack_with_width_direction<F: FnOnce(&mut Self)>(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: F) {
         let snapshot = self.layout.snapshot_flow_state();
         if direction == StackDirection::TopToBottom {

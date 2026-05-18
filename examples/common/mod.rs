@@ -72,6 +72,7 @@ pub mod vulkan_renderer;
 pub mod wgpu_renderer;
 
 pub mod camera;
+pub mod mesh;
 pub mod obj_loader;
 pub mod polymesh;
 pub mod view3d;

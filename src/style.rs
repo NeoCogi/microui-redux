@@ -304,6 +304,21 @@ impl FontChoice {
 }
 
 impl Style {
+    /// Returns the border color used when a frame painted with `fill` should receive an outline.
+    ///
+    /// Some built-in color roles, such as scrollbars and title bars, are deliberately flat. Keeping
+    /// that frame metadata on the style keeps generic draw code from knowing which widget emitted
+    /// the frame.
+    pub fn frame_border_color(&self, fill: crate::ControlColor) -> Option<Color> {
+        match fill {
+            crate::ControlColor::ScrollBase | crate::ControlColor::ScrollThumb | crate::ControlColor::TitleBG => None,
+            _ => {
+                let color = self.colors[crate::ControlColor::Border as usize];
+                if color.a == 0 { None } else { Some(color) }
+            }
+        }
+    }
+
     /// Returns the concrete font ID for the provided semantic role.
     pub fn resolve_font_role(&self, role: FontRole) -> FontId {
         match role {
@@ -494,5 +509,15 @@ mod tests {
         style.font = explicit_title;
         style.bind_default_named_fonts(&atlas);
         assert_eq!(style.font, explicit_title);
+    }
+
+    #[test]
+    fn frame_border_policy_keeps_flat_roles_borderless() {
+        let style = Style::default();
+
+        assert!(style.frame_border_color(crate::ControlColor::Button).is_some());
+        assert!(style.frame_border_color(crate::ControlColor::ScrollBase).is_none());
+        assert!(style.frame_border_color(crate::ControlColor::ScrollThumb).is_none());
+        assert!(style.frame_border_color(crate::ControlColor::TitleBG).is_none());
     }
 }
