@@ -207,8 +207,6 @@ bitflags! {
         const NO_RESIZE = 16;
         /// Hides the outer frame.
         const NO_FRAME = 8;
-        /// Reserved for future use (currently unused by the container).
-        const NO_INTERACT = 4;
         /// No special options.
         const NONE = 0;
     }
@@ -245,9 +243,9 @@ bitflags! {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-/// Behaviour options that control how widgets and containers handle input side effects.
-pub enum WidgetBehaviourOption {
-    /// No special behaviour.
+/// Scroll behavior requested by a widget or container.
+pub enum ScrollBehavior {
+    /// Use the default container scroll handling.
     None,
     /// Consume pending scroll when the widget is hovered.
     GrabScroll,
@@ -255,8 +253,8 @@ pub enum WidgetBehaviourOption {
     NoScroll,
 }
 
-impl WidgetBehaviourOption {
-    /// No special behaviour.
+impl ScrollBehavior {
+    /// Use the default container scroll handling.
     pub const NONE: Self = Self::None;
     /// Consume pending scroll when the widget is hovered.
     pub const GRAB_SCROLL: Self = Self::GrabScroll;
@@ -273,6 +271,10 @@ impl WidgetBehaviourOption {
         matches!(self, Self::NoScroll)
     }
 }
+
+/// Deprecated alias for the pre-rename scroll behavior type.
+#[deprecated(since = "0.6.1", note = "use ScrollBehavior")]
+pub type WidgetBehaviourOption = ScrollBehavior;
 
 #[derive(Copy, Clone, Default, Debug)]
 /// Captures the interaction state for a widget during the current frame.

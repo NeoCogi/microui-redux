@@ -205,14 +205,14 @@ mod tests {
         let atlas = make_test_atlas();
         let input = Rc::new(RefCell::new(Input::default()));
         let handle = ContainerHandle::new(Container::new("panel", atlas, Rc::new(Style::default()), input));
-        let leaf = widget_handle((crate::WidgetOption::NONE, crate::WidgetBehaviourOption::NONE));
+        let leaf = widget_handle((crate::WidgetOption::NONE, crate::ScrollBehavior::NONE));
 
         let tree = WidgetTreeBuilder::build(|builder| {
             builder.container_with(
                 NodeOptions::with_policy(Policy::fill()),
                 handle.clone(),
                 crate::ContainerOption::NONE,
-                crate::WidgetBehaviourOption::NONE,
+                crate::ScrollBehavior::NONE,
                 |builder| {
                     builder.widget(leaf.clone());
                 },

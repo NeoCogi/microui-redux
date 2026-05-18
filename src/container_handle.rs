@@ -60,7 +60,7 @@ use std::{
 use crate::canvas::Canvas;
 use crate::container::Container;
 use crate::render::Renderer;
-use crate::{Clip, Color, ContainerOption, ControlColor, Dimensioni, FontId, IconId, Recti, SlotId, TextWrap, Vec2i, WidgetBehaviourOption, WidgetId, WidgetOption};
+use crate::{Clip, Color, ContainerOption, ControlColor, Dimensioni, FontId, IconId, Recti, SlotId, TextWrap, Vec2i, ScrollBehavior, WidgetId, WidgetOption};
 
 pub(crate) type ContainerId = *const ();
 
@@ -243,8 +243,8 @@ impl<'a> ContainerViewMut<'a> {
     }
 
     /// Configures the body rectangle for standalone panel-style drawing.
-    pub fn push_container_body(&mut self, body: Recti, opt: ContainerOption, bopt: WidgetBehaviourOption) {
-        self.inner.push_container_body(body, opt, bopt);
+    pub fn push_container_body(&mut self, body: Recti, opt: ContainerOption, scroll_behavior: ScrollBehavior) {
+        self.inner.push_container_body(body, opt, scroll_behavior);
     }
 }
 

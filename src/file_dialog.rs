@@ -223,7 +223,7 @@ impl FileDialogState {
             });
 
             tree.row(&pane_widths, SizePolicy::Remainder(footer_reserved), |tree| {
-                tree.container(folder_panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                tree.container(folder_panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                         tree.widget(folders_label.clone());
                         for item in &folder_items {
@@ -235,7 +235,7 @@ impl FileDialogState {
                     });
                 });
 
-                tree.container(file_panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                tree.container(file_panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                         tree.widget(files_label.clone());
                         for item in &file_items {
@@ -279,7 +279,7 @@ impl FileDialogState {
     }
 
     fn render<R: Renderer>(&mut self, ctx: &mut Context<R>) {
-        ctx.dialog(&mut self.win, ContainerOption::NONE, WidgetBehaviourOption::NO_SCROLL, &self.tree);
+        ctx.dialog(&mut self.win, ContainerOption::NONE, ScrollBehavior::NO_SCROLL, &self.tree);
     }
 
     fn apply_navigation_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {

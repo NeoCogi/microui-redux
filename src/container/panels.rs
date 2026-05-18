@@ -162,7 +162,7 @@ impl Container {
         if maxscroll_y > 0 && body.height > 0 {
             let scrollbar_y_id = widget_id_of(&self.scrollbar_y_state);
             let base = scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size);
-            let control = self.update_control_with_opts(scrollbar_y_id, base, self.scrollbar_y_state.opt, self.scrollbar_y_state.bopt);
+            let control = self.update_control_with_opts(scrollbar_y_id, base, self.scrollbar_y_state.opt, self.scrollbar_y_state.scroll_behavior);
             {
                 let mut ctx = WidgetCtx::new(
                     scrollbar_y_id,
@@ -194,7 +194,7 @@ impl Container {
         if maxscroll_x > 0 && body.width > 0 {
             let scrollbar_x_id = widget_id_of(&self.scrollbar_x_state);
             let base = scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size);
-            let control = self.update_control_with_opts(scrollbar_x_id, base, self.scrollbar_x_state.opt, self.scrollbar_x_state.bopt);
+            let control = self.update_control_with_opts(scrollbar_x_id, base, self.scrollbar_x_state.opt, self.scrollbar_x_state.scroll_behavior);
             {
                 let mut ctx = WidgetCtx::new(
                     scrollbar_x_id,
@@ -226,9 +226,9 @@ impl Container {
     }
 
     /// Configures layout state for the container's client area without drawing.
-    pub(crate) fn configure_container_body(&mut self, body: Recti, bopt: WidgetBehaviourOption) {
+    pub(crate) fn configure_container_body(&mut self, body: Recti, scroll_behavior: ScrollBehavior) {
         let mut body = body;
-        self.scroll_enabled = !bopt.is_no_scroll();
+        self.scroll_enabled = !scroll_behavior.is_no_scroll();
         if self.scroll_enabled {
             self.resolve_scrollbars(&mut body);
         }
@@ -248,8 +248,8 @@ impl Container {
     }
 
     /// Configures layout state for the container's client area, handling scrollbars when necessary.
-    pub fn push_container_body(&mut self, body: Recti, _opt: ContainerOption, bopt: WidgetBehaviourOption) {
-        self.configure_container_body(body, bopt);
+    pub fn push_container_body(&mut self, body: Recti, _opt: ContainerOption, scroll_behavior: ScrollBehavior) {
+        self.configure_container_body(body, scroll_behavior);
         self.render_active_scrollbars();
     }
 
@@ -263,17 +263,17 @@ impl Container {
         container.layout.pop_scope();
     }
 
-    fn begin_panel_layout_container(&mut self, container: &mut Container, bopt: WidgetBehaviourOption, policy: Policy) {
+    fn begin_panel_layout_container(&mut self, container: &mut Container, scroll_behavior: ScrollBehavior, policy: Policy) {
         let rect = self.layout.next_with_policies(Dimensioni::default(), policy.width, policy.height);
         container.prepare();
         container.style = self.style.clone();
         container.rect = rect;
-        container.configure_container_body(rect, bopt);
+        container.configure_container_body(rect, scroll_behavior);
     }
 
-    pub(crate) fn begin_panel_layout(&mut self, panel: &mut ContainerHandle, _opt: ContainerOption, bopt: WidgetBehaviourOption, policy: Policy) {
+    pub(crate) fn begin_panel_layout(&mut self, panel: &mut ContainerHandle, _opt: ContainerOption, scroll_behavior: ScrollBehavior, policy: Policy) {
         let container = &mut panel.inner_mut();
-        self.begin_panel_layout_container(container, bopt, policy);
+        self.begin_panel_layout_container(container, scroll_behavior, policy);
     }
 
     pub(crate) fn end_panel_layout(&mut self, panel: &mut ContainerHandle) {
@@ -284,20 +284,20 @@ impl Container {
     pub(crate) fn measure_panel_layout(
         &mut self,
         panel: &ContainerHandle,
-        bopt: WidgetBehaviourOption,
+        scroll_behavior: ScrollBehavior,
         policy: Policy,
         results: &FrameResults,
         children: &[WidgetTreeNode],
     ) -> NodeLayout {
         let mut scratch = panel.inner().measurement_scratch();
         scratch.measurement_mode = true;
-        self.begin_panel_layout_container(&mut scratch, bopt, policy);
+        self.begin_panel_layout_container(&mut scratch, scroll_behavior, policy);
         scratch.layout_tree_nodes(results, children);
         Self::pop_panel_container(&mut scratch);
         NodeLayout::new(scratch.rect(), scratch.body(), scratch.content_size())
     }
 
-    pub(crate) fn begin_panel_render(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, layout: NodeLayout) {
+    pub(crate) fn begin_panel_render(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, layout: NodeLayout) {
         let panel_id = container_id_of(panel);
         if self.hit_test_rect(layout.rect, self.interaction.in_hover_root) {
             self.interaction.next_hover_root_child = Some(panel_id);
@@ -309,7 +309,7 @@ impl Container {
         container.rect = layout.rect;
         container.body = layout.body;
         container.content_size = layout.content_size;
-        container.scroll_enabled = !bopt.is_no_scroll();
+        container.scroll_enabled = !scroll_behavior.is_no_scroll();
 
         if !opt.has_no_frame() {
             self.draw_frame(layout.rect, ControlColor::PanelBG);

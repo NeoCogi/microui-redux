@@ -60,7 +60,7 @@ let tree = WidgetTreeBuilder::build({
 });
 
 ctx.run_ui_frame(|ctx| {
-    ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+    ctx.window(&mut main_window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
 });
 
 if ctx.committed_results().state_of_handle(&name).is_submitted() {
@@ -72,7 +72,7 @@ Retained trees are the supported public authoring path. Post-render business log
 
 ```rust
 ctx.run_ui_frame(|ctx| {
-    ctx.window(&mut main_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+    ctx.window(&mut main_window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
 });
 
 let results = ctx.committed_results();
@@ -90,15 +90,15 @@ Pointer-derived widget IDs remain available for manual focus and handle-oriented
 my_window.set_focus(Some(widget_id_of_handle(&my_textbox_handle)));
 ```
 
-Window, dialog, and popup builders now accept a `WidgetBehaviourOption` to control scroll behavior. Use `WidgetBehaviourOption::NO_SCROLL`
-for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widgets that want to consume scroll, and
-`WidgetBehaviourOption::NONE` for default behavior. Custom widgets receive consumed scroll in `CustomRenderArgs::scroll_delta`.
+Window, dialog, and popup builders now accept a `ScrollBehavior` to control scroll behavior. Use `ScrollBehavior::NO_SCROLL`
+for popups that should not scroll, `ScrollBehavior::GRAB_SCROLL` for widgets that want to consume scroll, and
+`ScrollBehavior::NONE` for default behavior. Custom widgets receive consumed scroll in `CustomRenderArgs::scroll_delta`.
 
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
 - Retained traversal measures committed widget state, allocates the widget rectangle, then calls `Widget::run` to sample interaction and update widget-local state.
 - `WidgetTreeBuilder` exposes retained `row`, `grid`, `column`, `stack`, `header`, `tree_node`, `container`, and `custom_render` structure so layout stays declarative instead of closure-driven.
-- `SizePolicy::Weight(value)` distributes available track space by sibling weight ratio (spacing accounted for). In single-track flows, it uses a `0..=100` scale.
+- `SizePolicy::Weight(value)` distributes available track space by sibling share ratio (spacing accounted for). Use `SizePolicy::Fraction(value)` for explicit `0.0..=1.0` proportional sizing in single-track flows.
 - Returning `<= 0` for either axis from `Widget::measure` still means "use layout fallback/defaults" for that axis.
 
 Built-in widget structs keep their fields public as retained state so application code can update labels, values, fonts, and options between frames. Raw input is not exposed through `Context`; feed events through methods such as `mousemove`, `mousedown`, `scroll`, `keydown_code`, and `text`. Widgets clamp their own transient invariants, such as UTF-8 cursor positions, scroll offsets, selected indices, and slider bounds, during `Widget::run`.
@@ -120,7 +120,7 @@ let tree = WidgetTreeBuilder::build({
 });
 
 ctx.run_ui_frame(|ctx| {
-    ctx.window(&mut image_window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+    ctx.window(&mut image_window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
 });
 if ctx.committed_results().state_of_handle(&image_button).is_submitted() {
     // react here

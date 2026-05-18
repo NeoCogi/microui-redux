@@ -70,9 +70,13 @@ pub enum SizePolicy {
     ///
     /// When multiple sibling tracks use `Weight`, each track receives
     /// `weight / total_weight` of the available track space.
-    /// When no sibling weight context exists (single-track flows),
-    /// values are interpreted on a `0..=100` scale.
+    /// When no sibling weight context exists, a positive weight receives the full reference space.
     Weight(f32),
+    /// Uses an explicit `0.0..=1.0` fraction of the reference space.
+    ///
+    /// This is the proportional sizing policy for single-track flows such as vertical stacks or
+    /// uniform row heights.
+    Fraction(f32),
     /// Consumes the remaining space with an optional margin.
     Remainder(i32),
 }
@@ -80,6 +84,15 @@ pub enum SizePolicy {
 impl SizePolicy {
     fn clamp_weight(value: f32) -> f32 {
         if value.is_finite() { value.max(0.0) } else { 0.0 }
+    }
+
+    fn clamp_fraction(value: f32) -> f32 {
+        if value.is_finite() { value.clamp(0.0, 1.0) } else { 0.0 }
+    }
+
+    fn resolve_fraction(fraction: f32, reference_space: i32) -> i32 {
+        let reference = reference_space.max(0) as f32;
+        (reference * Self::clamp_fraction(fraction)).floor() as i32
     }
 
     fn resolve_weight(weight: f32, reference_space: i32, total_weight: Option<f32>) -> i32 {
@@ -90,7 +103,7 @@ impl SizePolicy {
 
         let denom = match total_weight {
             Some(total) if total.is_finite() && total > 0.0 => total,
-            _ => 100.0,
+            _ => w,
         };
         let reference = reference_space.max(0) as f32;
         (reference * (w / denom)).floor() as i32
@@ -112,6 +125,7 @@ impl SizePolicy {
             SizePolicy::Auto => default_size,
             SizePolicy::Fixed(value) => value,
             SizePolicy::Weight(weight) => Self::resolve_weight(weight, available_space, None),
+            SizePolicy::Fraction(fraction) => Self::resolve_fraction(fraction, available_space),
             SizePolicy::Remainder(margin) => available_space.saturating_sub(margin),
         };
         resolved.max(0)
@@ -120,6 +134,7 @@ impl SizePolicy {
     fn resolve_with_reference(self, default_size: i32, available_space: i32, reference_space: i32, total_weight: Option<f32>) -> i32 {
         let resolved = match self {
             SizePolicy::Weight(weight) => Self::resolve_weight(weight, reference_space, total_weight),
+            SizePolicy::Fraction(fraction) => Self::resolve_fraction(fraction, reference_space),
             _ => self.resolve(default_size, available_space),
         };
         resolved.max(0)
@@ -271,6 +286,7 @@ impl RowFlow {
                 SizePolicy::Auto => default_size.max(0),
                 SizePolicy::Fixed(value) => value.max(0),
                 SizePolicy::Weight(_) => 0,
+                SizePolicy::Fraction(fraction) => SizePolicy::resolve_fraction(fraction, total_space),
                 SizePolicy::Remainder(_) => 0,
             })
             .sum::<i32>();
@@ -865,13 +881,13 @@ mod tests {
     }
 
     #[test]
-    fn stack_weight_without_siblings_uses_100_scale() {
+    fn stack_fraction_uses_explicit_proportion() {
         let mut layout = LayoutManager::default();
         layout.style = Style::default();
         let body = rect(0, 0, 120, 60);
         layout.reset(body, vec2(0, 0));
         layout.set_default_cell_height(10);
-        layout.stack(SizePolicy::Weight(50.0), SizePolicy::Weight(25.0));
+        layout.stack(SizePolicy::Fraction(0.5), SizePolicy::Fraction(0.25));
 
         let first = layout.next();
         let second = layout.next();
@@ -880,6 +896,21 @@ mod tests {
         assert_eq!(first.height, 15);
         assert_eq!(second.width, 60);
         assert_eq!(second.height, 15);
+    }
+
+    #[test]
+    fn stack_weight_without_siblings_acts_as_one_share() {
+        let mut layout = LayoutManager::default();
+        layout.style = Style::default();
+        let body = rect(0, 0, 120, 60);
+        layout.reset(body, vec2(0, 0));
+        layout.set_default_cell_height(10);
+        layout.stack(SizePolicy::Weight(1.0), SizePolicy::Weight(1.0));
+
+        let first = layout.next();
+
+        assert_eq!(first.width, body.width);
+        assert_eq!(first.height, body.height);
     }
 
     #[test]

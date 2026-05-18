@@ -59,7 +59,7 @@ use rs_math3d::Dimensioni;
 
 use crate::atlas::{AtlasHandle, EXPAND_DOWN_ICON};
 use crate::id::Id;
-use crate::input::{ControlState, ResourceState, WidgetBehaviourOption, WidgetOption};
+use crate::input::{ControlState, ResourceState, ScrollBehavior, WidgetOption};
 use crate::style::Style;
 use crate::widget_tree::WidgetHandle;
 
@@ -96,8 +96,10 @@ impl FocusPolicy {
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
-    /// Returns the behaviour options for this state.
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption;
+    /// Returns the scroll behavior for this state.
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        ScrollBehavior::NONE
+    }
     /// Returns the intrinsic widget size for the current frame's layout pass.
     ///
     /// `avail` reports the current container body size visible to the widget.
@@ -111,9 +113,9 @@ pub trait Widget {
     fn effective_widget_opt(&self) -> WidgetOption {
         *self.widget_opt()
     }
-    /// Returns the effective behavior options used by generic dispatch.
-    fn effective_behaviour_opt(&self) -> WidgetBehaviourOption {
-        *self.behaviour_opt()
+    /// Returns the effective scroll behavior used by generic dispatch.
+    fn effective_scroll_behavior(&self) -> ScrollBehavior {
+        self.scroll_behavior()
     }
     /// Returns the focus behavior used by generic dispatch.
     fn focus_policy(&self) -> FocusPolicy {
@@ -305,13 +307,13 @@ mod tests {
     }
 }
 
-impl Widget for (WidgetOption, WidgetBehaviourOption) {
+impl Widget for (WidgetOption, ScrollBehavior) {
     fn widget_opt(&self) -> &WidgetOption {
         &self.0
     }
 
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-        &self.1
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.1
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {

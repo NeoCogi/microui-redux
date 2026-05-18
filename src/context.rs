@@ -60,7 +60,7 @@ use png::{ColorType, Decoder};
 
 use crate::{
     rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, FrameResultGeneration, ImageSource, Input, Recti, Renderer, KeyCode, KeyMode,
-    MouseButton, RendererHandle, Style, TextureId, WidgetBehaviourOption, WidgetTree, WindowHandle, FrameResults,
+    MouseButton, RendererHandle, Style, TextureId, ScrollBehavior, WidgetTree, WindowHandle, FrameResults,
 };
 
 #[cfg(test)]
@@ -75,7 +75,6 @@ pub struct Context<R: Renderer> {
     frame: usize,
     hover_root: Option<WindowHandle>,
     next_hover_root: Option<WindowHandle>,
-    scroll_target: Option<WindowHandle>,
 
     root_list: Vec<WindowHandle>,
     frame_results: FrameResults,
@@ -95,7 +94,6 @@ impl<R: Renderer> Context<R> {
             frame: 0,
             hover_root: None,
             next_hover_root: None,
-            scroll_target: None,
 
             root_list: Vec::default(),
             frame_results: FrameResults::default(),
@@ -257,7 +255,7 @@ mod tests {
     struct AlwaysSubmitWidget {
         label: &'static str,
         opt: WidgetOption,
-        bopt: WidgetBehaviourOption,
+        scroll_behavior: ScrollBehavior,
     }
 
     impl AlwaysSubmitWidget {
@@ -265,7 +263,7 @@ mod tests {
             Self {
                 label,
                 opt: WidgetOption::NONE,
-                bopt: WidgetBehaviourOption::NONE,
+                scroll_behavior: ScrollBehavior::NONE,
             }
         }
     }
@@ -275,8 +273,8 @@ mod tests {
             &self.opt
         }
 
-        fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-            &self.bopt
+        fn scroll_behavior(&self) -> ScrollBehavior {
+            self.scroll_behavior
         }
 
         fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
@@ -305,11 +303,11 @@ mod tests {
         });
 
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
         });
 
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
         });
 
         let inner = window.inner();
@@ -358,10 +356,10 @@ mod tests {
         });
 
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
         });
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
         });
 
         let initial_rect = window.rect();
@@ -370,17 +368,17 @@ mod tests {
 
         ctx.mousemove(corner_x, corner_y);
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
         });
 
         ctx.mousedown(corner_x, corner_y, MouseButton::LEFT);
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
         });
 
         ctx.mousemove(corner_x + 12, corner_y + 10);
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
         });
 
         let resized = window.rect();
@@ -445,7 +443,7 @@ mod tests {
         });
 
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
         });
         ctx.frame(|_ui| {});
 
@@ -455,7 +453,7 @@ mod tests {
         }
 
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
         });
 
         let inner = window.inner();
@@ -474,8 +472,8 @@ mod tests {
         });
 
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
         });
     }
 
@@ -495,14 +493,14 @@ mod tests {
 
         dialog.open();
         ctx.frame(|ui| {
-            ui.dialog(&mut dialog, opt, WidgetBehaviourOption::NONE, &first_tree);
+            ui.dialog(&mut dialog, opt, ScrollBehavior::NONE, &first_tree);
         });
 
         dialog.close();
 
         dialog.open();
         ctx.frame(|ui| {
-            ui.dialog(&mut dialog, opt, WidgetBehaviourOption::NONE, &second_tree);
+            ui.dialog(&mut dialog, opt, ScrollBehavior::NONE, &second_tree);
         });
 
         let inner = dialog.inner();
@@ -536,16 +534,16 @@ mod tests {
 
         ctx.open_dialog(&mut dialog);
         ctx.frame(|ui| {
-            ui.window(&mut background, ContainerOption::NONE, WidgetBehaviourOption::NONE, &background_tree);
-            ui.dialog(&mut dialog, ContainerOption::NONE, WidgetBehaviourOption::NONE, &dialog_tree);
+            ui.window(&mut background, ContainerOption::NONE, ScrollBehavior::NONE, &background_tree);
+            ui.dialog(&mut dialog, ContainerOption::NONE, ScrollBehavior::NONE, &dialog_tree);
         });
 
         let first_zindex = dialog.zindex();
         assert!(first_zindex > background.zindex());
 
         ctx.frame(|ui| {
-            ui.window(&mut background, ContainerOption::NONE, WidgetBehaviourOption::NONE, &background_tree);
-            ui.dialog(&mut dialog, ContainerOption::NONE, WidgetBehaviourOption::NONE, &dialog_tree);
+            ui.window(&mut background, ContainerOption::NONE, ScrollBehavior::NONE, &background_tree);
+            ui.dialog(&mut dialog, ContainerOption::NONE, ScrollBehavior::NONE, &dialog_tree);
         });
 
         assert_eq!(dialog.zindex(), first_zindex);
@@ -561,7 +559,7 @@ mod tests {
         let tree_with_panel = WidgetTreeBuilder::build({
             let panel = panel.clone();
             move |tree| {
-                tree.container(panel.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                     tree.text("panel child");
                 });
             }
@@ -571,14 +569,14 @@ mod tests {
         });
 
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree_with_panel);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree_with_panel);
         });
         assert_eq!(window.inner().main.panel_count(), 1);
 
         ctx.frame(|_ui| {});
 
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree_without_panel);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree_without_panel);
         });
 
         assert_eq!(window.inner().main.panel_count(), 0);
@@ -597,7 +595,7 @@ mod tests {
         ctx.mousemove(40, 50);
         ctx.open_popup(&mut popup);
         ctx.frame(|ui| {
-            ui.popup(&mut popup, WidgetBehaviourOption::NONE, &tree);
+            ui.popup(&mut popup, ScrollBehavior::NONE, &tree);
         });
 
         let inner = popup.inner();
@@ -618,7 +616,7 @@ mod tests {
         });
 
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::AUTO_SIZE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::AUTO_SIZE, ScrollBehavior::NONE, &tree);
         });
 
         let inner = window.inner();
@@ -644,12 +642,12 @@ mod tests {
         ctx.mousemove(60, 60);
         ctx.open_popup(&mut popup);
         ctx.frame(|ui| {
-            ui.popup(&mut popup, WidgetBehaviourOption::NONE, &short_tree);
+            ui.popup(&mut popup, ScrollBehavior::NONE, &short_tree);
         });
         let first_width = popup.rect().width;
 
         ctx.frame(|ui| {
-            ui.popup(&mut popup, WidgetBehaviourOption::NONE, &long_tree);
+            ui.popup(&mut popup, ScrollBehavior::NONE, &long_tree);
         });
 
         assert!(popup.rect().width > first_width);
@@ -670,7 +668,7 @@ mod tests {
         });
 
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::AUTO_SIZE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::AUTO_SIZE, ScrollBehavior::NONE, &tree);
         });
 
         let inner = window.inner();
@@ -698,8 +696,8 @@ mod tests {
         let tree = WidgetTreeBuilder::build(|_tree| {});
 
         ctx.frame(|ui| {
-            ui.window(&mut titled, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
-            ui.window(&mut plain, ContainerOption::NO_TITLE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut titled, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
+            ui.window(&mut plain, ContainerOption::NO_TITLE, ScrollBehavior::NONE, &tree);
         });
 
         let titled_inner = titled.inner();
@@ -747,7 +745,7 @@ mod tests {
 
         let panic = catch_unwind(AssertUnwindSafe(|| {
             ctx.frame(|ui| {
-                ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+                ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
             });
         }))
         .expect_err("duplicate widget handle should panic");
@@ -773,8 +771,8 @@ mod tests {
 
         let panic = catch_unwind(AssertUnwindSafe(|| {
             ctx.frame(|ui| {
-                ui.window(&mut left, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
-                ui.window(&mut right, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+                ui.window(&mut left, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
+                ui.window(&mut right, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
             });
         }))
         .expect_err("rendering one widget handle in two windows should panic");
@@ -801,7 +799,7 @@ mod tests {
         assert_ne!(widget_id_of_handle(&first), widget_id_of_handle(&second));
 
         ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, WidgetBehaviourOption::NONE, &tree);
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
         });
 
         assert!(ctx.committed_results().state_of_handle(&first).is_submitted());
@@ -895,7 +893,6 @@ impl<R: Renderer> Context<R> {
 
     #[inline(never)]
     fn frame_begin(&mut self) {
-        self.scroll_target = None;
         self.frame_results.begin_frame();
         self.input.borrow_mut().prelude();
         self.frame += 1;
@@ -1017,13 +1014,13 @@ impl<R: Renderer> Context<R> {
 
     #[inline(never)]
     #[must_use]
-    fn begin_window(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption) -> bool {
+    fn begin_window(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior) -> bool {
         if !window.is_open() {
             return false;
         }
 
         self.begin_root_container(window);
-        window.begin_window(opt, bopt);
+        window.begin_window(opt, scroll_behavior);
 
         true
     }
@@ -1034,15 +1031,15 @@ impl<R: Renderer> Context<R> {
         window.finish_resize(opt);
     }
 
-    fn render_window_tree(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
+    fn render_window_tree(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         if window.is_open() {
             window.set_root_style(self.style.clone());
             if opt.is_auto_sizing() {
-                window.measure_auto_size(&self.frame_results, opt, bopt, tree);
+                window.measure_auto_size(&self.frame_results, opt, scroll_behavior, tree);
             }
         }
 
-        if self.begin_window(window, opt, bopt) {
+        if self.begin_window(window, opt, scroll_behavior) {
             {
                 let mut inner = window.inner_mut();
                 inner.main.widget_tree(&mut self.frame_results, tree);
@@ -1056,8 +1053,8 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Opens a window and renders the provided retained widget tree into it.
-    pub fn window(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
-        self.render_window_tree(window, opt, bopt, tree);
+    pub fn window(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
+        self.render_window_tree(window, opt, scroll_behavior, tree);
     }
 
     /// Marks a dialog window as open for the next frame.
@@ -1070,14 +1067,14 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Renders a dialog window if it is currently open.
-    pub fn dialog(&mut self, window: &mut WindowHandle, opt: ContainerOption, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
+    pub fn dialog(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         if window.is_open() {
             self.next_hover_root = Some(window.clone());
             self.hover_root = self.next_hover_root.clone();
             window.set_root_hover_active(true);
             self.bring_to_front_if_behind(window);
 
-            self.render_window_tree(window, opt, bopt, tree);
+            self.render_window_tree(window, opt, scroll_behavior, tree);
         }
     }
 
@@ -1126,9 +1123,9 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Opens a popup window with default options and renders a retained tree into it.
-    pub fn popup(&mut self, window: &mut WindowHandle, bopt: WidgetBehaviourOption, tree: &WidgetTree) {
+    pub fn popup(&mut self, window: &mut WindowHandle, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         let opt = ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE;
-        self.render_window_tree(window, opt, bopt, tree);
+        self.render_window_tree(window, opt, scroll_behavior, tree);
     }
 
     /// Returns the previous frame's published widget results.

@@ -35,8 +35,8 @@ use common::{atlas_assets, *};
 use microui_redux::*;
 
 const DISPLAY_MAX_LEN: usize = 24;
-const DISPLAY_HEIGHT_WEIGHT: f32 = 20.0;
-const KEYPAD_ROW_HEIGHT_WEIGHT: f32 = 20.0;
+const DISPLAY_HEIGHT_FRACTION: f32 = 0.20;
+const KEYPAD_ROW_HEIGHT_WEIGHT: f32 = 1.0;
 
 #[derive(Copy, Clone)]
 enum Operator {
@@ -342,7 +342,7 @@ fn main() {
         let tree = WidgetTreeBuilder::build({
             let display = display.clone();
             move |tree| {
-                tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Weight(DISPLAY_HEIGHT_WEIGHT), |tree| {
+                tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION), |tree| {
                     tree.widget(display.clone());
                 });
                 tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
@@ -386,7 +386,7 @@ fn main() {
             ctx.window(
                 &mut state.window.clone(),
                 ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
-                WidgetBehaviourOption::NONE,
+                ScrollBehavior::NONE,
                 &state.tree,
             );
 

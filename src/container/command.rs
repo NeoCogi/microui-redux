@@ -70,8 +70,8 @@ pub struct CustomRenderArgs {
     pub scroll_delta: Option<Vec2i>,
     /// Options provided when the widget was created.
     pub widget_opt: WidgetOption,
-    /// Behaviour options provided when the widget was created.
-    pub behaviour_opt: WidgetBehaviourOption,
+    /// Scroll behavior provided when the widget was created.
+    pub scroll_behavior: ScrollBehavior,
     /// Currently active modifier keys.
     pub key_mods: KeyMode,
     /// Currently active navigation keys.

@@ -31,7 +31,7 @@
 //! Retained node definitions and placement metadata.
 
 use crate::{
-    input::{ContainerOption, WidgetBehaviourOption},
+    input::{ContainerOption, ScrollBehavior},
     layout::{SizePolicy, StackDirection},
     ContainerHandle, Custom, Id, Node,
 };
@@ -102,8 +102,8 @@ pub(crate) enum WidgetTreeNodeKind {
         handle: ContainerHandle,
         /// Container rendering options.
         opt: ContainerOption,
-        /// Behaviour options applied while embedded.
-        behaviour: WidgetBehaviourOption,
+        /// Scroll behavior applied while embedded.
+        scroll_behavior: ScrollBehavior,
     },
     /// Collapsible header node with optional child content.
     Header {

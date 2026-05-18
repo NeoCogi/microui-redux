@@ -84,7 +84,7 @@ fn main() {
 
     fw.event_loop(|ctx, state| {
         ctx.run_ui_frame(|ctx| {
-            ctx.window(&mut state.window.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, &state.tree);
+            ctx.window(&mut state.window.clone(), ContainerOption::NONE, ScrollBehavior::NONE, &state.tree);
         });
     });
 }

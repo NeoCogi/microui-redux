@@ -176,8 +176,8 @@ pub struct Button {
     pub font: FontChoice,
     /// Widget options applied to the button.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the button.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the button.
+    pub scroll_behavior: ScrollBehavior,
     /// Fill behavior for the button background.
     pub fill: WidgetFillOption,
 }
@@ -189,7 +189,7 @@ impl Button {
             content: ButtonContent::Text { label: label.into(), icon: None },
             font: FontChoice::default(),
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
             fill: WidgetFillOption::ALL,
         }
     }
@@ -200,7 +200,7 @@ impl Button {
             content: ButtonContent::Text { label: label.into(), icon: None },
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
             fill: WidgetFillOption::ALL,
         }
     }
@@ -211,7 +211,7 @@ impl Button {
             content: ButtonContent::Image { label: label.into(), image },
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
             fill,
         }
     }
@@ -222,7 +222,7 @@ impl Button {
             content: ButtonContent::Slot { label: label.into(), slot, paint },
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
             fill,
         }
     }
@@ -308,8 +308,8 @@ pub struct ListItem {
     pub font: FontChoice,
     /// Widget options applied to the list item.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the list item.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the list item.
+    pub scroll_behavior: ScrollBehavior,
 }
 
 impl ListItem {
@@ -320,7 +320,7 @@ impl ListItem {
             icon: None,
             font: FontChoice::default(),
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
@@ -331,7 +331,7 @@ impl ListItem {
             icon: None,
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
@@ -342,7 +342,7 @@ impl ListItem {
             icon: Some(icon),
             font: FontChoice::default(),
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
@@ -353,7 +353,7 @@ impl ListItem {
             icon: Some(icon),
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
@@ -426,8 +426,8 @@ pub struct ListBox {
     pub font: FontChoice,
     /// Widget options applied to the list box.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the list box.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the list box.
+    pub scroll_behavior: ScrollBehavior,
 }
 
 impl ListBox {
@@ -438,7 +438,7 @@ impl ListBox {
             image,
             font: FontChoice::default(),
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
@@ -449,7 +449,7 @@ impl ListBox {
             image,
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
@@ -496,8 +496,8 @@ pub struct Checkbox {
     pub font: FontChoice,
     /// Widget options applied to the checkbox.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the checkbox.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the checkbox.
+    pub scroll_behavior: ScrollBehavior,
 }
 
 impl Checkbox {
@@ -508,7 +508,7 @@ impl Checkbox {
             value,
             font: FontChoice::default(),
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
@@ -519,7 +519,7 @@ impl Checkbox {
             value,
             font: FontChoice::default(),
             opt,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
@@ -561,8 +561,8 @@ impl Widget for Checkbox {
         &self.opt
     }
 
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-        &self.bopt
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
@@ -585,8 +585,8 @@ pub struct Custom {
     pub name: String,
     /// Widget options applied to the custom widget.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the custom widget.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the custom widget.
+    pub scroll_behavior: ScrollBehavior,
 }
 
 impl Custom {
@@ -595,13 +595,13 @@ impl Custom {
         Self {
             name: name.into(),
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
     /// Creates a custom widget state with explicit options.
-    pub fn with_opt(name: impl Into<String>, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self {
-        Self { name: name.into(), opt, bopt }
+    pub fn with_opt(name: impl Into<String>, opt: WidgetOption, scroll_behavior: ScrollBehavior) -> Self {
+        Self { name: name.into(), opt, scroll_behavior }
     }
 
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
@@ -630,8 +630,8 @@ pub struct Internal {
     pub tag: &'static str,
     /// Widget options applied to the internal control.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the internal control.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the internal control.
+    pub scroll_behavior: ScrollBehavior,
 }
 
 impl Internal {
@@ -640,7 +640,7 @@ impl Internal {
         Self {
             tag,
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 
@@ -674,8 +674,8 @@ pub struct Combo {
     pub open: bool,
     /// Widget options applied to the combo header.
     pub opt: WidgetOption,
-    /// Behaviour options applied to the combo header.
-    pub bopt: WidgetBehaviourOption,
+    /// Scroll behavior applied to the combo header.
+    pub scroll_behavior: ScrollBehavior,
     /// Font selection used for the combo label.
     pub font: FontChoice,
     label: String,
@@ -691,7 +691,7 @@ impl Combo {
             selected: 0,
             open: false,
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
             font: FontChoice::default(),
             label: String::new(),
             clamped: false,
@@ -700,13 +700,13 @@ impl Combo {
     }
 
     /// Creates a new combo state with explicit widget options.
-    pub fn with_opt(popup: WindowHandle, opt: WidgetOption, bopt: WidgetBehaviourOption) -> Self {
+    pub fn with_opt(popup: WindowHandle, opt: WidgetOption, scroll_behavior: ScrollBehavior) -> Self {
         Self {
             popup,
             selected: 0,
             open: false,
             opt,
-            bopt,
+            scroll_behavior,
             font: FontChoice::default(),
             label: String::new(),
             clamped: false,
@@ -826,8 +826,8 @@ impl Widget for Combo {
         &self.opt
     }
 
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-        &self.bopt
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

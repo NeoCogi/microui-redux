@@ -58,7 +58,7 @@ use rs_math3d::Dimensioni;
 
 use crate::{
     atlas::AtlasHandle,
-    input::{ControlState, ResourceState, WidgetBehaviourOption, WidgetOption},
+    input::{ControlState, ResourceState, ScrollBehavior, WidgetOption},
     style::Style,
     widget::{widget_id_of, FocusPolicy, Widget, WidgetId},
     widget_ctx::WidgetCtx,
@@ -85,7 +85,7 @@ pub(crate) type TreeCustomRender = Rc<RefCell<Box<dyn CustomRenderCommand + 'sta
 pub(crate) trait WidgetStateHandleDyn {
     fn widget_id(&self) -> WidgetId;
     fn effective_widget_opt(&self) -> WidgetOption;
-    fn effective_behaviour_opt(&self) -> WidgetBehaviourOption;
+    fn effective_scroll_behavior(&self) -> ScrollBehavior;
     fn focus_policy(&self) -> FocusPolicy;
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     fn needs_input_snapshot(&self) -> bool;
@@ -107,9 +107,9 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
         widget.effective_widget_opt()
     }
 
-    fn effective_behaviour_opt(&self) -> WidgetBehaviourOption {
+    fn effective_scroll_behavior(&self) -> ScrollBehavior {
         let widget = self.handle.borrow();
-        widget.effective_behaviour_opt()
+        widget.effective_scroll_behavior()
     }
 
     fn focus_policy(&self) -> FocusPolicy {

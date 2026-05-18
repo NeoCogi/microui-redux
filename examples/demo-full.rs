@@ -103,7 +103,7 @@ struct TriangleState {
 struct GraphicsDemo {
     phase: f32,
     opt: WidgetOption,
-    bopt: WidgetBehaviourOption,
+    scroll_behavior: ScrollBehavior,
 }
 
 impl GraphicsDemo {
@@ -111,7 +111,7 @@ impl GraphicsDemo {
         Self {
             phase: 0.0,
             opt: WidgetOption::NONE,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 }
@@ -121,8 +121,8 @@ impl Widget for GraphicsDemo {
         &self.opt
     }
 
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-        &self.bopt
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.scroll_behavior
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
@@ -240,7 +240,7 @@ struct FalloffEditor {
     active: Option<FalloffTarget>,
     hovered: Option<FalloffTarget>,
     opt: WidgetOption,
-    bopt: WidgetBehaviourOption,
+    scroll_behavior: ScrollBehavior,
 }
 
 impl FalloffEditor {
@@ -279,7 +279,7 @@ impl FalloffEditor {
             active: None,
             hovered: None,
             opt: WidgetOption::HOLD_FOCUS,
-            bopt: WidgetBehaviourOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
         };
         editor.sanitize();
         editor
@@ -504,8 +504,8 @@ impl Widget for FalloffEditor {
         &self.opt
     }
 
-    fn behaviour_opt(&self) -> &WidgetBehaviourOption {
-        &self.bopt
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.scroll_behavior
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
@@ -1021,10 +1021,10 @@ impl State {
             white_uv,
             triangle_data,
             suzane_data,
-            triangle_widget: widget_handle(Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::NONE)),
+            triangle_widget: widget_handle(Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS, ScrollBehavior::NONE)),
             graphics_widget: widget_handle(GraphicsDemo::new()),
             falloff_widget: widget_handle(FalloffEditor::new()),
-            suzane_widget: widget_handle(Custom::with_opt("Suzane", WidgetOption::HOLD_FOCUS, WidgetBehaviourOption::GRAB_SCROLL)),
+            suzane_widget: widget_handle(Custom::with_opt("Suzane", WidgetOption::HOLD_FOCUS, ScrollBehavior::GRAB_SCROLL)),
             background_swatch: widget_handle(ColorSwatch::new(color(90, 95, 100, 0xFF))),
             style_tree: WidgetTree::default(),
             log_tree: WidgetTree::default(),
@@ -1105,7 +1105,7 @@ impl State {
         self.log_tree = WidgetTreeBuilder::build(move |tree| {
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
-                tree.container(log_output.clone(), ContainerOption::NONE, WidgetBehaviourOption::NONE, |tree| {
+                tree.container(log_output.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                     tree.widget(log_text.clone());
                 });
             });
@@ -1508,7 +1508,7 @@ impl State {
         ctx.window(
             &mut self.style_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
-            WidgetBehaviourOption::NONE,
+            ScrollBehavior::NONE,
             &self.style_tree,
         );
 
@@ -1534,7 +1534,7 @@ impl State {
         ctx.window(
             &mut self.log_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
-            WidgetBehaviourOption::NONE,
+            ScrollBehavior::NONE,
             &self.log_tree,
         );
 
@@ -1576,7 +1576,7 @@ impl State {
         ctx.window(
             &mut self.typography_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
-            WidgetBehaviourOption::NONE,
+            ScrollBehavior::NONE,
             &self.typography_tree,
         );
     }
@@ -1588,7 +1588,7 @@ impl State {
         ctx.window(
             &mut self.triangle_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
-            WidgetBehaviourOption::NONE,
+            ScrollBehavior::NONE,
             &self.triangle_tree,
         );
     }
@@ -1600,7 +1600,7 @@ impl State {
         ctx.window(
             &mut self.suzane_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
-            WidgetBehaviourOption::NONE,
+            ScrollBehavior::NONE,
             &self.suzane_tree,
         );
     }
@@ -1612,7 +1612,7 @@ impl State {
         ctx.window(
             &mut self.graphics_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
-            WidgetBehaviourOption::NONE,
+            ScrollBehavior::NONE,
             &self.graphics_tree,
         );
     }
@@ -1624,7 +1624,7 @@ impl State {
         ctx.window(
             &mut self.falloff_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
-            WidgetBehaviourOption::NONE,
+            ScrollBehavior::NONE,
             &self.falloff_tree,
         );
     }
@@ -1638,7 +1638,7 @@ impl State {
         ctx.window(
             &mut self.stack_direction_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
-            WidgetBehaviourOption::NONE,
+            ScrollBehavior::NONE,
             &self.stack_direction_tree,
         );
 
@@ -1676,7 +1676,7 @@ impl State {
         ctx.window(
             &mut self.weight_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
-            WidgetBehaviourOption::NONE,
+            ScrollBehavior::NONE,
             &self.weight_tree,
         );
 
@@ -1743,7 +1743,7 @@ impl State {
         ctx.window(
             &mut self.demo_window.as_mut().unwrap().clone(),
             ContainerOption::NONE,
-            WidgetBehaviourOption::NONE,
+            ScrollBehavior::NONE,
             &self.demo_tree,
         );
 
@@ -1809,7 +1809,7 @@ impl State {
             ctx.open_popup_at(&mut popup, combo_anchor);
         }
 
-        ctx.popup(&mut popup, WidgetBehaviourOption::NO_SCROLL, &self.combo_tree);
+        ctx.popup(&mut popup, ScrollBehavior::NO_SCROLL, &self.combo_tree);
         let combo_log = {
             let results = ctx.committed_results();
             let mut selected_label = None;
@@ -1835,11 +1835,7 @@ impl State {
         }
 
         let mut popup_logs: Vec<&'static str> = Vec::new();
-        ctx.popup(
-            &mut self.popup_window.as_mut().unwrap().clone(),
-            WidgetBehaviourOption::NO_SCROLL,
-            &self.popup_tree,
-        );
+        ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), ScrollBehavior::NO_SCROLL, &self.popup_tree);
         {
             let results = ctx.committed_results();
             if results.state_of_handle(&self.popup_buttons[0]).is_submitted() {
