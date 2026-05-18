@@ -877,8 +877,8 @@ mod tests {
         }
 
         match &commands[0] {
-            Command::Triangle { vertex_start, vertex_count } => {
-                let vertices = &triangle_vertices[*vertex_start..*vertex_start + *vertex_count];
+            &Command::Triangle { vertex_start, vertex_count } => {
+                let vertices = &triangle_vertices[vertex_start..vertex_start + vertex_count];
                 let a = vertices[0].position();
                 let b = vertices[1].position();
                 let c = vertices[2].position();
@@ -967,8 +967,8 @@ mod tests {
         }
 
         match &commands[0] {
-            Command::Triangle { vertex_start, vertex_count } => {
-                let vertices = &triangle_vertices[*vertex_start..*vertex_start + *vertex_count];
+            &Command::Triangle { vertex_start, vertex_count } => {
+                let vertices = &triangle_vertices[vertex_start..vertex_start + vertex_count];
                 assert!(!vertices.is_empty());
                 for vertex in vertices {
                     let pos = vertex.position();

@@ -50,6 +50,13 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Built-in retained widget state.
+//!
+//! The widget structs intentionally keep their user-facing fields public so applications can update
+//! labels, values, options, fonts, and local state between frames. Raw input remains owned by
+//! [`crate::Context`], and each widget's `run` path clamps transient invariants such as text
+//! cursors, scroll offsets, selected indices, and numeric ranges before using those fields.
+
 macro_rules! implement_widget {
     ($ty:ty, $render:ident, $measure:ident) => {
         impl Widget for $ty {

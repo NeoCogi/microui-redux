@@ -262,7 +262,7 @@ pub mod builder {
     use super::*;
     use fontdue::*;
 
-    use rect_packer::*;
+    use crate::rect_packer::*;
 
     /// Incrementally constructs an atlas by packing fonts, icons, and slots.
     pub struct Builder {
@@ -325,7 +325,7 @@ pub mod builder {
         /// Creates a builder using the provided configuration and assets.
         #[cfg(feature = "builder")]
         pub fn from_config<'a>(config: &'a Config) -> Result<Builder> {
-            let rp_config = rect_packer::Config {
+            let rp_config = crate::rect_packer::Config {
                 width: config.texture_width as _,
                 height: config.texture_height as _,
 

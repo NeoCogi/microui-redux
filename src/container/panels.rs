@@ -289,7 +289,7 @@ impl Container {
         results: &FrameResults,
         children: &[WidgetTreeNode],
     ) -> NodeLayout {
-        let mut scratch = panel.with(|container| container.measurement_scratch());
+        let mut scratch = panel.inner().measurement_scratch();
         scratch.measurement_mode = true;
         self.begin_panel_layout_container(&mut scratch, bopt, policy);
         scratch.layout_tree_nodes(results, children);

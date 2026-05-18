@@ -54,7 +54,6 @@
 
 use std::{
     cell::{Ref, RefCell, RefMut},
-    ops::Deref,
     rc::Rc,
 };
 
@@ -82,13 +81,25 @@ impl<'a> ContainerView<'a> {
     fn new(inner: &'a Container) -> Self {
         Self { inner }
     }
-}
 
-impl<'a> Deref for ContainerView<'a> {
-    type Target = Container;
+    /// Returns the container outer rectangle.
+    pub fn rect(&self) -> Recti {
+        self.inner.rect()
+    }
 
-    fn deref(&self) -> &Self::Target {
-        self.inner
+    /// Returns the current body rectangle.
+    pub fn body(&self) -> Recti {
+        self.inner.body()
+    }
+
+    /// Returns the current scroll offset.
+    pub fn scroll(&self) -> Vec2i {
+        self.inner.scroll()
+    }
+
+    /// Returns the measured content size.
+    pub fn content_size(&self) -> Dimensioni {
+        self.inner.content_size()
     }
 }
 
@@ -101,17 +112,6 @@ impl<'a> ContainerViewMut<'a> {
     fn new(inner: &'a mut Container) -> Self {
         Self { inner }
     }
-}
-
-impl<'a> Deref for ContainerViewMut<'a> {
-    type Target = Container;
-
-    fn deref(&self) -> &Self::Target {
-        self.inner
-    }
-}
-
-impl<'a> ContainerViewMut<'a> {
     /// Returns the container outer rectangle.
     pub fn rect(&self) -> Recti {
         self.inner.rect()

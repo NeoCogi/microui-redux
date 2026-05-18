@@ -80,8 +80,7 @@ pub struct Context<R: Renderer> {
     root_list: Vec<WindowHandle>,
     frame_results: FrameResults,
 
-    /// Shared pointer to the input state driving this context.
-    pub input: Rc<RefCell<Input>>,
+    input: Rc<RefCell<Input>>,
 }
 
 impl<R: Renderer> Context<R> {
@@ -1162,8 +1161,11 @@ impl<R: Renderer> Context<R> {
         self.style = Rc::new(resolved)
     }
 
-    /// Returns the underlying canvas used for rendering.
-    pub fn canvas(&self) -> &Canvas<R> {
+    /// Returns the underlying canvas used for advanced backend inspection.
+    ///
+    /// Application code should prefer the higher-level context image APIs and retained widget
+    /// rendering. Backend tests can name this type as [`crate::backend::Canvas`].
+    pub fn canvas(&self) -> &crate::backend::Canvas<R> {
         &self.canvas
     }
 

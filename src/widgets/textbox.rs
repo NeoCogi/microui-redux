@@ -52,7 +52,7 @@
 //
 use crate::*;
 
-use super::text_edit::{apply_text_input, ReturnBehavior};
+use super::text_edit::{apply_text_input, clamp_cursor_boundary, ReturnBehavior};
 
 #[derive(Clone)]
 /// Persistent state for textbox widgets.
@@ -133,7 +133,7 @@ pub(crate) fn textbox_handle(
     if !control.focused {
         *cursor = buf.len();
     }
-    let mut cursor_pos = (*cursor).min(buf.len());
+    let mut cursor_pos = clamp_cursor_boundary(buf, *cursor);
 
     let (mouse_pressed, mouse_pos, end_pressed, edit) = {
         let input = ctx.input_or_default();
@@ -210,7 +210,7 @@ pub(crate) fn textbox_handle(
         }
     }
 
-    cursor_pos = cursor_pos.min(buf.len());
+    cursor_pos = clamp_cursor_boundary(buf, cursor_pos);
     *cursor = cursor_pos;
 
     let caret_offset = if cursor_pos == 0 {
