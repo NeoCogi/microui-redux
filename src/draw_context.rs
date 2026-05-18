@@ -50,9 +50,9 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+use crate::container::Command;
 use crate::*;
 use std::cmp::{max, min};
-use std::rc::Rc;
 
 /// Returns the intersection of `rect` with `limit`, defaulting to an empty rect when disjoint.
 pub(crate) fn intersect_clip_rect(limit: Recti, rect: Recti) -> Recti {
@@ -278,13 +278,6 @@ impl<'a> DrawCtx<'a> {
         let clip = self.current_clip_rect();
         self.emit_clipped(rect, clip, |draw| {
             draw.push_command(Command::Image { image, rect, color });
-        });
-    }
-
-    pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        let clip = self.current_clip_rect();
-        self.emit_clipped(rect, clip, |draw| {
-            draw.push_command(Command::SlotRedraw { id, rect, color, payload: f });
         });
     }
 

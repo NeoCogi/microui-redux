@@ -61,8 +61,9 @@ use crate::atlas::{AtlasHandle, EXPAND_DOWN_ICON};
 use crate::id::Id;
 use crate::input::{ControlState, ResourceState, WidgetBehaviourOption, WidgetOption};
 use crate::style::Style;
-use crate::widget_ctx::WidgetCtx;
 use crate::widget_tree::WidgetHandle;
+
+pub use crate::widget_ctx::WidgetCtx;
 
 /// High-level focus behavior requested by a widget.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -151,7 +152,7 @@ impl InteractionId {
 }
 
 /// Returns the pointer identity for a widget state object.
-/// Use this when calling APIs such as `Container::set_focus`.
+/// Use this when calling focus APIs such as `WindowHandle::set_focus`.
 pub fn widget_id_of<W: Widget + ?Sized>(widget: &W) -> WidgetId {
     widget as *const W as *const ()
 }

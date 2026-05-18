@@ -41,10 +41,10 @@ mod node;
 mod retained;
 
 pub use builder::{NodeOptions, WidgetTreeBuilder};
-pub use cache::{NodeFrameState, NodeInteraction, NodeLayout, WidgetTreeCache};
 pub use node::{NodeId, Policy, WidgetTree, WidgetTreeNode};
 pub use retained::{widget_handle, WidgetHandle};
 
+pub(crate) use cache::{NodeInteraction, NodeLayout, WidgetTreeCache};
 pub(crate) use node::WidgetTreeNodeKind;
 pub(crate) use retained::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
 

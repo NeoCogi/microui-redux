@@ -53,6 +53,8 @@
 
 //! Pack small rectangles into a larger one. This is useful for creating texture atlases for the efficient GPU rendering.
 
+#![allow(dead_code)]
+
 use crate::*;
 
 /// Describes size and padding requirements of rectangle packing.

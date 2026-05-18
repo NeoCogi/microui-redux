@@ -45,6 +45,8 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override their own `font: FontChoice`.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
 
+The public API is intentionally centered on `Context`, `WindowHandle`, `ContainerHandle`, `WidgetTreeBuilder`, widget state types, style/input/image types, `Renderer`, and custom-render extension types. Low-level canvas access is available as `microui_redux::backend::Canvas` for backend tests and integrations; `Container`, retained cache internals, and rect-packing details are not part of the application authoring surface.
+
 ```rust
 let name = widget_handle(Textbox::new(""));
 let tree = WidgetTreeBuilder::build({
@@ -98,6 +100,8 @@ for popups that should not scroll, `WidgetBehaviourOption::GRAB_SCROLL` for widg
 - `WidgetTreeBuilder` exposes retained `row`, `grid`, `column`, `stack`, `header`, `tree_node`, `container`, and `custom_render` structure so layout stays declarative instead of closure-driven.
 - `SizePolicy::Weight(value)` distributes available track space by sibling weight ratio (spacing accounted for). In single-track flows, it uses a `0..=100` scale.
 - Returning `<= 0` for either axis from `Widget::measure` still means "use layout fallback/defaults" for that axis.
+
+Built-in widget structs keep their fields public as retained state so application code can update labels, values, fonts, and options between frames. Raw input is not exposed through `Context`; feed events through methods such as `mousemove`, `mousedown`, `scroll`, `keydown_code`, and `text`. Widgets clamp their own transient invariants, such as UTF-8 cursor positions, scroll offsets, selected indices, and slider bounds, during `Widget::run`.
 
 ## Images and textures
 Some widgets can render an `Image`, which can reference either a slot **or** an uploaded texture at runtime:
@@ -237,7 +241,7 @@ Version `0.6.0` is the retained-tree release. Compared to `0.5.0`, it replaces t
     - [x] The old `keyed_*` / `*_with_policy` builder matrix was collapsed into one default insertion method plus one `*_with(NodeOptions, ...)` overload per structural concept.
 - [x] Reworked retained execution around explicit layout and interaction generations.
     - [x] Retained traversal now runs a layout pass and a `Widget::run` pass, reusing cached geometry instead of advancing layout while rendering.
-    - [x] `WidgetTreeCache` stores layout and interaction separately across previous/current generations.
+    - [x] The internal retained tree cache stores layout and interaction separately across previous/current generations.
     - [x] The temporary runtime adapter tree was removed; retained traversal now walks `WidgetTreeNode` values directly.
 - [x] Tightened the widget/runtime contract compared to v0.5.
     - [x] Widgets now implement `measure` + `run`; the intermediate `reconcile` / frame-commit design was removed.

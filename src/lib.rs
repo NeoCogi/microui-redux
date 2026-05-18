@@ -54,8 +54,9 @@
 //! `microui-redux` provides a GUI toolkit inspired by [rxi/microui](https://github.com/rxi/microui).
 //! The crate uses retained [`WidgetTree`] values as the public UI authoring model while keeping Microui's
 //! compact frame-driven execution and renderer integration.
-//! It exposes the core context, container, layout, and renderer hooks necessary to embed a UI inside
-//! custom render backends while remaining allocator- and platform-agnostic.
+//! It exposes the core context, retained widget tree builders, widget state types, renderer traits,
+//! styles, and image APIs needed to embed a UI inside custom render backends while remaining
+//! allocator- and platform-agnostic.
 //! Built-in widget placement is driven by each widget's `measure` result, so auto-sized rows can use
 //! per-widget intrinsic text/icon metrics instead of a single shared control size.
 //! Layout internals are flow-based: row tracks and vertical stack flows both run through the same
@@ -88,9 +89,18 @@ mod widget_tree;
 mod widgets;
 mod window;
 
+/// Low-level renderer integration types.
+///
+/// Most applications should use [`Context`] plus retained [`WidgetTree`] values. Backend authors
+/// and renderer smoke tests can use these types when they need direct access to the command canvas
+/// or the exact vertex payload delivered to [`Renderer`].
+pub mod backend {
+    pub use crate::canvas::{Canvas, Vertex};
+}
+
 pub use atlas::*;
-pub use canvas::*;
-pub use container::*;
+pub use canvas::Vertex;
+pub use container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
 pub use container_handle::*;
 pub use context::Context;
 pub use file_dialog::*;
@@ -98,16 +108,16 @@ pub use graphics::*;
 pub use id::Id;
 pub use input::*;
 pub use layout::{SizePolicy, StackDirection};
-pub use rect_packer::*;
 pub use render::*;
 pub use rs_math3d::*;
 pub use style::*;
 pub use widget::*;
-pub use widget_ctx::WidgetCtx;
 pub use widget_tree::*;
 pub use widgets::*;
 pub use window::*;
 
+pub(crate) use canvas::Canvas;
+pub(crate) use container::Container;
 pub(crate) use layout::LayoutManager;
 pub(crate) use std::{
     cell::RefCell,

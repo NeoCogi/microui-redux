@@ -65,11 +65,19 @@ pub(crate) struct TextEditOutcome {
     pub submit: bool,
 }
 
+pub(crate) fn clamp_cursor_boundary(buf: &str, cursor: usize) -> usize {
+    let mut cursor = cursor.min(buf.len());
+    while cursor > 0 && !buf.is_char_boundary(cursor) {
+        cursor -= 1;
+    }
+    cursor
+}
+
 fn insert_text(buf: &mut String, cursor: &mut usize, text: &str) -> bool {
     if text.is_empty() {
         return false;
     }
-    let insert_at = (*cursor).min(buf.len());
+    let insert_at = clamp_cursor_boundary(buf, *cursor);
     buf.insert_str(insert_at, text);
     *cursor = insert_at + text.len();
     true
@@ -79,6 +87,7 @@ fn delete_prev(buf: &mut String, cursor: &mut usize, allow_leading_newline: bool
     if buf.is_empty() {
         return false;
     }
+    *cursor = clamp_cursor_boundary(buf, *cursor);
     if *cursor == 0 {
         if allow_leading_newline && buf.as_bytes().first() == Some(&b'\n') {
             buf.replace_range(0..1, "");
@@ -86,7 +95,7 @@ fn delete_prev(buf: &mut String, cursor: &mut usize, allow_leading_newline: bool
         }
         return false;
     }
-    let mut start = (*cursor).min(buf.len());
+    let mut start = *cursor;
     start -= 1;
     while start > 0 && !buf.is_char_boundary(start) {
         start -= 1;
@@ -97,6 +106,7 @@ fn delete_prev(buf: &mut String, cursor: &mut usize, allow_leading_newline: bool
 }
 
 fn delete_next(buf: &mut String, cursor: usize) -> bool {
+    let cursor = clamp_cursor_boundary(buf, cursor);
     if buf.is_empty() || cursor >= buf.len() {
         return false;
     }
@@ -109,6 +119,7 @@ fn delete_next(buf: &mut String, cursor: usize) -> bool {
 }
 
 fn move_left(buf: &str, cursor: usize) -> usize {
+    let cursor = clamp_cursor_boundary(buf, cursor);
     if cursor == 0 {
         return 0;
     }
@@ -120,6 +131,7 @@ fn move_left(buf: &str, cursor: usize) -> usize {
 }
 
 fn move_right(buf: &str, cursor: usize) -> usize {
+    let cursor = clamp_cursor_boundary(buf, cursor);
     if cursor >= buf.len() {
         return buf.len();
     }
@@ -137,7 +149,7 @@ pub(crate) fn apply_text_input(
     allow_leading_newline: bool,
     return_behavior: ReturnBehavior,
 ) -> TextEditOutcome {
-    let mut cursor_pos = cursor.min(buf.len());
+    let mut cursor_pos = clamp_cursor_boundary(buf, cursor);
     let mut changed = false;
     let mut moved = false;
     let mut submit = false;
@@ -228,4 +240,40 @@ pub(crate) fn cursor_from_x(line: &TextLine, buf: &str, target_x: i32, font: Fon
 
 pub(crate) fn clamp_scroll(value: i32, max_value: i32) -> i32 {
     if max_value <= 0 { 0 } else { value.clamp(0, max_value) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::KeyCode;
+
+    #[test]
+    fn text_input_clamps_external_cursor_to_utf8_boundary() {
+        let mut buf = String::from("éa");
+        let input = InputSnapshot {
+            text_input: String::from("x"),
+            ..Default::default()
+        };
+
+        let outcome = apply_text_input(&mut buf, 1, &input, false, ReturnBehavior::Submit);
+
+        assert_eq!(buf, "xéa");
+        assert_eq!(outcome.cursor, 1);
+        assert!(outcome.changed);
+    }
+
+    #[test]
+    fn delete_next_clamps_external_cursor_to_utf8_boundary() {
+        let mut buf = String::from("éa");
+        let input = InputSnapshot {
+            key_code_pressed: KeyCode::DELETE,
+            ..Default::default()
+        };
+
+        let outcome = apply_text_input(&mut buf, 1, &input, false, ReturnBehavior::Submit);
+
+        assert_eq!(buf, "a");
+        assert_eq!(outcome.cursor, 0);
+        assert!(outcome.changed);
+    }
 }

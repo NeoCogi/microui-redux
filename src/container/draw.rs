@@ -218,12 +218,6 @@ impl Container {
         draw.push_image(Image::Slot(id), rect, color);
     }
 
-    /// Records a slot redraw that uses a callback to fill pixels.
-    pub fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        let mut draw = self.draw_ctx();
-        draw.draw_slot_with_function(id, rect, color, f);
-    }
-
     #[inline(never)]
     /// Draws multi-line text within the container without wrapping.
     pub fn text(&mut self, text: &str) {

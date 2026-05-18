@@ -61,6 +61,7 @@ impl NodeLayout {
 }
 
 /// Interaction data sampled for a retained node in one frame.
+#[allow(dead_code)]
 #[derive(Copy, Clone, Debug)]
 pub struct NodeInteraction {
     /// Control state observed while handling the node this frame.
@@ -79,23 +80,6 @@ impl NodeInteraction {
 impl Default for NodeInteraction {
     fn default() -> Self {
         Self::new(ControlState::default(), ResourceState::NONE)
-    }
-}
-
-/// Combined previous/current frame view for callers that need both layout and
-/// interaction at the same time.
-#[derive(Copy, Clone, Debug, Default)]
-pub struct NodeFrameState {
-    /// Layout resolved for the node in one frame.
-    pub layout: NodeLayout,
-    /// Interaction sampled for the node in one frame.
-    pub interaction: NodeInteraction,
-}
-
-impl NodeFrameState {
-    /// Creates a combined frame-state snapshot for one node.
-    pub const fn new(layout: NodeLayout, interaction: NodeInteraction) -> Self {
-        Self { layout, interaction }
     }
 }
 
@@ -146,27 +130,15 @@ impl WidgetTreeCache {
     }
 
     /// Returns the previous frame interaction for `node_id`.
+    #[allow(dead_code)]
     pub fn prev_interaction(&self, node_id: NodeId) -> Option<&NodeInteraction> {
         self.prev_interaction.get(&node_id)
     }
 
     /// Returns the current frame interaction for `node_id`.
+    #[allow(dead_code)]
     pub fn current_interaction(&self, node_id: NodeId) -> Option<&NodeInteraction> {
         self.curr_interaction.get(&node_id)
-    }
-
-    /// Returns the previous combined frame state for `node_id`.
-    pub fn prev_state(&self, node_id: NodeId) -> Option<NodeFrameState> {
-        let layout = self.prev_layout(node_id).copied()?;
-        let interaction = self.prev_interaction(node_id).copied().unwrap_or_default();
-        Some(NodeFrameState::new(layout, interaction))
-    }
-
-    /// Returns the current combined frame state for `node_id`.
-    pub fn current_state(&self, node_id: NodeId) -> Option<NodeFrameState> {
-        let layout = self.current_layout(node_id).copied()?;
-        let interaction = self.current_interaction(node_id).copied().unwrap_or_default();
-        Some(NodeFrameState::new(layout, interaction))
     }
 
     /// Records the current frame layout for `node_id`.

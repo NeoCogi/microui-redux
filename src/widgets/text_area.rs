@@ -54,7 +54,7 @@ use crate::*;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::text_layout::{build_text_lines, TextLine};
 
-use super::text_edit::{apply_text_input, clamp_scroll, cursor_from_x, cursor_x_in_line, line_index_for_cursor, ReturnBehavior};
+use super::text_edit::{apply_text_input, clamp_cursor_boundary, clamp_scroll, cursor_from_x, cursor_x_in_line, line_index_for_cursor, ReturnBehavior};
 
 #[derive(Clone)]
 /// Persistent state for multi-line text area widgets.
@@ -152,7 +152,7 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         state.cursor = state.buf.len();
         state.preferred_x = None;
     }
-    let mut cursor_pos = state.cursor.min(state.buf.len());
+    let mut cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
 
     let input = ctx.input_or_default();
     let mut ensure_visible = false;
@@ -317,7 +317,7 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         reset_preferred = true;
     }
 
-    cursor_pos = cursor_pos.min(state.buf.len());
+    cursor_pos = clamp_cursor_boundary(&state.buf, cursor_pos);
     cursor_line = line_index_for_cursor(&lines, cursor_pos);
     caret_x = cursor_x_in_line(&lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
