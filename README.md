@@ -131,9 +131,8 @@ let tree = WidgetTreeBuilder::build({
     move |tree| tree.widget(image_button.clone())
 });
 
-ctx.run_ui_frame(|ctx| {
-    ctx.window(&mut image_window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-});
+let _image_root = ctx.create_window("image", rect(20, 20, 260, 120), tree);
+ctx.update_ui();
 if ctx.committed_results().state_of_handle(&image_button).is_submitted() {
     // react here
 }

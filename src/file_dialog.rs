@@ -39,6 +39,7 @@ pub struct FileDialogState {
     path_box: WidgetHandle<Textbox>,
     tmp_file_name: WidgetHandle<Textbox>,
     selected_folder: Option<String>,
+    root: RootId,
     win: WindowHandle,
     folder_panel: ContainerHandle,
     file_panel: ContainerHandle,
@@ -278,8 +279,9 @@ impl FileDialogState {
         true
     }
 
-    fn render<R: Renderer>(&mut self, ctx: &mut Context<R>) {
-        ctx.dialog(&mut self.win, ContainerOption::NONE, ScrollBehavior::NO_SCROLL, &self.tree);
+    fn sync_retained_root<R: Renderer>(&mut self, ctx: &mut Context<R>) {
+        self.sync_retained_view();
+        ctx.set_root_tree(self.root, std::mem::take(&mut self.tree));
     }
 
     fn apply_navigation_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
@@ -370,6 +372,8 @@ impl FileDialogState {
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .to_string_lossy()
             .to_string();
+        let root = ctx.create_dialog("Open File", Recti::new(50, 50, 720, 520), WidgetTree::default());
+        ctx.set_root_options(root, ContainerOption::NONE, ScrollBehavior::NO_SCROLL);
         let mut dialog = Self {
             current_working_directory,
             file_name: None,
@@ -377,7 +381,8 @@ impl FileDialogState {
             path_box: widget_handle(Textbox::new("")),
             tmp_file_name: widget_handle(Textbox::new("")),
             selected_folder: None,
-            win: ctx.new_dialog("Open File", Recti::new(50, 50, 720, 520)),
+            root,
+            win: ctx.root_handle(root).expect("file dialog root window missing"),
             folder_panel: ctx.new_panel("folders"),
             file_panel: ctx.new_panel("files"),
             folders: Vec::new(),
@@ -399,18 +404,17 @@ impl FileDialogState {
         };
         dialog.path_box.borrow_mut().buf = dialog.current_working_directory.clone();
         dialog.refresh_entries();
+        dialog.sync_retained_root(ctx);
         dialog
     }
 
     /// Marks the dialog as open for the next frame.
     pub fn open<R: Renderer>(&mut self, ctx: &mut Context<R>) {
-        ctx.open_dialog(&mut self.win);
+        ctx.set_root_visible(self.root, true);
     }
 
     /// Renders the dialog and updates the selected file when confirmed.
     pub fn eval<R: Renderer>(&mut self, ctx: &mut Context<R>) {
-        self.sync_retained_view();
-        self.render(ctx);
         let results = ctx.committed_results();
         let needs_refresh = self.apply_navigation_actions(results) || self.apply_folder_actions(results);
         self.apply_file_actions(results);
@@ -421,5 +425,6 @@ impl FileDialogState {
             // against the current tree and item handles have been released.
             self.refresh_entries();
         }
+        self.sync_retained_root(ctx);
     }
 }

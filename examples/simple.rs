@@ -58,16 +58,13 @@ use common::{atlas_assets, *};
 use microui_redux::prelude::*;
 
 struct State {
-    window: WindowHandle,
-    tree: WidgetTree,
+    _root: RootId,
 }
 
 fn main() {
     let slots = atlas_assets::default_slots();
     let atlas = atlas_assets::load_atlas(&slots);
     let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
-        // Build retained widget state and tree once. Phase 8 will move this example from the
-        // compatibility window submission path to `Context::create_window` + `update_ui`.
         let hello_button = widget_handle(Button::with_opt("Hello World!", WidgetOption::ALIGN_CENTER));
         let tree = WidgetTreeBuilder::build({
             let hello_button = hello_button.clone();
@@ -78,15 +75,13 @@ fn main() {
             }
         });
         State {
-            window: ctx.new_window("Hello Window", rect(40, 40, 300, 450)),
-            tree,
+            _root: ctx.create_window("Hello Window", rect(40, 40, 300, 450), tree),
         }
     })
     .unwrap();
 
     fw.event_loop(|ctx, state| {
-        ctx.run_ui_frame(|ctx| {
-            ctx.window(&mut state.window.clone(), ContainerOption::NONE, ScrollBehavior::NONE, &state.tree);
-        });
+        let _ = state;
+        ctx.update_ui();
     });
 }

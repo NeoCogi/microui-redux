@@ -304,11 +304,11 @@ impl Calculator {
 }
 
 struct State {
+    _root: RootId,
     window: WindowHandle,
     display: WidgetHandle<Textbox>,
     calculator: Calculator,
     buttons: [CalcButton; 20],
-    tree: WidgetTree,
 }
 
 fn main() {
@@ -363,39 +363,34 @@ fn main() {
                 });
             }
         });
+        let root = ctx.create_window("Calculator", rect(0, 0, 320, 420), tree);
+        ctx.set_root_options(root, ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE, ScrollBehavior::NONE);
         State {
-            window: ctx.new_window("Calculator", rect(0, 0, 320, 420)),
+            _root: root,
+            window: ctx.root_handle(root).expect("calculator root window missing"),
             display,
             calculator: Calculator::new(),
             buttons,
-            tree,
         }
     })
     .unwrap();
 
     fw.event_loop(|ctx, state| {
-        ctx.run_ui_frame(|ctx| {
-            let dim = ctx.canvas().current_dimension();
-            state.window.set_size(&dim);
-            {
-                let mut display = state.display.borrow_mut();
-                display.buf = state.calculator.display_text().to_string();
-                display.cursor = display.buf.len();
-            }
+        let dim = ctx.canvas().current_dimension();
+        state.window.set_size(&dim);
+        {
+            let mut display = state.display.borrow_mut();
+            display.buf = state.calculator.display_text().to_string();
+            display.cursor = display.buf.len();
+        }
 
-            ctx.window(
-                &mut state.window.clone(),
-                ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
-                ScrollBehavior::NONE,
-                &state.tree,
-            );
+        ctx.update_ui();
 
-            let results = ctx.committed_results();
-            for button in &state.buttons {
-                if results.state_of_handle(&button.widget).is_submitted() {
-                    state.calculator.apply(button.action);
-                }
+        let results = ctx.committed_results();
+        for button in &state.buttons {
+            if results.state_of_handle(&button.widget).is_submitted() {
+                state.calculator.apply(button.action);
             }
-        });
+        }
     });
 }
