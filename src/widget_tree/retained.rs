@@ -89,7 +89,7 @@ pub(crate) trait WidgetStateHandleDyn {
     fn focus_policy(&self) -> FocusPolicy;
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     fn needs_input_snapshot(&self) -> bool;
-    fn run(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
+    fn run_retained(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
 }
 
 struct WidgetStateHandle<W: Widget + 'static> {
@@ -127,9 +127,9 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
         widget.needs_input_snapshot()
     }
 
-    fn run(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn run_retained(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut widget = self.handle.borrow_mut();
-        widget.run(ctx, control)
+        widget.run_retained(ctx, control)
     }
 }
 

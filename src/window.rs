@@ -209,7 +209,7 @@ impl WindowChromeTree {
             node.id,
             NodeLayout::new(node.rect, node.rect, Dimensioni::new(node.rect.width, node.rect.height)),
         );
-        let (control, widget_result) = container.render_internal_widget(node.id, state, node.rect);
+        let (control, widget_result) = container.execute_internal_node(node.id, state, node.rect);
         let submit_on_click = matches!(node.part, WindowChromePart::Close);
         let result = widget_result | chrome_result(&control, submit_on_click);
         container.record_tree_interaction(node.id, NodeInteraction::new(control, result));

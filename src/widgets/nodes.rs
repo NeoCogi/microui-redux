@@ -246,7 +246,7 @@ impl Widget for Node {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let res = self.handle_widget(ctx, control);
         if control.clicked {
             self.state = if self.state.is_expanded() {

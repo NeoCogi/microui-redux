@@ -142,7 +142,7 @@ impl Widget for GraphicsDemo {
         true
     }
 
-    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let bounds = ctx.rect();
         let local_width = bounds.width.max(0) as f32;
         let local_height = bounds.height.max(0) as f32;
@@ -525,7 +525,7 @@ impl Widget for FalloffEditor {
         true
     }
 
-    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let bounds = ctx.rect();
         let graph = Self::graph_rect(bounds);
         if graph.width <= 0 || graph.height <= 0 {

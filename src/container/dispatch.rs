@@ -46,7 +46,7 @@ impl Container {
         self.layout.next_with_policies(preferred, policy.width, policy.height)
     }
 
-    pub(crate) fn render_widget_dyn(
+    pub(crate) fn execute_node_dyn(
         &mut self,
         results: &mut FrameResults,
         node_id: NodeId,
@@ -63,12 +63,12 @@ impl Container {
         let retained_id = self.retained_id_for_node(node_id);
         let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
         let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
-        let res = widget.run(&mut ctx, &control);
+        let res = widget.run_retained(&mut ctx, &control);
         results.record_retained_with_context(retained_id, node_id, widget_id, res, dispatch_site);
         (control, res)
     }
 
-    pub(crate) fn render_internal_widget<W: Widget + ?Sized>(&mut self, node_id: NodeId, widget: &mut W, rect: Recti) -> (ControlState, ResourceState) {
+    pub(crate) fn execute_internal_node<W: Widget + ?Sized>(&mut self, node_id: NodeId, widget: &mut W, rect: Recti) -> (ControlState, ResourceState) {
         let opt = widget.effective_widget_opt();
         let scroll_behavior = widget.effective_scroll_behavior();
         let focus_policy = widget.focus_policy();
@@ -77,7 +77,7 @@ impl Container {
         let widget_id = node_id.raw() as WidgetId;
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
-        let res = widget.run(&mut ctx, &control);
+        let res = widget.run_retained(&mut ctx, &control);
         (control, res)
     }
 
@@ -86,7 +86,7 @@ impl Container {
         self.measure_widget_rect_with_policy(&*state, policy)
     }
 
-    pub(crate) fn render_widget_handle<W: Widget>(
+    pub(crate) fn execute_node_handle<W: Widget>(
         &mut self,
         results: &mut FrameResults,
         node_id: NodeId,
@@ -108,7 +108,7 @@ impl Container {
         let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
         let res = {
             let mut state = handle.borrow_mut();
-            state.run(&mut ctx, &control)
+            state.run_retained(&mut ctx, &control)
         };
         results.record_retained_with_context(retained_id, node_id, widget_id, res, dispatch_site);
         (control, res)

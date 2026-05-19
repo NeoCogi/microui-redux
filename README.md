@@ -108,12 +108,12 @@ for popups that should not scroll, `ScrollBehavior::GRAB_SCROLL` for widgets tha
 
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
-- Retained traversal measures committed widget state, allocates the widget rectangle, then calls `Widget::run` to sample interaction and update widget-local state.
+- Retained traversal measures committed widget state, allocates the widget rectangle, then calls `Widget::run_retained` to sample interaction, update widget-local state, and record paint commands. The older `Widget::run` name remains only as a deprecated compatibility alias.
 - `WidgetTreeBuilder` exposes retained `row`, `grid`, `column`, `stack`, `header`, `tree_node`, `container`, and `custom_render` structure so layout stays declarative instead of closure-driven.
 - `SizePolicy::Weight(value)` distributes available track space by sibling share ratio (spacing accounted for). Use `SizePolicy::Fraction(value)` for explicit `0.0..=1.0` proportional sizing in single-track flows.
 - Returning `<= 0` for either axis from `Widget::measure` still means "use layout fallback/defaults" for that axis.
 
-Built-in widget structs keep their fields public as retained state so application code can update labels, values, fonts, and options between frames. Raw input is not exposed through `Context`; feed events through methods such as `mousemove`, `mousedown`, `scroll`, `keydown_code`, and `text`. Widgets clamp their own transient invariants, such as UTF-8 cursor positions, scroll offsets, selected indices, and slider bounds, during `Widget::run`.
+Built-in widget structs keep their fields public as retained state so application code can update labels, values, fonts, and options between frames. Raw input is not exposed through `Context`; feed events through methods such as `mousemove`, `mousedown`, `scroll`, `keydown_code`, and `text`. Widgets clamp their own transient invariants, such as UTF-8 cursor positions, scroll offsets, selected indices, and slider bounds, during `Widget::run_retained`.
 
 ## Images and textures
 Some widgets can render an `Image`, which can reference either a slot **or** an uploaded texture at runtime:
@@ -253,12 +253,12 @@ Version `0.6.0` is the retained-tree release. Compared to `0.5.0`, it replaces t
     - [x] `WidgetTreeBuilder` is centered on one `NodeOptions` value that carries optional keys and optional placement metadata.
     - [x] The old `keyed_*` / `*_with_policy` builder matrix was collapsed into one default insertion method plus one `*_with(NodeOptions, ...)` overload per structural concept.
 - [x] Reworked retained execution around explicit layout and interaction generations.
-    - [x] Retained traversal now runs a layout pass and a `Widget::run` pass, reusing cached geometry instead of advancing layout while rendering.
+    - [x] Retained traversal now runs a layout pass and a `Widget::run_retained` execution pass, reusing cached geometry instead of advancing layout while executing widgets.
     - [x] The internal retained tree cache stores layout and interaction separately across previous/current generations.
     - [x] The temporary runtime adapter tree was removed; retained traversal now walks `WidgetTreeNode` values directly.
 - [x] Tightened the widget/runtime contract compared to v0.5.
-    - [x] Widgets now implement `measure` + `run`; the intermediate `reconcile` / frame-commit design was removed.
-    - [x] Persistent widget state stays inside the widget handle and mutates during `run`.
+    - [x] Widgets now implement `measure` + `run_retained`; the intermediate `reconcile` / frame-commit design was removed.
+    - [x] Persistent widget state stays inside the widget handle and mutates during `run_retained`.
     - [x] Retained focus/hover and retained result lookup can use stable `NodeId`s; pointer-derived IDs remain as the manual-handle fallback through `widget_id_of` and `widget_id_of_handle`.
 - [x] Added widget-local graphics primitives as a first-class paint path.
     - [x] `WidgetCtx::graphics(...)` and `Graphics` expose rectangles, frames, text/icons/images, thick line strokes, polygon fills, and nested local clip scopes.

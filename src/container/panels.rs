@@ -232,7 +232,7 @@ impl Container {
                     self.interaction.in_hover_root,
                     None,
                 );
-                let _ = self.scrollbar_y_state.run(&mut ctx, &control);
+                let _ = self.scrollbar_y_state.run_retained(&mut ctx, &control);
             }
             if control.active {
                 let delta = scrollbar_drag_delta(ScrollAxis::Vertical, self.input.borrow().mouse_delta, cs.height, base);
@@ -273,7 +273,7 @@ impl Container {
                     self.interaction.in_hover_root,
                     None,
                 );
-                let _ = self.scrollbar_x_state.run(&mut ctx, &control);
+                let _ = self.scrollbar_x_state.run_retained(&mut ctx, &control);
             }
             if control.active {
                 let delta = scrollbar_drag_delta(ScrollAxis::Horizontal, self.input.borrow().mouse_delta, cs.width, base);
@@ -336,7 +336,14 @@ impl Container {
         container.configure_container_body(rect, scroll_behavior);
     }
 
-    pub(crate) fn begin_panel_layout(&mut self, panel: &mut ContainerHandle, node_id: NodeId, _opt: ContainerOption, scroll_behavior: ScrollBehavior, policy: Policy) {
+    pub(crate) fn begin_panel_layout(
+        &mut self,
+        panel: &mut ContainerHandle,
+        node_id: NodeId,
+        _opt: ContainerOption,
+        scroll_behavior: ScrollBehavior,
+        policy: Policy,
+    ) {
         let panel_scope = self.panel_scope_id(node_id);
         let container = &mut panel.inner_mut();
         container.set_internal_id_seed(panel_scope);
@@ -366,7 +373,14 @@ impl Container {
         NodeLayout::new(scratch.rect(), scratch.body(), scratch.content_size())
     }
 
-    pub(crate) fn begin_panel_render(&mut self, panel: &mut ContainerHandle, node_id: NodeId, opt: ContainerOption, scroll_behavior: ScrollBehavior, layout: NodeLayout) {
+    pub(crate) fn begin_panel_render(
+        &mut self,
+        panel: &mut ContainerHandle,
+        node_id: NodeId,
+        opt: ContainerOption,
+        scroll_behavior: ScrollBehavior,
+        layout: NodeLayout,
+    ) {
         let panel_id = self.retained_id_for_node(node_id);
         let panel_scope = self.panel_scope_id(node_id);
         if self.hit_test_rect(layout.rect, self.interaction.in_hover_root) {

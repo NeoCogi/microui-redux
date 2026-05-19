@@ -195,7 +195,7 @@ impl Widget for FocusProbe {
         Dimensioni::new(30, 10)
     }
 
-    fn run(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn run_retained(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         self.focused.set(control.focused);
         ResourceState::NONE
     }
@@ -230,7 +230,7 @@ impl Widget for TraceWidget {
         Dimensioni::new(10, 10)
     }
 
-    fn run(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn run_retained(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         self.log.borrow_mut().push(format!("render {}", self.name));
         ResourceState::NONE
     }
@@ -286,7 +286,7 @@ fn textbox_left_moves_over_multibyte() {
     let control = container.update_control(textbox_id, rect, &control_state);
     let input = container.snapshot_input();
     let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
-    state.run(&mut ctx, &control);
+    state.run_retained(&mut ctx, &control);
     assert_eq!(state.cursor, 1);
 }
 
@@ -305,7 +305,7 @@ fn textbox_backspace_removes_multibyte() {
     let control = container.update_control(textbox_id, rect, &control_state);
     let input = container.snapshot_input();
     let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
-    state.run(&mut ctx, &control);
+    state.run_retained(&mut ctx, &control);
     assert_eq!(state.buf, "ab");
     assert_eq!(state.cursor, 1);
 }
@@ -324,7 +324,7 @@ fn node_run_updates_expansion_after_click() {
         scroll_delta: None,
     };
     let mut ctx = container.widget_ctx(node_id, rect, None);
-    let res = state.run(&mut ctx, &control);
+    let res = state.run_retained(&mut ctx, &control);
 
     assert!(res.is_changed());
     assert!(state.is_expanded());
@@ -648,7 +648,10 @@ fn retained_panel_scope_is_stable_and_parent_scoped() {
 
     assert_eq!(first_scope, first_parent.panel_scope_id(panel_node));
     assert_ne!(first_scope, second_scope);
-    assert_ne!(RetainedId::scoped_node(first_scope, child_node), RetainedId::scoped_node(second_scope, child_node));
+    assert_ne!(
+        RetainedId::scoped_node(first_scope, child_node),
+        RetainedId::scoped_node(second_scope, child_node)
+    );
 }
 
 #[test]
