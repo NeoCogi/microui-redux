@@ -209,7 +209,8 @@ impl WindowChromeTree {
             node.id,
             NodeLayout::new(node.rect, node.rect, Dimensioni::new(node.rect.width, node.rect.height)),
         );
-        let (control, widget_result) = container.execute_internal_node(node.id, state, node.rect);
+        let (control, widget_result) = container.update_internal_node(node.id, state, node.rect);
+        container.paint_internal_node(node.id, state, node.rect, &control);
         let submit_on_click = matches!(node.part, WindowChromePart::Close);
         let result = widget_result | chrome_result(&control, submit_on_click);
         container.record_tree_interaction(node.id, NodeInteraction::new(control, result));
@@ -433,6 +434,7 @@ impl Window {
         scratch.clear_content_and_scroll();
         scratch.configure_container_body(body, scroll_behavior);
         self.main.set_content_size(scratch.measure_widget_tree_content(results, tree));
+        Self::apply_auto_size(&mut self.main, opt);
     }
 
     fn finish_resize(&mut self, results: &mut FrameResults, opt: ContainerOption) {
@@ -514,11 +516,6 @@ impl WindowHandle {
     /// Clears focus in the window's root container.
     pub fn clear_focus(&mut self) {
         self.inner_mut().main.clear_focus();
-    }
-
-    /// Sets focus to the retained node that most recently dispatched `handle`.
-    pub fn set_focus_handle<W: Widget>(&mut self, handle: &WidgetHandle<W>) -> bool {
-        self.inner_mut().main.set_focus_handle(handle)
     }
 
     pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Window> {

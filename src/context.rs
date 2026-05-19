@@ -151,8 +151,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        container::Command, widget_handle, AtlasHandle, AtlasSource, CharEntry, ControlState, FontEntry, ResourceState, SourceFormat, TextBlock, Widget,
-        WidgetCtx, WidgetOption, WidgetTreeBuilder,
+        container::Command, widget_handle, AtlasHandle, AtlasSource, CharEntry, Combo, ControlState, FontEntry, ListItem, NodeId, ResourceState, RetainedId,
+        SizePolicy, SourceFormat, StackDirection, TextBlock, Widget, WidgetCtx, WidgetHandle, WidgetOption, WidgetTreeBuilder,
     };
 
     const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
@@ -436,20 +436,20 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let committed_widget = 1_u8;
-        let current_widget = 2_u8;
-        let committed_id = (&committed_widget as *const u8).cast::<()>();
-        let current_id = (&current_widget as *const u8).cast::<()>();
+        let committed_id = NodeId::new(1);
+        let current_id = NodeId::new(2);
 
-        ctx.frame_results.record(committed_id, ResourceState::SUBMIT);
+        ctx.frame_results
+            .record_node_with_context(RetainedId::node(committed_id), committed_id, ResourceState::SUBMIT, "committed");
         ctx.frame_results.finish_frame();
         ctx.frame_results.begin_frame();
-        ctx.frame_results.record(current_id, ResourceState::CHANGE);
+        ctx.frame_results
+            .record_node_with_context(RetainedId::node(current_id), current_id, ResourceState::CHANGE, "current");
 
-        assert!(ctx.committed_results().state(committed_id).is_submitted());
-        assert!(ctx.committed_results().state(current_id).is_none());
-        assert!(ctx.current_results().state(committed_id).is_none());
-        assert!(ctx.current_results().state(current_id).is_changed());
+        assert!(ctx.committed_results().state_of_node(committed_id).is_submitted());
+        assert!(ctx.committed_results().state_of_node(current_id).is_none());
+        assert!(ctx.current_results().state_of_node(committed_id).is_none());
+        assert!(ctx.current_results().state_of_node(current_id).is_changed());
     }
 
     #[test]
@@ -806,16 +806,18 @@ mod tests {
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
         let first = widget_handle(AlwaysSubmitWidget::new("same"));
         let second = widget_handle(AlwaysSubmitWidget::new("same"));
+        let mut first_id = NodeId::default();
+        let mut second_id = NodeId::default();
         let tree = WidgetTreeBuilder::build(|tree| {
-            tree.widget(first.clone());
-            tree.widget(second.clone());
+            first_id = tree.widget(first.clone());
+            second_id = tree.widget(second.clone());
         });
 
-        ctx.create_window("window", rect(0, 0, 80, 40), tree);
+        let root = ctx.create_window("window", rect(0, 0, 80, 40), tree);
         ctx.update_ui();
 
-        assert!(ctx.committed_results().state_of_handle(&first).is_submitted());
-        assert!(ctx.committed_results().state_of_handle(&second).is_submitted());
+        assert!(ctx.committed_results().state_of_retained(RetainedId::root_node(root, first_id)).is_submitted());
+        assert!(ctx.committed_results().state_of_retained(RetainedId::root_node(root, second_id)).is_submitted());
     }
 
     #[test]
@@ -1201,6 +1203,106 @@ mod tests {
         assert!(!ctx.root_handle(popup).unwrap().is_open());
         assert!(rendered_root_names(&ctx).is_empty());
     }
+
+    fn run_combo_frame(
+        ctx: &mut Context<NoopRenderer>,
+        popup_root: RootId,
+        combo: &WidgetHandle<Combo>,
+        items: &[WidgetHandle<ListItem>; 2],
+        item_ids: &[NodeId; 2],
+    ) -> Option<String> {
+        let labels: Vec<String> = items.iter().map(|item| item.borrow().label.clone()).collect();
+        combo.borrow_mut().update_items(&labels);
+        let combo_anchor = combo.borrow().anchor();
+        let mut popup = combo.borrow().popup.clone();
+        if combo.borrow().is_open() {
+            ctx.set_root_visible(popup_root, true);
+            popup.set_rect(combo_anchor);
+        } else {
+            ctx.set_root_visible(popup_root, false);
+        }
+
+        let mut selected_label = None;
+        let results = ctx.committed_results();
+        for (idx, node_id) in item_ids.iter().enumerate() {
+            if results.state_of_retained(RetainedId::root_node(popup_root, *node_id)).is_submitted() {
+                selected_label = combo.borrow_mut().select(idx, &labels);
+                break;
+            }
+        }
+
+        ctx.update_ui();
+        selected_label
+    }
+
+    #[test]
+    fn retained_combo_popup_stays_closed_after_mouse_selection() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let popup_root = ctx.create_popup("combo popup", WidgetTree::default());
+        ctx.set_root_options(
+            popup_root,
+            ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
+            ScrollBehavior::NO_SCROLL,
+        );
+        let popup = ctx.root_handle(popup_root).expect("popup root missing");
+        let combo = widget_handle(Combo::new(popup));
+        let items = [widget_handle(ListItem::new("Apple")), widget_handle(ListItem::new("Banana"))];
+        let mut item_ids = [NodeId::default(); 2];
+        let main_root = ctx.create_window(
+            "combo window",
+            rect(0, 0, 120, 80),
+            WidgetTreeBuilder::build({
+                let combo = combo.clone();
+                move |tree| {
+                    tree.row(&[SizePolicy::Fixed(80)], SizePolicy::Auto, |tree| {
+                        tree.widget(combo.clone());
+                    });
+                }
+            }),
+        );
+        ctx.set_root_options(main_root, ContainerOption::NO_TITLE | ContainerOption::NO_RESIZE, ScrollBehavior::NONE);
+        let popup_items = items.clone();
+        ctx.set_root_tree(
+            popup_root,
+            WidgetTreeBuilder::build(|tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                    for (index, item) in popup_items.iter().enumerate() {
+                        item_ids[index] = tree.widget(item.clone());
+                    }
+                });
+            }),
+        );
+
+        run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+        ctx.mousemove(10, 10);
+        run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+        ctx.mousedown(10, 10, MouseButton::LEFT);
+        run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+        ctx.mouseup(10, 10, MouseButton::LEFT);
+        run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+        assert!(combo.borrow().is_open());
+        assert!(ctx.root_handle(popup_root).unwrap().is_open());
+
+        let popup_rect = ctx.root_handle(popup_root).unwrap().rect();
+        let item_x = popup_rect.x + 12;
+        let item_y = popup_rect.y + 12;
+        ctx.mousemove(item_x, item_y);
+        run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+        ctx.mousedown(item_x, item_y, MouseButton::LEFT);
+        run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+        ctx.mouseup(item_x, item_y, MouseButton::LEFT);
+        let selected = run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+
+        assert_eq!(selected.as_deref(), Some("Apple"));
+        assert!(!combo.borrow().is_open());
+        assert!(!ctx.root_handle(popup_root).unwrap().is_open());
+
+        run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+        assert!(!combo.borrow().is_open());
+        assert!(!ctx.root_handle(popup_root).unwrap().is_open());
+    }
 }
 
 impl<R: Renderer> Context<R> {
@@ -1219,22 +1321,6 @@ impl<R: Renderer> Context<R> {
             r.render(&mut self.canvas);
         }
         self.canvas.end()
-    }
-
-    /// Begins a new draw pass on the underlying canvas.
-    ///
-    /// Prefer [`Context::begin_render_frame`] in new code; this method remains as a compatibility
-    /// alias.
-    pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
-        self.begin_render_frame(width, height, clr);
-    }
-
-    /// Flushes recorded draw commands to the renderer and ends the draw pass.
-    ///
-    /// Prefer [`Context::end_render_frame`] in new code; this method remains as a compatibility
-    /// alias.
-    pub fn end(&mut self) {
-        self.end_render_frame()
     }
 
     /// Returns a handle to the underlying renderer.
@@ -1574,7 +1660,11 @@ impl<R: Renderer> Context<R> {
             return true;
         }
 
-        if !self.input.borrow().mouse_pressed.is_none() && !window.root_in_hover_root() {
+        let click_outside_popup = {
+            let input = self.input.borrow();
+            !input.mouse_pressed.is_none() && !window.root_in_hover_root() && !window.root_contains_point(input.mouse_pos)
+        };
+        if click_outside_popup {
             window.close();
             return false;
         }

@@ -46,7 +46,7 @@ impl Container {
         self.layout.next_with_policies(preferred, policy.width, policy.height)
     }
 
-    pub(crate) fn execute_node_dyn(
+    pub(crate) fn update_node_dyn(
         &mut self,
         results: &mut FrameResults,
         node_id: NodeId,
@@ -59,17 +59,29 @@ impl Container {
         dispatch_site: String,
     ) -> (ControlState, ResourceState) {
         let widget_id = widget.widget_id();
-        self.record_widget_node(widget_id, node_id);
         let retained_id = self.retained_id_for_node(node_id);
         let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
         let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
         let res = widget.update(&mut ctx, &control);
-        widget.paint(&mut ctx, &control);
         results.record_retained_with_context(retained_id, node_id, widget_id, res, dispatch_site);
         (control, res)
     }
 
-    pub(crate) fn execute_internal_node<W: Widget + ?Sized>(&mut self, node_id: NodeId, widget: &mut W, rect: Recti) -> (ControlState, ResourceState) {
+    pub(crate) fn paint_node_dyn(
+        &mut self,
+        node_id: NodeId,
+        widget: &dyn WidgetStateHandleDyn,
+        rect: Recti,
+        input: Option<Rc<InputSnapshot>>,
+        control: &ControlState,
+    ) {
+        let widget_id = widget.widget_id();
+        let retained_id = self.retained_id_for_node(node_id);
+        let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
+        widget.paint(&mut ctx, control);
+    }
+
+    pub(crate) fn update_internal_node<W: Widget + ?Sized>(&mut self, node_id: NodeId, widget: &mut W, rect: Recti) -> (ControlState, ResourceState) {
         let opt = widget.effective_widget_opt();
         let scroll_behavior = widget.effective_scroll_behavior();
         let focus_policy = widget.focus_policy();
@@ -79,8 +91,15 @@ impl Container {
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
         let res = widget.update(&mut ctx, &control);
-        widget.paint(&mut ctx, &control);
         (control, res)
+    }
+
+    pub(crate) fn paint_internal_node<W: Widget + ?Sized>(&mut self, node_id: NodeId, widget: &mut W, rect: Recti, control: &ControlState) {
+        let retained_id = self.retained_id_for_node(node_id);
+        let widget_id = node_id.raw() as WidgetId;
+        let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
+        let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
+        widget.paint(&mut ctx, control);
     }
 
     pub(crate) fn measure_widget_rect_handle_with_policy<W: Widget>(&mut self, handle: &WidgetHandle<W>, policy: Policy) -> Recti {
@@ -88,7 +107,7 @@ impl Container {
         self.measure_widget_rect_with_policy(&*state, policy)
     }
 
-    pub(crate) fn execute_node_handle<W: Widget>(
+    pub(crate) fn update_node_handle<W: Widget>(
         &mut self,
         results: &mut FrameResults,
         node_id: NodeId,
@@ -104,17 +123,32 @@ impl Container {
             let state = handle.borrow();
             widget_id_of(&*state)
         };
-        self.record_widget_node(widget_id, node_id);
         let retained_id = self.retained_id_for_node(node_id);
         let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
         let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
         let res = {
             let mut state = handle.borrow_mut();
-            let res = state.update(&mut ctx, &control);
-            state.paint(&mut ctx, &control);
-            res
+            state.update(&mut ctx, &control)
         };
         results.record_retained_with_context(retained_id, node_id, widget_id, res, dispatch_site);
         (control, res)
+    }
+
+    pub(crate) fn paint_node_handle<W: Widget>(
+        &mut self,
+        node_id: NodeId,
+        handle: &WidgetHandle<W>,
+        rect: Recti,
+        input: Option<Rc<InputSnapshot>>,
+        control: &ControlState,
+    ) {
+        let widget_id = {
+            let state = handle.borrow();
+            widget_id_of(&*state)
+        };
+        let retained_id = self.retained_id_for_node(node_id);
+        let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
+        let mut state = handle.borrow_mut();
+        state.paint(&mut ctx, control);
     }
 }

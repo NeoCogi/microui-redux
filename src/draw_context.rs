@@ -234,31 +234,12 @@ impl<'a> DrawCtx<'a> {
         });
     }
 
-    pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
-        let clip = self.current_clip_rect();
-        self.emit_clipped(rect, clip, |draw| {
-            draw.push_command(Command::Image { image, rect, color });
-        });
-    }
-
     pub(crate) fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
         let color = self.style.colors[colorid as usize];
         self.draw_rect(rect, color);
         if let Some(border_color) = self.style.frame_border_color(colorid) {
             self.draw_box(expand_rect(rect, 1), border_color);
         }
-    }
-
-    pub(crate) fn draw_widget_frame(&mut self, focused: bool, hovered: bool, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
-        if opt.has_no_frame() {
-            return;
-        }
-        if focused {
-            colorid.focus()
-        } else if hovered {
-            colorid.hover()
-        }
-        self.draw_frame(rect, colorid);
     }
 
     pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {

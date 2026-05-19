@@ -62,6 +62,7 @@ enum Action {
 struct CalcButton {
     action: Action,
     widget: WidgetHandle<Button>,
+    node_id: NodeId,
 }
 
 impl CalcButton {
@@ -69,6 +70,7 @@ impl CalcButton {
         Self {
             action,
             widget: widget_handle(Button::with_opt(label, WidgetOption::ALIGN_CENTER)),
+            node_id: NodeId::default(),
         }
     }
 }
@@ -316,7 +318,7 @@ fn main() {
     let atlas = atlas_assets::load_atlas(&slots);
     let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
         let display = widget_handle(Textbox::with_opt("0", WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT));
-        let buttons = [
+        let mut buttons = [
             CalcButton::new("AC", Action::ClearAll),
             CalcButton::new("CE", Action::ClearEntry),
             CalcButton::new("BS", Action::Backspace),
@@ -339,30 +341,31 @@ fn main() {
             CalcButton::new("=", Action::Equals),
         ];
         let button_widgets: Vec<_> = buttons.iter().map(|button| button.widget.clone()).collect();
-        let tree = WidgetTreeBuilder::build({
-            let display = display.clone();
-            move |tree| {
-                tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION), |tree| {
-                    tree.widget(display.clone());
-                });
-                tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
-                    tree.column(|tree| {
-                        let columns = [
-                            SizePolicy::Weight(1.0),
-                            SizePolicy::Weight(1.0),
-                            SizePolicy::Weight(1.0),
-                            SizePolicy::Weight(1.0),
-                        ];
-                        let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
-                        tree.grid(&columns, &rows, |tree| {
-                            for button in &button_widgets {
-                                tree.widget(button.clone());
-                            }
-                        });
+        let mut button_node_ids = [NodeId::default(); 20];
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION), |tree| {
+                tree.widget(display.clone());
+            });
+            tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
+                tree.column(|tree| {
+                    let columns = [
+                        SizePolicy::Weight(1.0),
+                        SizePolicy::Weight(1.0),
+                        SizePolicy::Weight(1.0),
+                        SizePolicy::Weight(1.0),
+                    ];
+                    let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
+                    tree.grid(&columns, &rows, |tree| {
+                        for (index, button) in button_widgets.iter().enumerate() {
+                            button_node_ids[index] = tree.widget(button.clone());
+                        }
                     });
                 });
-            }
+            });
         });
+        for (button, node_id) in buttons.iter_mut().zip(button_node_ids) {
+            button.node_id = node_id;
+        }
         let root = ctx.create_window("Calculator", rect(0, 0, 320, 420), tree);
         ctx.set_root_options(root, ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE, ScrollBehavior::NONE);
         State {
@@ -388,7 +391,7 @@ fn main() {
 
         let results = ctx.committed_results();
         for button in &state.buttons {
-            if results.state_of_handle(&button.widget).is_submitted() {
+            if results.state_of_retained(RetainedId::root_node(state._root, button.node_id)).is_submitted() {
                 state.calculator.apply(button.action);
             }
         }

@@ -57,11 +57,11 @@ use super::*;
 impl Container {
     /// Manually updates which widget owns focus.
     ///
-    /// Deprecated: prefer [`Container::set_focus_node`] or [`Container::set_focus_handle`].
+    /// Deprecated: retained traversal uses [`Container::set_focus_node`].
     #[cfg(test)]
-    #[deprecated(note = "use set_focus_node or set_focus_handle; widget pointer focus is a compatibility path")]
+    #[deprecated(note = "use set_focus_node; widget pointer focus is a test-only compatibility path")]
     pub fn set_focus(&mut self, widget_id: Option<WidgetId>) {
-        self.interaction.focus = widget_id.map(|widget_id| self.retained_id_for_widget(widget_id));
+        self.interaction.focus = widget_id.map(RetainedId::compat_widget);
         self.interaction.updated_focus = true;
     }
 
@@ -77,28 +77,8 @@ impl Container {
         self.interaction.updated_focus = true;
     }
 
-    /// Sets focus to the retained node that most recently dispatched `handle`.
-    ///
-    /// Returns `false` when the handle has not yet been seen in this container's retained
-    /// traversal. In that case the caller should render once and retry, or use `set_focus_node`
-    /// with a known node ID.
-    pub fn set_focus_handle<W: Widget>(&mut self, handle: &WidgetHandle<W>) -> bool {
-        let widget_id = widget_id_of_handle(handle);
-        match self.tree.cache.node_for_widget(widget_id) {
-            Some(node_id) => {
-                self.set_focus_node(node_id);
-                true
-            }
-            None => false,
-        }
-    }
-
     pub(crate) fn retained_id_for_widget(&self, widget_id: WidgetId) -> RetainedId {
-        self.tree
-            .cache
-            .node_for_widget(widget_id)
-            .map(|node_id| self.retained_id_for_node(node_id))
-            .unwrap_or_else(|| RetainedId::compat_widget(widget_id))
+        RetainedId::compat_widget(widget_id)
     }
 
     pub(crate) fn retained_id_for_node(&self, node_id: NodeId) -> RetainedId {
