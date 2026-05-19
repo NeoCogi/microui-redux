@@ -62,7 +62,7 @@ impl Container {
         while !commands.is_empty() {
             let special_index = commands
                 .iter()
-                .position(|command| matches!(command, Command::BackendCustomRender(_, _) | Command::Panel { .. }));
+                .position(|command| matches!(command, Command::BackendCustomRender(_, _) | Command::RetainedPanel { .. }));
             let batch_len = special_index.unwrap_or(commands.len());
             if batch_len > 0 {
                 Self::render_batch(canvas, &self.draw.triangle_vertices, commands.drain(..batch_len));
@@ -88,7 +88,7 @@ impl Container {
                     canvas.flush();
                     canvas.set_clip_rect(prev_clip);
                 }
-                Some(Command::Panel { mut handle }) => {
+                Some(Command::RetainedPanel { mut handle }) => {
                     canvas.flush();
                     handle.render(canvas);
                     canvas.flush();
@@ -144,7 +144,7 @@ impl Container {
                         let end = vertex_start + vertex_count;
                         canvas.draw_triangles(&triangle_vertices[vertex_start..end]);
                     }
-                    Command::Panel { .. } | Command::BackendCustomRender(_, _) | Command::None => (),
+                    Command::RetainedPanel { .. } | Command::BackendCustomRender(_, _) | Command::None => (),
                 }
             }
             canvas.set_clip_rect(base_clip);

@@ -65,12 +65,6 @@ use crate::{Dimensioni, NodeId, Recti, Vec2i, Widget, WidgetHandle, WidgetId};
 #[cfg(feature = "manual-drawing")]
 use crate::{Clip, Color, ContainerOption, ControlColor, FontId, IconId, ScrollBehavior, SlotId, TextWrap, WidgetOption};
 
-pub(crate) type ContainerId = *const ();
-
-pub(crate) fn container_id_of(handle: &ContainerHandle) -> ContainerId {
-    Rc::as_ptr(&handle.0) as *const ()
-}
-
 #[derive(Clone)]
 /// Shared handle to a container that can be embedded inside windows or panels.
 pub struct ContainerHandle(pub(crate) Rc<RefCell<Container>>);

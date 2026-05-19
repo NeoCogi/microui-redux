@@ -61,6 +61,24 @@ enum InternalControlPart {
 }
 
 impl Container {
+    pub(crate) fn panel_scope_id(&self, node_id: NodeId) -> Id {
+        const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+        const FNV_PRIME: u64 = 0x100000001b3;
+
+        fn write(mut hash: u64, value: u64) -> u64 {
+            for byte in value.to_le_bytes() {
+                hash ^= byte as u64;
+                hash = hash.wrapping_mul(FNV_PRIME);
+            }
+            hash
+        }
+
+        let hash = write(FNV_OFFSET_BASIS, 0x6d69_6372_6f75_695f_u64);
+        let hash = write(hash, 0x7061_6e65_6c5f_7363_u64);
+        let hash = write(hash, self.internal_id_seed.raw() as u64);
+        Id::new(write(hash, node_id.raw() as u64))
+    }
+
     fn internal_control_node_id(&self, part: InternalControlPart) -> NodeId {
         const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
         const FNV_PRIME: u64 = 0x100000001b3;
@@ -319,8 +337,9 @@ impl Container {
     }
 
     pub(crate) fn begin_panel_layout(&mut self, panel: &mut ContainerHandle, node_id: NodeId, _opt: ContainerOption, scroll_behavior: ScrollBehavior, policy: Policy) {
+        let panel_scope = self.panel_scope_id(node_id);
         let container = &mut panel.inner_mut();
-        container.set_internal_id_seed(node_id);
+        container.set_internal_id_seed(panel_scope);
         self.begin_panel_layout_container(container, scroll_behavior, policy);
     }
 
@@ -340,7 +359,7 @@ impl Container {
     ) -> NodeLayout {
         let mut scratch = panel.inner().measurement_scratch();
         scratch.measurement_mode = true;
-        scratch.set_internal_id_seed(node_id);
+        scratch.set_internal_id_seed(self.panel_scope_id(node_id));
         self.begin_panel_layout_container(&mut scratch, scroll_behavior, policy);
         scratch.layout_tree_nodes(results, children);
         Self::pop_panel_container(&mut scratch);
@@ -348,14 +367,15 @@ impl Container {
     }
 
     pub(crate) fn begin_panel_render(&mut self, panel: &mut ContainerHandle, node_id: NodeId, opt: ContainerOption, scroll_behavior: ScrollBehavior, layout: NodeLayout) {
-        let panel_id = container_id_of(panel);
+        let panel_id = self.retained_id_for_node(node_id);
+        let panel_scope = self.panel_scope_id(node_id);
         if self.hit_test_rect(layout.rect, self.interaction.in_hover_root) {
             self.interaction.next_hover_root_child = Some(panel_id);
             self.interaction.next_hover_root_child_rect = Some(layout.rect);
         }
 
         let container = &mut panel.inner_mut();
-        container.set_internal_id_seed(node_id);
+        container.set_internal_id_seed(panel_scope);
         container.style = self.style.clone();
         container.rect = layout.rect;
         container.body = layout.body;
@@ -384,7 +404,7 @@ impl Container {
                 self.interaction.pending_scroll = pending;
             }
         }
-        self.draw.commands.push(Command::Panel { handle: panel.clone() });
+        self.draw.commands.push(Command::RetainedPanel { handle: panel.clone() });
         self.panels.active.push(panel.clone())
     }
 }

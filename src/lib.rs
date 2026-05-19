@@ -144,5 +144,4 @@ pub(crate) use std::{
     hash::Hash,
     rc::Rc,
 };
-pub(crate) use container_handle::{container_id_of, ContainerId};
 pub(crate) use style::UNCLIPPED_RECT;

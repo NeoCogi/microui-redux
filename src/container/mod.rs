@@ -127,12 +127,12 @@ struct InteractionState {
     hover: Option<RetainedId>,
     /// ID of the widget currently focused, if any.
     focus: Option<RetainedId>,
-    /// Child container that currently owns pointer routing inside this container.
-    hover_root_child: Option<ContainerId>,
+    /// Retained panel node that currently owns pointer routing inside this container.
+    hover_root_child: Option<RetainedId>,
     /// Rectangle occupied by the child container that currently owns pointer routing.
     hover_root_child_rect: Option<Recti>,
-    /// Child container selected to own pointer routing on the next frame.
-    next_hover_root_child: Option<ContainerId>,
+    /// Retained panel node selected to own pointer routing on the next frame.
+    next_hover_root_child: Option<RetainedId>,
     /// Rectangle for the child container selected to own pointer routing on the next frame.
     next_hover_root_child_rect: Option<Recti>,
     /// Tracks whether focus changed this frame.

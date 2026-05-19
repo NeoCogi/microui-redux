@@ -621,7 +621,7 @@ fn embedded_panel_render_command_preserves_tree_order() {
         .draw
         .commands
         .iter()
-        .position(|cmd| matches!(cmd, Command::Panel { .. }))
+        .position(|cmd| matches!(cmd, Command::RetainedPanel { .. }))
         .expect("panel command missing");
     let after_idx = parent
         .draw
@@ -632,6 +632,23 @@ fn embedded_panel_render_command_preserves_tree_order() {
 
     assert!(before_idx < panel_idx);
     assert!(panel_idx < after_idx);
+}
+
+#[test]
+fn retained_panel_scope_is_stable_and_parent_scoped() {
+    let mut first_parent = make_container();
+    let mut second_parent = make_container();
+    first_parent.set_internal_id_seed(Id::new(11));
+    second_parent.set_internal_id_seed(Id::new(22));
+
+    let panel_node = NodeId::new(100);
+    let child_node = NodeId::new(200);
+    let first_scope = first_parent.panel_scope_id(panel_node);
+    let second_scope = second_parent.panel_scope_id(panel_node);
+
+    assert_eq!(first_scope, first_parent.panel_scope_id(panel_node));
+    assert_ne!(first_scope, second_scope);
+    assert_ne!(RetainedId::scoped_node(first_scope, child_node), RetainedId::scoped_node(second_scope, child_node));
 }
 
 #[test]
@@ -982,6 +999,99 @@ fn panel_hover_root_switches_between_siblings_on_next_frame() {
     parent.widget_tree(&mut results, &tree);
     assert!(left.inner().interaction.in_hover_root);
     assert!(!right.inner().interaction.in_hover_root);
+}
+
+#[test]
+fn nested_panels_preserve_focus_hover_scroll_and_content_size() {
+    let mut parent = make_container();
+    let input = parent.input.clone();
+    let mut style = Style::default();
+    style.padding = 0;
+    style.scrollbar_size = 8;
+    parent.style = Rc::new(style);
+
+    let outer = make_panel_handle(&parent, "outer");
+    let inner = make_panel_handle(&parent, "inner");
+    let focused = Rc::new(Cell::new(false));
+    let probe = widget_handle(FocusProbe::new(focused.clone()));
+    let text = widget_handle(TextBlock::new("a\na\na\na\na\na\na\na"));
+    let mut outer_node_id = NodeId::new(0);
+    let mut inner_node_id = NodeId::new(0);
+    let mut probe_node_id = NodeId::new(0);
+    let mut results = FrameResults::default();
+
+    let tree = WidgetTreeBuilder::build(|tree| {
+        outer_node_id = tree.container_with(
+            NodeOptions::with_policy(Policy::fixed(80, 40)),
+            outer.clone(),
+            ContainerOption::NONE,
+            ScrollBehavior::NONE,
+            |tree| {
+                inner_node_id = tree.container_with(
+                    NodeOptions::with_policy(Policy::fixed(60, 18)),
+                    inner.clone(),
+                    ContainerOption::NONE,
+                    ScrollBehavior::NONE,
+                    |tree| {
+                        probe_node_id = tree.widget(probe.clone());
+                        tree.widget(text.clone());
+                    },
+                );
+            },
+        );
+    });
+
+    input.borrow_mut().mousemove(5, 5);
+    for _ in 0..3 {
+        results.begin_frame();
+        begin_test_frame(&mut parent, rect(0, 0, 100, 60));
+        parent.widget_tree(&mut results, &tree);
+        parent.finish();
+        results.finish_frame();
+    }
+
+    assert_eq!(parent.interaction.hover_root_child, Some(parent.retained_id_for_node(outer_node_id)));
+    assert!(outer.inner().interaction.in_hover_root);
+    let expected_inner_hover = outer.inner().retained_id_for_node(inner_node_id);
+    assert_eq!(outer.inner().interaction.hover_root_child, Some(expected_inner_hover));
+    assert!(inner.inner().interaction.in_hover_root);
+
+    let mut inner_focus = inner.clone();
+    inner_focus.with_mut(|panel| panel.set_focus_node(probe_node_id));
+    focused.set(false);
+    results.begin_frame();
+    begin_test_frame(&mut parent, rect(0, 0, 100, 60));
+    parent.widget_tree(&mut results, &tree);
+    assert!(focused.get());
+    parent.finish();
+    results.finish_frame();
+
+    let content_before_scroll = inner.inner().content_size();
+    let body_before_scroll = inner.inner().body();
+    let scroll_before = inner.inner().scroll();
+    assert!(content_before_scroll.height > body_before_scroll.height);
+
+    results.begin_frame();
+    begin_test_frame(&mut parent, rect(0, 0, 100, 60));
+    parent.seed_pending_scroll(Some(vec2(0, 24)));
+    parent.widget_tree(&mut results, &tree);
+    parent.finish();
+    results.finish_frame();
+
+    let scroll_after = inner.inner().scroll();
+    assert!(scroll_after.y > scroll_before.y);
+    assert_eq!(inner.inner().content_size().height, content_before_scroll.height);
+
+    focused.set(false);
+    results.begin_frame();
+    begin_test_frame(&mut parent, rect(0, 0, 100, 60));
+    parent.widget_tree(&mut results, &tree);
+    assert!(focused.get());
+    parent.finish();
+    results.finish_frame();
+
+    assert_eq!(inner.inner().scroll().y, scroll_after.y);
+    assert_eq!(inner.inner().content_size().height, content_before_scroll.height);
 }
 
 #[test]

@@ -175,8 +175,8 @@ pub(crate) enum Command {
         /// Number of consecutive vertices in the triangle list.
         vertex_count: usize,
     },
-    /// Renders an embedded retained panel at its tree position.
-    Panel {
+    /// Replays an embedded retained panel at its tree position.
+    RetainedPanel {
         /// Panel handle whose command list should be replayed here.
         handle: ContainerHandle,
     },
