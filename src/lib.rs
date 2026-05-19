@@ -121,7 +121,7 @@ pub use atlas::*;
 pub use canvas::Vertex;
 pub use container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
 pub use container_handle::*;
-pub use context::Context;
+pub use context::{Context, RootId};
 pub use file_dialog::*;
 pub use graphics::*;
 pub use id::Id;

@@ -154,8 +154,9 @@ impl Container {
         self.update_control_for(InteractionId::widget(widget_id), rect, opt, scroll_behavior, focus_policy)
     }
 
-    #[inline(never)]
     /// Updates hover/focus state for the widget described by `widget_id` and optionally consumes scroll.
+    #[cfg_attr(not(test), allow(dead_code))]
+    #[inline(never)]
     pub fn update_control<W: Widget + ?Sized>(&mut self, widget_id: WidgetId, rect: Recti, state: &W) -> ControlState {
         self.update_control_for(
             InteractionId::widget(widget_id),
@@ -187,6 +188,7 @@ impl Container {
         snapshot
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn widget_ctx(&mut self, widget_id: WidgetId, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'_> {
         self.widget_ctx_for(widget_id, InteractionId::widget(widget_id), rect, input)
     }

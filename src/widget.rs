@@ -272,6 +272,13 @@ impl FrameResults {
         self.record_with_context(widget_id, state, dispatch_site);
     }
 
+    /// Records an internal retained node result without a legacy widget identity.
+    pub(crate) fn record_node_with_context(&mut self, node_id: Id, state: ResourceState, dispatch_site: impl Into<String>) {
+        let dispatch_site = dispatch_site.into();
+        self.current_nodes.entry(node_id).or_insert(state);
+        self.current_node_dispatch_sites.entry(node_id).or_insert(dispatch_site);
+    }
+
     /// Returns the committed result generation published by the previous frame.
     pub(crate) fn committed(&self) -> FrameResultGeneration<'_> {
         FrameResultGeneration::new(&self.committed, &self.committed_nodes)
