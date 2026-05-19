@@ -391,8 +391,6 @@ fn widget_tree_records_leaf_states() {
     });
     container.widget_tree(&mut results, &tree);
 
-    assert!(results.current().state(widget_id_of_handle(&button_a)).is_none());
-    assert!(results.current().state(widget_id_of_handle(&button_b)).is_none());
     assert!(results.current().state_of_node(button_a_node).is_none());
     assert!(results.current().state_of_node(button_b_node).is_none());
 }
@@ -455,7 +453,7 @@ fn structural_node_policy_allocates_outer_scope() {
 }
 
 #[test]
-fn widget_tree_measures_all_nodes_before_rendering() {
+fn widget_tree_measures_and_updates_all_nodes_before_painting() {
     let mut container = make_container();
     let log = Rc::new(RefCell::new(Vec::new()));
     let first = widget_handle(TraceWidget::new("first", log.clone()));
@@ -477,8 +475,8 @@ fn widget_tree_measures_all_nodes_before_rendering() {
             "measure first".to_string(),
             "measure second".to_string(),
             "update first".to_string(),
-            "paint first".to_string(),
             "update second".to_string(),
+            "paint first".to_string(),
             "paint second".to_string(),
         ]
     );
@@ -530,7 +528,6 @@ fn retained_widget_value_commits_on_next_frame() {
     container.widget_tree(&mut results, &tree);
 
     let retained_checkbox_id = container.retained_id_for_node(checkbox_node_id);
-    assert!(results.current().state(widget_id_of_handle(&checkbox)).is_changed());
     assert!(results.current().state_of_retained(retained_checkbox_id).is_changed());
     assert!(checkbox.borrow().value);
     container.finish();
@@ -558,17 +555,18 @@ fn widget_tree_dispatches_panel_children() {
     let panel = make_panel_handle(&parent, "panel");
     let button = widget_handle(Button::new("inside"));
     let mut results = FrameResults::default();
+    let mut button_node_id = NodeId::default();
 
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
             tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                tree.widget(button.clone());
+                button_node_id = tree.widget(button.clone());
             });
         });
     });
     parent.widget_tree(&mut results, &tree);
 
-    assert!(results.current().state(widget_id_of_handle(&button)).is_none());
+    assert!(results.current().state_of_node(button_node_id).is_none());
 }
 
 #[test]
@@ -736,33 +734,6 @@ fn retained_focus_follows_stable_node_id_when_widget_handle_changes() {
     container.widget_tree(&mut results, &tree);
     container.set_focus_node(focused_node_id);
     container.finish();
-
-    results.begin_frame();
-    begin_test_frame(&mut container, rect(0, 0, 80, 30));
-    let second = widget_handle(FocusProbe::new(second_focus.clone()));
-    let tree = WidgetTreeBuilder::build(|tree| {
-        tree.widget_with(NodeOptions::keyed("stable-probe"), second.clone());
-    });
-    container.widget_tree(&mut results, &tree);
-
-    assert!(second_focus.get());
-}
-
-#[test]
-fn set_focus_handle_maps_to_retained_node_identity() {
-    let mut container = make_container();
-    let mut results = FrameResults::default();
-    let second_focus = Rc::new(Cell::new(false));
-
-    begin_test_frame(&mut container, rect(0, 0, 80, 30));
-    let first = widget_handle(FocusProbe::new(Rc::new(Cell::new(false))));
-    let tree = WidgetTreeBuilder::build(|tree| {
-        tree.widget_with(NodeOptions::keyed("stable-probe"), first.clone());
-    });
-    container.widget_tree(&mut results, &tree);
-    container.finish();
-
-    assert!(container.set_focus_handle(&first));
 
     results.begin_frame();
     begin_test_frame(&mut container, rect(0, 0, 80, 30));

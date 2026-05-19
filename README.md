@@ -37,7 +37,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 
 ## Key Concepts
 - **Context**: owns the renderer handle, user input, frame results, and retained root windows. A frame has explicit phases: `begin_render_frame(...)` starts renderer work, input events are fed into the context, `update_ui()` traverses roots registered with `create_window(...)`, `create_dialog(...)`, or `create_popup(...)`, and `end_render_frame()` presents recorded root commands.
-- **Container**: the internal execution object behind windows, panels, popups, and retained tree nodes. Application code should normally work through `Context`, `WindowHandle`, `ContainerHandle`, and `WidgetTreeBuilder` instead of authoring widgets directly on a container. `ContainerHandle` exposes retained state access by default; direct draw/clip/body mutation on `ContainerViewMut` is available only with the `manual-drawing` feature for debugging or migration work.
+- **Container**: the internal execution object behind windows, panels, popups, and retained tree nodes. Application code should normally work through `Context`, `WindowHandle`, `ContainerHandle`, and `WidgetTreeBuilder` instead of authoring widgets directly on a container. `ContainerHandle` exposes retained state, focus, and scroll access; direct draw/clip/body mutation is not part of the public application API.
 - **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). Retained traversal keys widget interaction by stable retained node IDs.
 - **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and stored in retained roots through `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)`. Tree nodes cover widgets, panels, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
@@ -45,7 +45,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override their own `font: FontChoice`.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
 
-The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `WindowHandle`, `ContainerHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. Backend-specific canvas and vertex access is available as `microui_redux::backend::{Canvas, Vertex}`; atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, and rect-packing details are not part of the application authoring surface. Container-level manual drawing is not exported by default.
+The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `WindowHandle`, `ContainerHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. Backend-specific canvas and vertex access is available as `microui_redux::backend::{Canvas, Vertex}`; atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, rect-packing details, and container-level manual drawing are not part of the application authoring surface.
 
 ### Retained-mode migration status
 
@@ -55,20 +55,18 @@ Per-frame root submission APIs have been removed from the public surface. Root t
 
 ```rust
 let name = widget_handle(Textbox::new(""));
-let tree = WidgetTreeBuilder::build({
-    let name = name.clone();
-    move |tree| {
-        tree.row(&[SizePolicy::Fixed(120), SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
-            tree.text("Name");
-            tree.widget(name.clone());
-        });
-    }
+let mut name_node = NodeId::default();
+let tree = WidgetTreeBuilder::build(|tree| {
+    tree.row(&[SizePolicy::Fixed(120), SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
+        tree.text("Name");
+        name_node = tree.widget(name.clone());
+    });
 });
 
-let _root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
+let root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
 ctx.update_ui();
 
-if ctx.committed_results().state_of_handle(&name).is_submitted() {
+if ctx.committed_results().state_of_retained(RetainedId::root_node(root, name_node)).is_submitted() {
     // react to the textbox submission here
 }
 ```
@@ -79,27 +77,25 @@ Retained trees are the supported public authoring path. Post-render business log
 ctx.update_ui();
 
 let results = ctx.committed_results();
-if results.state_of_handle(&submit_button).is_submitted() {
+if results.state_of_retained(RetainedId::root_node(root, submit_button_node)).is_submitted() {
     save_form();
 }
 ```
 
-### Widget IDs
+### Retained Node IDs
 Retained-tree focus and hover use the stable `NodeId` assigned by `WidgetTreeBuilder`, scoped by the owning root or panel, so keyed retained nodes keep interaction continuity even when the backing widget handle changes. `ctx.committed_results().state_of_node(node_id)` exposes the same stable lookup for retained nodes when the node ID is unambiguous; `state_of_retained(RetainedId::root_node(root_id, node_id))` accepts the richer retained key.
 
-For retained focus, keep the `NodeId` returned by `WidgetTreeBuilder` and use `set_focus_node`, or use `set_focus_handle` after the handle has been rendered once:
+For retained focus, keep the `NodeId` returned by `WidgetTreeBuilder` and use `set_focus_node`:
 
 ```rust
 my_window.set_focus_node(textbox_node_id);
-// or
-let focused = my_window.set_focus_handle(&my_textbox_handle);
 ```
 
 Registered roots can be configured with `Context::set_root_options(...)` to control container options and root scroll behavior. Use `ScrollBehavior::NO_SCROLL` for popups that should not scroll, `ScrollBehavior::GRAB_SCROLL` for widgets that want to consume scroll, and `ScrollBehavior::NONE` for default behavior. Custom widgets receive consumed scroll in `CustomRenderArgs::scroll_delta`.
 
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
-- Retained traversal measures committed widget state, allocates the widget rectangle, then calls `Widget::update` to sample interaction and mutate widget-local state before `Widget::paint` records commands.
+- Retained traversal measures committed widget state, allocates widget rectangles, updates the whole retained tree with `Widget::update`, then paints the whole retained tree with `Widget::paint`.
 - `WidgetTreeBuilder` exposes retained `row`, `grid`, `column`, `stack`, `header`, `tree_node`, `container`, and `custom_render` structure so layout stays declarative instead of closure-driven.
 - `SizePolicy::Weight(value)` distributes available track space by sibling share ratio (spacing accounted for). Use `SizePolicy::Fraction(value)` for explicit `0.0..=1.0` proportional sizing in single-track flows.
 - Returning `<= 0` for either axis from `Widget::measure` still means "use layout fallback/defaults" for that axis.
@@ -117,14 +113,14 @@ let image_button = widget_handle(Button::with_image(
     WidgetOption::NONE,
     WidgetFillOption::ALL,
 ));
-let tree = WidgetTreeBuilder::build({
-    let image_button = image_button.clone();
-    move |tree| tree.widget(image_button.clone())
+let mut image_button_node = NodeId::default();
+let tree = WidgetTreeBuilder::build(|tree| {
+    image_button_node = tree.widget(image_button.clone());
 });
 
-let _image_root = ctx.create_window("image", rect(20, 20, 260, 120), tree);
+let image_root = ctx.create_window("image", rect(20, 20, 260, 120), tree);
 ctx.update_ui();
-if ctx.committed_results().state_of_handle(&image_button).is_submitted() {
+if ctx.committed_results().state_of_retained(RetainedId::root_node(image_root, image_button_node)).is_submitted() {
     // react here
 }
 ```
@@ -139,7 +135,7 @@ if ctx.committed_results().state_of_handle(&image_button).is_submitted() {
 - The builder provides `draw_rect`, `draw_box`, `draw_text`, `draw_icon`, `draw_image`, `draw_frame`, `draw_widget_frame`, `draw_control_text`, `stroke_line`, `fill_polygon`, and local clip helpers such as `with_clip`.
 - Filled shapes and strokes are tessellated into retained triangles and clipped in software before replay, so primitive rendering stays consistent across glow, Vulkan, and WGPU backends.
 - `examples/retained-custom-drawing` shows a retained custom widget drawing through `WidgetCtx::graphics(...)`, and `examples/demo-full` includes a larger graphics window.
-- Direct `ContainerViewMut` draw and clip methods are gated behind `manual-drawing`; retained widgets and `WidgetTreeBuilder::custom_render(...)` are the supported custom drawing paths.
+- Direct `ContainerViewMut` draw and clip methods are no longer public; retained widgets and `WidgetTreeBuilder::custom_render(...)` are the supported custom drawing paths.
 
 ## Fonts and typography
 - Atlas building supports multiple baked fonts and sizes through `atlas::builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.
@@ -243,13 +239,13 @@ Version `0.6.0` is the retained-tree release. Compared to `0.5.0`, it replaces t
     - [x] `WidgetTreeBuilder` is centered on one `NodeOptions` value that carries optional keys and optional placement metadata.
     - [x] The old `keyed_*` / `*_with_policy` builder matrix was collapsed into one default insertion method plus one `*_with(NodeOptions, ...)` overload per structural concept.
 - [x] Reworked retained execution around explicit layout and interaction generations.
-    - [x] Retained traversal now runs a layout pass followed by `Widget::update` and `Widget::paint`, reusing cached geometry instead of advancing layout while executing widgets.
+    - [x] Retained traversal now runs a layout pass, a whole-tree `Widget::update` pass, then a whole-tree `Widget::paint` pass, reusing cached geometry instead of advancing layout while executing widgets.
     - [x] The internal retained tree cache stores layout and interaction separately across previous/current generations.
     - [x] The temporary runtime adapter tree was removed; retained traversal now walks `WidgetTreeNode` values directly.
 - [x] Tightened the widget/runtime contract compared to v0.5.
     - [x] Widgets now implement `measure` + `update` + `paint`; the intermediate `reconcile` / frame-commit design was removed.
     - [x] Persistent widget state stays inside the widget handle and mutates during `update`.
-    - [x] Retained focus/hover and retained result lookup use stable `NodeId` / `RetainedId` identity, with handle-based result lookup retained for app state handles.
+    - [x] Retained focus/hover and retained result lookup use stable `NodeId` / `RetainedId` identity; pointer-derived widget IDs are not part of the public API.
 - [x] Added widget-local graphics primitives as a first-class paint path.
     - [x] `WidgetCtx::graphics(...)` and `Graphics` expose rectangles, frames, text/icons/images, thick line strokes, polygon fills, and nested local clip scopes.
     - [x] Primitives are tessellated into retained triangles and software-clipped before replay, keeping backend behavior consistent without fragmenting batches on clip changes.
@@ -258,8 +254,8 @@ Version `0.6.0` is the retained-tree release. Compared to `0.5.0`, it replaces t
     - [x] `Style` binds semantic roles (`body`, `small`, `title`, `heading`, `mono`) from atlas font names, and text-bearing widgets can override their font per instance through `FontChoice`.
     - [x] Different text sizes are represented as separate baked font variants instead of runtime bitmap scaling.
 - [x] Made committed retained results the strict public business-logic contract.
-    - [x] Per-frame widget results are recorded internally by retained node ID and widget ID, then published as the previous frame's committed generation.
-    - [x] `Context::committed_results()` is the public app-facing results API, including `FrameResultGeneration::state_of_node` and `FrameResultGeneration::state_of_handle`.
+    - [x] Per-frame widget results are recorded internally by retained ID, then published as the previous frame's committed generation.
+    - [x] `Context::committed_results()` is the public app-facing results API, including `FrameResultGeneration::state_of_node` and `FrameResultGeneration::state_of_retained`.
     - [x] Current-frame results stay internal; `FrameResults` and `current_results()` are no longer part of the public surface.
 - [x] Migrated shipped UI and supporting widgets to the retained-only model.
     - [x] `examples/simple`, `examples/calculator`, `examples/demo-full`, and `FileDialogState` now build retained trees and react through committed results.

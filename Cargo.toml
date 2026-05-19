@@ -5,7 +5,7 @@ version = "0.6.1"
 edition = "2024"
 readme = "README.md"
 license = "BSD-3-Clause"
-description = "Idiomatic Rust MicroUI (immediate mode GUI) library port"
+description = "Retained Rust MicroUI-inspired GUI library"
 repository = "https://github.com/NeoCogi/microui-redux"
 autoexamples = false
 categories = ["gui", "rendering"]
@@ -19,7 +19,6 @@ builder = ["dep:fontdue", "dep:png"]
 png_source = ["dep:png"]
 save-to-rust = []
 prebuilt-atlas = []
-manual-drawing = []
 example-backend = []
 # Example backends are only used by examples and are wired to optional deps.
 example-glow = ["example-backend", "dep:sdl2", "dep:glow"]

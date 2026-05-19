@@ -53,7 +53,6 @@
 //! Draw-command recording helpers that operate on container-local state.
 
 use super::*;
-use crate::text_layout::{baseline_aligned_top, build_display_text_lines};
 
 impl Container {
     #[inline(never)]
@@ -179,34 +178,27 @@ impl Container {
     }
 
     /// Determines whether `r` is fully visible, partially visible, or completely clipped.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
+    #[cfg(test)]
     pub fn check_clip(&mut self, r: Recti) -> Clip {
         self.draw_ctx().check_clip(r)
     }
 
     /// Adjusts the current clip rectangle.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
+    #[cfg(test)]
     pub fn set_clip(&mut self, rect: Recti) {
         let mut draw = self.draw_ctx();
         draw.set_current_clip_rect(rect);
     }
 
     /// Records a filled rectangle draw command.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
+    #[cfg(test)]
     pub fn draw_rect(&mut self, rect: Recti, color: Color) {
         let mut draw = self.draw_ctx();
         draw.draw_rect(rect, color);
     }
 
-    /// Records a rectangle outline.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
-    pub fn draw_box(&mut self, r: Recti, color: Color) {
-        let mut draw = self.draw_ctx();
-        draw.draw_box(r, color);
-    }
-
     /// Records a text draw command.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
+    #[cfg(test)]
     pub fn draw_text(&mut self, font: FontId, str: &str, pos: Vec2i, color: Color) {
         let mut draw = self.draw_ctx();
         draw.draw_text(font, str, pos, color);
@@ -218,104 +210,10 @@ impl Container {
         draw.draw_icon(id, rect, color);
     }
 
-    /// Records a slot draw command.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
-    pub fn draw_slot(&mut self, id: SlotId, rect: Recti, color: Color) {
-        let mut draw = self.draw_ctx();
-        draw.push_image(Image::Slot(id), rect, color);
-    }
-
-    #[inline(never)]
-    /// Draws multi-line text within the container without wrapping.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
-    pub fn text(&mut self, text: &str) {
-        self.text_with_font_wrap(self.style.as_ref().font, text, TextWrap::None);
-    }
-
-    #[inline(never)]
-    /// Draws multi-line text within the container without wrapping using an explicit font.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
-    pub fn text_with_font(&mut self, font: FontId, text: &str) {
-        self.text_with_font_wrap(font, text, TextWrap::None);
-    }
-
-    #[inline(never)]
-    /// Draws multi-line text within the container using the provided wrapping mode.
-    /// The block is rendered inside an internal column with zero spacing so consecutive
-    /// lines sit back-to-back while the outer widget spacing/padding remains intact.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
-    pub fn text_with_wrap(&mut self, text: &str, wrap: TextWrap) {
-        self.text_with_font_wrap(self.style.as_ref().font, text, wrap);
-    }
-
-    #[inline(never)]
-    /// Draws multi-line text within the container using the provided wrapping mode and font.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
-    pub fn text_with_font_wrap(&mut self, font: FontId, text: &str, wrap: TextWrap) {
-        if text.is_empty() {
-            return;
-        }
-        let style = self.style.as_ref();
-        let color = style.colors[ControlColor::Text as usize];
-        let line_height = self.atlas.get_font_height(font) as i32;
-        let baseline = self.atlas.get_font_baseline(font);
-        let saved_spacing = self.layout.style.spacing;
-        self.layout.style.spacing = 0;
-        self.column(|ui| {
-            ui.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Fixed(line_height));
-            let first_rect = ui.layout.next();
-            let max_width = first_rect.width;
-            let lines = build_display_text_lines(text, wrap, max_width, font, &ui.atlas);
-            for (idx, line) in lines.iter().enumerate() {
-                let r = if idx == 0 { first_rect } else { ui.layout.next() };
-                let line_top = baseline_aligned_top(r, line_height, baseline);
-                let slice = &text[line.start..line.end];
-                if !slice.is_empty() {
-                    ui.draw_text(font, slice, vec2(r.x, line_top), color);
-                }
-            }
-        });
-        self.layout.style.spacing = saved_spacing;
-    }
-
     /// Draws a frame and optional border using the specified color.
     pub fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
         let mut draw = self.draw_ctx();
         draw.draw_frame(rect, colorid);
-    }
-
-    /// Draws a widget background, applying hover/focus accents when needed.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
-    pub fn draw_widget_frame(&mut self, widget_id: WidgetId, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let retained_id = self.retained_id_for_widget(widget_id);
-        let focused = self.interaction.focus == Some(retained_id);
-        let hovered = self.interaction.hover == Some(retained_id);
-        let mut draw = self.draw_ctx();
-        draw.draw_widget_frame(focused, hovered, rect, colorid, opt);
-    }
-
-    /// Draws a container frame, skipping rendering when the option disables it.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
-    pub fn draw_container_frame(&mut self, widget_id: WidgetId, rect: Recti, mut colorid: ControlColor, opt: ContainerOption) {
-        if opt.has_no_frame() {
-            return;
-        }
-
-        let retained_id = self.retained_id_for_widget(widget_id);
-        if self.interaction.focus == Some(retained_id) {
-            colorid.focus()
-        } else if self.interaction.hover == Some(retained_id) {
-            colorid.hover()
-        }
-        let mut draw = self.draw_ctx();
-        draw.draw_frame(rect, colorid);
-    }
-
-    #[inline(never)]
-    /// Draws widget text with the appropriate alignment flags.
-    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
-    pub fn draw_control_text(&mut self, str: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        self.draw_control_text_with_font(self.style.as_ref().font, str, rect, colorid, opt);
     }
 
     #[inline(never)]

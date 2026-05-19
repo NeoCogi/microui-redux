@@ -781,6 +781,14 @@ struct State {
     slot_buttons: [WidgetHandle<Button>; 4],
     stack_direction_buttons: [WidgetHandle<Button>; 6],
     weight_buttons: [WidgetHandle<Button>; 9],
+    submit_buf_id: NodeId,
+    submit_button_id: NodeId,
+    test_button_ids: [NodeId; 6],
+    tree_button_ids: [NodeId; 6],
+    popup_button_ids: [NodeId; 2],
+    stack_direction_button_ids: [NodeId; 6],
+    weight_button_ids: [NodeId; 9],
+    combo_item_ids: [NodeId; 4],
     external_image_button: Option<WidgetHandle<Button>>,
     checkboxes: [WidgetHandle<Checkbox>; 3],
     open_popup: bool,
@@ -1068,6 +1076,14 @@ impl State {
                 widget_handle(Button::with_opt("g5", WidgetOption::ALIGN_CENTER)),
                 widget_handle(Button::with_opt("g6", WidgetOption::ALIGN_CENTER)),
             ],
+            submit_buf_id: NodeId::default(),
+            submit_button_id: NodeId::default(),
+            test_button_ids: [NodeId::default(); 6],
+            tree_button_ids: [NodeId::default(); 6],
+            popup_button_ids: [NodeId::default(); 2],
+            stack_direction_button_ids: [NodeId::default(); 6],
+            weight_button_ids: [NodeId::default(); 9],
+            combo_item_ids: [NodeId::default(); 4],
             external_image_button,
             checkboxes: [
                 widget_handle(Checkbox::new("Checkbox 1", false)),
@@ -1097,9 +1113,40 @@ impl State {
             combo_tree: WidgetTree::default(),
             popup_tree: WidgetTree::default(),
         };
+        state.sync_background_controls_from_bg();
+        state.sync_style_controls_from_style();
         state.rebuild_trees();
         state.install_root_trees(ctx);
         state
+    }
+
+    fn sync_background_controls_from_bg(&mut self) {
+        self.bg_sliders[0].borrow_mut().value = self.bg[0];
+        self.bg_sliders[1].borrow_mut().value = self.bg[1];
+        self.bg_sliders[2].borrow_mut().value = self.bg[2];
+        self.sync_background_swatch();
+    }
+
+    fn sync_background_swatch(&mut self) {
+        let mut swatch = self.background_swatch.borrow_mut();
+        swatch.fill = color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255);
+        swatch.label = format!("#{:02X}{:02X}{:02X}", swatch.fill.r, swatch.fill.g, swatch.fill.b);
+    }
+
+    fn sync_style_controls_from_style(&mut self) {
+        for (i, color) in self.style.colors.iter().enumerate() {
+            let slider_base = i * 4;
+            self.style_color_sliders[slider_base].borrow_mut().value = color.r as Real;
+            self.style_color_sliders[slider_base + 1].borrow_mut().value = color.g as Real;
+            self.style_color_sliders[slider_base + 2].borrow_mut().value = color.b as Real;
+            self.style_color_sliders[slider_base + 3].borrow_mut().value = color.a as Real;
+            self.style_color_swatches[i].borrow_mut().fill = *color;
+        }
+        self.style_value_sliders[0].borrow_mut().value = self.style.padding as Real;
+        self.style_value_sliders[1].borrow_mut().value = self.style.spacing as Real;
+        self.style_value_sliders[2].borrow_mut().value = self.style.title_height as Real;
+        self.style_value_sliders[3].borrow_mut().value = self.style.thumb_size as Real;
+        self.style_value_sliders[4].borrow_mut().value = self.style.scrollbar_size as Real;
     }
 
     fn install_root_trees(&mut self, ctx: &mut Context<BackendRenderer>) {
@@ -1130,6 +1177,10 @@ impl State {
 
     fn section(tree: &mut WidgetTreeBuilder, node: &WidgetHandle<Node>, f: impl FnOnce(&mut WidgetTreeBuilder)) {
         tree.header(node.clone(), f);
+    }
+
+    fn root_submitted(results: FrameResultGeneration<'_>, root: RootId, node_id: NodeId) -> bool {
+        results.state_of_retained(RetainedId::root_node(root, node_id)).is_submitted()
     }
 
     fn rebuild_trees(&mut self) {
@@ -1176,7 +1227,9 @@ impl State {
         let log_text = self.log_text.clone();
         let submit_buf = self.submit_buf.clone();
         let submit_button = self.submit_button.clone();
-        self.log_tree = WidgetTreeBuilder::build(move |tree| {
+        let mut submit_buf_id = NodeId::default();
+        let mut submit_button_id = NodeId::default();
+        self.log_tree = WidgetTreeBuilder::build(|tree| {
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
                 tree.container(log_output.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
@@ -1184,10 +1237,12 @@ impl State {
                 });
             });
             tree.row(&submit_row, SizePolicy::Auto, |tree| {
-                tree.widget(submit_buf.clone());
-                tree.widget(submit_button.clone());
+                submit_buf_id = tree.widget(submit_buf.clone());
+                submit_button_id = tree.widget(submit_button.clone());
             });
         });
+        self.submit_buf_id = submit_buf_id;
+        self.submit_button_id = submit_button_id;
 
         let typography_heading = self.typography_heading.clone();
         let typography_body = self.typography_body.clone();
@@ -1310,7 +1365,8 @@ impl State {
 
         let stack_direction_labels = self.stack_direction_labels.clone();
         let stack_direction_buttons = self.stack_direction_buttons.clone();
-        self.stack_direction_tree = WidgetTreeBuilder::build(move |tree| {
+        let mut stack_direction_button_ids = [NodeId::default(); 6];
+        self.stack_direction_tree = WidgetTreeBuilder::build(|tree| {
             let columns = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
             let [label_top, label_bottom] = stack_direction_labels.clone();
             let [button_top_0, button_top_1, button_top_2, button_bottom_0, button_bottom_1, button_bottom_2] = stack_direction_buttons.clone();
@@ -1321,24 +1377,26 @@ impl State {
             tree.row(&columns, SizePolicy::Fixed(120), |tree| {
                 tree.column(|tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, |tree| {
-                        tree.widget(button_top_0.clone());
-                        tree.widget(button_top_1.clone());
-                        tree.widget(button_top_2.clone());
+                        stack_direction_button_ids[0] = tree.widget(button_top_0.clone());
+                        stack_direction_button_ids[1] = tree.widget(button_top_1.clone());
+                        stack_direction_button_ids[2] = tree.widget(button_top_2.clone());
                     });
                 });
                 tree.column(|tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::BottomToTop, |tree| {
-                        tree.widget(button_bottom_0.clone());
-                        tree.widget(button_bottom_1.clone());
-                        tree.widget(button_bottom_2.clone());
+                        stack_direction_button_ids[3] = tree.widget(button_bottom_0.clone());
+                        stack_direction_button_ids[4] = tree.widget(button_bottom_1.clone());
+                        stack_direction_button_ids[5] = tree.widget(button_bottom_2.clone());
                     });
                 });
             });
         });
+        self.stack_direction_button_ids = stack_direction_button_ids;
 
         let weight_labels = self.weight_labels.clone();
         let weight_buttons = self.weight_buttons.clone();
-        self.weight_tree = WidgetTreeBuilder::build(move |tree| {
+        let mut weight_button_ids = [NodeId::default(); 9];
+        self.weight_tree = WidgetTreeBuilder::build(|tree| {
             let [row_weight_label, grid_weight_label] = weight_labels.clone();
             let [
                 button_row_0,
@@ -1358,9 +1416,9 @@ impl State {
                 tree.widget(row_weight_label.clone());
             });
             tree.row(&row, SizePolicy::Fixed(28), |tree| {
-                tree.widget(button_row_0.clone());
-                tree.widget(button_row_1.clone());
-                tree.widget(button_row_2.clone());
+                weight_button_ids[0] = tree.widget(button_row_0.clone());
+                weight_button_ids[1] = tree.widget(button_row_1.clone());
+                weight_button_ids[2] = tree.widget(button_row_2.clone());
             });
             tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |tree| {
                 tree.widget(grid_weight_label.clone());
@@ -1368,34 +1426,39 @@ impl State {
             tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |tree| {
                 tree.column(|tree| {
                     tree.grid(&cols, &rows, |tree| {
-                        tree.widget(button_grid_0.clone());
-                        tree.widget(button_grid_1.clone());
-                        tree.widget(button_grid_2.clone());
-                        tree.widget(button_grid_3.clone());
-                        tree.widget(button_grid_4.clone());
-                        tree.widget(button_grid_5.clone());
+                        weight_button_ids[3] = tree.widget(button_grid_0.clone());
+                        weight_button_ids[4] = tree.widget(button_grid_1.clone());
+                        weight_button_ids[5] = tree.widget(button_grid_2.clone());
+                        weight_button_ids[6] = tree.widget(button_grid_3.clone());
+                        weight_button_ids[7] = tree.widget(button_grid_4.clone());
+                        weight_button_ids[8] = tree.widget(button_grid_5.clone());
                     });
                 });
             });
         });
+        self.weight_button_ids = weight_button_ids;
 
         let combo_items = self.combo_items.clone();
-        self.combo_tree = WidgetTreeBuilder::build(move |tree| {
+        let mut combo_item_ids = [NodeId::default(); 4];
+        self.combo_tree = WidgetTreeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                for item in &combo_items {
-                    tree.widget(item.clone());
+                for (index, item) in combo_items.iter().enumerate() {
+                    combo_item_ids[index] = tree.widget(item.clone());
                 }
             });
         });
+        self.combo_item_ids = combo_item_ids;
 
         let popup_buttons = self.popup_buttons.clone();
-        self.popup_tree = WidgetTreeBuilder::build(move |tree| {
+        let mut popup_button_ids = [NodeId::default(); 2];
+        self.popup_tree = WidgetTreeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                for button in &popup_buttons {
-                    tree.widget(button.clone());
+                for (index, button) in popup_buttons.iter().enumerate() {
+                    popup_button_ids[index] = tree.widget(button.clone());
                 }
             });
         });
+        self.popup_button_ids = popup_button_ids;
 
         let window_header = self.window_header.clone();
         let test_buttons_header = self.test_buttons_header.clone();
@@ -1423,7 +1486,9 @@ impl State {
         let background_swatch = self.background_swatch.clone();
         let slot_buttons = self.slot_buttons.clone();
         let external_image_button = self.external_image_button.clone();
-        self.demo_tree = WidgetTreeBuilder::build(move |tree| {
+        let mut test_button_ids = [NodeId::default(); 6];
+        let mut tree_button_ids = [NodeId::default(); 6];
+        self.demo_tree = WidgetTreeBuilder::build(|tree| {
             let window_info_row = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
             let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
             let tree_widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
@@ -1459,18 +1524,18 @@ impl State {
             Self::section(tree, &test_buttons_header, |tree| {
                 tree.row(&button_widths, SizePolicy::Auto, |tree| {
                     tree.widget(test_label0.clone());
-                    tree.widget(button0.clone());
-                    tree.widget(button1.clone());
+                    test_button_ids[0] = tree.widget(button0.clone());
+                    test_button_ids[1] = tree.widget(button1.clone());
                 });
                 tree.row(&button_widths, SizePolicy::Auto, |tree| {
                     tree.widget(test_label1.clone());
-                    tree.widget(button2.clone());
-                    tree.widget(button3.clone());
+                    test_button_ids[2] = tree.widget(button2.clone());
+                    test_button_ids[3] = tree.widget(button3.clone());
                 });
                 tree.row(&button_widths, SizePolicy::Auto, |tree| {
                     tree.widget(test_label2.clone());
-                    tree.widget(button4.clone());
-                    tree.widget(button5.clone());
+                    test_button_ids[4] = tree.widget(button4.clone());
+                    test_button_ids[5] = tree.widget(button5.clone());
                 });
             });
 
@@ -1489,18 +1554,18 @@ impl State {
                                 tree.widget(tree_label_world.clone());
                             });
                             tree.tree_node(test1b_tn.clone(), |tree| {
-                                tree.widget(tree_button0.clone());
-                                tree.widget(tree_button1.clone());
+                                tree_button_ids[0] = tree.widget(tree_button0.clone());
+                                tree_button_ids[1] = tree.widget(tree_button1.clone());
                             });
                         });
                         tree.tree_node(test2_tn.clone(), |tree| {
                             tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
-                                tree.widget(tree_button2.clone());
-                                tree.widget(tree_button3.clone());
+                                tree_button_ids[2] = tree.widget(tree_button2.clone());
+                                tree_button_ids[3] = tree.widget(tree_button3.clone());
                             });
                             tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
-                                tree.widget(tree_button4.clone());
-                                tree.widget(tree_button5.clone());
+                                tree_button_ids[4] = tree.widget(tree_button4.clone());
+                                tree_button_ids[5] = tree.widget(tree_button5.clone());
                             });
                         });
                         tree.tree_node(test3_tn.clone(), |tree| {
@@ -1562,23 +1627,11 @@ impl State {
                 });
             });
         });
+        self.test_button_ids = test_button_ids;
+        self.tree_button_ids = tree_button_ids;
     }
 
     fn style_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        for (i, color) in self.style.colors.iter().enumerate() {
-            let slider_base = i * 4;
-            self.style_color_sliders[slider_base].borrow_mut().value = color.r as Real;
-            self.style_color_sliders[slider_base + 1].borrow_mut().value = color.g as Real;
-            self.style_color_sliders[slider_base + 2].borrow_mut().value = color.b as Real;
-            self.style_color_sliders[slider_base + 3].borrow_mut().value = color.a as Real;
-            self.style_color_swatches[i].borrow_mut().fill = *color;
-        }
-        self.style_value_sliders[0].borrow_mut().value = self.style.padding as Real;
-        self.style_value_sliders[1].borrow_mut().value = self.style.spacing as Real;
-        self.style_value_sliders[2].borrow_mut().value = self.style.title_height as Real;
-        self.style_value_sliders[3].borrow_mut().value = self.style.thumb_size as Real;
-        self.style_value_sliders[4].borrow_mut().value = self.style.scrollbar_size as Real;
-
         for (color, sliders) in self.style.colors.iter_mut().zip(self.style_color_sliders.chunks_exact(4)) {
             color.r = sliders[0].borrow().value as u8;
             color.g = sliders[1].borrow().value as u8;
@@ -1612,13 +1665,13 @@ impl State {
         let mut submitted = false;
         {
             let results = ctx.committed_results();
-            let submit_buf_out = results.state_of_handle(&self.submit_buf);
-            let submit_btn_out = results.state_of_handle(&self.submit_button);
-            if submit_buf_out.is_submitted() {
-                self.log_window.set_focus_handle(&self.submit_buf);
+            let submit_buf_out = Self::root_submitted(results, self.log_root, self.submit_buf_id);
+            let submit_btn_out = Self::root_submitted(results, self.log_root, self.submit_button_id);
+            if submit_buf_out {
+                self.log_window.set_focus_node(self.submit_buf_id);
                 submitted = true;
             }
-            if submit_btn_out.is_submitted() {
+            if submit_btn_out {
                 submitted = true;
             }
         }
@@ -1644,22 +1697,22 @@ impl State {
         let mut logs: Vec<&'static str> = Vec::new();
 
         let results = ctx.committed_results();
-        if results.state_of_handle(&self.stack_direction_buttons[0]).is_submitted() {
+        if Self::root_submitted(results, self.stack_direction_root, self.stack_direction_button_ids[0]) {
             logs.push("Top->Bottom: call 1");
         }
-        if results.state_of_handle(&self.stack_direction_buttons[1]).is_submitted() {
+        if Self::root_submitted(results, self.stack_direction_root, self.stack_direction_button_ids[1]) {
             logs.push("Top->Bottom: call 2");
         }
-        if results.state_of_handle(&self.stack_direction_buttons[2]).is_submitted() {
+        if Self::root_submitted(results, self.stack_direction_root, self.stack_direction_button_ids[2]) {
             logs.push("Top->Bottom: call 3");
         }
-        if results.state_of_handle(&self.stack_direction_buttons[3]).is_submitted() {
+        if Self::root_submitted(results, self.stack_direction_root, self.stack_direction_button_ids[3]) {
             logs.push("Bottom->Top: call 1");
         }
-        if results.state_of_handle(&self.stack_direction_buttons[4]).is_submitted() {
+        if Self::root_submitted(results, self.stack_direction_root, self.stack_direction_button_ids[4]) {
             logs.push("Bottom->Top: call 2");
         }
-        if results.state_of_handle(&self.stack_direction_buttons[5]).is_submitted() {
+        if Self::root_submitted(results, self.stack_direction_root, self.stack_direction_button_ids[5]) {
             logs.push("Bottom->Top: call 3");
         }
 
@@ -1672,31 +1725,31 @@ impl State {
         let mut logs: Vec<&'static str> = Vec::new();
 
         let results = ctx.committed_results();
-        if results.state_of_handle(&self.weight_buttons[0]).is_submitted() {
+        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[0]) {
             logs.push("Weight row: 1");
         }
-        if results.state_of_handle(&self.weight_buttons[1]).is_submitted() {
+        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[1]) {
             logs.push("Weight row: 2");
         }
-        if results.state_of_handle(&self.weight_buttons[2]).is_submitted() {
+        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[2]) {
             logs.push("Weight row: 3");
         }
-        if results.state_of_handle(&self.weight_buttons[3]).is_submitted() {
+        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[3]) {
             logs.push("Weight grid: 1");
         }
-        if results.state_of_handle(&self.weight_buttons[4]).is_submitted() {
+        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[4]) {
             logs.push("Weight grid: 2");
         }
-        if results.state_of_handle(&self.weight_buttons[5]).is_submitted() {
+        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[5]) {
             logs.push("Weight grid: 3");
         }
-        if results.state_of_handle(&self.weight_buttons[6]).is_submitted() {
+        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[6]) {
             logs.push("Weight grid: 4");
         }
-        if results.state_of_handle(&self.weight_buttons[7]).is_submitted() {
+        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[7]) {
             logs.push("Weight grid: 5");
         }
-        if results.state_of_handle(&self.weight_buttons[8]).is_submitted() {
+        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[8]) {
             logs.push("Weight grid: 6");
         }
 
@@ -1722,65 +1775,52 @@ impl State {
         let combo_labels: Vec<String> = self.combo_items.iter().map(|item| item.borrow().label.clone()).collect();
         self.combo_state.borrow_mut().update_items(&combo_labels);
 
-        self.bg_sliders[0].borrow_mut().value = self.bg[0];
-        self.bg_sliders[1].borrow_mut().value = self.bg[1];
-        self.bg_sliders[2].borrow_mut().value = self.bg[2];
-        {
-            let mut swatch = self.background_swatch.borrow_mut();
-            swatch.fill = color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255);
-            swatch.label = format!("#{:02X}{:02X}{:02X}", swatch.fill.r, swatch.fill.g, swatch.fill.b);
-        }
-
         let mut button_logs: Vec<&'static str> = Vec::new();
         let mut tree_logs: Vec<&'static str> = Vec::new();
         let combo_anchor = self.combo_state.borrow().anchor();
         {
             let results = ctx.committed_results();
-            if results.state_of_handle(&self.test_buttons[0]).is_submitted() {
+            if Self::root_submitted(results, self.demo_root, self.test_button_ids[0]) {
                 button_logs.push("Pressed button 1");
             }
-            if results.state_of_handle(&self.test_buttons[1]).is_submitted() {
+            if Self::root_submitted(results, self.demo_root, self.test_button_ids[1]) {
                 button_logs.push("Pressed button 2");
             }
-            if results.state_of_handle(&self.test_buttons[2]).is_submitted() {
+            if Self::root_submitted(results, self.demo_root, self.test_button_ids[2]) {
                 button_logs.push("Pressed button 3");
             }
-            if results.state_of_handle(&self.test_buttons[3]).is_submitted() {
+            if Self::root_submitted(results, self.demo_root, self.test_button_ids[3]) {
                 self.open_popup = true;
             }
-            if results.state_of_handle(&self.test_buttons[4]).is_submitted() {
+            if Self::root_submitted(results, self.demo_root, self.test_button_ids[4]) {
                 button_logs.push("Pressed button 4");
             }
-            if results.state_of_handle(&self.test_buttons[5]).is_submitted() {
+            if Self::root_submitted(results, self.demo_root, self.test_button_ids[5]) {
                 self.open_dialog = true;
             }
-            if results.state_of_handle(&self.tree_buttons[0]).is_submitted() {
+            if Self::root_submitted(results, self.demo_root, self.tree_button_ids[0]) {
                 tree_logs.push("Pressed button 1");
             }
-            if results.state_of_handle(&self.tree_buttons[1]).is_submitted() {
+            if Self::root_submitted(results, self.demo_root, self.tree_button_ids[1]) {
                 tree_logs.push("Pressed button 2");
             }
-            if results.state_of_handle(&self.tree_buttons[2]).is_submitted() {
+            if Self::root_submitted(results, self.demo_root, self.tree_button_ids[2]) {
                 tree_logs.push("Pressed button 3");
             }
-            if results.state_of_handle(&self.tree_buttons[3]).is_submitted() {
+            if Self::root_submitted(results, self.demo_root, self.tree_button_ids[3]) {
                 tree_logs.push("Pressed button 4");
             }
-            if results.state_of_handle(&self.tree_buttons[4]).is_submitted() {
+            if Self::root_submitted(results, self.demo_root, self.tree_button_ids[4]) {
                 tree_logs.push("Pressed button 5");
             }
-            if results.state_of_handle(&self.tree_buttons[5]).is_submitted() {
+            if Self::root_submitted(results, self.demo_root, self.tree_button_ids[5]) {
                 tree_logs.push("Pressed button 6");
             }
         }
         self.bg[0] = self.bg_sliders[0].borrow().value;
         self.bg[1] = self.bg_sliders[1].borrow().value;
         self.bg[2] = self.bg_sliders[2].borrow().value;
-        {
-            let mut swatch = self.background_swatch.borrow_mut();
-            swatch.fill = color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255);
-            swatch.label = format!("#{:02X}{:02X}{:02X}", swatch.fill.r, swatch.fill.g, swatch.fill.b);
-        }
+        self.sync_background_swatch();
         for msg in button_logs {
             self.write_log(msg);
         }
@@ -1799,8 +1839,8 @@ impl State {
         let combo_log = {
             let results = ctx.committed_results();
             let mut selected_label = None;
-            for (idx, item) in self.combo_items.iter().enumerate() {
-                if results.state_of_handle(item).is_submitted() {
+            for (idx, node_id) in self.combo_item_ids.iter().enumerate() {
+                if Self::root_submitted(results, self.combo_popup_root, *node_id) {
                     selected_label = self.combo_state.borrow_mut().select(idx, &combo_labels);
                     break;
                 }
@@ -1822,10 +1862,10 @@ impl State {
         let mut popup_logs: Vec<&'static str> = Vec::new();
         {
             let results = ctx.committed_results();
-            if results.state_of_handle(&self.popup_buttons[0]).is_submitted() {
+            if Self::root_submitted(results, self.popup_root, self.popup_button_ids[0]) {
                 popup_logs.push("Hello")
             }
-            if results.state_of_handle(&self.popup_buttons[1]).is_submitted() {
+            if Self::root_submitted(results, self.popup_root, self.popup_button_ids[1]) {
                 popup_logs.push("World")
             }
         }

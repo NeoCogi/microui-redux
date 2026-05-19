@@ -53,7 +53,7 @@
 #![deny(missing_docs)]
 // `clippy::pedantic` is useful as an occasional review tool for this crate, but these categories
 // are intentionally outside the local lint profile. The UI/rendering path performs many bounded
-// pixel/UV casts, internal modules use crate preludes heavily, and the immediate-mode public API
+// pixel/UV casts, internal modules use crate preludes heavily, and the retained public API
 // should not grow `#[must_use]` or pedantic doc-section noise mechanically.
 #![allow(
     clippy::cast_lossless,
@@ -126,7 +126,7 @@ pub mod retained {
     pub use crate::container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
     pub use crate::container_handle::{ContainerHandle, ContainerView, ContainerViewMut};
     pub use crate::context::{Context, RootId};
-    pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetId};
+    pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
     pub use crate::widget_tree::{NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
     pub use crate::window::{WindowHandle, WindowState};
 }
@@ -150,7 +150,7 @@ pub mod prelude {
     pub use crate::render::{Renderer, RendererHandle};
     pub use crate::retained::{
         ContainerHandle, Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeId, NodeOptions, Policy, RetainedId, RootId,
-        TextWrap, Widget, WidgetCtx, WidgetHandle, WidgetId, WidgetTree, WidgetTreeBuilder, WindowHandle, WindowState, widget_handle,
+        TextWrap, Widget, WidgetCtx, WidgetHandle, WidgetTree, WidgetTreeBuilder, WindowHandle, WindowState, widget_handle,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
@@ -186,7 +186,7 @@ pub use rs_math3d::{
     ortho4,
 };
 pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
-pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetId};
+pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
 pub use widget_tree::{NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
 pub use widgets::{
     Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, NumberEditState, Slider, TextArea, TextBlock,

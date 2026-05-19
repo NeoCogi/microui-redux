@@ -47,11 +47,19 @@ pub struct FileDialogState {
     files: Vec<String>,
     folder_items: Vec<WidgetHandle<ListItem>>,
     file_items: Vec<WidgetHandle<ListItem>>,
+    folder_item_ids: Vec<NodeId>,
+    file_item_ids: Vec<NodeId>,
     up_button: WidgetHandle<Button>,
     home_button: WidgetHandle<Button>,
     go_button: WidgetHandle<Button>,
     ok_button: WidgetHandle<Button>,
     cancel_button: WidgetHandle<Button>,
+    up_button_id: NodeId,
+    home_button_id: NodeId,
+    path_box_id: NodeId,
+    go_button_id: NodeId,
+    ok_button_id: NodeId,
+    cancel_button_id: NodeId,
     folders_label: WidgetHandle<ListItem>,
     no_folders_label: WidgetHandle<ListItem>,
     files_label: WidgetHandle<ListItem>,
@@ -194,6 +202,14 @@ impl FileDialogState {
         let file_items = self.file_items.clone();
         let no_folder_items = folder_items.is_empty();
         let no_file_items = file_items.is_empty();
+        let mut folder_item_ids = Vec::with_capacity(folder_items.len());
+        let mut file_item_ids = Vec::with_capacity(file_items.len());
+        let mut up_button_id = NodeId::default();
+        let mut home_button_id = NodeId::default();
+        let mut path_box_id = NodeId::default();
+        let mut go_button_id = NodeId::default();
+        let mut cancel_button_id = NodeId::default();
+        let mut ok_button_id = NodeId::default();
         let (control_height, spacing) = {
             let win = self.win.inner();
             let container = &win.main;
@@ -217,10 +233,10 @@ impl FileDialogState {
             let action_widths = [SizePolicy::Remainder(96 * 2 + spacing * 2), SizePolicy::Fixed(96), SizePolicy::Fixed(96)];
             let footer_reserved = control_height * 2 + spacing * 2;
             tree.row(&toolbar_widths, SizePolicy::Auto, |tree| {
-                tree.widget(up_button.clone());
-                tree.widget(home_button.clone());
-                tree.widget(path_box.clone());
-                tree.widget(go_button.clone());
+                up_button_id = tree.widget(up_button.clone());
+                home_button_id = tree.widget(home_button.clone());
+                path_box_id = tree.widget(path_box.clone());
+                go_button_id = tree.widget(go_button.clone());
             });
 
             tree.row(&pane_widths, SizePolicy::Remainder(footer_reserved), |tree| {
@@ -228,7 +244,7 @@ impl FileDialogState {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                         tree.widget(folders_label.clone());
                         for item in &folder_items {
-                            tree.widget(item.clone());
+                            folder_item_ids.push(tree.widget(item.clone()));
                         }
                         if no_folder_items {
                             tree.widget(no_folders_label.clone());
@@ -240,7 +256,7 @@ impl FileDialogState {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                         tree.widget(files_label.clone());
                         for item in &file_items {
-                            tree.widget(item.clone());
+                            file_item_ids.push(tree.widget(item.clone()));
                         }
                         if no_file_items {
                             tree.widget(no_files_label.clone());
@@ -256,10 +272,18 @@ impl FileDialogState {
 
             tree.row(&action_widths, SizePolicy::Auto, |tree| {
                 tree.widget(spacer_label.clone());
-                tree.widget(cancel_button.clone());
-                tree.widget(ok_button.clone());
+                cancel_button_id = tree.widget(cancel_button.clone());
+                ok_button_id = tree.widget(ok_button.clone());
             });
         });
+        self.folder_item_ids = folder_item_ids;
+        self.file_item_ids = file_item_ids;
+        self.up_button_id = up_button_id;
+        self.home_button_id = home_button_id;
+        self.path_box_id = path_box_id;
+        self.go_button_id = go_button_id;
+        self.cancel_button_id = cancel_button_id;
+        self.ok_button_id = ok_button_id;
     }
 
     fn sync_retained_view(&mut self) {
@@ -284,14 +308,18 @@ impl FileDialogState {
         ctx.set_root_tree(self.root, std::mem::take(&mut self.tree));
     }
 
+    fn root_submitted(&self, results: FrameResultGeneration<'_>, node_id: NodeId) -> bool {
+        results.state_of_retained(RetainedId::root_node(self.root, node_id)).is_submitted()
+    }
+
     fn apply_navigation_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
-        if results.state_of_handle(&self.up_button).is_submitted() {
+        if self.root_submitted(results, self.up_button_id) {
             if let Some(parent) = Path::new(self.current_working_directory.as_str()).parent() {
                 return self.navigate_to(parent.to_string_lossy().to_string());
             }
         }
 
-        if results.state_of_handle(&self.home_button).is_submitted() {
+        if self.root_submitted(results, self.home_button_id) {
             if let Some(home) = Self::home_dir() {
                 if Path::new(home.as_str()).is_dir() {
                     return self.navigate_to(home);
@@ -299,7 +327,7 @@ impl FileDialogState {
             }
         }
 
-        if results.state_of_handle(&self.path_box).is_submitted() || results.state_of_handle(&self.go_button).is_submitted() {
+        if self.root_submitted(results, self.path_box_id) || self.root_submitted(results, self.go_button_id) {
             let path_input = self.path_box.borrow().buf.clone();
             if let Some(path) = Self::resolve_directory_path(self.current_working_directory.as_str(), path_input.as_str()) {
                 return self.navigate_to(path);
@@ -310,8 +338,8 @@ impl FileDialogState {
     }
 
     fn apply_folder_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
-        let next_directory = self.folder_items.iter().enumerate().find_map(|(index, item)| {
-            if results.state_of_handle(item).is_submitted() {
+        let next_directory = self.folder_item_ids.iter().enumerate().find_map(|(index, node_id)| {
+            if results.state_of_retained(self.folder_panel.retained_id_for_node(*node_id)).is_submitted() {
                 self.folders.get(index).cloned()
             } else {
                 None
@@ -327,8 +355,8 @@ impl FileDialogState {
     }
 
     fn apply_file_actions(&mut self, results: FrameResultGeneration<'_>) {
-        let selected_file = self.file_items.iter().enumerate().find_map(|(index, item)| {
-            if results.state_of_handle(item).is_submitted() {
+        let selected_file = self.file_item_ids.iter().enumerate().find_map(|(index, node_id)| {
+            if results.state_of_retained(self.file_panel.retained_id_for_node(*node_id)).is_submitted() {
                 self.files.get(index).cloned()
             } else {
                 None
@@ -341,13 +369,13 @@ impl FileDialogState {
     }
 
     fn apply_completion_actions(&mut self, results: FrameResultGeneration<'_>) {
-        if results.state_of_handle(&self.cancel_button).is_submitted() {
+        if self.root_submitted(results, self.cancel_button_id) {
             self.file_name = None;
             self.file_path = None;
             self.win.close();
         }
 
-        if results.state_of_handle(&self.ok_button).is_submitted() {
+        if self.root_submitted(results, self.ok_button_id) {
             let typed_name = self.tmp_file_name.borrow().buf.clone();
             if typed_name.is_empty() {
                 self.file_name = None;
@@ -389,11 +417,19 @@ impl FileDialogState {
             files: Vec::new(),
             folder_items: Vec::new(),
             file_items: Vec::new(),
+            folder_item_ids: Vec::new(),
+            file_item_ids: Vec::new(),
             up_button: widget_handle(Button::new("Up")),
             home_button: widget_handle(Button::new("Home")),
             go_button: widget_handle(Button::new("Go")),
             ok_button: widget_handle(Button::new("Open")),
             cancel_button: widget_handle(Button::new("Cancel")),
+            up_button_id: NodeId::default(),
+            home_button_id: NodeId::default(),
+            path_box_id: NodeId::default(),
+            go_button_id: NodeId::default(),
+            ok_button_id: NodeId::default(),
+            cancel_button_id: NodeId::default(),
             folders_label: widget_handle(ListItem::with_opt("Folders", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),
             no_folders_label: widget_handle(ListItem::with_opt("No folders", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),
             files_label: widget_handle(ListItem::with_opt("Files", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),

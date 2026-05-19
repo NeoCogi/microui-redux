@@ -57,7 +57,7 @@
 use super::*;
 use crate::draw_context::DrawCtx;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
-use crate::widget::{widget_id_of_handle, FocusPolicy, RetainedId, WidgetId};
+use crate::widget::{FocusPolicy, RetainedId, WidgetId};
 use crate::widget_tree::{NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
 use std::cell::RefCell;
 
