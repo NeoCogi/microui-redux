@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use microui_redux::*;
+use microui_redux::prelude::*;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]

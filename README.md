@@ -45,7 +45,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override their own `font: FontChoice`.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
 
-The public API is intentionally centered on `Context`, `WindowHandle`, `ContainerHandle`, `WidgetTreeBuilder`, widget state types, style/input/image types, `Renderer`, and custom-render extension types. Low-level canvas access is available as `microui_redux::backend::Canvas` for backend tests and integrations; `Container`, retained cache internals, and rect-packing details are not part of the application authoring surface. Container-level manual drawing is not exported by default.
+The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `WindowHandle`, `ContainerHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. Backend-specific canvas and vertex access is available as `microui_redux::backend::{Canvas, Vertex}`; atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, and rect-packing details are not part of the application authoring surface. Container-level manual drawing is not exported by default.
 
 ### Retained-mode migration status
 
@@ -152,14 +152,14 @@ if ctx.committed_results().state_of_handle(&image_button).is_submitted() {
 - Direct `ContainerViewMut` draw and clip methods are gated behind `manual-drawing`; retained widgets and `WidgetTreeBuilder::custom_render(...)` are the supported custom drawing paths.
 
 ## Fonts and typography
-- Atlas building supports multiple baked fonts and sizes through `builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.
+- Atlas building supports multiple baked fonts and sizes through `atlas::builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.
 - `Context::new(...)` binds the conventional atlas keys `body`, `small`, `title`, `heading`, and `mono` onto the default `Style`. `Context::set_style(...)` also rebinds any font fields that are still left at their default/unset values, so tweaking colors or spacing on top of `Style::default()` keeps the intended body/title sizes.
 - Text-bearing widgets expose `font: FontChoice`, so you can either select a semantic role (`FontRole::Heading.into()`) or a concrete baked font ID (`atlas.font_id("caption").unwrap().into()`).
 - Font sizes are selected by choosing another baked font variant, not by scaling one bitmap font at runtime.
 - `examples/demo-full` uses this directly: `NORMAL.ttf` for control/body text, `BOLD.ttf` for window titles, and `CONSOLE.ttf` for the log window’s input/output text.
 
 ```rust
-use microui_redux::{builder, FontRole, TextBlock};
+use microui_redux::{atlas::builder, prelude::*};
 
 const FONTS: &[builder::FontAsset<'static>] = &[
     builder::FontAsset {

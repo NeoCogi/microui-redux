@@ -28,6 +28,8 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
+//! Texture atlas handles, baked icon/font metadata, and atlas construction helpers.
+
 #[cfg(any(feature = "builder", feature = "png_source"))]
 use png::{BitDepth, ColorType, Decoder, Transformations};
 use std::collections::HashMap;

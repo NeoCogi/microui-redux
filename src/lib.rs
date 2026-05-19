@@ -86,7 +86,7 @@
 //! [`Context::committed_results`], which exposes the previous frame's published
 //! interaction generation as the crate's public retained contract.
 
-mod atlas;
+pub mod atlas;
 mod canvas;
 mod container;
 mod container_handle;
@@ -105,7 +105,7 @@ mod text_layout;
 mod widget;
 mod widget_ctx;
 mod widget_tree;
-mod widgets;
+pub mod widgets;
 mod window;
 
 /// Low-level renderer integration types.
@@ -115,27 +115,87 @@ mod window;
 /// or the exact vertex payload delivered to [`Renderer`].
 pub mod backend {
     pub use crate::canvas::{Canvas, Vertex};
+    pub use crate::render::{Renderer, RendererHandle};
 }
 
-pub use atlas::*;
-pub use canvas::Vertex;
-pub use container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
-pub use container_handle::*;
-pub use context::{Context, RootId};
-pub use file_dialog::*;
-pub use graphics::*;
-pub use id::Id;
-pub use input::*;
-pub use layout::{SizePolicy, StackDirection};
-pub use render::*;
-pub use rs_math3d::*;
-pub use style::*;
-pub use widget::*;
-pub use widget_tree::*;
-pub use widgets::*;
-pub use window::*;
+/// Retained UI authoring types.
+///
+/// This module groups the stable retained concepts used by application code without exposing
+/// low-level renderer/canvas details or manual container drawing helpers through default imports.
+pub mod retained {
+    pub use crate::container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
+    pub use crate::container_handle::{ContainerHandle, ContainerView, ContainerViewMut};
+    pub use crate::context::{Context, RootId};
+    pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetId, widget_id_of, widget_id_of_handle};
+    pub use crate::widget_tree::{NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
+    pub use crate::window::{WindowHandle, WindowState};
+}
 
-pub(crate) use canvas::Canvas;
+/// Common imports for retained UI applications.
+///
+/// The prelude intentionally favors retained authoring, widget state, style/input/image types, and
+/// renderer integration. Backend-specific canvas access remains under [`backend`].
+pub mod prelude {
+    pub use crate::atlas::{
+        AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry, FontId,
+        IconId, OPEN_FOLDER_16_ICON, SlotId, SourceFormat, WHITE_ICON, load_image_bytes,
+    };
+    pub use crate::file_dialog::FileDialogState;
+    pub use crate::graphics::Graphics;
+    pub use crate::input::{
+        Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, InputSnapshot, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState,
+        ScrollBehavior, WidgetFillOption, WidgetOption,
+    };
+    pub use crate::layout::{SizePolicy, StackDirection};
+    pub use crate::render::{Renderer, RendererHandle};
+    pub use crate::retained::{
+        ContainerHandle, Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeId, NodeOptions, Policy, RetainedId, RootId,
+        TextWrap, Widget, WidgetCtx, WidgetHandle, WidgetId, WidgetTree, WidgetTreeBuilder, WindowHandle, WindowState, widget_handle, widget_id_of,
+        widget_id_of_handle,
+    };
+    pub use crate::style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
+    pub use crate::widgets::{
+        Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, NumberEditState, Slider, TextArea,
+        TextBlock, Textbox,
+    };
+    pub use rs_math3d::{
+        Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3,
+        color4b, ortho4,
+    };
+}
+
+pub use atlas::{
+    AtlasHandle, AtlasSource, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry,
+    FontId, IconId, OPEN_FOLDER_16_ICON, SlotId, SourceFormat, WHITE_ICON, load_image_bytes,
+};
+pub use container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
+pub use container_handle::ContainerHandle;
+pub use context::{Context, RootId};
+pub use file_dialog::FileDialogState;
+pub use graphics::Graphics;
+pub use id::Id;
+pub use input::{
+    Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, InputSnapshot, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState,
+    ScrollBehavior, WidgetFillOption, WidgetOption,
+};
+#[allow(deprecated)]
+pub use input::WidgetBehaviourOption;
+pub use layout::{SizePolicy, StackDirection};
+pub use render::{Renderer, RendererHandle};
+pub use rs_math3d::{
+    Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3, color4b,
+    ortho4,
+};
+pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
+pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetId, widget_id_of, widget_id_of_handle};
+pub use widget_tree::{NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
+pub use widgets::{
+    Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, NumberEditState, Slider, TextArea,
+    TextBlock, Textbox,
+};
+pub use window::{WindowHandle, WindowState};
+
+pub(crate) use canvas::{Canvas, Vertex};
 pub(crate) use container::Container;
 pub(crate) use layout::LayoutManager;
 pub(crate) use std::{
@@ -145,3 +205,6 @@ pub(crate) use std::{
     rc::Rc,
 };
 pub(crate) use style::UNCLIPPED_RECT;
+pub(crate) use widget::FrameResults;
+pub(crate) use widget_tree::{NodeInteraction, NodeLayout, WidgetTreeCache};
+pub(crate) use widgets::Internal;

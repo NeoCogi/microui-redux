@@ -32,7 +32,7 @@
 use core::slice;
 use std::{collections::HashMap, io, sync::Arc, usize};
 
-use microui_redux::*;
+use microui_redux::{backend::Vertex, prelude::*};
 use glow::*;
 use rs_math3d::{Vec3f, Vec4f};
 

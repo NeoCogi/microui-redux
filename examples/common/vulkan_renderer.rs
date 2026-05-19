@@ -46,7 +46,7 @@
 use std::{collections::HashMap, convert::TryFrom, ffi::CString, io::Cursor, mem, ptr};
 
 use ash::{khr, util::read_spv, vk, Entry};
-use microui_redux::*;
+use microui_redux::{backend::Vertex, prelude::*};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use sdl2::video::Window;
 

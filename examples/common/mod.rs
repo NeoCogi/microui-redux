@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-use microui_redux::*;
+use microui_redux::prelude::*;
 
 #[cfg(not(any(feature = "example-glow", feature = "example-vulkan", feature = "example-wgpu")))]
 compile_error!("Enable one of `example-glow`, `example-vulkan`, or `example-wgpu` to build the examples.");
