@@ -569,7 +569,7 @@ impl Widget for Checkbox {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let res = self.handle_widget(ctx, control);
         if control.clicked {
             self.value = !self.value;
@@ -834,7 +834,7 @@ impl Widget for Combo {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         if control.clicked {
             self.open = !self.open;
             if !self.open {
@@ -954,7 +954,7 @@ mod tests {
             None,
         );
 
-        combo.run(&mut ctx, &control);
+        combo.run_retained(&mut ctx, &control);
         assert!(combo.is_open());
 
         combo.popup.open();
@@ -971,7 +971,7 @@ mod tests {
             true,
             None,
         );
-        combo.run(&mut ctx, &control);
+        combo.run_retained(&mut ctx, &control);
         assert!(!combo.is_open());
         assert!(!combo.popup.is_open());
     }

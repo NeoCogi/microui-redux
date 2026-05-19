@@ -243,7 +243,7 @@ impl Widget for Slider {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let old_value = self.value;
         let old_edit = self.edit.clone();
         let mut res = self.handle_widget(ctx, control);
@@ -377,7 +377,7 @@ impl Widget for Number {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let old_value = self.value;
         let old_edit = self.edit.clone();
         let mut res = self.handle_widget(ctx, control);
@@ -485,7 +485,7 @@ mod tests {
             true,
             Some(Rc::new(input)),
         );
-        slider.run(&mut ctx, &control)
+        slider.run_retained(&mut ctx, &control)
     }
 
     fn assert_real_close(actual: Real, expected: Real) {
@@ -535,7 +535,7 @@ mod tests {
             scroll_delta: None,
         };
 
-        let res = slider.run(&mut ctx, &control);
+        let res = slider.run_retained(&mut ctx, &control);
 
         assert!(res.is_active());
         assert!(slider.value.is_finite());
@@ -624,7 +624,7 @@ mod tests {
             scroll_delta: None,
         };
 
-        let res = slider.run(&mut ctx, &control);
+        let res = slider.run_retained(&mut ctx, &control);
 
         assert!(!res.is_none());
         assert_eq!(slider.value, 50.0);

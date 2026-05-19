@@ -90,10 +90,10 @@ impl FocusPolicy {
 
 /// Trait implemented by persistent widget state structures.
 ///
-/// Widgets participate in two retained phases:
+/// Widgets participate in two retained execution phases:
 /// 1. `measure`, which reports intrinsic size for the current frame's layout pass.
-/// 2. `run`, which records draw commands, samples interaction, mutates widget-local state,
-///    and produces the current frame result.
+/// 2. `run_retained`, which samples interaction, mutates widget-local state, records paint
+///    commands, and produces the current frame result.
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
@@ -106,8 +106,16 @@ pub trait Widget {
     /// `avail` reports the current container body size visible to the widget.
     /// Values less than or equal to zero are treated as "use layout defaults" for that axis.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
+    /// Executes the retained widget node for the current frame and returns its result.
+    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
     /// Runs the widget for the current frame and returns the current frame result.
-    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
+    ///
+    /// Deprecated: prefer [`Widget::run_retained`], which makes the retained traversal contract
+    /// explicit. This compatibility wrapper will be removed with the legacy naming path.
+    #[deprecated(note = "use run_retained; Widget::run is a compatibility alias")]
+    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        self.run_retained(ctx, control)
+    }
     /// Returns the effective widget options used by generic dispatch.
     ///
     /// Widgets can override this to apply dynamic option adjustments.
@@ -177,7 +185,6 @@ impl RetainedId {
     pub(crate) fn compat_widget(widget_id: WidgetId) -> Self {
         Self::Node(compat_widget_node_id(widget_id))
     }
-
 }
 
 fn compat_widget_node_id(widget_id: WidgetId) -> Id {
@@ -238,16 +245,8 @@ pub struct FrameResultGeneration<'a> {
 }
 
 impl<'a> FrameResultGeneration<'a> {
-    fn new(
-        entries: &'a HashMap<RetainedId, ResourceState>,
-        widget_nodes: &'a HashMap<WidgetId, RetainedId>,
-        node_ids: &'a HashMap<Id, RetainedId>,
-    ) -> Self {
-        Self {
-            entries,
-            widget_nodes,
-            node_ids,
-        }
+    fn new(entries: &'a HashMap<RetainedId, ResourceState>, widget_nodes: &'a HashMap<WidgetId, RetainedId>, node_ids: &'a HashMap<Id, RetainedId>) -> Self {
+        Self { entries, widget_nodes, node_ids }
     }
 
     /// Returns the state for a retained interaction ID in this generation.
@@ -465,7 +464,7 @@ impl Widget for (WidgetOption, ScrollBehavior) {
         Dimensioni::new(width, height)
     }
 
-    fn run(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn run_retained(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         ResourceState::NONE
     }
 }

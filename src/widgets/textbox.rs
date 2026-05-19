@@ -247,7 +247,7 @@ impl Widget for Textbox {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let old_buf = self.buf.clone();
         let old_cursor = self.cursor;
         let mut res = self.handle_widget(ctx, control);
