@@ -151,8 +151,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        container::Command, widget::widget_id_of_handle, widget_handle, AtlasHandle, AtlasSource, CharEntry, ControlState, FontEntry, ResourceState,
-        SourceFormat, TextBlock, Widget, WidgetCtx, WidgetOption, WidgetTreeBuilder,
+        container::Command, widget_handle, AtlasHandle, AtlasSource, CharEntry, ControlState, FontEntry, ResourceState, SourceFormat, TextBlock, Widget,
+        WidgetCtx, WidgetOption, WidgetTreeBuilder,
     };
 
     const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
@@ -352,20 +352,16 @@ mod tests {
         style.scrollbar_size = 10;
         ctx.set_style(&style);
 
-        let mut window = ctx.new_window("window", rect(0, 0, 60, 30));
         let text = widget_handle(TextBlock::new("a\na\na\na\na\na"));
         let tree = WidgetTreeBuilder::build(|tree| {
             tree.widget(text.clone());
         });
+        let root = ctx.create_window("window", rect(0, 0, 60, 30), tree);
 
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
+        ctx.update_ui();
+        ctx.update_ui();
 
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
-
+        let window = ctx.root_handle(root).unwrap();
         let inner = window.inner();
         let body = inner.main.body();
         let has_vertical_scrollbar =
@@ -405,39 +401,30 @@ mod tests {
         style.scrollbar_size = 10;
         ctx.set_style(&style);
 
-        let mut window = ctx.new_window("window", rect(0, 0, 60, 40));
         let text = widget_handle(TextBlock::new("aaaaaaaaaaaaaaaaaaaaaaaa\na\na\na\na\na\na\na"));
         let tree = WidgetTreeBuilder::build(|tree| {
             tree.widget(text.clone());
         });
+        let root = ctx.create_window("window", rect(0, 0, 60, 40), tree);
 
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
+        ctx.update_ui();
+        ctx.update_ui();
 
+        let window = ctx.root_handle(root).unwrap();
         let initial_rect = window.rect();
         let corner_x = initial_rect.x + initial_rect.width - 1;
         let corner_y = initial_rect.y + initial_rect.height - 1;
 
         ctx.mousemove(corner_x, corner_y);
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
+        ctx.update_ui();
 
         ctx.mousedown(corner_x, corner_y, MouseButton::LEFT);
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
+        ctx.update_ui();
 
         ctx.mousemove(corner_x + 12, corner_y + 10);
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
+        ctx.update_ui();
 
-        let resized = window.rect();
+        let resized = ctx.root_handle(root).unwrap().rect();
         assert!(resized.width > initial_rect.width);
         assert!(resized.height > initial_rect.height);
     }
@@ -468,7 +455,8 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let mut window = ctx.new_window("window", rect(0, 0, 80, 40));
+        let root = ctx.create_window("window", rect(0, 0, 80, 40), WidgetTree::default());
+        let mut window = ctx.root_handle(root).unwrap();
 
         {
             let mut inner = window.inner_mut();
@@ -493,44 +481,27 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let mut window = ctx.new_window("window", rect(20, 20, 80, 40));
         let tree = WidgetTreeBuilder::build(|tree| {
             tree.text("hello");
         });
+        let root = ctx.create_window("window", rect(20, 20, 80, 40), tree);
 
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
-        ctx.frame(|_ui| {});
+        ctx.update_ui();
+        ctx.set_root_visible(root, false);
+        ctx.update_ui();
 
         {
+            let mut window = ctx.root_handle(root).unwrap();
             let mut inner = window.inner_mut();
             inner.main.debug_push_command(Command::None);
         }
 
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
+        ctx.set_root_visible(root, true);
+        ctx.update_ui();
 
+        let window = ctx.root_handle(root).unwrap();
         let inner = window.inner();
         assert!(!inner.main.debug_commands().iter().any(|cmd| matches!(cmd, Command::None)));
-    }
-
-    #[test]
-    #[should_panic(expected = "rendered more than once in frame")]
-    fn rendering_same_window_twice_in_one_frame_panics() {
-        let atlas = make_test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let mut window = ctx.new_window("window", rect(0, 0, 80, 40));
-        let tree = WidgetTreeBuilder::build(|tree| {
-            tree.text("hello");
-        });
-
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
     }
 
     #[test]
@@ -538,7 +509,6 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let mut dialog = ctx.new_dialog("dialog", rect(10, 10, 80, 40));
         let first_tree = WidgetTreeBuilder::build(|tree| {
             tree.text("before");
         });
@@ -546,19 +516,20 @@ mod tests {
             tree.text("after");
         });
         let opt = ContainerOption::NO_TITLE | ContainerOption::NO_CLOSE | ContainerOption::NO_RESIZE;
+        let root = ctx.create_dialog("dialog", rect(10, 10, 80, 40), first_tree);
+        ctx.set_root_options(root, opt, ScrollBehavior::NONE);
 
-        dialog.open();
-        ctx.frame(|ui| {
-            ui.dialog(&mut dialog, opt, ScrollBehavior::NONE, &first_tree);
-        });
+        ctx.set_root_visible(root, true);
+        ctx.update_ui();
 
-        dialog.close();
+        ctx.set_root_visible(root, false);
+        ctx.update_ui();
 
-        dialog.open();
-        ctx.frame(|ui| {
-            ui.dialog(&mut dialog, opt, ScrollBehavior::NONE, &second_tree);
-        });
+        ctx.set_root_tree(root, second_tree);
+        ctx.set_root_visible(root, true);
+        ctx.update_ui();
 
+        let dialog = ctx.root_handle(root).unwrap();
         let inner = dialog.inner();
         let texts: Vec<String> = inner
             .main
@@ -579,30 +550,24 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let mut background = ctx.new_window("background", rect(0, 0, 100, 80));
-        let mut dialog = ctx.new_dialog("dialog", rect(10, 10, 80, 40));
         let background_tree = WidgetTreeBuilder::build(|tree| {
             tree.text("background");
         });
         let dialog_tree = WidgetTreeBuilder::build(|tree| {
             tree.text("dialog");
         });
+        let background = ctx.create_window("background", rect(0, 0, 100, 80), background_tree);
+        let dialog = ctx.create_dialog("dialog", rect(10, 10, 80, 40), dialog_tree);
 
-        ctx.open_dialog(&mut dialog);
-        ctx.frame(|ui| {
-            ui.window(&mut background, ContainerOption::NONE, ScrollBehavior::NONE, &background_tree);
-            ui.dialog(&mut dialog, ContainerOption::NONE, ScrollBehavior::NONE, &dialog_tree);
-        });
+        ctx.set_root_visible(dialog, true);
+        ctx.update_ui();
 
-        let first_zindex = dialog.zindex();
-        assert!(first_zindex > background.zindex());
+        let first_zindex = ctx.root_handle(dialog).unwrap().zindex();
+        assert!(first_zindex > ctx.root_handle(background).unwrap().zindex());
 
-        ctx.frame(|ui| {
-            ui.window(&mut background, ContainerOption::NONE, ScrollBehavior::NONE, &background_tree);
-            ui.dialog(&mut dialog, ContainerOption::NONE, ScrollBehavior::NONE, &dialog_tree);
-        });
+        ctx.update_ui();
 
-        assert_eq!(dialog.zindex(), first_zindex);
+        assert_eq!(ctx.root_handle(dialog).unwrap().zindex(), first_zindex);
     }
 
     #[test]
@@ -610,7 +575,6 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let mut window = ctx.new_window("window", rect(0, 0, 100, 80));
         let panel = ctx.new_panel("panel");
         let tree_with_panel = WidgetTreeBuilder::build({
             let panel = panel.clone();
@@ -623,18 +587,20 @@ mod tests {
         let tree_without_panel = WidgetTreeBuilder::build(|tree| {
             tree.text("root only");
         });
+        let root = ctx.create_window("window", rect(0, 0, 100, 80), tree_with_panel);
 
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree_with_panel);
-        });
+        ctx.update_ui();
+        let window = ctx.root_handle(root).unwrap();
         assert_eq!(window.inner().main.panel_count(), 1);
 
-        ctx.frame(|_ui| {});
+        ctx.set_root_visible(root, false);
+        ctx.update_ui();
 
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree_without_panel);
-        });
+        ctx.set_root_tree(root, tree_without_panel);
+        ctx.set_root_visible(root, true);
+        ctx.update_ui();
 
+        let window = ctx.root_handle(root).unwrap();
         assert_eq!(window.inner().main.panel_count(), 0);
     }
 
@@ -643,17 +609,16 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let mut popup = ctx.new_popup("popup");
         let tree = WidgetTreeBuilder::build(|tree| {
             tree.text("hello popup");
         });
+        let popup = ctx.create_popup("popup", tree);
 
         ctx.mousemove(40, 50);
-        ctx.open_popup(&mut popup);
-        ctx.frame(|ui| {
-            ui.popup(&mut popup, ScrollBehavior::NONE, &tree);
-        });
+        ctx.set_root_visible(popup, true);
+        ctx.update_ui();
 
+        let popup = ctx.root_handle(popup).unwrap();
         let inner = popup.inner();
         assert!(inner.main.rect().width > 1);
         assert!(inner.main.rect().height > 1);
@@ -666,15 +631,15 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let mut window = ctx.new_window("window", rect(0, 0, 1, 1));
         let tree = WidgetTreeBuilder::build(|tree| {
             tree.text("hello\nhello\nhello");
         });
+        let root = ctx.create_window("window", rect(0, 0, 1, 1), tree);
+        ctx.set_root_options(root, ContainerOption::AUTO_SIZE, ScrollBehavior::NONE);
 
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::AUTO_SIZE, ScrollBehavior::NONE, &tree);
-        });
+        ctx.update_ui();
 
+        let window = ctx.root_handle(root).unwrap();
         let inner = window.inner();
         assert!(inner.main.rect().width > 1);
         assert!(inner.main.rect().height > 1);
@@ -687,26 +652,23 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let mut popup = ctx.new_popup("popup");
         let short_tree = WidgetTreeBuilder::build(|tree| {
             tree.text("a");
         });
         let long_tree = WidgetTreeBuilder::build(|tree| {
             tree.text("hello popup with much longer content");
         });
+        let popup = ctx.create_popup("popup", short_tree);
 
         ctx.mousemove(60, 60);
-        ctx.open_popup(&mut popup);
-        ctx.frame(|ui| {
-            ui.popup(&mut popup, ScrollBehavior::NONE, &short_tree);
-        });
-        let first_width = popup.rect().width;
+        ctx.set_root_visible(popup, true);
+        ctx.update_ui();
+        let first_width = ctx.root_handle(popup).unwrap().rect().width;
 
-        ctx.frame(|ui| {
-            ui.popup(&mut popup, ScrollBehavior::NONE, &long_tree);
-        });
+        ctx.set_root_tree(popup, long_tree);
+        ctx.update_ui();
 
-        assert!(popup.rect().width > first_width);
+        assert!(ctx.root_handle(popup).unwrap().rect().width > first_width);
     }
 
     #[test]
@@ -718,15 +680,15 @@ mod tests {
         style.padding = 0;
         style.scrollbar_size = 10;
         ctx.set_style(&style);
-        let mut window = ctx.new_window("window", rect(0, 0, 1, 1));
         let tree = WidgetTreeBuilder::build(|tree| {
             tree.text("hello\nhello\nhello\nhello");
         });
+        let root = ctx.create_window("window", rect(0, 0, 1, 1), tree);
+        ctx.set_root_options(root, ContainerOption::AUTO_SIZE, ScrollBehavior::NONE);
 
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::AUTO_SIZE, ScrollBehavior::NONE, &tree);
-        });
+        ctx.update_ui();
 
+        let window = ctx.root_handle(root).unwrap();
         let inner = window.inner();
         assert!(inner.main.body().width >= inner.main.content_size().width);
         assert!(inner.main.body().height >= inner.main.content_size().height);
@@ -747,15 +709,12 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
-        let mut titled = ctx.new_window("titled", rect(0, 0, 80, 40));
-        let mut plain = ctx.new_window("plain", rect(100, 0, 80, 40));
-        let tree = WidgetTreeBuilder::build(|_tree| {});
+        let titled = ctx.create_window("titled", rect(0, 0, 80, 40), WidgetTreeBuilder::build(|_tree| {}));
+        let plain = ctx.create_window("plain", rect(100, 0, 80, 40), WidgetTreeBuilder::build(|_tree| {}));
+        ctx.set_root_options(plain, ContainerOption::NO_TITLE, ScrollBehavior::NONE);
+        ctx.update_ui();
 
-        ctx.frame(|ui| {
-            ui.window(&mut titled, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-            ui.window(&mut plain, ContainerOption::NO_TITLE, ScrollBehavior::NONE, &tree);
-        });
-
+        let titled = ctx.root_handle(titled).unwrap();
         let titled_inner = titled.inner();
         assert!(titled_inner.main.body().y > titled_inner.main.rect().y);
         assert!(titled_inner.main.body().height < titled_inner.main.rect().height);
@@ -770,6 +729,7 @@ mod tests {
             .collect();
         assert!(titled_texts.iter().any(|text| text == "titled"));
 
+        let plain = ctx.root_handle(plain).unwrap();
         let plain_inner = plain.inner();
         assert_eq!(plain_inner.main.body().y, plain_inner.main.rect().y);
         assert_eq!(plain_inner.main.body().height, plain_inner.main.rect().height);
@@ -792,17 +752,15 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let mut window = ctx.new_window("primary", rect(0, 0, 80, 40));
         let shared = widget_handle(AlwaysSubmitWidget::new("shared"));
         let tree = WidgetTreeBuilder::build(|tree| {
             tree.widget(shared.clone());
             tree.widget(shared.clone());
         });
+        ctx.create_window("primary", rect(0, 0, 80, 40), tree);
 
         let panic = catch_unwind(AssertUnwindSafe(|| {
-            ctx.frame(|ui| {
-                ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-            });
+            ctx.update_ui();
         }))
         .expect_err("duplicate widget handle should panic");
         let message = panic_message(panic);
@@ -818,18 +776,18 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let mut left = ctx.new_window("left", rect(0, 0, 80, 40));
-        let mut right = ctx.new_window("right", rect(90, 0, 80, 40));
         let shared = widget_handle(AlwaysSubmitWidget::new("shared"));
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let left_tree = WidgetTreeBuilder::build(|tree| {
             tree.widget(shared.clone());
         });
+        let right_tree = WidgetTreeBuilder::build(|tree| {
+            tree.widget(shared.clone());
+        });
+        ctx.create_window("left", rect(0, 0, 80, 40), left_tree);
+        ctx.create_window("right", rect(90, 0, 80, 40), right_tree);
 
         let panic = catch_unwind(AssertUnwindSafe(|| {
-            ctx.frame(|ui| {
-                ui.window(&mut left, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-                ui.window(&mut right, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-            });
+            ctx.update_ui();
         }))
         .expect_err("rendering one widget handle in two windows should panic");
         let message = panic_message(panic);
@@ -844,7 +802,6 @@ mod tests {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-        let mut window = ctx.new_window("window", rect(0, 0, 80, 40));
         let first = widget_handle(AlwaysSubmitWidget::new("same"));
         let second = widget_handle(AlwaysSubmitWidget::new("same"));
         let tree = WidgetTreeBuilder::build(|tree| {
@@ -852,11 +809,8 @@ mod tests {
             tree.widget(second.clone());
         });
 
-        assert_ne!(widget_id_of_handle(&first), widget_id_of_handle(&second));
-
-        ctx.frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
+        ctx.create_window("window", rect(0, 0, 80, 40), tree);
+        ctx.update_ui();
 
         assert!(ctx.committed_results().state_of_handle(&first).is_submitted());
         assert!(ctx.committed_results().state_of_handle(&second).is_submitted());
@@ -933,34 +887,6 @@ mod tests {
         let texts = window_texts(&ctx.root_handle(root).unwrap());
         assert!(texts.iter().any(|text| text == "second"));
         assert!(!texts.iter().any(|text| text == "first"));
-    }
-
-    #[test]
-    fn retained_and_compatibility_roots_can_share_a_frame() {
-        let atlas = make_test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
-        let retained_root = ctx.create_window(
-            "retained",
-            rect(0, 0, 90, 60),
-            WidgetTreeBuilder::build(|tree| {
-                tree.text("retained");
-            }),
-        );
-        let mut legacy_window = ctx.new_window("legacy", rect(100, 0, 90, 60));
-        let legacy_tree = WidgetTreeBuilder::build(|tree| {
-            tree.text("legacy");
-        });
-
-        ctx.run_ui_frame(|ui| {
-            ui.window(&mut legacy_window, ContainerOption::NONE, ScrollBehavior::NONE, &legacy_tree);
-        });
-
-        let names = rendered_root_names(&ctx);
-        assert!(names.iter().any(|name| name == "retained"));
-        assert!(names.iter().any(|name| name == "legacy"));
-        assert!(window_texts(&ctx.root_handle(retained_root).unwrap()).iter().any(|text| text == "retained"));
-        assert!(window_texts(&legacy_window).iter().any(|text| text == "legacy"));
     }
 
     #[test]
@@ -1067,30 +993,6 @@ mod tests {
         ctx.bring_to_front(&mut left_handle);
         ctx.update_ui();
         assert_eq!(ctx.hover_root.as_ref().unwrap().inner().main.name(), "left");
-    }
-
-    #[test]
-    fn compatibility_root_chrome_node_ids_are_root_derived_and_stable() {
-        let atlas = make_test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
-        let mut window = ctx.new_window("legacy", rect(0, 0, 100, 70));
-        let tree = WidgetTreeBuilder::build(|tree| {
-            tree.text("body");
-        });
-
-        let root_id = window.root_id();
-        let ids = window.inner().chrome_ids();
-        assert_eq!(ids, WindowChromeIds::from_root_seed(root_id.raw()));
-
-        ctx.run_ui_frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
-        ctx.run_ui_frame(|ui| {
-            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-        });
-
-        assert_eq!(window.inner().chrome_ids(), ids);
     }
 
     #[test]
@@ -1304,7 +1206,7 @@ impl<R: Renderer> Context<R> {
     ///
     /// Call this once after determining the viewport size and before presenting UI commands for
     /// the frame. Input events may be collected before or after this call, as long as
-    /// [`Context::run_ui_frame`] runs after the input state has been updated.
+    /// [`Context::update_ui`] runs after the input state has been updated.
     pub fn begin_render_frame(&mut self, width: i32, height: i32, clr: Color) {
         self.canvas.begin(width, height, clr);
     }
@@ -1423,57 +1325,30 @@ impl<R: Renderer> Context<R> {
         self.root_list.sort_by(|a, b| a.zindex().cmp(&b.zindex()));
     }
 
-    /// Runs the retained UI traversal and publishes frame results.
-    ///
-    /// This wraps input prelude/epilogue, root bookkeeping, retained layout, widget execution, and
-    /// result commit. Renderer presentation remains explicit through
-    /// [`Context::begin_render_frame`] and [`Context::end_render_frame`].
-    pub fn run_ui_frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
-        self.frame_begin();
-
-        f(self);
-        self.render_registered_roots();
-
-        self.frame_end();
-    }
-
     /// Runs one UI frame using only roots previously registered with this context.
     ///
-    /// This is the retained-root entry point: applications can create roots once with
-    /// [`Context::create_window`], [`Context::create_dialog`], or [`Context::create_popup`], mutate
-    /// widget handle state over time, and call this method each frame without re-submitting root
-    /// trees.
+    /// Applications create roots once with [`Context::create_window`],
+    /// [`Context::create_dialog`], or [`Context::create_popup`], mutate widget handle state over
+    /// time, and call this method each frame without re-submitting root trees.
     pub fn update_ui(&mut self) {
         self.frame_begin();
         self.render_registered_roots();
         self.frame_end();
     }
 
-    /// Runs the UI for a single frame by wrapping input/layout bookkeeping.
-    ///
-    /// Prefer [`Context::run_ui_frame`] in new code; this method remains as a compatibility alias.
-    /// Rendering still requires calling [`Context::begin_render_frame`] and
-    /// [`Context::end_render_frame`].
-    pub fn frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
-        self.run_ui_frame(f);
-    }
-
-    /// Creates a new movable window rooted at the provided rectangle.
-    pub fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
+    fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
         let root_id = self.next_root_id();
         let mut window = WindowHandle::window(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone(), initial_rect);
         self.bring_to_front(&mut window);
         window
     }
 
-    /// Creates a modal dialog window.
-    pub fn new_dialog(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
+    fn new_dialog(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
         let root_id = self.next_root_id();
         WindowHandle::dialog(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone(), initial_rect)
     }
 
-    /// Creates a popup window that appears under the mouse cursor.
-    pub fn new_popup(&mut self, name: &str) -> WindowHandle {
+    fn new_popup(&mut self, name: &str) -> WindowHandle {
         let root_id = self.next_root_id();
         WindowHandle::popup(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone())
     }
@@ -1520,8 +1395,8 @@ impl<R: Renderer> Context<R> {
 
     /// Registers an open retained window and returns its stable root identifier.
     ///
-    /// The window is rendered by subsequent calls to [`Context::update_ui`] or
-    /// [`Context::run_ui_frame`] without the application re-submitting its tree.
+    /// The window is rendered by subsequent calls to [`Context::update_ui`] without the
+    /// application re-submitting its tree.
     pub fn create_window(&mut self, name: &str, rect: Recti, tree: WidgetTree) -> RootId {
         let window = self.new_window(name, rect);
         self.register_root(RootKind::Window, window, tree, ContainerOption::NONE, ScrollBehavior::NONE, true)
@@ -1556,8 +1431,8 @@ impl<R: Renderer> Context<R> {
 
     /// Replaces the container options and scroll behavior for a registered root.
     ///
-    /// Popups are created with the same default options as [`Context::popup`]. This method can
-    /// override those defaults for retained roots that need custom chrome or sizing.
+    /// Popups are created with the default retained popup options. This method can override those
+    /// defaults for retained roots that need custom chrome or sizing.
     pub fn set_root_options(&mut self, root: RootId, opt: ContainerOption, scroll_behavior: ScrollBehavior) {
         if let Some(entry) = self.root_entry_mut(root) {
             entry.opt = opt;
@@ -1568,7 +1443,7 @@ impl<R: Renderer> Context<R> {
     /// Shows or hides a registered retained root.
     ///
     /// Windows reopen in their existing z-order. Dialogs and newly opened popups are brought to the
-    /// front, matching the compatibility APIs.
+    /// front.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) {
         let Some(index) = self.retained_roots.iter().position(|entry| entry.id == root) else {
             return;
@@ -1767,84 +1642,6 @@ impl<R: Renderer> Context<R> {
 
     const fn default_popup_options() -> ContainerOption {
         ContainerOption::AUTO_SIZE.union(ContainerOption::NO_RESIZE).union(ContainerOption::NO_TITLE)
-    }
-
-    /// Opens a window and renders the provided retained widget tree into it.
-    ///
-    /// This is the per-frame root-submission compatibility API. New retained-root code should use
-    /// [`Context::create_window`] plus [`Context::update_ui`].
-    pub fn window(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
-        self.render_window_tree(window, opt, scroll_behavior, tree);
-    }
-
-    /// Marks a dialog window as open for the next frame.
-    pub fn open_dialog(&mut self, window: &mut WindowHandle) {
-        let was_open = window.is_open();
-        window.open();
-        if !was_open {
-            self.bring_to_front(window);
-        }
-    }
-
-    /// Renders a dialog window if it is currently open.
-    ///
-    /// This is the per-frame root-submission compatibility API. New retained-root code should use
-    /// [`Context::create_dialog`] plus [`Context::set_root_visible`].
-    pub fn dialog(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
-        self.render_dialog_tree(window, opt, scroll_behavior, tree);
-    }
-
-    /// Shows a popup at the mouse cursor position.
-    pub fn open_popup(&mut self, window: &mut WindowHandle) {
-        let was_open = window.is_open();
-        let mouse_pos = self.input.borrow().mouse_pos;
-        if was_open {
-            let mut rect = window.rect();
-            rect.x = mouse_pos.x;
-            rect.y = mouse_pos.y;
-            window.set_rect(rect);
-        } else {
-            window.set_rect(rect(mouse_pos.x, mouse_pos.y, 1, 1));
-            window.open();
-            window.set_root_hover_active(true);
-            window.mark_popup_just_opened();
-        }
-        if !was_open {
-            self.next_hover_root = Some(window.clone());
-            self.hover_root = self.next_hover_root.clone();
-            self.bring_to_front(window);
-        }
-    }
-
-    /// Shows a popup anchored at the provided rectangle instead of the mouse cursor.
-    pub fn open_popup_at(&mut self, window: &mut WindowHandle, anchor: Recti) {
-        let was_open = window.is_open();
-        if was_open {
-            let mut rect = window.rect();
-            rect.x = anchor.x;
-            rect.y = anchor.y;
-            rect.width = anchor.width;
-            window.set_rect(rect);
-        } else {
-            window.set_rect(anchor);
-            window.open();
-            window.set_root_hover_active(true);
-            window.mark_popup_just_opened();
-        }
-        if !was_open {
-            self.next_hover_root = Some(window.clone());
-            self.hover_root = self.next_hover_root.clone();
-            self.bring_to_front(window);
-        }
-    }
-
-    /// Opens a popup window with default options and renders a retained tree into it.
-    ///
-    /// This is the per-frame root-submission compatibility API. New retained-root code should use
-    /// [`Context::create_popup`] plus [`Context::set_root_visible`].
-    pub fn popup(&mut self, window: &mut WindowHandle, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
-        let opt = Self::default_popup_options();
-        self.render_window_tree(window, opt, scroll_behavior, tree);
     }
 
     /// Returns the previous frame's published widget results.

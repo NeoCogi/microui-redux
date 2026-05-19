@@ -60,10 +60,10 @@ use std::{
 use crate::canvas::Canvas;
 use crate::container::Container;
 use crate::render::Renderer;
-use crate::{Dimensioni, NodeId, Recti, Vec2i, Widget, WidgetHandle, WidgetId};
+use crate::{Dimensioni, NodeId, Recti, Vec2i, Widget, WidgetHandle};
 
 #[cfg(feature = "manual-drawing")]
-use crate::{Clip, Color, ContainerOption, ControlColor, FontId, IconId, ScrollBehavior, SlotId, TextWrap, WidgetOption};
+use crate::{Clip, Color, ContainerOption, ControlColor, FontId, IconId, ScrollBehavior, SlotId, TextWrap, WidgetId, WidgetOption};
 
 #[derive(Clone)]
 /// Shared handle to a container that can be embedded inside windows or panels.
@@ -141,16 +141,6 @@ impl<'a> ContainerViewMut<'a> {
     /// Returns the measured content size.
     pub fn content_size(&self) -> Dimensioni {
         self.inner.content_size()
-    }
-
-    /// Manually updates which widget owns focus.
-    ///
-    /// Deprecated: prefer [`ContainerViewMut::set_focus_node`] or
-    /// [`ContainerViewMut::set_focus_handle`].
-    #[deprecated(note = "use set_focus_node or set_focus_handle; widget pointer focus is a compatibility path")]
-    pub fn set_focus(&mut self, widget_id: Option<WidgetId>) {
-        #[allow(deprecated)]
-        self.inner.set_focus(widget_id);
     }
 
     /// Sets focus to a retained node in this container.

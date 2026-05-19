@@ -151,7 +151,10 @@ impl WidgetTreeCache {
 
     /// Returns the retained node most recently associated with `widget_id`.
     pub fn node_for_widget(&self, widget_id: WidgetId) -> Option<NodeId> {
-        self.curr_widget_nodes.get(&widget_id).or_else(|| self.prev_widget_nodes.get(&widget_id)).copied()
+        self.curr_widget_nodes
+            .get(&widget_id)
+            .or_else(|| self.prev_widget_nodes.get(&widget_id))
+            .copied()
     }
 
     /// Records the current frame layout for `node_id`.

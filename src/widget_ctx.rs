@@ -67,7 +67,6 @@ use crate::widget::{RetainedId, WidgetId};
 
 /// Shared context passed to widget handlers.
 pub struct WidgetCtx<'a> {
-    id: WidgetId,
     interaction_id: RetainedId,
     rect: Recti,
     draw: DrawCtx<'a>,
@@ -129,7 +128,7 @@ impl<'a> WidgetCtx<'a> {
     /// Creates a widget context with a stable interaction identity distinct from the widget
     /// pointer. Retained tree dispatch uses this so focus and hover follow `NodeId`.
     pub(crate) fn new_with_interaction(
-        id: WidgetId,
+        _id: WidgetId,
         interaction_id: RetainedId,
         rect: Recti,
         commands: &'a mut Vec<Command>,
@@ -143,7 +142,6 @@ impl<'a> WidgetCtx<'a> {
         input: Option<Rc<InputSnapshot>>,
     ) -> Self {
         Self {
-            id,
             interaction_id,
             rect,
             draw: DrawCtx::new(commands, triangle_vertices, clip_stack, style, atlas),
@@ -153,11 +151,6 @@ impl<'a> WidgetCtx<'a> {
             input: Self::localize_input(rect, input),
             default_input: InputSnapshot::default(),
         }
-    }
-
-    /// Returns the widget identity pointer.
-    pub fn id(&self) -> WidgetId {
-        self.id
     }
 
     /// Returns the widget rectangle.

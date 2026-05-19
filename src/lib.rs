@@ -126,7 +126,7 @@ pub mod retained {
     pub use crate::container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
     pub use crate::container_handle::{ContainerHandle, ContainerView, ContainerViewMut};
     pub use crate::context::{Context, RootId};
-    pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetId, widget_id_of, widget_id_of_handle};
+    pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetId};
     pub use crate::widget_tree::{NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
     pub use crate::window::{WindowHandle, WindowState};
 }
@@ -150,8 +150,7 @@ pub mod prelude {
     pub use crate::render::{Renderer, RendererHandle};
     pub use crate::retained::{
         ContainerHandle, Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeId, NodeOptions, Policy, RetainedId, RootId,
-        TextWrap, Widget, WidgetCtx, WidgetHandle, WidgetId, WidgetTree, WidgetTreeBuilder, WindowHandle, WindowState, widget_handle, widget_id_of,
-        widget_id_of_handle,
+        TextWrap, Widget, WidgetCtx, WidgetHandle, WidgetId, WidgetTree, WidgetTreeBuilder, WindowHandle, WindowState, widget_handle,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
@@ -187,11 +186,11 @@ pub use rs_math3d::{
     ortho4,
 };
 pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
-pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetId, widget_id_of, widget_id_of_handle};
+pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetId};
 pub use widget_tree::{NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
 pub use widgets::{
-    Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, NumberEditState, Slider, TextArea,
-    TextBlock, Textbox,
+    Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, NumberEditState, Slider, TextArea, TextBlock,
+    Textbox,
 };
 pub use window::{WindowHandle, WindowState};
 
@@ -205,6 +204,6 @@ pub(crate) use std::{
     rc::Rc,
 };
 pub(crate) use style::UNCLIPPED_RECT;
-pub(crate) use widget::FrameResults;
+pub(crate) use widget::{widget_id_of, FrameResults};
 pub(crate) use widget_tree::{NodeInteraction, NodeLayout, WidgetTreeCache};
 pub(crate) use widgets::Internal;

@@ -506,16 +506,6 @@ impl WindowHandle {
         self.inner_mut().main.set_rect(rect);
     }
 
-    /// Sets the focused widget inside the window's root container.
-    ///
-    /// Deprecated: prefer [`WindowHandle::set_focus_node`] or
-    /// [`WindowHandle::set_focus_handle`].
-    #[deprecated(note = "use set_focus_node or set_focus_handle; widget pointer focus is a compatibility path")]
-    pub fn set_focus(&mut self, widget_id: Option<WidgetId>) {
-        #[allow(deprecated)]
-        self.inner_mut().main.set_focus(widget_id);
-    }
-
     /// Sets focus to a retained node inside the window's root container.
     pub fn set_focus_node(&mut self, node_id: NodeId) {
         self.inner_mut().main.set_focus_node(node_id);
