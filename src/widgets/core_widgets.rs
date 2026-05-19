@@ -726,7 +726,7 @@ impl Combo {
 
     /// Closes the popup and clears any popup-local focus state.
     pub fn close_popup(&mut self) {
-        self.popup.set_focus(None);
+        self.popup.clear_focus();
         self.popup.close();
         self.open = false;
     }

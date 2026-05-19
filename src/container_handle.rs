@@ -60,7 +60,10 @@ use std::{
 use crate::canvas::Canvas;
 use crate::container::Container;
 use crate::render::Renderer;
-use crate::{Clip, Color, ContainerOption, ControlColor, Dimensioni, FontId, IconId, Recti, SlotId, TextWrap, Vec2i, ScrollBehavior, WidgetId, WidgetOption};
+use crate::{
+    Clip, Color, ContainerOption, ControlColor, Dimensioni, FontId, IconId, NodeId, Recti, ScrollBehavior, SlotId, TextWrap, Vec2i, Widget,
+    WidgetHandle, WidgetId, WidgetOption,
+};
 
 pub(crate) type ContainerId = *const ();
 
@@ -143,8 +146,28 @@ impl<'a> ContainerViewMut<'a> {
     }
 
     /// Manually updates which widget owns focus.
+    ///
+    /// Deprecated: prefer [`ContainerViewMut::set_focus_node`] or
+    /// [`ContainerViewMut::set_focus_handle`].
+    #[deprecated(note = "use set_focus_node or set_focus_handle; widget pointer focus is a compatibility path")]
     pub fn set_focus(&mut self, widget_id: Option<WidgetId>) {
+        #[allow(deprecated)]
         self.inner.set_focus(widget_id);
+    }
+
+    /// Sets focus to a retained node in this container.
+    pub fn set_focus_node(&mut self, node_id: NodeId) {
+        self.inner.set_focus_node(node_id);
+    }
+
+    /// Clears focus in this container.
+    pub fn clear_focus(&mut self) {
+        self.inner.clear_focus();
+    }
+
+    /// Sets focus to the retained node that most recently dispatched `handle`.
+    pub fn set_focus_handle<W: Widget>(&mut self, handle: &WidgetHandle<W>) -> bool {
+        self.inner.set_focus_handle(handle)
     }
 
     /// Pushes a new clip rectangle combined with the previous clip.

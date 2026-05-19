@@ -49,7 +49,7 @@ impl Container {
     pub(crate) fn render_widget_dyn(
         &mut self,
         results: &mut FrameResults,
-        node_id: Option<NodeId>,
+        node_id: NodeId,
         widget: &dyn WidgetStateHandleDyn,
         rect: Recti,
         input: Option<Rc<InputSnapshot>>,
@@ -59,14 +59,12 @@ impl Container {
         dispatch_site: String,
     ) -> (ControlState, ResourceState) {
         let widget_id = widget.widget_id();
-        let interaction_id = node_id.map(InteractionId::node).unwrap_or_else(|| InteractionId::widget(widget_id));
-        let control = self.update_control_for(interaction_id, rect, opt, scroll_behavior, focus_policy);
-        let mut ctx = self.widget_ctx_for(widget_id, interaction_id, rect, input);
+        self.record_widget_node(widget_id, node_id);
+        let retained_id = self.retained_id_for_node(node_id);
+        let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
+        let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
         let res = widget.run(&mut ctx, &control);
-        match node_id {
-            Some(node_id) => results.record_retained_with_context(node_id, widget_id, res, dispatch_site),
-            None => results.record_with_context(widget_id, res, dispatch_site),
-        }
+        results.record_retained_with_context(retained_id, node_id, widget_id, res, dispatch_site);
         (control, res)
     }
 
@@ -74,11 +72,11 @@ impl Container {
         let opt = widget.effective_widget_opt();
         let scroll_behavior = widget.effective_scroll_behavior();
         let focus_policy = widget.focus_policy();
-        let interaction_id = InteractionId::node(node_id);
-        let control = self.update_control_for(interaction_id, rect, opt, scroll_behavior, focus_policy);
+        let retained_id = self.retained_id_for_node(node_id);
+        let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
         let widget_id = node_id.raw() as WidgetId;
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
-        let mut ctx = self.widget_ctx_for(widget_id, interaction_id, rect, input);
+        let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
         let res = widget.run(&mut ctx, &control);
         (control, res)
     }
@@ -91,7 +89,7 @@ impl Container {
     pub(crate) fn render_widget_handle<W: Widget>(
         &mut self,
         results: &mut FrameResults,
-        node_id: Option<NodeId>,
+        node_id: NodeId,
         handle: &WidgetHandle<W>,
         rect: Recti,
         input: Option<Rc<InputSnapshot>>,
@@ -104,17 +102,15 @@ impl Container {
             let state = handle.borrow();
             widget_id_of(&*state)
         };
-        let interaction_id = node_id.map(InteractionId::node).unwrap_or_else(|| InteractionId::widget(widget_id));
-        let control = self.update_control_for(interaction_id, rect, opt, scroll_behavior, focus_policy);
-        let mut ctx = self.widget_ctx_for(widget_id, interaction_id, rect, input);
+        self.record_widget_node(widget_id, node_id);
+        let retained_id = self.retained_id_for_node(node_id);
+        let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
+        let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
         let res = {
             let mut state = handle.borrow_mut();
             state.run(&mut ctx, &control)
         };
-        match node_id {
-            Some(node_id) => results.record_retained_with_context(node_id, widget_id, res, dispatch_site),
-            None => results.record_with_context(widget_id, res, dispatch_site),
-        }
+        results.record_retained_with_context(retained_id, node_id, widget_id, res, dispatch_site);
         (control, res)
     }
 }

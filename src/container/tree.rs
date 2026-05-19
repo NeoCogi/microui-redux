@@ -101,6 +101,11 @@ impl Container {
         self.tree.cache.record_interaction(node_id, interaction);
     }
 
+    /// Stores the retained node associated with a widget handle this frame.
+    pub(crate) fn record_widget_node(&mut self, widget_id: WidgetId, node_id: NodeId) {
+        self.tree.cache.record_widget_node(widget_id, node_id);
+    }
+
     /// Returns the current frame layout for `node_id` or panics if layout was skipped.
     fn current_tree_layout_or_panic(&self, node_id: NodeId) -> NodeLayout {
         self.tree
@@ -171,7 +176,7 @@ impl Container {
         let focus_policy = widget.focus_policy();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let dispatch_site = self.widget_dispatch_site(node_id, "widget");
-        let (control, result) = self.render_widget_dyn(results, Some(node_id), widget, rect, input, opt, scroll_behavior, focus_policy, dispatch_site);
+        let (control, result) = self.render_widget_dyn(results, node_id, widget, rect, input, opt, scroll_behavior, focus_policy, dispatch_site);
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
     }
 
@@ -195,7 +200,7 @@ impl Container {
         };
         let input = if needs_input { Some(self.snapshot_input()) } else { None };
         let dispatch_site = self.widget_dispatch_site(node_id, "custom render");
-        let (control, result) = self.render_widget_handle(results, Some(node_id), state, rect, input, opt, scroll_behavior, focus_policy, dispatch_site);
+        let (control, result) = self.render_widget_handle(results, node_id, state, rect, input, opt, scroll_behavior, focus_policy, dispatch_site);
 
         let snapshot = self.snapshot_input();
         let input_ref = snapshot.as_ref();
@@ -269,7 +274,7 @@ impl Container {
             )
         };
         let dispatch_site = self.widget_dispatch_site(node_id, "node disclosure");
-        let (control, result) = self.render_widget_handle(results, Some(node_id), state, rect, None, opt, scroll_behavior, focus_policy, dispatch_site);
+        let (control, result) = self.render_widget_handle(results, node_id, state, rect, None, opt, scroll_behavior, focus_policy, dispatch_site);
         self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
         stable_state
     }
@@ -287,13 +292,13 @@ impl Container {
             }
             WidgetTreeNodeKind::Container { handle, opt, scroll_behavior } => {
                 if self.measurement_mode {
-                    let layout = self.measure_panel_layout(handle, *scroll_behavior, policy, results, children);
+                    let layout = self.measure_panel_layout(handle, node_id, *scroll_behavior, policy, results, children);
                     self.record_tree_layout(node_id, layout);
                 } else {
                     let mut handle = handle.clone();
                     // Containers are nested retained sub-contexts. The parent records the panel bounds,
                     // then lets the child container execute the same layout pass against its own body.
-                    self.begin_panel_layout(&mut handle, *opt, *scroll_behavior, policy);
+                    self.begin_panel_layout(&mut handle, node_id, *opt, *scroll_behavior, policy);
                     handle.with_inner_mut(|container| {
                         container.layout_tree_nodes(results, children);
                     });
@@ -373,7 +378,7 @@ impl Container {
                 // The render pass re-enters the panel with the layout snapshot already frozen.
                 // Scrollbars, body clipping, and child drawing therefore use the same geometry that
                 // was computed during the first pass.
-                self.begin_panel_render(&mut handle, *opt, *scroll_behavior, layout);
+                self.begin_panel_render(&mut handle, node_id, *opt, *scroll_behavior, layout);
                 handle.with_inner_mut(|container| {
                     container.render_tree_nodes(results, children);
                 });

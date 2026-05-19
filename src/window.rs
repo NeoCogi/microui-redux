@@ -213,7 +213,7 @@ impl WindowChromeTree {
         let submit_on_click = matches!(node.part, WindowChromePart::Close);
         let result = widget_result | chrome_result(&control, submit_on_click);
         container.record_tree_interaction(node.id, NodeInteraction::new(control, result));
-        results.record_node_with_context(node.id, result, dispatch_site);
+        results.record_node_with_context(container.retained_id_for_node(node.id), node.id, result, dispatch_site);
         control
     }
 
@@ -329,6 +329,7 @@ impl Window {
     /// Creates a dialog window that starts closed.
     pub fn dialog(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
+        main.set_internal_id_seed(Id::new(root_id.raw() as u64));
         main.set_rect(initial_rect);
         let chrome_ids = WindowChromeIds::from_root(root_id);
 
@@ -345,6 +346,7 @@ impl Window {
     /// Creates a standard window that starts open.
     pub fn window(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
+        main.set_internal_id_seed(Id::new(root_id.raw() as u64));
         main.set_rect(initial_rect);
         let chrome_ids = WindowChromeIds::from_root(root_id);
 
@@ -361,6 +363,7 @@ impl Window {
     /// Creates a popup window that starts closed.
     pub fn popup(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
+        main.set_internal_id_seed(Id::new(root_id.raw() as u64));
         main.set_rect(initial_rect);
         let chrome_ids = WindowChromeIds::from_root(root_id);
 
@@ -504,8 +507,28 @@ impl WindowHandle {
     }
 
     /// Sets the focused widget inside the window's root container.
+    ///
+    /// Deprecated: prefer [`WindowHandle::set_focus_node`] or
+    /// [`WindowHandle::set_focus_handle`].
+    #[deprecated(note = "use set_focus_node or set_focus_handle; widget pointer focus is a compatibility path")]
     pub fn set_focus(&mut self, widget_id: Option<WidgetId>) {
+        #[allow(deprecated)]
         self.inner_mut().main.set_focus(widget_id);
+    }
+
+    /// Sets focus to a retained node inside the window's root container.
+    pub fn set_focus_node(&mut self, node_id: NodeId) {
+        self.inner_mut().main.set_focus_node(node_id);
+    }
+
+    /// Clears focus in the window's root container.
+    pub fn clear_focus(&mut self) {
+        self.inner_mut().main.clear_focus();
+    }
+
+    /// Sets focus to the retained node that most recently dispatched `handle`.
+    pub fn set_focus_handle<W: Widget>(&mut self, handle: &WidgetHandle<W>) -> bool {
+        self.inner_mut().main.set_focus_handle(handle)
     }
 
     pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Window> {

@@ -39,7 +39,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 - **Context**: owns the renderer handle, user input, frame results, and retained root windows. A frame has explicit phases: `begin_render_frame(...)` starts renderer work, input events are fed into the context, `update_ui()` traverses roots registered with `create_window(...)`, `create_dialog(...)`, or `create_popup(...)`, and `end_render_frame()` presents recorded root commands. `run_ui_frame(...)` remains available while migrating per-frame root submissions.
 - **Container**: the internal execution object behind windows, panels, popups, and retained tree nodes. Application code should normally work through `Context`, `WindowHandle`, `ContainerHandle`, and `WidgetTreeBuilder` instead of authoring widgets directly on a container.
 - **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
-- **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). These structs hold interaction state and use pointer-derived IDs from their current address.
+- **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). Retained traversal keys widget interaction by stable retained node IDs; pointer-derived widget IDs remain only for compatibility helpers.
 - **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and stored in retained roots through `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)`. The compatibility APIs can still replay trees per frame through `Context::window(...)`, `Context::dialog(...)`, or `Context::popup(...)`. Tree nodes cover widgets, panels, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
 - **Graphics**: widget-local primitive drawing exposed through `WidgetCtx::graphics(...)` and the `Graphics` builder. It covers rectangles, frames, text/icons/images, thick line strokes, filled polygons, and nested local clip scopes.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override their own `font: FontChoice`.
@@ -54,9 +54,9 @@ The current supported authoring path is retained widget trees registered as cont
 The older `Context::run_ui_frame(|ctx| { ctx.window(...); })`, `Context::window(...)`, `Context::dialog(...)`, and `Context::popup(...)` APIs remain compatibility paths during the migration. The planned migration is:
 
 - `0.7.0`: release retained root registration APIs, migrate examples where practical, and document legacy per-frame root submission as compatibility API.
-- `0.8.0`: remove compatibility root-submission APIs and remove pointer-derived interaction identity from normal retained paths after retained focus/result replacements exist.
+- `0.8.0`: remove compatibility root-submission APIs and remove remaining pointer-derived compatibility helpers after retained focus/result replacements have settled.
 
-Pointer-derived widget IDs remain available today for manual focus and handle-oriented result lookup. New retained code should prefer stable `NodeId` lookups where possible.
+Pointer-derived widget IDs remain available today only as compatibility helpers. New retained code should prefer stable `NodeId`/`RetainedId` lookups and retained focus APIs.
 
 ```rust
 let name = widget_handle(Textbox::new(""));
@@ -90,13 +90,17 @@ if results.state_of_handle(&submit_button).is_submitted() {
 ```
 
 ### Widget IDs
-Retained-tree focus and hover use the stable `NodeId` assigned by `WidgetTreeBuilder`, so keyed retained nodes keep interaction continuity even when the backing widget handle changes. `ctx.committed_results().state_of_node(node_id)` exposes the same stable lookup for retained nodes.
+Retained-tree focus and hover use the stable `NodeId` assigned by `WidgetTreeBuilder`, scoped by the owning root or panel, so keyed retained nodes keep interaction continuity even when the backing widget handle changes. `ctx.committed_results().state_of_node(node_id)` exposes the same stable lookup for retained nodes when the node ID is unambiguous; `state_of_retained(RetainedId::root_node(root_id, node_id))` accepts the richer retained key.
 
-Pointer-derived widget IDs remain available for manual focus and handle-oriented result lookup. When setting focus manually, pass a widget pointer ID from `widget_id_of` or `widget_id_of_handle`:
+For retained focus, keep the `NodeId` returned by `WidgetTreeBuilder` and use `set_focus_node`, or use `set_focus_handle` after the handle has been rendered once:
 
 ```rust
-my_window.set_focus(Some(widget_id_of_handle(&my_textbox_handle)));
+my_window.set_focus_node(textbox_node_id);
+// or
+let focused = my_window.set_focus_handle(&my_textbox_handle);
 ```
+
+Pointer-derived widget IDs from `widget_id_of` and `widget_id_of_handle`, plus `WindowHandle::set_focus`, remain deprecated compatibility APIs for manual/debug paths.
 
 Window, dialog, and popup builders now accept a `ScrollBehavior` to control scroll behavior. Use `ScrollBehavior::NO_SCROLL`
 for popups that should not scroll, `ScrollBehavior::GRAB_SCROLL` for widgets that want to consume scroll, and

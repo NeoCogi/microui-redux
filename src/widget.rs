@@ -58,6 +58,7 @@ use std::collections::HashMap;
 use rs_math3d::Dimensioni;
 
 use crate::atlas::{AtlasHandle, EXPAND_DOWN_ICON};
+use crate::context::RootId;
 use crate::id::Id;
 use crate::input::{ControlState, ResourceState, ScrollBehavior, WidgetOption};
 use crate::style::Style;
@@ -130,27 +131,70 @@ pub trait Widget {
 /// Raw pointer identity used for widget hover/focus tracking.
 pub type WidgetId = *const ();
 
-/// Internal interaction identity used by focus, hover, and retained results.
+/// Retained interaction identity used by focus, hover, and frame results.
 ///
-/// Retained widgets use their stable `NodeId` while immediate/manual widgets keep the historical
-/// pointer identity. That lets retained interaction survive state-handle movement and keeps
-/// pointer IDs as an explicit fallback for APIs such as manual focus.
+/// Normal retained traversal uses `Node` identities. `Root` is available for root-level results
+/// and future framework controls that do not naturally belong to a widget-tree node.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum InteractionId {
-    /// Pointer-derived identity for immediate widgets and manual focus.
-    Widget(WidgetId),
+pub enum RetainedId {
+    /// Stable root-window, dialog, or popup identity.
+    Root(RootId),
     /// Stable retained-tree node identity.
     Node(Id),
+    /// Stable retained-tree node identity scoped to the owning root or panel.
+    ScopedNode {
+        /// Stable owner/root/panel scope.
+        scope: Id,
+        /// Stable node ID within that scope.
+        node: Id,
+    },
 }
 
-impl InteractionId {
-    pub(crate) fn widget(widget_id: WidgetId) -> Self {
-        Self::Widget(widget_id)
+impl RetainedId {
+    /// Creates a retained root interaction ID.
+    pub const fn root(root_id: RootId) -> Self {
+        Self::Root(root_id)
     }
 
-    pub(crate) fn node(node_id: Id) -> Self {
+    /// Creates a retained node interaction ID.
+    pub const fn node(node_id: Id) -> Self {
         Self::Node(node_id)
     }
+
+    /// Creates a scoped retained node interaction ID.
+    ///
+    /// Root containers use a scope derived from their `RootId`; retained panels use their panel
+    /// node ID as the child-container scope.
+    pub const fn scoped_node(scope: Id, node_id: Id) -> Self {
+        Self::ScopedNode { scope, node: node_id }
+    }
+
+    /// Creates a retained node ID scoped to a registered root.
+    pub fn root_node(root_id: RootId, node_id: Id) -> Self {
+        Self::scoped_node(Id::new(root_id.raw() as u64), node_id)
+    }
+
+    pub(crate) fn compat_widget(widget_id: WidgetId) -> Self {
+        Self::Node(compat_widget_node_id(widget_id))
+    }
+
+}
+
+fn compat_widget_node_id(widget_id: WidgetId) -> Id {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    fn write(mut hash: u64, value: u64) -> u64 {
+        for byte in value.to_le_bytes() {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        hash
+    }
+
+    let hash = write(FNV_OFFSET_BASIS, 0x6d69_6372_6f75_695f_u64);
+    let hash = write(hash, 0x6c65_6761_6379_5f77_u64);
+    Id::new(write(hash, widget_id as usize as u64))
 }
 
 /// Returns the pointer identity for a widget state object.
@@ -165,54 +209,93 @@ pub fn widget_id_of_handle<W: Widget>(handle: &WidgetHandle<W>) -> WidgetId {
     widget_id_of(&*widget)
 }
 
-/// Per-frame widget interaction results keyed by [`WidgetId`].
+/// Per-frame widget interaction results keyed by retained identity.
 ///
-/// A single widget state is expected to be dispatched once per frame.
-/// Duplicate dispatches with the same ID panic in all builds.
+/// Retained nodes are the primary storage. Legacy widget-pointer lookups remain as a compatibility
+/// layer by recording which retained node dispatched each widget handle during traversal.
 ///
 /// The storage is split into two generations:
 /// - the committed result set published at the end of the previous frame,
 /// - and the current in-progress result set being written by this frame.
 #[derive(Default)]
 pub(crate) struct FrameResults {
-    committed: HashMap<WidgetId, ResourceState>,
-    current: HashMap<WidgetId, ResourceState>,
-    current_dispatch_sites: HashMap<WidgetId, String>,
-    committed_nodes: HashMap<Id, ResourceState>,
-    current_nodes: HashMap<Id, ResourceState>,
-    current_node_dispatch_sites: HashMap<Id, String>,
+    committed: HashMap<RetainedId, ResourceState>,
+    current: HashMap<RetainedId, ResourceState>,
+    current_dispatch_sites: HashMap<RetainedId, String>,
+    current_widget_dispatch_sites: HashMap<WidgetId, String>,
+    committed_widget_nodes: HashMap<WidgetId, RetainedId>,
+    current_widget_nodes: HashMap<WidgetId, RetainedId>,
+    committed_node_ids: HashMap<Id, RetainedId>,
+    current_node_ids: HashMap<Id, RetainedId>,
 }
 
 /// Read-only view over one frame-result generation.
 #[derive(Copy, Clone)]
 pub struct FrameResultGeneration<'a> {
-    entries: &'a HashMap<WidgetId, ResourceState>,
-    node_entries: &'a HashMap<Id, ResourceState>,
+    entries: &'a HashMap<RetainedId, ResourceState>,
+    widget_nodes: &'a HashMap<WidgetId, RetainedId>,
+    node_ids: &'a HashMap<Id, RetainedId>,
 }
 
 impl<'a> FrameResultGeneration<'a> {
-    fn new(entries: &'a HashMap<WidgetId, ResourceState>, node_entries: &'a HashMap<Id, ResourceState>) -> Self {
-        Self { entries, node_entries }
+    fn new(
+        entries: &'a HashMap<RetainedId, ResourceState>,
+        widget_nodes: &'a HashMap<WidgetId, RetainedId>,
+        node_ids: &'a HashMap<Id, RetainedId>,
+    ) -> Self {
+        Self {
+            entries,
+            widget_nodes,
+            node_ids,
+        }
+    }
+
+    /// Returns the state for a retained interaction ID in this generation.
+    pub fn state_of_retained(&self, retained_id: RetainedId) -> ResourceState {
+        self.entries.get(&retained_id).copied().unwrap_or(ResourceState::NONE)
     }
 
     /// Returns the state for `widget_id` in this generation.
+    ///
+    /// Deprecated: prefer [`FrameResultGeneration::state_of_node`] or
+    /// [`FrameResultGeneration::state_of_retained`]. This compatibility helper maps the widget
+    /// pointer to the retained node that dispatched it in this generation when possible.
+    #[deprecated(note = "use state_of_node or state_of_retained; widget pointer result lookup is a compatibility path")]
     pub fn state(&self, widget_id: WidgetId) -> ResourceState {
-        self.entries.get(&widget_id).copied().unwrap_or(ResourceState::NONE)
+        self.widget_nodes
+            .get(&widget_id)
+            .copied()
+            .map(|retained_id| self.state_of_retained(retained_id))
+            .unwrap_or_else(|| self.state_of_retained(RetainedId::compat_widget(widget_id)))
     }
 
     /// Returns the state for `widget` in this generation.
+    ///
+    /// Deprecated: prefer [`FrameResultGeneration::state_of_node`] or
+    /// [`FrameResultGeneration::state_of_retained`].
+    #[deprecated(note = "use state_of_node or state_of_retained; widget pointer result lookup is a compatibility path")]
     pub fn state_of<W: Widget + ?Sized>(&self, widget: &W) -> ResourceState {
+        #[allow(deprecated)]
         self.state(widget_id_of(widget))
     }
 
     /// Returns the state for the widget stored in `handle` in this generation.
+    ///
+    /// This compatibility helper maps the handle to the retained node that dispatched it in this
+    /// generation. Prefer [`FrameResultGeneration::state_of_node`] when the caller already has a
+    /// retained node ID.
     pub fn state_of_handle<W: Widget>(&self, handle: &WidgetHandle<W>) -> ResourceState {
+        #[allow(deprecated)]
         self.state(widget_id_of_handle(handle))
     }
 
     /// Returns the state for a retained tree node in this generation.
     pub fn state_of_node(&self, node_id: Id) -> ResourceState {
-        self.node_entries.get(&node_id).copied().unwrap_or(ResourceState::NONE)
+        self.node_ids
+            .get(&node_id)
+            .copied()
+            .map(|retained_id| self.state_of_retained(retained_id))
+            .unwrap_or_else(|| self.state_of_retained(RetainedId::node(node_id)))
     }
 }
 
@@ -223,76 +306,124 @@ impl FrameResults {
     pub(crate) fn begin_frame(&mut self) {
         self.current.clear();
         self.current_dispatch_sites.clear();
-        self.current_nodes.clear();
-        self.current_node_dispatch_sites.clear();
+        self.current_widget_dispatch_sites.clear();
+        self.current_widget_nodes.clear();
+        self.current_node_ids.clear();
     }
 
     /// Publishes the current frame as the next committed result generation.
     pub(crate) fn finish_frame(&mut self) {
         std::mem::swap(&mut self.committed, &mut self.current);
-        std::mem::swap(&mut self.committed_nodes, &mut self.current_nodes);
+        std::mem::swap(&mut self.committed_widget_nodes, &mut self.current_widget_nodes);
+        std::mem::swap(&mut self.committed_node_ids, &mut self.current_node_ids);
         self.current.clear();
         self.current_dispatch_sites.clear();
-        self.current_nodes.clear();
-        self.current_node_dispatch_sites.clear();
+        self.current_widget_dispatch_sites.clear();
+        self.current_widget_nodes.clear();
+        self.current_node_ids.clear();
     }
 
     /// Records the current frame state under `widget_id`.
+    ///
+    /// Deprecated: manual/debug compatibility path. Retained traversal records by retained ID.
+    #[deprecated(note = "record retained results with record_retained_with_context or record_node_with_context")]
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn record(&mut self, widget_id: WidgetId, state: ResourceState) {
+        #[allow(deprecated)]
         self.record_with_context(widget_id, state, "unknown widget dispatch site");
     }
 
     /// Records the current frame state under `widget_id` with a human-readable dispatch site.
+    ///
+    /// Deprecated: manual/debug compatibility path. Retained traversal records by retained ID.
+    #[deprecated(note = "record retained results with record_retained_with_context or record_node_with_context")]
     pub(crate) fn record_with_context(&mut self, widget_id: WidgetId, state: ResourceState, dispatch_site: impl Into<String>) {
         let dispatch_site = dispatch_site.into();
-        if let Some(first_site) = self.current_dispatch_sites.get(&widget_id) {
+        if let Some(first_site) = self.current_widget_dispatch_sites.get(&widget_id) {
             panic!(
                 "duplicate widget dispatch detected for widget {:p}; a WidgetHandle may only be rendered once per frame. first dispatch: {}. duplicate dispatch: {}.",
                 widget_id, first_site, dispatch_site
             );
         }
 
-        let prev_state = self.current.insert(widget_id, state);
-        let prev_site = self.current_dispatch_sites.insert(widget_id, dispatch_site);
+        let retained_id = RetainedId::compat_widget(widget_id);
+        self.current_widget_nodes.insert(widget_id, retained_id);
+        let prev_site = self.current_widget_dispatch_sites.insert(widget_id, dispatch_site.clone());
+        let prev_state = self.current.insert(retained_id, state);
+        let prev_retained_site = self.current_dispatch_sites.insert(retained_id, dispatch_site);
         debug_assert_eq!(
             prev_state.is_some(),
-            prev_site.is_some(),
-            "widget result and dispatch-site tracking diverged for widget {:p}",
-            widget_id
+            prev_retained_site.is_some(),
+            "retained result and dispatch-site tracking diverged for {:?}",
+            retained_id
         );
+        debug_assert!(prev_site.is_none(), "widget dispatch-site tracking diverged for widget {:p}", widget_id);
     }
 
     /// Records a retained node result under both stable node identity and legacy widget identity.
-    pub(crate) fn record_retained_with_context(&mut self, node_id: Id, widget_id: WidgetId, state: ResourceState, dispatch_site: impl Into<String>) {
+    pub(crate) fn record_retained_with_context(
+        &mut self,
+        retained_id: RetainedId,
+        node_id: Id,
+        widget_id: WidgetId,
+        state: ResourceState,
+        dispatch_site: impl Into<String>,
+    ) {
         let dispatch_site = dispatch_site.into();
-        self.current_nodes.entry(node_id).or_insert(state);
-        self.current_node_dispatch_sites.entry(node_id).or_insert_with(|| dispatch_site.clone());
+        if let Some(first_site) = self.current_widget_dispatch_sites.get(&widget_id) {
+            panic!(
+                "duplicate widget dispatch detected for widget {:p}; a WidgetHandle may only be rendered once per frame. first dispatch: {}. duplicate dispatch: {}.",
+                widget_id, first_site, dispatch_site
+            );
+        }
 
-        self.record_with_context(widget_id, state, dispatch_site);
+        self.current_widget_dispatch_sites.insert(widget_id, dispatch_site.clone());
+        self.current_widget_nodes.insert(widget_id, retained_id);
+        self.current_node_ids.entry(node_id).or_insert(retained_id);
+        self.record_retained_id_with_context(retained_id, state, dispatch_site);
     }
 
     /// Records an internal retained node result without a legacy widget identity.
-    pub(crate) fn record_node_with_context(&mut self, node_id: Id, state: ResourceState, dispatch_site: impl Into<String>) {
+    pub(crate) fn record_node_with_context(&mut self, retained_id: RetainedId, node_id: Id, state: ResourceState, dispatch_site: impl Into<String>) {
+        self.current_node_ids.entry(node_id).or_insert(retained_id);
+        self.record_retained_id_with_context(retained_id, state, dispatch_site);
+    }
+
+    fn record_retained_id_with_context(&mut self, retained_id: RetainedId, state: ResourceState, dispatch_site: impl Into<String>) {
         let dispatch_site = dispatch_site.into();
-        self.current_nodes.entry(node_id).or_insert(state);
-        self.current_node_dispatch_sites.entry(node_id).or_insert(dispatch_site);
+        if let Some(first_site) = self.current_dispatch_sites.get(&retained_id) {
+            panic!(
+                "duplicate retained dispatch detected for {:?}. first dispatch: {}. duplicate dispatch: {}.",
+                retained_id, first_site, dispatch_site
+            );
+        }
+
+        let prev_state = self.current.insert(retained_id, state);
+        let prev_site = self.current_dispatch_sites.insert(retained_id, dispatch_site);
+        debug_assert_eq!(
+            prev_state.is_some(),
+            prev_site.is_some(),
+            "retained result and dispatch-site tracking diverged for {:?}",
+            retained_id
+        );
     }
 
     /// Returns the committed result generation published by the previous frame.
     pub(crate) fn committed(&self) -> FrameResultGeneration<'_> {
-        FrameResultGeneration::new(&self.committed, &self.committed_nodes)
+        FrameResultGeneration::new(&self.committed, &self.committed_widget_nodes, &self.committed_node_ids)
     }
 
     /// Returns the in-progress result generation for the current frame.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn current(&self) -> FrameResultGeneration<'_> {
-        FrameResultGeneration::new(&self.current, &self.current_nodes)
+        FrameResultGeneration::new(&self.current, &self.current_widget_nodes, &self.current_node_ids)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(deprecated)]
+
     use super::*;
 
     #[test]
