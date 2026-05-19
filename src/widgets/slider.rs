@@ -53,7 +53,7 @@
 use crate::*;
 use std::fmt::Write;
 
-use super::textbox::textbox_handle;
+use super::textbox::{textbox_paint, textbox_update};
 
 #[derive(Clone)]
 /// Persistent state for slider widgets.
@@ -123,13 +123,13 @@ impl Slider {
         Dimensioni::new(width, height)
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let base = ctx.rect();
         let last = self.value;
         let mut v = last;
         let font = ctx.style().resolve_font_choice(self.font);
-        if !number_textbox_handle(ctx, control, &mut self.edit, self.precision, font, &mut v).is_none() {
+        if !number_textbox_update(ctx, control, &mut self.edit, self.precision, font, &mut v).is_none() {
             return res;
         }
         if let Some(delta) = control.scroll_delta {
@@ -161,20 +161,31 @@ impl Slider {
         if last != v {
             res |= ResourceState::CHANGE;
         }
+        res
+    }
+
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        let font = ctx.style().resolve_font_choice(self.font);
+        if self.edit.editing {
+            number_textbox_paint(ctx, control, &self.edit, font);
+            return;
+        }
+
+        let base = ctx.rect();
+        let range = self.high - self.low;
         ctx.draw_widget_frame(control, base, ControlColor::Base, self.opt);
         let w = ctx.style().thumb_size;
         let available = (base.width - w).max(0);
         let x = if range != 0.0 && available > 0 {
-            ((v - self.low) * available as Real / range) as i32
+            ((self.value - self.low) * available as Real / range) as i32
         } else {
             0
         };
         let thumb = rect(base.x + x, base.y, w, base.height);
         ctx.draw_widget_frame(control, thumb, ControlColor::Button, self.opt);
-        self.edit.buf.clear();
-        let _ = write!(self.edit.buf, "{:.*}", self.precision, self.value);
-        ctx.draw_control_text_with_font(font, self.edit.buf.as_str(), base, ControlColor::Text, self.opt);
-        res
+        let mut label = String::new();
+        let _ = write!(label, "{:.*}", self.precision, self.value);
+        ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
     }
 }
 
@@ -195,7 +206,7 @@ fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
     }
 }
 
-fn number_textbox_handle(
+fn number_textbox_update(
     ctx: &mut WidgetCtx<'_>,
     control: &ControlState,
     edit: &mut NumberEditState,
@@ -216,7 +227,7 @@ fn number_textbox_handle(
     }
 
     if edit.editing {
-        let res = textbox_handle(ctx, control, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE, font);
+        let res = textbox_update(ctx, control, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE, font);
         if res.is_submitted() || !control.focused {
             if let Ok(v) = edit.buf.parse::<f32>() {
                 *value = v as Real;
@@ -228,6 +239,10 @@ fn number_textbox_handle(
         }
     }
     ResourceState::NONE
+}
+
+fn number_textbox_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, edit: &NumberEditState, font: FontId) {
+    textbox_paint(ctx, control, edit.buf.as_str(), edit.cursor, WidgetOption::NONE, font);
 }
 
 impl Widget for Slider {
@@ -243,15 +258,19 @@ impl Widget for Slider {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let old_value = self.value;
         let old_edit = self.edit.clone();
-        let mut res = self.handle_widget(ctx, control);
+        let mut res = self.update_widget(ctx, control);
         let changed = self.value != old_value || self.edit != old_edit;
-        if self.edit.editing || changed {
+        if control.active || self.edit.editing || changed {
             res |= ResourceState::ACTIVE;
         }
         res
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        self.paint_widget(ctx, control);
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
@@ -341,12 +360,11 @@ impl Number {
         Dimensioni::new(width, height)
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let base = ctx.rect();
         let last = self.value;
         let font = ctx.style().resolve_font_choice(self.font);
-        if !number_textbox_handle(ctx, control, &mut self.edit, self.precision, font, &mut self.value).is_none() {
+        if !number_textbox_update(ctx, control, &mut self.edit, self.precision, font, &mut self.value).is_none() {
             return res;
         }
         let input = ctx.input_or_default();
@@ -356,11 +374,21 @@ impl Number {
         if self.value != last {
             res |= ResourceState::CHANGE;
         }
-        ctx.draw_widget_frame(control, base, ControlColor::Base, self.opt);
-        self.edit.buf.clear();
-        let _ = write!(self.edit.buf, "{:.*}", self.precision, self.value);
-        ctx.draw_control_text_with_font(font, self.edit.buf.as_str(), base, ControlColor::Text, self.opt);
         res
+    }
+
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        let font = ctx.style().resolve_font_choice(self.font);
+        if self.edit.editing {
+            number_textbox_paint(ctx, control, &self.edit, font);
+            return;
+        }
+
+        let base = ctx.rect();
+        ctx.draw_widget_frame(control, base, ControlColor::Base, self.opt);
+        let mut label = String::new();
+        let _ = write!(label, "{:.*}", self.precision, self.value);
+        ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
     }
 }
 
@@ -377,15 +405,19 @@ impl Widget for Number {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let old_value = self.value;
         let old_edit = self.edit.clone();
-        let mut res = self.handle_widget(ctx, control);
+        let mut res = self.update_widget(ctx, control);
         let changed = self.value != old_value || self.edit != old_edit;
-        if self.edit.editing || changed {
+        if control.active || self.edit.editing || changed {
             res |= ResourceState::ACTIVE;
         }
         res
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        self.paint_widget(ctx, control);
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
@@ -485,7 +517,7 @@ mod tests {
             true,
             Some(Rc::new(input)),
         );
-        slider.run_retained(&mut ctx, &control)
+        slider.update(&mut ctx, &control)
     }
 
     fn assert_real_close(actual: Real, expected: Real) {
@@ -535,7 +567,7 @@ mod tests {
             scroll_delta: None,
         };
 
-        let res = slider.run_retained(&mut ctx, &control);
+        let res = slider.update(&mut ctx, &control);
 
         assert!(res.is_active());
         assert!(slider.value.is_finite());
@@ -624,7 +656,7 @@ mod tests {
             scroll_delta: None,
         };
 
-        let res = slider.run_retained(&mut ctx, &control);
+        let res = slider.update(&mut ctx, &control);
 
         assert!(!res.is_none());
         assert_eq!(slider.value, 50.0);

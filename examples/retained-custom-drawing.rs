@@ -87,7 +87,11 @@ impl Widget for RetainedPaint {
         Dimensioni::new(96, 48)
     }
 
-    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+        ResourceState::NONE
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         ctx.graphics(|graphics| {
             let bounds = graphics.local_rect();
             let fill = if control.hovered { color(54, 116, 155, 255) } else { color(42, 70, 92, 255) };
@@ -102,7 +106,6 @@ impl Widget for RetainedPaint {
                 );
             });
         });
-        ResourceState::NONE
     }
 }
 

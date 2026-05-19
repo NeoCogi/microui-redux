@@ -195,10 +195,12 @@ impl Widget for FocusProbe {
         Dimensioni::new(30, 10)
     }
 
-    fn run_retained(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         self.focused.set(control.focused);
         ResourceState::NONE
     }
+
+    fn paint(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) {}
 
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::HoldUntilBlur
@@ -230,9 +232,13 @@ impl Widget for TraceWidget {
         Dimensioni::new(10, 10)
     }
 
-    fn run_retained(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
-        self.log.borrow_mut().push(format!("render {}", self.name));
+    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+        self.log.borrow_mut().push(format!("update {}", self.name));
         ResourceState::NONE
+    }
+
+    fn paint(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) {
+        self.log.borrow_mut().push(format!("paint {}", self.name));
     }
 }
 
@@ -286,7 +292,7 @@ fn textbox_left_moves_over_multibyte() {
     let control = container.update_control(textbox_id, rect, &control_state);
     let input = container.snapshot_input();
     let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
-    state.run_retained(&mut ctx, &control);
+    state.update(&mut ctx, &control);
     assert_eq!(state.cursor, 1);
 }
 
@@ -305,7 +311,7 @@ fn textbox_backspace_removes_multibyte() {
     let control = container.update_control(textbox_id, rect, &control_state);
     let input = container.snapshot_input();
     let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
-    state.run_retained(&mut ctx, &control);
+    state.update(&mut ctx, &control);
     assert_eq!(state.buf, "ab");
     assert_eq!(state.cursor, 1);
 }
@@ -324,7 +330,7 @@ fn node_run_updates_expansion_after_click() {
         scroll_delta: None,
     };
     let mut ctx = container.widget_ctx(node_id, rect, None);
-    let res = state.run_retained(&mut ctx, &control);
+    let res = state.update(&mut ctx, &control);
 
     assert!(res.is_changed());
     assert!(state.is_expanded());
@@ -470,8 +476,10 @@ fn widget_tree_measures_all_nodes_before_rendering() {
         &[
             "measure first".to_string(),
             "measure second".to_string(),
-            "render first".to_string(),
-            "render second".to_string(),
+            "update first".to_string(),
+            "paint first".to_string(),
+            "update second".to_string(),
+            "paint second".to_string(),
         ]
     );
 }

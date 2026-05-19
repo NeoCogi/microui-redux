@@ -232,7 +232,8 @@ impl Container {
                     self.interaction.in_hover_root,
                     None,
                 );
-                let _ = self.scrollbar_y_state.run_retained(&mut ctx, &control);
+                let _ = self.scrollbar_y_state.update(&mut ctx, &control);
+                self.scrollbar_y_state.paint(&mut ctx, &control);
             }
             if control.active {
                 let delta = scrollbar_drag_delta(ScrollAxis::Vertical, self.input.borrow().mouse_delta, cs.height, base);
@@ -273,7 +274,8 @@ impl Container {
                     self.interaction.in_hover_root,
                     None,
                 );
-                let _ = self.scrollbar_x_state.run_retained(&mut ctx, &control);
+                let _ = self.scrollbar_x_state.update(&mut ctx, &control);
+                self.scrollbar_x_state.paint(&mut ctx, &control);
             }
             if control.active {
                 let delta = scrollbar_drag_delta(ScrollAxis::Horizontal, self.input.borrow().mouse_delta, cs.width, base);

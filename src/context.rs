@@ -337,9 +337,11 @@ mod tests {
             Dimensioni::new((self.label.len() as i32 * 8).max(8), 12)
         }
 
-        fn run_retained(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+        fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
             ResourceState::SUBMIT
         }
+
+        fn paint(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) {}
     }
 
     #[test]

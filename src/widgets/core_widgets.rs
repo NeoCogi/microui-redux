@@ -244,11 +244,15 @@ impl Button {
         }
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         if control.clicked {
             res |= ResourceState::SUBMIT;
         }
+        res
+    }
+
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         let rect = ctx.rect();
         if !self.opt.has_no_frame() {
             if let Some(colorid) = widget_fill_color(control, ControlColor::Button, self.fill) {
@@ -291,11 +295,10 @@ impl Button {
                 }
             }
         }
-        res
     }
 }
 
-implement_widget!(Button, handle_widget, preferred_size_widget);
+implement_widget!(Button, update_widget, paint_widget, preferred_size_widget);
 
 #[derive(Clone)]
 /// Persistent state for list items.
@@ -373,12 +376,16 @@ impl ListItem {
         Dimensioni::new(width.max(0), height)
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let bounds = ctx.rect();
         if control.clicked {
             res |= ResourceState::SUBMIT;
         }
+        res
+    }
+
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        let bounds = ctx.rect();
 
         if control.focused || control.hovered {
             let mut color = ControlColor::Button;
@@ -409,11 +416,10 @@ impl ListItem {
             let font = ctx.style().resolve_font_choice(self.font);
             ctx.draw_control_text_with_font(font, &self.label, text_rect, ControlColor::Text, self.opt);
         }
-        res
     }
 }
 
-implement_widget!(ListItem, handle_widget, preferred_size_widget);
+implement_widget!(ListItem, update_widget, paint_widget, preferred_size_widget);
 
 #[derive(Clone)]
 /// Persistent state for list boxes.
@@ -458,12 +464,16 @@ impl ListBox {
         inline_content_size(style, atlas, self.font, &self.label, visual)
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let rect = ctx.rect();
         if control.clicked {
             res |= ResourceState::SUBMIT;
         }
+        res
+    }
+
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        let rect = ctx.rect();
         if !self.opt.has_no_frame() {
             if let Some(colorid) = widget_fill_color(control, ControlColor::Button, WidgetFillOption::HOVER | WidgetFillOption::CLICK) {
                 ctx.draw_frame(rect, colorid);
@@ -479,11 +489,10 @@ impl ListBox {
             let color = ctx.style().colors[ControlColor::Text as usize];
             ctx.push_image(image, visual, color);
         }
-        res
     }
 }
 
-implement_widget!(ListBox, handle_widget, preferred_size_widget);
+implement_widget!(ListBox, update_widget, paint_widget, preferred_size_widget);
 
 #[derive(Clone)]
 /// Persistent state for checkbox widgets.
@@ -534,16 +543,20 @@ impl Checkbox {
         Dimensioni::new(width.max(0), height)
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let bounds = ctx.rect();
-        let box_rect = rect(bounds.x, bounds.y, bounds.height, bounds.height);
-        let value = if control.clicked { !self.value } else { self.value };
         if control.clicked {
+            self.value = !self.value;
             res |= ResourceState::CHANGE;
         }
+        res
+    }
+
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        let bounds = ctx.rect();
+        let box_rect = rect(bounds.x, bounds.y, bounds.height, bounds.height);
         ctx.draw_widget_frame(control, box_rect, ControlColor::Base, self.opt);
-        if value {
+        if self.value {
             let color = ctx.style().colors[ControlColor::Text as usize];
             ctx.draw_icon(CHECK_ICON, box_rect, color);
         }
@@ -552,7 +565,6 @@ impl Checkbox {
             let font = ctx.style().resolve_font_choice(self.font);
             ctx.draw_control_text_with_font(font, &self.label, text_rect, ControlColor::Text, self.opt);
         }
-        res
     }
 }
 
@@ -569,12 +581,12 @@ impl Widget for Checkbox {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        let res = self.handle_widget(ctx, control);
-        if control.clicked {
-            self.value = !self.value;
-        }
-        res
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        self.update_widget(ctx, control)
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        self.paint_widget(ctx, control);
     }
 }
 
@@ -616,12 +628,14 @@ impl Custom {
         Dimensioni::new(width.max(0), height)
     }
 
-    fn handle_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         ResourceState::NONE
     }
+
+    fn paint_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) {}
 }
 
-implement_widget!(Custom, handle_widget, preferred_size_widget);
+implement_widget!(Custom, update_widget, paint_widget, preferred_size_widget);
 
 #[derive(Clone)]
 /// Persistent state for internal window/container controls.
@@ -656,12 +670,14 @@ impl Internal {
         Dimensioni::new(width.max(0), height)
     }
 
-    fn handle_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         ResourceState::NONE
     }
+
+    fn paint_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) {}
 }
 
-implement_widget!(Internal, handle_widget, preferred_size_widget);
+implement_widget!(Internal, update_widget, paint_widget, preferred_size_widget);
 
 /// Persistent state used by `combo_box` to track popup and selection.
 #[derive(Clone)]
@@ -784,7 +800,7 @@ impl Combo {
         Some(selected_label)
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         if self.clamped {
             res |= ResourceState::CHANGE;
@@ -792,12 +808,23 @@ impl Combo {
         }
 
         if control.clicked {
+            self.open = !self.open;
+            if !self.open {
+                self.close_popup();
+            }
+        } else if !self.popup.is_open() {
+            self.open = false;
+        }
+        if control.clicked {
             res |= ResourceState::SUBMIT | ResourceState::ACTIVE;
         }
         if self.open || self.popup.is_open() {
             res |= ResourceState::ACTIVE;
         }
+        res
+    }
 
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         let header = ctx.rect();
         self.last_anchor = rect(header.x, header.y + header.height, header.width, 1);
         ctx.draw_widget_frame(control, header, ControlColor::Button, self.opt);
@@ -816,8 +843,6 @@ impl Combo {
         ctx.draw_widget_frame(control, indicator, ControlColor::Button, self.opt);
         let icon_color = ctx.style().colors[ControlColor::Text as usize];
         ctx.draw_icon(EXPAND_DOWN_ICON, indicator, icon_color);
-
-        res
     }
 }
 
@@ -834,16 +859,12 @@ impl Widget for Combo {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        if control.clicked {
-            self.open = !self.open;
-            if !self.open {
-                self.close_popup();
-            }
-        } else if !self.popup.is_open() {
-            self.open = false;
-        }
-        self.handle_widget(ctx, control)
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        self.update_widget(ctx, control)
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        self.paint_widget(ctx, control);
     }
 }
 
@@ -954,7 +975,7 @@ mod tests {
             None,
         );
 
-        combo.run_retained(&mut ctx, &control);
+        combo.update(&mut ctx, &control);
         assert!(combo.is_open());
 
         combo.popup.open();
@@ -971,7 +992,7 @@ mod tests {
             true,
             None,
         );
-        combo.run_retained(&mut ctx, &control);
+        combo.update(&mut ctx, &control);
         assert!(!combo.is_open());
         assert!(!combo.popup.is_open());
     }

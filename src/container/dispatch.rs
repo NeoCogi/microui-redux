@@ -63,7 +63,8 @@ impl Container {
         let retained_id = self.retained_id_for_node(node_id);
         let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
         let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
-        let res = widget.run_retained(&mut ctx, &control);
+        let res = widget.update(&mut ctx, &control);
+        widget.paint(&mut ctx, &control);
         results.record_retained_with_context(retained_id, node_id, widget_id, res, dispatch_site);
         (control, res)
     }
@@ -77,7 +78,8 @@ impl Container {
         let widget_id = node_id.raw() as WidgetId;
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
-        let res = widget.run_retained(&mut ctx, &control);
+        let res = widget.update(&mut ctx, &control);
+        widget.paint(&mut ctx, &control);
         (control, res)
     }
 
@@ -108,7 +110,9 @@ impl Container {
         let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
         let res = {
             let mut state = handle.borrow_mut();
-            state.run_retained(&mut ctx, &control)
+            let res = state.update(&mut ctx, &control);
+            state.paint(&mut ctx, &control);
+            res
         };
         results.record_retained_with_context(retained_id, node_id, widget_id, res, dispatch_site);
         (control, res)

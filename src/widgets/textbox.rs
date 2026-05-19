@@ -114,18 +114,23 @@ impl Textbox {
         Dimensioni::new(width, height)
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let font = ctx.style().resolve_font_choice(self.font);
-        textbox_handle(ctx, control, &mut self.buf, &mut self.cursor, self.opt, font)
+        textbox_update(ctx, control, &mut self.buf, &mut self.cursor, self.opt, font)
+    }
+
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        let font = ctx.style().resolve_font_choice(self.font);
+        textbox_paint(ctx, control, self.buf.as_str(), self.cursor, self.opt, font);
     }
 }
 
-pub(crate) fn textbox_handle(
+pub(crate) fn textbox_update(
     ctx: &mut WidgetCtx<'_>,
     control: &ControlState,
     buf: &mut String,
     cursor: &mut usize,
-    opt: WidgetOption,
+    _opt: WidgetOption,
     font: FontId,
 ) -> ResourceState {
     let mut res = ResourceState::NONE;
@@ -165,22 +170,6 @@ pub(crate) fn textbox_handle(
         ctx.clear_focus();
     }
 
-    ctx.draw_widget_frame(control, r, ControlColor::Base, opt);
-
-    let line_height = ctx.atlas().get_font_height(font) as i32;
-    let baseline = ctx.atlas().get_font_baseline(font);
-    let descent = (line_height - baseline).max(0);
-
-    let mut texty = r.y + r.height / 2 - line_height / 2;
-    if texty < r.y {
-        texty = r.y;
-    }
-    let max_texty = (r.y + r.height - line_height).max(r.y);
-    if texty > max_texty {
-        texty = max_texty;
-    }
-    let baseline_y = texty + line_height - descent;
-
     let text_metrics = ctx.atlas().get_text_size(font, buf.as_str());
     let padding = ctx.style().padding;
     let ofx = r.width - padding - text_metrics.width - 1;
@@ -212,7 +201,32 @@ pub(crate) fn textbox_handle(
 
     cursor_pos = clamp_cursor_boundary(buf, cursor_pos);
     *cursor = cursor_pos;
+    res
+}
 
+pub(crate) fn textbox_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, buf: &str, cursor: usize, opt: WidgetOption, font: FontId) {
+    let r = ctx.rect();
+    ctx.draw_widget_frame(control, r, ControlColor::Base, opt);
+
+    let line_height = ctx.atlas().get_font_height(font) as i32;
+    let baseline = ctx.atlas().get_font_baseline(font);
+    let descent = (line_height - baseline).max(0);
+
+    let mut texty = r.y + r.height / 2 - line_height / 2;
+    if texty < r.y {
+        texty = r.y;
+    }
+    let max_texty = (r.y + r.height - line_height).max(r.y);
+    if texty > max_texty {
+        texty = max_texty;
+    }
+    let baseline_y = texty + line_height - descent;
+
+    let text_metrics = ctx.atlas().get_text_size(font, buf);
+    let padding = ctx.style().padding;
+    let ofx = r.width - padding - text_metrics.width - 1;
+    let textx = r.x + if ofx < padding { ofx } else { padding };
+    let cursor_pos = clamp_cursor_boundary(buf, cursor);
     let caret_offset = if cursor_pos == 0 {
         0
     } else {
@@ -222,16 +236,15 @@ pub(crate) fn textbox_handle(
     if control.focused {
         let color = ctx.style().colors[ControlColor::Text as usize];
         ctx.push_clip_rect(r);
-        ctx.draw_text(font, buf.as_str(), vec2(textx, texty), color);
+        ctx.draw_text(font, buf, vec2(textx, texty), color);
         let caret_top = (baseline_y - baseline + 2).max(r.y).min(r.y + r.height);
         let caret_bottom = (baseline_y + descent - 2).max(r.y).min(r.y + r.height);
         let caret_height = (caret_bottom - caret_top).max(1);
         ctx.draw_rect(rect(textx + caret_offset, caret_top, 1, caret_height), color);
         ctx.pop_clip_rect();
     } else {
-        ctx.draw_control_text_with_font(font, buf.as_str(), r, ControlColor::Text, opt);
+        ctx.draw_control_text_with_font(font, buf, r, ControlColor::Text, opt);
     }
-    res
 }
 
 impl Widget for Textbox {
@@ -247,15 +260,19 @@ impl Widget for Textbox {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let old_buf = self.buf.clone();
         let old_cursor = self.cursor;
-        let mut res = self.handle_widget(ctx, control);
+        let mut res = self.update_widget(ctx, control);
         let changed = self.buf != old_buf || self.cursor != old_cursor;
         if control.focused || changed {
             res |= ResourceState::ACTIVE;
         }
         res
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        self.paint_widget(ctx, control);
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
