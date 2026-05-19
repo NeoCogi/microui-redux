@@ -32,7 +32,7 @@ mod common;
 
 use application::Application;
 use common::{atlas_assets, *};
-use microui_redux::*;
+use microui_redux::prelude::*;
 
 const DISPLAY_MAX_LEN: usize = 24;
 const DISPLAY_HEIGHT_FRACTION: f32 = 0.20;

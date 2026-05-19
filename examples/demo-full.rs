@@ -70,8 +70,8 @@ use common::vulkan_renderer::VulkanRenderer as BackendRenderer;
 #[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
 use common::wgpu_renderer::WgpuRenderer as BackendRenderer;
 #[cfg(feature = "builder")]
-use microui_redux::builder;
-use microui_redux::*;
+use microui_redux::atlas::builder;
+use microui_redux::{backend::Vertex, prelude::*};
 use rand::{RngExt, rng};
 use std::{
     cell::RefCell,
