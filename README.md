@@ -36,11 +36,11 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 ![random](res/microui-0.6.png)
 
 ## Key Concepts
-- **Context**: owns the renderer handle, user input, frame results, and retained root windows. A frame has explicit phases: `begin_render_frame(...)` starts renderer work, input events are fed into the context, `update_ui()` traverses roots registered with `create_window(...)`, `create_dialog(...)`, or `create_popup(...)`, and `end_render_frame()` presents recorded root commands. `run_ui_frame(...)` remains available while migrating per-frame root submissions.
+- **Context**: owns the renderer handle, user input, frame results, and retained root windows. A frame has explicit phases: `begin_render_frame(...)` starts renderer work, input events are fed into the context, `update_ui()` traverses roots registered with `create_window(...)`, `create_dialog(...)`, or `create_popup(...)`, and `end_render_frame()` presents recorded root commands.
 - **Container**: the internal execution object behind windows, panels, popups, and retained tree nodes. Application code should normally work through `Context`, `WindowHandle`, `ContainerHandle`, and `WidgetTreeBuilder` instead of authoring widgets directly on a container. `ContainerHandle` exposes retained state access by default; direct draw/clip/body mutation on `ContainerViewMut` is available only with the `manual-drawing` feature for debugging or migration work.
 - **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
-- **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). Retained traversal keys widget interaction by stable retained node IDs; pointer-derived widget IDs remain only for compatibility helpers.
-- **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and stored in retained roots through `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)`. The compatibility APIs can still replay trees per frame through `Context::window(...)`, `Context::dialog(...)`, or `Context::popup(...)`. Tree nodes cover widgets, panels, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
+- **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). Retained traversal keys widget interaction by stable retained node IDs.
+- **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and stored in retained roots through `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)`. Tree nodes cover widgets, panels, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
 - **Graphics**: widget-local primitive drawing exposed through `WidgetCtx::graphics(...)` and the `Graphics` builder. It covers rectangles, frames, text/icons/images, thick line strokes, filled polygons, and nested local clip scopes.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override their own `font: FontChoice`.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
@@ -51,12 +51,7 @@ The public API is intentionally centered on `microui_redux::prelude` for applica
 
 The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate retained widget handle state over time, and drive frames with `Context::update_ui()`.
 
-The older `Context::run_ui_frame(|ctx| { ctx.window(...); })`, `Context::window(...)`, `Context::dialog(...)`, and `Context::popup(...)` APIs remain compatibility paths during the migration. The planned migration is:
-
-- `0.7.0`: release retained root registration APIs, migrate examples where practical, and document legacy per-frame root submission as compatibility API.
-- `0.8.0`: remove compatibility root-submission APIs and remove remaining pointer-derived compatibility helpers after retained focus/result replacements have settled.
-
-Pointer-derived widget IDs remain available today only as compatibility helpers. New retained code should prefer stable `NodeId`/`RetainedId` lookups and retained focus APIs.
+Per-frame root submission APIs have been removed from the public surface. Root trees are registered or replaced explicitly with `create_window`, `create_dialog`, `create_popup`, and `set_root_tree`; visibility is controlled with `set_root_visible`.
 
 ```rust
 let name = widget_handle(Textbox::new(""));
@@ -100,11 +95,7 @@ my_window.set_focus_node(textbox_node_id);
 let focused = my_window.set_focus_handle(&my_textbox_handle);
 ```
 
-Pointer-derived widget IDs from `widget_id_of` and `widget_id_of_handle`, plus `WindowHandle::set_focus`, remain deprecated compatibility APIs for manual/debug paths.
-
-Window, dialog, and popup builders now accept a `ScrollBehavior` to control scroll behavior. Use `ScrollBehavior::NO_SCROLL`
-for popups that should not scroll, `ScrollBehavior::GRAB_SCROLL` for widgets that want to consume scroll, and
-`ScrollBehavior::NONE` for default behavior. Custom widgets receive consumed scroll in `CustomRenderArgs::scroll_delta`.
+Registered roots can be configured with `Context::set_root_options(...)` to control container options and root scroll behavior. Use `ScrollBehavior::NO_SCROLL` for popups that should not scroll, `ScrollBehavior::GRAB_SCROLL` for widgets that want to consume scroll, and `ScrollBehavior::NONE` for default behavior. Custom widgets receive consumed scroll in `CustomRenderArgs::scroll_delta`.
 
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
@@ -244,7 +235,7 @@ To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for P
 Version `0.6.0` is the retained-tree release. Compared to `0.5.0`, it replaces the public immediate/closure authoring path with retained widget trees and committed interaction results.
 
 - [x] Replaced the v0.5 public immediate/closure authoring path with retained widget trees.
-    - [x] `Context::window`, `dialog`, and `popup` now take `&WidgetTree` instead of UI-building closures.
+    - [x] `Context` now owns registered roots and traverses them through `update_ui()`.
     - [x] `WidgetTree` nodes cover widgets, embedded containers, headers/tree nodes, row/grid/column/stack groups, and custom render leaves.
     - [x] The public immediate widget-helper surface and `tree.run(...)` escape hatch are gone from the supported API.
 - [x] Added a retained composition API with stable node identity and a smaller builder surface.
@@ -258,7 +249,7 @@ Version `0.6.0` is the retained-tree release. Compared to `0.5.0`, it replaces t
 - [x] Tightened the widget/runtime contract compared to v0.5.
     - [x] Widgets now implement `measure` + `run_retained`; the intermediate `reconcile` / frame-commit design was removed.
     - [x] Persistent widget state stays inside the widget handle and mutates during `run_retained`.
-    - [x] Retained focus/hover and retained result lookup can use stable `NodeId`s; pointer-derived IDs remain as the manual-handle fallback through `widget_id_of` and `widget_id_of_handle`.
+    - [x] Retained focus/hover and retained result lookup use stable `NodeId` / `RetainedId` identity, with handle-based result lookup retained for app state handles.
 - [x] Added widget-local graphics primitives as a first-class paint path.
     - [x] `WidgetCtx::graphics(...)` and `Graphics` expose rectangles, frames, text/icons/images, thick line strokes, polygon fills, and nested local clip scopes.
     - [x] Primitives are tessellated into retained triangles and software-clipped before replay, keeping backend behavior consistent without fragmenting batches on clip changes.

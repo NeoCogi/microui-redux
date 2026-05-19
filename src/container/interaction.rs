@@ -58,6 +58,7 @@ impl Container {
     /// Manually updates which widget owns focus.
     ///
     /// Deprecated: prefer [`Container::set_focus_node`] or [`Container::set_focus_handle`].
+    #[cfg(test)]
     #[deprecated(note = "use set_focus_node or set_focus_handle; widget pointer focus is a compatibility path")]
     pub fn set_focus(&mut self, widget_id: Option<WidgetId>) {
         self.interaction.focus = widget_id.map(|widget_id| self.retained_id_for_widget(widget_id));
@@ -252,13 +253,7 @@ impl Container {
         self.widget_ctx_for(widget_id, self.retained_id_for_widget(widget_id), rect, input)
     }
 
-    pub(crate) fn widget_ctx_for(
-        &mut self,
-        widget_id: WidgetId,
-        interaction_id: RetainedId,
-        rect: Recti,
-        input: Option<Rc<InputSnapshot>>,
-    ) -> WidgetCtx<'_> {
+    pub(crate) fn widget_ctx_for(&mut self, widget_id: WidgetId, interaction_id: RetainedId, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'_> {
         WidgetCtx::new_with_interaction(
             widget_id,
             interaction_id,

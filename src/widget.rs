@@ -204,14 +204,11 @@ fn compat_widget_node_id(widget_id: WidgetId) -> Id {
     Id::new(write(hash, widget_id as usize as u64))
 }
 
-/// Returns the pointer identity for a widget state object.
-/// Use this when calling focus APIs such as `WindowHandle::set_focus`.
-pub fn widget_id_of<W: Widget + ?Sized>(widget: &W) -> WidgetId {
+pub(crate) fn widget_id_of<W: Widget + ?Sized>(widget: &W) -> WidgetId {
     widget as *const W as *const ()
 }
 
-/// Returns the pointer identity for the widget state stored in `handle`.
-pub fn widget_id_of_handle<W: Widget>(handle: &WidgetHandle<W>) -> WidgetId {
+pub(crate) fn widget_id_of_handle<W: Widget>(handle: &WidgetHandle<W>) -> WidgetId {
     let widget = handle.borrow();
     widget_id_of(&*widget)
 }
@@ -254,28 +251,12 @@ impl<'a> FrameResultGeneration<'a> {
         self.entries.get(&retained_id).copied().unwrap_or(ResourceState::NONE)
     }
 
-    /// Returns the state for `widget_id` in this generation.
-    ///
-    /// Deprecated: prefer [`FrameResultGeneration::state_of_node`] or
-    /// [`FrameResultGeneration::state_of_retained`]. This compatibility helper maps the widget
-    /// pointer to the retained node that dispatched it in this generation when possible.
-    #[deprecated(note = "use state_of_node or state_of_retained; widget pointer result lookup is a compatibility path")]
-    pub fn state(&self, widget_id: WidgetId) -> ResourceState {
+    pub(crate) fn state(&self, widget_id: WidgetId) -> ResourceState {
         self.widget_nodes
             .get(&widget_id)
             .copied()
             .map(|retained_id| self.state_of_retained(retained_id))
             .unwrap_or_else(|| self.state_of_retained(RetainedId::compat_widget(widget_id)))
-    }
-
-    /// Returns the state for `widget` in this generation.
-    ///
-    /// Deprecated: prefer [`FrameResultGeneration::state_of_node`] or
-    /// [`FrameResultGeneration::state_of_retained`].
-    #[deprecated(note = "use state_of_node or state_of_retained; widget pointer result lookup is a compatibility path")]
-    pub fn state_of<W: Widget + ?Sized>(&self, widget: &W) -> ResourceState {
-        #[allow(deprecated)]
-        self.state(widget_id_of(widget))
     }
 
     /// Returns the state for the widget stored in `handle` in this generation.
