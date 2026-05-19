@@ -35,6 +35,7 @@ use std::collections::HashMap;
 use rs_math3d::{Dimensioni, Recti};
 
 use crate::input::{ControlState, ResourceState};
+use crate::widget::WidgetId;
 
 use super::NodeId;
 
@@ -94,6 +95,8 @@ pub struct WidgetTreeCache {
     curr_layout: HashMap<NodeId, NodeLayout>,
     prev_interaction: HashMap<NodeId, NodeInteraction>,
     curr_interaction: HashMap<NodeId, NodeInteraction>,
+    prev_widget_nodes: HashMap<WidgetId, NodeId>,
+    curr_widget_nodes: HashMap<WidgetId, NodeId>,
 }
 
 impl WidgetTreeCache {
@@ -101,14 +104,17 @@ impl WidgetTreeCache {
     pub fn begin_frame(&mut self) {
         self.curr_layout.clear();
         self.curr_interaction.clear();
+        self.curr_widget_nodes.clear();
     }
 
     /// Publishes the current frame cache as the previous frame for the next run.
     pub fn finish_frame(&mut self) {
         std::mem::swap(&mut self.prev_layout, &mut self.curr_layout);
         std::mem::swap(&mut self.prev_interaction, &mut self.curr_interaction);
+        std::mem::swap(&mut self.prev_widget_nodes, &mut self.curr_widget_nodes);
         self.curr_layout.clear();
         self.curr_interaction.clear();
+        self.curr_widget_nodes.clear();
     }
 
     /// Drops both previous and current cached node data.
@@ -117,6 +123,8 @@ impl WidgetTreeCache {
         self.curr_layout.clear();
         self.prev_interaction.clear();
         self.curr_interaction.clear();
+        self.prev_widget_nodes.clear();
+        self.curr_widget_nodes.clear();
     }
 
     /// Returns the previous frame layout for `node_id`.
@@ -141,6 +149,11 @@ impl WidgetTreeCache {
         self.curr_interaction.get(&node_id)
     }
 
+    /// Returns the retained node most recently associated with `widget_id`.
+    pub fn node_for_widget(&self, widget_id: WidgetId) -> Option<NodeId> {
+        self.curr_widget_nodes.get(&widget_id).or_else(|| self.prev_widget_nodes.get(&widget_id)).copied()
+    }
+
     /// Records the current frame layout for `node_id`.
     pub fn record_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
         let prev = self.curr_layout.insert(node_id, layout);
@@ -151,6 +164,11 @@ impl WidgetTreeCache {
     pub fn record_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
         let prev = self.curr_interaction.insert(node_id, interaction);
         debug_assert!(prev.is_none(), "Node {:?} interaction was recorded more than once in the same frame", node_id);
+    }
+
+    /// Records which retained node dispatched a widget handle this frame.
+    pub fn record_widget_node(&mut self, widget_id: WidgetId, node_id: NodeId) {
+        self.curr_widget_nodes.entry(widget_id).or_insert(node_id);
     }
 }
 

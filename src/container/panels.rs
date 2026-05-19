@@ -54,7 +54,35 @@
 
 use super::*;
 
+#[derive(Copy, Clone)]
+enum InternalControlPart {
+    ScrollbarY,
+    ScrollbarX,
+}
+
 impl Container {
+    fn internal_control_node_id(&self, part: InternalControlPart) -> NodeId {
+        const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+        const FNV_PRIME: u64 = 0x100000001b3;
+
+        fn write(mut hash: u64, value: u64) -> u64 {
+            for byte in value.to_le_bytes() {
+                hash ^= byte as u64;
+                hash = hash.wrapping_mul(FNV_PRIME);
+            }
+            hash
+        }
+
+        let part = match part {
+            InternalControlPart::ScrollbarY => 1,
+            InternalControlPart::ScrollbarX => 2,
+        };
+        let hash = write(FNV_OFFSET_BASIS, 0x6d69_6372_6f75_695f_u64);
+        let hash = write(hash, 0x696e_7465_726e_616c_u64);
+        let hash = write(hash, self.internal_id_seed.raw() as u64);
+        Id::new(write(hash, part))
+    }
+
     pub(crate) fn consume_pending_scroll(&mut self) {
         if !self.scroll_enabled {
             return;
@@ -160,12 +188,21 @@ impl Container {
         }
         self.push_clip_rect(clip_rect);
         if maxscroll_y > 0 && body.height > 0 {
-            let scrollbar_y_id = widget_id_of(&self.scrollbar_y_state);
+            let scrollbar_y_node_id = self.internal_control_node_id(InternalControlPart::ScrollbarY);
+            let scrollbar_y_id = scrollbar_y_node_id.raw() as WidgetId;
             let base = scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size);
-            let control = self.update_control_with_opts(scrollbar_y_id, base, self.scrollbar_y_state.opt, self.scrollbar_y_state.scroll_behavior);
+            let scrollbar_y_retained_id = self.retained_id_for_node(scrollbar_y_node_id);
+            let control = self.update_control_for(
+                scrollbar_y_retained_id,
+                base,
+                self.scrollbar_y_state.opt,
+                self.scrollbar_y_state.scroll_behavior,
+                FocusPolicy::from_widget_options(self.scrollbar_y_state.opt),
+            );
             {
-                let mut ctx = WidgetCtx::new(
+                let mut ctx = WidgetCtx::new_with_interaction(
                     scrollbar_y_id,
+                    scrollbar_y_retained_id,
                     base,
                     &mut self.draw.commands,
                     &mut self.draw.triangle_vertices,
@@ -192,12 +229,21 @@ impl Container {
         }
 
         if maxscroll_x > 0 && body.width > 0 {
-            let scrollbar_x_id = widget_id_of(&self.scrollbar_x_state);
+            let scrollbar_x_node_id = self.internal_control_node_id(InternalControlPart::ScrollbarX);
+            let scrollbar_x_id = scrollbar_x_node_id.raw() as WidgetId;
             let base = scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size);
-            let control = self.update_control_with_opts(scrollbar_x_id, base, self.scrollbar_x_state.opt, self.scrollbar_x_state.scroll_behavior);
+            let scrollbar_x_retained_id = self.retained_id_for_node(scrollbar_x_node_id);
+            let control = self.update_control_for(
+                scrollbar_x_retained_id,
+                base,
+                self.scrollbar_x_state.opt,
+                self.scrollbar_x_state.scroll_behavior,
+                FocusPolicy::from_widget_options(self.scrollbar_x_state.opt),
+            );
             {
-                let mut ctx = WidgetCtx::new(
+                let mut ctx = WidgetCtx::new_with_interaction(
                     scrollbar_x_id,
+                    scrollbar_x_retained_id,
                     base,
                     &mut self.draw.commands,
                     &mut self.draw.triangle_vertices,
@@ -271,8 +317,9 @@ impl Container {
         container.configure_container_body(rect, scroll_behavior);
     }
 
-    pub(crate) fn begin_panel_layout(&mut self, panel: &mut ContainerHandle, _opt: ContainerOption, scroll_behavior: ScrollBehavior, policy: Policy) {
+    pub(crate) fn begin_panel_layout(&mut self, panel: &mut ContainerHandle, node_id: NodeId, _opt: ContainerOption, scroll_behavior: ScrollBehavior, policy: Policy) {
         let container = &mut panel.inner_mut();
+        container.set_internal_id_seed(node_id);
         self.begin_panel_layout_container(container, scroll_behavior, policy);
     }
 
@@ -284,6 +331,7 @@ impl Container {
     pub(crate) fn measure_panel_layout(
         &mut self,
         panel: &ContainerHandle,
+        node_id: NodeId,
         scroll_behavior: ScrollBehavior,
         policy: Policy,
         results: &FrameResults,
@@ -291,13 +339,14 @@ impl Container {
     ) -> NodeLayout {
         let mut scratch = panel.inner().measurement_scratch();
         scratch.measurement_mode = true;
+        scratch.set_internal_id_seed(node_id);
         self.begin_panel_layout_container(&mut scratch, scroll_behavior, policy);
         scratch.layout_tree_nodes(results, children);
         Self::pop_panel_container(&mut scratch);
         NodeLayout::new(scratch.rect(), scratch.body(), scratch.content_size())
     }
 
-    pub(crate) fn begin_panel_render(&mut self, panel: &mut ContainerHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, layout: NodeLayout) {
+    pub(crate) fn begin_panel_render(&mut self, panel: &mut ContainerHandle, node_id: NodeId, opt: ContainerOption, scroll_behavior: ScrollBehavior, layout: NodeLayout) {
         let panel_id = container_id_of(panel);
         if self.hit_test_rect(layout.rect, self.interaction.in_hover_root) {
             self.interaction.next_hover_root_child = Some(panel_id);
@@ -305,6 +354,7 @@ impl Container {
         }
 
         let container = &mut panel.inner_mut();
+        container.set_internal_id_seed(node_id);
         container.style = self.style.clone();
         container.rect = layout.rect;
         container.body = layout.body;

@@ -57,8 +57,8 @@
 use super::*;
 use crate::draw_context::DrawCtx;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
-use crate::widget::{FocusPolicy, InteractionId, WidgetId};
-use crate::widget_tree::{Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
+use crate::widget::{widget_id_of_handle, FocusPolicy, RetainedId, WidgetId};
+use crate::widget_tree::{NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
 use std::cell::RefCell;
 
 mod command;
@@ -92,6 +92,8 @@ pub struct Container {
     scroll: Vec2i,
     /// Z-index used to order overlapping windows.
     zindex: i32,
+    /// Stable seed used to derive internal retained node IDs for framework controls.
+    internal_id_seed: Id,
     draw: DrawState,
     layout: LayoutManager,
     interaction: InteractionState,
@@ -122,9 +124,9 @@ struct DrawState {
 #[derive(Default)]
 struct InteractionState {
     /// ID of the widget currently hovered, if any.
-    hover: Option<InteractionId>,
+    hover: Option<RetainedId>,
     /// ID of the widget currently focused, if any.
-    focus: Option<InteractionId>,
+    focus: Option<RetainedId>,
     /// Child container that currently owns pointer routing inside this container.
     hover_root_child: Option<ContainerId>,
     /// Rectangle occupied by the child container that currently owns pointer routing.
@@ -168,6 +170,7 @@ impl Container {
             content_size: Dimensioni::default(),
             scroll: Vec2i::default(),
             zindex: 0,
+            internal_id_seed: Id::from_str(name),
             draw: DrawState::default(),
             interaction: InteractionState::default(),
             layout: LayoutManager::default(),
@@ -179,6 +182,10 @@ impl Container {
             tree: TreeState::default(),
             panels: PanelState::default(),
         }
+    }
+
+    pub(crate) fn set_internal_id_seed(&mut self, seed: Id) {
+        self.internal_id_seed = seed;
     }
 
     pub(crate) fn reset(&mut self) {

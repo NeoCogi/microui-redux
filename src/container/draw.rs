@@ -276,9 +276,9 @@ impl Container {
 
     /// Draws a widget background, applying hover/focus accents when needed.
     pub fn draw_widget_frame(&mut self, widget_id: WidgetId, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let interaction_id = InteractionId::widget(widget_id);
-        let focused = self.interaction.focus == Some(interaction_id);
-        let hovered = self.interaction.hover == Some(interaction_id);
+        let retained_id = self.retained_id_for_widget(widget_id);
+        let focused = self.interaction.focus == Some(retained_id);
+        let hovered = self.interaction.hover == Some(retained_id);
         let mut draw = self.draw_ctx();
         draw.draw_widget_frame(focused, hovered, rect, colorid, opt);
     }
@@ -289,10 +289,10 @@ impl Container {
             return;
         }
 
-        let interaction_id = InteractionId::widget(widget_id);
-        if self.interaction.focus == Some(interaction_id) {
+        let retained_id = self.retained_id_for_widget(widget_id);
+        if self.interaction.focus == Some(retained_id) {
             colorid.focus()
-        } else if self.interaction.hover == Some(interaction_id) {
+        } else if self.interaction.hover == Some(retained_id) {
             colorid.hover()
         }
         let mut draw = self.draw_ctx();

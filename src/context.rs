@@ -142,6 +142,8 @@ impl<R: Renderer> Context<R> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(deprecated)]
+
     use std::{
         any::Any,
         panic::{catch_unwind, AssertUnwindSafe},

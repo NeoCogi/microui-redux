@@ -940,6 +940,7 @@ impl AtlasHandle {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(feature = "builder", feature = "png_source"))]
     use super::*;
     #[cfg(any(feature = "builder", feature = "png_source"))]
     use png::Encoder;

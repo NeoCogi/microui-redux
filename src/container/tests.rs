@@ -50,6 +50,8 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+#![allow(deprecated)]
+
 use super::*;
 use crate::{AtlasSource, FontEntry, SourceFormat};
 use std::{
@@ -519,7 +521,9 @@ fn retained_widget_value_commits_on_next_frame() {
     });
     container.widget_tree(&mut results, &tree);
 
+    let retained_checkbox_id = container.retained_id_for_node(checkbox_node_id);
     assert!(results.current().state(widget_id_of_handle(&checkbox)).is_changed());
+    assert!(results.current().state_of_retained(retained_checkbox_id).is_changed());
     assert!(checkbox.borrow().value);
     container.finish();
     results.finish_frame();
@@ -702,10 +706,37 @@ fn retained_focus_follows_stable_node_id_when_widget_handle_changes() {
         focused_node_id = tree.widget_with(NodeOptions::keyed("stable-probe"), first.clone());
     });
     container.widget_tree(&mut results, &tree);
-    container.interaction.focus = Some(InteractionId::node(focused_node_id));
-    container.interaction.updated_focus = true;
+    container.set_focus_node(focused_node_id);
     container.finish();
 
+    results.begin_frame();
+    begin_test_frame(&mut container, rect(0, 0, 80, 30));
+    let second = widget_handle(FocusProbe::new(second_focus.clone()));
+    let tree = WidgetTreeBuilder::build(|tree| {
+        tree.widget_with(NodeOptions::keyed("stable-probe"), second.clone());
+    });
+    container.widget_tree(&mut results, &tree);
+
+    assert!(second_focus.get());
+}
+
+#[test]
+fn set_focus_handle_maps_to_retained_node_identity() {
+    let mut container = make_container();
+    let mut results = FrameResults::default();
+    let second_focus = Rc::new(Cell::new(false));
+
+    begin_test_frame(&mut container, rect(0, 0, 80, 30));
+    let first = widget_handle(FocusProbe::new(Rc::new(Cell::new(false))));
+    let tree = WidgetTreeBuilder::build(|tree| {
+        tree.widget_with(NodeOptions::keyed("stable-probe"), first.clone());
+    });
+    container.widget_tree(&mut results, &tree);
+    container.finish();
+
+    assert!(container.set_focus_handle(&first));
+
+    results.begin_frame();
     begin_test_frame(&mut container, rect(0, 0, 80, 30));
     let second = widget_handle(FocusProbe::new(second_focus.clone()));
     let tree = WidgetTreeBuilder::build(|tree| {
