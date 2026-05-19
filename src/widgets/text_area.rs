@@ -138,45 +138,38 @@ impl TextArea {
         Dimensioni::new(width, height)
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let font = ctx.style().resolve_font_choice(self.font);
-        textarea_handle(ctx, control, self, font)
+        textarea_update(ctx, control, self, font)
+    }
+
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        let font = ctx.style().resolve_font_choice(self.font);
+        textarea_paint(ctx, control, self, font);
     }
 }
 
-fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea, font: FontId) -> ResourceState {
-    let mut res = ResourceState::NONE;
+struct TextAreaLayout {
+    bounds: Recti,
+    body: Recti,
+    body_local: Recti,
+    lines: Vec<TextLine>,
+    content_size: Vec2i,
+    maxscroll_y: i32,
+    maxscroll_x: i32,
+    needs_v: bool,
+    needs_h: bool,
+    vscroll_base: Recti,
+    hscroll_base: Recti,
+    padding: i32,
+    thumb_size: i32,
+    line_height: i32,
+    baseline: i32,
+    descent: i32,
+}
+
+fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextAreaLayout {
     let bounds = ctx.rect();
-    let local_bounds = rect(0, 0, bounds.width, bounds.height);
-    if !control.focused {
-        state.cursor = state.buf.len();
-        state.preferred_x = None;
-    }
-    let mut cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
-
-    let input = ctx.input_or_default();
-    let mut ensure_visible = false;
-    let mut reset_preferred = false;
-    let mut vertical_moved = false;
-    let mut preferred_x = state.preferred_x;
-
-    if control.focused {
-        let edit = apply_text_input(&mut state.buf, cursor_pos, input, true, ReturnBehavior::Newline { submit_on_ctrl: true });
-        cursor_pos = edit.cursor;
-        if edit.changed {
-            res |= ResourceState::CHANGE;
-            ensure_visible = true;
-            reset_preferred = true;
-        }
-        if edit.moved {
-            ensure_visible = true;
-            reset_preferred = true;
-        }
-        if edit.submit {
-            res |= ResourceState::SUBMIT;
-        }
-    }
-
     let style = ctx.style();
     let padding = style.padding;
     let scrollbar_size = style.scrollbar_size;
@@ -218,15 +211,79 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         lines.push(TextLine { start: 0, end: 0, width: 0 });
     }
 
-    let cs = vec2(content_width + padding * 2, content_height + padding * 2);
-    let maxscroll_y = scrollbar_max_scroll(cs.y, body.height);
-    let maxscroll_x = scrollbar_max_scroll(cs.x, body.width);
+    let content_size = vec2(content_width + padding * 2, content_height + padding * 2);
+    let maxscroll_y = scrollbar_max_scroll(content_size.y, body.height);
+    let maxscroll_x = scrollbar_max_scroll(content_size.x, body.width);
+    let vscroll_base = if needs_v && maxscroll_y > 0 && body.height > 0 {
+        scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size)
+    } else {
+        bounds
+    };
+    let hscroll_base = if needs_h && maxscroll_x > 0 && body.width > 0 {
+        scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size)
+    } else {
+        bounds
+    };
+    let body_local = rect(body.x - bounds.x, body.y - bounds.y, body.width, body.height);
+
+    TextAreaLayout {
+        bounds,
+        body,
+        body_local,
+        lines,
+        content_size,
+        maxscroll_y,
+        maxscroll_x,
+        needs_v,
+        needs_h,
+        vscroll_base,
+        hscroll_base,
+        padding,
+        thumb_size,
+        line_height,
+        baseline,
+        descent,
+    }
+}
+
+fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea, font: FontId) -> ResourceState {
+    let mut res = ResourceState::NONE;
+    if !control.focused {
+        state.cursor = state.buf.len();
+        state.preferred_x = None;
+    }
+    let mut cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
+
+    let input = ctx.input_or_default();
+    let mut ensure_visible = false;
+    let mut reset_preferred = false;
+    let mut vertical_moved = false;
+    let mut preferred_x = state.preferred_x;
+
+    if control.focused {
+        let edit = apply_text_input(&mut state.buf, cursor_pos, input, true, ReturnBehavior::Newline { submit_on_ctrl: true });
+        cursor_pos = edit.cursor;
+        if edit.changed {
+            res |= ResourceState::CHANGE;
+            ensure_visible = true;
+            reset_preferred = true;
+        }
+        if edit.moved {
+            ensure_visible = true;
+            reset_preferred = true;
+        }
+        if edit.submit {
+            res |= ResourceState::SUBMIT;
+        }
+    }
+
+    let layout = textarea_layout(ctx, state, font);
 
     if let Some(delta) = control.scroll_delta {
-        if maxscroll_y > 0 {
+        if layout.maxscroll_y > 0 {
             state.scroll.y += delta.y;
         }
-        if maxscroll_x > 0 {
+        if layout.maxscroll_x > 0 {
             state.scroll.x += delta.x;
         }
     }
@@ -237,46 +294,46 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     }
 
     let mut clicked_scrollbar = false;
-    let mut vscroll_base = bounds;
-    let mut hscroll_base = bounds;
-    let mut body_local = local_bounds;
 
-    body_local.x = body.x - bounds.x;
-    body_local.y = body.y - bounds.y;
-    body_local.width = body.width;
-    body_local.height = body.height;
-
-    if needs_v && maxscroll_y > 0 && body.height > 0 {
-        vscroll_base = scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size);
-        let vscroll_base_local = rect(vscroll_base.x - bounds.x, vscroll_base.y - bounds.y, vscroll_base.width, vscroll_base.height);
+    if layout.needs_v && layout.maxscroll_y > 0 && layout.body.height > 0 {
+        let vscroll_base_local = rect(
+            layout.vscroll_base.x - layout.bounds.x,
+            layout.vscroll_base.y - layout.bounds.y,
+            layout.vscroll_base.width,
+            layout.vscroll_base.height,
+        );
         if input.mouse_pressed.is_left() && vscroll_base_local.contains(&input.mouse_pos) {
             state.dragging_y = true;
             clicked_scrollbar = true;
         }
         if state.dragging_y {
-            state.scroll.y += scrollbar_drag_delta(ScrollAxis::Vertical, input.mouse_delta, cs.y, vscroll_base);
+            state.scroll.y += scrollbar_drag_delta(ScrollAxis::Vertical, input.mouse_delta, layout.content_size.y, layout.vscroll_base);
         }
     }
 
-    if needs_h && maxscroll_x > 0 && body.width > 0 {
-        hscroll_base = scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size);
-        let hscroll_base_local = rect(hscroll_base.x - bounds.x, hscroll_base.y - bounds.y, hscroll_base.width, hscroll_base.height);
+    if layout.needs_h && layout.maxscroll_x > 0 && layout.body.width > 0 {
+        let hscroll_base_local = rect(
+            layout.hscroll_base.x - layout.bounds.x,
+            layout.hscroll_base.y - layout.bounds.y,
+            layout.hscroll_base.width,
+            layout.hscroll_base.height,
+        );
         if input.mouse_pressed.is_left() && hscroll_base_local.contains(&input.mouse_pos) {
             state.dragging_x = true;
             clicked_scrollbar = true;
         }
         if state.dragging_x {
-            state.scroll.x += scrollbar_drag_delta(ScrollAxis::Horizontal, input.mouse_delta, cs.x, hscroll_base);
+            state.scroll.x += scrollbar_drag_delta(ScrollAxis::Horizontal, input.mouse_delta, layout.content_size.x, layout.hscroll_base);
         }
     }
 
-    let mut cursor_line = line_index_for_cursor(&lines, cursor_pos);
-    let mut caret_x = cursor_x_in_line(&lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
+    let mut cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
+    let mut caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
     if control.focused {
         if input.key_code_pressed.is_end() {
-            cursor_pos = lines[cursor_line].end;
-            caret_x = cursor_x_in_line(&lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
+            cursor_pos = layout.lines[cursor_line].end;
+            caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
             ensure_visible = true;
             reset_preferred = true;
         }
@@ -285,7 +342,7 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line > 0 {
                 cursor_line -= 1;
-                cursor_pos = cursor_from_x(&lines[cursor_line], state.buf.as_str(), target_x, font, ctx.atlas());
+                cursor_pos = cursor_from_x(&layout.lines[cursor_line], state.buf.as_str(), target_x, font, ctx.atlas());
             }
             preferred_x = Some(target_x);
             ensure_visible = true;
@@ -294,9 +351,9 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
 
         if input.key_code_pressed.is_down() {
             let target_x = preferred_x.unwrap_or(caret_x);
-            if cursor_line + 1 < lines.len() {
+            if cursor_line + 1 < layout.lines.len() {
                 cursor_line += 1;
-                cursor_pos = cursor_from_x(&lines[cursor_line], state.buf.as_str(), target_x, font, ctx.atlas());
+                cursor_pos = cursor_from_x(&layout.lines[cursor_line], state.buf.as_str(), target_x, font, ctx.atlas());
             }
             preferred_x = Some(target_x);
             ensure_visible = true;
@@ -304,22 +361,18 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         }
     }
 
-    if control.focused && input.mouse_pressed.is_left() && ctx.mouse_over(bounds) && !clicked_scrollbar {
-        let local_x = input.mouse_pos.x - (body_local.x + padding) + state.scroll.x;
-        let local_y = input.mouse_pos.y - (body_local.y + padding) + state.scroll.y;
-        let line_idx = if lines.is_empty() {
-            0
-        } else {
-            (local_y / line_height).clamp(0, lines.len().saturating_sub(1) as i32) as usize
-        };
-        cursor_pos = cursor_from_x(&lines[line_idx], state.buf.as_str(), local_x, font, ctx.atlas());
+    if control.focused && input.mouse_pressed.is_left() && ctx.mouse_over(layout.bounds) && !clicked_scrollbar {
+        let local_x = input.mouse_pos.x - (layout.body_local.x + layout.padding) + state.scroll.x;
+        let local_y = input.mouse_pos.y - (layout.body_local.y + layout.padding) + state.scroll.y;
+        let line_idx = (local_y / layout.line_height).clamp(0, layout.lines.len().saturating_sub(1) as i32) as usize;
+        cursor_pos = cursor_from_x(&layout.lines[line_idx], state.buf.as_str(), local_x, font, ctx.atlas());
         ensure_visible = true;
         reset_preferred = true;
     }
 
     cursor_pos = clamp_cursor_boundary(&state.buf, cursor_pos);
-    cursor_line = line_index_for_cursor(&lines, cursor_pos);
-    caret_x = cursor_x_in_line(&lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
+    cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
+    caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
     if reset_preferred && !vertical_moved {
         preferred_x = None;
@@ -329,9 +382,9 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     }
 
     if ensure_visible && !state.dragging_x && !state.dragging_y {
-        let view_width = (body.width - padding * 2).max(0);
-        let view_height = (body.height - padding * 2).max(0);
-        let caret_y = cursor_line as i32 * line_height;
+        let view_width = (layout.body.width - layout.padding * 2).max(0);
+        let view_height = (layout.body.height - layout.padding * 2).max(0);
+        let caret_y = cursor_line as i32 * layout.line_height;
         if view_width > 0 {
             if caret_x < state.scroll.x {
                 state.scroll.x = caret_x;
@@ -342,26 +395,34 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         if view_height > 0 {
             if caret_y < state.scroll.y {
                 state.scroll.y = caret_y;
-            } else if caret_y + line_height > state.scroll.y + view_height {
-                state.scroll.y = caret_y + line_height - view_height;
+            } else if caret_y + layout.line_height > state.scroll.y + view_height {
+                state.scroll.y = caret_y + layout.line_height - view_height;
             }
         }
     }
 
-    state.scroll.x = clamp_scroll(state.scroll.x, maxscroll_x);
-    state.scroll.y = clamp_scroll(state.scroll.y, maxscroll_y);
+    state.scroll.x = clamp_scroll(state.scroll.x, layout.maxscroll_x);
+    state.scroll.y = clamp_scroll(state.scroll.y, layout.maxscroll_y);
     state.cursor = cursor_pos;
     state.preferred_x = preferred_x;
+    res
+}
 
-    ctx.draw_widget_frame(control, bounds, ControlColor::Base, state.opt);
+fn textarea_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea, font: FontId) {
+    let layout = textarea_layout(ctx, state, font);
+    let cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
+    let cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
+    let caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
-    let text_origin = vec2(body.x + padding - state.scroll.x, body.y + padding - state.scroll.y);
+    ctx.draw_widget_frame(control, layout.bounds, ControlColor::Base, state.opt);
+
+    let text_origin = vec2(layout.body.x + layout.padding - state.scroll.x, layout.body.y + layout.padding - state.scroll.y);
     let color = ctx.style().colors[ControlColor::Text as usize];
-    ctx.push_clip_rect(body);
-    for (idx, line) in lines.iter().enumerate() {
-        let line_top = text_origin.y + idx as i32 * line_height;
-        let line_bottom = line_top + line_height;
-        if line_bottom < body.y || line_top > body.y + body.height {
+    ctx.push_clip_rect(layout.body);
+    for (idx, line) in layout.lines.iter().enumerate() {
+        let line_top = text_origin.y + idx as i32 * layout.line_height;
+        let line_bottom = line_top + layout.line_height;
+        if line_bottom < layout.body.y || line_top > layout.body.y + layout.body.height {
             continue;
         }
         let text = &state.buf[line.start..line.end];
@@ -371,28 +432,40 @@ fn textarea_handle(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     }
 
     if control.focused {
-        let caret_line_top = text_origin.y + cursor_line as i32 * line_height;
-        let baseline_y = caret_line_top + baseline;
-        let caret_top = (baseline_y - baseline + 2).max(body.y).min(body.y + body.height);
-        let caret_bottom = (baseline_y + descent - 2).max(body.y).min(body.y + body.height);
+        let caret_line_top = text_origin.y + cursor_line as i32 * layout.line_height;
+        let baseline_y = caret_line_top + layout.baseline;
+        let caret_top = (baseline_y - layout.baseline + 2).max(layout.body.y).min(layout.body.y + layout.body.height);
+        let caret_bottom = (baseline_y + layout.descent - 2).max(layout.body.y).min(layout.body.y + layout.body.height);
         let caret_height = (caret_bottom - caret_top).max(1);
         ctx.draw_rect(rect(text_origin.x + caret_x, caret_top, 1, caret_height), color);
     }
     ctx.pop_clip_rect();
 
-    if needs_v && maxscroll_y > 0 && body.height > 0 {
-        ctx.draw_frame(vscroll_base, ControlColor::ScrollBase);
-        let thumb = scrollbar_thumb(ScrollAxis::Vertical, vscroll_base, body.height, cs.y, state.scroll.y, thumb_size);
+    if layout.needs_v && layout.maxscroll_y > 0 && layout.body.height > 0 {
+        ctx.draw_frame(layout.vscroll_base, ControlColor::ScrollBase);
+        let thumb = scrollbar_thumb(
+            ScrollAxis::Vertical,
+            layout.vscroll_base,
+            layout.body.height,
+            layout.content_size.y,
+            state.scroll.y,
+            layout.thumb_size,
+        );
         ctx.draw_frame(thumb, ControlColor::ScrollThumb);
     }
 
-    if needs_h && maxscroll_x > 0 && body.width > 0 {
-        ctx.draw_frame(hscroll_base, ControlColor::ScrollBase);
-        let thumb = scrollbar_thumb(ScrollAxis::Horizontal, hscroll_base, body.width, cs.x, state.scroll.x, thumb_size);
+    if layout.needs_h && layout.maxscroll_x > 0 && layout.body.width > 0 {
+        ctx.draw_frame(layout.hscroll_base, ControlColor::ScrollBase);
+        let thumb = scrollbar_thumb(
+            ScrollAxis::Horizontal,
+            layout.hscroll_base,
+            layout.body.width,
+            layout.content_size.x,
+            state.scroll.x,
+            layout.thumb_size,
+        );
         ctx.draw_frame(thumb, ControlColor::ScrollThumb);
     }
-
-    res
 }
 
 impl Widget for TextArea {
@@ -408,14 +481,14 @@ impl Widget for TextArea {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let old_buf = self.buf.clone();
         let old_cursor = self.cursor;
         let old_scroll = self.scroll;
         let old_preferred_x = self.preferred_x;
         let old_dragging_y = self.dragging_y;
         let old_dragging_x = self.dragging_x;
-        let mut res = self.handle_widget(ctx, control);
+        let mut res = self.update_widget(ctx, control);
         let scroll_changed = self.scroll.x != old_scroll.x || self.scroll.y != old_scroll.y;
         let changed = self.buf != old_buf
             || self.cursor != old_cursor
@@ -427,6 +500,10 @@ impl Widget for TextArea {
             res |= ResourceState::ACTIVE;
         }
         res
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        self.paint_widget(ctx, control);
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {

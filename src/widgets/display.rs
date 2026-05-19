@@ -102,9 +102,13 @@ impl TextBlock {
         text_block_size(&lines, line_height)
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+        ResourceState::NONE
+    }
+
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) {
         if self.text.is_empty() {
-            return ResourceState::NONE;
+            return;
         }
 
         let bounds = ctx.rect();
@@ -125,12 +129,10 @@ impl TextBlock {
             }
         }
         ctx.pop_clip_rect();
-
-        ResourceState::NONE
     }
 }
 
-implement_widget!(TextBlock, handle_widget, preferred_size_widget);
+implement_widget!(TextBlock, update_widget, paint_widget, preferred_size_widget);
 
 #[derive(Clone)]
 /// Non-interactive filled rectangle used for retained preview swatches.
@@ -171,7 +173,11 @@ impl ColorSwatch {
         Dimensioni::new((label_width + padding * 2).max(24), height)
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+        ResourceState::NONE
+    }
+
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) {
         let rect = ctx.rect();
         ctx.draw_rect(rect, self.fill);
         let border = ctx.style().colors[ControlColor::Border as usize];
@@ -180,8 +186,7 @@ impl ColorSwatch {
             let font = ctx.style().resolve_font_choice(self.font);
             ctx.draw_control_text_with_font(font, self.label.as_str(), rect, ControlColor::Text, self.opt);
         }
-        ResourceState::NONE
     }
 }
 
-implement_widget!(ColorSwatch, handle_widget, preferred_size_widget);
+implement_widget!(ColorSwatch, update_widget, paint_widget, preferred_size_widget);

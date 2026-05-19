@@ -54,11 +54,11 @@
 //!
 //! The widget structs intentionally keep their user-facing fields public so applications can update
 //! labels, values, options, fonts, and local state between frames. Raw input remains owned by
-//! [`crate::Context`], and each widget's `run_retained` path clamps transient invariants such as text
-//! cursors, scroll offsets, selected indices, and numeric ranges before using those fields.
+//! [`crate::Context`], and each widget's `update` path clamps transient invariants such as text
+//! cursors, scroll offsets, selected indices, and numeric ranges before `paint` records commands.
 
 macro_rules! implement_widget {
-    ($ty:ty, $render:ident, $measure:ident) => {
+    ($ty:ty, $update:ident, $paint:ident, $measure:ident) => {
         impl Widget for $ty {
             fn widget_opt(&self) -> &WidgetOption {
                 &self.opt
@@ -69,8 +69,11 @@ macro_rules! implement_widget {
             fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
                 self.$measure(style, atlas, avail)
             }
-            fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-                self.$render(ctx, control)
+            fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+                self.$update(ctx, control)
+            }
+            fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+                self.$paint(ctx, control);
             }
         }
     };

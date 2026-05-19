@@ -90,10 +90,11 @@ impl FocusPolicy {
 
 /// Trait implemented by persistent widget state structures.
 ///
-/// Widgets participate in two retained execution phases:
+/// Widgets participate in three retained execution phases:
 /// 1. `measure`, which reports intrinsic size for the current frame's layout pass.
-/// 2. `run_retained`, which samples interaction, mutates widget-local state, records paint
-///    commands, and produces the current frame result.
+/// 2. `update`, which samples interaction, mutates widget-local state, and produces the current
+///    frame result.
+/// 3. `paint`, which records paint commands for the updated widget state.
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
@@ -106,16 +107,10 @@ pub trait Widget {
     /// `avail` reports the current container body size visible to the widget.
     /// Values less than or equal to zero are treated as "use layout defaults" for that axis.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
-    /// Executes the retained widget node for the current frame and returns its result.
-    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
-    /// Runs the widget for the current frame and returns the current frame result.
-    ///
-    /// Deprecated: prefer [`Widget::run_retained`], which makes the retained traversal contract
-    /// explicit. This compatibility wrapper will be removed with the legacy naming path.
-    #[deprecated(note = "use run_retained; Widget::run is a compatibility alias")]
-    fn run(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        self.run_retained(ctx, control)
-    }
+    /// Updates retained widget state for the current frame and returns its interaction result.
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
+    /// Records paint commands for the current frame.
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState);
     /// Returns the effective widget options used by generic dispatch.
     ///
     /// Widgets can override this to apply dynamic option adjustments.
@@ -445,7 +440,9 @@ impl Widget for (WidgetOption, ScrollBehavior) {
         Dimensioni::new(width, height)
     }
 
-    fn run_retained(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         ResourceState::NONE
     }
+
+    fn paint(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) {}
 }

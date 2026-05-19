@@ -197,8 +197,20 @@ impl Node {
         Dimensioni::new(width, height)
     }
 
-    fn handle_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
+        if control.clicked {
+            self.state = if self.state.is_expanded() {
+                NodeStateValue::Closed
+            } else {
+                NodeStateValue::Expanded
+            };
+            res |= ResourceState::CHANGE;
+        }
+        res
+    }
+
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         let expanded = self.state.is_expanded();
         let style = ctx.style();
         let padding = style.padding;
@@ -225,11 +237,6 @@ impl Node {
         r.width -= r.height - padding;
         let font = ctx.style().resolve_font_choice(self.font);
         ctx.draw_control_text_with_font(font, self.label.as_str(), r, ControlColor::Text, self.opt);
-
-        if control.clicked {
-            res |= ResourceState::CHANGE;
-        }
-        res
     }
 }
 
@@ -246,15 +253,11 @@ impl Widget for Node {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        let res = self.handle_widget(ctx, control);
-        if control.clicked {
-            self.state = if self.state.is_expanded() {
-                NodeStateValue::Closed
-            } else {
-                NodeStateValue::Expanded
-            };
-        }
-        res
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        self.update_widget(ctx, control)
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        self.paint_widget(ctx, control);
     }
 }

@@ -142,7 +142,7 @@ impl Widget for GraphicsDemo {
         true
     }
 
-    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         let bounds = ctx.rect();
         let local_width = bounds.width.max(0) as f32;
         let local_height = bounds.height.max(0) as f32;
@@ -151,6 +151,17 @@ impl Widget for GraphicsDemo {
         }
 
         self.phase = (self.phase + 0.025) % (PI * 2.0);
+        ResourceState::NONE
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        let bounds = ctx.rect();
+        let local_width = bounds.width.max(0) as f32;
+        let local_height = bounds.height.max(0) as f32;
+        if local_width <= 0.0 || local_height <= 0.0 {
+            return;
+        }
+
         let clip_rect = rect(18, 18, (bounds.width - 36).max(0), (bounds.height - 36).max(0));
         let animated_center = Vec2f::new(
             local_width * 0.5 + self.phase.cos() * (local_width * 0.16),
@@ -217,8 +228,6 @@ impl Widget for GraphicsDemo {
                 g.fill_polygon(sweep.as_slice(), color(90, 220, 180, 190));
             });
         });
-
-        ResourceState::NONE
     }
 }
 
@@ -525,7 +534,7 @@ impl Widget for FalloffEditor {
         true
     }
 
-    fn run_retained(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let bounds = ctx.rect();
         let graph = Self::graph_rect(bounds);
         if graph.width <= 0 || graph.height <= 0 {
@@ -563,6 +572,26 @@ impl Widget for FalloffEditor {
         } else {
             self.hovered = None;
             self.active = None;
+        }
+
+        if self.active.is_some() {
+            let mut state = ResourceState::ACTIVE;
+            if changed {
+                state |= ResourceState::CHANGE;
+            }
+            state
+        } else if changed {
+            ResourceState::CHANGE
+        } else {
+            ResourceState::NONE
+        }
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) {
+        let bounds = ctx.rect();
+        let graph = Self::graph_rect(bounds);
+        if graph.width <= 0 || graph.height <= 0 {
+            return;
         }
 
         let curve = self.sample_curve_local(graph, FALLOFF_SEGMENT_STEPS);
@@ -671,18 +700,6 @@ impl Widget for FalloffEditor {
                 g.fill_polygon(marker.as_slice(), color);
             }
         });
-
-        if self.active.is_some() {
-            let mut state = ResourceState::ACTIVE;
-            if changed {
-                state |= ResourceState::CHANGE;
-            }
-            state
-        } else if changed {
-            ResourceState::CHANGE
-        } else {
-            ResourceState::NONE
-        }
     }
 }
 
