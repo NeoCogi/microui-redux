@@ -1478,7 +1478,10 @@ impl<R: Renderer> Context<R> {
         WindowHandle::popup(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone())
     }
 
-    /// Creates a standalone panel that can be embedded inside other windows.
+    /// Creates a retained panel handle for use with [`crate::WidgetTreeBuilder::container`].
+    ///
+    /// The handle owns panel-local focus, hover, scroll, layout cache, and draw commands across
+    /// frames; application code supplies its children through the retained tree.
     pub fn new_panel(&mut self, name: &str) -> ContainerHandle {
         ContainerHandle::new(Container::new(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone()))
     }
