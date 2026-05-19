@@ -1,7 +1,7 @@
 # Rxi's Microui Port to Idiomatic Rust
 [![Crate](https://img.shields.io/crates/v/microui-redux.svg)](https://crates.io/crates/microui-redux)
 
-This project started as a C2Rust conversion of Rxi's MicroUI and has since grown into a Rust-first UI toolkit. It keeps Microui's compact rendering model while moving UI authoring onto retained `WidgetTree` values, stateful widget structs with pointer-derived identity, and backend-agnostic rendering hooks.
+This project started as a C2Rust conversion of Rxi's MicroUI and has since grown into a Rust-first UI toolkit. It keeps Microui's compact rendering model while moving UI authoring onto retained `WidgetTree` values, stateful widget structs, stable retained node IDs, and backend-agnostic rendering hooks.
 
 Compared to [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces std types, reusable retained trees, and richer widgets such as custom rendering callbacks, dialogs, and a file dialog.
 
@@ -36,16 +36,27 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 ![random](res/microui-0.6.png)
 
 ## Key Concepts
-- **Context**: owns the renderer handle, user input, frame results, and root windows. A frame has explicit phases: `begin_render_frame(...)` starts renderer work, input events are fed into the context, `run_ui_frame(...)` traverses retained trees with `context.window(...)`, `context.dialog(...)`, or `context.popup(...)`, and `end_render_frame()` presents recorded root commands.
+- **Context**: owns the renderer handle, user input, frame results, and retained root windows. A frame has explicit phases: `begin_render_frame(...)` starts renderer work, input events are fed into the context, `update_ui()` traverses roots registered with `create_window(...)`, `create_dialog(...)`, or `create_popup(...)`, and `end_render_frame()` presents recorded root commands. `run_ui_frame(...)` remains available while migrating per-frame root submissions.
 - **Container**: the internal execution object behind windows, panels, popups, and retained tree nodes. Application code should normally work through `Context`, `WindowHandle`, `ContainerHandle`, and `WidgetTreeBuilder` instead of authoring widgets directly on a container.
 - **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). These structs hold interaction state and use pointer-derived IDs from their current address.
-- **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and replayed each frame through `Context::window(...)`, `Context::dialog(...)`, or `Context::popup(...)`. Tree nodes cover widgets, panels, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
+- **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and stored in retained roots through `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)`. The compatibility APIs can still replay trees per frame through `Context::window(...)`, `Context::dialog(...)`, or `Context::popup(...)`. Tree nodes cover widgets, panels, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
 - **Graphics**: widget-local primitive drawing exposed through `WidgetCtx::graphics(...)` and the `Graphics` builder. It covers rectangles, frames, text/icons/images, thick line strokes, filled polygons, and nested local clip scopes.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override their own `font: FontChoice`.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
 
 The public API is intentionally centered on `Context`, `WindowHandle`, `ContainerHandle`, `WidgetTreeBuilder`, widget state types, style/input/image types, `Renderer`, and custom-render extension types. Low-level canvas access is available as `microui_redux::backend::Canvas` for backend tests and integrations; `Container`, retained cache internals, and rect-packing details are not part of the application authoring surface.
+
+### Retained-mode migration status
+
+The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate retained widget handle state over time, and drive frames with `Context::update_ui()`.
+
+The older `Context::run_ui_frame(|ctx| { ctx.window(...); })`, `Context::window(...)`, `Context::dialog(...)`, and `Context::popup(...)` APIs remain compatibility paths during the migration. The planned migration is:
+
+- `0.7.0`: release retained root registration APIs, migrate examples where practical, and document legacy per-frame root submission as compatibility API.
+- `0.8.0`: remove compatibility root-submission APIs and remove pointer-derived interaction identity from normal retained paths after retained focus/result replacements exist.
+
+Pointer-derived widget IDs remain available today for manual focus and handle-oriented result lookup. New retained code should prefer stable `NodeId` lookups where possible.
 
 ```rust
 let name = widget_handle(Textbox::new(""));
@@ -59,21 +70,18 @@ let tree = WidgetTreeBuilder::build({
     }
 });
 
-ctx.run_ui_frame(|ctx| {
-    ctx.window(&mut main_window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-});
+let _root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
+ctx.update_ui();
 
 if ctx.committed_results().state_of_handle(&name).is_submitted() {
     // react to the textbox submission here
 }
 ```
 
-Retained trees are the supported public authoring path. Post-render business logic lives alongside the window call and reads from `ctx.committed_results()`, which intentionally exposes the previous frame's published interaction generation:
+Retained trees are the supported public authoring path. Post-render business logic reads from `ctx.committed_results()`, which intentionally exposes the previous frame's published interaction generation:
 
 ```rust
-ctx.run_ui_frame(|ctx| {
-    ctx.window(&mut main_window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
-});
+ctx.update_ui();
 
 let results = ctx.committed_results();
 if results.state_of_handle(&submit_button).is_submitted() {

@@ -59,12 +59,40 @@ use std::io::Cursor;
 use png::{ColorType, Decoder};
 
 use crate::{
-    rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, FrameResultGeneration, ImageSource, Input, Recti, Renderer, KeyCode, KeyMode,
-    MouseButton, RendererHandle, Style, TextureId, ScrollBehavior, WidgetTree, WindowHandle, FrameResults,
+    rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode,
+    MouseButton, Recti, Renderer, RendererHandle, ScrollBehavior, Style, TextureId, WidgetTree, WindowHandle,
 };
+use crate::window::WindowChromeIds;
 
 #[cfg(test)]
 use crate::{UNCLIPPED_RECT, Vec2i};
+
+/// Opaque identifier for a root window, dialog, or popup registered with [`Context`].
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct RootId(usize);
+
+impl RootId {
+    pub(crate) fn raw(self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum RootKind {
+    Window,
+    Dialog,
+    Popup,
+}
+
+struct RootEntry {
+    id: RootId,
+    handle: WindowHandle,
+    tree: WidgetTree,
+    opt: ContainerOption,
+    scroll_behavior: ScrollBehavior,
+    visible: bool,
+    kind: RootKind,
+}
 
 /// Primary entry point used to drive the UI over a renderer implementation.
 pub struct Context<R: Renderer> {
@@ -77,6 +105,8 @@ pub struct Context<R: Renderer> {
     next_hover_root: Option<WindowHandle>,
 
     root_list: Vec<WindowHandle>,
+    retained_roots: Vec<RootEntry>,
+    next_root_id: usize,
     frame_results: FrameResults,
 
     input: Rc<RefCell<Input>>,
@@ -96,6 +126,8 @@ impl<R: Renderer> Context<R> {
             next_hover_root: None,
 
             root_list: Vec::default(),
+            retained_roots: Vec::default(),
+            next_root_id: 1,
             frame_results: FrameResults::default(),
 
             input: Rc::new(RefCell::new(Input::default())),
@@ -250,6 +282,23 @@ mod tests {
             return (*message).to_string();
         }
         "<non-string panic payload>".to_string()
+    }
+
+    fn window_texts(window: &WindowHandle) -> Vec<String> {
+        window
+            .inner()
+            .main
+            .debug_commands()
+            .iter()
+            .filter_map(|cmd| match cmd {
+                Command::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn rendered_root_names(ctx: &Context<NoopRenderer>) -> Vec<String> {
+        ctx.root_list.iter().map(|window| window.inner().main.name().to_string()).collect()
     }
 
     struct AlwaysSubmitWidget {
@@ -805,6 +854,387 @@ mod tests {
         assert!(ctx.committed_results().state_of_handle(&first).is_submitted());
         assert!(ctx.committed_results().state_of_handle(&second).is_submitted());
     }
+
+    #[test]
+    fn registered_window_renders_across_frames_without_resubmission() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let text = widget_handle(TextBlock::new("before"));
+        let tree = WidgetTreeBuilder::build({
+            let text = text.clone();
+            move |tree| {
+                tree.widget(text.clone());
+            }
+        });
+        let root = ctx.create_window("retained", rect(0, 0, 90, 50), tree);
+
+        ctx.update_ui();
+        let handle = ctx.root_handle(root).unwrap();
+        assert!(window_texts(&handle).iter().any(|text| text == "before"));
+
+        text.borrow_mut().text = "after".to_string();
+        ctx.update_ui();
+        let handle = ctx.root_handle(root).unwrap();
+        let texts = window_texts(&handle);
+        assert!(texts.iter().any(|text| text == "after"));
+        assert!(!texts.iter().any(|text| text == "before"));
+    }
+
+    #[test]
+    fn retained_root_visibility_controls_rendering() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("visible");
+        });
+        let root = ctx.create_window("retained", rect(0, 0, 90, 50), tree);
+
+        ctx.update_ui();
+        assert_eq!(rendered_root_names(&ctx), vec!["retained"]);
+
+        ctx.set_root_visible(root, false);
+        ctx.update_ui();
+        assert!(rendered_root_names(&ctx).is_empty());
+        assert!(window_texts(&ctx.root_handle(root).unwrap()).is_empty());
+
+        ctx.set_root_visible(root, true);
+        ctx.update_ui();
+        assert_eq!(rendered_root_names(&ctx), vec!["retained"]);
+        assert!(window_texts(&ctx.root_handle(root).unwrap()).iter().any(|text| text == "visible"));
+    }
+
+    #[test]
+    fn retained_root_tree_can_be_replaced_after_registration() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+        let first_tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("first");
+        });
+        let second_tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("second");
+        });
+        let root = ctx.create_window("retained", rect(0, 0, 90, 50), first_tree);
+
+        ctx.update_ui();
+        assert!(window_texts(&ctx.root_handle(root).unwrap()).iter().any(|text| text == "first"));
+
+        ctx.set_root_tree(root, second_tree);
+        ctx.update_ui();
+        let texts = window_texts(&ctx.root_handle(root).unwrap());
+        assert!(texts.iter().any(|text| text == "second"));
+        assert!(!texts.iter().any(|text| text == "first"));
+    }
+
+    #[test]
+    fn retained_and_compatibility_roots_can_share_a_frame() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let retained_root = ctx.create_window(
+            "retained",
+            rect(0, 0, 90, 60),
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("retained");
+            }),
+        );
+        let mut legacy_window = ctx.new_window("legacy", rect(100, 0, 90, 60));
+        let legacy_tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("legacy");
+        });
+
+        ctx.run_ui_frame(|ui| {
+            ui.window(&mut legacy_window, ContainerOption::NONE, ScrollBehavior::NONE, &legacy_tree);
+        });
+
+        let names = rendered_root_names(&ctx);
+        assert!(names.iter().any(|name| name == "retained"));
+        assert!(names.iter().any(|name| name == "legacy"));
+        assert!(window_texts(&ctx.root_handle(retained_root).unwrap()).iter().any(|text| text == "retained"));
+        assert!(window_texts(&legacy_window).iter().any(|text| text == "legacy"));
+    }
+
+    #[test]
+    fn retained_roots_preserve_z_order_and_fronting() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let left_tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("left");
+        });
+        let right_tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("right");
+        });
+        let left = ctx.create_window("left", rect(0, 0, 90, 60), left_tree);
+        let _right = ctx.create_window("right", rect(20, 0, 90, 60), right_tree);
+
+        ctx.update_ui();
+        assert_eq!(rendered_root_names(&ctx), vec!["left", "right"]);
+
+        let mut left_handle = ctx.root_handle(left).unwrap();
+        ctx.bring_to_front(&mut left_handle);
+        ctx.update_ui();
+        assert_eq!(rendered_root_names(&ctx), vec!["right", "left"]);
+    }
+
+    #[test]
+    fn retained_dialog_becomes_front_root_when_shown() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let background = ctx.create_window(
+            "background",
+            rect(0, 0, 120, 80),
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("background");
+            }),
+        );
+        let dialog = ctx.create_dialog(
+            "dialog",
+            rect(10, 10, 90, 50),
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("dialog");
+            }),
+        );
+
+        ctx.update_ui();
+        assert_eq!(rendered_root_names(&ctx), vec!["background"]);
+
+        ctx.set_root_visible(dialog, true);
+        ctx.update_ui();
+        assert_eq!(rendered_root_names(&ctx), vec!["background", "dialog"]);
+        assert!(ctx.root_handle(dialog).unwrap().zindex() > ctx.root_handle(background).unwrap().zindex());
+    }
+
+    #[test]
+    fn retained_popup_opens_at_mouse_and_auto_sizes_on_first_frame() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let popup = ctx.create_popup(
+            "popup",
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("hello popup");
+            }),
+        );
+
+        ctx.mousemove(40, 50);
+        ctx.set_root_visible(popup, true);
+        ctx.update_ui();
+
+        let handle = ctx.root_handle(popup).unwrap();
+        assert_eq!(handle.rect().x, 40);
+        assert_eq!(handle.rect().y, 50);
+        assert!(handle.rect().width > 1);
+        assert!(handle.rect().height > 1);
+        assert_eq!(rendered_root_names(&ctx), vec!["popup"]);
+    }
+
+    #[test]
+    fn retained_root_hover_selection_uses_registered_root_z_order() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let left = ctx.create_window(
+            "left",
+            rect(0, 0, 100, 80),
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("left");
+            }),
+        );
+        let _right = ctx.create_window(
+            "right",
+            rect(0, 0, 100, 80),
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("right");
+            }),
+        );
+
+        ctx.mousemove(20, 20);
+        ctx.update_ui();
+        assert_eq!(ctx.hover_root.as_ref().unwrap().inner().main.name(), "right");
+
+        let mut left_handle = ctx.root_handle(left).unwrap();
+        ctx.bring_to_front(&mut left_handle);
+        ctx.update_ui();
+        assert_eq!(ctx.hover_root.as_ref().unwrap().inner().main.name(), "left");
+    }
+
+    #[test]
+    fn retained_chrome_node_ids_are_root_derived_and_stable() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let root = ctx.create_window(
+            "retained",
+            rect(0, 0, 100, 70),
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("before");
+            }),
+        );
+        let other = ctx.create_window(
+            "other",
+            rect(120, 0, 100, 70),
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("other");
+            }),
+        );
+
+        let ids = ctx.root_handle(root).unwrap().inner().chrome_ids;
+        assert_eq!(ids, WindowChromeIds::from_root_seed(root.raw()));
+        assert_ne!(ids, ctx.root_handle(other).unwrap().inner().chrome_ids);
+
+        ctx.update_ui();
+        ctx.set_root_tree(
+            root,
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("after");
+            }),
+        );
+        ctx.update_ui();
+
+        assert_eq!(ctx.root_handle(root).unwrap().inner().chrome_ids, ids);
+    }
+
+    #[test]
+    fn retained_title_drag_uses_chrome_node_after_tree_update() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let root = ctx.create_window(
+            "retained",
+            rect(10, 10, 100, 70),
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("before");
+            }),
+        );
+        let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids;
+
+        ctx.update_ui();
+        ctx.set_root_tree(
+            root,
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("after");
+            }),
+        );
+        ctx.update_ui();
+
+        let initial = ctx.root_handle(root).unwrap().rect();
+        let title_x = initial.x + 10;
+        let title_y = initial.y + 6;
+        ctx.mousemove(title_x, title_y);
+        ctx.update_ui();
+        ctx.update_ui();
+        ctx.mousedown(title_x, title_y, MouseButton::LEFT);
+        ctx.update_ui();
+        ctx.mousemove(title_x + 12, title_y + 7);
+        ctx.update_ui();
+
+        let moved = ctx.root_handle(root).unwrap().rect();
+        assert!(moved.x > initial.x);
+        assert!(moved.y > initial.y);
+        assert!(ctx.committed_results().state_of_node(chrome.title).is_active());
+        assert_eq!(ctx.root_handle(root).unwrap().inner().chrome_ids, chrome);
+    }
+
+    #[test]
+    fn retained_close_button_closes_root_and_records_chrome_result() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let root = ctx.create_window(
+            "retained",
+            rect(10, 10, 100, 70),
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("body");
+            }),
+        );
+        let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids;
+
+        let close_x = 10 + 100 - 12;
+        let close_y = 10 + 6;
+        ctx.mousemove(close_x, close_y);
+        ctx.update_ui();
+        ctx.update_ui();
+        assert!(ctx.root_handle(root).unwrap().is_open());
+
+        ctx.mousedown(close_x, close_y, MouseButton::LEFT);
+        ctx.update_ui();
+        assert!(ctx.committed_results().state_of_node(chrome.close).is_submitted());
+        assert!(!ctx.root_handle(root).unwrap().is_open());
+
+        ctx.mouseup(close_x, close_y, MouseButton::LEFT);
+        ctx.update_ui();
+        assert!(rendered_root_names(&ctx).is_empty());
+    }
+
+    #[test]
+    fn retained_resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 240));
+        let mut style = Style::default();
+        style.padding = 0;
+        style.scrollbar_size = 10;
+        ctx.set_style(&style);
+
+        let text = widget_handle(TextBlock::new("aaaaaaaaaaaaaaaaaaaaaaaa\na\na\na\na\na\na\na"));
+        let tree = WidgetTreeBuilder::build({
+            let text = text.clone();
+            move |tree| {
+                tree.widget(text.clone());
+            }
+        });
+        let root = ctx.create_window("retained", rect(0, 0, 60, 40), tree);
+        let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids;
+
+        ctx.update_ui();
+        ctx.update_ui();
+
+        let initial_rect = ctx.root_handle(root).unwrap().rect();
+        let corner_x = initial_rect.x + initial_rect.width - 1;
+        let corner_y = initial_rect.y + initial_rect.height - 1;
+
+        ctx.mousemove(corner_x, corner_y);
+        ctx.update_ui();
+        ctx.mousedown(corner_x, corner_y, MouseButton::LEFT);
+        ctx.update_ui();
+        ctx.mousemove(corner_x + 12, corner_y + 10);
+        ctx.update_ui();
+
+        let resized = ctx.root_handle(root).unwrap().rect();
+        assert!(resized.width > initial_rect.width);
+        assert!(resized.height > initial_rect.height);
+        assert!(ctx.committed_results().state_of_node(chrome.resize).is_active());
+    }
+
+    #[test]
+    fn retained_popup_closes_from_root_state_when_clicking_outside() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let popup = ctx.create_popup(
+            "popup",
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("popup");
+            }),
+        );
+
+        ctx.mousemove(20, 20);
+        ctx.set_root_visible(popup, true);
+        ctx.update_ui();
+        assert!(ctx.root_handle(popup).unwrap().is_open());
+
+        ctx.mousemove(200, 100);
+        ctx.update_ui();
+        ctx.mousedown(200, 100, MouseButton::LEFT);
+        ctx.update_ui();
+
+        assert!(!ctx.root_handle(popup).unwrap().is_open());
+        assert!(rendered_root_names(&ctx).is_empty());
+    }
 }
 
 impl<R: Renderer> Context<R> {
@@ -939,9 +1369,21 @@ impl<R: Renderer> Context<R> {
     pub fn run_ui_frame<F: FnOnce(&mut Self)>(&mut self, f: F) {
         self.frame_begin();
 
-        // execute the frame function
         f(self);
+        self.render_registered_roots();
 
+        self.frame_end();
+    }
+
+    /// Runs one UI frame using only roots previously registered with this context.
+    ///
+    /// This is the retained-root entry point: applications can create roots once with
+    /// [`Context::create_window`], [`Context::create_dialog`], or [`Context::create_popup`], mutate
+    /// widget handle state over time, and call this method each frame without re-submitting root
+    /// trees.
+    pub fn update_ui(&mut self) {
+        self.frame_begin();
+        self.render_registered_roots();
         self.frame_end();
     }
 
@@ -976,10 +1418,153 @@ impl<R: Renderer> Context<R> {
         ContainerHandle::new(Container::new(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone()))
     }
 
+    fn next_root_id(&mut self) -> RootId {
+        let id = RootId(self.next_root_id);
+        self.next_root_id = self.next_root_id.checked_add(1).expect("retained root id counter overflowed");
+        id
+    }
+
+    fn register_root(
+        &mut self,
+        kind: RootKind,
+        mut handle: WindowHandle,
+        tree: WidgetTree,
+        opt: ContainerOption,
+        scroll_behavior: ScrollBehavior,
+        visible: bool,
+    ) -> RootId {
+        let id = self.next_root_id();
+        handle.set_chrome_ids(WindowChromeIds::from_root_seed(id.raw()));
+        self.retained_roots.push(RootEntry {
+            id,
+            handle,
+            tree,
+            opt,
+            scroll_behavior,
+            visible,
+            kind,
+        });
+        id
+    }
+
+    fn root_entry_mut(&mut self, root: RootId) -> Option<&mut RootEntry> {
+        self.retained_roots.iter_mut().find(|entry| entry.id == root)
+    }
+
+    /// Registers an open retained window and returns its stable root identifier.
+    ///
+    /// The window is rendered by subsequent calls to [`Context::update_ui`] or
+    /// [`Context::run_ui_frame`] without the application re-submitting its tree.
+    pub fn create_window(&mut self, name: &str, rect: Recti, tree: WidgetTree) -> RootId {
+        let window = self.new_window(name, rect);
+        self.register_root(RootKind::Window, window, tree, ContainerOption::NONE, ScrollBehavior::NONE, true)
+    }
+
+    /// Registers a retained dialog root.
+    ///
+    /// Dialogs start hidden; call [`Context::set_root_visible`] with `true` to open the dialog and
+    /// bring it to the front.
+    pub fn create_dialog(&mut self, name: &str, rect: Recti, tree: WidgetTree) -> RootId {
+        let dialog = self.new_dialog(name, rect);
+        self.register_root(RootKind::Dialog, dialog, tree, ContainerOption::NONE, ScrollBehavior::NONE, false)
+    }
+
+    /// Registers a retained popup root.
+    ///
+    /// Popups start hidden; calling [`Context::set_root_visible`] with `true` opens the popup at the
+    /// current mouse position.
+    pub fn create_popup(&mut self, name: &str, tree: WidgetTree) -> RootId {
+        let popup = self.new_popup(name);
+        self.register_root(RootKind::Popup, popup, tree, Self::default_popup_options(), ScrollBehavior::NONE, false)
+    }
+
+    /// Replaces the retained widget tree for a registered root.
+    ///
+    /// Invalid root identifiers are ignored.
+    pub fn set_root_tree(&mut self, root: RootId, tree: WidgetTree) {
+        if let Some(entry) = self.root_entry_mut(root) {
+            entry.tree = tree;
+        }
+    }
+
+    /// Replaces the container options and scroll behavior for a registered root.
+    ///
+    /// Popups are created with the same default options as [`Context::popup`]. This method can
+    /// override those defaults for retained roots that need custom chrome or sizing.
+    pub fn set_root_options(&mut self, root: RootId, opt: ContainerOption, scroll_behavior: ScrollBehavior) {
+        if let Some(entry) = self.root_entry_mut(root) {
+            entry.opt = opt;
+            entry.scroll_behavior = scroll_behavior;
+        }
+    }
+
+    /// Shows or hides a registered retained root.
+    ///
+    /// Windows reopen in their existing z-order. Dialogs and newly opened popups are brought to the
+    /// front, matching the compatibility APIs.
+    pub fn set_root_visible(&mut self, root: RootId, visible: bool) {
+        let Some(index) = self.retained_roots.iter().position(|entry| entry.id == root) else {
+            return;
+        };
+        self.set_root_visible_at(index, visible);
+    }
+
+    /// Returns the window handle owned by a registered retained root.
+    pub fn root_handle(&self, root: RootId) -> Option<WindowHandle> {
+        self.retained_roots.iter().find(|entry| entry.id == root).map(|entry| entry.handle.clone())
+    }
+
     /// Bumps the window's Z order so it renders above others.
     pub fn bring_to_front(&mut self, window: &mut WindowHandle) {
         self.last_zindex += 1;
         window.set_zindex(self.last_zindex);
+    }
+
+    fn set_root_visible_at(&mut self, index: usize, visible: bool) {
+        let mouse_pos = self.input.borrow().mouse_pos;
+        let mut bring_to_front = None;
+        let mut hover_root = None;
+
+        {
+            let entry = &mut self.retained_roots[index];
+            if !visible {
+                entry.visible = false;
+                entry.handle.close();
+                return;
+            }
+
+            let was_open = entry.handle.is_open();
+            entry.visible = true;
+            match entry.kind {
+                RootKind::Window => {
+                    entry.handle.open();
+                }
+                RootKind::Dialog => {
+                    entry.handle.open();
+                    if !was_open {
+                        bring_to_front = Some(entry.handle.clone());
+                    }
+                }
+                RootKind::Popup => {
+                    if !was_open {
+                        entry.handle.set_rect(rect(mouse_pos.x, mouse_pos.y, 1, 1));
+                        entry.handle.open();
+                        entry.handle.set_root_hover_active(true);
+                        entry.handle.mark_popup_just_opened();
+                        bring_to_front = Some(entry.handle.clone());
+                        hover_root = Some(entry.handle.clone());
+                    }
+                }
+            }
+        }
+
+        if let Some(mut window) = bring_to_front {
+            self.bring_to_front(&mut window);
+        }
+        if let Some(window) = hover_root {
+            self.next_hover_root = Some(window.clone());
+            self.hover_root = Some(window);
+        }
     }
 
     fn bring_to_front_if_behind(&mut self, window: &mut WindowHandle) {
@@ -1019,8 +1604,12 @@ impl<R: Renderer> Context<R> {
             return false;
         }
 
+        if !self.update_popup_root_state(window) {
+            return false;
+        }
+
         self.begin_root_container(window);
-        window.begin_window(opt, scroll_behavior);
+        window.begin_window(&mut self.frame_results, opt, scroll_behavior);
 
         true
     }
@@ -1028,7 +1617,25 @@ impl<R: Renderer> Context<R> {
     fn end_window(&mut self, window: &mut WindowHandle, opt: ContainerOption) {
         window.end_window();
         self.end_root_container(window);
-        window.finish_resize(opt);
+        window.finish_resize(&mut self.frame_results, opt);
+    }
+
+    fn update_popup_root_state(&mut self, window: &mut WindowHandle) -> bool {
+        if !window.root_is_popup() {
+            return true;
+        }
+
+        if window.root_popup_just_opened() {
+            window.clear_root_popup_just_opened();
+            return true;
+        }
+
+        if !self.input.borrow().mouse_pressed.is_none() && !window.root_in_hover_root() {
+            window.close();
+            return false;
+        }
+
+        true
     }
 
     fn render_window_tree(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
@@ -1052,7 +1659,53 @@ impl<R: Renderer> Context<R> {
         }
     }
 
+    fn render_dialog_tree(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
+        if window.is_open() {
+            self.next_hover_root = Some(window.clone());
+            self.hover_root = self.next_hover_root.clone();
+            window.set_root_hover_active(true);
+            self.bring_to_front_if_behind(window);
+
+            self.render_window_tree(window, opt, scroll_behavior, tree);
+        }
+    }
+
+    fn render_retained_root(&mut self, entry: &mut RootEntry) {
+        if !entry.visible {
+            return;
+        }
+        if !entry.handle.is_open() {
+            entry.visible = false;
+            return;
+        }
+
+        match entry.kind {
+            RootKind::Window => self.render_window_tree(&mut entry.handle, entry.opt, entry.scroll_behavior, &entry.tree),
+            RootKind::Dialog => self.render_dialog_tree(&mut entry.handle, entry.opt, entry.scroll_behavior, &entry.tree),
+            RootKind::Popup => self.render_window_tree(&mut entry.handle, entry.opt, entry.scroll_behavior, &entry.tree),
+        }
+
+        if !entry.handle.is_open() {
+            entry.visible = false;
+        }
+    }
+
+    fn render_registered_roots(&mut self) {
+        let mut roots = std::mem::take(&mut self.retained_roots);
+        for entry in &mut roots {
+            self.render_retained_root(entry);
+        }
+        self.retained_roots = roots;
+    }
+
+    const fn default_popup_options() -> ContainerOption {
+        ContainerOption::AUTO_SIZE.union(ContainerOption::NO_RESIZE).union(ContainerOption::NO_TITLE)
+    }
+
     /// Opens a window and renders the provided retained widget tree into it.
+    ///
+    /// This is the per-frame root-submission compatibility API. New retained-root code should use
+    /// [`Context::create_window`] plus [`Context::update_ui`].
     pub fn window(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         self.render_window_tree(window, opt, scroll_behavior, tree);
     }
@@ -1067,15 +1720,11 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Renders a dialog window if it is currently open.
+    ///
+    /// This is the per-frame root-submission compatibility API. New retained-root code should use
+    /// [`Context::create_dialog`] plus [`Context::set_root_visible`].
     pub fn dialog(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
-        if window.is_open() {
-            self.next_hover_root = Some(window.clone());
-            self.hover_root = self.next_hover_root.clone();
-            window.set_root_hover_active(true);
-            self.bring_to_front_if_behind(window);
-
-            self.render_window_tree(window, opt, scroll_behavior, tree);
-        }
+        self.render_dialog_tree(window, opt, scroll_behavior, tree);
     }
 
     /// Shows a popup at the mouse cursor position.
@@ -1123,8 +1772,11 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Opens a popup window with default options and renders a retained tree into it.
+    ///
+    /// This is the per-frame root-submission compatibility API. New retained-root code should use
+    /// [`Context::create_popup`] plus [`Context::set_root_visible`].
     pub fn popup(&mut self, window: &mut WindowHandle, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
-        let opt = ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE;
+        let opt = Self::default_popup_options();
         self.render_window_tree(window, opt, scroll_behavior, tree);
     }
 
