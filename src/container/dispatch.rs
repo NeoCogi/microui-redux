@@ -70,6 +70,19 @@ impl Container {
         (control, res)
     }
 
+    pub(crate) fn render_internal_widget<W: Widget + ?Sized>(&mut self, node_id: NodeId, widget: &mut W, rect: Recti) -> (ControlState, ResourceState) {
+        let opt = widget.effective_widget_opt();
+        let scroll_behavior = widget.effective_scroll_behavior();
+        let focus_policy = widget.focus_policy();
+        let interaction_id = InteractionId::node(node_id);
+        let control = self.update_control_for(interaction_id, rect, opt, scroll_behavior, focus_policy);
+        let widget_id = node_id.raw() as WidgetId;
+        let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
+        let mut ctx = self.widget_ctx_for(widget_id, interaction_id, rect, input);
+        let res = widget.run(&mut ctx, &control);
+        (control, res)
+    }
+
     pub(crate) fn measure_widget_rect_handle_with_policy<W: Widget>(&mut self, handle: &WidgetHandle<W>, policy: Policy) -> Recti {
         let state = handle.borrow();
         self.measure_widget_rect_with_policy(&*state, policy)

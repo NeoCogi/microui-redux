@@ -1099,6 +1099,37 @@ mod tests {
     }
 
     #[test]
+    fn retained_chrome_nodes_are_recorded_in_root_cache() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let root = ctx.create_window(
+            "retained",
+            rect(10, 12, 100, 70),
+            WidgetTreeBuilder::build(|tree| {
+                tree.text("body");
+            }),
+        );
+        let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids;
+
+        ctx.update_ui();
+
+        let handle = ctx.root_handle(root).unwrap();
+        let inner = handle.inner();
+        let title = inner.main.previous_node_layout(chrome.title).expect("title chrome node layout missing");
+        let close = inner.main.previous_node_layout(chrome.close).expect("close chrome node layout missing");
+        let resize = inner.main.previous_node_layout(chrome.resize).expect("resize chrome node layout missing");
+
+        assert_eq!(title.rect.x, 10);
+        assert_eq!(title.rect.y, 12);
+        assert_eq!(title.rect.width, 100);
+        assert!(title.rect.height > 0);
+        assert!(close.rect.x >= title.rect.x);
+        assert!(resize.rect.x >= title.rect.x);
+        assert!(resize.rect.y >= title.rect.y);
+    }
+
+    #[test]
     fn retained_title_drag_uses_chrome_node_after_tree_update() {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });

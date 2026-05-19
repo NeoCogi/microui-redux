@@ -92,12 +92,12 @@ impl Container {
     }
 
     /// Stores the current frame geometry snapshot for a retained tree node.
-    fn record_tree_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
+    pub(crate) fn record_tree_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
         self.tree.cache.record_layout(node_id, layout);
     }
 
     /// Stores the current frame control/result snapshot for a retained tree node.
-    fn record_tree_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
+    pub(crate) fn record_tree_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
         self.tree.cache.record_interaction(node_id, interaction);
     }
 

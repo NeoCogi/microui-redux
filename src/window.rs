@@ -51,7 +51,10 @@
 // IN THE SOFTWARE.
 //
 use super::*;
-use crate::{widget::FrameResults, widget_tree::WidgetTree};
+use crate::{
+    widget::FrameResults,
+    widget_tree::{NodeInteraction, NodeLayout, WidgetTree},
+};
 use std::{
     cell::{Ref, RefMut},
     sync::atomic::{AtomicUsize, Ordering},
@@ -126,10 +129,6 @@ fn chrome_node_id(namespace: ChromeNamespace, seed: usize, part: ChromePart) -> 
     Id::new(write(hash, part))
 }
 
-fn chrome_widget_id(node_id: Id) -> WidgetId {
-    node_id.raw() as *const ()
-}
-
 fn chrome_result(control: &ControlState, submit_on_click: bool) -> ResourceState {
     let mut result = ResourceState::NONE;
     if submit_on_click && control.clicked {
@@ -139,6 +138,152 @@ fn chrome_result(control: &ControlState, submit_on_click: bool) -> ResourceState
         result |= ResourceState::ACTIVE;
     }
     result
+}
+
+#[derive(Copy, Clone)]
+enum WindowChromePart {
+    Title,
+    Close,
+    Resize,
+}
+
+#[derive(Copy, Clone)]
+struct WindowChromeNode {
+    id: Id,
+    part: WindowChromePart,
+    rect: Recti,
+}
+
+impl WindowChromeNode {
+    fn new(id: Id, part: WindowChromePart, rect: Recti) -> Self {
+        Self { id, part, rect }
+    }
+}
+
+struct WindowChromeTree {
+    ids: WindowChromeIds,
+    title_state: Internal,
+    close_state: Internal,
+    resize_state: Internal,
+}
+
+impl WindowChromeTree {
+    fn new(ids: WindowChromeIds) -> Self {
+        Self {
+            ids,
+            title_state: Internal::new("!title"),
+            close_state: Internal::new("!close"),
+            resize_state: Internal::new("!resize"),
+        }
+    }
+
+    fn set_ids(&mut self, ids: WindowChromeIds) {
+        self.ids = ids;
+    }
+
+    fn title_node(&self, container: &Container, opt: ContainerOption) -> Option<WindowChromeNode> {
+        if opt.has_no_title() {
+            return None;
+        }
+
+        let mut rect = container.rect();
+        rect.height = Window::titlebar_height(container);
+        Some(WindowChromeNode::new(self.ids.title, WindowChromePart::Title, rect))
+    }
+
+    fn close_node(&self, title_rect: Recti, opt: ContainerOption) -> Option<WindowChromeNode> {
+        if opt.has_no_close() {
+            return None;
+        }
+
+        let rect = rect(
+            title_rect.x + title_rect.width - title_rect.height,
+            title_rect.y,
+            title_rect.height,
+            title_rect.height,
+        );
+        Some(WindowChromeNode::new(self.ids.close, WindowChromePart::Close, rect))
+    }
+
+    fn resize_node(&self, container: &Container, opt: ContainerOption) -> Option<WindowChromeNode> {
+        if opt.is_auto_sizing() || opt.is_fixed() {
+            return None;
+        }
+
+        let size = container.style().title_height;
+        let container_rect = container.rect();
+        let rect = rect(
+            container_rect.x + container_rect.width - size,
+            container_rect.y + container_rect.height - size,
+            size,
+            size,
+        );
+        Some(WindowChromeNode::new(self.ids.resize, WindowChromePart::Resize, rect))
+    }
+
+    fn dispatch_node(
+        container: &mut Container,
+        results: &mut FrameResults,
+        node: WindowChromeNode,
+        state: &mut Internal,
+        dispatch_site: &'static str,
+    ) -> ControlState {
+        container.record_tree_layout(
+            node.id,
+            NodeLayout::new(node.rect, node.rect, Dimensioni::new(node.rect.width, node.rect.height)),
+        );
+        let (control, widget_result) = container.render_internal_widget(node.id, state, node.rect);
+        let submit_on_click = matches!(node.part, WindowChromePart::Close);
+        let result = widget_result | chrome_result(&control, submit_on_click);
+        container.record_tree_interaction(node.id, NodeInteraction::new(control, result));
+        results.record_node_with_context(node.id, result, dispatch_site);
+        control
+    }
+
+    fn render_title_bar(&mut self, container: &mut Container, results: &mut FrameResults, win_state: &mut WindowState, opt: ContainerOption) {
+        let Some(title_node) = self.title_node(container, opt) else {
+            return;
+        };
+
+        let title_text_color = container.style().colors[ControlColor::TitleText as usize];
+        container.draw_frame(title_node.rect, ControlColor::TitleBG);
+
+        let title_control = Self::dispatch_node(container, results, title_node, &mut self.title_state, "window chrome title");
+        let name = container.name().to_string();
+        container.draw_control_text_with_font(
+            container.style().title_font,
+            &name,
+            title_node.rect,
+            ControlColor::TitleText,
+            WidgetOption::NONE,
+        );
+        if title_control.active {
+            let delta = container.input().borrow().mouse_delta;
+            container.translate_rect(delta);
+        }
+
+        let Some(close_node) = self.close_node(title_node.rect, opt) else {
+            return;
+        };
+
+        container.draw_icon(CLOSE_ICON, close_node.rect, title_text_color);
+        let close_control = Self::dispatch_node(container, results, close_node, &mut self.close_state, "window chrome close");
+        if close_control.clicked {
+            *win_state = WindowState::Closed;
+        }
+    }
+
+    fn render_resize_handle(&mut self, container: &mut Container, results: &mut FrameResults, opt: ContainerOption) {
+        let Some(resize_node) = self.resize_node(container, opt) else {
+            return;
+        };
+
+        let resize_control = Self::dispatch_node(container, results, resize_node, &mut self.resize_state, "window chrome resize");
+        if resize_control.active {
+            let delta = container.input().borrow().mouse_delta;
+            container.resize_rect_by(delta, Dimensioni::new(96, 64));
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -163,12 +308,7 @@ pub(crate) struct Window {
     last_root_frame: Option<usize>,
     pub(crate) main: Container,
     pub(crate) chrome_ids: WindowChromeIds,
-    /// Internal state for the window title bar.
-    pub(crate) title_state: Internal,
-    /// Internal state for the window close button.
-    pub(crate) close_state: Internal,
-    /// Internal state for the window resize handle.
-    pub(crate) resize_state: Internal,
+    chrome_tree: WindowChromeTree,
 }
 
 impl Window {
@@ -213,16 +353,15 @@ impl Window {
     pub fn dialog(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.set_rect(initial_rect);
+        let chrome_ids = WindowChromeIds::anonymous();
 
         Self {
             ty: Type::Dialog,
             win_state: WindowState::Closed,
             last_root_frame: None,
             main,
-            chrome_ids: WindowChromeIds::anonymous(),
-            title_state: Internal::new("!title"),
-            close_state: Internal::new("!close"),
-            resize_state: Internal::new("!resize"),
+            chrome_ids,
+            chrome_tree: WindowChromeTree::new(chrome_ids),
         }
     }
 
@@ -230,16 +369,15 @@ impl Window {
     pub fn window(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.set_rect(initial_rect);
+        let chrome_ids = WindowChromeIds::anonymous();
 
         Self {
             ty: Type::Window,
             win_state: WindowState::Open,
             last_root_frame: None,
             main,
-            chrome_ids: WindowChromeIds::anonymous(),
-            title_state: Internal::new("!title"),
-            close_state: Internal::new("!close"),
-            resize_state: Internal::new("!resize"),
+            chrome_ids,
+            chrome_tree: WindowChromeTree::new(chrome_ids),
         }
     }
 
@@ -247,16 +385,15 @@ impl Window {
     pub fn popup(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.set_rect(initial_rect);
+        let chrome_ids = WindowChromeIds::anonymous();
 
         Self {
             ty: Type::Popup,
             win_state: WindowState::Closed,
             last_root_frame: None,
             main,
-            chrome_ids: WindowChromeIds::anonymous(),
-            title_state: Internal::new("!title"),
-            close_state: Internal::new("!close"),
-            resize_state: Internal::new("!resize"),
+            chrome_ids,
+            chrome_tree: WindowChromeTree::new(chrome_ids),
         }
     }
 
@@ -270,74 +407,19 @@ impl Window {
 
     #[inline(never)]
     fn begin_window(&mut self, results: &mut FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior) {
-        let Window {
-            win_state,
-            main: container,
-            chrome_ids,
-            title_state,
-            close_state,
-            resize_state: _,
-            ..
-        } = self;
-        Self::apply_auto_size(container, opt);
+        Self::apply_auto_size(&mut self.main, opt);
 
-        let r = container.rect();
+        let r = self.main.rect();
         if !opt.has_no_frame() {
-            container.draw_frame(r, ControlColor::WindowBG);
+            self.main.draw_frame(r, ControlColor::WindowBG);
         }
-        if !opt.has_no_title() {
-            let mut tr: Recti = r;
-            let title_text_color = container.style().colors[ControlColor::TitleText as usize];
-            tr.height = Self::titlebar_height(container);
-            container.draw_frame(tr, ControlColor::TitleBG);
 
-            let title_node = chrome_ids.title;
-            let title_widget_id = chrome_widget_id(title_node);
-            let control = container.update_control_for(
-                InteractionId::node(title_node),
-                tr,
-                title_state.effective_widget_opt(),
-                title_state.effective_scroll_behavior(),
-                title_state.focus_policy(),
-            );
-            {
-                let mut ctx = container.widget_ctx_for(title_widget_id, InteractionId::node(title_node), tr, None);
-                let _ = title_state.run(&mut ctx, &control);
-            }
-            results.record_node_with_context(title_node, chrome_result(&control, false), "window chrome title");
-            let name = container.name().to_string(); // Necessary due to borrow checker limitations
-            container.draw_control_text_with_font(container.style().title_font, &name, tr, ControlColor::TitleText, WidgetOption::NONE);
-            if control.active {
-                let delta = container.input().borrow().mouse_delta;
-                container.translate_rect(delta);
-            }
-            if !opt.has_no_close() {
-                let close_node = chrome_ids.close;
-                let close_widget_id = chrome_widget_id(close_node);
-                let r: Recti = rect(tr.x + tr.width - tr.height, tr.y, tr.height, tr.height);
-                let color = title_text_color;
-                container.draw_icon(CLOSE_ICON, r, color);
-                let control = container.update_control_for(
-                    InteractionId::node(close_node),
-                    r,
-                    close_state.effective_widget_opt(),
-                    close_state.effective_scroll_behavior(),
-                    close_state.focus_policy(),
-                );
-                {
-                    let mut ctx = container.widget_ctx_for(close_widget_id, InteractionId::node(close_node), r, None);
-                    let _ = close_state.run(&mut ctx, &control);
-                }
-                results.record_node_with_context(close_node, chrome_result(&control, true), "window chrome close");
-                if control.clicked {
-                    *win_state = WindowState::Closed;
-                }
-            }
-        }
-        let body = Self::body_rect_for(container, opt);
-        container.configure_container_body(body, scroll_behavior);
-        let body = container.body();
-        container.push_clip_rect(body);
+        self.chrome_tree.render_title_bar(&mut self.main, results, &mut self.win_state, opt);
+
+        let body = Self::body_rect_for(&self.main, opt);
+        self.main.configure_container_body(body, scroll_behavior);
+        let body = self.main.body();
+        self.main.push_clip_rect(body);
     }
 
     fn end_window(&mut self) {
@@ -374,37 +456,7 @@ impl Window {
     }
 
     fn finish_resize(&mut self, results: &mut FrameResults, opt: ContainerOption) {
-        if opt.is_auto_sizing() || opt.is_fixed() {
-            return;
-        }
-
-        let container = &mut self.main;
-        let sz = container.style().title_height;
-        let resize_node = self.chrome_ids.resize;
-        let resize_widget_id = chrome_widget_id(resize_node);
-        let container_rect = container.rect();
-        let rect = rect(
-            container_rect.x + container_rect.width - sz,
-            container_rect.y + container_rect.height - sz,
-            sz,
-            sz,
-        );
-        let control = container.update_control_for(
-            InteractionId::node(resize_node),
-            rect,
-            self.resize_state.effective_widget_opt(),
-            self.resize_state.effective_scroll_behavior(),
-            self.resize_state.focus_policy(),
-        );
-        {
-            let mut ctx = container.widget_ctx_for(resize_widget_id, InteractionId::node(resize_node), rect, None);
-            let _ = self.resize_state.run(&mut ctx, &control);
-        }
-        results.record_node_with_context(resize_node, chrome_result(&control, false), "window chrome resize");
-        if control.active {
-            let delta = container.input().borrow().mouse_delta;
-            container.resize_rect_by(delta, Dimensioni::new(96, 64));
-        }
+        self.chrome_tree.render_resize_handle(&mut self.main, results, opt);
     }
 }
 
@@ -551,7 +603,9 @@ impl WindowHandle {
     }
 
     pub(crate) fn set_chrome_ids(&mut self, chrome_ids: WindowChromeIds) {
-        self.inner_mut().chrome_ids = chrome_ids;
+        let mut inner = self.inner_mut();
+        inner.chrome_ids = chrome_ids;
+        inner.chrome_tree.set_ids(chrome_ids);
     }
 
     pub(crate) fn root_is_popup(&self) -> bool {
