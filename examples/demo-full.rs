@@ -76,7 +76,7 @@ use rand::{RngExt, rng};
 use std::{
     cell::RefCell,
     f32::consts::PI,
-    fs,
+    fs, mem,
     path::PathBuf,
     rc::Rc,
     sync::{Arc, RwLock},
@@ -719,19 +719,24 @@ struct State {
     background_labels: [WidgetHandle<ListItem>; 3],
     style: Style,
 
-    demo_window: Option<WindowHandle>,
-    style_window: Option<WindowHandle>,
-    log_window: Option<WindowHandle>,
-    popup_window: Option<WindowHandle>,
+    demo_root: RootId,
+    style_root: RootId,
+    log_root: RootId,
+    combo_popup_root: RootId,
+    popup_root: RootId,
+    typography_root: RootId,
+    triangle_root: RootId,
+    graphics_root: RootId,
+    falloff_root: RootId,
+    suzanne_root: RootId,
+    stack_direction_root: RootId,
+    weight_root: RootId,
+
+    demo_window: WindowHandle,
+    log_window: WindowHandle,
+    popup_window: WindowHandle,
     log_output: Option<ContainerHandle>,
-    typography_window: Option<WindowHandle>,
-    triangle_window: Option<WindowHandle>,
-    graphics_window: Option<WindowHandle>,
-    falloff_window: Option<WindowHandle>,
-    suzanne_window: Option<WindowHandle>,
-    stack_direction_window: Option<WindowHandle>,
-    weight_window: Option<WindowHandle>,
-    dialog_window: Option<FileDialogState>,
+    dialog_window: FileDialogState,
 
     fps: f32,
     last_frame: Instant,
@@ -894,6 +899,29 @@ impl State {
         );
         typography_body.font = FontRole::Body.into();
         let style = Style::default().with_named_fonts(&ctx.canvas().get_atlas());
+        let demo_root = ctx.create_window("Demo Window", rect(40, 40, 300, 450), WidgetTree::default());
+        let style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), WidgetTree::default());
+        let log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), WidgetTree::default());
+        let combo_popup_root = ctx.create_popup("Combo Box Popup", WidgetTree::default());
+        ctx.set_root_options(
+            combo_popup_root,
+            ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
+            ScrollBehavior::NO_SCROLL,
+        );
+        let popup_root = ctx.create_popup("Test Popup", WidgetTree::default());
+        ctx.set_root_options(
+            popup_root,
+            ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
+            ScrollBehavior::NO_SCROLL,
+        );
+        let typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), WidgetTree::default());
+        let triangle_root = ctx.create_window("Triangle Window", rect(200, 100, 200, 200), WidgetTree::default());
+        let graphics_root = ctx.create_window("Graphics Window", rect(820, 40, 280, 240), WidgetTree::default());
+        let falloff_root = ctx.create_window("Brush Falloff", rect(820, 300, 320, 260), WidgetTree::default());
+        let suzanne_root = ctx.create_window("Suzanne Window", rect(220, 220, 300, 300), WidgetTree::default());
+        let stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), WidgetTree::default());
+        let weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), WidgetTree::default());
+        let combo_popup = ctx.root_handle(combo_popup_root).expect("combo popup root missing");
         let mut state = Self {
             renderer,
             bg: [90.0, 95.0, 100.0],
@@ -904,7 +932,7 @@ impl State {
             logbuf_updated: false,
             submit_buf: widget_handle(submit_buf),
             text_area: widget_handle(text_area),
-            combo_state: widget_handle(Combo::new(ctx.new_popup("Combo Box Popup"))),
+            combo_state: widget_handle(Combo::new(combo_popup)),
             combo_items: [
                 widget_handle(ListItem::new("Apple")),
                 widget_handle(ListItem::new("Banana")),
@@ -947,19 +975,23 @@ impl State {
             tree_labels: [static_label("Hello"), static_label("world")],
             background_labels: [static_label("Red:"), static_label("Green:"), static_label("Blue:")],
             style,
-            demo_window: Some(ctx.new_window("Demo Window", rect(40, 40, 300, 450))),
-            style_window: Some(ctx.new_window("Style Editor", rect(350, 250, 300, 240))),
-            log_window: Some(ctx.new_window("Log Window", rect(350, 40, 300, 200))),
-            popup_window: Some(ctx.new_popup("Test Popup")),
+            demo_root,
+            style_root,
+            log_root,
+            combo_popup_root,
+            popup_root,
+            typography_root,
+            triangle_root,
+            graphics_root,
+            falloff_root,
+            suzanne_root,
+            stack_direction_root,
+            weight_root,
+            demo_window: ctx.root_handle(demo_root).expect("demo root window missing"),
+            log_window: ctx.root_handle(log_root).expect("log root window missing"),
+            popup_window: ctx.root_handle(popup_root).expect("popup root window missing"),
             log_output: Some(ctx.new_panel("Log Output")),
-            typography_window: Some(ctx.new_window("Typography Demo", rect(40, 500, 300, 170))),
-            triangle_window: Some(ctx.new_window("Triangle Window", rect(200, 100, 200, 200))),
-            graphics_window: Some(ctx.new_window("Graphics Window", rect(820, 40, 280, 240))),
-            falloff_window: Some(ctx.new_window("Brush Falloff", rect(820, 300, 320, 260))),
-            suzanne_window: Some(ctx.new_window("Suzanne Window", rect(220, 220, 300, 300))),
-            stack_direction_window: Some(ctx.new_window("Stack Direction Demo", rect(530, 40, 280, 220))),
-            weight_window: Some(ctx.new_window("Weight Demo", rect(530, 270, 280, 260))),
-            dialog_window: Some(FileDialogState::new(ctx)),
+            dialog_window: FileDialogState::new(ctx),
             fps: 0.0,
             last_frame: Instant::now(),
             window_header: widget_handle(Node::header("Window Info", NodeStateValue::Closed)),
@@ -1049,7 +1081,23 @@ impl State {
             popup_tree: WidgetTree::default(),
         };
         state.rebuild_trees();
+        state.install_root_trees(ctx);
         state
+    }
+
+    fn install_root_trees(&mut self, ctx: &mut Context<BackendRenderer>) {
+        ctx.set_root_tree(self.style_root, mem::take(&mut self.style_tree));
+        ctx.set_root_tree(self.log_root, mem::take(&mut self.log_tree));
+        ctx.set_root_tree(self.typography_root, mem::take(&mut self.typography_tree));
+        ctx.set_root_tree(self.triangle_root, mem::take(&mut self.triangle_tree));
+        ctx.set_root_tree(self.graphics_root, mem::take(&mut self.graphics_tree));
+        ctx.set_root_tree(self.falloff_root, mem::take(&mut self.falloff_tree));
+        ctx.set_root_tree(self.suzanne_root, mem::take(&mut self.suzanne_tree));
+        ctx.set_root_tree(self.stack_direction_root, mem::take(&mut self.stack_direction_tree));
+        ctx.set_root_tree(self.weight_root, mem::take(&mut self.weight_tree));
+        ctx.set_root_tree(self.demo_root, mem::take(&mut self.demo_tree));
+        ctx.set_root_tree(self.combo_popup_root, mem::take(&mut self.combo_tree));
+        ctx.set_root_tree(self.popup_root, mem::take(&mut self.popup_tree));
     }
 
     fn write_log(&mut self, text: &str) {
@@ -1514,13 +1562,6 @@ impl State {
         self.style_value_sliders[3].borrow_mut().value = self.style.thumb_size as Real;
         self.style_value_sliders[4].borrow_mut().value = self.style.scrollbar_size as Real;
 
-        ctx.window(
-            &mut self.style_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            &self.style_tree,
-        );
-
         for (color, sliders) in self.style.colors.iter_mut().zip(self.style_color_sliders.chunks_exact(4)) {
             color.r = sliders[0].borrow().value as u8;
             color.g = sliders[1].borrow().value as u8;
@@ -1540,12 +1581,6 @@ impl State {
 
     fn log_window(&mut self, ctx: &mut Context<BackendRenderer>) {
         self.log_text.borrow_mut().text = self.logbuf.borrow().clone();
-        ctx.window(
-            &mut self.log_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            &self.log_tree,
-        );
 
         if self.logbuf_updated {
             let mut log_output = self.log_output.as_mut().unwrap().clone();
@@ -1563,7 +1598,7 @@ impl State {
             let submit_buf_out = results.state_of_handle(&self.submit_buf);
             let submit_btn_out = results.state_of_handle(&self.submit_button);
             if submit_buf_out.is_submitted() {
-                self.log_window.as_mut().unwrap().set_focus(Some(widget_id_of_handle(&self.submit_buf)));
+                self.log_window.set_focus_handle(&self.submit_buf);
                 submitted = true;
             }
             if submit_btn_out.is_submitted() {
@@ -1578,78 +1613,18 @@ impl State {
         }
     }
 
-    fn typography_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        if self.typography_window.is_none() {
-            return;
-        }
-        ctx.window(
-            &mut self.typography_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            &self.typography_tree,
-        );
-    }
+    fn typography_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
 
-    fn triangle_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        if self.triangle_window.is_none() {
-            return;
-        }
-        ctx.window(
-            &mut self.triangle_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            &self.triangle_tree,
-        );
-    }
+    fn triangle_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
 
-    fn suzanne_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        if self.suzanne_window.is_none() {
-            return;
-        }
-        ctx.window(
-            &mut self.suzanne_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            &self.suzanne_tree,
-        );
-    }
+    fn suzanne_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
 
-    fn graphics_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        if self.graphics_window.is_none() {
-            return;
-        }
-        ctx.window(
-            &mut self.graphics_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            &self.graphics_tree,
-        );
-    }
+    fn graphics_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
 
-    fn falloff_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        if self.falloff_window.is_none() {
-            return;
-        }
-        ctx.window(
-            &mut self.falloff_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            &self.falloff_tree,
-        );
-    }
+    fn falloff_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
 
     fn stack_direction_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        if self.stack_direction_window.is_none() {
-            return;
-        }
-
         let mut logs: Vec<&'static str> = Vec::new();
-        ctx.window(
-            &mut self.stack_direction_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            &self.stack_direction_tree,
-        );
 
         let results = ctx.committed_results();
         if results.state_of_handle(&self.stack_direction_buttons[0]).is_submitted() {
@@ -1677,17 +1652,7 @@ impl State {
     }
 
     fn weight_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        if self.weight_window.is_none() {
-            return;
-        }
-
         let mut logs: Vec<&'static str> = Vec::new();
-        ctx.window(
-            &mut self.weight_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            &self.weight_tree,
-        );
 
         let results = ctx.committed_results();
         if results.state_of_handle(&self.weight_buttons[0]).is_submitted() {
@@ -1725,7 +1690,7 @@ impl State {
 
     fn test_window(&mut self, ctx: &mut Context<BackendRenderer>) {
         {
-            let window = self.demo_window.as_mut().unwrap();
+            let window = &mut self.demo_window;
             let mut win = window.rect();
             win.width = win.width.max(240);
             win.height = win.height.max(300);
@@ -1748,13 +1713,6 @@ impl State {
             swatch.fill = color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255);
             swatch.label = format!("#{:02X}{:02X}{:02X}", swatch.fill.r, swatch.fill.g, swatch.fill.b);
         }
-
-        ctx.window(
-            &mut self.demo_window.as_mut().unwrap().clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            &self.demo_tree,
-        );
 
         let mut button_logs: Vec<&'static str> = Vec::new();
         let mut tree_logs: Vec<&'static str> = Vec::new();
@@ -1815,10 +1773,12 @@ impl State {
 
         let mut popup = self.combo_state.borrow().popup.clone();
         if self.combo_state.borrow().is_open() {
-            ctx.open_popup_at(&mut popup, combo_anchor);
+            ctx.set_root_visible(self.combo_popup_root, true);
+            popup.set_rect(combo_anchor);
+        } else {
+            ctx.set_root_visible(self.combo_popup_root, false);
         }
 
-        ctx.popup(&mut popup, ScrollBehavior::NO_SCROLL, &self.combo_tree);
         let combo_log = {
             let results = ctx.committed_results();
             let mut selected_label = None;
@@ -1837,14 +1797,12 @@ impl State {
 
         if self.open_popup {
             let popup_width = (self.style.default_cell_width + self.style.padding.max(0) * 2).max(80);
-            let popup = self.popup_window.as_mut().unwrap();
-            ctx.open_popup(popup);
-            popup.set_size(&Dimensioni::new(popup_width, 1));
+            ctx.set_root_visible(self.popup_root, true);
+            self.popup_window.set_size(&Dimensioni::new(popup_width, 1));
             self.open_popup = false;
         }
 
         let mut popup_logs: Vec<&'static str> = Vec::new();
-        ctx.popup(&mut self.popup_window.as_mut().unwrap().clone(), ScrollBehavior::NO_SCROLL, &self.popup_tree);
         {
             let results = ctx.committed_results();
             if results.state_of_handle(&self.popup_buttons[0]).is_submitted() {
@@ -1863,13 +1821,13 @@ impl State {
 
     fn dialog(&mut self, ctx: &mut Context<BackendRenderer>) {
         if self.open_dialog {
-            self.dialog_window.as_mut().unwrap().open(ctx);
+            self.dialog_window.open(ctx);
             self.open_dialog = false;
             self.write_log("Open dialog!");
         }
 
         let dialog_result = {
-            let dialog = self.dialog_window.as_mut().unwrap();
+            let dialog = &mut self.dialog_window;
             let was_open = dialog.is_open();
             dialog.eval(ctx);
             if was_open && !dialog.is_open() {
@@ -1900,18 +1858,17 @@ impl State {
             self.fps = if self.fps == 0.0 { inst_fps } else { self.fps * 0.9 + inst_fps * 0.1 };
         }
 
-        ctx.run_ui_frame(|ctx| {
-            self.style_window(ctx);
-            self.log_window(ctx);
-            self.typography_window(ctx);
-            self.test_window(ctx);
-            self.triangle_window(ctx);
-            self.graphics_window(ctx);
-            self.falloff_window(ctx);
-            self.suzanne_window(ctx);
-            self.stack_direction_window(ctx);
-            self.weight_window(ctx);
-        })
+        self.style_window(ctx);
+        self.log_window(ctx);
+        self.typography_window(ctx);
+        self.test_window(ctx);
+        self.triangle_window(ctx);
+        self.graphics_window(ctx);
+        self.falloff_window(ctx);
+        self.suzanne_window(ctx);
+        self.stack_direction_window(ctx);
+        self.weight_window(ctx);
+        ctx.update_ui();
     }
 }
 

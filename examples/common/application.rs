@@ -117,7 +117,7 @@ impl<S> Application<S> {
             let (width, height) = self.window.size();
 
             // Start the renderer draw pass before polling events; UI traversal runs after input
-            // translation through `Context::run_ui_frame` in the user callback.
+            // translation through `Context::update_ui` in the user callback.
             self.ctx.begin_render_frame(width as i32, height as i32, color(0x7F, 0x7F, 0x7F, 255));
 
             fn map_mouse_button(sdl_mb: sdl2::mouse::MouseButton) -> microui::MouseButton {
