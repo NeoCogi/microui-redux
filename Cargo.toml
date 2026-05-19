@@ -19,6 +19,7 @@ builder = ["dep:fontdue", "dep:png"]
 png_source = ["dep:png"]
 save-to-rust = []
 prebuilt-atlas = []
+manual-drawing = []
 example-backend = []
 # Example backends are only used by examples and are wired to optional deps.
 example-glow = ["example-backend", "dep:sdl2", "dep:glow"]
@@ -79,6 +80,10 @@ required-features = ["example-backend"]
 [[example]]
 name = "texture-clipping-smoke"
 path = "examples/texture-clipping-smoke.rs"
+
+[[example]]
+name = "retained-custom-drawing"
+path = "examples/retained-custom-drawing.rs"
 
 # small size executable
 [profile.release]

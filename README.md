@@ -37,7 +37,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 
 ## Key Concepts
 - **Context**: owns the renderer handle, user input, frame results, and retained root windows. A frame has explicit phases: `begin_render_frame(...)` starts renderer work, input events are fed into the context, `update_ui()` traverses roots registered with `create_window(...)`, `create_dialog(...)`, or `create_popup(...)`, and `end_render_frame()` presents recorded root commands. `run_ui_frame(...)` remains available while migrating per-frame root submissions.
-- **Container**: the internal execution object behind windows, panels, popups, and retained tree nodes. Application code should normally work through `Context`, `WindowHandle`, `ContainerHandle`, and `WidgetTreeBuilder` instead of authoring widgets directly on a container.
+- **Container**: the internal execution object behind windows, panels, popups, and retained tree nodes. Application code should normally work through `Context`, `WindowHandle`, `ContainerHandle`, and `WidgetTreeBuilder` instead of authoring widgets directly on a container. `ContainerHandle` exposes retained state access by default; direct draw/clip/body mutation on `ContainerViewMut` is available only with the `manual-drawing` feature for debugging or migration work.
 - **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). Retained traversal keys widget interaction by stable retained node IDs; pointer-derived widget IDs remain only for compatibility helpers.
 - **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and stored in retained roots through `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)`. The compatibility APIs can still replay trees per frame through `Context::window(...)`, `Context::dialog(...)`, or `Context::popup(...)`. Tree nodes cover widgets, panels, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
@@ -45,7 +45,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override their own `font: FontChoice`.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
 
-The public API is intentionally centered on `Context`, `WindowHandle`, `ContainerHandle`, `WidgetTreeBuilder`, widget state types, style/input/image types, `Renderer`, and custom-render extension types. Low-level canvas access is available as `microui_redux::backend::Canvas` for backend tests and integrations; `Container`, retained cache internals, and rect-packing details are not part of the application authoring surface.
+The public API is intentionally centered on `Context`, `WindowHandle`, `ContainerHandle`, `WidgetTreeBuilder`, widget state types, style/input/image types, `Renderer`, and custom-render extension types. Low-level canvas access is available as `microui_redux::backend::Canvas` for backend tests and integrations; `Container`, retained cache internals, and rect-packing details are not part of the application authoring surface. Container-level manual drawing is not exported by default.
 
 ### Retained-mode migration status
 
@@ -148,7 +148,8 @@ if ctx.committed_results().state_of_handle(&image_button).is_submitted() {
 - `WidgetCtx::graphics(...)` exposes a widget-local `Graphics` builder for custom widgets and paint code.
 - The builder provides `draw_rect`, `draw_box`, `draw_text`, `draw_icon`, `draw_image`, `draw_frame`, `draw_widget_frame`, `draw_control_text`, `stroke_line`, `fill_polygon`, and local clip helpers such as `with_clip`.
 - Filled shapes and strokes are tessellated into retained triangles and clipped in software before replay, so primitive rendering stays consistent across glow, Vulkan, and WGPU backends.
-- `examples/demo-full` includes a dedicated graphics window that exercises the primitive API.
+- `examples/retained-custom-drawing` shows a retained custom widget drawing through `WidgetCtx::graphics(...)`, and `examples/demo-full` includes a larger graphics window.
+- Direct `ContainerViewMut` draw and clip methods are gated behind `manual-drawing`; retained widgets and `WidgetTreeBuilder::custom_render(...)` are the supported custom drawing paths.
 
 ## Fonts and typography
 - Atlas building supports multiple baked fonts and sizes through `builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.

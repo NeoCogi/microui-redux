@@ -294,6 +294,7 @@ impl Container {
     }
 
     /// Configures layout state for the container's client area, handling scrollbars when necessary.
+    #[cfg_attr(not(feature = "manual-drawing"), allow(dead_code))]
     pub fn push_container_body(&mut self, body: Recti, _opt: ContainerOption, scroll_behavior: ScrollBehavior) {
         self.configure_container_body(body, scroll_behavior);
         self.render_active_scrollbars();
