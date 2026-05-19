@@ -60,10 +60,10 @@ use std::{
 use crate::canvas::Canvas;
 use crate::container::Container;
 use crate::render::Renderer;
-use crate::{
-    Clip, Color, ContainerOption, ControlColor, Dimensioni, FontId, IconId, NodeId, Recti, ScrollBehavior, SlotId, TextWrap, Vec2i, Widget,
-    WidgetHandle, WidgetId, WidgetOption,
-};
+use crate::{Dimensioni, NodeId, Recti, Vec2i, Widget, WidgetHandle, WidgetId};
+
+#[cfg(feature = "manual-drawing")]
+use crate::{Clip, Color, ContainerOption, ControlColor, FontId, IconId, ScrollBehavior, SlotId, TextWrap, WidgetOption};
 
 pub(crate) type ContainerId = *const ();
 
@@ -107,6 +107,10 @@ impl<'a> ContainerView<'a> {
 }
 
 /// Mutable view into a container borrowed from a handle.
+///
+/// By default this view is for retained container state such as focus, rect, and scroll. Direct
+/// command recording and manual clip/body mutation are available only with the `manual-drawing`
+/// feature, which is intended as a debug or migration escape hatch.
 pub struct ContainerViewMut<'a> {
     inner: &'a mut Container,
 }
@@ -171,101 +175,121 @@ impl<'a> ContainerViewMut<'a> {
     }
 
     /// Pushes a new clip rectangle combined with the previous clip.
+    #[cfg(feature = "manual-drawing")]
     pub fn push_clip_rect(&mut self, rect: Recti) {
         self.inner.push_clip_rect(rect);
     }
 
     /// Restores the previous clip rectangle from the stack.
+    #[cfg(feature = "manual-drawing")]
     pub fn pop_clip_rect(&mut self) {
         self.inner.pop_clip_rect();
     }
 
     /// Returns the active clip rectangle.
+    #[cfg(feature = "manual-drawing")]
     pub fn get_clip_rect(&mut self) -> Recti {
         self.inner.get_clip_rect()
     }
 
     /// Determines whether `rect` is visible under the current clip.
+    #[cfg(feature = "manual-drawing")]
     pub fn check_clip(&mut self, rect: Recti) -> Clip {
         self.inner.check_clip(rect)
     }
 
     /// Adjusts the current clip rectangle.
+    #[cfg(feature = "manual-drawing")]
     pub fn set_clip(&mut self, rect: Recti) {
         self.inner.set_clip(rect);
     }
 
     /// Records a filled rectangle draw command.
+    #[cfg(feature = "manual-drawing")]
     pub fn draw_rect(&mut self, rect: Recti, color: Color) {
         self.inner.draw_rect(rect, color);
     }
 
     /// Records a rectangle outline.
+    #[cfg(feature = "manual-drawing")]
     pub fn draw_box(&mut self, rect: Recti, color: Color) {
         self.inner.draw_box(rect, color);
     }
 
     /// Records a text draw command.
+    #[cfg(feature = "manual-drawing")]
     pub fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
         self.inner.draw_text(font, text, pos, color);
     }
 
     /// Records an icon draw command.
+    #[cfg(feature = "manual-drawing")]
     pub fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
         self.inner.draw_icon(id, rect, color);
     }
 
     /// Records a slot draw command.
+    #[cfg(feature = "manual-drawing")]
     pub fn draw_slot(&mut self, id: SlotId, rect: Recti, color: Color) {
         self.inner.draw_slot(id, rect, color);
     }
 
     /// Draws multi-line text without wrapping.
+    #[cfg(feature = "manual-drawing")]
     pub fn text(&mut self, text: &str) {
         self.inner.text(text);
     }
 
     /// Draws multi-line text without wrapping using an explicit font.
+    #[cfg(feature = "manual-drawing")]
     pub fn text_with_font(&mut self, font: FontId, text: &str) {
         self.inner.text_with_font(font, text);
     }
 
     /// Draws multi-line text using the provided wrapping mode.
+    #[cfg(feature = "manual-drawing")]
     pub fn text_with_wrap(&mut self, text: &str, wrap: TextWrap) {
         self.inner.text_with_wrap(text, wrap);
     }
 
     /// Draws multi-line text using the provided wrapping mode and font.
+    #[cfg(feature = "manual-drawing")]
     pub fn text_with_font_wrap(&mut self, font: FontId, text: &str, wrap: TextWrap) {
         self.inner.text_with_font_wrap(font, text, wrap);
     }
 
     /// Records a standard UI frame.
+    #[cfg(feature = "manual-drawing")]
     pub fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
         self.inner.draw_frame(rect, colorid);
     }
 
     /// Records a standard widget frame.
+    #[cfg(feature = "manual-drawing")]
     pub fn draw_widget_frame(&mut self, widget_id: WidgetId, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         self.inner.draw_widget_frame(widget_id, rect, colorid, opt);
     }
 
     /// Records a standard container frame.
+    #[cfg(feature = "manual-drawing")]
     pub fn draw_container_frame(&mut self, widget_id: WidgetId, rect: Recti, colorid: ControlColor, opt: ContainerOption) {
         self.inner.draw_container_frame(widget_id, rect, colorid, opt);
     }
 
     /// Records control text using the style's body font.
+    #[cfg(feature = "manual-drawing")]
     pub fn draw_control_text(&mut self, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         self.inner.draw_control_text(text, rect, colorid, opt);
     }
 
     /// Records control text using an explicit font.
+    #[cfg(feature = "manual-drawing")]
     pub fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         self.inner.draw_control_text_with_font(font, text, rect, colorid, opt);
     }
 
     /// Configures the body rectangle for standalone panel-style drawing.
+    #[cfg(feature = "manual-drawing")]
     pub fn push_container_body(&mut self, body: Recti, opt: ContainerOption, scroll_behavior: ScrollBehavior) {
         self.inner.push_container_body(body, opt, scroll_behavior);
     }
