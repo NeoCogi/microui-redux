@@ -925,7 +925,7 @@ mod tests {
         let atlas = make_test_atlas();
         let style = Rc::new(Style::default());
         let input = Rc::new(RefCell::new(Input::default()));
-        let popup = WindowHandle::popup("combo", atlas.clone(), style.clone(), input);
+        let popup = WindowHandle::popup(RootId::from_raw(1), "combo", atlas.clone(), style.clone(), input);
         let mut combo = Combo::new(popup);
         let mut commands = Vec::new();
         let mut triangle_vertices = Vec::new();
@@ -981,7 +981,7 @@ mod tests {
         let atlas = make_test_atlas();
         let style = Rc::new(Style::default());
         let input = Rc::new(RefCell::new(Input::default()));
-        let popup = WindowHandle::popup("combo", atlas, style, input);
+        let popup = WindowHandle::popup(RootId::from_raw(1), "combo", atlas, style, input);
         let mut combo = Combo::new(popup);
         let items = ["Apple", "Banana", "Cherry"];
 

@@ -52,15 +52,11 @@
 //
 use super::*;
 use crate::{
+    context::RootId,
     widget::FrameResults,
     widget_tree::{NodeInteraction, NodeLayout, WidgetTree},
 };
-use std::{
-    cell::{Ref, RefMut},
-    sync::atomic::{AtomicUsize, Ordering},
-};
-
-static NEXT_ANONYMOUS_CHROME_SEED: AtomicUsize = AtomicUsize::new(1);
+use std::cell::{Ref, RefMut};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) struct WindowChromeIds {
@@ -72,26 +68,15 @@ pub(crate) struct WindowChromeIds {
 impl WindowChromeIds {
     pub(crate) fn from_root_seed(seed: usize) -> Self {
         Self {
-            title: chrome_node_id(ChromeNamespace::Root, seed, ChromePart::Title),
-            close: chrome_node_id(ChromeNamespace::Root, seed, ChromePart::Close),
-            resize: chrome_node_id(ChromeNamespace::Root, seed, ChromePart::Resize),
+            title: chrome_node_id(seed, ChromePart::Title),
+            close: chrome_node_id(seed, ChromePart::Close),
+            resize: chrome_node_id(seed, ChromePart::Resize),
         }
     }
 
-    fn anonymous() -> Self {
-        let seed = NEXT_ANONYMOUS_CHROME_SEED.fetch_add(1, Ordering::Relaxed);
-        Self {
-            title: chrome_node_id(ChromeNamespace::Anonymous, seed, ChromePart::Title),
-            close: chrome_node_id(ChromeNamespace::Anonymous, seed, ChromePart::Close),
-            resize: chrome_node_id(ChromeNamespace::Anonymous, seed, ChromePart::Resize),
-        }
+    fn from_root(root_id: RootId) -> Self {
+        Self::from_root_seed(root_id.raw())
     }
-}
-
-#[derive(Copy, Clone)]
-enum ChromeNamespace {
-    Root,
-    Anonymous,
 }
 
 #[derive(Copy, Clone)]
@@ -101,7 +86,7 @@ enum ChromePart {
     Resize,
 }
 
-fn chrome_node_id(namespace: ChromeNamespace, seed: usize, part: ChromePart) -> Id {
+fn chrome_node_id(seed: usize, part: ChromePart) -> Id {
     const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
 
@@ -113,10 +98,6 @@ fn chrome_node_id(namespace: ChromeNamespace, seed: usize, part: ChromePart) -> 
         hash
     }
 
-    let namespace = match namespace {
-        ChromeNamespace::Root => 0x726f_6f74_u64,
-        ChromeNamespace::Anonymous => 0x616e_6f6e_u64,
-    };
     let part = match part {
         ChromePart::Title => 1,
         ChromePart::Close => 2,
@@ -124,7 +105,7 @@ fn chrome_node_id(namespace: ChromeNamespace, seed: usize, part: ChromePart) -> 
     };
 
     let hash = write(FNV_OFFSET_BASIS, 0x6d69_6372_6f75_695f_u64);
-    let hash = write(hash, namespace);
+    let hash = write(hash, 0x726f_6f74_u64);
     let hash = write(hash, seed as u64);
     Id::new(write(hash, part))
 }
@@ -175,10 +156,6 @@ impl WindowChromeTree {
             close_state: Internal::new("!close"),
             resize_state: Internal::new("!resize"),
         }
-    }
-
-    fn set_ids(&mut self, ids: WindowChromeIds) {
-        self.ids = ids;
     }
 
     fn title_node(&self, container: &Container, opt: ContainerOption) -> Option<WindowChromeNode> {
@@ -305,9 +282,9 @@ pub(crate) enum Type {
 pub(crate) struct Window {
     pub(crate) ty: Type,
     pub(crate) win_state: WindowState,
+    root_id: RootId,
     last_root_frame: Option<usize>,
     pub(crate) main: Container,
-    pub(crate) chrome_ids: WindowChromeIds,
     chrome_tree: WindowChromeTree,
 }
 
@@ -350,49 +327,49 @@ impl Window {
     }
 
     /// Creates a dialog window that starts closed.
-    pub fn dialog(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+    pub fn dialog(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.set_rect(initial_rect);
-        let chrome_ids = WindowChromeIds::anonymous();
+        let chrome_ids = WindowChromeIds::from_root(root_id);
 
         Self {
             ty: Type::Dialog,
             win_state: WindowState::Closed,
+            root_id,
             last_root_frame: None,
             main,
-            chrome_ids,
             chrome_tree: WindowChromeTree::new(chrome_ids),
         }
     }
 
     /// Creates a standard window that starts open.
-    pub fn window(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+    pub fn window(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.set_rect(initial_rect);
-        let chrome_ids = WindowChromeIds::anonymous();
+        let chrome_ids = WindowChromeIds::from_root(root_id);
 
         Self {
             ty: Type::Window,
             win_state: WindowState::Open,
+            root_id,
             last_root_frame: None,
             main,
-            chrome_ids,
             chrome_tree: WindowChromeTree::new(chrome_ids),
         }
     }
 
     /// Creates a popup window that starts closed.
-    pub fn popup(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+    pub fn popup(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         let mut main = Container::new(name, atlas, style, input);
         main.set_rect(initial_rect);
-        let chrome_ids = WindowChromeIds::anonymous();
+        let chrome_ids = WindowChromeIds::from_root(root_id);
 
         Self {
             ty: Type::Popup,
             win_state: WindowState::Closed,
+            root_id,
             last_root_frame: None,
             main,
-            chrome_ids,
             chrome_tree: WindowChromeTree::new(chrome_ids),
         }
     }
@@ -458,6 +435,11 @@ impl Window {
     fn finish_resize(&mut self, results: &mut FrameResults, opt: ContainerOption) {
         self.chrome_tree.render_resize_handle(&mut self.main, results, opt);
     }
+
+    #[cfg(test)]
+    pub(crate) fn chrome_ids(&self) -> WindowChromeIds {
+        self.chrome_tree.ids
+    }
 }
 
 #[derive(Clone)]
@@ -465,16 +447,16 @@ impl Window {
 pub struct WindowHandle(Rc<RefCell<Window>>);
 
 impl WindowHandle {
-    pub(crate) fn window(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
-        Self(Rc::new(RefCell::new(Window::window(name, atlas, style, input, initial_rect))))
+    pub(crate) fn window(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+        Self(Rc::new(RefCell::new(Window::window(root_id, name, atlas, style, input, initial_rect))))
     }
 
-    pub(crate) fn dialog(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
-        Self(Rc::new(RefCell::new(Window::dialog(name, atlas, style, input, initial_rect))))
+    pub(crate) fn dialog(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
+        Self(Rc::new(RefCell::new(Window::dialog(root_id, name, atlas, style, input, initial_rect))))
     }
 
-    pub(crate) fn popup(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>) -> Self {
-        Self(Rc::new(RefCell::new(Window::popup(name, atlas, style, input, Recti::new(0, 0, 0, 0)))))
+    pub(crate) fn popup(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>) -> Self {
+        Self(Rc::new(RefCell::new(Window::popup(root_id, name, atlas, style, input, Recti::new(0, 0, 0, 0)))))
     }
 
     /// Returns `true` if the window's state is `Open`.
@@ -532,6 +514,10 @@ impl WindowHandle {
 
     pub(crate) fn inner<'a>(&'a self) -> Ref<'a, Window> {
         self.0.borrow()
+    }
+
+    pub(crate) fn root_id(&self) -> RootId {
+        self.inner().root_id
     }
 
     pub(crate) fn prepare_for_frame(&mut self, frame: usize) {
@@ -600,12 +586,6 @@ impl WindowHandle {
 
     pub(crate) fn reset_after_close(&mut self) {
         self.inner_mut().reset_after_close()
-    }
-
-    pub(crate) fn set_chrome_ids(&mut self, chrome_ids: WindowChromeIds) {
-        let mut inner = self.inner_mut();
-        inner.chrome_ids = chrome_ids;
-        inner.chrome_tree.set_ids(chrome_ids);
     }
 
     pub(crate) fn root_is_popup(&self) -> bool {

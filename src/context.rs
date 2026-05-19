@@ -62,6 +62,7 @@ use crate::{
     rect, Canvas, Color, Container, ContainerHandle, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode,
     MouseButton, Recti, Renderer, RendererHandle, ScrollBehavior, Style, TextureId, WidgetTree, WindowHandle,
 };
+#[cfg(test)]
 use crate::window::WindowChromeIds;
 
 #[cfg(test)]
@@ -72,6 +73,10 @@ use crate::{UNCLIPPED_RECT, Vec2i};
 pub struct RootId(usize);
 
 impl RootId {
+    pub(crate) const fn from_raw(raw: usize) -> Self {
+        Self(raw)
+    }
+
     pub(crate) fn raw(self) -> usize {
         self.0
     }
@@ -1063,6 +1068,30 @@ mod tests {
     }
 
     #[test]
+    fn compatibility_root_chrome_node_ids_are_root_derived_and_stable() {
+        let atlas = make_test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+        let mut window = ctx.new_window("legacy", rect(0, 0, 100, 70));
+        let tree = WidgetTreeBuilder::build(|tree| {
+            tree.text("body");
+        });
+
+        let root_id = window.root_id();
+        let ids = window.inner().chrome_ids();
+        assert_eq!(ids, WindowChromeIds::from_root_seed(root_id.raw()));
+
+        ctx.run_ui_frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
+        });
+        ctx.run_ui_frame(|ui| {
+            ui.window(&mut window, ContainerOption::NONE, ScrollBehavior::NONE, &tree);
+        });
+
+        assert_eq!(window.inner().chrome_ids(), ids);
+    }
+
+    #[test]
     fn retained_chrome_node_ids_are_root_derived_and_stable() {
         let atlas = make_test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
@@ -1082,9 +1111,9 @@ mod tests {
             }),
         );
 
-        let ids = ctx.root_handle(root).unwrap().inner().chrome_ids;
+        let ids = ctx.root_handle(root).unwrap().inner().chrome_ids();
         assert_eq!(ids, WindowChromeIds::from_root_seed(root.raw()));
-        assert_ne!(ids, ctx.root_handle(other).unwrap().inner().chrome_ids);
+        assert_ne!(ids, ctx.root_handle(other).unwrap().inner().chrome_ids());
 
         ctx.update_ui();
         ctx.set_root_tree(
@@ -1095,7 +1124,7 @@ mod tests {
         );
         ctx.update_ui();
 
-        assert_eq!(ctx.root_handle(root).unwrap().inner().chrome_ids, ids);
+        assert_eq!(ctx.root_handle(root).unwrap().inner().chrome_ids(), ids);
     }
 
     #[test]
@@ -1110,7 +1139,7 @@ mod tests {
                 tree.text("body");
             }),
         );
-        let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids;
+        let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids();
 
         ctx.update_ui();
 
@@ -1141,7 +1170,7 @@ mod tests {
                 tree.text("before");
             }),
         );
-        let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids;
+        let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids();
 
         ctx.update_ui();
         ctx.set_root_tree(
@@ -1167,7 +1196,7 @@ mod tests {
         assert!(moved.x > initial.x);
         assert!(moved.y > initial.y);
         assert!(ctx.committed_results().state_of_node(chrome.title).is_active());
-        assert_eq!(ctx.root_handle(root).unwrap().inner().chrome_ids, chrome);
+        assert_eq!(ctx.root_handle(root).unwrap().inner().chrome_ids(), chrome);
     }
 
     #[test]
@@ -1182,7 +1211,7 @@ mod tests {
                 tree.text("body");
             }),
         );
-        let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids;
+        let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids();
 
         let close_x = 10 + 100 - 12;
         let close_y = 10 + 6;
@@ -1219,7 +1248,7 @@ mod tests {
             }
         });
         let root = ctx.create_window("retained", rect(0, 0, 60, 40), tree);
-        let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids;
+        let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids();
 
         ctx.update_ui();
         ctx.update_ui();
@@ -1429,19 +1458,22 @@ impl<R: Renderer> Context<R> {
 
     /// Creates a new movable window rooted at the provided rectangle.
     pub fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
-        let mut window = WindowHandle::window(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone(), initial_rect);
+        let root_id = self.next_root_id();
+        let mut window = WindowHandle::window(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone(), initial_rect);
         self.bring_to_front(&mut window);
         window
     }
 
     /// Creates a modal dialog window.
     pub fn new_dialog(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
-        WindowHandle::dialog(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone(), initial_rect)
+        let root_id = self.next_root_id();
+        WindowHandle::dialog(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone(), initial_rect)
     }
 
     /// Creates a popup window that appears under the mouse cursor.
     pub fn new_popup(&mut self, name: &str) -> WindowHandle {
-        WindowHandle::popup(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone())
+        let root_id = self.next_root_id();
+        WindowHandle::popup(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone())
     }
 
     /// Creates a standalone panel that can be embedded inside other windows.
@@ -1450,7 +1482,7 @@ impl<R: Renderer> Context<R> {
     }
 
     fn next_root_id(&mut self) -> RootId {
-        let id = RootId(self.next_root_id);
+        let id = RootId::from_raw(self.next_root_id);
         self.next_root_id = self.next_root_id.checked_add(1).expect("retained root id counter overflowed");
         id
     }
@@ -1458,14 +1490,13 @@ impl<R: Renderer> Context<R> {
     fn register_root(
         &mut self,
         kind: RootKind,
-        mut handle: WindowHandle,
+        handle: WindowHandle,
         tree: WidgetTree,
         opt: ContainerOption,
         scroll_behavior: ScrollBehavior,
         visible: bool,
     ) -> RootId {
-        let id = self.next_root_id();
-        handle.set_chrome_ids(WindowChromeIds::from_root_seed(id.raw()));
+        let id = handle.root_id();
         self.retained_roots.push(RootEntry {
             id,
             handle,
