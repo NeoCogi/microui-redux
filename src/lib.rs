@@ -101,6 +101,8 @@ mod rect_packer;
 mod render;
 mod scrollbar;
 mod style;
+#[cfg(test)]
+mod test_support;
 mod text_layout;
 mod widget;
 mod widget_ctx;

@@ -61,7 +61,7 @@ impl Container {
         let widget_id = widget.widget_id();
         let retained_id = self.retained_id_for_node(node_id);
         let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
-        let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
+        let mut ctx = self.widget_ctx_for(retained_id, rect, input);
         let res = widget.update(&mut ctx, &control);
         results.record_retained_with_context(retained_id, node_id, widget_id, res, dispatch_site);
         (control, res)
@@ -75,9 +75,8 @@ impl Container {
         input: Option<Rc<InputSnapshot>>,
         control: &ControlState,
     ) {
-        let widget_id = widget.widget_id();
         let retained_id = self.retained_id_for_node(node_id);
-        let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
+        let mut ctx = self.widget_ctx_for(retained_id, rect, input);
         widget.paint(&mut ctx, control);
     }
 
@@ -87,18 +86,16 @@ impl Container {
         let focus_policy = widget.focus_policy();
         let retained_id = self.retained_id_for_node(node_id);
         let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
-        let widget_id = node_id.raw() as WidgetId;
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
-        let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
+        let mut ctx = self.widget_ctx_for(retained_id, rect, input);
         let res = widget.update(&mut ctx, &control);
         (control, res)
     }
 
     pub(crate) fn paint_internal_node<W: Widget + ?Sized>(&mut self, node_id: NodeId, widget: &mut W, rect: Recti, control: &ControlState) {
         let retained_id = self.retained_id_for_node(node_id);
-        let widget_id = node_id.raw() as WidgetId;
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
-        let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
+        let mut ctx = self.widget_ctx_for(retained_id, rect, input);
         widget.paint(&mut ctx, control);
     }
 
@@ -125,7 +122,7 @@ impl Container {
         };
         let retained_id = self.retained_id_for_node(node_id);
         let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
-        let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
+        let mut ctx = self.widget_ctx_for(retained_id, rect, input);
         let res = {
             let mut state = handle.borrow_mut();
             state.update(&mut ctx, &control)
@@ -142,12 +139,8 @@ impl Container {
         input: Option<Rc<InputSnapshot>>,
         control: &ControlState,
     ) {
-        let widget_id = {
-            let state = handle.borrow();
-            widget_id_of(&*state)
-        };
         let retained_id = self.retained_id_for_node(node_id);
-        let mut ctx = self.widget_ctx_for(widget_id, retained_id, rect, input);
+        let mut ctx = self.widget_ctx_for(retained_id, rect, input);
         let mut state = handle.borrow_mut();
         state.paint(&mut ctx, control);
     }

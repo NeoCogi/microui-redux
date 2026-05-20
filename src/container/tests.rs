@@ -50,66 +50,12 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-#![allow(deprecated)]
-
 use super::*;
-use crate::{AtlasSource, FontEntry, SourceFormat};
+use crate::test_support::test_atlas;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
-
-const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
-
-fn make_test_atlas() -> AtlasHandle {
-    let pixels: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
-    let icons: Vec<(&str, Recti)> = ICON_NAMES.iter().map(|name| (*name, Recti::new(0, 0, 1, 1))).collect();
-    let entries = vec![
-        (
-            '_',
-            CharEntry {
-                offset: Vec2i::new(0, 0),
-                advance: Vec2i::new(8, 0),
-                rect: Recti::new(0, 0, 1, 1),
-            },
-        ),
-        (
-            'a',
-            CharEntry {
-                offset: Vec2i::new(0, 0),
-                advance: Vec2i::new(8, 0),
-                rect: Recti::new(0, 0, 1, 1),
-            },
-        ),
-        (
-            'b',
-            CharEntry {
-                offset: Vec2i::new(0, 0),
-                advance: Vec2i::new(8, 0),
-                rect: Recti::new(0, 0, 1, 1),
-            },
-        ),
-    ];
-    let fonts = vec![(
-        "default",
-        FontEntry {
-            line_size: 10,
-            baseline: 8,
-            font_size: 10,
-            entries: &entries,
-        },
-    )];
-    let source = AtlasSource {
-        width: 1,
-        height: 1,
-        pixels: &pixels,
-        icons: &icons,
-        fonts: &fonts,
-        format: SourceFormat::Raw,
-        slots: &[],
-    };
-    AtlasHandle::from(&source)
-}
 
 struct TestRenderer {
     atlas: AtlasHandle,
@@ -140,7 +86,7 @@ impl Renderer for TestRenderer {
 }
 
 fn make_container() -> Container {
-    let atlas = make_test_atlas();
+    let atlas = test_atlas();
     let input = Rc::new(RefCell::new(Input::default()));
     let mut container = Container::new("test", atlas, Rc::new(Style::default()), input);
     container.interaction.in_hover_root = true;
@@ -153,6 +99,21 @@ fn begin_test_frame(container: &mut Container, body: Recti) {
     container.rect = body;
     container.content_size = Dimensioni::default();
     container.push_container_body(body, ContainerOption::NONE, ScrollBehavior::NONE);
+}
+
+fn update_control_for_widget<W: Widget + ?Sized>(container: &mut Container, node_id: NodeId, rect: Recti, state: &W) -> ControlState {
+    container.update_control_for_node(
+        node_id,
+        rect,
+        state.effective_widget_opt(),
+        state.effective_scroll_behavior(),
+        state.focus_policy(),
+    )
+}
+
+fn widget_ctx_for_node<'a>(container: &'a mut Container, node_id: NodeId, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'a> {
+    let interaction_id = container.retained_id_for_node(node_id);
+    container.widget_ctx_for(interaction_id, rect, input)
 }
 
 fn make_panel_handle(container: &Container, name: &str) -> ContainerHandle {
@@ -282,16 +243,16 @@ fn textbox_left_moves_over_multibyte() {
     let mut container = make_container();
     let input = container.input.clone();
     let mut state = Textbox::new("a\u{1F600}b");
-    let textbox_id = widget_id_of(&state);
-    container.set_focus(Some(textbox_id));
+    let textbox_id = NodeId::new(0x1001);
+    container.set_focus_node(textbox_id);
     state.cursor = 5;
 
     input.borrow_mut().keydown_code(KeyCode::LEFT);
     let rect = container.layout.next();
     let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.scroll_behavior);
-    let control = container.update_control(textbox_id, rect, &control_state);
+    let control = update_control_for_widget(&mut container, textbox_id, rect, &control_state);
     let input = container.snapshot_input();
-    let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
+    let mut ctx = widget_ctx_for_node(&mut container, textbox_id, rect, Some(input));
     state.update(&mut ctx, &control);
     assert_eq!(state.cursor, 1);
 }
@@ -301,16 +262,16 @@ fn textbox_backspace_removes_multibyte() {
     let mut container = make_container();
     let input = container.input.clone();
     let mut state = Textbox::new("a\u{1F600}b");
-    let textbox_id = widget_id_of(&state);
-    container.set_focus(Some(textbox_id));
+    let textbox_id = NodeId::new(0x1002);
+    container.set_focus_node(textbox_id);
     state.cursor = 5;
 
     input.borrow_mut().keydown(KeyMode::BACKSPACE);
     let rect = container.layout.next();
     let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.scroll_behavior);
-    let control = container.update_control(textbox_id, rect, &control_state);
+    let control = update_control_for_widget(&mut container, textbox_id, rect, &control_state);
     let input = container.snapshot_input();
-    let mut ctx = container.widget_ctx(textbox_id, rect, Some(input));
+    let mut ctx = widget_ctx_for_node(&mut container, textbox_id, rect, Some(input));
     state.update(&mut ctx, &control);
     assert_eq!(state.buf, "ab");
     assert_eq!(state.cursor, 1);
@@ -320,7 +281,7 @@ fn textbox_backspace_removes_multibyte() {
 fn node_run_updates_expansion_after_click() {
     let mut container = make_container();
     let mut state = Node::header("Header", NodeStateValue::Closed);
-    let node_id = widget_id_of(&state);
+    let node_id = NodeId::new(0x1003);
     let rect = container.layout.next();
     let control = ControlState {
         hovered: true,
@@ -329,7 +290,7 @@ fn node_run_updates_expansion_after_click() {
         active: true,
         scroll_delta: None,
     };
-    let mut ctx = container.widget_ctx(node_id, rect, None);
+    let mut ctx = widget_ctx_for_node(&mut container, node_id, rect, None);
     let res = state.update(&mut ctx, &control);
 
     assert!(res.is_changed());
@@ -341,11 +302,11 @@ fn clicking_away_does_not_refocus_stale_hover_widget() {
     let mut container = make_container();
     let input = container.input.clone();
     let button = Button::new("A");
-    let button_id = widget_id_of(&button);
+    let button_id = NodeId::new(0x1004);
     let button_rect = rect(0, 0, 50, 20);
 
     input.borrow_mut().mousemove(10, 10);
-    let control = container.update_control(button_id, button_rect, &button);
+    let control = update_control_for_widget(&mut container, button_id, button_rect, &button);
     assert!(control.hovered);
     assert!(!control.focused);
 
@@ -355,7 +316,7 @@ fn clicking_away_does_not_refocus_stale_hover_widget() {
         input.mousedown(80, 10, MouseButton::LEFT);
         input.mouseup(80, 10, MouseButton::LEFT);
     }
-    let control = container.update_control(button_id, button_rect, &button);
+    let control = update_control_for_widget(&mut container, button_id, button_rect, &button);
     assert!(!control.hovered);
     assert!(!control.focused);
 }
@@ -365,10 +326,10 @@ fn focus_policy_holds_focus_without_hold_focus_widget_option() {
     let mut container = make_container();
     let focused = Rc::new(Cell::new(false));
     let probe = FocusProbe::new(focused);
-    let probe_id = widget_id_of(&probe);
-    container.set_focus(Some(probe_id));
+    let probe_id = NodeId::new(0x1005);
+    container.set_focus_node(probe_id);
 
-    let control = container.update_control(probe_id, rect(0, 0, 50, 20), &probe);
+    let control = update_control_for_widget(&mut container, probe_id, rect(0, 0, 50, 20), &probe);
 
     assert!(control.focused);
     assert!(!probe.widget_opt().is_holding_focus());
@@ -1096,7 +1057,7 @@ fn parent_widgets_are_only_blocked_while_mouse_is_inside_active_child_rect() {
     let blocked_button = Button::new("blocked");
     input.borrow_mut().mousemove(10, 10);
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
-    let blocked = parent.update_control(widget_id_of(&blocked_button), rect(0, 0, 40, 20), &blocked_button);
+    let blocked = update_control_for_widget(&mut parent, NodeId::new(0x1006), rect(0, 0, 40, 20), &blocked_button);
     assert!(!blocked.hovered);
     parent.widget_tree(&mut results, &tree);
     parent.finish();
@@ -1104,7 +1065,7 @@ fn parent_widgets_are_only_blocked_while_mouse_is_inside_active_child_rect() {
     let free_button = Button::new("free");
     input.borrow_mut().mousemove(75, 10);
     begin_test_frame(&mut parent, rect(0, 0, 100, 20));
-    let free = parent.update_control(widget_id_of(&free_button), rect(60, 0, 30, 20), &free_button);
+    let free = update_control_for_widget(&mut parent, NodeId::new(0x1007), rect(60, 0, 30, 20), &free_button);
     assert!(free.hovered);
 }
 

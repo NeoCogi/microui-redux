@@ -174,27 +174,6 @@ impl RetainedId {
     pub fn root_node(root_id: RootId, node_id: Id) -> Self {
         Self::scoped_node(Id::new(root_id.raw() as u64), node_id)
     }
-
-    pub(crate) fn compat_widget(widget_id: WidgetId) -> Self {
-        Self::Node(compat_widget_node_id(widget_id))
-    }
-}
-
-fn compat_widget_node_id(widget_id: WidgetId) -> Id {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    fn write(mut hash: u64, value: u64) -> u64 {
-        for byte in value.to_le_bytes() {
-            hash ^= byte as u64;
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
-        hash
-    }
-
-    let hash = write(FNV_OFFSET_BASIS, 0x6d69_6372_6f75_695f_u64);
-    let hash = write(hash, 0x6c65_6761_6379_5f77_u64);
-    Id::new(write(hash, widget_id as usize as u64))
 }
 
 pub(crate) fn widget_id_of<W: Widget + ?Sized>(widget: &W) -> WidgetId {
@@ -327,25 +306,7 @@ impl FrameResults {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn committed_and_current_generation_views_are_explicit() {
-        let committed_id = Id::new(1);
-        let current_id = Id::new(2);
-
-        let mut results = FrameResults::default();
-        results.record_node_with_context(RetainedId::node(committed_id), committed_id, ResourceState::SUBMIT, "committed");
-        results.finish_frame();
-        results.begin_frame();
-        results.record_node_with_context(RetainedId::node(current_id), current_id, ResourceState::CHANGE, "current");
-
-        assert!(results.committed().state_of_node(committed_id).is_submitted());
-        assert!(results.current().state_of_node(committed_id).is_none());
-        assert!(results.current().state_of_node(current_id).is_changed());
-    }
-}
+mod tests;
 
 impl Widget for (WidgetOption, ScrollBehavior) {
     fn widget_opt(&self) -> &WidgetOption {
