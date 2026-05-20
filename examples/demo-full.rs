@@ -1183,6 +1183,10 @@ impl State {
         results.state_of_retained(RetainedId::root_node(root, node_id)).is_submitted()
     }
 
+    fn remember_widget<W: Widget + 'static>(tree: &mut WidgetTreeBuilder, slot: &mut NodeId, handle: &WidgetHandle<W>) {
+        *slot = tree.widget(handle.clone());
+    }
+
     fn rebuild_trees(&mut self) {
         let style_color_labels = self.style_color_labels.clone();
         let style_color_sliders = self.style_color_sliders.clone();
@@ -1237,8 +1241,8 @@ impl State {
                 });
             });
             tree.row(&submit_row, SizePolicy::Auto, |tree| {
-                submit_buf_id = tree.widget(submit_buf.clone());
-                submit_button_id = tree.widget(submit_button.clone());
+                Self::remember_widget(tree, &mut submit_buf_id, &submit_buf);
+                Self::remember_widget(tree, &mut submit_button_id, &submit_button);
             });
         });
         self.submit_buf_id = submit_buf_id;
@@ -1377,16 +1381,16 @@ impl State {
             tree.row(&columns, SizePolicy::Fixed(120), |tree| {
                 tree.column(|tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, |tree| {
-                        stack_direction_button_ids[0] = tree.widget(button_top_0.clone());
-                        stack_direction_button_ids[1] = tree.widget(button_top_1.clone());
-                        stack_direction_button_ids[2] = tree.widget(button_top_2.clone());
+                        Self::remember_widget(tree, &mut stack_direction_button_ids[0], &button_top_0);
+                        Self::remember_widget(tree, &mut stack_direction_button_ids[1], &button_top_1);
+                        Self::remember_widget(tree, &mut stack_direction_button_ids[2], &button_top_2);
                     });
                 });
                 tree.column(|tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::BottomToTop, |tree| {
-                        stack_direction_button_ids[3] = tree.widget(button_bottom_0.clone());
-                        stack_direction_button_ids[4] = tree.widget(button_bottom_1.clone());
-                        stack_direction_button_ids[5] = tree.widget(button_bottom_2.clone());
+                        Self::remember_widget(tree, &mut stack_direction_button_ids[3], &button_bottom_0);
+                        Self::remember_widget(tree, &mut stack_direction_button_ids[4], &button_bottom_1);
+                        Self::remember_widget(tree, &mut stack_direction_button_ids[5], &button_bottom_2);
                     });
                 });
             });
@@ -1416,9 +1420,9 @@ impl State {
                 tree.widget(row_weight_label.clone());
             });
             tree.row(&row, SizePolicy::Fixed(28), |tree| {
-                weight_button_ids[0] = tree.widget(button_row_0.clone());
-                weight_button_ids[1] = tree.widget(button_row_1.clone());
-                weight_button_ids[2] = tree.widget(button_row_2.clone());
+                Self::remember_widget(tree, &mut weight_button_ids[0], &button_row_0);
+                Self::remember_widget(tree, &mut weight_button_ids[1], &button_row_1);
+                Self::remember_widget(tree, &mut weight_button_ids[2], &button_row_2);
             });
             tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |tree| {
                 tree.widget(grid_weight_label.clone());
@@ -1426,12 +1430,12 @@ impl State {
             tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |tree| {
                 tree.column(|tree| {
                     tree.grid(&cols, &rows, |tree| {
-                        weight_button_ids[3] = tree.widget(button_grid_0.clone());
-                        weight_button_ids[4] = tree.widget(button_grid_1.clone());
-                        weight_button_ids[5] = tree.widget(button_grid_2.clone());
-                        weight_button_ids[6] = tree.widget(button_grid_3.clone());
-                        weight_button_ids[7] = tree.widget(button_grid_4.clone());
-                        weight_button_ids[8] = tree.widget(button_grid_5.clone());
+                        Self::remember_widget(tree, &mut weight_button_ids[3], &button_grid_0);
+                        Self::remember_widget(tree, &mut weight_button_ids[4], &button_grid_1);
+                        Self::remember_widget(tree, &mut weight_button_ids[5], &button_grid_2);
+                        Self::remember_widget(tree, &mut weight_button_ids[6], &button_grid_3);
+                        Self::remember_widget(tree, &mut weight_button_ids[7], &button_grid_4);
+                        Self::remember_widget(tree, &mut weight_button_ids[8], &button_grid_5);
                     });
                 });
             });
@@ -1443,7 +1447,7 @@ impl State {
         self.combo_tree = WidgetTreeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                 for (index, item) in combo_items.iter().enumerate() {
-                    combo_item_ids[index] = tree.widget(item.clone());
+                    Self::remember_widget(tree, &mut combo_item_ids[index], item);
                 }
             });
         });
@@ -1454,7 +1458,7 @@ impl State {
         self.popup_tree = WidgetTreeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                 for (index, button) in popup_buttons.iter().enumerate() {
-                    popup_button_ids[index] = tree.widget(button.clone());
+                    Self::remember_widget(tree, &mut popup_button_ids[index], button);
                 }
             });
         });
@@ -1524,18 +1528,18 @@ impl State {
             Self::section(tree, &test_buttons_header, |tree| {
                 tree.row(&button_widths, SizePolicy::Auto, |tree| {
                     tree.widget(test_label0.clone());
-                    test_button_ids[0] = tree.widget(button0.clone());
-                    test_button_ids[1] = tree.widget(button1.clone());
+                    Self::remember_widget(tree, &mut test_button_ids[0], &button0);
+                    Self::remember_widget(tree, &mut test_button_ids[1], &button1);
                 });
                 tree.row(&button_widths, SizePolicy::Auto, |tree| {
                     tree.widget(test_label1.clone());
-                    test_button_ids[2] = tree.widget(button2.clone());
-                    test_button_ids[3] = tree.widget(button3.clone());
+                    Self::remember_widget(tree, &mut test_button_ids[2], &button2);
+                    Self::remember_widget(tree, &mut test_button_ids[3], &button3);
                 });
                 tree.row(&button_widths, SizePolicy::Auto, |tree| {
                     tree.widget(test_label2.clone());
-                    test_button_ids[4] = tree.widget(button4.clone());
-                    test_button_ids[5] = tree.widget(button5.clone());
+                    Self::remember_widget(tree, &mut test_button_ids[4], &button4);
+                    Self::remember_widget(tree, &mut test_button_ids[5], &button5);
                 });
             });
 
@@ -1554,18 +1558,18 @@ impl State {
                                 tree.widget(tree_label_world.clone());
                             });
                             tree.tree_node(test1b_tn.clone(), |tree| {
-                                tree_button_ids[0] = tree.widget(tree_button0.clone());
-                                tree_button_ids[1] = tree.widget(tree_button1.clone());
+                                Self::remember_widget(tree, &mut tree_button_ids[0], &tree_button0);
+                                Self::remember_widget(tree, &mut tree_button_ids[1], &tree_button1);
                             });
                         });
                         tree.tree_node(test2_tn.clone(), |tree| {
                             tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
-                                tree_button_ids[2] = tree.widget(tree_button2.clone());
-                                tree_button_ids[3] = tree.widget(tree_button3.clone());
+                                Self::remember_widget(tree, &mut tree_button_ids[2], &tree_button2);
+                                Self::remember_widget(tree, &mut tree_button_ids[3], &tree_button3);
                             });
                             tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
-                                tree_button_ids[4] = tree.widget(tree_button4.clone());
-                                tree_button_ids[5] = tree.widget(tree_button5.clone());
+                                Self::remember_widget(tree, &mut tree_button_ids[4], &tree_button4);
+                                Self::remember_widget(tree, &mut tree_button_ids[5], &tree_button5);
                             });
                         });
                         tree.tree_node(test3_tn.clone(), |tree| {

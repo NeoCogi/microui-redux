@@ -97,7 +97,7 @@ impl Container {
         }
         self.draw.commands = commands;
 
-        self.draw.triangle_vertices.clear();
+        self.draw.clear_triangle_vertices();
     }
 
     fn render_batch<R, I>(canvas: &mut Canvas<R>, triangle_vertices: &[Vertex], commands: I)
@@ -151,13 +151,7 @@ impl Container {
     }
 
     fn draw_ctx(&mut self) -> DrawCtx<'_> {
-        DrawCtx::new(
-            &mut self.draw.commands,
-            &mut self.draw.triangle_vertices,
-            &mut self.draw.clip_stack,
-            self.style.as_ref(),
-            &self.atlas,
-        )
+        self.draw.ctx(self.style.as_ref(), &self.atlas)
     }
 
     /// Pushes a new clip rectangle combined with the previous clip.

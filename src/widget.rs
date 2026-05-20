@@ -129,9 +129,6 @@ pub trait Widget {
     }
 }
 
-/// Internal raw pointer identity used only for duplicate widget-handle dispatch checks.
-pub(crate) type WidgetId = *const ();
-
 /// Retained interaction identity used by focus, hover, and frame results.
 ///
 /// Normal retained traversal uses `Node` identities. `Root` is available for root-level results
@@ -176,13 +173,9 @@ impl RetainedId {
     }
 }
 
-pub(crate) fn widget_id_of<W: Widget + ?Sized>(widget: &W) -> WidgetId {
-    widget as *const W as *const ()
-}
-
 /// Per-frame widget interaction results keyed by retained identity.
 ///
-/// Retained nodes are the primary storage. Widget-pointer identities are kept only internally to
+/// Retained nodes are the primary storage. Widget handle identities are kept only internally to
 /// catch duplicate `WidgetHandle` dispatch in a single frame.
 ///
 /// The storage is split into two generations:
@@ -193,7 +186,7 @@ pub(crate) struct FrameResults {
     committed: HashMap<RetainedId, ResourceState>,
     current: HashMap<RetainedId, ResourceState>,
     current_dispatch_sites: HashMap<RetainedId, String>,
-    current_widget_dispatch_sites: HashMap<WidgetId, String>,
+    current_widget_dispatch_sites: HashMap<Id, String>,
     committed_node_ids: HashMap<Id, RetainedId>,
     current_node_ids: HashMap<Id, RetainedId>,
 }
@@ -251,19 +244,19 @@ impl FrameResults {
         &mut self,
         retained_id: RetainedId,
         node_id: Id,
-        widget_id: WidgetId,
+        widget_handle_id: Id,
         state: ResourceState,
         dispatch_site: impl Into<String>,
     ) {
         let dispatch_site = dispatch_site.into();
-        if let Some(first_site) = self.current_widget_dispatch_sites.get(&widget_id) {
+        if let Some(first_site) = self.current_widget_dispatch_sites.get(&widget_handle_id) {
             panic!(
-                "duplicate widget dispatch detected for widget {:p}; a WidgetHandle may only be rendered once per frame. first dispatch: {}. duplicate dispatch: {}.",
-                widget_id, first_site, dispatch_site
+                "duplicate widget dispatch detected for handle {:?}; a WidgetHandle may only be rendered once per frame. first dispatch: {}. duplicate dispatch: {}.",
+                widget_handle_id, first_site, dispatch_site
             );
         }
 
-        self.current_widget_dispatch_sites.insert(widget_id, dispatch_site.clone());
+        self.current_widget_dispatch_sites.insert(widget_handle_id, dispatch_site.clone());
         self.current_node_ids.entry(node_id).or_insert(retained_id);
         self.record_retained_id_with_context(retained_id, state, dispatch_site);
     }

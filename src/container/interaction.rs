@@ -57,14 +57,12 @@ use super::*;
 impl Container {
     /// Sets focus to a retained node.
     pub fn set_focus_node(&mut self, node_id: NodeId) {
-        self.interaction.focus = Some(self.retained_id_for_node(node_id));
-        self.interaction.updated_focus = true;
+        self.interaction.set_focus(self.retained_id_for_node(node_id));
     }
 
     /// Clears focus in this container.
     pub fn clear_focus(&mut self) {
-        self.interaction.focus = None;
-        self.interaction.updated_focus = true;
+        self.interaction.clear_focus();
     }
 
     pub(crate) fn retained_id_for_node(&self, node_id: NodeId) -> RetainedId {
@@ -99,7 +97,7 @@ impl Container {
         let in_hover_root = self.interaction.in_hover_root;
         let mouseover = self.mouse_over(rect, in_hover_root);
         if self.interaction.focus == Some(interaction_id) {
-            self.interaction.updated_focus = true;
+            self.interaction.mark_focus_seen();
         }
         if opt.is_not_interactive() {
             return ControlState::default();
@@ -115,15 +113,14 @@ impl Container {
                 pressed_outside || released_without_hold_focus
             };
             if should_clear_focus {
-                self.clear_focus();
+                self.interaction.clear_focus();
             }
         }
         if self.interaction.hover == Some(interaction_id) {
             if !mouseover {
                 self.interaction.hover = None;
             } else if !self.input.borrow().mouse_pressed.is_none() {
-                self.interaction.focus = Some(interaction_id);
-                self.interaction.updated_focus = true;
+                self.interaction.set_focus(interaction_id);
             }
         }
 
@@ -131,7 +128,7 @@ impl Container {
         if scroll_behavior.is_grab_scroll() && self.interaction.hover == Some(interaction_id) {
             if let Some(delta) = self.interaction.pending_scroll {
                 if delta.x != 0 || delta.y != 0 {
-                    self.interaction.pending_scroll = None;
+                    self.interaction.clear_pending_scroll();
                     scroll = Some(delta);
                 }
             }

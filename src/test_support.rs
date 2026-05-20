@@ -1,4 +1,4 @@
-use crate::{AtlasHandle, AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, Vec2i};
+use crate::{AtlasHandle, AtlasSource, CharEntry, Color, FontEntry, Recti, Renderer, SourceFormat, TextureId, Vec2i, Vertex};
 
 const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
 
@@ -59,4 +59,32 @@ pub(crate) fn test_atlas_with_font_sizes(fonts: &[(&str, usize)]) -> AtlasHandle
         slots: &[],
     };
     AtlasHandle::from(&source)
+}
+
+pub(crate) struct NoopRenderer {
+    pub(crate) atlas: AtlasHandle,
+}
+
+impl Renderer for NoopRenderer {
+    fn get_atlas(&self) -> AtlasHandle {
+        self.atlas.clone()
+    }
+
+    fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
+
+    fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {}
+
+    fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
+
+    fn flush(&mut self) {}
+
+    fn end(&mut self) {}
+
+    fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn destroy_texture(&mut self, _id: TextureId) {}
+
+    fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
 }

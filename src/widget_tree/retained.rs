@@ -58,9 +58,10 @@ use rs_math3d::Dimensioni;
 
 use crate::{
     atlas::AtlasHandle,
+    id::Id,
     input::{ControlState, ResourceState, ScrollBehavior, WidgetOption},
     style::Style,
-    widget::{widget_id_of, FocusPolicy, Widget, WidgetId},
+    widget::{FocusPolicy, Widget},
     widget_ctx::WidgetCtx,
     CustomRenderCommand,
 };
@@ -80,10 +81,14 @@ pub fn widget_handle<T>(value: T) -> WidgetHandle<T> {
     Rc::new(RefCell::new(value))
 }
 
+pub(crate) fn widget_handle_id<W>(handle: &WidgetHandle<W>) -> Id {
+    Id::new(Rc::as_ptr(handle) as *const () as usize as u64)
+}
+
 pub(crate) type TreeCustomRender = Rc<RefCell<Box<dyn CustomRenderCommand + 'static>>>;
 
 pub(crate) trait WidgetStateHandleDyn {
-    fn widget_id(&self) -> WidgetId;
+    fn widget_handle_id(&self) -> Id;
     fn effective_widget_opt(&self) -> WidgetOption;
     fn effective_scroll_behavior(&self) -> ScrollBehavior;
     fn focus_policy(&self) -> FocusPolicy;
@@ -98,9 +103,8 @@ struct WidgetStateHandle<W: Widget + 'static> {
 }
 
 impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
-    fn widget_id(&self) -> WidgetId {
-        let widget = self.handle.borrow();
-        widget_id_of(&*widget)
+    fn widget_handle_id(&self) -> Id {
+        widget_handle_id(&self.handle)
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {

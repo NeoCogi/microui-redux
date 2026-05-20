@@ -46,7 +46,7 @@ pub use retained::{widget_handle, WidgetHandle};
 
 pub(crate) use cache::{NodeInteraction, NodeLayout, WidgetTreeCache};
 pub(crate) use node::WidgetTreeNodeKind;
-pub(crate) use retained::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
+pub(crate) use retained::{erased_widget_state, widget_handle_id, TreeCustomRender, WidgetStateHandleDyn};
 
 #[cfg(test)]
 mod tests;

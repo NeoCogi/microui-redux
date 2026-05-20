@@ -58,12 +58,12 @@ impl Container {
         focus_policy: FocusPolicy,
         dispatch_site: String,
     ) -> (ControlState, ResourceState) {
-        let widget_id = widget.widget_id();
+        let widget_handle_id = widget.widget_handle_id();
         let retained_id = self.retained_id_for_node(node_id);
         let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
         let mut ctx = self.widget_ctx_for(retained_id, rect, input);
         let res = widget.update(&mut ctx, &control);
-        results.record_retained_with_context(retained_id, node_id, widget_id, res, dispatch_site);
+        results.record_retained_with_context(retained_id, node_id, widget_handle_id, res, dispatch_site);
         (control, res)
     }
 
@@ -116,10 +116,7 @@ impl Container {
         focus_policy: FocusPolicy,
         dispatch_site: String,
     ) -> (ControlState, ResourceState) {
-        let widget_id = {
-            let state = handle.borrow();
-            widget_id_of(&*state)
-        };
+        let widget_handle_id = widget_handle_id(handle);
         let retained_id = self.retained_id_for_node(node_id);
         let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
         let mut ctx = self.widget_ctx_for(retained_id, rect, input);
@@ -127,7 +124,7 @@ impl Container {
             let mut state = handle.borrow_mut();
             state.update(&mut ctx, &control)
         };
-        results.record_retained_with_context(retained_id, node_id, widget_id, res, dispatch_site);
+        results.record_retained_with_context(retained_id, node_id, widget_handle_id, res, dispatch_site);
         (control, res)
     }
 

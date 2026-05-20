@@ -58,7 +58,7 @@ use super::*;
 use crate::draw_context::DrawCtx;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::widget::{FocusPolicy, RetainedId};
-use crate::widget_tree::{NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
+use crate::widget_tree::{widget_handle_id, NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
 use std::cell::RefCell;
 
 mod command;
@@ -121,6 +121,38 @@ struct DrawState {
     clip_stack: Vec<Recti>,
 }
 
+impl DrawState {
+    fn clear(&mut self) {
+        self.commands.clear();
+        self.triangle_vertices.clear();
+        self.clip_stack.clear();
+    }
+
+    fn clear_commands(&mut self) {
+        self.commands.clear();
+    }
+
+    fn clear_triangle_vertices(&mut self) {
+        self.triangle_vertices.clear();
+    }
+
+    fn assert_clip_stack_empty(&self) {
+        assert!(self.clip_stack.is_empty());
+    }
+
+    fn push_raw_clip(&mut self, rect: Recti) {
+        self.clip_stack.push(rect);
+    }
+
+    fn push_command(&mut self, command: Command) {
+        self.commands.push(command);
+    }
+
+    fn ctx<'a>(&'a mut self, style: &'a Style, atlas: &'a AtlasHandle) -> DrawCtx<'a> {
+        DrawCtx::new(&mut self.commands, &mut self.triangle_vertices, &mut self.clip_stack, style, atlas)
+    }
+}
+
 #[derive(Default)]
 struct InteractionState {
     /// ID of the widget currently hovered, if any.
@@ -147,16 +179,140 @@ struct InteractionState {
     pending_scroll: Option<Vec2i>,
 }
 
+impl InteractionState {
+    fn reset_all(&mut self) {
+        self.hover = None;
+        self.focus = None;
+        self.clear_root_frame_state();
+        self.updated_focus = false;
+        self.input_snapshot = None;
+        self.popup_just_opened = false;
+    }
+
+    fn clear_root_frame_state(&mut self) {
+        self.hover_root_child = None;
+        self.hover_root_child_rect = None;
+        self.next_hover_root_child = None;
+        self.next_hover_root_child_rect = None;
+        self.in_hover_root = false;
+        self.pending_scroll = None;
+    }
+
+    fn prepare_frame(&mut self) {
+        self.input_snapshot = None;
+        self.next_hover_root_child = None;
+        self.next_hover_root_child_rect = None;
+        self.pending_scroll = None;
+    }
+
+    fn finish_frame(&mut self) {
+        if !self.updated_focus {
+            self.focus = None;
+        }
+        self.updated_focus = false;
+        self.hover_root_child = self.next_hover_root_child;
+        self.hover_root_child_rect = self.next_hover_root_child_rect;
+        self.next_hover_root_child = None;
+        self.next_hover_root_child_rect = None;
+    }
+
+    fn set_focus(&mut self, retained_id: RetainedId) {
+        self.focus = Some(retained_id);
+        self.updated_focus = true;
+    }
+
+    fn clear_focus(&mut self) {
+        self.focus = None;
+        self.updated_focus = true;
+    }
+
+    fn mark_focus_seen(&mut self) {
+        self.updated_focus = true;
+    }
+
+    fn set_next_hover_root_child(&mut self, panel_id: RetainedId, rect: Recti) {
+        self.next_hover_root_child = Some(panel_id);
+        self.next_hover_root_child_rect = Some(rect);
+    }
+
+    fn seed_pending_scroll(&mut self, delta: Option<Vec2i>) {
+        self.pending_scroll = delta;
+    }
+
+    fn take_pending_scroll(&mut self) -> Option<Vec2i> {
+        self.pending_scroll.take()
+    }
+
+    fn clear_pending_scroll(&mut self) {
+        self.pending_scroll = None;
+    }
+}
+
 #[derive(Default)]
 struct TreeState {
     /// Previous/current frame cache for tree node geometry and interaction state.
     cache: WidgetTreeCache,
 }
 
+impl TreeState {
+    fn clear(&mut self) {
+        self.cache.clear();
+    }
+
+    fn begin_frame(&mut self) {
+        self.cache.begin_frame();
+    }
+
+    fn finish_frame(&mut self) {
+        self.cache.finish_frame();
+    }
+
+    fn previous_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
+        self.cache.prev_layout(node_id).copied()
+    }
+
+    fn current_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
+        self.cache.current_layout(node_id).copied()
+    }
+
+    fn record_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
+        self.cache.record_layout(node_id, layout);
+    }
+
+    fn current_interaction(&self, node_id: NodeId) -> Option<NodeInteraction> {
+        self.cache.current_interaction(node_id).copied()
+    }
+
+    fn record_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
+        self.cache.record_interaction(node_id, interaction);
+    }
+}
+
 #[derive(Default)]
 struct PanelState {
     /// Embedded panels active in the current retained traversal.
     active: Vec<ContainerHandle>,
+}
+
+impl PanelState {
+    fn clear(&mut self) {
+        self.active.clear();
+    }
+
+    fn push(&mut self, panel: ContainerHandle) {
+        self.active.push(panel);
+    }
+
+    fn finish_active(&mut self) {
+        for panel in &mut self.active {
+            panel.finish();
+        }
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.active.len()
+    }
 }
 
 impl Container {
@@ -189,43 +345,28 @@ impl Container {
     }
 
     pub(crate) fn reset(&mut self) {
-        self.draw.commands.clear();
-        self.draw.triangle_vertices.clear();
-        self.draw.clip_stack.clear();
+        self.draw.clear();
         self.body = Recti::default();
         self.content_size = Dimensioni::default();
         self.scroll = Vec2i::default();
-        self.interaction.hover = None;
-        self.interaction.focus = None;
-        self.clear_root_frame_state();
-        self.interaction.updated_focus = false;
-        self.interaction.input_snapshot = None;
-        self.interaction.popup_just_opened = false;
+        self.interaction.reset_all();
         self.scroll_enabled = true;
         self.measurement_mode = false;
-        self.panels.active.clear();
-        self.tree.cache.clear();
+        self.panels.clear();
+        self.tree.clear();
     }
 
     pub(crate) fn clear_root_frame_state(&mut self) {
-        self.interaction.hover_root_child = None;
-        self.interaction.hover_root_child_rect = None;
-        self.interaction.next_hover_root_child = None;
-        self.interaction.next_hover_root_child_rect = None;
-        self.interaction.in_hover_root = false;
-        self.interaction.pending_scroll = None;
+        self.interaction.clear_root_frame_state();
     }
 
     pub(crate) fn prepare(&mut self) {
-        self.draw.commands.clear();
-        assert!(self.draw.clip_stack.is_empty());
-        self.panels.active.clear();
-        self.interaction.input_snapshot = None;
-        self.interaction.next_hover_root_child = None;
-        self.interaction.next_hover_root_child_rect = None;
-        self.interaction.pending_scroll = None;
+        self.draw.clear_commands();
+        self.draw.assert_clip_stack_empty();
+        self.panels.clear();
+        self.interaction.prepare_frame();
         self.scroll_enabled = true;
-        self.tree.cache.begin_frame();
+        self.tree.begin_frame();
     }
 
     pub(crate) fn measurement_scratch(&self) -> Self {
@@ -242,12 +383,12 @@ impl Container {
     }
 
     pub(crate) fn seed_pending_scroll(&mut self, delta: Option<Vec2i>) {
-        self.interaction.pending_scroll = delta;
+        self.interaction.seed_pending_scroll(delta);
     }
 
     pub(crate) fn begin_root_command_scope(&mut self, pending_scroll: Option<Vec2i>) {
         self.seed_pending_scroll(pending_scroll);
-        self.draw.clip_stack.push(UNCLIPPED_RECT);
+        self.draw.push_raw_clip(UNCLIPPED_RECT);
     }
 
     pub(crate) fn finish_root_command_scope(&mut self) {
@@ -264,18 +405,9 @@ impl Container {
 
     /// Resets transient per-frame state after widgets have been processed.
     pub fn finish(&mut self) {
-        for panel in &mut self.panels.active {
-            panel.finish();
-        }
-        if !self.interaction.updated_focus {
-            self.interaction.focus = None;
-        }
-        self.interaction.updated_focus = false;
-        self.interaction.hover_root_child = self.interaction.next_hover_root_child;
-        self.interaction.hover_root_child_rect = self.interaction.next_hover_root_child_rect;
-        self.interaction.next_hover_root_child = None;
-        self.interaction.next_hover_root_child_rect = None;
-        self.tree.cache.finish_frame();
+        self.panels.finish_active();
+        self.interaction.finish_frame();
+        self.tree.finish_frame();
     }
 
     /// Returns the outer container rectangle.
@@ -391,17 +523,17 @@ impl Container {
 
     #[cfg(test)]
     pub(crate) fn debug_push_command(&mut self, command: Command) {
-        self.draw.commands.push(command);
+        self.draw.push_command(command);
     }
 
     #[cfg(test)]
     pub(crate) fn debug_push_clip(&mut self, rect: Recti) {
-        self.draw.clip_stack.push(rect);
+        self.draw.push_raw_clip(rect);
     }
 
     #[cfg(test)]
     pub(crate) fn panel_count(&self) -> usize {
-        self.panels.active.len()
+        self.panels.len()
     }
 
     fn clamp(x: i32, a: i32, b: i32) -> i32 {

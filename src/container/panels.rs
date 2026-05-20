@@ -149,7 +149,7 @@ impl Container {
 
         if consumed {
             self.scroll = scroll;
-            self.interaction.pending_scroll = None;
+            self.interaction.clear_pending_scroll();
         }
     }
 
@@ -334,9 +334,7 @@ impl Container {
 
         let control = self
             .tree
-            .cache
             .current_interaction(spec.node_id)
-            .copied()
             .map(|interaction| interaction.control)
             .unwrap_or_default();
         self.paint_scrollbar_internal(spec, &control);
@@ -423,9 +421,21 @@ impl Container {
     fn begin_panel_layout_container(&mut self, container: &mut Container, scroll_behavior: ScrollBehavior, policy: Policy) {
         let rect = self.layout.next_with_policies(Dimensioni::default(), policy.width, policy.height);
         container.prepare();
-        container.style = self.style.clone();
         container.rect = rect;
         container.configure_container_body(rect, scroll_behavior);
+    }
+
+    fn apply_panel_base_state(&self, container: &mut Container, panel_scope: Id) {
+        container.set_internal_id_seed(panel_scope);
+        container.style = self.style.clone();
+    }
+
+    fn apply_panel_layout_state(&self, container: &mut Container, panel_scope: Id, scroll_behavior: ScrollBehavior, layout: NodeLayout) {
+        self.apply_panel_base_state(container, panel_scope);
+        container.rect = layout.rect;
+        container.body = layout.body;
+        container.content_size = layout.content_size;
+        container.scroll_enabled = !scroll_behavior.is_no_scroll();
     }
 
     pub(crate) fn begin_panel_layout(
@@ -438,7 +448,7 @@ impl Container {
     ) {
         let panel_scope = self.panel_scope_id(node_id);
         let container = &mut panel.inner_mut();
-        container.set_internal_id_seed(panel_scope);
+        self.apply_panel_base_state(container, panel_scope);
         self.begin_panel_layout_container(container, scroll_behavior, policy);
     }
 
@@ -458,7 +468,7 @@ impl Container {
     ) -> NodeLayout {
         let mut scratch = panel.inner().measurement_scratch();
         scratch.measurement_mode = true;
-        scratch.set_internal_id_seed(self.panel_scope_id(node_id));
+        self.apply_panel_base_state(&mut scratch, self.panel_scope_id(node_id));
         self.begin_panel_layout_container(&mut scratch, scroll_behavior, policy);
         scratch.layout_tree_nodes(results, children);
         Self::pop_panel_container(&mut scratch);
@@ -476,21 +486,15 @@ impl Container {
         let panel_id = self.retained_id_for_node(node_id);
         let panel_scope = self.panel_scope_id(node_id);
         if self.hit_test_rect(layout.rect, self.interaction.in_hover_root) {
-            self.interaction.next_hover_root_child = Some(panel_id);
-            self.interaction.next_hover_root_child_rect = Some(layout.rect);
+            self.interaction.set_next_hover_root_child(panel_id, layout.rect);
         }
 
         let container = &mut panel.inner_mut();
-        container.set_internal_id_seed(panel_scope);
-        container.style = self.style.clone();
-        container.rect = layout.rect;
-        container.body = layout.body;
-        container.content_size = layout.content_size;
-        container.scroll_enabled = !scroll_behavior.is_no_scroll();
+        self.apply_panel_layout_state(container, panel_scope, scroll_behavior, layout);
 
         container.interaction.in_hover_root = self.interaction.in_hover_root && self.interaction.hover_root_child == Some(panel_id);
         if self.interaction.pending_scroll.is_some() && container.interaction.in_hover_root {
-            container.interaction.pending_scroll = self.interaction.pending_scroll.take();
+            container.interaction.seed_pending_scroll(self.interaction.take_pending_scroll());
         }
         container.push_clip_rect(layout.body);
     }
@@ -501,9 +505,9 @@ impl Container {
             let mut inner = panel.inner_mut();
             inner.update_active_scrollbars();
             inner.consume_pending_scroll();
-            let pending = inner.interaction.pending_scroll.take();
+            let pending = inner.interaction.take_pending_scroll();
             if self.interaction.pending_scroll.is_none() {
-                self.interaction.pending_scroll = pending;
+                self.interaction.seed_pending_scroll(pending);
             }
         }
     }
@@ -518,12 +522,7 @@ impl Container {
     ) {
         let panel_scope = self.panel_scope_id(node_id);
         let container = &mut panel.inner_mut();
-        container.set_internal_id_seed(panel_scope);
-        container.style = self.style.clone();
-        container.rect = layout.rect;
-        container.body = layout.body;
-        container.content_size = layout.content_size;
-        container.scroll_enabled = !scroll_behavior.is_no_scroll();
+        self.apply_panel_layout_state(container, panel_scope, scroll_behavior, layout);
 
         if !opt.has_no_frame() {
             self.draw_frame(layout.rect, ControlColor::PanelBG);
@@ -535,7 +534,7 @@ impl Container {
 
     pub(crate) fn end_panel_paint(&mut self, panel: &mut ContainerHandle) {
         panel.inner_mut().pop_clip_rect();
-        self.draw.commands.push(Command::RetainedPanel { handle: panel.clone() });
-        self.panels.active.push(panel.clone())
+        self.draw.push_command(Command::RetainedPanel { handle: panel.clone() });
+        self.panels.push(panel.clone())
     }
 }
