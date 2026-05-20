@@ -206,6 +206,6 @@ pub(crate) use std::{
     rc::Rc,
 };
 pub(crate) use style::UNCLIPPED_RECT;
-pub(crate) use widget::{widget_id_of, FrameResults};
+pub(crate) use widget::FrameResults;
 pub(crate) use widget_tree::{NodeInteraction, NodeLayout, WidgetTreeCache};
 pub(crate) use widgets::Internal;

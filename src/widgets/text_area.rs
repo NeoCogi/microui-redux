@@ -54,7 +54,10 @@ use crate::*;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::text_layout::{build_text_lines, TextLine};
 
-use super::text_edit::{apply_text_input, clamp_cursor_boundary, clamp_scroll, cursor_from_x, cursor_x_in_line, line_index_for_cursor, ReturnBehavior};
+use super::text_edit::{
+    apply_text_input, caret_rect, clamp_cursor_boundary, clamp_scroll, cursor_from_x, cursor_x_in_line, font_line_metrics, line_index_for_cursor,
+    FontLineMetrics, ReturnBehavior,
+};
 
 #[derive(Clone)]
 /// Persistent state for multi-line text area widgets.
@@ -163,9 +166,7 @@ struct TextAreaLayout {
     hscroll_base: Recti,
     padding: i32,
     thumb_size: i32,
-    line_height: i32,
-    baseline: i32,
-    descent: i32,
+    metrics: FontLineMetrics,
 }
 
 fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextAreaLayout {
@@ -174,9 +175,8 @@ fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextA
     let padding = style.padding;
     let scrollbar_size = style.scrollbar_size;
     let thumb_size = style.thumb_size;
-    let line_height = ctx.atlas().get_font_height(font) as i32;
-    let baseline = ctx.atlas().get_font_baseline(font);
-    let descent = (line_height - baseline).max(0);
+    let metrics = font_line_metrics(font, ctx.atlas());
+    let line_height = metrics.line_height;
 
     let base_body = bounds;
     let mut body = base_body;
@@ -240,9 +240,7 @@ fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextA
         hscroll_base,
         padding,
         thumb_size,
-        line_height,
-        baseline,
-        descent,
+        metrics,
     }
 }
 
@@ -364,7 +362,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     if control.focused && input.mouse_pressed.is_left() && ctx.mouse_over(layout.bounds) && !clicked_scrollbar {
         let local_x = input.mouse_pos.x - (layout.body_local.x + layout.padding) + state.scroll.x;
         let local_y = input.mouse_pos.y - (layout.body_local.y + layout.padding) + state.scroll.y;
-        let line_idx = (local_y / layout.line_height).clamp(0, layout.lines.len().saturating_sub(1) as i32) as usize;
+        let line_idx = (local_y / layout.metrics.line_height).clamp(0, layout.lines.len().saturating_sub(1) as i32) as usize;
         cursor_pos = cursor_from_x(&layout.lines[line_idx], state.buf.as_str(), local_x, font, ctx.atlas());
         ensure_visible = true;
         reset_preferred = true;
@@ -384,7 +382,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     if ensure_visible && !state.dragging_x && !state.dragging_y {
         let view_width = (layout.body.width - layout.padding * 2).max(0);
         let view_height = (layout.body.height - layout.padding * 2).max(0);
-        let caret_y = cursor_line as i32 * layout.line_height;
+        let caret_y = cursor_line as i32 * layout.metrics.line_height;
         if view_width > 0 {
             if caret_x < state.scroll.x {
                 state.scroll.x = caret_x;
@@ -395,8 +393,8 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         if view_height > 0 {
             if caret_y < state.scroll.y {
                 state.scroll.y = caret_y;
-            } else if caret_y + layout.line_height > state.scroll.y + view_height {
-                state.scroll.y = caret_y + layout.line_height - view_height;
+            } else if caret_y + layout.metrics.line_height > state.scroll.y + view_height {
+                state.scroll.y = caret_y + layout.metrics.line_height - view_height;
             }
         }
     }
@@ -420,8 +418,8 @@ fn textarea_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut T
     let color = ctx.style().colors[ControlColor::Text as usize];
     ctx.push_clip_rect(layout.body);
     for (idx, line) in layout.lines.iter().enumerate() {
-        let line_top = text_origin.y + idx as i32 * layout.line_height;
-        let line_bottom = line_top + layout.line_height;
+        let line_top = text_origin.y + idx as i32 * layout.metrics.line_height;
+        let line_bottom = line_top + layout.metrics.line_height;
         if line_bottom < layout.body.y || line_top > layout.body.y + layout.body.height {
             continue;
         }
@@ -432,12 +430,9 @@ fn textarea_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut T
     }
 
     if control.focused {
-        let caret_line_top = text_origin.y + cursor_line as i32 * layout.line_height;
-        let baseline_y = caret_line_top + layout.baseline;
-        let caret_top = (baseline_y - layout.baseline + 2).max(layout.body.y).min(layout.body.y + layout.body.height);
-        let caret_bottom = (baseline_y + layout.descent - 2).max(layout.body.y).min(layout.body.y + layout.body.height);
-        let caret_height = (caret_bottom - caret_top).max(1);
-        ctx.draw_rect(rect(text_origin.x + caret_x, caret_top, 1, caret_height), color);
+        let caret_line_top = text_origin.y + cursor_line as i32 * layout.metrics.line_height;
+        let baseline_y = caret_line_top + layout.metrics.baseline;
+        ctx.draw_rect(caret_rect(text_origin.x + caret_x, baseline_y, layout.metrics, layout.body), color);
     }
     ctx.pop_clip_rect();
 

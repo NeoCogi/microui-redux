@@ -5,93 +5,14 @@ use std::{
 
 use super::*;
 use crate::{
-    container::Command, test_support::test_atlas as make_test_atlas, widget_handle, AtlasHandle, AtlasSource, CharEntry, Combo, ControlState, FontEntry,
-    ListItem, NodeId, ResourceState, RetainedId, SizePolicy, SourceFormat, StackDirection, TextBlock, Widget, WidgetCtx, WidgetHandle, WidgetOption,
-    WidgetTreeBuilder,
+    container::Command,
+    test_support::{test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer},
+    widget_handle, AtlasHandle, Combo, ControlState, ListItem, NodeId, ResourceState, RetainedId, SizePolicy, StackDirection, TextBlock, Widget, WidgetCtx,
+    WidgetHandle, WidgetOption, WidgetTreeBuilder,
 };
 
-const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
-
-struct NoopRenderer {
-    atlas: AtlasHandle,
-}
-
-impl Renderer for NoopRenderer {
-    fn get_atlas(&self) -> AtlasHandle {
-        self.atlas.clone()
-    }
-    fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
-    fn push_quad_vertices(&mut self, _v0: &crate::canvas::Vertex, _v1: &crate::canvas::Vertex, _v2: &crate::canvas::Vertex, _v3: &crate::canvas::Vertex) {}
-    fn push_triangle_vertices(&mut self, _v0: &crate::canvas::Vertex, _v1: &crate::canvas::Vertex, _v2: &crate::canvas::Vertex) {}
-    fn flush(&mut self) {}
-    fn end(&mut self) {}
-    fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
-        Ok(())
-    }
-    fn destroy_texture(&mut self, _id: TextureId) {}
-    fn draw_texture(&mut self, _id: TextureId, _vertices: [crate::canvas::Vertex; 4]) {}
-}
-
 fn make_named_font_test_atlas() -> AtlasHandle {
-    let pixels: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
-    let icons: Vec<(&str, Recti)> = ICON_NAMES.iter().map(|name| (*name, Recti::new(0, 0, 1, 1))).collect();
-    let entries = vec![
-        (
-            '_',
-            CharEntry {
-                offset: Vec2i::new(0, 0),
-                advance: Vec2i::new(8, 0),
-                rect: Recti::new(0, 0, 1, 1),
-            },
-        ),
-        (
-            'a',
-            CharEntry {
-                offset: Vec2i::new(0, 0),
-                advance: Vec2i::new(8, 0),
-                rect: Recti::new(0, 0, 1, 1),
-            },
-        ),
-    ];
-    let fonts = vec![
-        (
-            "small",
-            FontEntry {
-                line_size: 10,
-                baseline: 8,
-                font_size: 10,
-                entries: &entries,
-            },
-        ),
-        (
-            "body",
-            FontEntry {
-                line_size: 12,
-                baseline: 9,
-                font_size: 12,
-                entries: &entries,
-            },
-        ),
-        (
-            "title",
-            FontEntry {
-                line_size: 16,
-                baseline: 12,
-                font_size: 16,
-                entries: &entries,
-            },
-        ),
-    ];
-    let source = AtlasSource {
-        width: 1,
-        height: 1,
-        pixels: &pixels,
-        icons: &icons,
-        fonts: &fonts,
-        format: SourceFormat::Raw,
-        slots: &[],
-    };
-    AtlasHandle::from(&source)
+    test_atlas_with_font_sizes(&[("small", 10), ("body", 12), ("title", 16)])
 }
 
 fn panic_message(payload: Box<dyn Any + Send>) -> String {

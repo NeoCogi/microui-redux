@@ -51,39 +51,11 @@
 // IN THE SOFTWARE.
 //
 use super::*;
-use crate::test_support::test_atlas;
+use crate::test_support::{test_atlas, NoopRenderer};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
-
-struct TestRenderer {
-    atlas: AtlasHandle,
-}
-
-impl Renderer for TestRenderer {
-    fn get_atlas(&self) -> AtlasHandle {
-        self.atlas.clone()
-    }
-
-    fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
-
-    fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {}
-
-    fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
-
-    fn flush(&mut self) {}
-
-    fn end(&mut self) {}
-
-    fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn destroy_texture(&mut self, _id: TextureId) {}
-
-    fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
-}
 
 fn make_container() -> Container {
     let atlas = test_atlas();
@@ -1178,7 +1150,7 @@ fn retained_custom_render_callback_receives_content_clipped_view() {
     container.widget_tree(&mut results, &tree);
     container.pop_clip_rect();
 
-    let mut canvas = Canvas::from(RendererHandle::new(TestRenderer { atlas: container.atlas.clone() }), Dimensioni::new(120, 40));
+    let mut canvas = Canvas::from(RendererHandle::new(NoopRenderer { atlas: container.atlas.clone() }), Dimensioni::new(120, 40));
     container.render(&mut canvas);
 
     let (content_area, view) = observed.borrow().as_ref().copied().expect("custom render callback was not invoked");

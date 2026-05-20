@@ -52,7 +52,7 @@
 //
 use crate::*;
 
-use super::text_edit::{apply_text_input, clamp_cursor_boundary, ReturnBehavior};
+use super::text_edit::{apply_text_input, caret_rect, centered_line_top, clamp_cursor_boundary, cursor_from_text_x, font_line_metrics, ReturnBehavior};
 
 #[derive(Clone)]
 /// Persistent state for textbox widgets.
@@ -177,26 +177,7 @@ pub(crate) fn textbox_update(
 
     if control.focused && mouse_pressed.is_left() && ctx.mouse_over(r) {
         let click_x = mouse_pos.x - (textx - r.x);
-        if click_x <= 0 {
-            cursor_pos = 0;
-        } else {
-            let mut last_width = 0;
-            let mut new_cursor = buf.len();
-            for (idx, ch) in buf.char_indices() {
-                let next = idx + ch.len_utf8();
-                let width = ctx.atlas().get_text_size(font, &buf[..next]).width;
-                if click_x < width {
-                    if click_x < (last_width + width) / 2 {
-                        new_cursor = idx;
-                    } else {
-                        new_cursor = next;
-                    }
-                    break;
-                }
-                last_width = width;
-            }
-            cursor_pos = new_cursor.min(buf.len());
-        }
+        cursor_pos = cursor_from_text_x(buf, click_x, font, ctx.atlas());
     }
 
     cursor_pos = clamp_cursor_boundary(buf, cursor_pos);
@@ -208,19 +189,9 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, buf
     let r = ctx.rect();
     ctx.draw_widget_frame(control, r, ControlColor::Base, opt);
 
-    let line_height = ctx.atlas().get_font_height(font) as i32;
-    let baseline = ctx.atlas().get_font_baseline(font);
-    let descent = (line_height - baseline).max(0);
-
-    let mut texty = r.y + r.height / 2 - line_height / 2;
-    if texty < r.y {
-        texty = r.y;
-    }
-    let max_texty = (r.y + r.height - line_height).max(r.y);
-    if texty > max_texty {
-        texty = max_texty;
-    }
-    let baseline_y = texty + line_height - descent;
+    let metrics = font_line_metrics(font, ctx.atlas());
+    let texty = centered_line_top(r, metrics.line_height);
+    let baseline_y = texty + metrics.baseline;
 
     let text_metrics = ctx.atlas().get_text_size(font, buf);
     let padding = ctx.style().padding;
@@ -237,10 +208,7 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, buf
         let color = ctx.style().colors[ControlColor::Text as usize];
         ctx.push_clip_rect(r);
         ctx.draw_text(font, buf, vec2(textx, texty), color);
-        let caret_top = (baseline_y - baseline + 2).max(r.y).min(r.y + r.height);
-        let caret_bottom = (baseline_y + descent - 2).max(r.y).min(r.y + r.height);
-        let caret_height = (caret_bottom - caret_top).max(1);
-        ctx.draw_rect(rect(textx + caret_offset, caret_top, 1, caret_height), color);
+        ctx.draw_rect(caret_rect(textx + caret_offset, baseline_y, metrics, r), color);
         ctx.pop_clip_rect();
     } else {
         ctx.draw_control_text_with_font(font, buf, r, ControlColor::Text, opt);

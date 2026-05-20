@@ -51,7 +51,7 @@
 // IN THE SOFTWARE.
 //
 use crate::text_layout::TextLine;
-use crate::{AtlasHandle, FontId, InputSnapshot};
+use crate::{rect, AtlasHandle, FontId, InputSnapshot, Recti};
 
 pub(crate) enum ReturnBehavior {
     Submit,
@@ -63,6 +63,38 @@ pub(crate) struct TextEditOutcome {
     pub changed: bool,
     pub moved: bool,
     pub submit: bool,
+}
+
+#[derive(Copy, Clone)]
+pub(crate) struct FontLineMetrics {
+    pub line_height: i32,
+    pub baseline: i32,
+    pub descent: i32,
+}
+
+pub(crate) fn font_line_metrics(font: FontId, atlas: &AtlasHandle) -> FontLineMetrics {
+    let line_height = atlas.get_font_height(font) as i32;
+    let baseline = atlas.get_font_baseline(font);
+    let descent = (line_height - baseline).max(0);
+    FontLineMetrics { line_height, baseline, descent }
+}
+
+pub(crate) fn centered_line_top(bounds: Recti, line_height: i32) -> i32 {
+    let mut text_y = bounds.y + bounds.height / 2 - line_height / 2;
+    if text_y < bounds.y {
+        text_y = bounds.y;
+    }
+    let max_text_y = (bounds.y + bounds.height - line_height).max(bounds.y);
+    if text_y > max_text_y {
+        text_y = max_text_y;
+    }
+    text_y
+}
+
+pub(crate) fn caret_rect(x: i32, baseline_y: i32, metrics: FontLineMetrics, clip: Recti) -> Recti {
+    let caret_top = (baseline_y - metrics.baseline + 2).max(clip.y).min(clip.y + clip.height);
+    let caret_bottom = (baseline_y + metrics.descent - 2).max(clip.y).min(clip.y + clip.height);
+    rect(x, caret_top, 1, (caret_bottom - caret_top).max(1))
 }
 
 pub(crate) fn clamp_cursor_boundary(buf: &str, cursor: usize) -> usize {
@@ -236,6 +268,26 @@ pub(crate) fn cursor_from_x(line: &TextLine, buf: &str, target_x: i32, font: Fon
         last_width = width;
     }
     line.end
+}
+
+pub(crate) fn cursor_from_text_x(buf: &str, target_x: i32, font: FontId, atlas: &AtlasHandle) -> usize {
+    if target_x <= 0 {
+        return 0;
+    }
+
+    let mut last_width = 0;
+    for (idx, ch) in buf.char_indices() {
+        let next = idx + ch.len_utf8();
+        let width = atlas.get_text_size(font, &buf[..next]).width;
+        if target_x < width {
+            if target_x < (last_width + width) / 2 {
+                return idx;
+            }
+            return next;
+        }
+        last_width = width;
+    }
+    buf.len()
 }
 
 pub(crate) fn clamp_scroll(value: i32, max_value: i32) -> i32 {

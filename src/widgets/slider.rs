@@ -55,6 +55,48 @@ use std::fmt::Write;
 
 use super::textbox::{textbox_paint, textbox_update};
 
+fn number_label(value: Real, precision: usize) -> String {
+    let mut label = String::new();
+    let _ = write!(label, "{:.*}", precision, value);
+    label
+}
+
+fn number_preferred_size(
+    style: &Style,
+    atlas: &AtlasHandle,
+    font: FontChoice,
+    value: Real,
+    precision: usize,
+    visual_width: i32,
+    visual_height: i32,
+) -> Dimensioni {
+    let label = number_label(value, precision);
+    let resolved_font = style.resolve_font_choice(font);
+    let text_w = atlas.get_text_size(resolved_font, label.as_str()).width;
+    let padding = style.padding.max(0);
+    let vertical_pad = (padding / 2).max(1);
+    let font_height = atlas.get_font_height(resolved_font) as i32;
+    let width = (text_w + padding * 2 + visual_width.max(0)).max(0);
+    let height = (font_height.max(visual_height.max(0)) + vertical_pad * 2).max(0);
+    Dimensioni::new(width, height)
+}
+
+fn number_active_result(control: &ControlState, editing: bool, changed: bool) -> ResourceState {
+    if control.active || editing || changed {
+        ResourceState::ACTIVE
+    } else {
+        ResourceState::NONE
+    }
+}
+
+fn number_effective_widget_opt(opt: WidgetOption, editing: bool) -> WidgetOption {
+    if editing { opt | WidgetOption::HOLD_FOCUS } else { opt }
+}
+
+fn number_focus_policy(editing: bool) -> FocusPolicy {
+    if editing { FocusPolicy::HoldUntilBlur } else { FocusPolicy::DragCapture }
+}
+
 #[derive(Clone)]
 /// Persistent state for slider widgets.
 pub struct Slider {
@@ -110,17 +152,8 @@ impl Slider {
     }
 
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        let mut label = String::new();
-        let _ = write!(label, "{:.*}", self.precision, self.value);
-        let font = style.resolve_font_choice(self.font);
-        let text_w = atlas.get_text_size(font, label.as_str()).width;
-        let padding = style.padding.max(0);
-        let vertical_pad = (padding / 2).max(1);
-        let font_height = atlas.get_font_height(font) as i32;
         let thumb_size = style.thumb_size.max(0);
-        let width = (text_w + padding * 2 + thumb_size).max(0);
-        let height = (font_height.max(thumb_size) + vertical_pad * 2).max(0);
-        Dimensioni::new(width, height)
+        number_preferred_size(style, atlas, self.font, self.value, self.precision, thumb_size, thumb_size)
     }
 
     fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -183,8 +216,7 @@ impl Slider {
         };
         let thumb = rect(base.x + x, base.y, w, base.height);
         ctx.draw_widget_frame(control, thumb, ControlColor::Button, self.opt);
-        let mut label = String::new();
-        let _ = write!(label, "{:.*}", self.precision, self.value);
+        let label = number_label(self.value, self.precision);
         ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
     }
 }
@@ -263,9 +295,7 @@ impl Widget for Slider {
         let old_edit = self.edit.clone();
         let mut res = self.update_widget(ctx, control);
         let changed = self.value != old_value || self.edit != old_edit;
-        if control.active || self.edit.editing || changed {
-            res |= ResourceState::ACTIVE;
-        }
+        res |= number_active_result(control, self.edit.editing, changed);
         res
     }
 
@@ -274,15 +304,11 @@ impl Widget for Slider {
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
-        if self.edit.editing { self.opt | WidgetOption::HOLD_FOCUS } else { self.opt }
+        number_effective_widget_opt(self.opt, self.edit.editing)
     }
 
     fn focus_policy(&self) -> FocusPolicy {
-        if self.edit.editing {
-            FocusPolicy::HoldUntilBlur
-        } else {
-            FocusPolicy::DragCapture
-        }
+        number_focus_policy(self.edit.editing)
     }
 
     fn needs_input_snapshot(&self) -> bool {
@@ -348,16 +374,7 @@ impl Number {
     }
 
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        let mut label = String::new();
-        let _ = write!(label, "{:.*}", self.precision, self.value);
-        let font = style.resolve_font_choice(self.font);
-        let text_w = atlas.get_text_size(font, label.as_str()).width;
-        let padding = style.padding.max(0);
-        let vertical_pad = (padding / 2).max(1);
-        let font_height = atlas.get_font_height(font) as i32;
-        let width = (text_w + padding * 2).max(0);
-        let height = (font_height + vertical_pad * 2).max(0);
-        Dimensioni::new(width, height)
+        number_preferred_size(style, atlas, self.font, self.value, self.precision, 0, 0)
     }
 
     fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
@@ -386,8 +403,7 @@ impl Number {
 
         let base = ctx.rect();
         ctx.draw_widget_frame(control, base, ControlColor::Base, self.opt);
-        let mut label = String::new();
-        let _ = write!(label, "{:.*}", self.precision, self.value);
+        let label = number_label(self.value, self.precision);
         ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
     }
 }
@@ -410,9 +426,7 @@ impl Widget for Number {
         let old_edit = self.edit.clone();
         let mut res = self.update_widget(ctx, control);
         let changed = self.value != old_value || self.edit != old_edit;
-        if control.active || self.edit.editing || changed {
-            res |= ResourceState::ACTIVE;
-        }
+        res |= number_active_result(control, self.edit.editing, changed);
         res
     }
 
@@ -421,15 +435,11 @@ impl Widget for Number {
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
-        if self.edit.editing { self.opt | WidgetOption::HOLD_FOCUS } else { self.opt }
+        number_effective_widget_opt(self.opt, self.edit.editing)
     }
 
     fn focus_policy(&self) -> FocusPolicy {
-        if self.edit.editing {
-            FocusPolicy::HoldUntilBlur
-        } else {
-            FocusPolicy::DragCapture
-        }
+        number_focus_policy(self.edit.editing)
     }
 
     fn needs_input_snapshot(&self) -> bool {

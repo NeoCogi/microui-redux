@@ -84,53 +84,49 @@ impl Container {
     /// Returns the previous frame layout for `node_id`, if any.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn previous_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
-        self.tree.cache.prev_layout(node_id).copied()
+        self.tree.previous_layout(node_id)
     }
 
     /// Returns the current frame layout for `node_id`, if any.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn current_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
-        self.tree.cache.current_layout(node_id).copied()
+        self.tree.current_layout(node_id)
     }
 
     /// Stores the current frame geometry snapshot for a retained tree node.
     pub(crate) fn record_tree_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
-        self.tree.cache.record_layout(node_id, layout);
+        self.tree.record_layout(node_id, layout);
     }
 
     /// Stores the current frame control/result snapshot for a retained tree node.
     pub(crate) fn record_tree_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
-        self.tree.cache.record_interaction(node_id, interaction);
+        self.tree.record_interaction(node_id, interaction);
     }
 
     /// Returns the current frame layout for `node_id` or panics if layout was skipped.
     fn current_tree_layout_or_panic(&self, node_id: NodeId) -> NodeLayout {
         self.tree
-            .cache
             .current_layout(node_id)
-            .copied()
             .unwrap_or_else(|| panic!("tree node {:?} missing current layout", node_id))
     }
 
     /// Returns the current frame interaction for `node_id` or panics if update was skipped.
     fn current_tree_interaction_or_panic(&self, node_id: NodeId) -> NodeInteraction {
         self.tree
-            .cache
             .current_interaction(node_id)
-            .copied()
             .unwrap_or_else(|| panic!("tree node {:?} missing current interaction", node_id))
     }
 
     /// Returns whether layout included this node's children in the current frame.
     fn tree_children_were_laid_out(&self, children: &[WidgetTreeNode]) -> bool {
-        children.first().is_some_and(|child| self.tree.cache.current_layout(child.id()).is_some())
+        children.first().is_some_and(|child| self.tree.current_layout(child.id()).is_some())
     }
 
     /// Synthesizes a structural node rect by unioning the current frame bounds of its children.
     fn record_tree_group_from_children(&mut self, node_id: NodeId, children: &[WidgetTreeNode]) {
         let mut bounds: Option<Recti> = None;
         for child in children {
-            if let Some(child_state) = self.tree.cache.current_layout(child.id()) {
+            if let Some(child_state) = self.tree.current_layout(child.id()) {
                 // Structural nodes like rows, grids, and columns do not have their own widget
                 // state; their effective bounds are the union of their children for the current
                 // frame. That cached group rect is useful for debugging/tests and keeps the cache
@@ -266,8 +262,7 @@ impl Container {
         };
         let render = render.clone();
         self.draw
-            .commands
-            .push(Command::BackendCustomRender(cra, Box::new(RetainedCustomRenderCommand { render })));
+            .push_command(Command::BackendCustomRender(cra, Box::new(RetainedCustomRenderCommand { render })));
     }
 
     /// Measures a header/tree disclosure node and returns the stable expansion state used this frame.
@@ -297,6 +292,29 @@ impl Container {
         self.record_tree_layout(node_id, NodeLayout::new(rect, rect, content_size));
     }
 
+    fn layout_tree_node_scope_children(
+        &mut self,
+        results: &FrameResults,
+        node_id: NodeId,
+        policy: Policy,
+        state: &WidgetHandle<Node>,
+        children: &[WidgetTreeNode],
+        indent_children: bool,
+    ) {
+        if !self.layout_tree_node_scope(node_id, policy, state).is_expanded() {
+            return;
+        }
+
+        if indent_children {
+            let indent_size = self.style.as_ref().indent;
+            self.layout.adjust_indent(indent_size);
+            self.layout_tree_nodes(results, children);
+            self.layout.adjust_indent(-indent_size);
+        } else {
+            self.layout_tree_nodes(results, children);
+        }
+    }
+
     /// Updates a header/tree disclosure node and returns the layout-time expansion state.
     fn update_tree_node_scope(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
@@ -315,11 +333,32 @@ impl Container {
         stable_state
     }
 
+    fn update_tree_node_scope_children(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Node>, children: &[WidgetTreeNode]) {
+        if self.update_tree_node_scope(results, node_id, state).is_expanded() {
+            self.update_tree_nodes(results, children);
+        }
+    }
+
     /// Paints a header/tree disclosure node.
     fn paint_tree_node_scope(&mut self, node_id: NodeId, state: &WidgetHandle<Node>) {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
         let control = self.current_tree_interaction_or_panic(node_id).control;
         self.paint_node_handle(node_id, state, rect, None, &control);
+    }
+
+    fn paint_tree_node_scope_children(&mut self, node_id: NodeId, state: &WidgetHandle<Node>, children: &[WidgetTreeNode]) {
+        self.paint_tree_node_scope(node_id, state);
+        if self.tree_children_were_laid_out(children) {
+            self.paint_tree_nodes(children);
+        }
+    }
+
+    fn update_structural_tree_node(&mut self, results: &mut FrameResults, children: &[WidgetTreeNode]) {
+        self.update_tree_nodes(results, children);
+    }
+
+    fn paint_structural_tree_node(&mut self, children: &[WidgetTreeNode]) {
+        self.paint_tree_nodes(children);
     }
 
     /// Performs the layout pass for one retained tree node, recursing into children when needed.
@@ -353,18 +392,11 @@ impl Container {
             WidgetTreeNodeKind::Header { state } => {
                 // Headers gate child participation entirely. In the strict retained model the
                 // current stable state decides whether descendants exist for this frame.
-                if self.layout_tree_node_scope(node_id, policy, state).is_expanded() {
-                    self.layout_tree_nodes(results, children);
-                }
+                self.layout_tree_node_scope_children(results, node_id, policy, state, children, false);
             }
             WidgetTreeNodeKind::Tree { state } => {
-                if self.layout_tree_node_scope(node_id, policy, state).is_expanded() {
-                    // Tree nodes differ from plain headers only by indenting their descendants.
-                    let indent_size = self.style.as_ref().indent;
-                    self.layout.adjust_indent(indent_size);
-                    self.layout_tree_nodes(results, children);
-                    self.layout.adjust_indent(-indent_size);
-                }
+                // Tree nodes differ from plain headers only by indenting their descendants.
+                self.layout_tree_node_scope_children(results, node_id, policy, state, children, true);
             }
             WidgetTreeNodeKind::Row { widths, height } => {
                 // Structural layout nodes do not run widgets themselves; they only establish a new
@@ -428,19 +460,15 @@ impl Container {
                 self.end_panel_update(&mut handle);
             }
             WidgetTreeNodeKind::Header { state } => {
-                if self.update_tree_node_scope(results, node_id, state).is_expanded() {
-                    self.update_tree_nodes(results, children);
-                }
+                self.update_tree_node_scope_children(results, node_id, state, children);
             }
             WidgetTreeNodeKind::Tree { state } => {
-                if self.update_tree_node_scope(results, node_id, state).is_expanded() {
-                    self.update_tree_nodes(results, children);
-                }
+                self.update_tree_node_scope_children(results, node_id, state, children);
             }
             WidgetTreeNodeKind::Row { .. } | WidgetTreeNodeKind::Grid { .. } | WidgetTreeNodeKind::Column | WidgetTreeNodeKind::Stack { .. } => {
                 // Structural nodes simply forward update to descendants because their own cached
                 // bounds were already synthesized during layout.
-                self.update_tree_nodes(results, children);
+                self.update_structural_tree_node(results, children);
             }
         }
     }
@@ -465,21 +493,15 @@ impl Container {
                 self.end_panel_paint(&mut handle);
             }
             WidgetTreeNodeKind::Header { state } => {
-                self.paint_tree_node_scope(node_id, state);
-                if self.tree_children_were_laid_out(children) {
-                    self.paint_tree_nodes(children);
-                }
+                self.paint_tree_node_scope_children(node_id, state, children);
             }
             WidgetTreeNodeKind::Tree { state } => {
-                self.paint_tree_node_scope(node_id, state);
-                if self.tree_children_were_laid_out(children) {
-                    self.paint_tree_nodes(children);
-                }
+                self.paint_tree_node_scope_children(node_id, state, children);
             }
             WidgetTreeNodeKind::Row { .. } | WidgetTreeNodeKind::Grid { .. } | WidgetTreeNodeKind::Column | WidgetTreeNodeKind::Stack { .. } => {
                 // Structural nodes simply forward paint to descendants because their own cached
                 // bounds were already synthesized during layout.
-                self.paint_tree_nodes(children);
+                self.paint_structural_tree_node(children);
             }
         }
     }
