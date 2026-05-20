@@ -60,6 +60,17 @@ enum InternalControlPart {
     ScrollbarX,
 }
 
+#[derive(Copy, Clone)]
+struct ScrollbarSpec {
+    axis: ScrollAxis,
+    part: InternalControlPart,
+    node_id: NodeId,
+    base: Recti,
+    max_scroll: i32,
+    view_len: i32,
+    content_len: i32,
+}
+
 impl Container {
     pub(crate) fn panel_scope_id(&self, node_id: NodeId) -> Id {
         const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
@@ -205,60 +216,152 @@ impl Container {
         self.paint_scrollbars(body);
     }
 
+    fn scrollbar_content_size(&self, padding: i32) -> Dimensioni {
+        let mut cs = self.content_size;
+        cs.width += padding * 2;
+        cs.height += padding * 2;
+        cs
+    }
+
+    fn scrollbar_clip_rect(body: Recti, content_size: Dimensioni, scrollbar_size: i32) -> Recti {
+        let mut clip_rect = body;
+        if scrollbar_max_scroll(content_size.height, body.height) > 0 && body.height > 0 {
+            clip_rect.width += scrollbar_size;
+        }
+        if scrollbar_max_scroll(content_size.width, body.width) > 0 && body.width > 0 {
+            clip_rect.height += scrollbar_size;
+        }
+        clip_rect
+    }
+
+    fn scrollbar_spec(&self, axis: ScrollAxis, body: Recti, content_size: Dimensioni, scrollbar_size: i32) -> Option<ScrollbarSpec> {
+        let (part, view_len, content_len) = match axis {
+            ScrollAxis::Vertical => (InternalControlPart::ScrollbarY, body.height, content_size.height),
+            ScrollAxis::Horizontal => (InternalControlPart::ScrollbarX, body.width, content_size.width),
+        };
+        let max_scroll = scrollbar_max_scroll(content_len, view_len);
+        if max_scroll <= 0 || view_len <= 0 {
+            return None;
+        }
+        let node_id = self.internal_control_node_id(part);
+        let base = scrollbar_base(axis, body, scrollbar_size);
+        Some(ScrollbarSpec {
+            axis,
+            part,
+            node_id,
+            base,
+            max_scroll,
+            view_len,
+            content_len,
+        })
+    }
+
+    fn scroll_axis(&self, axis: ScrollAxis) -> i32 {
+        match axis {
+            ScrollAxis::Vertical => self.scroll.y,
+            ScrollAxis::Horizontal => self.scroll.x,
+        }
+    }
+
+    fn set_scroll_axis(&mut self, axis: ScrollAxis, value: i32) {
+        match axis {
+            ScrollAxis::Vertical => self.scroll.y = value,
+            ScrollAxis::Horizontal => self.scroll.x = value,
+        }
+    }
+
+    fn add_scroll_axis(&mut self, axis: ScrollAxis, delta: i32) {
+        let value = self.scroll_axis(axis) + delta;
+        self.set_scroll_axis(axis, value);
+    }
+
+    fn update_scrollbar_internal(&mut self, spec: ScrollbarSpec) -> (ControlState, ResourceState) {
+        match spec.part {
+            InternalControlPart::ScrollbarY => {
+                let mut state = std::mem::replace(&mut self.scrollbar_y_state, Internal::new("!scrollbary"));
+                let output = self.update_internal_node(spec.node_id, &mut state, spec.base);
+                self.scrollbar_y_state = state;
+                output
+            }
+            InternalControlPart::ScrollbarX => {
+                let mut state = std::mem::replace(&mut self.scrollbar_x_state, Internal::new("!scrollbarx"));
+                let output = self.update_internal_node(spec.node_id, &mut state, spec.base);
+                self.scrollbar_x_state = state;
+                output
+            }
+        }
+    }
+
+    fn paint_scrollbar_internal(&mut self, spec: ScrollbarSpec, control: &ControlState) {
+        match spec.part {
+            InternalControlPart::ScrollbarY => {
+                let mut state = std::mem::replace(&mut self.scrollbar_y_state, Internal::new("!scrollbary"));
+                self.paint_internal_node(spec.node_id, &mut state, spec.base, control);
+                self.scrollbar_y_state = state;
+            }
+            InternalControlPart::ScrollbarX => {
+                let mut state = std::mem::replace(&mut self.scrollbar_x_state, Internal::new("!scrollbarx"));
+                self.paint_internal_node(spec.node_id, &mut state, spec.base, control);
+                self.scrollbar_x_state = state;
+            }
+        }
+    }
+
+    fn update_scrollbar(&mut self, axis: ScrollAxis, body: Recti, content_size: Dimensioni, scrollbar_size: i32) {
+        let Some(spec) = self.scrollbar_spec(axis, body, content_size, scrollbar_size) else {
+            self.set_scroll_axis(axis, 0);
+            return;
+        };
+
+        self.record_tree_layout(
+            spec.node_id,
+            NodeLayout::new(spec.base, spec.base, Dimensioni::new(spec.base.width, spec.base.height)),
+        );
+        let (control, result) = self.update_scrollbar_internal(spec);
+        self.record_tree_interaction(spec.node_id, NodeInteraction::new(control, result));
+        if control.active {
+            let delta = scrollbar_drag_delta(spec.axis, self.input.borrow().mouse_delta, spec.content_len, spec.base);
+            self.add_scroll_axis(axis, delta);
+        }
+        let scroll = Self::clamp(self.scroll_axis(axis), 0, spec.max_scroll);
+        self.set_scroll_axis(axis, scroll);
+    }
+
+    fn paint_scrollbar(&mut self, axis: ScrollAxis, body: Recti, content_size: Dimensioni, scrollbar_size: i32, thumb_size: i32) {
+        let Some(spec) = self.scrollbar_spec(axis, body, content_size, scrollbar_size) else {
+            return;
+        };
+
+        let control = self
+            .tree
+            .cache
+            .current_interaction(spec.node_id)
+            .copied()
+            .map(|interaction| interaction.control)
+            .unwrap_or_default();
+        self.paint_scrollbar_internal(spec, &control);
+        self.draw_frame(spec.base, ControlColor::ScrollBase);
+        let thumb = scrollbar_thumb(spec.axis, spec.base, spec.view_len, spec.content_len, self.scroll_axis(axis), thumb_size);
+        self.draw_frame(thumb, ControlColor::ScrollThumb);
+    }
+
     fn update_scrollbars(&mut self, body: Recti) {
         let (scrollbar_size, padding) = {
             let style = self.style.as_ref();
             (style.scrollbar_size, style.padding)
         };
-        let mut cs = self.content_size;
-        cs.width += padding * 2;
-        cs.height += padding * 2;
+        let cs = self.scrollbar_content_size(padding);
         let maxscroll_y = scrollbar_max_scroll(cs.height, body.height);
         let maxscroll_x = scrollbar_max_scroll(cs.width, body.width);
-        let mut clip_rect = body;
-        if maxscroll_y > 0 && body.height > 0 {
-            clip_rect.width += scrollbar_size;
-        }
-        if maxscroll_x > 0 && body.width > 0 {
-            clip_rect.height += scrollbar_size;
-        }
+        let clip_rect = Self::scrollbar_clip_rect(body, cs, scrollbar_size);
         self.push_clip_rect(clip_rect);
-        if maxscroll_y > 0 && body.height > 0 {
-            let scrollbar_y_node_id = self.internal_control_node_id(InternalControlPart::ScrollbarY);
-            let base = scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size);
-            self.record_tree_layout(scrollbar_y_node_id, NodeLayout::new(base, base, Dimensioni::new(base.width, base.height)));
-            let (control, result) = {
-                let mut state = std::mem::replace(&mut self.scrollbar_y_state, Internal::new("!scrollbary"));
-                let output = self.update_internal_node(scrollbar_y_node_id, &mut state, base);
-                self.scrollbar_y_state = state;
-                output
-            };
-            self.record_tree_interaction(scrollbar_y_node_id, NodeInteraction::new(control, result));
-            if control.active {
-                let delta = scrollbar_drag_delta(ScrollAxis::Vertical, self.input.borrow().mouse_delta, cs.height, base);
-                self.scroll.y += delta;
-            }
-            self.scroll.y = Self::clamp(self.scroll.y, 0, maxscroll_y);
+        if maxscroll_y > 0 {
+            self.update_scrollbar(ScrollAxis::Vertical, body, cs, scrollbar_size);
         } else {
             self.scroll.y = 0;
         }
-
-        if maxscroll_x > 0 && body.width > 0 {
-            let scrollbar_x_node_id = self.internal_control_node_id(InternalControlPart::ScrollbarX);
-            let base = scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size);
-            self.record_tree_layout(scrollbar_x_node_id, NodeLayout::new(base, base, Dimensioni::new(base.width, base.height)));
-            let (control, result) = {
-                let mut state = std::mem::replace(&mut self.scrollbar_x_state, Internal::new("!scrollbarx"));
-                let output = self.update_internal_node(scrollbar_x_node_id, &mut state, base);
-                self.scrollbar_x_state = state;
-                output
-            };
-            self.record_tree_interaction(scrollbar_x_node_id, NodeInteraction::new(control, result));
-            if control.active {
-                let delta = scrollbar_drag_delta(ScrollAxis::Horizontal, self.input.borrow().mouse_delta, cs.width, base);
-                self.scroll.x += delta;
-            }
-            self.scroll.x = Self::clamp(self.scroll.x, 0, maxscroll_x);
+        if maxscroll_x > 0 {
+            self.update_scrollbar(ScrollAxis::Horizontal, body, cs, scrollbar_size);
         } else {
             self.scroll.x = 0;
         }
@@ -270,58 +373,11 @@ impl Container {
             let style = self.style.as_ref();
             (style.scrollbar_size, style.padding, style.thumb_size)
         };
-        let mut cs = self.content_size;
-        cs.width += padding * 2;
-        cs.height += padding * 2;
-        let maxscroll_y = scrollbar_max_scroll(cs.height, body.height);
-        let maxscroll_x = scrollbar_max_scroll(cs.width, body.width);
-        let mut clip_rect = body;
-        if maxscroll_y > 0 && body.height > 0 {
-            clip_rect.width += scrollbar_size;
-        }
-        if maxscroll_x > 0 && body.width > 0 {
-            clip_rect.height += scrollbar_size;
-        }
+        let cs = self.scrollbar_content_size(padding);
+        let clip_rect = Self::scrollbar_clip_rect(body, cs, scrollbar_size);
         self.push_clip_rect(clip_rect);
-        if maxscroll_y > 0 && body.height > 0 {
-            let scrollbar_y_node_id = self.internal_control_node_id(InternalControlPart::ScrollbarY);
-            let base = scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size);
-            let control = self
-                .tree
-                .cache
-                .current_interaction(scrollbar_y_node_id)
-                .copied()
-                .map(|interaction| interaction.control)
-                .unwrap_or_default();
-            {
-                let mut state = std::mem::replace(&mut self.scrollbar_y_state, Internal::new("!scrollbary"));
-                self.paint_internal_node(scrollbar_y_node_id, &mut state, base, &control);
-                self.scrollbar_y_state = state;
-            }
-            self.draw_frame(base, ControlColor::ScrollBase);
-            let thumb = scrollbar_thumb(ScrollAxis::Vertical, base, body.height, cs.height, self.scroll.y, thumb_size);
-            self.draw_frame(thumb, ControlColor::ScrollThumb);
-        }
-
-        if maxscroll_x > 0 && body.width > 0 {
-            let scrollbar_x_node_id = self.internal_control_node_id(InternalControlPart::ScrollbarX);
-            let base = scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size);
-            let control = self
-                .tree
-                .cache
-                .current_interaction(scrollbar_x_node_id)
-                .copied()
-                .map(|interaction| interaction.control)
-                .unwrap_or_default();
-            {
-                let mut state = std::mem::replace(&mut self.scrollbar_x_state, Internal::new("!scrollbarx"));
-                self.paint_internal_node(scrollbar_x_node_id, &mut state, base, &control);
-                self.scrollbar_x_state = state;
-            }
-            self.draw_frame(base, ControlColor::ScrollBase);
-            let thumb = scrollbar_thumb(ScrollAxis::Horizontal, base, body.width, cs.width, self.scroll.x, thumb_size);
-            self.draw_frame(thumb, ControlColor::ScrollThumb);
-        }
+        self.paint_scrollbar(ScrollAxis::Vertical, body, cs, scrollbar_size, thumb_size);
+        self.paint_scrollbar(ScrollAxis::Horizontal, body, cs, scrollbar_size, thumb_size);
         self.pop_clip_rect();
     }
 

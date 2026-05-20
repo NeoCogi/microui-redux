@@ -55,16 +55,6 @@
 use super::*;
 
 impl Container {
-    /// Manually updates which widget owns focus.
-    ///
-    /// Deprecated: retained traversal uses [`Container::set_focus_node`].
-    #[cfg(test)]
-    #[deprecated(note = "use set_focus_node; widget pointer focus is a test-only compatibility path")]
-    pub fn set_focus(&mut self, widget_id: Option<WidgetId>) {
-        self.interaction.focus = widget_id.map(RetainedId::compat_widget);
-        self.interaction.updated_focus = true;
-    }
-
     /// Sets focus to a retained node.
     pub fn set_focus_node(&mut self, node_id: NodeId) {
         self.interaction.focus = Some(self.retained_id_for_node(node_id));
@@ -75,10 +65,6 @@ impl Container {
     pub fn clear_focus(&mut self) {
         self.interaction.focus = None;
         self.interaction.updated_focus = true;
-    }
-
-    pub(crate) fn retained_id_for_widget(&self, widget_id: WidgetId) -> RetainedId {
-        RetainedId::compat_widget(widget_id)
     }
 
     pub(crate) fn retained_id_for_node(&self, node_id: NodeId) -> RetainedId {
@@ -174,12 +160,6 @@ impl Container {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn update_control_with_opts(&mut self, widget_id: WidgetId, rect: Recti, opt: WidgetOption, scroll_behavior: ScrollBehavior) -> ControlState {
-        let focus_policy = FocusPolicy::from_widget_options(opt);
-        self.update_control_for(self.retained_id_for_widget(widget_id), rect, opt, scroll_behavior, focus_policy)
-    }
-
-    #[allow(dead_code)]
     pub(crate) fn update_control_for_node(
         &mut self,
         node_id: NodeId,
@@ -189,22 +169,6 @@ impl Container {
         focus_policy: FocusPolicy,
     ) -> ControlState {
         self.update_control_for(self.retained_id_for_node(node_id), rect, opt, scroll_behavior, focus_policy)
-    }
-
-    /// Updates hover/focus state for the widget described by `widget_id` and optionally consumes scroll.
-    ///
-    /// Deprecated: prefer retained dispatch or [`Container::update_control_for_node`].
-    #[deprecated(note = "use retained node dispatch or update_control_for_node; widget pointer interaction is a compatibility path")]
-    #[cfg_attr(not(test), allow(dead_code))]
-    #[inline(never)]
-    pub fn update_control<W: Widget + ?Sized>(&mut self, widget_id: WidgetId, rect: Recti, state: &W) -> ControlState {
-        self.update_control_for(
-            self.retained_id_for_widget(widget_id),
-            rect,
-            state.effective_widget_opt(),
-            state.effective_scroll_behavior(),
-            state.focus_policy(),
-        )
     }
 
     pub(crate) fn snapshot_input(&mut self) -> Rc<InputSnapshot> {
@@ -228,14 +192,8 @@ impl Container {
         snapshot
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn widget_ctx(&mut self, widget_id: WidgetId, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'_> {
-        self.widget_ctx_for(widget_id, self.retained_id_for_widget(widget_id), rect, input)
-    }
-
-    pub(crate) fn widget_ctx_for(&mut self, widget_id: WidgetId, interaction_id: RetainedId, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'_> {
+    pub(crate) fn widget_ctx_for(&mut self, interaction_id: RetainedId, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'_> {
         WidgetCtx::new_with_interaction(
-            widget_id,
             interaction_id,
             rect,
             &mut self.draw.commands,
