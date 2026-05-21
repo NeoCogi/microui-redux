@@ -358,7 +358,7 @@ impl Container {
         };
 
         let control = self
-            .tree
+            .tree_cache
             .current_interaction(spec.node_id)
             .map(|interaction| interaction.control)
             .unwrap_or_default();
