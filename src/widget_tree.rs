@@ -27,13 +27,13 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
-// The retained widget tree owns the long-lived UI structure. Composite nodes
-// such as headers, tree nodes, and embedded containers store their child lists
-// here and keep stable NodeIds across frames. Each frame the container uses the
-// previous-frame cache for committed geometry/results, then traverses the retained
-// nodes directly through the normal layout and widget paths. Layout and interaction
-// are cached in separate generations so previous-frame geometry can be consulted
-// without conflating it with current-frame widget results.
+//! Retained widget tree module.
+//!
+//! The retained widget tree owns the long-lived UI structure. Composite nodes such as headers,
+//! tree nodes, and embedded containers store their child lists here and keep stable `NodeId`s
+//! across frames. Each frame the container uses the previous-frame cache for committed
+//! geometry/results, then traverses the retained nodes directly through the normal layout and
+//! widget paths.
 
 mod builder;
 mod cache;

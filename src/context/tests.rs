@@ -1,3 +1,5 @@
+//! Tests for context root registration, visibility, image loading, and retained results.
+
 use std::{
     any::Any,
     panic::{catch_unwind, AssertUnwindSafe},

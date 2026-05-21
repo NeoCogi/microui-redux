@@ -50,6 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Tests for container layout, retained traversal, panels, focus, and draw command behavior.
 use super::*;
 use crate::test_support::{test_atlas, NoopRenderer};
 use std::{

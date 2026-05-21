@@ -27,6 +27,10 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
+//! Calculator retained-mode example.
+//!
+//! This example builds a small calculator UI with the retained widget tree API and the Glow/SDL
+//! backend from `examples/common`.
 #[path = "./common/mod.rs"]
 mod common;
 

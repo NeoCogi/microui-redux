@@ -1,3 +1,5 @@
+//! Tests for UTF-8 safe text editing primitives.
+
 use super::*;
 use crate::KeyCode;
 

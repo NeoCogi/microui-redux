@@ -48,6 +48,7 @@ use crate::{
 
 use super::{erased_widget_state, widget_handle, NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetTree, WidgetTreeNode, WidgetTreeNodeKind};
 
+/// Stack frame used while the builder collects a group node's children.
 struct BuilderFrame {
     scope_seed: u64,
     next_auto: u64,
@@ -55,6 +56,7 @@ struct BuilderFrame {
 }
 
 impl BuilderFrame {
+    /// Creates the root builder frame.
     fn root(seed: u64) -> Self {
         Self {
             scope_seed: seed,
@@ -63,6 +65,7 @@ impl BuilderFrame {
         }
     }
 
+    /// Creates a child frame whose automatic ids are scoped by its parent node id.
     fn child(seed: u64) -> Self {
         Self {
             scope_seed: seed,
@@ -117,6 +120,7 @@ impl NodeOptions {
     }
 }
 
+/// Hashes an application-provided key into the builder's id space.
 fn hash_builder_key<K: Hash>(key: K) -> u64 {
     let mut hasher = DefaultHasher::new();
     key.hash(&mut hasher);
@@ -299,8 +303,10 @@ impl WidgetTreeBuilder {
         self.push_group(options, WidgetTreeNodeKind::Stack { width, height, direction }, f)
     }
 
+    /// Pushes a leaf node into the current builder frame.
     fn push_leaf(&mut self, options: NodeOptions, kind: WidgetTreeNodeKind) -> NodeId {
         let id = self.alloc_id(kind.tag(), options.key);
+        // Leaf nodes have no child frame; they become siblings in the current frame directly.
         self.current_frame_mut().nodes.push(WidgetTreeNode {
             id,
             policy: options.policy,
@@ -310,8 +316,11 @@ impl WidgetTreeBuilder {
         id
     }
 
+    /// Pushes a group node after collecting children in a nested builder frame.
     fn push_group(&mut self, options: NodeOptions, kind: WidgetTreeNodeKind, f: impl FnOnce(&mut Self)) -> NodeId {
         let id = self.alloc_id(kind.tag(), options.key);
+        // Child auto-ids are scoped by the group id, so sibling insertion outside the group does
+        // not affect descendants.
         self.frames.push(BuilderFrame::child(id.raw() as u64));
         f(self);
         let frame = self.frames.pop().expect("child frame missing");
@@ -324,11 +333,13 @@ impl WidgetTreeBuilder {
         id
     }
 
+    /// Allocates a stable node id from the current scope, node kind, and optional user key.
     fn alloc_id(&mut self, tag: u8, key: Option<u64>) -> NodeId {
         let frame = self.current_frame_mut();
         let ordinal = match key {
             Some(_) => None,
             None => {
+                // Unkeyed ids use sibling order and therefore advance the per-frame auto counter.
                 let ordinal = frame.next_auto;
                 frame.next_auto += 1;
                 Some(ordinal)
@@ -340,6 +351,7 @@ impl WidgetTreeBuilder {
         tag.hash(&mut hasher);
         match key {
             Some(key) => {
+                // Keyed ids use a different discriminator so they do not collide with unkeyed ids.
                 1u8.hash(&mut hasher);
                 key.hash(&mut hasher);
             }
@@ -351,6 +363,7 @@ impl WidgetTreeBuilder {
         NodeId::new(hasher.finish())
     }
 
+    /// Returns the frame currently receiving new nodes.
     fn current_frame_mut(&mut self) -> &mut BuilderFrame {
         self.frames.last_mut().expect("widget tree builder frame missing")
     }

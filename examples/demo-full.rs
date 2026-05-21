@@ -50,6 +50,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Full retained-mode demo application.
+//!
+//! This example exercises core widgets, layout groups, embedded panels, images, and optional 3D
+//! renderer integrations in one interactive application.
 #[path = "./common/mod.rs"]
 mod common;
 

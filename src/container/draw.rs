@@ -56,9 +56,12 @@ use super::*;
 
 impl Container {
     #[inline(never)]
+    /// Replays this container's command list into the renderer canvas.
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
         let mut commands = std::mem::take(&mut self.draw.commands);
         while !commands.is_empty() {
+            // Render ordinary drawing commands in batches, but stop before commands that need a
+            // separate renderer lock or recursive panel render.
             let special_index = commands
                 .iter()
                 .position(|command| matches!(command, Command::BackendCustomRender(_, _) | Command::RetainedPanel { .. }));
@@ -100,6 +103,7 @@ impl Container {
         self.draw.clear_triangle_vertices();
     }
 
+    /// Replays a contiguous run of ordinary draw commands under one renderer lock.
     fn render_batch<R, I>(canvas: &mut Canvas<R>, triangle_vertices: &[Vertex], commands: I)
     where
         R: Renderer,
@@ -121,12 +125,14 @@ impl Container {
                         canvas.draw_icon(id, rect, color);
                     }
                     Command::PushClip { rect } => {
+                        // Replay clips are monotonic: every push intersects with the active clip.
                         let current = clip_stack.last().copied().unwrap_or(base_clip);
                         let next = current.intersect(&rect).unwrap_or_default();
                         clip_stack.push(next);
                         canvas.set_clip_rect(next);
                     }
                     Command::PopClip => {
+                        // Keep the base clip installed even if an unmatched pop appears.
                         if clip_stack.len() > 1 {
                             clip_stack.pop();
                         }
@@ -140,6 +146,7 @@ impl Container {
                         canvas.draw_slot_with_function(id, rect, color, payload);
                     }
                     Command::Triangle { vertex_start, vertex_count } => {
+                        // Triangle commands reference the container-owned vertex arena by range.
                         let end = vertex_start + vertex_count;
                         canvas.draw_triangles(&triangle_vertices[vertex_start..end]);
                     }
@@ -150,6 +157,7 @@ impl Container {
         });
     }
 
+    /// Creates a draw context over this container's buffers.
     fn draw_ctx(&mut self) -> DrawCtx<'_> {
         self.draw.ctx(self.style.as_ref(), &self.atlas)
     }

@@ -27,6 +27,9 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
+//! Texture clipping smoke test example.
+//!
+//! This standalone example validates that external texture drawing respects UI clipping.
 
 use microui_redux::{
     backend::{Canvas, Vertex},

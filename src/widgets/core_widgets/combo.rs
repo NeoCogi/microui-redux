@@ -1,3 +1,8 @@
+//! Combo-box retained state.
+//!
+//! The combo widget tracks selected item text and popup-open state; the container/window layer owns
+//! the actual popup traversal.
+
 use super::*;
 
 /// Persistent state used by `combo_box` to track popup and selection.
@@ -68,6 +73,7 @@ impl Combo {
         self.open = false;
     }
 
+    /// Measures the combo header label plus dropdown indicator.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let text_w = if self.label.is_empty() {
@@ -94,6 +100,7 @@ impl Combo {
         }
 
         if self.selected >= items.len() {
+            // Clamp stale selections after the backing item list changes.
             self.selected = items.len() - 1;
             self.clamped = true;
         }
@@ -121,6 +128,7 @@ impl Combo {
         Some(selected_label)
     }
 
+    /// Updates popup open state and reports submit/active transitions.
     fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         if self.clamped {
@@ -129,11 +137,13 @@ impl Combo {
         }
 
         if control.clicked {
+            // Clicking the header toggles the popup; closing clears popup-local focus.
             self.open = !self.open;
             if !self.open {
                 self.close_popup();
             }
         } else if !self.popup.is_open() {
+            // Keep the retained flag synchronized if the popup was closed externally.
             self.open = false;
         }
         if control.clicked {
@@ -145,6 +155,7 @@ impl Combo {
         res
     }
 
+    /// Paints the combo header and records the popup anchor below it.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         let header = ctx.rect();
         self.last_anchor = rect(header.x, header.y + header.height, header.width, 1);

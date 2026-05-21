@@ -50,6 +50,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Multiline text-area widget state and editing behavior.
+//!
+//! Text areas share the UTF-8 editing core with textboxes but track line layout, vertical scroll,
+//! and mouse-driven cursor placement across multiple wrapped lines.
 use crate::*;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::text_layout::{build_text_lines, TextLine};
@@ -118,6 +122,7 @@ impl TextArea {
         }
     }
 
+    /// Measures the text area content, respecting wrapping and available constraints.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let font = style.resolve_font_choice(self.font);
@@ -141,17 +146,20 @@ impl TextArea {
         Dimensioni::new(width, height)
     }
 
+    /// Applies multiline editing, scrolling, and scrollbar dragging.
     fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let font = ctx.style().resolve_font_choice(self.font);
         textarea_update(ctx, control, self, font)
     }
 
+    /// Paints the multiline editor and scrollbars.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         let font = ctx.style().resolve_font_choice(self.font);
         textarea_paint(ctx, control, self, font);
     }
 }
 
+/// Complete derived layout for one text-area frame.
 struct TextAreaLayout {
     bounds: Recti,
     body: Recti,
@@ -169,6 +177,7 @@ struct TextAreaLayout {
     metrics: FontLineMetrics,
 }
 
+/// Resolves wrapped lines, content size, scrollbar visibility, and scrollbar geometry.
 fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextAreaLayout {
     let bounds = ctx.rect();
     let style = ctx.style();
@@ -187,6 +196,8 @@ fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextA
     let mut needs_h = false;
 
     for _ in 0..3 {
+        // Vertical and horizontal scrollbars can force each other to appear. Iterate a few times
+        // until the body stabilizes without making the layout solver recursive.
         let available_width = (body.width - padding * 2).max(0);
         lines = build_text_lines(state.buf.as_str(), state.wrap, available_width, font, ctx.atlas());
         content_width = lines.iter().map(|line| line.width).max().unwrap_or(0);
@@ -244,9 +255,11 @@ fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextA
     }
 }
 
+/// Updates text-area buffer, cursor, scroll position, and scrollbar drag state.
 fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea, font: FontId) -> ResourceState {
     let mut res = ResourceState::NONE;
     if !control.focused {
+        // Blurred text areas park the cursor at the end and forget vertical cursor preference.
         state.cursor = state.buf.len();
         state.preferred_x = None;
     }
@@ -278,6 +291,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     let layout = textarea_layout(ctx, state, font);
 
     if let Some(delta) = control.scroll_delta {
+        // Wheel/trackpad scrolling only affects axes that actually overflow.
         if layout.maxscroll_y > 0 {
             state.scroll.y += delta.y;
         }
@@ -301,6 +315,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
             layout.vscroll_base.height,
         );
         if input.mouse_pressed.is_left() && vscroll_base_local.contains(&input.mouse_pos) {
+            // Track scrollbar drag separately so text clicks do not also move the caret.
             state.dragging_y = true;
             clicked_scrollbar = true;
         }
@@ -337,6 +352,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         }
 
         if input.key_code_pressed.is_up() {
+            // Vertical movement preserves preferred x so repeated Up/Down follows a visual column.
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line > 0 {
                 cursor_line -= 1;
@@ -348,6 +364,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         }
 
         if input.key_code_pressed.is_down() {
+            // Vertical movement preserves preferred x so repeated Up/Down follows a visual column.
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line + 1 < layout.lines.len() {
                 cursor_line += 1;
@@ -360,6 +377,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     }
 
     if control.focused && input.mouse_pressed.is_left() && ctx.mouse_over(layout.bounds) && !clicked_scrollbar {
+        // Convert a widget-local click to content-local coordinates before resolving cursor.
         let local_x = input.mouse_pos.x - (layout.body_local.x + layout.padding) + state.scroll.x;
         let local_y = input.mouse_pos.y - (layout.body_local.y + layout.padding) + state.scroll.y;
         let line_idx = (local_y / layout.metrics.line_height).clamp(0, layout.lines.len().saturating_sub(1) as i32) as usize;
@@ -380,6 +398,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     }
 
     if ensure_visible && !state.dragging_x && !state.dragging_y {
+        // Auto-scroll only when text editing moved the caret, not while the user drags scrollbars.
         let view_width = (layout.body.width - layout.padding * 2).max(0);
         let view_height = (layout.body.height - layout.padding * 2).max(0);
         let caret_y = cursor_line as i32 * layout.metrics.line_height;
@@ -406,6 +425,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     res
 }
 
+/// Paints text-area frame, visible text lines, caret, and scrollbars.
 fn textarea_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea, font: FontId) {
     let layout = textarea_layout(ctx, state, font);
     let cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
@@ -421,6 +441,7 @@ fn textarea_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut T
         let line_top = text_origin.y + idx as i32 * layout.metrics.line_height;
         let line_bottom = line_top + layout.metrics.line_height;
         if line_bottom < layout.body.y || line_top > layout.body.y + layout.body.height {
+            // Skip fully clipped lines before slicing/drawing text.
             continue;
         }
         let text = &state.buf[line.start..line.end];

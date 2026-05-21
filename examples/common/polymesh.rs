@@ -31,6 +31,8 @@
 // TODO: Triangulate inputs
 // TODO: have the polygon points to 2 arrays: vertices and triangles
 //
+//! Simple polygon mesh container used by OBJ loading and 3D demo rendering.
+
 use super::*;
 
 #[cfg(feature = "example-glow")]

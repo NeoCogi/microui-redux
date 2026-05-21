@@ -55,12 +55,14 @@
 use super::*;
 
 #[derive(Copy, Clone)]
+/// Internal retained controls owned by a scrollable container.
 enum InternalControlPart {
     ScrollbarY,
     ScrollbarX,
 }
 
 #[derive(Copy, Clone)]
+/// Fully resolved scrollbar geometry and identity for one axis.
 struct ScrollbarSpec {
     axis: ScrollAxis,
     part: InternalControlPart,
@@ -72,6 +74,7 @@ struct ScrollbarSpec {
 }
 
 impl Container {
+    /// Derives a stable child-container scope id from the parent scope and retained node id.
     pub(crate) fn panel_scope_id(&self, node_id: NodeId) -> Id {
         const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
         const FNV_PRIME: u64 = 0x100000001b3;
@@ -84,12 +87,14 @@ impl Container {
             hash
         }
 
+        // Include string salts so panel scopes do not collide with other internal id families.
         let hash = write(FNV_OFFSET_BASIS, 0x6d69_6372_6f75_695f_u64);
         let hash = write(hash, 0x7061_6e65_6c5f_7363_u64);
         let hash = write(hash, self.internal_id_seed.raw() as u64);
         Id::new(write(hash, node_id.raw() as u64))
     }
 
+    /// Derives stable retained ids for framework-owned scrollbar controls.
     fn internal_control_node_id(&self, part: InternalControlPart) -> NodeId {
         const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
         const FNV_PRIME: u64 = 0x100000001b3;
@@ -112,6 +117,7 @@ impl Container {
         Id::new(write(hash, part))
     }
 
+    /// Applies pending wheel/trackpad scroll to this container when it owns the hover route.
     pub(crate) fn consume_pending_scroll(&mut self) {
         if !self.scroll_enabled {
             return;
@@ -125,6 +131,7 @@ impl Container {
         let mut scroll = self.scroll;
         let mut content_size = self.content_size;
         let padding = self.style.as_ref().padding * 2;
+        // Scrollbars account for padded content because layout extents are tracked inside padding.
         content_size.width += padding;
         content_size.height += padding;
         let body = self.body;
@@ -148,11 +155,13 @@ impl Container {
         }
 
         if consumed {
+            // Once a container consumes scroll, parents should not also apply the same delta.
             self.scroll = scroll;
             self.interaction.clear_pending_scroll();
         }
     }
 
+    /// Shrinks the body for visible scrollbars and clamps scroll offsets into valid ranges.
     fn resolve_scrollbars(&mut self, body: &mut Recti) {
         let (scrollbar_size, padding) = {
             let style = self.style.as_ref();
@@ -187,11 +196,13 @@ impl Container {
 
     #[cfg_attr(not(test), allow(dead_code))]
     #[inline(never)]
+    /// Updates and paints scrollbars for tests and legacy callers.
     pub(crate) fn scrollbars(&mut self, body: &mut Recti) {
         self.resolve_scrollbars(body);
         self.render_scrollbars(*body);
     }
 
+    /// Updates and paints scrollbars for the active body when scrolling is enabled.
     pub(crate) fn render_active_scrollbars(&mut self) {
         if self.scroll_enabled {
             self.update_scrollbars(self.body);
@@ -199,23 +210,27 @@ impl Container {
         }
     }
 
+    /// Updates active scrollbar interaction without painting it.
     pub(crate) fn update_active_scrollbars(&mut self) {
         if self.scroll_enabled {
             self.update_scrollbars(self.body);
         }
     }
 
+    /// Paints active scrollbars using interaction recorded earlier in the frame.
     pub(crate) fn paint_active_scrollbars(&mut self) {
         if self.scroll_enabled {
             self.paint_scrollbars(self.body);
         }
     }
 
+    /// Runs scrollbar update and paint passes for `body`.
     pub(crate) fn render_scrollbars(&mut self, body: Recti) {
         self.update_scrollbars(body);
         self.paint_scrollbars(body);
     }
 
+    /// Returns content size including style padding that contributes to scrollbar range.
     fn scrollbar_content_size(&self, padding: i32) -> Dimensioni {
         let mut cs = self.content_size;
         cs.width += padding * 2;
@@ -223,6 +238,7 @@ impl Container {
         cs
     }
 
+    /// Expands the clip to include scrollbar gutters when scrollbars exist.
     fn scrollbar_clip_rect(body: Recti, content_size: Dimensioni, scrollbar_size: i32) -> Recti {
         let mut clip_rect = body;
         if scrollbar_max_scroll(content_size.height, body.height) > 0 && body.height > 0 {
@@ -234,6 +250,7 @@ impl Container {
         clip_rect
     }
 
+    /// Resolves the scrollbar spec for one axis, returning `None` when that axis is not needed.
     fn scrollbar_spec(&self, axis: ScrollAxis, body: Recti, content_size: Dimensioni, scrollbar_size: i32) -> Option<ScrollbarSpec> {
         let (part, view_len, content_len) = match axis {
             ScrollAxis::Vertical => (InternalControlPart::ScrollbarY, body.height, content_size.height),
@@ -256,6 +273,7 @@ impl Container {
         })
     }
 
+    /// Reads the scroll component for the selected axis.
     fn scroll_axis(&self, axis: ScrollAxis) -> i32 {
         match axis {
             ScrollAxis::Vertical => self.scroll.y,
@@ -263,6 +281,7 @@ impl Container {
         }
     }
 
+    /// Writes the scroll component for the selected axis.
     fn set_scroll_axis(&mut self, axis: ScrollAxis, value: i32) {
         match axis {
             ScrollAxis::Vertical => self.scroll.y = value,
@@ -270,11 +289,13 @@ impl Container {
         }
     }
 
+    /// Adds a delta to the scroll component for the selected axis.
     fn add_scroll_axis(&mut self, axis: ScrollAxis, delta: i32) {
         let value = self.scroll_axis(axis) + delta;
         self.set_scroll_axis(axis, value);
     }
 
+    /// Runs update for the internal scrollbar widget without aliasing its stored state.
     fn update_scrollbar_internal(&mut self, spec: ScrollbarSpec) -> (ControlState, ResourceState) {
         match spec.part {
             InternalControlPart::ScrollbarY => {
@@ -292,6 +313,7 @@ impl Container {
         }
     }
 
+    /// Runs paint for the internal scrollbar widget without aliasing its stored state.
     fn paint_scrollbar_internal(&mut self, spec: ScrollbarSpec, control: &ControlState) {
         match spec.part {
             InternalControlPart::ScrollbarY => {
@@ -307,6 +329,7 @@ impl Container {
         }
     }
 
+    /// Updates one scrollbar axis and adjusts the matching scroll offset when dragged.
     fn update_scrollbar(&mut self, axis: ScrollAxis, body: Recti, content_size: Dimensioni, scrollbar_size: i32) {
         let Some(spec) = self.scrollbar_spec(axis, body, content_size, scrollbar_size) else {
             self.set_scroll_axis(axis, 0);
@@ -320,6 +343,7 @@ impl Container {
         let (control, result) = self.update_scrollbar_internal(spec);
         self.record_tree_interaction(spec.node_id, NodeInteraction::new(control, result));
         if control.active {
+            // Dragging the thumb moves content proportionally to the drag distance on the track.
             let delta = scrollbar_drag_delta(spec.axis, self.input.borrow().mouse_delta, spec.content_len, spec.base);
             self.add_scroll_axis(axis, delta);
         }
@@ -327,6 +351,7 @@ impl Container {
         self.set_scroll_axis(axis, scroll);
     }
 
+    /// Paints one scrollbar axis using the interaction state recorded during update.
     fn paint_scrollbar(&mut self, axis: ScrollAxis, body: Recti, content_size: Dimensioni, scrollbar_size: i32, thumb_size: i32) {
         let Some(spec) = self.scrollbar_spec(axis, body, content_size, scrollbar_size) else {
             return;
@@ -343,6 +368,7 @@ impl Container {
         self.draw_frame(thumb, ControlColor::ScrollThumb);
     }
 
+    /// Updates both scrollbar axes under a clip that includes the scrollbar gutters.
     fn update_scrollbars(&mut self, body: Recti) {
         let (scrollbar_size, padding) = {
             let style = self.style.as_ref();
@@ -352,6 +378,7 @@ impl Container {
         let maxscroll_y = scrollbar_max_scroll(cs.height, body.height);
         let maxscroll_x = scrollbar_max_scroll(cs.width, body.width);
         let clip_rect = Self::scrollbar_clip_rect(body, cs, scrollbar_size);
+        // Internal controls live partly in the gutter, so they need a wider clip than content.
         self.push_clip_rect(clip_rect);
         if maxscroll_y > 0 {
             self.update_scrollbar(ScrollAxis::Vertical, body, cs, scrollbar_size);
@@ -366,6 +393,7 @@ impl Container {
         self.pop_clip_rect();
     }
 
+    /// Paints both scrollbar axes under a clip that includes the scrollbar gutters.
     fn paint_scrollbars(&mut self, body: Recti) {
         let (scrollbar_size, padding, thumb_size) = {
             let style = self.style.as_ref();
@@ -373,6 +401,7 @@ impl Container {
         };
         let cs = self.scrollbar_content_size(padding);
         let clip_rect = Self::scrollbar_clip_rect(body, cs, scrollbar_size);
+        // Paint after update so thumb hover/active state comes from the current frame cache.
         self.push_clip_rect(clip_rect);
         self.paint_scrollbar(ScrollAxis::Vertical, body, cs, scrollbar_size, thumb_size);
         self.paint_scrollbar(ScrollAxis::Horizontal, body, cs, scrollbar_size, thumb_size);
@@ -408,6 +437,7 @@ impl Container {
         self.render_active_scrollbars();
     }
 
+    /// Ends an embedded panel layout scope and stores its measured content size.
     fn pop_panel_container(container: &mut Container) {
         let layout_body = container.layout.current_body();
         let layout_max = container.layout.current_max();
@@ -418,6 +448,7 @@ impl Container {
         container.layout.pop_scope();
     }
 
+    /// Allocates a panel rect in the parent and prepares the child container layout.
     fn begin_panel_layout_container(&mut self, container: &mut Container, scroll_behavior: ScrollBehavior, policy: Policy) {
         let rect = self.layout.next_with_policies(Dimensioni::default(), policy.width, policy.height);
         container.prepare();
@@ -425,11 +456,13 @@ impl Container {
         container.configure_container_body(rect, scroll_behavior);
     }
 
+    /// Applies parent-driven state that must stay synchronized on every panel pass.
     fn apply_panel_base_state(&self, container: &mut Container, panel_scope: Id) {
         container.set_internal_id_seed(panel_scope);
         container.style = self.style.clone();
     }
 
+    /// Applies previously measured geometry to the child container before update/paint.
     fn apply_panel_layout_state(&self, container: &mut Container, panel_scope: Id, scroll_behavior: ScrollBehavior, layout: NodeLayout) {
         self.apply_panel_base_state(container, panel_scope);
         container.rect = layout.rect;
@@ -438,6 +471,7 @@ impl Container {
         container.scroll_enabled = !scroll_behavior.is_no_scroll();
     }
 
+    /// Starts the layout pass for an embedded retained panel.
     pub(crate) fn begin_panel_layout(
         &mut self,
         panel: &mut ContainerHandle,
@@ -452,11 +486,13 @@ impl Container {
         self.begin_panel_layout_container(container, scroll_behavior, policy);
     }
 
+    /// Ends the layout pass for an embedded retained panel.
     pub(crate) fn end_panel_layout(&mut self, panel: &mut ContainerHandle) {
         let container = &mut panel.inner_mut();
         Self::pop_panel_container(container);
     }
 
+    /// Measures a panel in a scratch container so parent layout can reserve its final rectangle.
     pub(crate) fn measure_panel_layout(
         &mut self,
         panel: &ContainerHandle,
@@ -466,6 +502,8 @@ impl Container {
         results: &FrameResults,
         children: &[WidgetTreeNode],
     ) -> NodeLayout {
+        // Measurement uses a clone of panel state so probing child geometry does not mutate live
+        // hover/focus/scroll state before the update pass.
         let mut scratch = panel.inner().measurement_scratch();
         scratch.measurement_mode = true;
         self.apply_panel_base_state(&mut scratch, self.panel_scope_id(node_id));
@@ -475,6 +513,7 @@ impl Container {
         NodeLayout::new(scratch.rect(), scratch.body(), scratch.content_size())
     }
 
+    /// Starts update traversal for an embedded retained panel.
     pub(crate) fn begin_panel_update(
         &mut self,
         panel: &mut ContainerHandle,
@@ -486,6 +525,7 @@ impl Container {
         let panel_id = self.retained_id_for_node(node_id);
         let panel_scope = self.panel_scope_id(node_id);
         if self.hit_test_rect(layout.rect, self.interaction.in_hover_root) {
+            // The parent tracks which child panel should own hover routing on the next frame.
             self.interaction.set_next_hover_root_child(panel_id, layout.rect);
         }
 
@@ -494,11 +534,13 @@ impl Container {
 
         container.interaction.in_hover_root = self.interaction.in_hover_root && self.interaction.hover_root_child == Some(panel_id);
         if self.interaction.pending_scroll.is_some() && container.interaction.in_hover_root {
+            // Scroll deltas descend into the active child panel first.
             container.interaction.seed_pending_scroll(self.interaction.take_pending_scroll());
         }
         container.push_clip_rect(layout.body);
     }
 
+    /// Ends update traversal for an embedded panel and bubbles unconsumed scroll back to the parent.
     pub(crate) fn end_panel_update(&mut self, panel: &mut ContainerHandle) {
         panel.inner_mut().pop_clip_rect();
         {
@@ -507,11 +549,13 @@ impl Container {
             inner.consume_pending_scroll();
             let pending = inner.interaction.take_pending_scroll();
             if self.interaction.pending_scroll.is_none() {
+                // If the child did not consume the scroll, the parent may still apply it.
                 self.interaction.seed_pending_scroll(pending);
             }
         }
     }
 
+    /// Starts paint traversal for an embedded retained panel.
     pub(crate) fn begin_panel_paint(
         &mut self,
         panel: &mut ContainerHandle,
@@ -525,6 +569,7 @@ impl Container {
         self.apply_panel_layout_state(container, panel_scope, scroll_behavior, layout);
 
         if !opt.has_no_frame() {
+            // The parent draws the panel frame before the child command list is replayed.
             self.draw_frame(layout.rect, ControlColor::PanelBG);
         }
 
@@ -532,6 +577,7 @@ impl Container {
         container.push_clip_rect(layout.body);
     }
 
+    /// Ends paint traversal and records a command that replays the child panel in tree order.
     pub(crate) fn end_panel_paint(&mut self, panel: &mut ContainerHandle) {
         panel.inner_mut().pop_clip_rect();
         self.draw.push_command(Command::RetainedPanel { handle: panel.clone() });

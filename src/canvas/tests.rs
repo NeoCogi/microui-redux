@@ -1,3 +1,5 @@
+//! Tests for canvas clipping, texture upload, and draw submission behavior.
+
 use super::*;
 use std::cell::Cell;
 

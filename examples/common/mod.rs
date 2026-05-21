@@ -50,6 +50,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Shared modules used by the example applications.
+//!
+//! This module gates backend selection and exposes renderer, mesh, atlas, camera, and application
+//! helpers to each example binary.
 use microui_redux::prelude::*;
 
 #[cfg(not(any(feature = "example-glow", feature = "example-vulkan", feature = "example-wgpu")))]

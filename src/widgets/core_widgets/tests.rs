@@ -1,3 +1,5 @@
+//! Tests for basic widget sizing and state behavior.
+
 use super::*;
 use crate::{test_support::test_atlas as make_test_atlas, Input};
 use std::{cell::RefCell, rc::Rc};

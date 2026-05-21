@@ -1,3 +1,5 @@
+//! Tests for atlas image loading and source conversion helpers.
+
 #[cfg(any(feature = "builder", feature = "png_source"))]
 use super::*;
 #[cfg(any(feature = "builder", feature = "png_source"))]

@@ -1,3 +1,5 @@
+//! Tests for retained widget-tree building and identity behavior.
+
 use crate::{test_support::test_atlas, Button, Container, ContainerHandle, Input, SizePolicy, Style};
 use std::{cell::RefCell, rc::Rc};
 

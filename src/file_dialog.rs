@@ -1,5 +1,3 @@
-use std::path::Path;
-
 //
 // Copyright 2022-Present (c) Raja Lehtihet & Wael El Oraiby
 //
@@ -29,6 +27,12 @@ use std::path::Path;
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
+//! Retained file picker dialog state and widget tree construction.
+//!
+//! The dialog owns reusable widget handles for folder/file lists, navigation buttons, path entry,
+//! and selection state so applications can open it repeatedly without rebuilding runtime state.
+use std::path::Path;
+
 use crate::*;
 
 /// Simple modal dialog that lets the user browse and pick files.
@@ -85,6 +89,7 @@ impl FileDialogState {
         self.win.is_open()
     }
 
+    /// Resolves a typed file name into a path relative to the current directory when needed.
     fn resolve_selected_path(cwd: &str, file_name: &str) -> String {
         let path = Path::new(file_name);
         if path.is_absolute() {
@@ -94,6 +99,7 @@ impl FileDialogState {
         }
     }
 
+    /// Resolves a typed directory path and accepts it only when it exists.
     fn resolve_directory_path(cwd: &str, input: &str) -> Option<String> {
         if input.trim().is_empty() {
             return None;
@@ -107,6 +113,7 @@ impl FileDialogState {
         }
     }
 
+    /// Returns the best available user home directory from common environment variables.
     fn home_dir() -> Option<String> {
         if let Ok(home) = std::env::var("HOME") {
             if !home.is_empty() {
@@ -121,10 +128,12 @@ impl FileDialogState {
         None
     }
 
+    /// Reads one directory into separate folder and file lists.
     fn list_folders_files(p: &Path, folders: &mut Vec<String>, files: &mut Vec<String>) {
         folders.clear();
         files.clear();
         if let Some(parent) = p.parent() {
+            // Inject parent as the first folder entry so the dialog can always navigate upward.
             folders.push(parent.to_string_lossy().to_string());
         }
         if let Ok(read_dir) = std::fs::read_dir(p) {
@@ -141,6 +150,7 @@ impl FileDialogState {
         }
     }
 
+    /// Refreshes filesystem entries and rebuilt list item widget handles.
     fn refresh_entries(&mut self) {
         // Re-snapshot the filesystem, then rebuild both the retained widget
         // handles so list length changes stay in sync.
@@ -148,6 +158,7 @@ impl FileDialogState {
         self.rebuild_item_states();
     }
 
+    /// Rebuilds retained list item state from the latest folder/file names.
     fn rebuild_item_states(&mut self) {
         let parent_path = Path::new(&self.current_working_directory).parent().map(|p| p.to_string_lossy().to_string());
 
@@ -182,6 +193,7 @@ impl FileDialogState {
         }
     }
 
+    /// Rebuilds the retained widget tree and records the node ids used for result lookup.
     fn rebuild_tree(&mut self) {
         let folder_panel = self.folder_panel.clone();
         let file_panel = self.file_panel.clone();
@@ -211,6 +223,8 @@ impl FileDialogState {
         let mut cancel_button_id = NodeId::default();
         let mut ok_button_id = NodeId::default();
         let (control_height, spacing) = {
+            // Size the footer reservation from the active root style/atlas so panels get the
+            // remaining body height without hard-coding font metrics.
             let win = self.win.inner();
             let container = &win.main;
             let style = container.style();
@@ -232,6 +246,7 @@ impl FileDialogState {
             let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
             let action_widths = [SizePolicy::Remainder(96 * 2 + spacing * 2), SizePolicy::Fixed(96), SizePolicy::Fixed(96)];
             let footer_reserved = control_height * 2 + spacing * 2;
+            // Toolbar: up/home/path/go.
             tree.row(&toolbar_widths, SizePolicy::Auto, |tree| {
                 up_button_id = tree.widget(up_button.clone());
                 home_button_id = tree.widget(home_button.clone());
@@ -239,6 +254,7 @@ impl FileDialogState {
                 go_button_id = tree.widget(go_button.clone());
             });
 
+            // Main pane: folders on the left, files on the right, both scrollable through panels.
             tree.row(&pane_widths, SizePolicy::Remainder(footer_reserved), |tree| {
                 tree.container(folder_panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
@@ -265,6 +281,7 @@ impl FileDialogState {
                 });
             });
 
+            // Filename row and action buttons.
             tree.row(&filename_widths, SizePolicy::Auto, |tree| {
                 tree.widget(file_name_label.clone());
                 tree.widget(tmp_file_name.clone());
@@ -286,6 +303,7 @@ impl FileDialogState {
         self.ok_button_id = ok_button_id;
     }
 
+    /// Synchronizes text boxes and tree structure with the current dialog state.
     fn sync_retained_view(&mut self) {
         if self.path_box.borrow().buf != self.current_working_directory {
             self.path_box.borrow_mut().buf = self.current_working_directory.clone();
@@ -293,6 +311,7 @@ impl FileDialogState {
         self.rebuild_tree();
     }
 
+    /// Changes the working directory and resets folder selection.
     fn navigate_to(&mut self, path: String) -> bool {
         if path.is_empty() || path == self.current_working_directory {
             return false;
@@ -303,15 +322,18 @@ impl FileDialogState {
         true
     }
 
+    /// Pushes the current retained tree/options into the registered context root.
     fn sync_retained_root<R: Renderer>(&mut self, ctx: &mut Context<R>) {
         self.sync_retained_view();
         ctx.set_root_tree(self.root, std::mem::take(&mut self.tree));
     }
 
+    /// Checks whether a node inside the root dialog submitted in the committed results.
     fn root_submitted(&self, results: FrameResultGeneration<'_>, node_id: NodeId) -> bool {
         results.state_of_retained(RetainedId::root_node(self.root, node_id)).is_submitted()
     }
 
+    /// Applies toolbar/path navigation actions from committed frame results.
     fn apply_navigation_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
         if self.root_submitted(results, self.up_button_id) {
             if let Some(parent) = Path::new(self.current_working_directory.as_str()).parent() {
@@ -337,6 +359,7 @@ impl FileDialogState {
         false
     }
 
+    /// Applies folder-list selection and navigates when a folder is submitted.
     fn apply_folder_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
         let next_directory = self.folder_item_ids.iter().enumerate().find_map(|(index, node_id)| {
             if results.state_of_retained(self.folder_panel.retained_id_for_node(*node_id)).is_submitted() {
@@ -354,6 +377,7 @@ impl FileDialogState {
         false
     }
 
+    /// Applies file-list selection into the temporary filename textbox.
     fn apply_file_actions(&mut self, results: FrameResultGeneration<'_>) {
         let selected_file = self.file_item_ids.iter().enumerate().find_map(|(index, node_id)| {
             if results.state_of_retained(self.file_panel.retained_id_for_node(*node_id)).is_submitted() {
@@ -368,6 +392,7 @@ impl FileDialogState {
         }
     }
 
+    /// Applies OK/Cancel actions and stores the selected file result.
     fn apply_completion_actions(&mut self, results: FrameResultGeneration<'_>) {
         if self.root_submitted(results, self.cancel_button_id) {
             self.file_name = None;
@@ -381,6 +406,7 @@ impl FileDialogState {
                 self.file_name = None;
                 self.file_path = None;
             } else {
+                // Store both the display basename and resolved path so callers can choose either.
                 let selected_path = Self::resolve_selected_path(self.current_working_directory.as_str(), typed_name.as_str());
                 let selected_name = Path::new(selected_path.as_str())
                     .file_name()

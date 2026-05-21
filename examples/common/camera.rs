@@ -28,6 +28,7 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
+//! Orbit camera and trackball helpers for the 3D examples.
 use rs_math3d::*;
 
 const TRACKBALL_SIZE: f32 = 0.8;

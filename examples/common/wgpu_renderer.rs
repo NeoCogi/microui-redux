@@ -28,6 +28,10 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
+//! WGPU renderer backend used by examples.
+//!
+//! This module implements the `Renderer` trait, texture uploads, UI batching, and optional custom
+//! mesh rendering for the demo application.
 
 use std::{collections::HashMap, mem, slice};
 

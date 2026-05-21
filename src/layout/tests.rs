@@ -1,3 +1,5 @@
+//! Tests for layout policy resolution and scoped flow restoration.
+
 use super::*;
 
 #[test]

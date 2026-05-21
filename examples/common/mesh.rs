@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+//! Shared mesh buffer and submission helpers for renderer examples.
 
 use std::sync::Arc;
 

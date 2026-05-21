@@ -50,14 +50,20 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! UTF-8 safe text editing primitives shared by textbox and text-area widgets.
+//!
+//! The helpers in this file keep cursor indices on valid byte boundaries, apply keyboard/text
+//! input, and translate pointer positions into cursor locations.
 use crate::text_layout::TextLine;
 use crate::{rect, AtlasHandle, FontId, InputSnapshot, Recti};
 
+/// Determines what pressing return means for the active editor.
 pub(crate) enum ReturnBehavior {
     Submit,
     Newline { submit_on_ctrl: bool },
 }
 
+/// Result of applying one input snapshot to a text buffer.
 pub(crate) struct TextEditOutcome {
     pub cursor: usize,
     pub changed: bool,
@@ -66,12 +72,14 @@ pub(crate) struct TextEditOutcome {
 }
 
 #[derive(Copy, Clone)]
+/// Metrics needed to align text and draw a caret consistently.
 pub(crate) struct FontLineMetrics {
     pub line_height: i32,
     pub baseline: i32,
     pub descent: i32,
 }
 
+/// Reads line-height, baseline, and descent from the atlas.
 pub(crate) fn font_line_metrics(font: FontId, atlas: &AtlasHandle) -> FontLineMetrics {
     let line_height = atlas.get_font_height(font) as i32;
     let baseline = atlas.get_font_baseline(font);
@@ -79,6 +87,7 @@ pub(crate) fn font_line_metrics(font: FontId, atlas: &AtlasHandle) -> FontLineMe
     FontLineMetrics { line_height, baseline, descent }
 }
 
+/// Centers a single text line inside bounds while keeping it fully clipped to the bounds.
 pub(crate) fn centered_line_top(bounds: Recti, line_height: i32) -> i32 {
     let mut text_y = bounds.y + bounds.height / 2 - line_height / 2;
     if text_y < bounds.y {
@@ -91,12 +100,14 @@ pub(crate) fn centered_line_top(bounds: Recti, line_height: i32) -> i32 {
     text_y
 }
 
+/// Builds a one-pixel caret rectangle clipped to the visible text area.
 pub(crate) fn caret_rect(x: i32, baseline_y: i32, metrics: FontLineMetrics, clip: Recti) -> Recti {
     let caret_top = (baseline_y - metrics.baseline + 2).max(clip.y).min(clip.y + clip.height);
     let caret_bottom = (baseline_y + metrics.descent - 2).max(clip.y).min(clip.y + clip.height);
     rect(x, caret_top, 1, (caret_bottom - caret_top).max(1))
 }
 
+/// Clamps a byte cursor to the nearest previous valid UTF-8 character boundary.
 pub(crate) fn clamp_cursor_boundary(buf: &str, cursor: usize) -> usize {
     let mut cursor = cursor.min(buf.len());
     while cursor > 0 && !buf.is_char_boundary(cursor) {
@@ -105,6 +116,7 @@ pub(crate) fn clamp_cursor_boundary(buf: &str, cursor: usize) -> usize {
     cursor
 }
 
+/// Inserts text at a valid cursor boundary and advances the cursor past the inserted text.
 fn insert_text(buf: &mut String, cursor: &mut usize, text: &str) -> bool {
     if text.is_empty() {
         return false;
@@ -115,6 +127,7 @@ fn insert_text(buf: &mut String, cursor: &mut usize, text: &str) -> bool {
     true
 }
 
+/// Deletes the previous UTF-8 scalar value, with optional leading-newline cleanup for text areas.
 fn delete_prev(buf: &mut String, cursor: &mut usize, allow_leading_newline: bool) -> bool {
     if buf.is_empty() {
         return false;
@@ -129,6 +142,7 @@ fn delete_prev(buf: &mut String, cursor: &mut usize, allow_leading_newline: bool
     }
     let mut start = *cursor;
     start -= 1;
+    // Walk back to the start byte of the previous UTF-8 scalar.
     while start > 0 && !buf.is_char_boundary(start) {
         start -= 1;
     }
@@ -137,12 +151,14 @@ fn delete_prev(buf: &mut String, cursor: &mut usize, allow_leading_newline: bool
     true
 }
 
+/// Deletes the next UTF-8 scalar value after `cursor`.
 fn delete_next(buf: &mut String, cursor: usize) -> bool {
     let cursor = clamp_cursor_boundary(buf, cursor);
     if buf.is_empty() || cursor >= buf.len() {
         return false;
     }
     let mut end = cursor + 1;
+    // Walk forward to the first boundary after the deleted scalar.
     while end < buf.len() && !buf.is_char_boundary(end) {
         end += 1;
     }
@@ -150,6 +166,7 @@ fn delete_next(buf: &mut String, cursor: usize) -> bool {
     true
 }
 
+/// Moves the cursor one UTF-8 scalar value to the left.
 fn move_left(buf: &str, cursor: usize) -> usize {
     let cursor = clamp_cursor_boundary(buf, cursor);
     if cursor == 0 {
@@ -162,6 +179,7 @@ fn move_left(buf: &str, cursor: usize) -> usize {
     new_cursor
 }
 
+/// Moves the cursor one UTF-8 scalar value to the right.
 fn move_right(buf: &str, cursor: usize) -> usize {
     let cursor = clamp_cursor_boundary(buf, cursor);
     if cursor >= buf.len() {
@@ -174,6 +192,7 @@ fn move_right(buf: &str, cursor: usize) -> usize {
     new_cursor
 }
 
+/// Applies text, editing keys, cursor keys, and return behavior to a UTF-8 buffer.
 pub(crate) fn apply_text_input(
     buf: &mut String,
     cursor: usize,
@@ -215,6 +234,7 @@ pub(crate) fn apply_text_input(
                 submit = true;
             }
             ReturnBehavior::Newline { submit_on_ctrl } => {
+                // Text areas can use Ctrl+Enter for submit while plain Enter inserts a newline.
                 if submit_on_ctrl && input.key_mods.is_ctrl() {
                     submit = true;
                 } else if insert_text(buf, &mut cursor_pos, "\n") {
@@ -232,6 +252,7 @@ pub(crate) fn apply_text_input(
     }
 }
 
+/// Finds the display line containing `cursor`.
 pub(crate) fn line_index_for_cursor(lines: &[TextLine], cursor: usize) -> usize {
     for (idx, line) in lines.iter().enumerate() {
         if cursor <= line.end {
@@ -241,6 +262,7 @@ pub(crate) fn line_index_for_cursor(lines: &[TextLine], cursor: usize) -> usize 
     lines.len().saturating_sub(1)
 }
 
+/// Returns the x offset of `cursor` measured from the start of `line`.
 pub(crate) fn cursor_x_in_line(line: &TextLine, buf: &str, cursor: usize, font: FontId, atlas: &AtlasHandle) -> i32 {
     let end = cursor.min(line.end).max(line.start);
     if end <= line.start {
@@ -250,6 +272,7 @@ pub(crate) fn cursor_x_in_line(line: &TextLine, buf: &str, cursor: usize, font: 
     }
 }
 
+/// Converts a target x coordinate inside one line into the nearest UTF-8 cursor position.
 pub(crate) fn cursor_from_x(line: &TextLine, buf: &str, target_x: i32, font: FontId, atlas: &AtlasHandle) -> usize {
     if target_x <= 0 {
         return line.start;
@@ -260,6 +283,7 @@ pub(crate) fn cursor_from_x(line: &TextLine, buf: &str, target_x: i32, font: Fon
         let next = idx + ch.len_utf8();
         let width = atlas.get_text_size(font, &slice[..next]).width;
         if target_x < width {
+            // Snap to whichever side of the glyph midpoint the target falls on.
             if target_x < (last_width + width) / 2 {
                 return line.start + idx;
             }
@@ -270,6 +294,7 @@ pub(crate) fn cursor_from_x(line: &TextLine, buf: &str, target_x: i32, font: Fon
     line.end
 }
 
+/// Converts a target x coordinate in single-line text into the nearest UTF-8 cursor position.
 pub(crate) fn cursor_from_text_x(buf: &str, target_x: i32, font: FontId, atlas: &AtlasHandle) -> usize {
     if target_x <= 0 {
         return 0;
@@ -290,6 +315,7 @@ pub(crate) fn cursor_from_text_x(buf: &str, target_x: i32, font: FontId, atlas: 
     buf.len()
 }
 
+/// Clamps a scroll offset against the current maximum scroll range.
 pub(crate) fn clamp_scroll(value: i32, max_value: i32) -> i32 {
     if max_value <= 0 { 0 } else { value.clamp(0, max_value) }
 }

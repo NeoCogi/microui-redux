@@ -27,6 +27,10 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
+//! Retained custom drawing example.
+//!
+//! This example demonstrates implementing a custom widget that emits widget-local triangle
+//! geometry through `WidgetCtx::graphics`.
 
 use microui_redux::{
     backend::Vertex, color, rect, widget_handle, AtlasHandle, AtlasSource, CharEntry, Color, Context, ControlState, Dimensioni, FontEntry, Renderer,

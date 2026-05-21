@@ -1,3 +1,5 @@
+//! Tests for retained widget-tree cache generation swapping.
+
 use super::*;
 
 #[test]

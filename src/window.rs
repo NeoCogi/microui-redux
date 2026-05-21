@@ -50,6 +50,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Window, dialog, and popup wrappers around root containers.
+//!
+//! This file owns chrome controls, window open/close state, z-order-facing handles, and the bridge
+//! between top-level roots and their underlying [`Container`].
 use super::*;
 use crate::{
     context::RootId,
@@ -66,6 +70,7 @@ pub(crate) struct WindowChromeIds {
 }
 
 impl WindowChromeIds {
+    /// Derives chrome ids directly from a raw root seed.
     pub(crate) fn from_root_seed(seed: usize) -> Self {
         Self {
             title: chrome_node_id(seed, ChromePart::Title),
@@ -74,18 +79,21 @@ impl WindowChromeIds {
         }
     }
 
+    /// Derives chrome ids from a retained root id.
     fn from_root(root_id: RootId) -> Self {
         Self::from_root_seed(root_id.raw())
     }
 }
 
 #[derive(Copy, Clone)]
+/// Chrome id slot used by deterministic id hashing.
 enum ChromePart {
     Title,
     Close,
     Resize,
 }
 
+/// Derives a stable id for one root chrome control.
 fn chrome_node_id(seed: usize, part: ChromePart) -> Id {
     const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
@@ -104,12 +112,14 @@ fn chrome_node_id(seed: usize, part: ChromePart) -> Id {
         ChromePart::Resize => 3,
     };
 
+    // Include string salts so chrome ids do not collide with normal retained tree ids.
     let hash = write(FNV_OFFSET_BASIS, 0x6d69_6372_6f75_695f_u64);
     let hash = write(hash, 0x726f_6f74_u64);
     let hash = write(hash, seed as u64);
     Id::new(write(hash, part))
 }
 
+/// Converts chrome interaction into the resource result reported for the chrome node.
 fn chrome_result(control: &ControlState, submit_on_click: bool) -> ResourceState {
     let mut result = ResourceState::NONE;
     if submit_on_click && control.clicked {
@@ -122,6 +132,7 @@ fn chrome_result(control: &ControlState, submit_on_click: bool) -> ResourceState
 }
 
 #[derive(Copy, Clone)]
+/// Type of chrome node being dispatched.
 enum WindowChromePart {
     Title,
     Close,
@@ -129,6 +140,7 @@ enum WindowChromePart {
 }
 
 #[derive(Copy, Clone)]
+/// One concrete chrome control and its allocated rectangle.
 struct WindowChromeNode {
     id: Id,
     part: WindowChromePart,
@@ -136,11 +148,13 @@ struct WindowChromeNode {
 }
 
 impl WindowChromeNode {
+    /// Creates a chrome node from id, role, and rect.
     fn new(id: Id, part: WindowChromePart, rect: Recti) -> Self {
         Self { id, part, rect }
     }
 }
 
+/// Small retained tree facade for title, close, and resize chrome controls.
 struct WindowChromeTree {
     ids: WindowChromeIds,
     title_state: Internal,
@@ -149,6 +163,7 @@ struct WindowChromeTree {
 }
 
 impl WindowChromeTree {
+    /// Creates chrome dispatch state from stable ids.
     fn new(ids: WindowChromeIds) -> Self {
         Self {
             ids,
@@ -158,6 +173,7 @@ impl WindowChromeTree {
         }
     }
 
+    /// Resolves the titlebar drag node when the window has a title.
     fn title_node(&self, container: &Container, opt: ContainerOption) -> Option<WindowChromeNode> {
         if opt.has_no_title() {
             return None;
@@ -168,6 +184,7 @@ impl WindowChromeTree {
         Some(WindowChromeNode::new(self.ids.title, WindowChromePart::Title, rect))
     }
 
+    /// Resolves the close button node inside the titlebar.
     fn close_node(&self, title_rect: Recti, opt: ContainerOption) -> Option<WindowChromeNode> {
         if opt.has_no_close() {
             return None;
@@ -182,6 +199,7 @@ impl WindowChromeTree {
         Some(WindowChromeNode::new(self.ids.close, WindowChromePart::Close, rect))
     }
 
+    /// Resolves the resize handle node when resizing is enabled.
     fn resize_node(&self, container: &Container, opt: ContainerOption) -> Option<WindowChromeNode> {
         if opt.is_auto_sizing() || opt.is_fixed() {
             return None;
@@ -198,6 +216,7 @@ impl WindowChromeTree {
         Some(WindowChromeNode::new(self.ids.resize, WindowChromePart::Resize, rect))
     }
 
+    /// Updates one chrome node, paints it, and records its retained interaction result.
     fn dispatch_node(
         container: &mut Container,
         results: &mut FrameResults,
@@ -214,10 +233,12 @@ impl WindowChromeTree {
         let submit_on_click = matches!(node.part, WindowChromePart::Close);
         let result = widget_result | chrome_result(&control, submit_on_click);
         container.record_tree_interaction(node.id, NodeInteraction::new(control, result));
+        // Chrome controls publish through the same result channel as retained tree widgets.
         results.record_node_with_context(container.retained_id_for_node(node.id), node.id, result, dispatch_site);
         control
     }
 
+    /// Updates and paints titlebar chrome, applying drag/close side effects.
     fn render_title_bar(&mut self, container: &mut Container, results: &mut FrameResults, win_state: &mut WindowState, opt: ContainerOption) {
         let Some(title_node) = self.title_node(container, opt) else {
             return;
@@ -236,6 +257,7 @@ impl WindowChromeTree {
             WidgetOption::NONE,
         );
         if title_control.active {
+            // Active titlebar drag moves the whole root.
             let delta = container.input().borrow().mouse_delta;
             container.translate_rect(delta);
         }
@@ -247,10 +269,12 @@ impl WindowChromeTree {
         container.draw_icon(CLOSE_ICON, close_node.rect, title_text_color);
         let close_control = Self::dispatch_node(container, results, close_node, &mut self.close_state, "window chrome close");
         if close_control.clicked {
+            // Close is expressed as window state so the context can reset after traversal ends.
             *win_state = WindowState::Closed;
         }
     }
 
+    /// Updates and paints the resize handle, applying drag deltas to the root rectangle.
     fn render_resize_handle(&mut self, container: &mut Container, results: &mut FrameResults, opt: ContainerOption) {
         let Some(resize_node) = self.resize_node(container, opt) else {
             return;
@@ -258,6 +282,7 @@ impl WindowChromeTree {
 
         let resize_control = Self::dispatch_node(container, results, resize_node, &mut self.resize_state, "window chrome resize");
         if resize_control.active {
+            // The hard minimum keeps the window usable while dragging inward.
             let delta = container.input().borrow().mouse_delta;
             container.resize_rect_by(delta, Dimensioni::new(96, 64));
         }
@@ -280,6 +305,7 @@ pub(crate) enum Type {
     Popup,
 }
 
+/// Root window data shared through [`WindowHandle`].
 pub(crate) struct Window {
     pub(crate) ty: Type,
     pub(crate) win_state: WindowState,
@@ -290,6 +316,7 @@ pub(crate) struct Window {
 }
 
 impl Window {
+    /// Computes titlebar height from style minimums and current title font metrics.
     fn titlebar_height(container: &Container) -> i32 {
         let style = container.style();
         let font_height = container.atlas().get_font_height(style.title_font) as i32;
@@ -298,6 +325,7 @@ impl Window {
         style.title_height.max(min_title_h)
     }
 
+    /// Computes the client body rect after titlebar chrome is reserved.
     fn body_rect_for(container: &Container, opt: ContainerOption) -> Recti {
         let mut body = container.rect();
         if !opt.has_no_title() {
@@ -308,6 +336,7 @@ impl Window {
         body
     }
 
+    /// Applies measured content size to an auto-sized root while preserving chrome thickness.
     fn apply_auto_size(container: &mut Container, opt: ContainerOption) {
         let content_size = container.content_size();
         if !opt.is_auto_sizing() || (content_size.width <= 0 && content_size.height <= 0) {
@@ -387,6 +416,7 @@ impl Window {
     }
 
     #[inline(never)]
+    /// Begins rendering a root window body and chrome.
     fn begin_window(&mut self, results: &mut FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior) {
         Self::apply_auto_size(&mut self.main, opt);
 
@@ -398,16 +428,19 @@ impl Window {
         self.chrome_tree.render_title_bar(&mut self.main, results, &mut self.win_state, opt);
 
         let body = Self::body_rect_for(&self.main, opt);
+        // Container body setup accounts for scrollbars before child layout begins.
         self.main.configure_container_body(body, scroll_behavior);
         let body = self.main.body();
         self.main.push_clip_rect(body);
     }
 
+    /// Ends rendering a root window body.
     fn end_window(&mut self) {
         let container = &mut self.main;
         container.pop_clip_rect();
     }
 
+    /// Prepares the underlying container exactly once per context frame.
     fn prepare_for_root_frame(&mut self, frame: usize) {
         if self.last_root_frame == Some(frame) {
             panic!("window {:?} was rendered more than once in frame {}", self.main.name(), frame);
@@ -415,17 +448,20 @@ impl Window {
 
         let contiguous = self.last_root_frame.and_then(|last| last.checked_add(1)) == Some(frame);
         if !contiguous {
+            // A hidden root loses hover routing when it is not rendered in consecutive frames.
             self.main.clear_root_frame_state();
         }
         self.main.prepare();
         self.last_root_frame = Some(frame);
     }
 
+    /// Clears transient state after a root closes.
     fn reset_after_close(&mut self) {
         self.last_root_frame = None;
         self.main.reset();
     }
 
+    /// Measures retained content in a scratch container for auto-size roots.
     fn measure_auto_size(&mut self, results: &FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         let body = Self::body_rect_for(&self.main, opt);
         // Auto-size should measure desired content against the raw body rect rather than inheriting
@@ -437,11 +473,13 @@ impl Window {
         Self::apply_auto_size(&mut self.main, opt);
     }
 
+    /// Finishes resize chrome after children have been traversed.
     fn finish_resize(&mut self, results: &mut FrameResults, opt: ContainerOption) {
         self.chrome_tree.render_resize_handle(&mut self.main, results, opt);
     }
 
     #[cfg(test)]
+    /// Returns stable chrome ids for tests.
     pub(crate) fn chrome_ids(&self) -> WindowChromeIds {
         self.chrome_tree.ids
     }
@@ -452,14 +490,17 @@ impl Window {
 pub struct WindowHandle(Rc<RefCell<Window>>);
 
 impl WindowHandle {
+    /// Wraps a new normal window in a shared handle.
     pub(crate) fn window(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         Self(Rc::new(RefCell::new(Window::window(root_id, name, atlas, style, input, initial_rect))))
     }
 
+    /// Wraps a new dialog in a shared handle.
     pub(crate) fn dialog(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
         Self(Rc::new(RefCell::new(Window::dialog(root_id, name, atlas, style, input, initial_rect))))
     }
 
+    /// Wraps a new popup in a shared handle with a zero rect until opened at the pointer.
     pub(crate) fn popup(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>) -> Self {
         Self(Rc::new(RefCell::new(Window::popup(root_id, name, atlas, style, input, Recti::new(0, 0, 0, 0)))))
     }
@@ -518,94 +559,117 @@ impl WindowHandle {
         self.inner_mut().main.clear_focus();
     }
 
+    /// Borrows the inner window mutably.
     pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Window> {
         self.0.borrow_mut()
     }
 
+    /// Borrows the inner window immutably.
     pub(crate) fn inner<'a>(&'a self) -> Ref<'a, Window> {
         self.0.borrow()
     }
 
+    /// Returns the root id associated with this handle.
     pub(crate) fn root_id(&self) -> RootId {
         self.inner().root_id
     }
 
+    /// Prepares the inner window for a context frame.
     pub(crate) fn prepare_for_frame(&mut self, frame: usize) {
         self.inner_mut().prepare_for_root_frame(frame)
     }
 
+    /// Replays the inner container draw commands.
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
         self.0.borrow_mut().main.render(canvas)
     }
 
+    /// Finishes inner container frame state.
     pub(crate) fn finish(&mut self) {
         self.inner_mut().main.finish()
     }
 
+    /// Returns the root z-index.
     pub(crate) fn zindex(&self) -> i32 {
         self.0.borrow().main.zindex()
     }
 
+    /// Sets the root z-index.
     pub(crate) fn set_zindex(&mut self, zindex: i32) {
         self.inner_mut().main.set_zindex(zindex);
     }
 
+    /// Replaces the root style handle.
     pub(crate) fn set_root_style(&mut self, style: Rc<Style>) {
         self.inner_mut().main.set_style_handle(style);
     }
 
+    /// Returns whether the root rectangle contains `point`.
     pub(crate) fn root_contains_point(&self, point: Vec2i) -> bool {
         self.inner().main.contains_point(point)
     }
 
+    /// Returns whether this root currently owns hover routing.
     pub(crate) fn root_in_hover_root(&self) -> bool {
         self.inner().main.in_hover_root()
     }
 
+    /// Sets whether this root currently owns hover routing.
     pub(crate) fn set_root_hover_active(&mut self, active: bool) {
         self.inner_mut().main.set_in_hover_root(active);
     }
 
+    /// Marks the popup just-opened guard on the inner container.
     pub(crate) fn mark_popup_just_opened(&mut self) {
         self.inner_mut().main.mark_popup_just_opened();
     }
 
+    /// Begins command recording for the root container.
     pub(crate) fn begin_root_command_scope(&mut self, pending_scroll: Option<Vec2i>) {
         self.inner_mut().main.begin_root_command_scope(pending_scroll);
     }
 
+    /// Ends command recording for the root container.
     pub(crate) fn finish_root_command_scope(&mut self) {
         self.inner_mut().main.finish_root_command_scope();
     }
 
+    /// Begins window body traversal.
     pub(crate) fn begin_window(&mut self, results: &mut FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior) {
         self.0.borrow_mut().begin_window(results, opt, scroll_behavior)
     }
 
+    /// Measures auto-size content for this root.
     pub(crate) fn measure_auto_size(&mut self, results: &FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         self.inner_mut().measure_auto_size(results, opt, scroll_behavior, tree)
     }
 
+    /// Ends window body traversal.
     pub(crate) fn end_window(&mut self) {
         self.inner_mut().end_window()
     }
 
+    /// Applies resize chrome side effects.
     pub(crate) fn finish_resize(&mut self, results: &mut FrameResults, opt: ContainerOption) {
         self.inner_mut().finish_resize(results, opt)
     }
 
+    /// Resets closed-window state.
     pub(crate) fn reset_after_close(&mut self) {
         self.inner_mut().reset_after_close()
     }
 
+    /// Returns whether this root is a popup.
     pub(crate) fn root_is_popup(&self) -> bool {
         self.inner().is_popup()
     }
 
+    /// Returns whether the popup just-opened guard is set.
     pub(crate) fn root_popup_just_opened(&self) -> bool {
         self.inner().main.popup_just_opened()
     }
 
+    /// Clears the popup just-opened guard.
     pub(crate) fn clear_root_popup_just_opened(&mut self) {
         self.inner_mut().main.clear_popup_just_opened();
     }

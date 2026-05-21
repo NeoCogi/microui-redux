@@ -50,6 +50,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Collapsible header and tree-node widget state.
+//!
+//! These widgets own expansion state while container traversal decides whether child nodes are
+//! included in each retained pass.
 use crate::*;
 
 #[derive(Clone, Copy)]
@@ -180,6 +184,7 @@ impl Node {
         matches!(self.kind, NodeKind::Header)
     }
 
+    /// Measures disclosure icon plus label text.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
@@ -197,9 +202,11 @@ impl Node {
         Dimensioni::new(width, height)
     }
 
+    /// Toggles expanded/closed state on click.
     fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         if control.clicked {
+            // The node owns expansion state; container traversal reads it to decide child passes.
             self.state = if self.state.is_expanded() {
                 NodeStateValue::Closed
             } else {
@@ -210,6 +217,7 @@ impl Node {
         res
     }
 
+    /// Paints header/tree frame, disclosure icon, and label.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         let expanded = self.state.is_expanded();
         let style = ctx.style();
@@ -228,6 +236,7 @@ impl Node {
             }
         }
 
+        // Reserve a square disclosure region at the left of the row.
         ctx.draw_icon(
             if expanded { COLLAPSE_ICON } else { EXPAND_ICON },
             rect(r.x, r.y, r.height, r.height),

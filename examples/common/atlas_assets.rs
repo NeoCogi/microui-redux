@@ -50,6 +50,8 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Default atlas asset configuration shared by examples and the build-time atlas exporter.
+
 use microui_redux::{AtlasHandle, Dimensioni};
 
 #[cfg(feature = "builder")]

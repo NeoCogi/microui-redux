@@ -27,6 +27,10 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
+//! Shared SDL application runner for examples.
+//!
+//! This module owns window/event setup, backend selection, input forwarding, and the example main
+//! loop used by retained-mode demos.
 use crate::*;
 use common::*;
 use microui_redux::{self as microui, AtlasHandle, Dimensioni, RendererHandle};
