@@ -84,49 +84,51 @@ impl Container {
     /// Returns the previous frame layout for `node_id`, if any.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn previous_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
-        self.tree.previous_layout(node_id)
+        self.tree_cache.prev_layout(node_id).copied()
     }
 
     /// Returns the current frame layout for `node_id`, if any.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn current_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
-        self.tree.current_layout(node_id)
+        self.tree_cache.current_layout(node_id).copied()
     }
 
     /// Stores the current frame geometry snapshot for a retained tree node.
     pub(crate) fn record_tree_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
-        self.tree.record_layout(node_id, layout);
+        self.tree_cache.record_layout(node_id, layout);
     }
 
     /// Stores the current frame control/result snapshot for a retained tree node.
     pub(crate) fn record_tree_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
-        self.tree.record_interaction(node_id, interaction);
+        self.tree_cache.record_interaction(node_id, interaction);
     }
 
     /// Returns the current frame layout for `node_id` or panics if layout was skipped.
     fn current_tree_layout_or_panic(&self, node_id: NodeId) -> NodeLayout {
-        self.tree
+        self.tree_cache
             .current_layout(node_id)
+            .copied()
             .unwrap_or_else(|| panic!("tree node {:?} missing current layout", node_id))
     }
 
     /// Returns the current frame interaction for `node_id` or panics if update was skipped.
     fn current_tree_interaction_or_panic(&self, node_id: NodeId) -> NodeInteraction {
-        self.tree
+        self.tree_cache
             .current_interaction(node_id)
+            .copied()
             .unwrap_or_else(|| panic!("tree node {:?} missing current interaction", node_id))
     }
 
     /// Returns whether layout included this node's children in the current frame.
     fn tree_children_were_laid_out(&self, children: &[WidgetTreeNode]) -> bool {
-        children.first().is_some_and(|child| self.tree.current_layout(child.id()).is_some())
+        children.first().is_some_and(|child| self.tree_cache.current_layout(child.id()).is_some())
     }
 
     /// Synthesizes a structural node rect by unioning the current frame bounds of its children.
     fn record_tree_group_from_children(&mut self, node_id: NodeId, children: &[WidgetTreeNode]) {
         let mut bounds: Option<Recti> = None;
         for child in children {
-            if let Some(child_state) = self.tree.current_layout(child.id()) {
+            if let Some(child_state) = self.tree_cache.current_layout(child.id()) {
                 // Structural nodes like rows, grids, and columns do not have their own widget
                 // state; their effective bounds are the union of their children for the current
                 // frame. That cached group rect is useful for debugging/tests and keeps the cache

@@ -107,7 +107,8 @@ pub struct Container {
     scroll_enabled: bool,
     /// True when this container is a scratch container used only for measurement.
     measurement_mode: bool,
-    tree: TreeState,
+    /// Previous/current frame cache for retained tree node geometry and interaction state.
+    tree_cache: WidgetTreeCache,
     panels: PanelState,
 }
 
@@ -268,54 +269,6 @@ impl InteractionState {
 }
 
 #[derive(Default)]
-struct TreeState {
-    /// Previous/current frame cache for tree node geometry and interaction state.
-    cache: WidgetTreeCache,
-}
-
-impl TreeState {
-    /// Clears all cached retained tree generations.
-    fn clear(&mut self) {
-        self.cache.clear();
-    }
-
-    /// Starts a new cache generation.
-    fn begin_frame(&mut self) {
-        self.cache.begin_frame();
-    }
-
-    /// Publishes current tree cache state as the previous generation for the next frame.
-    fn finish_frame(&mut self) {
-        self.cache.finish_frame();
-    }
-
-    /// Returns previous-frame layout for retained code that needs committed geometry.
-    fn previous_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
-        self.cache.prev_layout(node_id).copied()
-    }
-
-    /// Returns current-frame layout for retained update/paint passes.
-    fn current_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
-        self.cache.current_layout(node_id).copied()
-    }
-
-    /// Records current-frame layout for a retained tree node.
-    fn record_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
-        self.cache.record_layout(node_id, layout);
-    }
-
-    /// Returns current-frame interaction for a retained tree node.
-    fn current_interaction(&self, node_id: NodeId) -> Option<NodeInteraction> {
-        self.cache.current_interaction(node_id).copied()
-    }
-
-    /// Records current-frame interaction for a retained tree node.
-    fn record_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
-        self.cache.record_interaction(node_id, interaction);
-    }
-}
-
-#[derive(Default)]
 struct PanelState {
     /// Embedded panels active in the current retained traversal.
     active: Vec<ContainerHandle>,
@@ -367,7 +320,7 @@ impl Container {
             input,
             scroll_enabled: true,
             measurement_mode: false,
-            tree: TreeState::default(),
+            tree_cache: WidgetTreeCache::default(),
             panels: PanelState::default(),
         }
     }
@@ -387,7 +340,7 @@ impl Container {
         self.scroll_enabled = true;
         self.measurement_mode = false;
         self.panels.clear();
-        self.tree.clear();
+        self.tree_cache.clear();
     }
 
     /// Clears root-only frame routing while preserving widget focus and panel state.
@@ -402,7 +355,7 @@ impl Container {
         self.panels.clear();
         self.interaction.prepare_frame();
         self.scroll_enabled = true;
-        self.tree.begin_frame();
+        self.tree_cache.begin_frame();
     }
 
     /// Creates a shallow scratch copy for measurement without mutating live interaction state.
@@ -448,7 +401,7 @@ impl Container {
     pub fn finish(&mut self) {
         self.panels.finish_active();
         self.interaction.finish_frame();
-        self.tree.finish_frame();
+        self.tree_cache.finish_frame();
     }
 
     /// Returns the outer container rectangle.
