@@ -18,7 +18,7 @@ default = ["builder", "save-to-rust"]
 builder = ["dep:fontdue", "dep:png"]
 png_source = ["dep:png"]
 save-to-rust = []
-prebuilt-atlas = []
+prebuilt-atlas = ["png_source"]
 example-backend = []
 # Example backends are only used by examples and are wired to optional deps.
 example-glow = ["example-backend", "dep:sdl2", "dep:glow"]
@@ -58,7 +58,7 @@ rand = "0.10"
 [[bin]]
 name = "atlas_export"
 path = "tools/atlas_export.rs"
-required-features = ["builder", "save-to-rust"]
+required-features = ["builder", "save-to-rust", "png_source"]
 
 # Examples listed explicitly to ensure shared assets compile across feature sets.
 [[example]]

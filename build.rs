@@ -75,16 +75,26 @@ fn run_atlas_export(output: &Path, target_dir: &Path) -> Result<(), Box<dyn Erro
         "--bin",
         "atlas_export",
         "--features",
-        "builder,save-to-rust",
+        "builder,save-to-rust,png_source",
         "--release",
         "--",
         "--output",
         output.to_str().expect("valid path"),
     ]);
+    clear_nested_rustflags(&mut cmd);
 
     let status = cmd.status()?;
     if !status.success() {
         return Err("atlas_export failed".into());
     }
     Ok(())
+}
+
+fn clear_nested_rustflags(cmd: &mut Command) {
+    cmd.env_remove("RUSTFLAGS").env_remove("CARGO_ENCODED_RUSTFLAGS");
+    for (key, _) in env::vars() {
+        if key.starts_with("CARGO_TARGET_") && key.ends_with("_RUSTFLAGS") {
+            cmd.env_remove(key);
+        }
+    }
 }

@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-#![cfg(all(feature = "builder", feature = "save-to-rust"))]
+#![cfg(all(feature = "builder", feature = "save-to-rust", feature = "png_source"))]
 
 use microui_redux::SourceFormat;
 use std::{env, error::Error, path::PathBuf};
@@ -81,6 +81,6 @@ fn parse_output_arg() -> Result<PathBuf, Box<dyn Error>> {
 fn export_atlas(path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let slots = atlas_assets::default_slots();
     let atlas = atlas_assets::load_atlas(&slots);
-    atlas.to_rust_files("PREBUILT_ATLAS", SourceFormat::Raw, path.to_str().unwrap())?;
+    atlas.to_rust_files("PREBUILT_ATLAS", SourceFormat::Png, path.to_str().unwrap())?;
     Ok(())
 }
