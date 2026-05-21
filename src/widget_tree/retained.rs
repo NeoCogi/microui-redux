@@ -81,23 +81,35 @@ pub fn widget_handle<T>(value: T) -> WidgetHandle<T> {
     Rc::new(RefCell::new(value))
 }
 
+/// Uses the shared handle allocation address as the stable widget-state id.
 pub(crate) fn widget_handle_id<W>(handle: &WidgetHandle<W>) -> Id {
     Id::new(Rc::as_ptr(handle) as *const () as usize as u64)
 }
 
+/// Shared custom-render command object stored by retained custom nodes.
 pub(crate) type TreeCustomRender = Rc<RefCell<Box<dyn CustomRenderCommand + 'static>>>;
 
+/// Type-erased adapter for retained widget state handles.
 pub(crate) trait WidgetStateHandleDyn {
+    /// Returns the stable id of the wrapped widget handle.
     fn widget_handle_id(&self) -> Id;
+    /// Returns the widget options after applying widget-specific effective-state overrides.
     fn effective_widget_opt(&self) -> WidgetOption;
+    /// Returns the widget scroll behavior after applying widget-specific overrides.
     fn effective_scroll_behavior(&self) -> ScrollBehavior;
+    /// Returns how the widget wants focus to be retained or released.
     fn focus_policy(&self) -> FocusPolicy;
+    /// Measures the widget without mutating it.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
+    /// Returns whether update/paint need a captured input snapshot.
     fn needs_input_snapshot(&self) -> bool;
+    /// Updates the widget through interior mutability.
     fn update(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
+    /// Paints the widget through interior mutability.
     fn paint(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState);
 }
 
+/// Concrete erased adapter around a strongly typed widget handle.
 struct WidgetStateHandle<W: Widget + 'static> {
     handle: WidgetHandle<W>,
 }
@@ -133,16 +145,19 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
     }
 
     fn update(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+        // Borrow only for the duration of dispatch so later result recording cannot hold state.
         let mut widget = self.handle.borrow_mut();
         widget.update(ctx, control)
     }
 
     fn paint(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+        // Paint may mutate retained widget state for caches such as text layout.
         let mut widget = self.handle.borrow_mut();
         widget.paint(ctx, control);
     }
 }
 
+/// Boxes a typed widget handle behind the retained traversal's erased dispatch trait.
 pub(crate) fn erased_widget_state<W: Widget + 'static>(handle: WidgetHandle<W>) -> Box<dyn WidgetStateHandleDyn> {
     Box::new(WidgetStateHandle { handle })
 }

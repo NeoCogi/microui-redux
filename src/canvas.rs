@@ -27,6 +27,10 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
+//! Renderer-facing canvas and texture batching.
+//!
+//! `Canvas` turns retained draw commands into renderer calls, handles atlas/external texture
+//! quads, applies clipping, and owns the external texture id lifetime for a renderer handle.
 use crate::graphics::clip_triangle_vertices_to_rect;
 use super::*;
 use std::collections::HashMap;
@@ -76,6 +80,7 @@ pub struct Canvas<R: Renderer> {
 }
 
 #[derive(Clone, Copy)]
+/// Dimensions tracked for an uploaded external texture.
 struct TextureInfo {
     width: i32,
     height: i32,
@@ -187,6 +192,7 @@ impl<R: Renderer> Canvas<R> {
         self.render_scope(|frame| frame.draw_slot_with_function(id, r, color, payload));
     }
 
+    /// Runs a short mutable renderer scope with a prepared frame helper.
     pub(crate) fn render_scope<Res, F: FnOnce(&mut CanvasFrame<'_, R>) -> Res>(&mut self, f: F) -> Res {
         let Self {
             current_dim,
@@ -199,6 +205,8 @@ impl<R: Renderer> Canvas<R> {
             rect_batch,
             ..
         } = self;
+        // Copy immutable fields out before borrowing the renderer so the frame helper can borrow
+        // the mutable texture/clip buffers without fighting the renderer handle borrow.
         let current_dim = *current_dim;
         let atlas_dim = *atlas_dim;
         let white_icon_rect = *white_icon_rect;
@@ -305,6 +313,7 @@ impl<R: Renderer> Canvas<R> {
     }
 }
 
+/// Per-scope drawing facade used while the renderer is mutably borrowed.
 pub(crate) struct CanvasFrame<'a, R: Renderer> {
     renderer: &'a mut R,
     current_dim: Dimensioni,
@@ -318,12 +327,14 @@ pub(crate) struct CanvasFrame<'a, R: Renderer> {
 
 impl<R: Renderer> CanvasFrame<'_, R> {
     #[inline(never)]
+    /// Pushes one atlas-backed rectangle.
     pub(crate) fn push_rect(&mut self, dst: Recti, src: Recti, color: Color) {
         let rects = [(dst, src, color)];
         self.push_rects(&rects);
     }
 
     #[inline(never)]
+    /// Converts clipped atlas rectangles into renderer quad vertices.
     pub(crate) fn push_rects(&mut self, rects: &[(Recti, Recti, Color)]) {
         if rects.is_empty() {
             return;
@@ -373,11 +384,13 @@ impl<R: Renderer> CanvasFrame<'_, R> {
         }
     }
 
+    /// Draws a solid rectangle by sampling the atlas white pixel.
     pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
         self.push_rect(rect, self.white_icon_rect, color);
     }
 
     #[inline(never)]
+    /// Expands text into atlas quads and submits them in one batch.
     pub(crate) fn draw_chars(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
         let mut rect_batch = std::mem::take(self.rect_batch);
         rect_batch.clear();
@@ -392,6 +405,7 @@ impl<R: Renderer> CanvasFrame<'_, R> {
         *self.rect_batch = rect_batch;
     }
 
+    /// Draws an atlas icon centered inside the destination rectangle.
     pub(crate) fn draw_icon(&mut self, id: IconId, r: Recti, color: Color) {
         let src = self.atlas.get_icon_rect(id);
         let x = r.x + (r.width - src.width) / 2;
@@ -399,6 +413,7 @@ impl<R: Renderer> CanvasFrame<'_, R> {
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
+    /// Draws a named atlas slot centered inside the destination rectangle.
     pub(crate) fn draw_slot(&mut self, id: SlotId, r: Recti, color: Color) {
         let src = self.atlas.get_slot_rect(id);
         let x = r.x + (r.width - src.width) / 2;
@@ -406,6 +421,7 @@ impl<R: Renderer> CanvasFrame<'_, R> {
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
+    /// Renders dynamic slot pixels before drawing the slot quad.
     pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, r: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
         let src = self.atlas.get_slot_rect(id);
         let mut atlas = self.atlas.clone();
@@ -415,10 +431,12 @@ impl<R: Renderer> CanvasFrame<'_, R> {
         self.push_rect(rect(x, y, src.width, src.height), src, color);
     }
 
+    /// Updates the shared clip rectangle for this canvas frame.
     pub(crate) fn set_clip_rect(&mut self, rect: Recti) {
         *self.clip = rect;
     }
 
+    /// Clips retained custom triangles against the active frame clip and submits survivors.
     pub(crate) fn draw_triangles(&mut self, vertices: &[Vertex]) {
         if vertices.is_empty() {
             return;
@@ -436,6 +454,7 @@ impl<R: Renderer> CanvasFrame<'_, R> {
         }
     }
 
+    /// Dispatches an image draw to either an atlas slot or external texture.
     pub(crate) fn draw_image(&mut self, image: Image, rect: Recti, color: Color) {
         match image {
             Image::Slot(slot) => self.draw_slot(slot, rect, color),
@@ -443,6 +462,7 @@ impl<R: Renderer> CanvasFrame<'_, R> {
         }
     }
 
+    /// Draws an uploaded external texture with normalized source coordinates.
     pub(crate) fn draw_texture(&mut self, texture: TextureId, rect: Recti, color: Color) {
         let info = match self.textures.get(&texture) {
             Some(info) => *info,
@@ -492,6 +512,7 @@ impl<R: Renderer> CanvasFrame<'_, R> {
 }
 
 impl<R: Renderer> Drop for Canvas<R> {
+    /// Releases all renderer-owned textures allocated through the canvas.
     fn drop(&mut self) {
         let ids: Vec<_> = self.textures.keys().copied().collect();
         self.renderer.scope_mut(|r| {

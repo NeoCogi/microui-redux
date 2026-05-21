@@ -50,6 +50,11 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Draw command recording helpers used by containers and widget graphics.
+//!
+//! This file owns clip-stack mutation and conversion from high-level widget drawing requests into
+//! retained [`Command`] values. It deliberately does not talk to a renderer; that happens later
+//! when container draw commands are replayed through [`crate::Canvas`].
 use crate::container::Command;
 use crate::text_layout::control_text_position_with_font;
 use crate::*;
@@ -61,6 +66,7 @@ pub(crate) fn intersect_clip_rect(limit: Recti, rect: Recti) -> Recti {
 
 /// Returns whether `bounds` is fully visible, partially visible, or fully outside `clip`.
 pub(crate) fn clip_relation(bounds: Recti, clip: Recti) -> Clip {
+    // Empty geometry is treated as fully clipped so callers can skip command emission.
     if bounds.width <= 0 || bounds.height <= 0 || clip.width <= 0 || clip.height <= 0 {
         return Clip::All;
     }
@@ -76,6 +82,7 @@ pub(crate) fn clip_relation(bounds: Recti, clip: Recti) -> Clip {
     Clip::Part
 }
 
+/// Mutable command recording context shared by container draw helpers and custom widget graphics.
 pub(crate) struct DrawCtx<'a> {
     commands: &'a mut Vec<Command>,
     triangle_vertices: &'a mut Vec<Vertex>,
@@ -85,6 +92,7 @@ pub(crate) struct DrawCtx<'a> {
 }
 
 impl<'a> DrawCtx<'a> {
+    /// Creates a recorder around the container-owned command and vertex buffers.
     pub(crate) fn new(
         commands: &'a mut Vec<Command>,
         triangle_vertices: &'a mut Vec<Vertex>,
@@ -101,14 +109,17 @@ impl<'a> DrawCtx<'a> {
         }
     }
 
+    /// Returns the style currently used to resolve widget colors and spacing.
     pub(crate) fn style(&self) -> &Style {
         self.style
     }
 
+    /// Returns the atlas used for text/icon metrics and atlas slot lookups.
     pub(crate) fn atlas(&self) -> &AtlasHandle {
         self.atlas
     }
 
+    /// Returns the active clip rectangle, or an unclipped sentinel when the stack is empty.
     pub(crate) fn current_clip_rect(&self) -> Recti {
         self.clip_stack.last().copied().unwrap_or(UNCLIPPED_RECT)
     }
@@ -119,11 +130,13 @@ impl<'a> DrawCtx<'a> {
         self.clip_stack.len()
     }
 
+    /// Pushes a nested clip after intersecting it with the existing top-of-stack clip.
     pub(crate) fn push_clip_rect(&mut self, rect: Recti) {
         let last = self.current_clip_rect();
         self.clip_stack.push(intersect_clip_rect(last, rect));
     }
 
+    /// Pops the most recent clip scope.
     pub(crate) fn pop_clip_rect(&mut self) {
         self.clip_stack.pop();
     }
@@ -147,6 +160,7 @@ impl<'a> DrawCtx<'a> {
         }
     }
 
+    /// Appends a draw command to the container's retained command stream.
     pub(crate) fn push_command(&mut self, cmd: Command) {
         self.commands.push(cmd);
     }
@@ -158,20 +172,24 @@ impl<'a> DrawCtx<'a> {
         self.triangle_vertices.len()
     }
 
+    /// Appends one triangle to the shared triangle arena.
     pub(crate) fn push_triangle_vertices(&mut self, v0: Vertex, v1: Vertex, v2: Vertex) {
         self.triangle_vertices.push(v0);
         self.triangle_vertices.push(v1);
         self.triangle_vertices.push(v2);
     }
 
+    /// Replaces the active clip rectangle.
     pub(crate) fn set_current_clip_rect(&mut self, rect: Recti) {
         self.replace_current_clip_rect(rect);
     }
 
+    /// Emits a replay command that pushes a clip during render playback.
     fn push_replay_clip(&mut self, rect: Recti) {
         self.push_command(Command::PushClip { rect });
     }
 
+    /// Emits a replay command that pops a clip during render playback.
     fn pop_replay_clip(&mut self) {
         self.push_command(Command::PopClip);
     }
@@ -186,6 +204,8 @@ impl<'a> DrawCtx<'a> {
         if clipped == Clip::All {
             return;
         }
+        // Partially visible commands replay under a temporary clip; fully visible commands avoid
+        // the extra push/pop pair to keep the command stream compact.
         if clipped == Clip::Part {
             self.push_replay_clip(clip);
         }
@@ -195,10 +215,12 @@ impl<'a> DrawCtx<'a> {
         }
     }
 
+    /// Checks how `r` relates to the current draw clip.
     pub(crate) fn check_clip(&self, r: Recti) -> Clip {
         clip_relation(r, self.current_clip_rect())
     }
 
+    /// Records a solid rectangle after applying the active clip immediately.
     pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
         let rect = rect.intersect(&self.current_clip_rect()).unwrap_or_default();
         if rect.width > 0 && rect.height > 0 {
@@ -206,6 +228,7 @@ impl<'a> DrawCtx<'a> {
         }
     }
 
+    /// Records the four edges of a one-pixel border rectangle.
     pub(crate) fn draw_box(&mut self, r: Recti, color: Color) {
         self.draw_rect(rect(r.x + 1, r.y, r.width - 2, 1), color);
         self.draw_rect(rect(r.x + 1, r.y + r.height - 1, r.width - 2, 1), color);
@@ -213,6 +236,7 @@ impl<'a> DrawCtx<'a> {
         self.draw_rect(rect(r.x + r.width - 1, r.y, 1, r.height), color);
     }
 
+    /// Records a text command, wrapping it in a replay clip when only partly visible.
     pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
         let size = self.atlas.get_text_size(font, text);
         let bounds = rect(pos.x, pos.y, size.width, size.height);
@@ -227,6 +251,7 @@ impl<'a> DrawCtx<'a> {
         });
     }
 
+    /// Records an icon command, wrapping it in a replay clip when only partly visible.
     pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
         let clip = self.current_clip_rect();
         self.emit_clipped(rect, clip, |draw| {
@@ -234,6 +259,7 @@ impl<'a> DrawCtx<'a> {
         });
     }
 
+    /// Draws a filled control background and optional one-pixel border for the color role.
     pub(crate) fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
         let color = self.style.colors[colorid as usize];
         self.draw_rect(rect, color);
@@ -242,10 +268,12 @@ impl<'a> DrawCtx<'a> {
         }
     }
 
+    /// Records clipped control text using the widget option's alignment flags.
     pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let color = self.style.colors[colorid as usize];
         let pos = control_text_position_with_font(self.style, self.atlas, font, text, rect, opt);
 
+        // Text uses a scoped clip so glyph quads cannot bleed outside the control rectangle.
         self.push_clip_rect(rect);
         self.draw_text(font, text, pos, color);
         self.pop_clip_rect();

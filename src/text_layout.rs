@@ -50,15 +50,21 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Shared text measurement, wrapping, and control alignment helpers.
+//!
+//! Text widgets and simple display widgets use these routines to keep UTF-8 line slicing,
+//! baseline alignment, and control text placement consistent.
 use crate::{vec2, AtlasHandle, Dimensioni, FontId, Recti, Style, TextWrap, Vec2i, WidgetOption};
 
 #[derive(Clone, Copy)]
+/// Byte range and measured width for one display line.
 pub(crate) struct TextLine {
     pub start: usize,
     pub end: usize,
     pub width: i32,
 }
 
+/// Pushes one source line into `lines`, splitting it on word boundaries when wrapping is enabled.
 fn push_wrapped_line(
     lines: &mut Vec<TextLine>,
     buf: &str,
@@ -71,6 +77,7 @@ fn push_wrapped_line(
 ) {
     let line = &buf[line_start..line_end];
     if line.is_empty() {
+        // Preserve blank lines as zero-width ranges so cursor and display math keep line count.
         lines.push(TextLine {
             start: line_start,
             end: line_start,
@@ -92,6 +99,7 @@ fn push_wrapped_line(
         let word_len = word.len();
         let word_width = atlas.get_text_size(font, word).width;
         if seg_width > 0 && seg_width + word_width > max_width {
+            // Split before the word that would overflow the current segment.
             let seg_end = offset;
             lines.push(TextLine {
                 start: line_start + seg_start,
@@ -112,6 +120,7 @@ fn push_wrapped_line(
     });
 }
 
+/// Builds logical text lines, preserving the trailing blank line after a final newline.
 pub(crate) fn build_text_lines(buf: &str, wrap: TextWrap, max_width: i32, font: FontId, atlas: &AtlasHandle) -> Vec<TextLine> {
     let mut lines = Vec::new();
     if buf.is_empty() {
@@ -122,6 +131,7 @@ pub(crate) fn build_text_lines(buf: &str, wrap: TextWrap, max_width: i32, font: 
     let mut line_start = 0;
     for (idx, ch) in buf.char_indices() {
         if ch == '\n' {
+            // `idx` is a UTF-8 boundary from `char_indices`, so slicing remains valid.
             push_wrapped_line(&mut lines, buf, line_start, idx, wrap, max_width, font, atlas);
             line_start = idx + ch.len_utf8();
         }
@@ -137,6 +147,7 @@ pub(crate) fn build_text_lines(buf: &str, wrap: TextWrap, max_width: i32, font: 
     lines
 }
 
+/// Builds display lines for read-only text, suppressing the extra visual row after a final newline.
 pub(crate) fn build_display_text_lines(buf: &str, wrap: TextWrap, max_width: i32, font: FontId, atlas: &AtlasHandle) -> Vec<TextLine> {
     let mut lines = build_text_lines(buf, wrap, max_width, font, atlas);
     if buf.ends_with('\n') && lines.last().is_some_and(|last| last.start == buf.len() && last.end == buf.len()) {
@@ -145,6 +156,7 @@ pub(crate) fn build_display_text_lines(buf: &str, wrap: TextWrap, max_width: i32
     lines
 }
 
+/// Returns the y coordinate that aligns a font baseline inside a control rectangle.
 pub(crate) fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32) -> i32 {
     if rect.height >= line_height {
         return rect.y + (rect.height - line_height) / 2;
@@ -156,16 +168,19 @@ pub(crate) fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32)
     (baseline_center - baseline).clamp(min_top, max_top)
 }
 
+/// Returns a compact vertical padding value for text editing surfaces.
 pub(crate) fn vertical_text_padding(padding: i32) -> i32 {
     (padding / 2).max(1)
 }
 
+/// Computes the bounding size for a block of measured lines.
 pub(crate) fn text_block_size(lines: &[TextLine], line_height: i32) -> Dimensioni {
     let width = lines.iter().map(|line| line.width).max().unwrap_or(0).max(0);
     let height = line_height.saturating_mul((lines.len() as i32).max(1)).max(0);
     Dimensioni::new(width, height)
 }
 
+/// Computes the top-left text position for a single-line control.
 pub(crate) fn control_text_position_with_font(style: &Style, atlas: &AtlasHandle, font: FontId, text: &str, rect: Recti, opt: WidgetOption) -> Vec2i {
     let tsize = atlas.get_text_size(font, text);
     let padding = style.padding;

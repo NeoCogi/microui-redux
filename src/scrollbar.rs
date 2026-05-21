@@ -50,14 +50,20 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Geometry helpers for retained container scrollbars.
+//!
+//! Containers own scrollbar state and input routing; this file keeps the pure calculations for
+//! base tracks, thumb rectangles, and drag-to-scroll conversion independent of that state.
 use crate::{Recti, Vec2i};
 
 #[derive(Copy, Clone, Debug)]
+/// Axis selector used by shared scrollbar geometry helpers.
 pub(crate) enum ScrollAxis {
     Vertical,
     Horizontal,
 }
 
+/// Returns the scrollbar track rectangle just outside the container body on the selected axis.
 pub(crate) fn scrollbar_base(axis: ScrollAxis, body: Recti, scrollbar_size: i32) -> Recti {
     let mut base = body;
     match axis {
@@ -73,10 +79,12 @@ pub(crate) fn scrollbar_base(axis: ScrollAxis, body: Recti, scrollbar_size: i32)
     base
 }
 
+/// Returns the largest scroll offset needed to reveal all content.
 pub(crate) fn scrollbar_max_scroll(content_len: i32, view_len: i32) -> i32 {
     (content_len - view_len).max(0)
 }
 
+/// Converts pointer drag distance on the scrollbar track into content scroll distance.
 pub(crate) fn scrollbar_drag_delta(axis: ScrollAxis, delta: Vec2i, content_len: i32, base: Recti) -> i32 {
     let base_len = match axis {
         ScrollAxis::Vertical => base.height,
@@ -92,6 +100,7 @@ pub(crate) fn scrollbar_drag_delta(axis: ScrollAxis, delta: Vec2i, content_len: 
     axis_delta.saturating_mul(content_len) / base_len
 }
 
+/// Computes the thumb rectangle for the given view/content ratio and current scroll offset.
 pub(crate) fn scrollbar_thumb(axis: ScrollAxis, base: Recti, view_len: i32, content_len: i32, scroll: i32, thumb_size: i32) -> Recti {
     let mut thumb = base;
     let base_len = match axis {
@@ -102,6 +111,7 @@ pub(crate) fn scrollbar_thumb(axis: ScrollAxis, base: Recti, view_len: i32, cont
         return thumb;
     }
 
+    // Thumb length represents the visible fraction but is clamped so it remains usable.
     let mut thumb_len = base_len.saturating_mul(view_len) / content_len;
     if thumb_len < thumb_size {
         thumb_len = thumb_size;
@@ -119,6 +129,7 @@ pub(crate) fn scrollbar_thumb(axis: ScrollAxis, base: Recti, view_len: i32, cont
     if max_scroll > 0 {
         let track_len = base_len - thumb_len;
         if track_len > 0 {
+            // Map scroll position into the remaining track length after reserving the thumb.
             let offset = scroll.clamp(0, max_scroll) * track_len / max_scroll;
             match axis {
                 ScrollAxis::Vertical => thumb.y += offset,

@@ -1,3 +1,5 @@
+//! Tests for style font binding and role resolution.
+
 use super::*;
 use crate::test_support::test_atlas_with_font_sizes as make_test_atlas;
 

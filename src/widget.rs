@@ -81,6 +81,7 @@ impl FocusPolicy {
         if opt.is_holding_focus() { Self::HoldUntilBlur } else { Self::Momentary }
     }
 
+    /// Returns whether focus should clear when the pointer button is released.
     pub(crate) fn releases_on_mouse_up(self) -> bool {
         matches!(self, Self::Momentary | Self::DragCapture)
     }
@@ -199,6 +200,7 @@ pub struct FrameResultGeneration<'a> {
 }
 
 impl<'a> FrameResultGeneration<'a> {
+    /// Creates a read-only view over a specific result generation.
     fn new(entries: &'a HashMap<RetainedId, ResourceState>, node_ids: &'a HashMap<Id, RetainedId>) -> Self {
         Self { entries, node_ids }
     }
@@ -267,6 +269,7 @@ impl FrameResults {
         self.record_retained_id_with_context(retained_id, state, dispatch_site);
     }
 
+    /// Records a retained id after duplicate-dispatch validation.
     fn record_retained_id_with_context(&mut self, retained_id: RetainedId, state: ResourceState, dispatch_site: impl Into<String>) {
         let dispatch_site = dispatch_site.into();
         if let Some(first_site) = self.current_dispatch_sites.get(&retained_id) {
@@ -278,6 +281,7 @@ impl FrameResults {
 
         let prev_state = self.current.insert(retained_id, state);
         let prev_site = self.current_dispatch_sites.insert(retained_id, dispatch_site);
+        // These maps are maintained together so duplicate errors can cite the first dispatch site.
         debug_assert_eq!(
             prev_state.is_some(),
             prev_site.is_some(),
@@ -311,6 +315,7 @@ impl Widget for (WidgetOption, ScrollBehavior) {
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        // Internal placeholder widgets reserve enough room for text or an expand icon.
         let padding = style.padding.max(0);
         let vertical_pad = max(1, padding / 2);
         let font_height = atlas.get_font_height(style.font) as i32;

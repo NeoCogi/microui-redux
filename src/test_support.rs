@@ -1,3 +1,5 @@
+//! Shared fixtures and no-op helpers used by unit tests.
+
 use crate::{AtlasHandle, AtlasSource, CharEntry, Color, FontEntry, Recti, Renderer, SourceFormat, TextureId, Vec2i, Vertex};
 
 const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];

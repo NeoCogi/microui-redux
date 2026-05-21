@@ -50,12 +50,14 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Layout policy and flow engine.
+//!
+//! The public API exposes compact size policies and stack directions, while the internal engine
+//! tracks scoped cursors, scroll offsets, and content extents for rows, grids, columns, and stacks.
 use super::*;
 
-// Layout internals follow a two-layer model:
-// 1) `LayoutEngine` owns scope stack, coordinate transforms, and content extents.
-// 2) `LayoutFlow` implementations (`RowFlow`, `StackFlow`) decide how local cells are emitted.
-//
+// Layout internals follow a two-layer model: `LayoutEngine` owns scope stack, coordinate
+// transforms, and content extents; `LayoutFlow` implementations decide how local cells are emitted.
 // This keeps scroll/extent bookkeeping centralized while allowing specialized placement logic.
 
 /// Describes how a layout dimension should be resolved.
@@ -82,19 +84,23 @@ pub enum SizePolicy {
 }
 
 impl SizePolicy {
+    /// Normalizes negative, NaN, and infinite weights before distribution.
     fn clamp_weight(value: f32) -> f32 {
         if value.is_finite() { value.max(0.0) } else { 0.0 }
     }
 
+    /// Normalizes fractions to the usable `0.0..=1.0` sizing range.
     fn clamp_fraction(value: f32) -> f32 {
         if value.is_finite() { value.clamp(0.0, 1.0) } else { 0.0 }
     }
 
+    /// Resolves a fractional policy against non-negative reference space.
     fn resolve_fraction(fraction: f32, reference_space: i32) -> i32 {
         let reference = reference_space.max(0) as f32;
         (reference * Self::clamp_fraction(fraction)).floor() as i32
     }
 
+    /// Resolves a weighted policy against either sibling total weight or its own weight.
     fn resolve_weight(weight: f32, reference_space: i32, total_weight: Option<f32>) -> i32 {
         let w = Self::clamp_weight(weight);
         if w <= 0.0 {
@@ -109,6 +115,7 @@ impl SizePolicy {
         (reference * (w / denom)).floor() as i32
     }
 
+    /// Sums positive sibling weights for proportional row/grid distribution.
     fn total_weight(policies: &[SizePolicy]) -> Option<f32> {
         let total = policies
             .iter()
@@ -120,6 +127,7 @@ impl SizePolicy {
         if total > 0.0 { Some(total) } else { None }
     }
 
+    /// Resolves a policy without a sibling weight context.
     fn resolve(self, default_size: i32, available_space: i32) -> i32 {
         let resolved = match self {
             SizePolicy::Auto => default_size,
@@ -131,6 +139,7 @@ impl SizePolicy {
         resolved.max(0)
     }
 
+    /// Resolves a policy with a specific reference space and optional sibling weight total.
     fn resolve_with_reference(self, default_size: i32, available_space: i32, reference_space: i32, total_weight: Option<f32>) -> i32 {
         let resolved = match self {
             SizePolicy::Weight(weight) => Self::resolve_weight(weight, reference_space, total_weight),
@@ -237,14 +246,17 @@ struct RowFlow {
 }
 
 impl RowFlow {
+    /// Creates a repeating row flow with one height policy for every emitted row.
     fn new(widths: &[SizePolicy], height: SizePolicy) -> Self {
         Self::from_parts(widths.to_vec(), RowHeights::Uniform(height))
     }
 
+    /// Creates a grid flow with independent width and row-height tracks.
     fn new_grid(widths: &[SizePolicy], heights: &[SizePolicy]) -> Self {
         Self::from_parts(widths.to_vec(), RowHeights::Tracks(heights.to_vec()))
     }
 
+    /// Creates a row flow from already-owned policy vectors.
     fn from_parts(widths: Vec<SizePolicy>, heights: RowHeights) -> Self {
         Self {
             widths,
@@ -254,6 +266,7 @@ impl RowFlow {
         }
     }
 
+    /// Replaces the active row/grid template and restarts iteration at the first slot.
     fn apply_template(&mut self, widths: Vec<SizePolicy>, heights: RowHeights) {
         self.widths = widths;
         self.heights = heights;
@@ -261,6 +274,7 @@ impl RowFlow {
         self.row_index = 0;
     }
 
+    /// Returns the row height policy and optional row-count hint for grid distribution.
     fn current_height_policy(&self) -> (SizePolicy, Option<i32>) {
         match &self.heights {
             RowHeights::Uniform(policy) => (*policy, None),
@@ -275,6 +289,7 @@ impl RowFlow {
         }
     }
 
+    /// Computes the space left for weighted tracks after fixed/auto/fraction tracks reserve room.
     fn weight_reference_space(policies: &[SizePolicy], default_size: i32, total_space: i32) -> i32 {
         if policies.iter().any(|policy| matches!(policy, SizePolicy::Remainder(_))) {
             return total_space.max(0);
@@ -376,10 +391,12 @@ impl Default for StackFlow {
 }
 
 impl StackFlow {
+    /// Creates a vertical stack flow anchored in the requested direction.
     fn new(width: SizePolicy, height: SizePolicy, direction: StackDirection) -> Self {
         Self { width, height, direction, offset: 0 }
     }
 
+    /// Replaces the active stack template and resets consumed offset.
     fn apply_template(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection) {
         self.width = width;
         self.height = height;
@@ -453,6 +470,7 @@ impl FlowState {
         }
     }
 
+    /// Applies a saved flow template, reusing the active flow allocation where possible.
     fn apply_template(&mut self, template: FlowTemplate) {
         match template {
             FlowTemplate::Row { widths, heights } => match self {
@@ -488,6 +506,7 @@ struct LayoutFrame {
 }
 
 impl LayoutFrame {
+    /// Creates a new scope frame with scroll folded into local coordinate origin.
     fn new(body: Recti, scroll: Vec2i) -> Self {
         Self {
             scope: ScopeState {
@@ -531,6 +550,7 @@ impl LayoutEngine {
         self.stack.last_mut().expect("Layout stack should never be empty when accessed")
     }
 
+    /// Chooses effective fallback dimensions for a widget that reported no preferred size.
     fn fallback_dimensions(&self, preferred: Dimensioni) -> (i32, i32) {
         let padding = self.style.padding;
         // Width fallback mirrors legacy behavior: default width + horizontal padding.
@@ -544,6 +564,7 @@ impl LayoutEngine {
         (default_width, default_height)
     }
 
+    /// Clears all scopes and starts a fresh root body using the current scroll offset.
     pub fn reset(&mut self, body: Recti, scroll: Vec2i) {
         self.stack.clear();
         self.last_rect = Recti::default();
@@ -551,46 +572,56 @@ impl LayoutEngine {
         self.push_scope_with_flow(body, scroll, FlowState::default());
     }
 
+    /// Stores the default control height used when widgets report zero preferred height.
     pub fn set_default_cell_height(&mut self, height: i32) {
         self.default_cell_height = height.max(0);
     }
 
+    /// Returns the absolute body rectangle for the active layout scope.
     pub fn current_body(&self) -> Recti {
         self.top().scope.body
     }
 
+    /// Returns the largest absolute content extent seen in the active scope.
     pub fn current_max(&self) -> Option<Vec2i> {
         self.top().scope.max
     }
 
+    /// Pops the active layout scope.
     pub fn pop_scope(&mut self) {
         self.stack.pop();
     }
 
+    /// Adjusts horizontal indentation in the active scope.
     pub fn adjust_indent(&mut self, delta: i32) {
         self.top_mut().scope.indent += delta;
     }
 
+    /// Allocates a child cell and starts a nested column scope inside it.
     pub fn begin_column(&mut self) {
         // A column is allocated from the parent as one cell, then becomes a nested scope.
         let layout_rect = self.next();
         self.push_scope_with_flow(layout_rect, vec2(0, 0), FlowState::Row(RowFlow::new(&[SizePolicy::Auto], SizePolicy::Auto)));
     }
 
+    /// Ends the active column scope and merges its extents into the parent scope.
     pub fn end_column(&mut self) {
         self.end_nested_scope("cannot end column without an active child layout");
     }
 
+    /// Allocates a scoped retained-tree node using explicit layout policies.
     pub(crate) fn begin_node_scope_with_policies(&mut self, preferred: Dimensioni, width: SizePolicy, height: SizePolicy) -> Recti {
         let layout_rect = self.next_with_policies(preferred, width, height);
         self.push_scope_with_flow(layout_rect, vec2(0, 0), FlowState::default());
         layout_rect
     }
 
+    /// Ends a retained-tree node scope and returns its measured content size.
     pub(crate) fn end_node_scope(&mut self) -> Dimensioni {
         self.end_nested_scope("cannot end node scope without an active child layout")
     }
 
+    /// Pops a nested scope, returns its content size, and merges cursor/max state upward.
     fn end_nested_scope(&mut self, panic_message: &'static str) -> Dimensioni {
         let finished = self.stack.pop().expect(panic_message);
         let content_size = finished
@@ -620,6 +651,7 @@ impl LayoutEngine {
         content_size
     }
 
+    /// Switches the active scope to a repeating row template.
     pub fn row(&mut self, widths: &[SizePolicy], height: SizePolicy) {
         let frame = self.top_mut();
         frame.flow = FlowState::Row(RowFlow::new(widths, height));
@@ -627,6 +659,7 @@ impl LayoutEngine {
         frame.scope.reset_cursor_for_next_row();
     }
 
+    /// Switches the active scope to a grid template.
     pub fn grid(&mut self, widths: &[SizePolicy], heights: &[SizePolicy]) {
         let frame = self.top_mut();
         frame.flow = FlowState::Row(RowFlow::new_grid(widths, heights));
@@ -634,10 +667,12 @@ impl LayoutEngine {
         frame.scope.reset_cursor_for_next_row();
     }
 
+    /// Switches the active scope to a top-to-bottom stack.
     pub fn stack(&mut self, width: SizePolicy, height: SizePolicy) {
         self.stack_with_direction(width, height, StackDirection::TopToBottom);
     }
 
+    /// Switches the active scope to a stack with explicit direction.
     pub fn stack_with_direction(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection) {
         let frame = self.top_mut();
         frame.flow = FlowState::Stack(StackFlow::new(width, height, direction));
@@ -645,22 +680,27 @@ impl LayoutEngine {
         frame.scope.reset_cursor_for_next_row();
     }
 
+    /// Captures the active flow so temporary node-level layout overrides can be restored.
     pub(crate) fn snapshot_flow_state(&self) -> FlowSnapshot {
         FlowSnapshot::from_layout(self.top())
     }
 
+    /// Restores a previously captured flow snapshot.
     pub(crate) fn restore_flow_state(&mut self, snapshot: FlowSnapshot) {
         snapshot.apply(self.top_mut());
     }
 
+    /// Allocates the next cell using automatic preferred dimensions.
     pub fn next(&mut self) -> Recti {
         self.next_with_preferred(Dimensioni::new(0, 0))
     }
 
+    /// Allocates the next cell using a widget-provided preferred size.
     pub fn next_with_preferred(&mut self, preferred: Dimensioni) -> Recti {
         self.next_with_policies(preferred, SizePolicy::Auto, SizePolicy::Auto)
     }
 
+    /// Allocates the next cell using preferred size plus explicit node policy overrides.
     pub(crate) fn next_with_policies(&mut self, preferred: Dimensioni, width: SizePolicy, height: SizePolicy) -> Recti {
         let spacing = self.style.spacing;
         let (default_width, default_height) = self.fallback_dimensions(preferred);
@@ -730,10 +770,12 @@ pub(crate) struct FlowSnapshot {
 }
 
 impl FlowSnapshot {
+    /// Captures the flow template from a live layout frame.
     fn from_layout(layout: &LayoutFrame) -> Self {
         Self { flow: layout.flow.as_template() }
     }
 
+    /// Applies the captured flow template to a live layout frame.
     fn apply(self, layout: &mut LayoutFrame) {
         layout.flow.apply_template(self.flow);
     }

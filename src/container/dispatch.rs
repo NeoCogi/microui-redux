@@ -32,6 +32,7 @@
 use super::*;
 
 impl Container {
+    /// Measures a concrete widget and advances layout using the supplied node policy.
     pub(crate) fn measure_widget_rect_with_policy<W: Widget + ?Sized>(&mut self, state: &W, policy: Policy) -> Recti {
         let body = self.layout.current_body();
         let avail = Dimensioni::new(body.width.max(0), body.height.max(0));
@@ -39,6 +40,7 @@ impl Container {
         self.layout.next_with_policies(preferred, policy.width, policy.height)
     }
 
+    /// Measures an erased retained widget handle and advances layout using the supplied node policy.
     pub(crate) fn measure_widget_rect_dyn_with_policy(&mut self, widget: &dyn WidgetStateHandleDyn, policy: Policy) -> Recti {
         let body = self.layout.current_body();
         let avail = Dimensioni::new(body.width.max(0), body.height.max(0));
@@ -46,6 +48,7 @@ impl Container {
         self.layout.next_with_policies(preferred, policy.width, policy.height)
     }
 
+    /// Updates an erased retained widget and records its public frame result.
     pub(crate) fn update_node_dyn(
         &mut self,
         results: &mut FrameResults,
@@ -63,10 +66,13 @@ impl Container {
         let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
         let mut ctx = self.widget_ctx_for(retained_id, rect, input);
         let res = widget.update(&mut ctx, &control);
+        // Results are keyed by both node id and widget-handle id so app code can choose either
+        // structural or state-handle lookup patterns.
         results.record_retained_with_context(retained_id, node_id, widget_handle_id, res, dispatch_site);
         (control, res)
     }
 
+    /// Paints an erased retained widget using the control state produced during update.
     pub(crate) fn paint_node_dyn(
         &mut self,
         node_id: NodeId,
@@ -80,18 +86,21 @@ impl Container {
         widget.paint(&mut ctx, control);
     }
 
+    /// Updates a framework-owned internal widget such as a scrollbar.
     pub(crate) fn update_internal_node<W: Widget + ?Sized>(&mut self, node_id: NodeId, widget: &mut W, rect: Recti) -> (ControlState, ResourceState) {
         let opt = widget.effective_widget_opt();
         let scroll_behavior = widget.effective_scroll_behavior();
         let focus_policy = widget.focus_policy();
         let retained_id = self.retained_id_for_node(node_id);
         let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
+        // Snapshot input only for widgets that need text/key state to keep common controls cheap.
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let mut ctx = self.widget_ctx_for(retained_id, rect, input);
         let res = widget.update(&mut ctx, &control);
         (control, res)
     }
 
+    /// Paints a framework-owned internal widget.
     pub(crate) fn paint_internal_node<W: Widget + ?Sized>(&mut self, node_id: NodeId, widget: &mut W, rect: Recti, control: &ControlState) {
         let retained_id = self.retained_id_for_node(node_id);
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
@@ -99,11 +108,13 @@ impl Container {
         widget.paint(&mut ctx, control);
     }
 
+    /// Measures a strongly typed retained widget handle.
     pub(crate) fn measure_widget_rect_handle_with_policy<W: Widget>(&mut self, handle: &WidgetHandle<W>, policy: Policy) -> Recti {
         let state = handle.borrow();
         self.measure_widget_rect_with_policy(&*state, policy)
     }
 
+    /// Updates a strongly typed retained widget handle and records its frame result.
     pub(crate) fn update_node_handle<W: Widget>(
         &mut self,
         results: &mut FrameResults,
@@ -121,6 +132,7 @@ impl Container {
         let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
         let mut ctx = self.widget_ctx_for(retained_id, rect, input);
         let res = {
+            // Borrow the widget only for the update call so result recording cannot hold user state.
             let mut state = handle.borrow_mut();
             state.update(&mut ctx, &control)
         };
@@ -128,6 +140,7 @@ impl Container {
         (control, res)
     }
 
+    /// Paints a strongly typed retained widget handle.
     pub(crate) fn paint_node_handle<W: Widget>(
         &mut self,
         node_id: NodeId,

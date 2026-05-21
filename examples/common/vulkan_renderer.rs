@@ -42,6 +42,10 @@
 //   are retriggered whenever UI resources lose their backing image, keeping rendering seamless
 //   across window resizes.
 //
+//! Vulkan renderer backend used by examples.
+//!
+//! This module implements the `Renderer` trait, texture uploads, UI batching, swapchain handling,
+//! and optional custom mesh rendering for the demo application.
 
 use std::{collections::HashMap, convert::TryFrom, ffi::CString, io::Cursor, mem, ptr};
 

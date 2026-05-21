@@ -143,6 +143,7 @@ pub(crate) enum WidgetTreeNodeKind {
 }
 
 impl WidgetTreeNodeKind {
+    /// Returns the stable kind discriminator used by builder id hashing.
     pub(super) fn tag(&self) -> u8 {
         match self {
             Self::Widget { .. } => 1,
@@ -188,6 +189,7 @@ impl WidgetTreeNode {
         &self.children
     }
 
+    /// Returns internal node parts for container traversal without exposing the enum publicly.
     pub(crate) fn parts(&self) -> (NodeId, &WidgetTreeNodeKind, &[WidgetTreeNode]) {
         (self.id, &self.kind, &self.children)
     }

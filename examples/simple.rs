@@ -50,6 +50,9 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Minimal retained-mode application example.
+//!
+//! This example wires the common application runner to a small retained widget tree.
 #[path = "./common/mod.rs"]
 mod common;
 

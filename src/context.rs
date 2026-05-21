@@ -50,6 +50,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Top-level retained UI context.
+//!
+//! `Context` owns renderer-facing canvas state, global input, root windows/dialogs/popups, and the
+//! published frame results that application code reads after each retained update.
 use std::{cell::RefCell, rc::Rc};
 
 #[cfg(any(feature = "builder", feature = "png_source"))]
@@ -73,29 +77,40 @@ use crate::{UNCLIPPED_RECT, Vec2i};
 pub struct RootId(usize);
 
 impl RootId {
+    /// Wraps a raw counter value as a root identifier.
     pub(crate) const fn from_raw(raw: usize) -> Self {
         Self(raw)
     }
 
+    /// Returns the raw counter value for stable internal hashing.
     pub(crate) fn raw(self) -> usize {
         self.0
     }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+/// Runtime behavior class for a registered root.
 enum RootKind {
     Window,
     Dialog,
     Popup,
 }
 
+/// Registered retained root plus the tree/options needed to render it every frame.
 struct RootEntry {
+    /// Stable application-facing identifier for this root.
     id: RootId,
+    /// Window/dialog/popup runtime handle containing container state.
     handle: WindowHandle,
+    /// Retained tree rendered inside the root body.
     tree: WidgetTree,
+    /// Container chrome/sizing options.
     opt: ContainerOption,
+    /// Scroll behavior applied to the root body.
     scroll_behavior: ScrollBehavior,
+    /// Whether this root should be considered during frame traversal.
     visible: bool,
+    /// Behavior class for opening, closing, and hover routing.
     kind: RootKind,
 }
 
@@ -120,6 +135,7 @@ pub struct Context<R: Renderer> {
 impl<R: Renderer> Context<R> {
     /// Creates a new UI context around the provided renderer and dimensions.
     pub fn new(renderer: RendererHandle<R>, dim: Dimensioni) -> Self {
+        // The renderer supplies the atlas; the default style then binds semantic font roles from it.
         let canvas = Canvas::from(renderer, dim);
         let style = Style::default().with_named_fonts(&canvas.get_atlas());
         Self {
@@ -212,6 +228,7 @@ impl<R: Renderer> Context<R> {
     }
 
     #[inline(never)]
+    /// Starts a logical UI frame and clears transient root/render state.
     fn frame_begin(&mut self) {
         self.frame_results.begin_frame();
         self.input.borrow_mut().prelude();
@@ -220,6 +237,7 @@ impl<R: Renderer> Context<R> {
     }
 
     #[inline(never)]
+    /// Finishes root traversal, publishes results, and prepares hover/z-order for the next frame.
     fn frame_end(&mut self) {
         for r in &mut self.root_list {
             r.finish();
@@ -229,6 +247,7 @@ impl<R: Renderer> Context<R> {
         let mouse_pressed = self.input.borrow().mouse_pressed;
         match (mouse_pressed.is_none(), &self.next_hover_root) {
             (false, Some(next_hover_root)) if next_hover_root.zindex() < self.last_zindex && next_hover_root.zindex() >= 0 => {
+                // Clicking a window brings it forward after all roots have had a chance to report hover.
                 self.bring_to_front(&mut next_hover_root.clone());
             }
             _ => (),
@@ -236,7 +255,7 @@ impl<R: Renderer> Context<R> {
 
         self.input.borrow_mut().epilogue();
 
-        // prepare the next frame
+        // Promote the next hover root after input epilogue so current-frame routing stays stable.
         self.hover_root = self.next_hover_root.clone();
         self.next_hover_root = None;
         for r in &mut self.root_list {
@@ -247,7 +266,7 @@ impl<R: Renderer> Context<R> {
             _ => (),
         }
 
-        // sort all windows
+        // Sort all windows by z-index so render order matches interaction order.
         self.root_list.sort_by(|a, b| a.zindex().cmp(&b.zindex()));
     }
 
@@ -262,6 +281,7 @@ impl<R: Renderer> Context<R> {
         self.frame_end();
     }
 
+    /// Creates an open top-level window handle with a new root id.
     fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
         let root_id = self.next_root_id();
         let mut window = WindowHandle::window(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone(), initial_rect);
@@ -269,11 +289,13 @@ impl<R: Renderer> Context<R> {
         window
     }
 
+    /// Creates a hidden dialog handle with a new root id.
     fn new_dialog(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
         let root_id = self.next_root_id();
         WindowHandle::dialog(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone(), initial_rect)
     }
 
+    /// Creates a hidden popup handle with a new root id.
     fn new_popup(&mut self, name: &str) -> WindowHandle {
         let root_id = self.next_root_id();
         WindowHandle::popup(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone())
@@ -287,12 +309,14 @@ impl<R: Renderer> Context<R> {
         ContainerHandle::new(Container::new(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone()))
     }
 
+    /// Allocates the next stable root id.
     fn next_root_id(&mut self) -> RootId {
         let id = RootId::from_raw(self.next_root_id);
         self.next_root_id = self.next_root_id.checked_add(1).expect("retained root id counter overflowed");
         id
     }
 
+    /// Stores a retained root entry and returns the handle's stable root id.
     fn register_root(
         &mut self,
         kind: RootKind,
@@ -303,6 +327,7 @@ impl<R: Renderer> Context<R> {
         visible: bool,
     ) -> RootId {
         let id = handle.root_id();
+        // The handle owns mutable runtime state; the tree remains replaceable by app code.
         self.retained_roots.push(RootEntry {
             id,
             handle,
@@ -315,6 +340,7 @@ impl<R: Renderer> Context<R> {
         id
     }
 
+    /// Finds a mutable registered root by stable id.
     fn root_entry_mut(&mut self, root: RootId) -> Option<&mut RootEntry> {
         self.retained_roots.iter_mut().find(|entry| entry.id == root)
     }
@@ -388,6 +414,7 @@ impl<R: Renderer> Context<R> {
         window.set_zindex(self.last_zindex);
     }
 
+    /// Applies visibility changes by index so callers can avoid a second root lookup.
     fn set_root_visible_at(&mut self, index: usize, visible: bool) {
         let mouse_pos = self.input.borrow().mouse_pos;
         let mut bring_to_front = None;
@@ -405,16 +432,20 @@ impl<R: Renderer> Context<R> {
             entry.visible = true;
             match entry.kind {
                 RootKind::Window => {
+                    // Windows preserve their z-order when reopened.
                     entry.handle.open();
                 }
                 RootKind::Dialog => {
                     entry.handle.open();
                     if !was_open {
+                        // Newly opened dialogs should float above normal windows.
                         bring_to_front = Some(entry.handle.clone());
                     }
                 }
                 RootKind::Popup => {
                     if !was_open {
+                        // Popups anchor at the current pointer and become the hover root for the
+                        // opening frame so their first click does not immediately close them.
                         entry.handle.set_rect(rect(mouse_pos.x, mouse_pos.y, 1, 1));
                         entry.handle.open();
                         entry.handle.set_root_hover_active(true);
@@ -435,6 +466,7 @@ impl<R: Renderer> Context<R> {
         }
     }
 
+    /// Brings a window forward only when it is not already top-most.
     fn bring_to_front_if_behind(&mut self, window: &mut WindowHandle) {
         if window.zindex() < self.last_zindex {
             self.bring_to_front(window);
@@ -442,10 +474,12 @@ impl<R: Renderer> Context<R> {
     }
 
     #[inline(never)]
+    /// Starts command recording and hover/scroll routing for a root container.
     fn begin_root_container(&mut self, window: &mut WindowHandle) {
         window.prepare_for_frame(self.frame);
         self.root_list.push(window.clone());
 
+        // Highest z-index root under the pointer becomes next frame's hover root.
         if window.root_contains_point(self.input.borrow().mouse_pos)
             && (self.next_hover_root.is_none() || window.zindex() > self.next_hover_root.as_ref().unwrap().zindex())
         {
@@ -461,12 +495,14 @@ impl<R: Renderer> Context<R> {
     }
 
     #[inline(never)]
+    /// Ends command recording for a root container.
     fn end_root_container(&mut self, window: &mut WindowHandle) {
         window.finish_root_command_scope();
     }
 
     #[inline(never)]
     #[must_use]
+    /// Opens a root for retained traversal and returns whether its body should be rendered.
     fn begin_window(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior) -> bool {
         if !window.is_open() {
             return false;
@@ -482,12 +518,14 @@ impl<R: Renderer> Context<R> {
         true
     }
 
+    /// Completes retained traversal for a root and applies resize results.
     fn end_window(&mut self, window: &mut WindowHandle, opt: ContainerOption) {
         window.end_window();
         self.end_root_container(window);
         window.finish_resize(&mut self.frame_results, opt);
     }
 
+    /// Handles popup auto-close behavior before a popup root is traversed.
     fn update_popup_root_state(&mut self, window: &mut WindowHandle) -> bool {
         if !window.root_is_popup() {
             return true;
@@ -500,6 +538,7 @@ impl<R: Renderer> Context<R> {
 
         let click_outside_popup = {
             let input = self.input.borrow();
+            // A popup closes only on a press outside both its hover root and rectangle.
             !input.mouse_pressed.is_none() && !window.root_in_hover_root() && !window.root_contains_point(input.mouse_pos)
         };
         if click_outside_popup {
@@ -510,10 +549,12 @@ impl<R: Renderer> Context<R> {
         true
     }
 
+    /// Measures, begins, traverses, and ends one window-like retained tree.
     fn render_window_tree(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         if window.is_open() {
             window.set_root_style(self.style.clone());
             if opt.is_auto_sizing() {
+                // Auto-size is measured against committed previous-frame results before the live traversal.
                 window.measure_auto_size(&self.frame_results, opt, scroll_behavior, tree);
             }
         }
@@ -521,6 +562,7 @@ impl<R: Renderer> Context<R> {
         if self.begin_window(window, opt, scroll_behavior) {
             {
                 let mut inner = window.inner_mut();
+                // Widget traversal records layout, interaction, and draw commands into the root container.
                 inner.main.widget_tree(&mut self.frame_results, tree);
             }
             self.end_window(window, opt);
@@ -531,6 +573,7 @@ impl<R: Renderer> Context<R> {
         }
     }
 
+    /// Renders an open dialog and forces it to remain the active hover/root focus layer.
     fn render_dialog_tree(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         if window.is_open() {
             self.next_hover_root = Some(window.clone());
@@ -542,6 +585,7 @@ impl<R: Renderer> Context<R> {
         }
     }
 
+    /// Renders one registered retained root if it is visible and still open.
     fn render_retained_root(&mut self, entry: &mut RootEntry) {
         if !entry.visible {
             return;
@@ -562,7 +606,10 @@ impl<R: Renderer> Context<R> {
         }
     }
 
+    /// Traverses all retained roots without borrowing `self.retained_roots` during rendering.
     fn render_registered_roots(&mut self) {
+        // Rendering needs `&mut self` for z-order, hover, and frame results, so take the root list
+        // out temporarily to avoid aliasing the vector while entries are rendered.
         let mut roots = std::mem::take(&mut self.retained_roots);
         for entry in &mut roots {
             self.render_retained_root(entry);
@@ -570,6 +617,7 @@ impl<R: Renderer> Context<R> {
         self.retained_roots = roots;
     }
 
+    /// Returns the chrome options used by retained popups unless the app overrides them.
     const fn default_popup_options() -> ContainerOption {
         ContainerOption::AUTO_SIZE.union(ContainerOption::NO_RESIZE).union(ContainerOption::NO_TITLE)
     }
@@ -648,6 +696,7 @@ impl<R: Renderer> Context<R> {
     }
 
     #[cfg(any(feature = "builder", feature = "png_source"))]
+    /// Decodes PNG bytes into RGBA pixels for renderer texture upload.
     fn decode_png(bytes: &[u8]) -> Result<(i32, i32, Vec<u8>), String> {
         let cursor = Cursor::new(bytes);
         let decoder = Decoder::new(cursor);
@@ -664,17 +713,20 @@ impl<R: Renderer> Context<R> {
         match info.color_type {
             ColorType::Rgba => rgba.extend_from_slice(raw),
             ColorType::Rgb => {
+                // Expand RGB to opaque RGBA so the renderer texture upload has one format.
                 for chunk in raw.chunks(3) {
                     rgba.extend_from_slice(chunk);
                     rgba.push(0xFF);
                 }
             }
             ColorType::Grayscale => {
+                // Treat grayscale input as opaque luminance.
                 for &v in raw {
                     rgba.extend_from_slice(&[v, v, v, 0xFF]);
                 }
             }
             ColorType::GrayscaleAlpha => {
+                // Preserve grayscale alpha while expanding luminance into RGB channels.
                 for chunk in raw.chunks(2) {
                     let v = chunk[0];
                     let a = chunk[1];

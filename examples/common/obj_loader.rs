@@ -28,6 +28,10 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
+//! Minimal OBJ loader used by the 3D demo assets.
+//!
+//! The parser extracts positions, normals, texture coordinates, and polygon faces into the shared
+//! polymesh representation.
 
 use super::polymesh::*;
 use rs_math3d::*;

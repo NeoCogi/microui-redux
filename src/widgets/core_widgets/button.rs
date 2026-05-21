@@ -1,3 +1,8 @@
+//! Button widget state and rendering.
+//!
+//! Buttons support text, atlas icons, external images, and dynamic atlas slots through one shared
+//! layout path.
+
 use super::*;
 
 #[derive(Clone)]
@@ -88,6 +93,7 @@ impl Button {
         }
     }
 
+    /// Measures the label and optional visual content.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         match &self.content {
             ButtonContent::Text { label, icon } => {
@@ -105,10 +111,12 @@ impl Button {
         }
     }
 
+    /// Buttons submit on click and do not keep extra transient state.
     fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         submit_on_click(control)
     }
 
+    /// Paints the button frame, text, and optional visual payload.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         let rect = ctx.rect();
         if !self.opt.has_no_frame() {
@@ -119,6 +127,7 @@ impl Button {
         let font = ctx.style().resolve_font_choice(self.font);
         match &self.content {
             ButtonContent::Text { label, icon } => {
+                // Text/icon buttons use atlas icon metrics when laying out the inline visual.
                 let visual_size = icon.map(|icon| ctx.atlas().get_icon_size(icon));
                 let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
@@ -130,6 +139,7 @@ impl Button {
                 }
             }
             ButtonContent::Image { label, image } => {
+                // External textures and atlas slots both report dimensions through `Image::size`.
                 let visual_size = image.map(|image| image.size(ctx.atlas()));
                 let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
@@ -141,6 +151,7 @@ impl Button {
                 }
             }
             ButtonContent::Slot { label, slot, paint } => {
+                // Dynamic slots repaint the atlas slot immediately before drawing it.
                 let visual_size = Some(ctx.atlas().get_slot_size(*slot));
                 let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {

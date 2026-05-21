@@ -1,3 +1,5 @@
+//! Tests for retained frame-result generation views.
+
 use super::*;
 
 #[test]

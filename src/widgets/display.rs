@@ -50,6 +50,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Non-interactive display widgets.
+//!
+//! These retained widgets render static text and color previews while still participating in the
+//! same measurement and paint pipeline as interactive controls.
 
 use crate::text_layout::{baseline_aligned_top, build_display_text_lines, text_block_size};
 use crate::*;
@@ -86,6 +90,7 @@ impl TextBlock {
         }
     }
 
+    /// Measures wrapped display text using the available width when requested.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         if self.text.is_empty() {
             return Dimensioni::new(0, 0);
@@ -102,10 +107,12 @@ impl TextBlock {
         text_block_size(&lines, line_height)
     }
 
+    /// Display text is non-interactive.
     fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         ResourceState::NONE
     }
 
+    /// Paints each measured display line with baseline alignment.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) {
         if self.text.is_empty() {
             return;
@@ -123,6 +130,7 @@ impl TextBlock {
         for (idx, line) in lines.iter().enumerate() {
             let line_rect = rect(bounds.x, bounds.y + idx as i32 * line_height, bounds.width, line_height);
             let line_top = baseline_aligned_top(line_rect, line_height, baseline);
+            // Lines keep byte ranges into the source string, so slicing remains allocation-free.
             let slice = &self.text[line.start..line.end];
             if !slice.is_empty() {
                 ctx.draw_text(font, slice, vec2(line_rect.x, line_top), color);
@@ -161,6 +169,7 @@ impl ColorSwatch {
         }
     }
 
+    /// Measures a square-ish color swatch with a text-friendly default height.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let font = style.resolve_font_choice(self.font);
@@ -173,10 +182,12 @@ impl ColorSwatch {
         Dimensioni::new((label_width + padding * 2).max(24), height)
     }
 
+    /// Color swatches are non-interactive.
     fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         ResourceState::NONE
     }
 
+    /// Paints the swatch fill, border, and optional label.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) {
         let rect = ctx.rect();
         ctx.draw_rect(rect, self.fill);

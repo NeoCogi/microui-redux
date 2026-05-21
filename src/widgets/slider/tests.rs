@@ -1,3 +1,5 @@
+//! Tests for slider and numeric editing behavior.
+
 use super::*;
 use crate::test_support::test_atlas as make_test_atlas;
 use std::rc::Rc;

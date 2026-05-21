@@ -50,17 +50,23 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Slider and numeric entry widgets.
+//!
+//! Sliders support dragging, wheel increments, snapping, and shift-click text entry; `Number`
+//! shares the same text-editing helpers without a slider thumb.
 use crate::*;
 use std::fmt::Write;
 
 use super::textbox::{textbox_paint, textbox_update};
 
+/// Formats a numeric value using the widget's display precision.
 fn number_label(value: Real, precision: usize) -> String {
     let mut label = String::new();
     let _ = write!(label, "{:.*}", precision, value);
     label
 }
 
+/// Computes preferred size for numeric widgets with optional visual affordance width.
 fn number_preferred_size(
     style: &Style,
     atlas: &AtlasHandle,
@@ -81,6 +87,7 @@ fn number_preferred_size(
     Dimensioni::new(width, height)
 }
 
+/// Keeps numeric widgets active while dragging, editing, or after local state changes.
 fn number_active_result(control: &ControlState, editing: bool, changed: bool) -> ResourceState {
     if control.active || editing || changed {
         ResourceState::ACTIVE
@@ -89,10 +96,12 @@ fn number_active_result(control: &ControlState, editing: bool, changed: bool) ->
     }
 }
 
+/// Adds hold-focus while the inline numeric textbox is active.
 fn number_effective_widget_opt(opt: WidgetOption, editing: bool) -> WidgetOption {
     if editing { opt | WidgetOption::HOLD_FOCUS } else { opt }
 }
 
+/// Chooses drag or text-edit focus behavior for numeric widgets.
 fn number_focus_policy(editing: bool) -> FocusPolicy {
     if editing { FocusPolicy::HoldUntilBlur } else { FocusPolicy::DragCapture }
 }
@@ -151,11 +160,13 @@ impl Slider {
         }
     }
 
+    /// Measures the slider track plus formatted value label.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let thumb_size = style.thumb_size.max(0);
         number_preferred_size(style, atlas, self.font, self.value, self.precision, thumb_size, thumb_size)
     }
 
+    /// Updates slider value from shift-click text entry, scroll, or pointer drag.
     fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let base = ctx.rect();
@@ -163,6 +174,7 @@ impl Slider {
         let mut v = last;
         let font = ctx.style().resolve_font_choice(self.font);
         if !number_textbox_update(ctx, control, &mut self.edit, self.precision, font, &mut v).is_none() {
+            // While the text editor is active it owns state changes for this frame.
             return res;
         }
         if let Some(delta) = control.scroll_delta {
@@ -170,6 +182,7 @@ impl Slider {
             if range != 0.0 {
                 let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
                 if wheel != 0 {
+                    // Wheel increments use explicit step when set, otherwise one percent range.
                     let step_amount = if self.step != 0. { self.step.abs() } else { range / 100.0 };
                     v += wheel as Real * step_amount;
                     if self.step != 0. {
@@ -181,6 +194,7 @@ impl Slider {
         let input = ctx.input_or_default();
         let range = self.high - self.low;
         if control.focused && (!input.mouse_down.is_none() || input.mouse_pressed.is_left()) && base.width > 0 && range != 0.0 {
+            // Mouse x maps linearly across the slider track.
             v = self.low + input.mouse_pos.x as Real * range / base.width as Real;
             if self.step != 0. {
                 v = snap_slider_value(v, self.low, self.step);
@@ -197,6 +211,7 @@ impl Slider {
         res
     }
 
+    /// Paints either the inline numeric editor or the slider track/thumb/value label.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         let font = ctx.style().resolve_font_choice(self.font);
         if self.edit.editing {
@@ -221,11 +236,13 @@ impl Slider {
     }
 }
 
+/// Snaps a value to the nearest step relative to the lower bound.
 fn snap_slider_value(value: Real, low: Real, step: Real) -> Real {
     let step = step.abs();
     if step == 0.0 { value } else { low + ((value - low) / step).round() * step }
 }
 
+/// Clamps a slider value even when the range was provided high-to-low.
 fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
     let min = low.min(high);
     let max = low.max(high);
@@ -238,6 +255,7 @@ fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
     }
 }
 
+/// Runs the shared textbox editor for shift-click numeric input.
 fn number_textbox_update(
     ctx: &mut WidgetCtx<'_>,
     control: &ControlState,
@@ -252,6 +270,7 @@ fn number_textbox_update(
     };
 
     if shift_click {
+        // Enter edit mode by seeding the textbox with the current formatted value.
         edit.editing = true;
         edit.buf.clear();
         let _ = write!(edit.buf, "{:.*}", precision, value);
@@ -264,6 +283,7 @@ fn number_textbox_update(
             if let Ok(v) = edit.buf.parse::<f32>() {
                 *value = v as Real;
             }
+            // Commit valid parsed values and leave edit mode on submit or blur.
             edit.editing = false;
             edit.cursor = 0;
         } else {
@@ -273,6 +293,7 @@ fn number_textbox_update(
     ResourceState::NONE
 }
 
+/// Paints the shared textbox editor for a numeric widget.
 fn number_textbox_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, edit: &NumberEditState, font: FontId) {
     textbox_paint(ctx, control, edit.buf.as_str(), edit.cursor, WidgetOption::NONE, font);
 }
@@ -373,15 +394,18 @@ impl Number {
         }
     }
 
+    /// Measures the formatted number label.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         number_preferred_size(style, atlas, self.font, self.value, self.precision, 0, 0)
     }
 
+    /// Updates number value from shift-click text entry or horizontal drag.
     fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let mut res = ResourceState::NONE;
         let last = self.value;
         let font = ctx.style().resolve_font_choice(self.font);
         if !number_textbox_update(ctx, control, &mut self.edit, self.precision, font, &mut self.value).is_none() {
+            // Text editing suppresses drag updates while active.
             return res;
         }
         let input = ctx.input_or_default();
@@ -394,6 +418,7 @@ impl Number {
         res
     }
 
+    /// Paints either the inline numeric editor or the formatted value.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         let font = ctx.style().resolve_font_choice(self.font);
         if self.edit.editing {

@@ -1,3 +1,8 @@
+//! Framework-owned internal control widget.
+//!
+//! Containers use `Internal` for chrome and scrollbar hit-testing without exposing those controls
+//! as public application widgets.
+
 use super::*;
 
 #[derive(Clone)]
@@ -21,6 +26,7 @@ impl Internal {
         }
     }
 
+    /// Measures the internal tag for debug-visible chrome controls.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let text_w = if self.tag.is_empty() {
@@ -33,10 +39,12 @@ impl Internal {
         Dimensioni::new(width.max(0), height)
     }
 
+    /// Internal controls do not submit by themselves; callers interpret their control state.
     fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         ResourceState::NONE
     }
 
+    /// Internal controls paint through their caller-specific chrome path.
     fn paint_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) {}
 }
 

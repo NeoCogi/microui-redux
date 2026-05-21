@@ -78,6 +78,7 @@ pub struct WidgetCtx<'a> {
 }
 
 impl<'a> WidgetCtx<'a> {
+    /// Converts an input snapshot from container coordinates into widget-local coordinates.
     fn localize_input(rect: Recti, input: Option<Rc<InputSnapshot>>) -> Option<Rc<InputSnapshot>> {
         input.map(|input| {
             let mut localized = input.as_ref().clone();
@@ -86,10 +87,12 @@ impl<'a> WidgetCtx<'a> {
         })
     }
 
+    /// Converts a screen/container-space rectangle into widget-local space.
     fn local_rect_for(&self, rect: Recti) -> Recti {
         Recti::new(rect.x - self.rect.x, rect.y - self.rect.y, rect.width, rect.height)
     }
 
+    /// Converts a screen/container-space point into widget-local space.
     fn local_pos_for(&self, pos: Vec2i) -> Vec2i {
         pos - Vec2i::new(self.rect.x, self.rect.y)
     }
@@ -115,6 +118,7 @@ impl<'a> WidgetCtx<'a> {
             focus,
             updated_focus,
             in_hover_root,
+            // Widgets should see pointer coordinates relative to their own rect.
             input: Self::localize_input(rect, input),
             default_input: InputSnapshot::default(),
         }
@@ -130,6 +134,7 @@ impl<'a> WidgetCtx<'a> {
         self.input.as_deref()
     }
 
+    /// Returns a default empty input snapshot when this widget did not request one.
     pub(crate) fn input_or_default(&self) -> &InputSnapshot {
         self.input.as_deref().unwrap_or(&self.default_input)
     }
@@ -198,10 +203,12 @@ impl<'a> WidgetCtx<'a> {
         self.draw.current_clip_rect()
     }
 
+    /// Returns the active style.
     pub(crate) fn style(&self) -> &Style {
         self.draw.style()
     }
 
+    /// Returns the active atlas.
     pub(crate) fn atlas(&self) -> &AtlasHandle {
         self.draw.atlas()
     }
@@ -216,6 +223,7 @@ impl<'a> WidgetCtx<'a> {
         self.draw.check_clip(r)
     }
 
+    /// Draws a filled rectangle through the widget-local graphics path.
     pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
         let rect = self.local_rect_for(rect);
         let mut graphics = self.begin_widget_paint();
@@ -229,48 +237,56 @@ impl<'a> WidgetCtx<'a> {
         graphics.draw_box(rect, color);
     }
 
+    /// Draws text through the widget-local graphics path.
     pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
         let pos = self.local_pos_for(pos);
         let mut graphics = self.begin_widget_paint();
         graphics.draw_text(font, text, pos, color);
     }
 
+    /// Draws an atlas icon through the widget-local graphics path.
     pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
         let rect = self.local_rect_for(rect);
         let mut graphics = self.begin_widget_paint();
         graphics.draw_icon(id, rect, color);
     }
 
+    /// Draws an atlas slot or external image through the widget-local graphics path.
     pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
         let rect = self.local_rect_for(rect);
         let mut graphics = self.begin_widget_paint();
         graphics.draw_image(image, rect, color);
     }
 
+    /// Draws a dynamic atlas slot through the widget-local graphics path.
     pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
         let rect = self.local_rect_for(rect);
         let mut graphics = self.begin_widget_paint();
         graphics.draw_slot_with_function(id, rect, color, f);
     }
 
+    /// Draws a control frame through the widget-local graphics path.
     pub(crate) fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
         let rect = self.local_rect_for(rect);
         let mut graphics = self.begin_widget_paint();
         graphics.draw_frame(rect, colorid);
     }
 
+    /// Draws a control frame with hover/focus color adjustment.
     pub(crate) fn draw_widget_frame(&mut self, control: &ControlState, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let rect = self.local_rect_for(rect);
         let mut graphics = self.begin_widget_paint();
         graphics.draw_widget_frame(control.focused, control.hovered, rect, colorid, opt);
     }
 
+    /// Draws aligned control text with an explicit font.
     pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let rect = self.local_rect_for(rect);
         let mut graphics = self.begin_widget_paint();
         graphics.draw_control_text_with_font(font, text, rect, colorid, opt);
     }
 
+    /// Hit-tests a screen-space rect against widget-local input and the active clip.
     pub(crate) fn mouse_over(&self, rect: Recti) -> bool {
         let input = match self.input.as_ref() {
             Some(input) => input,
@@ -279,6 +295,7 @@ impl<'a> WidgetCtx<'a> {
         if !self.in_hover_root {
             return false;
         }
+        // Both the target rect and current clip are translated so the localized input can be used.
         let local_rect = self.local_rect_for(rect);
         let clip_rect = self.local_rect_for(self.current_clip_rect());
         local_rect.contains(&input.mouse_pos) && clip_rect.contains(&input.mouse_pos)

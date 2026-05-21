@@ -1,3 +1,8 @@
+//! List item and list-box widgets.
+//!
+//! `ListItem` represents one selectable row and `ListBox` stores shared selection state for a
+//! retained list.
+
 use super::*;
 
 #[derive(Clone)]
@@ -60,6 +65,7 @@ impl ListItem {
         }
     }
 
+    /// Measures the row label and optional icon.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let mut width = padding * 2;
@@ -76,10 +82,12 @@ impl ListItem {
         Dimensioni::new(width.max(0), height)
     }
 
+    /// List items submit on click and otherwise keep no local transient state.
     fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         submit_on_click(control)
     }
 
+    /// Paints row highlight, optional icon, and label.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         let bounds = ctx.rect();
 
@@ -96,6 +104,7 @@ impl ListItem {
 
         let mut text_rect = bounds;
         if let Some(icon) = self.icon {
+            // Icons consume the left padding + icon width before the text region starts.
             let padding = ctx.style().padding.max(0);
             let icon_size = ctx.atlas().get_icon_size(icon);
             let icon_x = bounds.x + padding;
@@ -155,15 +164,18 @@ impl ListBox {
         }
     }
 
+    /// Measures list-box inline label and optional image.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let visual = self.image.map(|image| image.size(atlas));
         inline_content_size(style, atlas, self.font, &self.label, visual)
     }
 
+    /// List boxes submit on click and otherwise keep no local transient state.
     fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         submit_on_click(control)
     }
 
+    /// Paints list-box frame, label, and optional image.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         let rect = ctx.rect();
         if !self.opt.has_no_frame() {

@@ -28,6 +28,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
+//! View state and interaction handling for the 3D demo viewport.
+
 use super::*;
 use camera::*;
 

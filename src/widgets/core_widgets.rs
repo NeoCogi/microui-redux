@@ -50,17 +50,24 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
+//! Shared helpers and re-exports for the basic retained widgets.
+//!
+//! The split widget modules keep concrete widget state small; this file holds common sizing,
+//! coloring, and submit helpers used by buttons, lists, combos, checkboxes, and custom controls.
 use crate::*;
+/// Measures text with the widget's resolved font choice.
 fn text_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, text: &str) -> Dimensioni {
     atlas.get_text_size(style.resolve_font_choice(font), text)
 }
 
+/// Computes a control height that can fit both text and an optional visual element.
 fn content_height(style: &Style, atlas: &AtlasHandle, font: FontChoice, visual_height: i32) -> i32 {
     let font_height = atlas.get_font_height(style.resolve_font_choice(font)) as i32;
     let vertical_pad = (style.padding / 2).max(1);
     (font_height.max(visual_height) + vertical_pad * 2).max(0)
 }
 
+/// Computes preferred size for a single-line label plus optional icon/image/slot.
 fn inline_content_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, label: &str, visual_size: Option<Dimensioni>) -> Dimensioni {
     let padding = style.padding.max(0);
     let text_size = if label.is_empty() {
@@ -72,6 +79,7 @@ fn inline_content_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, lab
     let has_text = !label.is_empty();
     let has_visual = visual_size.width > 0 && visual_size.height > 0;
 
+    // Text gets horizontal padding on both sides; visuals add one extra text/visual gap.
     let mut width = padding * 2 + text_size.width.max(0);
     if has_visual {
         width += visual_size.width.max(0);
@@ -85,11 +93,13 @@ fn inline_content_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, lab
 }
 
 #[derive(Copy, Clone)]
+/// Resolved inline placement for an optional visual and text region.
 struct InlineContentLayout {
     visual: Option<Recti>,
     text: Recti,
 }
 
+/// Places an optional visual before text while keeping visual-only content centered.
 fn layout_inline_content(bounds: Recti, style: &Style, label: &str, visual_size: Option<Dimensioni>) -> InlineContentLayout {
     let padding = style.padding.max(0);
     let visual_size = visual_size.unwrap_or_default();
@@ -97,6 +107,7 @@ fn layout_inline_content(bounds: Recti, style: &Style, label: &str, visual_size:
     let has_text = !label.is_empty();
 
     if !has_visual {
+        // Text-only controls can use the whole bounds; text alignment is handled by draw helpers.
         return InlineContentLayout { visual: None, text: bounds };
     }
 
@@ -105,6 +116,7 @@ fn layout_inline_content(bounds: Recti, style: &Style, label: &str, visual_size:
     let visual_y = bounds.y + ((bounds.height - visual_height) / 2).max(0);
 
     if !has_text {
+        // Visual-only controls center the visual and do not reserve a text rect.
         let visual_x = bounds.x + ((bounds.width - visual_width) / 2).max(0);
         let visual = rect(visual_x, visual_y, visual_width, visual_height);
         return InlineContentLayout {
@@ -121,6 +133,7 @@ fn layout_inline_content(bounds: Recti, style: &Style, label: &str, visual_size:
     InlineContentLayout { visual: Some(visual), text }
 }
 
+/// Selects which control color should be painted for a widget's fill policy and state.
 fn widget_fill_color(control: &ControlState, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
     if control.focused && fill.fill_click() {
         let mut color = base;
@@ -137,6 +150,7 @@ fn widget_fill_color(control: &ControlState, base: ControlColor, fill: WidgetFil
     }
 }
 
+/// Converts a click state into the standard submit result.
 fn submit_on_click(control: &ControlState) -> ResourceState {
     if control.clicked { ResourceState::SUBMIT } else { ResourceState::NONE }
 }

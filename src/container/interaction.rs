@@ -65,15 +65,18 @@ impl Container {
         self.interaction.clear_focus();
     }
 
+    /// Converts a tree node id into this container's scoped retained interaction id.
     pub(crate) fn retained_id_for_node(&self, node_id: NodeId) -> RetainedId {
         RetainedId::scoped_node(self.internal_id_seed, node_id)
     }
 
+    /// Performs pointer hit testing against rect, clip, and hover-root ownership.
     pub(crate) fn hit_test_rect(&mut self, rect: Recti, in_hover_root: bool) -> bool {
         let clip_rect = self.get_clip_rect();
         rect.contains(&self.input.borrow().mouse_pos) && clip_rect.contains(&self.input.borrow().mouse_pos) && in_hover_root
     }
 
+    /// Returns whether an active child panel blocks pointer ownership for the current pointer.
     fn pointer_blocked_by_child(&self) -> bool {
         match self.interaction.hover_root_child_rect {
             Some(rect) => rect.contains(&self.input.borrow().mouse_pos),
@@ -86,6 +89,7 @@ impl Container {
         self.hit_test_rect(rect, in_hover_root && !self.pointer_blocked_by_child())
     }
 
+    /// Computes the full control state for one retained interaction id.
     pub(crate) fn update_control_for(
         &mut self,
         interaction_id: RetainedId,
@@ -97,17 +101,20 @@ impl Container {
         let in_hover_root = self.interaction.in_hover_root;
         let mouseover = self.mouse_over(rect, in_hover_root);
         if self.interaction.focus == Some(interaction_id) {
+            // A focused retained widget must be seen each frame or focus is cleared at finish.
             self.interaction.mark_focus_seen();
         }
         if opt.is_not_interactive() {
             return ControlState::default();
         }
         if mouseover && self.input.borrow().mouse_down.is_none() {
+            // Hover moves only when the pointer is not dragging another control.
             self.interaction.hover = Some(interaction_id);
         }
         if self.interaction.focus == Some(interaction_id) {
             let should_clear_focus = {
                 let input = self.input.borrow();
+                // Focus clears on outside press or on mouse-up for controls that don't hold focus.
                 let pressed_outside = !input.mouse_pressed.is_none() && !mouseover;
                 let released_without_hold_focus = input.mouse_down.is_none() && focus_policy.releases_on_mouse_up();
                 pressed_outside || released_without_hold_focus
@@ -120,6 +127,7 @@ impl Container {
             if !mouseover {
                 self.interaction.hover = None;
             } else if !self.input.borrow().mouse_pressed.is_none() {
+                // Pressing the hovered control transfers focus to it.
                 self.interaction.set_focus(interaction_id);
             }
         }
@@ -128,6 +136,7 @@ impl Container {
         if scroll_behavior.is_grab_scroll() && self.interaction.hover == Some(interaction_id) {
             if let Some(delta) = self.interaction.pending_scroll {
                 if delta.x != 0 || delta.y != 0 {
+                    // Grabbable controls consume scroll before parent containers see it.
                     self.interaction.clear_pending_scroll();
                     scroll = Some(delta);
                 }
@@ -137,6 +146,7 @@ impl Container {
         if self.interaction.focus == Some(interaction_id) {
             let mouse_pos = self.input.borrow().mouse_pos;
             let origin = vec2(self.body.x, self.body.y);
+            // Legacy relative mouse position remains body-relative for focused widgets.
             self.input.borrow_mut().rel_mouse_pos = mouse_pos - origin;
         }
 
@@ -157,6 +167,7 @@ impl Container {
     }
 
     #[allow(dead_code)]
+    /// Computes control state for a retained tree node id.
     pub(crate) fn update_control_for_node(
         &mut self,
         node_id: NodeId,
@@ -168,11 +179,13 @@ impl Container {
         self.update_control_for(self.retained_id_for_node(node_id), rect, opt, scroll_behavior, focus_policy)
     }
 
+    /// Returns a cached per-frame immutable input snapshot for widgets that need text/key input.
     pub(crate) fn snapshot_input(&mut self) -> Rc<InputSnapshot> {
         if let Some(snapshot) = &self.interaction.input_snapshot {
             return snapshot.clone();
         }
 
+        // Snapshot once per container frame so multiple widgets observe the same input generation.
         let input = self.input.borrow();
         let snapshot = Rc::new(InputSnapshot {
             mouse_pos: input.mouse_pos,
@@ -189,6 +202,7 @@ impl Container {
         snapshot
     }
 
+    /// Creates a widget context over this container's draw buffers and interaction focus fields.
     pub(crate) fn widget_ctx_for(&mut self, interaction_id: RetainedId, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'_> {
         WidgetCtx::new_with_interaction(
             interaction_id,
@@ -205,9 +219,11 @@ impl Container {
         )
     }
 
+    /// Converts the current input snapshot into widget-local mouse event semantics.
     pub(crate) fn input_to_mouse_event(&self, control: &ControlState, input: &InputSnapshot, rect: Recti) -> MouseEvent {
         let orig = Vec2i::new(rect.x, rect.y);
 
+        // Mouse event positions are local to the widget content rectangle.
         let prev_pos = input.mouse_pos - input.mouse_delta - orig;
         let curr_pos = input.mouse_pos - orig;
         let mouse_down = input.mouse_down;

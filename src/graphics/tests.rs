@@ -1,3 +1,5 @@
+//! Tests for widget-local graphics translation, clipping, and batching.
+
 use super::*;
 use crate::container::Command;
 use crate::draw_context::clip_relation;

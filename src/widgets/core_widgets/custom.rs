@@ -1,3 +1,8 @@
+//! Custom widget state for user-provided retained drawing.
+//!
+//! Custom widgets reserve a normal layout cell and provide interaction payloads to callback-based
+//! rendering commands.
+
 use super::*;
 
 #[derive(Clone)]
@@ -26,6 +31,7 @@ impl Custom {
         Self { name: name.into(), opt, scroll_behavior }
     }
 
+    /// Measures the custom widget's debug label as its default preferred size.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let text_w = if self.name.is_empty() {
@@ -38,10 +44,12 @@ impl Custom {
         Dimensioni::new(width.max(0), height)
     }
 
+    /// Custom render state itself does not update; the retained command callback owns drawing.
     fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         ResourceState::NONE
     }
 
+    /// Custom widgets do not paint through the normal widget state path.
     fn paint_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) {}
 }
 

@@ -51,6 +51,11 @@
 // IN THE SOFTWARE.
 //
 #![cfg(all(feature = "builder", feature = "save-to-rust", feature = "png_source"))]
+//! Command-line helper that converts the default atlas assets into generated Rust source.
+//!
+//! The build script invokes this binary for `prebuilt-atlas` builds. Keeping it as a normal Cargo
+//! target lets it use the crate's public atlas export path instead of duplicating serialization
+//! code inside `build.rs`.
 
 use microui_redux::SourceFormat;
 use std::{env, error::Error, path::PathBuf};
@@ -58,16 +63,19 @@ use std::{env, error::Error, path::PathBuf};
 #[path = "../examples/common/atlas_assets.rs"]
 mod atlas_assets;
 
+/// Parses the output path and writes the generated atlas source.
 fn main() -> Result<(), Box<dyn Error>> {
     let output = parse_output_arg()?;
     export_atlas(&output)?;
     Ok(())
 }
 
+/// Extracts `--output <path>` from the helper's small argument surface.
 fn parse_output_arg() -> Result<PathBuf, Box<dyn Error>> {
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--output" {
+            // Keep the parser explicit so missing values report the user-facing flag name.
             if let Some(path) = args.next() {
                 return Ok(PathBuf::from(path));
             } else {
@@ -78,9 +86,11 @@ fn parse_output_arg() -> Result<PathBuf, Box<dyn Error>> {
     Err("missing --output <path>".into())
 }
 
+/// Builds the default atlas and emits it as PNG-compressed Rust bytes.
 fn export_atlas(path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let slots = atlas_assets::default_slots();
     let atlas = atlas_assets::load_atlas(&slots);
+    // PNG source keeps the embedded atlas self-contained without storing raw RGBA in `.rodata`.
     atlas.to_rust_files("PREBUILT_ATLAS", SourceFormat::Png, path.to_str().unwrap())?;
     Ok(())
 }
