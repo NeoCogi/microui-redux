@@ -90,7 +90,7 @@ mod text_area;
 mod text_edit;
 mod textbox;
 
-pub(crate) use core_widgets::Internal;
+pub(crate) use core_widgets::{Internal, Scrollbar, ScrollbarLayout};
 
 pub use core_widgets::{Button, ButtonContent, Checkbox, Combo, Custom, ListBox, ListItem};
 pub use display::{ColorSwatch, TextBlock};

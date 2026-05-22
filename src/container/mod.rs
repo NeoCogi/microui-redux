@@ -56,7 +56,6 @@
 
 use super::*;
 use crate::draw_context::DrawCtx;
-use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::widget::{FocusPolicy, RetainedId};
 use crate::widget_tree::{widget_handle_id, NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
 use std::cell::RefCell;
@@ -70,10 +69,13 @@ mod draw;
 mod interaction;
 mod layout_api;
 mod panels;
+mod scroll;
 mod tree;
 
 #[cfg(test)]
 mod tests;
+
+use scroll::ScrollState;
 
 /// Core UI building block that records commands and hosts layouts.
 pub struct Container {
@@ -88,8 +90,7 @@ pub struct Container {
     body: Recti,
     /// Size of the content region based on layout traversal.
     content_size: Dimensioni,
-    /// Accumulated scroll offset.
-    scroll: Vec2i,
+    scroll: ScrollState,
     /// Z-index used to order overlapping windows.
     zindex: i32,
     /// Stable seed used to derive internal retained node IDs for framework controls.
@@ -97,14 +98,8 @@ pub struct Container {
     draw: DrawState,
     layout: LayoutManager,
     interaction: InteractionState,
-    /// Internal state for the vertical scrollbar.
-    scrollbar_y_state: Internal,
-    /// Internal state for the horizontal scrollbar.
-    scrollbar_x_state: Internal,
     /// Shared access to the input state.
     input: Rc<RefCell<Input>>,
-    /// Determines whether container scrollbars and scroll consumption are enabled.
-    scroll_enabled: bool,
     /// True when this container is a scratch container used only for measurement.
     measurement_mode: bool,
     /// Previous/current frame cache for retained tree node geometry and interaction state.
@@ -309,16 +304,13 @@ impl Container {
             rect: Recti::default(),
             body: Recti::default(),
             content_size: Dimensioni::default(),
-            scroll: Vec2i::default(),
+            scroll: ScrollState::default(),
             zindex: 0,
             internal_id_seed: Id::from_str(name),
             draw: DrawState::default(),
             interaction: InteractionState::default(),
             layout: LayoutManager::default(),
-            scrollbar_y_state: Internal::new("!scrollbary"),
-            scrollbar_x_state: Internal::new("!scrollbarx"),
             input,
-            scroll_enabled: true,
             measurement_mode: false,
             tree_cache: WidgetTreeCache::default(),
             panels: PanelState::default(),
@@ -335,9 +327,8 @@ impl Container {
         self.draw.clear();
         self.body = Recti::default();
         self.content_size = Dimensioni::default();
-        self.scroll = Vec2i::default();
+        self.scroll.reset();
         self.interaction.reset_all();
-        self.scroll_enabled = true;
         self.measurement_mode = false;
         self.panels.clear();
         self.tree_cache.clear();
@@ -354,7 +345,7 @@ impl Container {
         self.draw.assert_clip_stack_empty();
         self.panels.clear();
         self.interaction.prepare_frame();
-        self.scroll_enabled = true;
+        self.scroll.prepare_frame();
         self.tree_cache.begin_frame();
     }
 
@@ -364,10 +355,9 @@ impl Container {
         scratch.rect = self.rect;
         scratch.body = self.body;
         scratch.content_size = self.content_size;
-        scratch.scroll = self.scroll;
+        scratch.scroll = self.scroll.clone();
         scratch.zindex = self.zindex;
         scratch.layout = self.layout.clone();
-        scratch.scroll_enabled = self.scroll_enabled;
         scratch.measurement_mode = true;
         scratch
     }
@@ -444,12 +434,12 @@ impl Container {
 
     /// Returns the current scroll offset.
     pub fn scroll(&self) -> Vec2i {
-        self.scroll
+        self.scroll.offset
     }
 
     /// Sets the current scroll offset.
     pub fn set_scroll(&mut self, scroll: Vec2i) {
-        self.scroll = scroll;
+        self.scroll.offset = scroll;
     }
 
     /// Returns the content size derived from layout traversal.
@@ -465,7 +455,7 @@ impl Container {
     /// Clears content size and scroll offset together.
     pub(crate) fn clear_content_and_scroll(&mut self) {
         self.content_size = Dimensioni::default();
-        self.scroll = Vec2i::default();
+        self.scroll.clear_offset();
     }
 
     /// Returns the container's debug/display name.

@@ -35,6 +35,9 @@ use crate::graphics::clip_triangle_vertices_to_rect;
 use super::*;
 use std::collections::HashMap;
 
+mod quad;
+use quad::textured_quad_vertices;
+
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
 /// Vertex submitted by the UI.
@@ -343,42 +346,7 @@ impl<R: Renderer> CanvasFrame<'_, R> {
         let clip = *self.clip;
         for (dst, src, color) in rects {
             if let Some((dst, src)) = Canvas::<R>::clip_rect(*dst, *src, clip) {
-                let x = src.x as f32 / atlas_dim.width as f32;
-                let y = src.y as f32 / atlas_dim.height as f32;
-                let w = src.width as f32 / atlas_dim.width as f32;
-                let h = src.height as f32 / atlas_dim.height as f32;
-
-                let mut v0 = Vertex::default();
-                let mut v1 = Vertex::default();
-                let mut v2 = Vertex::default();
-                let mut v3 = Vertex::default();
-
-                // tex coordinates
-                v0.tex.x = x;
-                v0.tex.y = y;
-                v1.tex.x = x + w;
-                v1.tex.y = y;
-                v2.tex.x = x + w;
-                v2.tex.y = y + h;
-                v3.tex.x = x;
-                v3.tex.y = y + h;
-
-                // position
-                v0.pos.x = dst.x as f32;
-                v0.pos.y = dst.y as f32;
-                v1.pos.x = dst.x as f32 + dst.width as f32;
-                v1.pos.y = dst.y as f32;
-                v2.pos.x = dst.x as f32 + dst.width as f32;
-                v2.pos.y = dst.y as f32 + dst.height as f32;
-                v3.pos.x = dst.x as f32;
-                v3.pos.y = dst.y as f32 + dst.height as f32;
-
-                // color
-                v0.color = color4b(color.r, color.g, color.b, color.a);
-                v1.color = v0.color;
-                v2.color = v0.color;
-                v3.color = v0.color;
-
+                let [v0, v1, v2, v3] = textured_quad_vertices(dst, src, atlas_dim, *color);
                 self.renderer.push_quad_vertices(&v0, &v1, &v2, &v3);
             }
         }
@@ -471,42 +439,8 @@ impl<R: Renderer> CanvasFrame<'_, R> {
         let src = Recti::new(0, 0, info.width, info.height);
         let clip = *self.clip;
         if let Some((dst, src)) = Canvas::<R>::clip_rect(rect, src, clip) {
-            let mut v0 = Vertex::default();
-            let mut v1 = Vertex::default();
-            let mut v2 = Vertex::default();
-            let mut v3 = Vertex::default();
-
-            let color = color4b(color.r, color.g, color.b, color.a);
-
-            let tex_width = info.width as f32;
-            let tex_height = info.height as f32;
-
-            // texture coordinates
-            v0.tex.x = src.x as f32 / tex_width;
-            v0.tex.y = src.y as f32 / tex_height;
-            v1.tex.x = (src.x + src.width) as f32 / tex_width;
-            v1.tex.y = src.y as f32 / tex_height;
-            v2.tex.x = (src.x + src.width) as f32 / tex_width;
-            v2.tex.y = (src.y + src.height) as f32 / tex_height;
-            v3.tex.x = src.x as f32 / tex_width;
-            v3.tex.y = (src.y + src.height) as f32 / tex_height;
-
-            // positions
-            v0.pos.x = dst.x as f32;
-            v0.pos.y = dst.y as f32;
-            v1.pos.x = (dst.x + dst.width) as f32;
-            v1.pos.y = dst.y as f32;
-            v2.pos.x = (dst.x + dst.width) as f32;
-            v2.pos.y = (dst.y + dst.height) as f32;
-            v3.pos.x = dst.x as f32;
-            v3.pos.y = (dst.y + dst.height) as f32;
-
-            v0.color = color;
-            v1.color = color;
-            v2.color = color;
-            v3.color = color;
-
-            self.renderer.draw_texture(texture, [v0, v1, v2, v3]);
+            self.renderer
+                .draw_texture(texture, textured_quad_vertices(dst, src, Dimensioni::new(info.width, info.height), color));
         }
     }
 }

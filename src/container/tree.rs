@@ -76,6 +76,12 @@ impl CustomRenderCommand for RetainedCustomRenderCommand {
     }
 }
 
+enum TreePass<'a> {
+    Layout(&'a FrameResults),
+    Update(&'a mut FrameResults),
+    Paint,
+}
+
 impl Container {
     fn widget_dispatch_site(&self, node_id: NodeId, kind: &str) -> String {
         format!("container {:?}, tree node {:?} ({})", self.name, node_id, kind)
@@ -153,22 +159,43 @@ impl Container {
 
     /// Runs the retained layout pass for a slice of sibling tree nodes.
     pub(crate) fn layout_tree_nodes(&mut self, results: &FrameResults, nodes: &[WidgetTreeNode]) {
-        for node in nodes {
-            self.layout_tree_node(results, node);
-        }
+        let mut pass = TreePass::Layout(results);
+        self.visit_tree_nodes(&mut pass, nodes);
     }
 
     /// Runs the retained widget update pass for a slice of sibling tree nodes.
     fn update_tree_nodes(&mut self, results: &mut FrameResults, nodes: &[WidgetTreeNode]) {
-        for node in nodes {
-            self.update_tree_node(results, node);
-        }
+        let mut pass = TreePass::Update(results);
+        self.visit_tree_nodes(&mut pass, nodes);
     }
 
     /// Runs the retained widget paint pass for a slice of sibling tree nodes.
     fn paint_tree_nodes(&mut self, nodes: &[WidgetTreeNode]) {
+        let mut pass = TreePass::Paint;
+        self.visit_tree_nodes(&mut pass, nodes);
+    }
+
+    fn visit_tree_nodes(&mut self, pass: &mut TreePass<'_>, nodes: &[WidgetTreeNode]) {
         for node in nodes {
-            self.paint_tree_node(node);
+            self.visit_tree_node(pass, node);
+        }
+    }
+
+    fn visit_tree_node(&mut self, pass: &mut TreePass<'_>, node: &WidgetTreeNode) {
+        let (node_id, kind, children) = node.parts();
+        let policy = node.policy();
+        match kind {
+            WidgetTreeNodeKind::Widget { widget } => self.visit_tree_widget(pass, node_id, policy, &**widget),
+            WidgetTreeNodeKind::CustomRender { state, render } => self.visit_tree_custom_render(pass, node_id, policy, state, render),
+            WidgetTreeNodeKind::Container { handle, opt, scroll_behavior } => {
+                self.visit_tree_container(pass, node_id, policy, handle, *opt, *scroll_behavior, children);
+            }
+            WidgetTreeNodeKind::Header { state } => self.visit_tree_scope(pass, node_id, policy, state, children, false),
+            WidgetTreeNodeKind::Tree { state } => self.visit_tree_scope(pass, node_id, policy, state, children, true),
+            WidgetTreeNodeKind::Row { widths, height } => self.visit_tree_row(pass, node_id, policy, children, widths, *height),
+            WidgetTreeNodeKind::Grid { widths, heights } => self.visit_tree_grid(pass, node_id, policy, children, widths, heights),
+            WidgetTreeNodeKind::Column => self.visit_tree_column(pass, node_id, policy, children),
+            WidgetTreeNodeKind::Stack { width, height, direction } => self.visit_tree_stack(pass, node_id, policy, children, *width, *height, *direction),
         }
     }
 
@@ -363,26 +390,43 @@ impl Container {
         self.paint_tree_nodes(children);
     }
 
-    /// Performs the layout pass for one retained tree node, recursing into children when needed.
-    fn layout_tree_node(&mut self, results: &FrameResults, node: &WidgetTreeNode) {
-        let (node_id, kind, children) = node.parts();
-        let policy = node.policy();
-        match kind {
-            WidgetTreeNodeKind::Widget { widget } => {
-                self.layout_tree_widget(node_id, policy, &**widget);
-            }
-            WidgetTreeNodeKind::CustomRender { state, .. } => {
-                self.layout_tree_custom_render(node_id, policy, state);
-            }
-            WidgetTreeNodeKind::Container { handle, opt, scroll_behavior } => {
+    fn visit_tree_widget(&mut self, pass: &mut TreePass<'_>, node_id: NodeId, policy: Policy, widget: &dyn WidgetStateHandleDyn) {
+        match pass {
+            TreePass::Layout(_) => self.layout_tree_widget(node_id, policy, widget),
+            TreePass::Update(results) => self.update_tree_widget(&mut **results, node_id, widget),
+            TreePass::Paint => self.paint_tree_widget(node_id, widget),
+        }
+    }
+
+    fn visit_tree_custom_render(&mut self, pass: &mut TreePass<'_>, node_id: NodeId, policy: Policy, state: &WidgetHandle<Custom>, render: &TreeCustomRender) {
+        match pass {
+            TreePass::Layout(_) => self.layout_tree_custom_render(node_id, policy, state),
+            TreePass::Update(results) => self.update_tree_custom_render(&mut **results, node_id, state),
+            TreePass::Paint => self.paint_tree_custom_render(node_id, state, render),
+        }
+    }
+
+    fn visit_tree_container(
+        &mut self,
+        pass: &mut TreePass<'_>,
+        node_id: NodeId,
+        policy: Policy,
+        handle: &ContainerHandle,
+        opt: ContainerOption,
+        scroll_behavior: ScrollBehavior,
+        children: &[WidgetTreeNode],
+    ) {
+        match pass {
+            TreePass::Layout(results) => {
+                let results = *results;
                 if self.measurement_mode {
-                    let layout = self.measure_panel_layout(handle, node_id, *scroll_behavior, policy, results, children);
+                    let layout = self.measure_panel_layout(handle, node_id, scroll_behavior, policy, results, children);
                     self.record_tree_layout(node_id, layout);
                 } else {
                     let mut handle = handle.clone();
                     // Containers are nested retained sub-contexts. The parent records the panel bounds,
                     // then lets the child container execute the same layout pass against its own body.
-                    self.begin_panel_layout(&mut handle, node_id, *opt, *scroll_behavior, policy);
+                    self.begin_panel_layout(&mut handle, node_id, opt, scroll_behavior, policy);
                     handle.with_inner_mut(|container| {
                         container.layout_tree_nodes(results, children);
                     });
@@ -391,32 +435,100 @@ impl Container {
                     self.record_tree_layout(node_id, NodeLayout::new(rect, body, content_size));
                 }
             }
-            WidgetTreeNodeKind::Header { state } => {
+            TreePass::Update(results) => {
+                let mut handle = handle.clone();
+                let layout = self.current_tree_layout_or_panic(node_id);
+                // The update pass re-enters the panel with the layout snapshot already frozen.
+                // Child interaction therefore uses the same geometry that was computed during the
+                // first pass.
+                self.begin_panel_update(&mut handle, node_id, opt, scroll_behavior, layout);
+                handle.with_inner_mut(|container| {
+                    container.update_tree_nodes(&mut **results, children);
+                });
+                self.end_panel_update(&mut handle);
+            }
+            TreePass::Paint => {
+                let mut handle = handle.clone();
+                let layout = self.current_tree_layout_or_panic(node_id);
+                self.begin_panel_paint(&mut handle, node_id, opt, scroll_behavior, layout);
+                handle.with_inner_mut(|container| {
+                    container.paint_tree_nodes(children);
+                });
+                self.end_panel_paint(&mut handle);
+            }
+        }
+    }
+
+    fn visit_tree_scope(
+        &mut self,
+        pass: &mut TreePass<'_>,
+        node_id: NodeId,
+        policy: Policy,
+        state: &WidgetHandle<Node>,
+        children: &[WidgetTreeNode],
+        indent_children: bool,
+    ) {
+        match pass {
+            TreePass::Layout(results) => {
                 // Headers gate child participation entirely. In the strict retained model the
                 // current stable state decides whether descendants exist for this frame.
-                self.layout_tree_node_scope_children(results, node_id, policy, state, children, false);
+                self.layout_tree_node_scope_children(*results, node_id, policy, state, children, indent_children);
             }
-            WidgetTreeNodeKind::Tree { state } => {
-                // Tree nodes differ from plain headers only by indenting their descendants.
-                self.layout_tree_node_scope_children(results, node_id, policy, state, children, true);
-            }
-            WidgetTreeNodeKind::Row { widths, height } => {
-                // Structural layout nodes do not run widgets themselves; they only establish a new
-                // layout scope for descendants and then synthesize a cached group rect afterward.
+            TreePass::Update(results) => self.update_tree_node_scope_children(&mut **results, node_id, state, children),
+            TreePass::Paint => self.paint_tree_node_scope_children(node_id, state, children),
+        }
+    }
+
+    fn visit_tree_row(
+        &mut self,
+        pass: &mut TreePass<'_>,
+        node_id: NodeId,
+        policy: Policy,
+        children: &[WidgetTreeNode],
+        widths: &[SizePolicy],
+        height: SizePolicy,
+    ) {
+        match pass {
+            TreePass::Layout(results) => {
+                let results = *results;
                 self.layout_policy_group(node_id, policy, children, |container| {
-                    container.with_row(widths, *height, |container| {
+                    container.with_row(widths, height, |container| {
                         container.layout_tree_nodes(results, children);
                     });
                 });
             }
-            WidgetTreeNodeKind::Grid { widths, heights } => {
+            TreePass::Update(results) => self.update_structural_tree_node(&mut **results, children),
+            TreePass::Paint => self.paint_structural_tree_node(children),
+        }
+    }
+
+    fn visit_tree_grid(
+        &mut self,
+        pass: &mut TreePass<'_>,
+        node_id: NodeId,
+        policy: Policy,
+        children: &[WidgetTreeNode],
+        widths: &[SizePolicy],
+        heights: &[SizePolicy],
+    ) {
+        match pass {
+            TreePass::Layout(results) => {
+                let results = *results;
                 self.layout_policy_group(node_id, policy, children, |container| {
                     container.with_grid(widths, heights, |container| {
                         container.layout_tree_nodes(results, children);
                     });
                 });
             }
-            WidgetTreeNodeKind::Column => {
+            TreePass::Update(results) => self.update_structural_tree_node(&mut **results, children),
+            TreePass::Paint => self.paint_structural_tree_node(children),
+        }
+    }
+
+    fn visit_tree_column(&mut self, pass: &mut TreePass<'_>, node_id: NodeId, policy: Policy, children: &[WidgetTreeNode]) {
+        match pass {
+            TreePass::Layout(results) => {
+                let results = *results;
                 if policy == Policy::auto() {
                     self.column(|container| {
                         container.layout_tree_nodes(results, children);
@@ -429,82 +541,32 @@ impl Container {
                     self.record_tree_layout(node_id, NodeLayout::new(rect, rect, content_size));
                 }
             }
-            WidgetTreeNodeKind::Stack { width, height, direction } => {
+            TreePass::Update(results) => self.update_structural_tree_node(&mut **results, children),
+            TreePass::Paint => self.paint_structural_tree_node(children),
+        }
+    }
+
+    fn visit_tree_stack(
+        &mut self,
+        pass: &mut TreePass<'_>,
+        node_id: NodeId,
+        policy: Policy,
+        children: &[WidgetTreeNode],
+        width: SizePolicy,
+        height: SizePolicy,
+        direction: StackDirection,
+    ) {
+        match pass {
+            TreePass::Layout(results) => {
+                let results = *results;
                 self.layout_policy_group(node_id, policy, children, |container| {
-                    container.stack_with_width_direction(*width, *height, *direction, |container| {
+                    container.stack_with_width_direction(width, height, direction, |container| {
                         container.layout_tree_nodes(results, children);
                     });
                 });
             }
-        }
-    }
-
-    /// Performs the retained widget update pass for one tree node using cached layout.
-    fn update_tree_node(&mut self, results: &mut FrameResults, node: &WidgetTreeNode) {
-        let (node_id, kind, children) = node.parts();
-        match kind {
-            WidgetTreeNodeKind::Widget { widget } => {
-                self.update_tree_widget(results, node_id, &**widget);
-            }
-            WidgetTreeNodeKind::CustomRender { state, .. } => {
-                self.update_tree_custom_render(results, node_id, state);
-            }
-            WidgetTreeNodeKind::Container { handle, opt, scroll_behavior } => {
-                let mut handle = handle.clone();
-                let layout = self.current_tree_layout_or_panic(node_id);
-                // The update pass re-enters the panel with the layout snapshot already frozen.
-                // Child interaction therefore uses the same geometry that was computed during the
-                // first pass.
-                self.begin_panel_update(&mut handle, node_id, *opt, *scroll_behavior, layout);
-                handle.with_inner_mut(|container| {
-                    container.update_tree_nodes(results, children);
-                });
-                self.end_panel_update(&mut handle);
-            }
-            WidgetTreeNodeKind::Header { state } => {
-                self.update_tree_node_scope_children(results, node_id, state, children);
-            }
-            WidgetTreeNodeKind::Tree { state } => {
-                self.update_tree_node_scope_children(results, node_id, state, children);
-            }
-            WidgetTreeNodeKind::Row { .. } | WidgetTreeNodeKind::Grid { .. } | WidgetTreeNodeKind::Column | WidgetTreeNodeKind::Stack { .. } => {
-                // Structural nodes simply forward update to descendants because their own cached
-                // bounds were already synthesized during layout.
-                self.update_structural_tree_node(results, children);
-            }
-        }
-    }
-
-    /// Performs the retained widget paint pass for one tree node using cached layout and update state.
-    fn paint_tree_node(&mut self, node: &WidgetTreeNode) {
-        let (node_id, kind, children) = node.parts();
-        match kind {
-            WidgetTreeNodeKind::Widget { widget } => {
-                self.paint_tree_widget(node_id, &**widget);
-            }
-            WidgetTreeNodeKind::CustomRender { state, render } => {
-                self.paint_tree_custom_render(node_id, state, render);
-            }
-            WidgetTreeNodeKind::Container { handle, opt, scroll_behavior } => {
-                let mut handle = handle.clone();
-                let layout = self.current_tree_layout_or_panic(node_id);
-                self.begin_panel_paint(&mut handle, node_id, *opt, *scroll_behavior, layout);
-                handle.with_inner_mut(|container| {
-                    container.paint_tree_nodes(children);
-                });
-                self.end_panel_paint(&mut handle);
-            }
-            WidgetTreeNodeKind::Header { state } => {
-                self.paint_tree_node_scope_children(node_id, state, children);
-            }
-            WidgetTreeNodeKind::Tree { state } => {
-                self.paint_tree_node_scope_children(node_id, state, children);
-            }
-            WidgetTreeNodeKind::Row { .. } | WidgetTreeNodeKind::Grid { .. } | WidgetTreeNodeKind::Column | WidgetTreeNodeKind::Stack { .. } => {
-                // Structural nodes simply forward paint to descendants because their own cached
-                // bounds were already synthesized during layout.
-                self.paint_structural_tree_node(children);
-            }
+            TreePass::Update(results) => self.update_structural_tree_node(&mut **results, children),
+            TreePass::Paint => self.paint_structural_tree_node(children),
         }
     }
 

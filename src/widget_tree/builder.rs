@@ -30,16 +30,12 @@
 // -----------------------------------------------------------------------------
 //! Builder APIs for assembling retained widget trees with stable IDs.
 
-use std::{
-    cell::RefCell,
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-    rc::Rc,
-};
+use std::{cell::RefCell, hash::Hash, rc::Rc};
 
 use rs_math3d::Dimensioni;
 
 use crate::{
+    id::{hash_id_key, IdNamespace},
     input::{ContainerOption, ScrollBehavior},
     layout::{SizePolicy, StackDirection},
     widget::Widget,
@@ -122,9 +118,7 @@ impl NodeOptions {
 
 /// Hashes an application-provided key into the builder's id space.
 fn hash_builder_key<K: Hash>(key: K) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    key.hash(&mut hasher);
-    hasher.finish()
+    hash_id_key(key)
 }
 
 /// Builder that creates a retained widget tree.
@@ -346,21 +340,14 @@ impl WidgetTreeBuilder {
             }
         };
 
-        let mut hasher = DefaultHasher::new();
-        frame.scope_seed.hash(&mut hasher);
-        tag.hash(&mut hasher);
-        match key {
+        let (key_kind, key_value) = match key {
             Some(key) => {
                 // Keyed ids use a different discriminator so they do not collide with unkeyed ids.
-                1u8.hash(&mut hasher);
-                key.hash(&mut hasher);
+                (1, key)
             }
-            None => {
-                0u8.hash(&mut hasher);
-                ordinal.expect("unkeyed ordinal missing").hash(&mut hasher);
-            }
-        }
-        NodeId::new(hasher.finish())
+            None => (0, ordinal.expect("unkeyed ordinal missing")),
+        };
+        IdNamespace::WIDGET_TREE_BUILDER.id([frame.scope_seed, tag as u64, key_kind, key_value])
     }
 
     /// Returns the frame currently receiving new nodes.

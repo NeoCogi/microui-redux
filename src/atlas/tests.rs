@@ -3,7 +3,7 @@
 #[cfg(any(feature = "builder", feature = "png_source"))]
 use super::*;
 #[cfg(any(feature = "builder", feature = "png_source"))]
-use png::Encoder;
+use png::{BitDepth, ColorType, Encoder};
 #[cfg(any(feature = "builder", feature = "png_source"))]
 use std::fmt::Write;
 
