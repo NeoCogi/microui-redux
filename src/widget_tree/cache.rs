@@ -88,66 +88,94 @@ impl Default for NodeInteraction {
 /// previous-frame geometry while writing the next frame's layout and update outputs independently.
 #[derive(Default)]
 pub struct WidgetTreeCache {
-    prev_layout: HashMap<NodeId, NodeLayout>,
-    curr_layout: HashMap<NodeId, NodeLayout>,
-    prev_interaction: HashMap<NodeId, NodeInteraction>,
-    curr_interaction: HashMap<NodeId, NodeInteraction>,
+    layout: FrameCache<NodeLayout>,
+    interaction: FrameCache<NodeInteraction>,
+}
+
+#[derive(Default)]
+struct FrameCache<T> {
+    previous: HashMap<NodeId, T>,
+    current: HashMap<NodeId, T>,
+}
+
+impl<T> FrameCache<T> {
+    fn begin_frame(&mut self) {
+        self.current.clear();
+    }
+
+    fn finish_frame(&mut self) {
+        std::mem::swap(&mut self.previous, &mut self.current);
+        self.current.clear();
+    }
+
+    fn clear(&mut self) {
+        self.previous.clear();
+        self.current.clear();
+    }
+
+    fn previous(&self, node_id: NodeId) -> Option<&T> {
+        self.previous.get(&node_id)
+    }
+
+    fn current(&self, node_id: NodeId) -> Option<&T> {
+        self.current.get(&node_id)
+    }
+
+    fn record(&mut self, node_id: NodeId, value: T) -> Option<T> {
+        self.current.insert(node_id, value)
+    }
 }
 
 impl WidgetTreeCache {
     /// Clears the in-progress frame cache while preserving the committed frame.
     pub fn begin_frame(&mut self) {
-        self.curr_layout.clear();
-        self.curr_interaction.clear();
+        self.layout.begin_frame();
+        self.interaction.begin_frame();
     }
 
     /// Publishes the current frame cache as the previous frame for the next run.
     pub fn finish_frame(&mut self) {
-        std::mem::swap(&mut self.prev_layout, &mut self.curr_layout);
-        std::mem::swap(&mut self.prev_interaction, &mut self.curr_interaction);
-        self.curr_layout.clear();
-        self.curr_interaction.clear();
+        self.layout.finish_frame();
+        self.interaction.finish_frame();
     }
 
     /// Drops both previous and current cached node data.
     pub fn clear(&mut self) {
-        self.prev_layout.clear();
-        self.curr_layout.clear();
-        self.prev_interaction.clear();
-        self.curr_interaction.clear();
+        self.layout.clear();
+        self.interaction.clear();
     }
 
     /// Returns the previous frame layout for `node_id`.
     pub fn prev_layout(&self, node_id: NodeId) -> Option<&NodeLayout> {
-        self.prev_layout.get(&node_id)
+        self.layout.previous(node_id)
     }
 
     /// Returns the current frame layout for `node_id`.
     pub fn current_layout(&self, node_id: NodeId) -> Option<&NodeLayout> {
-        self.curr_layout.get(&node_id)
+        self.layout.current(node_id)
     }
 
     /// Returns the previous frame interaction for `node_id`.
     #[allow(dead_code)]
     pub fn prev_interaction(&self, node_id: NodeId) -> Option<&NodeInteraction> {
-        self.prev_interaction.get(&node_id)
+        self.interaction.previous(node_id)
     }
 
     /// Returns the current frame interaction for `node_id`.
     #[allow(dead_code)]
     pub fn current_interaction(&self, node_id: NodeId) -> Option<&NodeInteraction> {
-        self.curr_interaction.get(&node_id)
+        self.interaction.current(node_id)
     }
 
     /// Records the current frame layout for `node_id`.
     pub fn record_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
-        let prev = self.curr_layout.insert(node_id, layout);
+        let prev = self.layout.record(node_id, layout);
         debug_assert!(prev.is_none(), "Node {:?} layout was recorded more than once in the same frame", node_id);
     }
 
     /// Records the current frame interaction for `node_id`.
     pub fn record_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
-        let prev = self.curr_interaction.insert(node_id, interaction);
+        let prev = self.interaction.record(node_id, interaction);
         debug_assert!(prev.is_none(), "Node {:?} interaction was recorded more than once in the same frame", node_id);
     }
 }

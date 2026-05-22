@@ -102,13 +102,12 @@ fn root_windows_render_scrollbars_after_content_size_is_known() {
     let window = ctx.root_handle(root).unwrap();
     let inner = window.inner();
     let body = inner.main.body();
-    let has_vertical_scrollbar = inner
-        .main
-        .debug_commands()
-        .iter()
-        .any(|cmd| matches!(cmd, Command::Recti { rect, .. } if rect.x == body.x + body.width && rect.width == style.scrollbar_size && rect.height > 0));
+    let (vertical_scrollbar, _) = inner.main.scrollbar_node_ids_for_test();
+    let scrollbar = inner.main.previous_node_layout(vertical_scrollbar).expect("vertical scrollbar layout missing");
 
-    assert!(has_vertical_scrollbar);
+    assert_eq!(scrollbar.rect.x, body.x + body.width);
+    assert_eq!(scrollbar.rect.width, style.scrollbar_size);
+    assert!(scrollbar.rect.height > 0);
 }
 
 #[test]
@@ -434,14 +433,8 @@ fn auto_sized_titled_window_body_fits_current_content_same_frame() {
     assert!(inner.main.body().height > 0);
     assert!(inner.main.body().y > inner.main.rect().y);
 
-    let body = inner.main.body();
-    let has_vertical_scrollbar = inner
-        .main
-        .debug_commands()
-        .iter()
-        .any(|cmd| matches!(cmd, Command::Recti { rect, .. } if rect.x == body.x + body.width && rect.width == style.scrollbar_size && rect.height > 0));
-
-    assert!(!has_vertical_scrollbar);
+    let (vertical_scrollbar, _) = inner.main.scrollbar_node_ids_for_test();
+    assert!(inner.main.previous_node_layout(vertical_scrollbar).is_none());
 }
 
 #[test]

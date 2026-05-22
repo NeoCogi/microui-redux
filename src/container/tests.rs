@@ -595,6 +595,21 @@ fn retained_panel_scope_is_stable_and_parent_scoped() {
 }
 
 #[test]
+fn retained_scrollbar_control_ids_are_stable_and_container_scoped() {
+    let mut first_parent = make_container();
+    let mut second_parent = make_container();
+    first_parent.set_internal_id_seed(Id::new(11));
+    second_parent.set_internal_id_seed(Id::new(22));
+
+    let first_ids = first_parent.scrollbar_node_ids_for_test();
+    let second_ids = second_parent.scrollbar_node_ids_for_test();
+
+    assert_eq!(first_ids, first_parent.scrollbar_node_ids_for_test());
+    assert_ne!(first_ids.0, first_ids.1);
+    assert_ne!(first_ids, second_ids);
+}
+
+#[test]
 fn partial_draw_clip_commands_are_balanced_push_pop() {
     let mut container = make_container();
     begin_test_frame(&mut container, rect(0, 0, 80, 30));

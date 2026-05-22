@@ -184,12 +184,74 @@ impl RetainedId {
 /// - and the current in-progress result set being written by this frame.
 #[derive(Default)]
 pub(crate) struct FrameResults {
-    committed: HashMap<RetainedId, ResourceState>,
-    current: HashMap<RetainedId, ResourceState>,
-    current_dispatch_sites: HashMap<RetainedId, String>,
-    current_widget_dispatch_sites: HashMap<Id, String>,
-    committed_node_ids: HashMap<Id, RetainedId>,
-    current_node_ids: HashMap<Id, RetainedId>,
+    committed: FrameResultStore,
+    current: FrameResultStore,
+    current_dispatch: FrameDispatchTracker,
+}
+
+#[derive(Default)]
+struct FrameResultStore {
+    /// Primary public result storage keyed by fully scoped retained identity.
+    entries: HashMap<RetainedId, ResourceState>,
+    /// Compatibility index for node-id lookup APIs that do not include a root/panel scope.
+    node_index: HashMap<Id, RetainedId>,
+}
+
+impl FrameResultStore {
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.node_index.clear();
+    }
+
+    fn record_node_index(&mut self, node_id: Id, retained_id: RetainedId) {
+        self.node_index.entry(node_id).or_insert(retained_id);
+    }
+
+    fn record_retained(&mut self, retained_id: RetainedId, state: ResourceState) {
+        let prev_state = self.entries.insert(retained_id, state);
+        debug_assert!(prev_state.is_none(), "retained result for {:?} was recorded more than once", retained_id);
+    }
+
+    fn generation(&self) -> FrameResultGeneration<'_> {
+        FrameResultGeneration::new(&self.entries, &self.node_index)
+    }
+}
+
+#[derive(Default)]
+struct FrameDispatchTracker {
+    /// Dispatch site for each retained ID seen in the current frame.
+    retained_sites: HashMap<RetainedId, String>,
+    /// Dispatch site for each widget handle seen in the current frame.
+    widget_sites: HashMap<Id, String>,
+}
+
+impl FrameDispatchTracker {
+    fn clear(&mut self) {
+        self.retained_sites.clear();
+        self.widget_sites.clear();
+    }
+
+    fn record_widget(&mut self, widget_handle_id: Id, dispatch_site: &str) {
+        if let Some(first_site) = self.widget_sites.get(&widget_handle_id) {
+            panic!(
+                "duplicate widget dispatch detected for handle {:?}; a WidgetHandle may only be rendered once per frame. first dispatch: {}. duplicate dispatch: {}.",
+                widget_handle_id, first_site, dispatch_site
+            );
+        }
+
+        self.widget_sites.insert(widget_handle_id, dispatch_site.to_string());
+    }
+
+    fn record_retained(&mut self, retained_id: RetainedId, dispatch_site: String) {
+        if let Some(first_site) = self.retained_sites.get(&retained_id) {
+            panic!(
+                "duplicate retained dispatch detected for {:?}. first dispatch: {}. duplicate dispatch: {}.",
+                retained_id, first_site, dispatch_site
+            );
+        }
+
+        self.retained_sites.insert(retained_id, dispatch_site);
+    }
 }
 
 /// Read-only view over one frame-result generation.
@@ -226,19 +288,14 @@ impl FrameResults {
     /// Previously committed results remain available through [`FrameResults::committed`].
     pub(crate) fn begin_frame(&mut self) {
         self.current.clear();
-        self.current_dispatch_sites.clear();
-        self.current_widget_dispatch_sites.clear();
-        self.current_node_ids.clear();
+        self.current_dispatch.clear();
     }
 
     /// Publishes the current frame as the next committed result generation.
     pub(crate) fn finish_frame(&mut self) {
         std::mem::swap(&mut self.committed, &mut self.current);
-        std::mem::swap(&mut self.committed_node_ids, &mut self.current_node_ids);
         self.current.clear();
-        self.current_dispatch_sites.clear();
-        self.current_widget_dispatch_sites.clear();
-        self.current_node_ids.clear();
+        self.current_dispatch.clear();
     }
 
     /// Records a retained node result and checks that its widget handle is not dispatched twice.
@@ -251,54 +308,33 @@ impl FrameResults {
         dispatch_site: impl Into<String>,
     ) {
         let dispatch_site = dispatch_site.into();
-        if let Some(first_site) = self.current_widget_dispatch_sites.get(&widget_handle_id) {
-            panic!(
-                "duplicate widget dispatch detected for handle {:?}; a WidgetHandle may only be rendered once per frame. first dispatch: {}. duplicate dispatch: {}.",
-                widget_handle_id, first_site, dispatch_site
-            );
-        }
-
-        self.current_widget_dispatch_sites.insert(widget_handle_id, dispatch_site.clone());
-        self.current_node_ids.entry(node_id).or_insert(retained_id);
+        self.current_dispatch.record_widget(widget_handle_id, &dispatch_site);
+        self.current.record_node_index(node_id, retained_id);
         self.record_retained_id_with_context(retained_id, state, dispatch_site);
     }
 
     /// Records an internal retained node result without a legacy widget identity.
     pub(crate) fn record_node_with_context(&mut self, retained_id: RetainedId, node_id: Id, state: ResourceState, dispatch_site: impl Into<String>) {
-        self.current_node_ids.entry(node_id).or_insert(retained_id);
+        self.current.record_node_index(node_id, retained_id);
         self.record_retained_id_with_context(retained_id, state, dispatch_site);
     }
 
     /// Records a retained id after duplicate-dispatch validation.
     fn record_retained_id_with_context(&mut self, retained_id: RetainedId, state: ResourceState, dispatch_site: impl Into<String>) {
         let dispatch_site = dispatch_site.into();
-        if let Some(first_site) = self.current_dispatch_sites.get(&retained_id) {
-            panic!(
-                "duplicate retained dispatch detected for {:?}. first dispatch: {}. duplicate dispatch: {}.",
-                retained_id, first_site, dispatch_site
-            );
-        }
-
-        let prev_state = self.current.insert(retained_id, state);
-        let prev_site = self.current_dispatch_sites.insert(retained_id, dispatch_site);
-        // These maps are maintained together so duplicate errors can cite the first dispatch site.
-        debug_assert_eq!(
-            prev_state.is_some(),
-            prev_site.is_some(),
-            "retained result and dispatch-site tracking diverged for {:?}",
-            retained_id
-        );
+        self.current_dispatch.record_retained(retained_id, dispatch_site);
+        self.current.record_retained(retained_id, state);
     }
 
     /// Returns the committed result generation published by the previous frame.
     pub(crate) fn committed(&self) -> FrameResultGeneration<'_> {
-        FrameResultGeneration::new(&self.committed, &self.committed_node_ids)
+        self.committed.generation()
     }
 
     /// Returns the in-progress result generation for the current frame.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn current(&self) -> FrameResultGeneration<'_> {
-        FrameResultGeneration::new(&self.current, &self.current_node_ids)
+        self.current.generation()
     }
 }
 

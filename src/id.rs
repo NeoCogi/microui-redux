@@ -52,6 +52,12 @@
 //
 //! Stable numeric identifiers shared across windows, widgets, and retained trees.
 
+use std::hash::{Hash, Hasher};
+
+const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+const FNV_PRIME: u64 = 0x100000001b3;
+const MICROUI_ID_SALT: u64 = 0x6d69_6372_6f75_695f;
+
 /// Numeric identifier value.
 #[derive(Default, Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Id(usize);
@@ -70,18 +76,127 @@ impl Id {
 
     /// Creates a stable ID from a string label using FNV-1a hashing.
     pub fn from_str(label: &str) -> Self {
-        const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-        const FNV_PRIME: u64 = 0x100000001b3;
-        let mut hash = FNV_OFFSET_BASIS;
-        for byte in label.as_bytes() {
-            hash ^= *byte as u64;
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
-        Self::new(hash)
+        let mut hash = IdHasher::new();
+        hash.write(label.as_bytes());
+        hash.into_id()
     }
 
     /// Returns the raw numeric value wrapped by this ID.
     pub fn raw(self) -> usize {
         self.0
     }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct IdHasher {
+    hash: u64,
+}
+
+impl Default for IdHasher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl IdHasher {
+    pub(crate) const fn new() -> Self {
+        Self { hash: FNV_OFFSET_BASIS }
+    }
+
+    pub(crate) fn into_id(self) -> Id {
+        Id::new(self.hash)
+    }
+}
+
+impl Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.hash ^= *byte as u64;
+            self.hash = self.hash.wrapping_mul(FNV_PRIME);
+        }
+    }
+
+    fn write_u8(&mut self, value: u8) {
+        self.write(&[value]);
+    }
+
+    fn write_u16(&mut self, value: u16) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_u128(&mut self, value: u128) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_usize(&mut self, value: usize) {
+        self.write_u64(value as u64);
+    }
+
+    fn write_i8(&mut self, value: i8) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_i16(&mut self, value: i16) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_i32(&mut self, value: i32) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_i64(&mut self, value: i64) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_i128(&mut self, value: i128) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_isize(&mut self, value: isize) {
+        self.write_i64(value as i64);
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) struct IdNamespace {
+    salt: u64,
+}
+
+impl IdNamespace {
+    pub(crate) const WINDOW_CHROME: Self = Self::new(0x726f_6f74);
+    pub(crate) const PANEL_SCOPE: Self = Self::new(0x7061_6e65_6c5f_7363);
+    pub(crate) const INTERNAL_CONTROL: Self = Self::new(0x696e_7465_726e_616c);
+    pub(crate) const WIDGET_TREE_BUILDER: Self = Self::new(0x7769_6467_6574_7472);
+
+    const fn new(salt: u64) -> Self {
+        Self { salt }
+    }
+
+    pub(crate) fn id(self, values: impl IntoIterator<Item = u64>) -> Id {
+        let mut hash = IdHasher::new();
+        MICROUI_ID_SALT.hash(&mut hash);
+        self.salt.hash(&mut hash);
+        for value in values {
+            value.hash(&mut hash);
+        }
+        hash.into_id()
+    }
+}
+
+pub(crate) fn hash_id_key<K: Hash>(key: K) -> u64 {
+    let mut hash = IdHasher::new();
+    key.hash(&mut hash);
+    hash.finish()
 }
