@@ -54,17 +54,17 @@
 
 use super::*;
 
-impl Container {
+impl TraversalHost {
     #[inline(never)]
     /// Replays this container's command list into the renderer canvas.
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
         let mut commands = std::mem::take(&mut self.draw.commands);
         while !commands.is_empty() {
             // Render ordinary drawing commands in batches, but stop before commands that need a
-            // separate renderer lock or recursive panel render.
+            // separate renderer lock or recursive scroll-area render.
             let special_index = commands
                 .iter()
-                .position(|command| matches!(command, Command::BackendCustomRender(_, _) | Command::RetainedPanel { .. }));
+                .position(|command| matches!(command, Command::BackendCustomRender(_, _) | Command::RetainedScrollArea { .. }));
             let batch_len = special_index.unwrap_or(commands.len());
             if batch_len > 0 {
                 Self::render_batch(canvas, &self.draw.triangle_vertices, commands.drain(..batch_len));
@@ -90,7 +90,7 @@ impl Container {
                     canvas.flush();
                     canvas.set_clip_rect(prev_clip);
                 }
-                Some(Command::RetainedPanel { mut handle }) => {
+                Some(Command::RetainedScrollArea { mut handle }) => {
                     canvas.flush();
                     handle.render(canvas);
                     canvas.flush();
@@ -150,7 +150,7 @@ impl Container {
                         let end = vertex_start + vertex_count;
                         canvas.draw_triangles(&triangle_vertices[vertex_start..end]);
                     }
-                    Command::RetainedPanel { .. } | Command::BackendCustomRender(_, _) | Command::None => (),
+                    Command::RetainedScrollArea { .. } | Command::BackendCustomRender(_, _) | Command::None => (),
                 }
             }
             canvas.set_clip_rect(base_clip);

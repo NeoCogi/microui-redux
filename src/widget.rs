@@ -162,7 +162,7 @@ impl RetainedId {
 
     /// Creates a scoped retained node interaction ID.
     ///
-    /// Root containers use a scope derived from their `RootId`; retained panels use their panel
+    /// Root containers use a scope derived from their `RootId`; retained scroll areas use their
     /// node ID as the child-container scope.
     pub const fn scoped_node(scope: Id, node_id: Id) -> Self {
         Self::ScopedNode { scope, node: node_id }

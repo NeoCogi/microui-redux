@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Tests for container layout, retained traversal, panels, focus, and draw command behavior.
+//! Tests for container layout, retained traversal, scroll areas, focus, and draw command behavior.
 use super::*;
 use crate::test_support::{test_atlas, NoopRenderer};
 use std::{
@@ -90,7 +90,7 @@ fn widget_ctx_for_node<'a>(container: &'a mut Container, node_id: NodeId, rect: 
 }
 
 fn make_panel_handle(container: &Container, name: &str) -> ContainerHandle {
-    ContainerHandle::new(Container::new(name, container.atlas.clone(), container.style.clone(), container.input.clone()))
+    ContainerHandle::new(ScrollArea::new(name, container.atlas.clone(), container.style.clone(), container.input.clone()))
 }
 
 struct TraceWidget {
@@ -493,7 +493,7 @@ fn widget_tree_dispatches_panel_children() {
 
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
-            tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                 button_node_id = tree.widget(button.clone());
             });
         });
@@ -513,7 +513,7 @@ fn measurement_tree_does_not_mutate_live_root_or_panel_state() {
 
     begin_test_frame(&mut parent, rect(0, 0, 80, 30));
     let tree = WidgetTreeBuilder::build(|tree| {
-        panel_node_id = tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+        panel_node_id = tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
             tree.widget(text.clone());
         });
     });
@@ -544,7 +544,7 @@ fn embedded_panel_render_command_preserves_tree_order() {
     begin_test_frame(&mut parent, rect(0, 0, 120, 60));
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.widget(before.clone());
-        tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+        tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
             tree.widget(inside.clone());
         });
         tree.widget(after.clone());
@@ -561,8 +561,8 @@ fn embedded_panel_render_command_preserves_tree_order() {
         .draw
         .commands
         .iter()
-        .position(|cmd| matches!(cmd, Command::RetainedPanel { .. }))
-        .expect("panel command missing");
+        .position(|cmd| matches!(cmd, Command::RetainedScrollArea { .. }))
+        .expect("scroll area command missing");
     let after_idx = parent
         .draw
         .commands
@@ -583,10 +583,10 @@ fn retained_panel_scope_is_stable_and_parent_scoped() {
 
     let panel_node = NodeId::new(100);
     let child_node = NodeId::new(200);
-    let first_scope = first_parent.panel_scope_id(panel_node);
-    let second_scope = second_parent.panel_scope_id(panel_node);
+    let first_scope = first_parent.scroll_area_scope_id(panel_node);
+    let second_scope = second_parent.scroll_area_scope_id(panel_node);
 
-    assert_eq!(first_scope, first_parent.panel_scope_id(panel_node));
+    assert_eq!(first_scope, first_parent.scroll_area_scope_id(panel_node));
     assert_ne!(first_scope, second_scope);
     assert_ne!(
         RetainedId::scoped_node(first_scope, child_node),
@@ -710,7 +710,7 @@ fn retained_text_inside_panel_grows_content_height() {
     begin_test_frame(&mut parent, rect(0, 0, 60, 20));
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(60)], SizePolicy::Fixed(20), |tree| {
-            tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                 tree.widget(text.clone());
             });
         });
@@ -901,8 +901,8 @@ fn panel_hover_root_switches_between_siblings_on_next_frame() {
     let mut results = FrameResults::default();
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(50), SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
-            tree.container(left.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
-            tree.container(right.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
+            tree.scroll_area(left.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
+            tree.scroll_area(right.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
         });
     });
 
@@ -952,13 +952,13 @@ fn nested_panels_preserve_focus_hover_scroll_and_content_size() {
     let mut results = FrameResults::default();
 
     let tree = WidgetTreeBuilder::build(|tree| {
-        outer_node_id = tree.container_with(
+        outer_node_id = tree.scroll_area_with(
             NodeOptions::with_policy(Policy::fixed(80, 40)),
             outer.clone(),
             ContainerOption::NONE,
             ScrollBehavior::NONE,
             |tree| {
-                inner_node_id = tree.container_with(
+                inner_node_id = tree.scroll_area_with(
                     NodeOptions::with_policy(Policy::fixed(60, 18)),
                     inner.clone(),
                     ContainerOption::NONE,
@@ -1033,7 +1033,7 @@ fn parent_widgets_are_only_blocked_while_mouse_is_inside_active_child_rect() {
     let mut results = FrameResults::default();
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
-            tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
+            tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
         });
     });
 

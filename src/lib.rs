@@ -126,7 +126,7 @@ pub mod backend {
 /// low-level renderer/canvas details or manual container drawing helpers through default imports.
 pub mod retained {
     pub use crate::container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
-    pub use crate::container_handle::{ContainerHandle, ContainerView, ContainerViewMut};
+    pub use crate::container_handle::{ContainerHandle, ContainerView, ContainerViewMut, ScrollAreaHandle, ScrollAreaView, ScrollAreaViewMut};
     pub use crate::context::{Context, RootId};
     pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
     pub use crate::widget_tree::{NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
@@ -152,7 +152,7 @@ pub mod prelude {
     pub use crate::render::{Renderer, RendererHandle};
     pub use crate::retained::{
         ContainerHandle, Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeId, NodeOptions, Policy, RetainedId, RootId,
-        TextWrap, Widget, WidgetCtx, WidgetHandle, WidgetTree, WidgetTreeBuilder, WindowHandle, WindowState, widget_handle,
+        ScrollAreaHandle, TextWrap, Widget, WidgetCtx, WidgetHandle, WidgetTree, WidgetTreeBuilder, WindowHandle, WindowState, widget_handle,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
@@ -170,7 +170,8 @@ pub use atlas::{
     FontId, IconId, OPEN_FOLDER_16_ICON, SlotId, SourceFormat, WHITE_ICON, load_image_bytes,
 };
 pub use container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
-pub use container_handle::ContainerHandle;
+pub use container::ScrollArea;
+pub use container_handle::{ContainerHandle, ScrollAreaHandle};
 pub use context::{Context, RootId};
 pub use file_dialog::FileDialogState;
 pub use graphics::Graphics;

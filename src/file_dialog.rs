@@ -45,8 +45,8 @@ pub struct FileDialogState {
     selected_folder: Option<String>,
     root: RootId,
     win: WindowHandle,
-    folder_panel: ContainerHandle,
-    file_panel: ContainerHandle,
+    folder_panel: ScrollAreaHandle,
+    file_panel: ScrollAreaHandle,
     folders: Vec<String>,
     files: Vec<String>,
     folder_items: Vec<WidgetHandle<ListItem>>,
@@ -223,7 +223,7 @@ impl FileDialogState {
         let mut cancel_button_id = NodeId::default();
         let mut ok_button_id = NodeId::default();
         let (control_height, spacing) = {
-            // Size the footer reservation from the active root style/atlas so panels get the
+            // Size the footer reservation from the active root style/atlas so scroll areas get the
             // remaining body height without hard-coding font metrics.
             let win = self.win.inner();
             let container = &win.main;
@@ -254,9 +254,9 @@ impl FileDialogState {
                 go_button_id = tree.widget(go_button.clone());
             });
 
-            // Main pane: folders on the left, files on the right, both scrollable through panels.
+            // Main pane: folders on the left, files on the right, both scrollable through scroll areas.
             tree.row(&pane_widths, SizePolicy::Remainder(footer_reserved), |tree| {
-                tree.container(folder_panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.scroll_area(folder_panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                         tree.widget(folders_label.clone());
                         for item in &folder_items {
@@ -268,7 +268,7 @@ impl FileDialogState {
                     });
                 });
 
-                tree.container(file_panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.scroll_area(file_panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                         tree.widget(files_label.clone());
                         for item in &file_items {
@@ -420,7 +420,7 @@ impl FileDialogState {
         }
     }
 
-    /// Creates a new dialog window and associated panels.
+    /// Creates a new dialog window and associated scroll areas.
     pub fn new<R: Renderer>(ctx: &mut Context<R>) -> Self {
         let current_working_directory = std::env::current_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
@@ -437,8 +437,8 @@ impl FileDialogState {
             selected_folder: None,
             root,
             win: ctx.root_handle(root).expect("file dialog root window missing"),
-            folder_panel: ctx.new_panel("folders"),
-            file_panel: ctx.new_panel("files"),
+            folder_panel: ctx.new_scroll_area("folders"),
+            file_panel: ctx.new_scroll_area("files"),
             folders: Vec::new(),
             files: Vec::new(),
             folder_items: Vec::new(),

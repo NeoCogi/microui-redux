@@ -82,7 +82,7 @@ enum TreePass<'a> {
     Paint,
 }
 
-impl Container {
+impl TraversalHost {
     fn widget_dispatch_site(&self, node_id: NodeId, kind: &str) -> String {
         format!("container {:?}, tree node {:?} ({})", self.name, node_id, kind)
     }
@@ -164,13 +164,13 @@ impl Container {
     }
 
     /// Runs the retained widget update pass for a slice of sibling tree nodes.
-    fn update_tree_nodes(&mut self, results: &mut FrameResults, nodes: &[WidgetTreeNode]) {
+    pub(super) fn update_tree_nodes(&mut self, results: &mut FrameResults, nodes: &[WidgetTreeNode]) {
         let mut pass = TreePass::Update(results);
         self.visit_tree_nodes(&mut pass, nodes);
     }
 
     /// Runs the retained widget paint pass for a slice of sibling tree nodes.
-    fn paint_tree_nodes(&mut self, nodes: &[WidgetTreeNode]) {
+    pub(super) fn paint_tree_nodes(&mut self, nodes: &[WidgetTreeNode]) {
         let mut pass = TreePass::Paint;
         self.visit_tree_nodes(&mut pass, nodes);
     }
@@ -187,8 +187,8 @@ impl Container {
         match kind {
             WidgetTreeNodeKind::Widget { widget } => self.visit_tree_widget(pass, node_id, policy, &**widget),
             WidgetTreeNodeKind::CustomRender { state, render } => self.visit_tree_custom_render(pass, node_id, policy, state, render),
-            WidgetTreeNodeKind::Container { handle, opt, scroll_behavior } => {
-                self.visit_tree_container(pass, node_id, policy, handle, *opt, *scroll_behavior, children);
+            WidgetTreeNodeKind::ScrollArea { handle, opt, scroll_behavior } => {
+                self.visit_tree_scroll_area(pass, node_id, policy, handle, *opt, *scroll_behavior, children);
             }
             WidgetTreeNodeKind::Header { state } => self.visit_tree_scope(pass, node_id, policy, state, children, false),
             WidgetTreeNodeKind::Tree { state } => self.visit_tree_scope(pass, node_id, policy, state, children, true),
@@ -406,55 +406,36 @@ impl Container {
         }
     }
 
-    fn visit_tree_container(
+    fn visit_tree_scroll_area(
         &mut self,
         pass: &mut TreePass<'_>,
         node_id: NodeId,
         policy: Policy,
-        handle: &ContainerHandle,
+        handle: &ScrollAreaHandle,
         opt: ContainerOption,
         scroll_behavior: ScrollBehavior,
         children: &[WidgetTreeNode],
     ) {
         match pass {
             TreePass::Layout(results) => {
-                let results = *results;
-                if self.measurement_mode {
-                    let layout = self.measure_panel_layout(handle, node_id, scroll_behavior, policy, results, children);
-                    self.record_tree_layout(node_id, layout);
-                } else {
-                    let mut handle = handle.clone();
-                    // Containers are nested retained sub-contexts. The parent records the panel bounds,
-                    // then lets the child container execute the same layout pass against its own body.
-                    self.begin_panel_layout(&mut handle, node_id, opt, scroll_behavior, policy);
-                    handle.with_inner_mut(|container| {
-                        container.layout_tree_nodes(results, children);
-                    });
-                    self.end_panel_layout(&mut handle);
-                    let (rect, body, content_size) = handle.with(|container| (container.rect(), container.body(), container.content_size()));
-                    self.record_tree_layout(node_id, NodeLayout::new(rect, body, content_size));
-                }
+                let mut handle = handle.clone();
+                let layout = handle.with_inner_mut(|area| area.layout_children(self, *results, node_id, policy, scroll_behavior, children));
+                self.record_tree_layout(node_id, layout);
             }
             TreePass::Update(results) => {
                 let mut handle = handle.clone();
                 let layout = self.current_tree_layout_or_panic(node_id);
-                // The update pass re-enters the panel with the layout snapshot already frozen.
-                // Child interaction therefore uses the same geometry that was computed during the
-                // first pass.
-                self.begin_panel_update(&mut handle, node_id, opt, scroll_behavior, layout);
-                handle.with_inner_mut(|container| {
-                    container.update_tree_nodes(&mut **results, children);
+                handle.with_inner_mut(|area| {
+                    area.update_children(self, &mut **results, node_id, layout, scroll_behavior, children);
                 });
-                self.end_panel_update(&mut handle);
             }
             TreePass::Paint => {
                 let mut handle = handle.clone();
                 let layout = self.current_tree_layout_or_panic(node_id);
-                self.begin_panel_paint(&mut handle, node_id, opt, scroll_behavior, layout);
-                handle.with_inner_mut(|container| {
-                    container.paint_tree_nodes(children);
+                handle.with_inner_mut(|area| {
+                    area.paint_children(self, node_id, layout, opt, scroll_behavior, children);
                 });
-                self.end_panel_paint(&mut handle);
+                self.draw.push_command(Command::RetainedScrollArea { handle });
             }
         }
     }

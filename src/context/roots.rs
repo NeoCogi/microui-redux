@@ -49,12 +49,19 @@ impl<R: Renderer> Context<R> {
         WindowHandle::popup(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone())
     }
 
+    /// Creates a retained scroll-area handle for use with [`crate::WidgetTreeBuilder::scroll_area`].
+    ///
+    /// The handle owns scroll-area-local focus, hover, scroll, layout cache, and draw commands across
+    /// frames; application code supplies its children through the retained tree.
+    pub fn new_scroll_area(&mut self, name: &str) -> ScrollAreaHandle {
+        ScrollAreaHandle::new(ScrollArea::new(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone()))
+    }
+
     /// Creates a retained panel handle for use with [`crate::WidgetTreeBuilder::container`].
     ///
-    /// The handle owns panel-local focus, hover, scroll, layout cache, and draw commands across
-    /// frames; application code supplies its children through the retained tree.
-    pub fn new_panel(&mut self, name: &str) -> ContainerHandle {
-        ContainerHandle::new(Container::new(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone()))
+    /// This is a compatibility alias for [`Self::new_scroll_area`].
+    pub fn new_panel(&mut self, name: &str) -> ScrollAreaHandle {
+        self.new_scroll_area(name)
     }
 
     /// Allocates the next stable root id.

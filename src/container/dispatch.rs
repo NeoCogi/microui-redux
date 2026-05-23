@@ -31,7 +31,7 @@
 
 use super::*;
 
-impl Container {
+impl TraversalHost {
     /// Measures a concrete widget and advances layout using the supplied node policy.
     pub(crate) fn measure_widget_rect_with_policy<W: Widget + ?Sized>(&mut self, state: &W, policy: Policy) -> Recti {
         let body = self.layout.current_body();

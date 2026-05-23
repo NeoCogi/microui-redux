@@ -40,7 +40,7 @@ use super::NodeId;
 /// Geometry resolved for a retained node in one frame.
 ///
 /// This cache is intentionally layout-only. Parent nodes such as headers,
-/// tree nodes, and embedded containers need the previous frame's rectangles to
+/// tree nodes, and scroll areas need the previous frame's rectangles to
 /// react to structural input before the current frame's layout runs.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct NodeLayout {
