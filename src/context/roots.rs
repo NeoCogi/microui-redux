@@ -60,6 +60,7 @@ impl<R: Renderer> Context<R> {
     /// Creates a retained panel handle for use with [`crate::WidgetTreeBuilder::container`].
     ///
     /// This is a compatibility alias for [`Self::new_scroll_area`].
+    #[deprecated(since = "0.6.1", note = "use new_scroll_area")]
     pub fn new_panel(&mut self, name: &str) -> ScrollAreaHandle {
         self.new_scroll_area(name)
     }

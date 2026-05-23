@@ -1231,7 +1231,7 @@ impl State {
             }
         });
 
-        let log_output = self.log_output.clone().expect("log output panel missing");
+        let log_output = self.log_output.clone().expect("log output scroll area missing");
         let log_text = self.log_text.clone();
         let submit_buf = self.submit_buf.clone();
         let submit_button = self.submit_button.clone();
@@ -1662,10 +1662,10 @@ impl State {
 
         if self.logbuf_updated {
             let mut log_output = self.log_output.as_mut().unwrap().clone();
-            log_output.with_mut(|panel| {
-                let mut scroll = panel.scroll();
-                scroll.y = panel.content_size().height;
-                panel.set_scroll(scroll);
+            log_output.with_mut(|scroll_area| {
+                let mut scroll = scroll_area.scroll();
+                scroll.y = scroll_area.content_size().height;
+                scroll_area.set_scroll(scroll);
             });
             self.logbuf_updated = false;
         }

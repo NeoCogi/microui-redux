@@ -76,7 +76,7 @@ impl TraversalHost {
         rect.contains(&self.input.borrow().mouse_pos) && clip_rect.contains(&self.input.borrow().mouse_pos) && in_hover_root
     }
 
-    /// Returns whether an active child panel blocks pointer ownership for the current pointer.
+    /// Returns whether an active child scroll area blocks pointer ownership for the current pointer.
     fn pointer_blocked_by_child(&self) -> bool {
         match self.interaction.hover_root_child_rect {
             Some(rect) => rect.contains(&self.input.borrow().mouse_pos),
@@ -145,7 +145,7 @@ impl TraversalHost {
 
         if self.interaction.focus == Some(interaction_id) {
             let mouse_pos = self.input.borrow().mouse_pos;
-            let origin = vec2(self.body.x, self.body.y);
+            let origin = vec2(self.viewport.body.x, self.viewport.body.y);
             // Legacy relative mouse position remains body-relative for focused widgets.
             self.input.borrow_mut().rel_mouse_pos = mouse_pos - origin;
         }

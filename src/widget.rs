@@ -140,9 +140,9 @@ pub enum RetainedId {
     Root(RootId),
     /// Stable retained-tree node identity.
     Node(Id),
-    /// Stable retained-tree node identity scoped to the owning root or panel.
+    /// Stable retained-tree node identity scoped to the owning root or scroll area.
     ScopedNode {
-        /// Stable owner/root/panel scope.
+        /// Stable owner/root/scroll-area scope.
         scope: Id,
         /// Stable node ID within that scope.
         node: Id,
@@ -193,7 +193,7 @@ pub(crate) struct FrameResults {
 struct FrameResultStore {
     /// Primary public result storage keyed by fully scoped retained identity.
     entries: HashMap<RetainedId, ResourceState>,
-    /// Compatibility index for node-id lookup APIs that do not include a root/panel scope.
+    /// Compatibility index for node-id lookup APIs that do not include a root/scroll-area scope.
     node_index: HashMap<Id, RetainedId>,
 }
 

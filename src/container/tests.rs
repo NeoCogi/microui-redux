@@ -69,8 +69,8 @@ fn make_container() -> Container {
 
 fn begin_test_frame(container: &mut Container, body: Recti) {
     container.prepare();
-    container.rect = body;
-    container.content_size = Dimensioni::default();
+    container.set_rect(body);
+    container.set_content_size(Dimensioni::default());
     container.push_container_body(body, ContainerOption::NONE, ScrollBehavior::NONE);
 }
 
@@ -89,8 +89,8 @@ fn widget_ctx_for_node<'a>(container: &'a mut Container, node_id: NodeId, rect: 
     container.widget_ctx_for(interaction_id, rect, input)
 }
 
-fn make_panel_handle(container: &Container, name: &str) -> ContainerHandle {
-    ContainerHandle::new(ScrollArea::new(name, container.atlas.clone(), container.style.clone(), container.input.clone()))
+fn make_scroll_area_handle(container: &Container, name: &str) -> ScrollAreaHandle {
+    ScrollAreaHandle::new(ScrollArea::new(name, container.atlas.clone(), container.style.clone(), container.input.clone()))
 }
 
 struct TraceWidget {
@@ -184,8 +184,8 @@ fn scrollbars_use_current_body() {
     style.scrollbar_size = 10;
     container.style = Rc::new(style);
 
-    container.body = rect(0, 0, 1, 1);
-    container.content_size = Dimensioni::new(0, 0);
+    container.set_body(rect(0, 0, 1, 1));
+    container.set_content_size(Dimensioni::new(0, 0));
 
     let mut body = rect(0, 0, 100, 100);
     container.scrollbars(&mut body);
@@ -202,7 +202,7 @@ fn scrollbars_shrink_body_when_needed() {
     style.scrollbar_size = 10;
     container.style = Rc::new(style);
 
-    container.content_size = Dimensioni::new(200, 200);
+    container.set_content_size(Dimensioni::new(200, 200));
 
     let mut body = rect(0, 0, 100, 100);
     container.scrollbars(&mut body);
@@ -484,16 +484,16 @@ fn retained_widget_value_commits_on_next_frame() {
 }
 
 #[test]
-fn widget_tree_dispatches_panel_children() {
+fn widget_tree_dispatches_scroll_area_children() {
     let mut parent = make_container();
-    let panel = make_panel_handle(&parent, "panel");
+    let scroll_area = make_scroll_area_handle(&parent, "scroll area");
     let button = widget_handle(Button::new("inside"));
     let mut results = FrameResults::default();
     let mut button_node_id = NodeId::default();
 
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
-            tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            tree.scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                 button_node_id = tree.widget(button.clone());
             });
         });
@@ -504,16 +504,16 @@ fn widget_tree_dispatches_panel_children() {
 }
 
 #[test]
-fn measurement_tree_does_not_mutate_live_root_or_panel_state() {
+fn measurement_tree_does_not_mutate_live_root_or_scroll_area_state() {
     let mut parent = make_container();
-    let panel = make_panel_handle(&parent, "panel");
-    let text = widget_handle(TextBlock::new("panel child"));
+    let scroll_area = make_scroll_area_handle(&parent, "scroll area");
+    let text = widget_handle(TextBlock::new("scroll area child"));
     let results = FrameResults::default();
-    let mut panel_node_id = NodeId::new(0);
+    let mut scroll_area_node_id = NodeId::new(0);
 
     begin_test_frame(&mut parent, rect(0, 0, 80, 30));
     let tree = WidgetTreeBuilder::build(|tree| {
-        panel_node_id = tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+        scroll_area_node_id = tree.scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
             tree.widget(text.clone());
         });
     });
@@ -522,20 +522,20 @@ fn measurement_tree_does_not_mutate_live_root_or_panel_state() {
 
     assert!(measured.width > 0);
     assert!(measured.height > 0);
-    assert!(parent.current_node_layout(panel_node_id).is_none());
-    let panel = panel.inner();
-    let rect = panel.rect();
-    let body = panel.body();
-    let content_size = panel.content_size();
+    assert!(parent.current_node_layout(scroll_area_node_id).is_none());
+    let scroll_area = scroll_area.inner();
+    let rect = scroll_area.rect();
+    let body = scroll_area.body();
+    let content_size = scroll_area.content_size();
     assert_eq!((rect.x, rect.y, rect.width, rect.height), (0, 0, 0, 0));
     assert_eq!((body.x, body.y, body.width, body.height), (0, 0, 0, 0));
     assert_eq!((content_size.width, content_size.height), (0, 0));
 }
 
 #[test]
-fn embedded_panel_render_command_preserves_tree_order() {
+fn embedded_scroll_area_render_command_preserves_tree_order() {
     let mut parent = make_container();
-    let panel = make_panel_handle(&parent, "panel");
+    let scroll_area = make_scroll_area_handle(&parent, "scroll area");
     let before = widget_handle(TextBlock::new("before"));
     let inside = widget_handle(TextBlock::new("inside"));
     let after = widget_handle(TextBlock::new("after"));
@@ -544,7 +544,7 @@ fn embedded_panel_render_command_preserves_tree_order() {
     begin_test_frame(&mut parent, rect(0, 0, 120, 60));
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.widget(before.clone());
-        tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+        tree.scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
             tree.widget(inside.clone());
         });
         tree.widget(after.clone());
@@ -557,7 +557,7 @@ fn embedded_panel_render_command_preserves_tree_order() {
         .iter()
         .position(|cmd| matches!(cmd, Command::Text { text, .. } if text == "before"))
         .expect("before text missing");
-    let panel_idx = parent
+    let scroll_area_idx = parent
         .draw
         .commands
         .iter()
@@ -570,23 +570,23 @@ fn embedded_panel_render_command_preserves_tree_order() {
         .position(|cmd| matches!(cmd, Command::Text { text, .. } if text == "after"))
         .expect("after text missing");
 
-    assert!(before_idx < panel_idx);
-    assert!(panel_idx < after_idx);
+    assert!(before_idx < scroll_area_idx);
+    assert!(scroll_area_idx < after_idx);
 }
 
 #[test]
-fn retained_panel_scope_is_stable_and_parent_scoped() {
+fn retained_scroll_area_scope_is_stable_and_parent_scoped() {
     let mut first_parent = make_container();
     let mut second_parent = make_container();
     first_parent.set_internal_id_seed(Id::new(11));
     second_parent.set_internal_id_seed(Id::new(22));
 
-    let panel_node = NodeId::new(100);
+    let scroll_area_node = NodeId::new(100);
     let child_node = NodeId::new(200);
-    let first_scope = first_parent.scroll_area_scope_id(panel_node);
-    let second_scope = second_parent.scroll_area_scope_id(panel_node);
+    let first_scope = first_parent.scroll_area_scope_id(scroll_area_node);
+    let second_scope = second_parent.scroll_area_scope_id(scroll_area_node);
 
-    assert_eq!(first_scope, first_parent.scroll_area_scope_id(panel_node));
+    assert_eq!(first_scope, first_parent.scroll_area_scope_id(scroll_area_node));
     assert_ne!(first_scope, second_scope);
     assert_ne!(
         RetainedId::scoped_node(first_scope, child_node),
@@ -696,29 +696,29 @@ fn retained_focus_follows_stable_node_id_when_widget_handle_changes() {
 }
 
 #[test]
-fn retained_text_inside_panel_grows_content_height() {
+fn retained_text_inside_scroll_area_grows_content_height() {
     let mut parent = make_container();
     let mut style = Style::default();
     style.padding = 0;
     style.scrollbar_size = 10;
     parent.style = Rc::new(style);
 
-    let panel = make_panel_handle(&parent, "panel");
+    let scroll_area = make_scroll_area_handle(&parent, "scroll area");
     let text = widget_handle(TextBlock::new("a\na\na\na"));
     let mut results = FrameResults::default();
 
     begin_test_frame(&mut parent, rect(0, 0, 60, 20));
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(60)], SizePolicy::Fixed(20), |tree| {
-            tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            tree.scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                 tree.widget(text.clone());
             });
         });
     });
     parent.widget_tree(&mut results, &tree);
 
-    let panel = panel.inner();
-    assert!(panel.content_size().height > panel.body().height);
+    let scroll_area = scroll_area.inner();
+    assert!(scroll_area.content_size().height > scroll_area.body().height);
 }
 
 #[test]
@@ -893,11 +893,11 @@ fn retained_tree_node_stays_expanded_after_click_is_committed() {
 }
 
 #[test]
-fn panel_hover_root_switches_between_siblings_on_next_frame() {
+fn scroll_area_hover_root_switches_between_siblings_on_next_frame() {
     let mut parent = make_container();
     let input = parent.input.clone();
-    let left = make_panel_handle(&parent, "left");
-    let right = make_panel_handle(&parent, "right");
+    let left = make_scroll_area_handle(&parent, "left");
+    let right = make_scroll_area_handle(&parent, "right");
     let mut results = FrameResults::default();
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(50), SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
@@ -933,7 +933,7 @@ fn panel_hover_root_switches_between_siblings_on_next_frame() {
 }
 
 #[test]
-fn nested_panels_preserve_focus_hover_scroll_and_content_size() {
+fn nested_scroll_areas_preserve_focus_hover_scroll_and_content_size() {
     let mut parent = make_container();
     let input = parent.input.clone();
     let mut style = Style::default();
@@ -941,8 +941,8 @@ fn nested_panels_preserve_focus_hover_scroll_and_content_size() {
     style.scrollbar_size = 8;
     parent.style = Rc::new(style);
 
-    let outer = make_panel_handle(&parent, "outer");
-    let inner = make_panel_handle(&parent, "inner");
+    let outer = make_scroll_area_handle(&parent, "outer");
+    let inner = make_scroll_area_handle(&parent, "inner");
     let focused = Rc::new(Cell::new(false));
     let probe = widget_handle(FocusProbe::new(focused.clone()));
     let text = widget_handle(TextBlock::new("a\na\na\na\na\na\na\na"));
@@ -988,7 +988,7 @@ fn nested_panels_preserve_focus_hover_scroll_and_content_size() {
     assert!(inner.inner().interaction.in_hover_root);
 
     let mut inner_focus = inner.clone();
-    inner_focus.with_mut(|panel| panel.set_focus_node(probe_node_id));
+    inner_focus.with_mut(|scroll_area| scroll_area.set_focus_node(probe_node_id));
     focused.set(false);
     results.begin_frame();
     begin_test_frame(&mut parent, rect(0, 0, 100, 60));
@@ -1029,11 +1029,11 @@ fn nested_panels_preserve_focus_hover_scroll_and_content_size() {
 fn parent_widgets_are_only_blocked_while_mouse_is_inside_active_child_rect() {
     let mut parent = make_container();
     let input = parent.input.clone();
-    let panel = make_panel_handle(&parent, "panel");
+    let scroll_area = make_scroll_area_handle(&parent, "scroll area");
     let mut results = FrameResults::default();
     let tree = WidgetTreeBuilder::build(|tree| {
         tree.row(&[SizePolicy::Fixed(50)], SizePolicy::Fixed(20), |tree| {
-            tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
+            tree.scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
         });
     });
 

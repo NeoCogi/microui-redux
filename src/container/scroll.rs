@@ -87,14 +87,14 @@ impl TraversalHost {
     #[cfg(test)]
     pub(crate) fn scrollbar_node_ids_for_test(&self) -> (NodeId, NodeId) {
         (
-            self.scroll.vertical.node_id(self.internal_id_seed),
-            self.scroll.horizontal.node_id(self.internal_id_seed),
+            self.viewport.scroll.vertical.node_id(self.internal_id_seed),
+            self.viewport.scroll.horizontal.node_id(self.internal_id_seed),
         )
     }
 
     /// Applies pending wheel/trackpad scroll to this container when it owns the hover route.
     pub(crate) fn consume_pending_scroll(&mut self) {
-        if !self.scroll.enabled {
+        if !self.viewport.scroll.enabled {
             return;
         }
         let delta = match self.interaction.pending_scroll {
@@ -103,13 +103,13 @@ impl TraversalHost {
         };
 
         let mut consumed = false;
-        let mut scroll = self.scroll.offset;
-        let mut content_size = self.content_size;
+        let mut scroll = self.viewport.scroll.offset;
+        let mut content_size = self.viewport.content_size;
         let padding = self.style.as_ref().padding * 2;
         // Scrollbars account for padded content because layout extents are tracked inside padding.
         content_size.width += padding;
         content_size.height += padding;
-        let body = self.body;
+        let body = self.viewport.body;
 
         let maxscroll_y = content_size.height - body.height;
         if delta.y != 0 && maxscroll_y > 0 && body.height > 0 {
@@ -131,14 +131,14 @@ impl TraversalHost {
 
         if consumed {
             // Once a container consumes scroll, parents should not also apply the same delta.
-            self.scroll.offset = scroll;
+            self.viewport.scroll.offset = scroll;
             self.interaction.clear_pending_scroll();
         }
     }
 
     /// Applies the caller's scroll policy to this container's scroll area state.
     pub(crate) fn apply_scroll_behavior(&mut self, scroll_behavior: ScrollBehavior) {
-        self.scroll.enabled = !scroll_behavior.is_no_scroll();
+        self.viewport.scroll.enabled = !scroll_behavior.is_no_scroll();
     }
 
     /// Shrinks the body for visible scrollbars and clamps scroll offsets into valid ranges.
@@ -148,7 +148,7 @@ impl TraversalHost {
             (style.scrollbar_size, style.padding)
         };
         let sz = scrollbar_size;
-        let mut cs = self.content_size;
+        let mut cs = self.viewport.content_size;
         cs.width += padding * 2;
         cs.height += padding * 2;
         let base_body = *body;
@@ -160,15 +160,15 @@ impl TraversalHost {
         }
         let body = *body;
         let maxscroll_y = scrollbar_max_scroll(cs.height, body.height);
-        self.scroll.offset.y = if maxscroll_y > 0 && body.height > 0 {
-            Self::clamp(self.scroll.offset.y, 0, maxscroll_y)
+        self.viewport.scroll.offset.y = if maxscroll_y > 0 && body.height > 0 {
+            Self::clamp(self.viewport.scroll.offset.y, 0, maxscroll_y)
         } else {
             0
         };
 
         let maxscroll_x = scrollbar_max_scroll(cs.width, body.width);
-        self.scroll.offset.x = if maxscroll_x > 0 && body.width > 0 {
-            Self::clamp(self.scroll.offset.x, 0, maxscroll_x)
+        self.viewport.scroll.offset.x = if maxscroll_x > 0 && body.width > 0 {
+            Self::clamp(self.viewport.scroll.offset.x, 0, maxscroll_x)
         } else {
             0
         };
@@ -184,23 +184,23 @@ impl TraversalHost {
 
     /// Updates and paints scrollbars for the active body when scrolling is enabled.
     pub(crate) fn render_active_scrollbars(&mut self) {
-        if self.scroll.enabled {
-            self.update_scrollbars(self.body);
-            self.paint_scrollbars(self.body);
+        if self.viewport.scroll.enabled {
+            self.update_scrollbars(self.viewport.body);
+            self.paint_scrollbars(self.viewport.body);
         }
     }
 
     /// Updates active scrollbar interaction without painting it.
     pub(crate) fn update_active_scrollbars(&mut self) {
-        if self.scroll.enabled {
-            self.update_scrollbars(self.body);
+        if self.viewport.scroll.enabled {
+            self.update_scrollbars(self.viewport.body);
         }
     }
 
     /// Paints active scrollbars using interaction recorded earlier in the frame.
     pub(crate) fn paint_active_scrollbars(&mut self) {
-        if self.scroll.enabled {
-            self.paint_scrollbars(self.body);
+        if self.viewport.scroll.enabled {
+            self.paint_scrollbars(self.viewport.body);
         }
     }
 
@@ -212,7 +212,7 @@ impl TraversalHost {
 
     /// Returns content size including style padding that contributes to scrollbar range.
     fn scrollbar_content_size(&self, padding: i32) -> Dimensioni {
-        let mut cs = self.content_size;
+        let mut cs = self.viewport.content_size;
         cs.width += padding * 2;
         cs.height += padding * 2;
         cs
@@ -233,20 +233,28 @@ impl TraversalHost {
     /// Resolves one scrollbar's layout, returning `None` when that axis is not needed.
     fn scrollbar_layout(&self, axis: ScrollAxis, body: Recti, content_size: Dimensioni, scrollbar_size: i32) -> Option<ScrollbarLayout> {
         match axis {
-            ScrollAxis::Vertical => self.scroll.vertical.resolve_layout(self.internal_id_seed, body, content_size, scrollbar_size),
-            ScrollAxis::Horizontal => self.scroll.horizontal.resolve_layout(self.internal_id_seed, body, content_size, scrollbar_size),
+            ScrollAxis::Vertical => self
+                .viewport
+                .scroll
+                .vertical
+                .resolve_layout(self.internal_id_seed, body, content_size, scrollbar_size),
+            ScrollAxis::Horizontal => self
+                .viewport
+                .scroll
+                .horizontal
+                .resolve_layout(self.internal_id_seed, body, content_size, scrollbar_size),
         }
     }
 
     /// Updates one scrollbar axis and adjusts the matching scroll offset when dragged.
     fn update_scrollbar(&mut self, axis: ScrollAxis, body: Recti, content_size: Dimensioni, scrollbar_size: i32) {
         let Some(layout) = self.scrollbar_layout(axis, body, content_size, scrollbar_size) else {
-            self.scroll.set_axis(axis, 0);
+            self.viewport.scroll.set_axis(axis, 0);
             return;
         };
 
-        let scroll_value = self.scroll.axis(axis);
-        let mut scrollbar = self.scroll.take_scrollbar(axis);
+        let scroll_value = self.viewport.scroll.axis(axis);
+        let mut scrollbar = self.viewport.scroll.take_scrollbar(axis);
         scrollbar.configure(layout, scroll_value);
         self.record_tree_layout(
             layout.node_id,
@@ -254,8 +262,8 @@ impl TraversalHost {
         );
         let (control, result) = self.update_internal_node(layout.node_id, &mut scrollbar, layout.base);
         self.record_tree_interaction(layout.node_id, NodeInteraction::new(control, result));
-        self.scroll.set_axis(axis, scrollbar.value());
-        self.scroll.restore_scrollbar(scrollbar);
+        self.viewport.scroll.set_axis(axis, scrollbar.value());
+        self.viewport.scroll.restore_scrollbar(scrollbar);
     }
 
     /// Paints one scrollbar axis using the interaction state recorded during update.
@@ -264,8 +272,8 @@ impl TraversalHost {
             return;
         };
 
-        let scroll_value = self.scroll.axis(axis);
-        let mut scrollbar = self.scroll.take_scrollbar(axis);
+        let scroll_value = self.viewport.scroll.axis(axis);
+        let mut scrollbar = self.viewport.scroll.take_scrollbar(axis);
         scrollbar.configure(layout, scroll_value);
         let control = self
             .tree_cache
@@ -273,7 +281,7 @@ impl TraversalHost {
             .map(|interaction| interaction.control)
             .unwrap_or_default();
         self.paint_internal_node(layout.node_id, &mut scrollbar, layout.base, &control);
-        self.scroll.restore_scrollbar(scrollbar);
+        self.viewport.scroll.restore_scrollbar(scrollbar);
     }
 
     /// Updates both scrollbar axes under a clip that includes the scrollbar gutters.
@@ -291,12 +299,12 @@ impl TraversalHost {
         if maxscroll_y > 0 {
             self.update_scrollbar(ScrollAxis::Vertical, body, cs, scrollbar_size);
         } else {
-            self.scroll.offset.y = 0;
+            self.viewport.scroll.offset.y = 0;
         }
         if maxscroll_x > 0 {
             self.update_scrollbar(ScrollAxis::Horizontal, body, cs, scrollbar_size);
         } else {
-            self.scroll.offset.x = 0;
+            self.viewport.scroll.offset.x = 0;
         }
         self.pop_clip_rect();
     }
@@ -320,14 +328,14 @@ impl TraversalHost {
     pub(crate) fn configure_container_body(&mut self, body: Recti, scroll_behavior: ScrollBehavior) {
         let mut body = body;
         self.apply_scroll_behavior(scroll_behavior);
-        if self.scroll.enabled {
+        if self.viewport.scroll.enabled {
             self.resolve_scrollbars(&mut body);
         }
         let (layout_padding, style_padding, font, style_clone) = {
             let style = self.style.as_ref();
             (-style.padding, style.padding, style.font, *style)
         };
-        let scroll = self.scroll.offset;
+        let scroll = self.viewport.scroll.offset;
         self.layout.reset(expand_rect(body, layout_padding), scroll);
         self.layout.style = style_clone;
         let font_height = self.atlas.get_font_height(font) as i32;
@@ -335,7 +343,7 @@ impl TraversalHost {
         let icon_height = self.atlas.get_icon_size(EXPAND_DOWN_ICON).height;
         let default_height = max(font_height + vertical_pad * 2, icon_height);
         self.layout.set_default_cell_height(default_height);
-        self.body = body;
+        self.viewport.body = body;
     }
 
     /// Configures layout state for the container's client area, handling scrollbars when necessary.
