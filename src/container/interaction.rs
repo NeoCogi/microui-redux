@@ -54,7 +54,7 @@
 
 use super::*;
 
-impl Container {
+impl TraversalHost {
     /// Sets focus to a retained node.
     pub fn set_focus_node(&mut self, node_id: NodeId) {
         self.interaction.set_focus(self.retained_id_for_node(node_id));

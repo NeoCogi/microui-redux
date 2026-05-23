@@ -58,7 +58,10 @@ use super::*;
 use crate::draw_context::DrawCtx;
 use crate::widget::{FocusPolicy, RetainedId};
 use crate::widget_tree::{widget_handle_id, NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
-use std::cell::RefCell;
+use std::{
+    cell::RefCell,
+    ops::{Deref, DerefMut},
+};
 
 mod command;
 pub use command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
@@ -68,17 +71,22 @@ mod dispatch;
 mod draw;
 mod interaction;
 mod layout_api;
-mod panels;
 mod scroll;
+mod scroll_area;
 mod tree;
 
 #[cfg(test)]
 mod tests;
 
 use scroll::ScrollState;
+pub use scroll_area::ScrollArea;
 
-/// Core UI building block that records commands and hosts layouts.
-pub struct Container {
+/// Per-traversal execution state shared by root containers and retained scroll areas.
+///
+/// `TraversalHost` owns layout, draw, interaction, scroll, and retained-tree caches for one
+/// traversed body. Root-only concerns such as z-order and window lifecycle stay on `Container`;
+/// retained child state lives in `ScrollArea`.
+pub struct TraversalHost {
     atlas: AtlasHandle,
     /// Style used when drawing widgets in the container.
     style: Rc<Style>,
@@ -91,8 +99,6 @@ pub struct Container {
     /// Size of the content region based on layout traversal.
     content_size: Dimensioni,
     scroll: ScrollState,
-    /// Z-index used to order overlapping windows.
-    zindex: i32,
     /// Stable seed used to derive internal retained node IDs for framework controls.
     internal_id_seed: Id,
     draw: DrawState,
@@ -104,7 +110,13 @@ pub struct Container {
     measurement_mode: bool,
     /// Previous/current frame cache for retained tree node geometry and interaction state.
     tree_cache: WidgetTreeCache,
-    panels: PanelState,
+}
+
+/// Root UI building block used by windows, dialogs, and popups.
+pub struct Container {
+    host: TraversalHost,
+    /// Z-index used to order overlapping windows.
+    zindex: i32,
 }
 
 #[derive(Default)]
@@ -162,13 +174,13 @@ struct InteractionState {
     hover: Option<RetainedId>,
     /// ID of the widget currently focused, if any.
     focus: Option<RetainedId>,
-    /// Retained panel node that currently owns pointer routing inside this container.
+    /// Retained scroll-area node that currently owns pointer routing inside this container.
     hover_root_child: Option<RetainedId>,
-    /// Rectangle occupied by the child container that currently owns pointer routing.
+    /// Rectangle occupied by the child scroll area that currently owns pointer routing.
     hover_root_child_rect: Option<Recti>,
-    /// Retained panel node selected to own pointer routing on the next frame.
+    /// Retained scroll-area node selected to own pointer routing on the next frame.
     next_hover_root_child: Option<RetainedId>,
-    /// Rectangle for the child container selected to own pointer routing on the next frame.
+    /// Rectangle for the child scroll area selected to own pointer routing on the next frame.
     next_hover_root_child_rect: Option<Recti>,
     /// Tracks whether focus changed this frame.
     updated_focus: bool,
@@ -241,9 +253,9 @@ impl InteractionState {
         self.updated_focus = true;
     }
 
-    /// Records which embedded panel should receive hover routing on the next frame.
-    fn set_next_hover_root_child(&mut self, panel_id: RetainedId, rect: Recti) {
-        self.next_hover_root_child = Some(panel_id);
+    /// Records which child scroll area should receive hover routing on the next frame.
+    fn set_next_hover_root_child(&mut self, scroll_area_id: RetainedId, rect: Recti) {
+        self.next_hover_root_child = Some(scroll_area_id);
         self.next_hover_root_child_rect = Some(rect);
     }
 
@@ -263,39 +275,8 @@ impl InteractionState {
     }
 }
 
-#[derive(Default)]
-struct PanelState {
-    /// Embedded panels active in the current retained traversal.
-    active: Vec<ContainerHandle>,
-}
-
-impl PanelState {
-    /// Clears the list of panels replayed by the current traversal.
-    fn clear(&mut self) {
-        self.active.clear();
-    }
-
-    /// Adds an embedded panel that must be finished at the end of the frame.
-    fn push(&mut self, panel: ContainerHandle) {
-        self.active.push(panel);
-    }
-
-    /// Finishes all active embedded panels after parent traversal.
-    fn finish_active(&mut self) {
-        for panel in &mut self.active {
-            panel.finish();
-        }
-    }
-
-    #[cfg(test)]
-    /// Returns the active panel count for tests.
-    fn len(&self) -> usize {
-        self.active.len()
-    }
-}
-
-impl Container {
-    /// Creates a container with persistent retained state and shared style/input handles.
+impl TraversalHost {
+    /// Creates a traversal host with persistent retained state and shared style/input handles.
     pub(crate) fn new(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>) -> Self {
         Self {
             name: name.to_string(),
@@ -305,7 +286,6 @@ impl Container {
             body: Recti::default(),
             content_size: Dimensioni::default(),
             scroll: ScrollState::default(),
-            zindex: 0,
             internal_id_seed: Id::from_str(name),
             draw: DrawState::default(),
             interaction: InteractionState::default(),
@@ -313,7 +293,6 @@ impl Container {
             input,
             measurement_mode: false,
             tree_cache: WidgetTreeCache::default(),
-            panels: PanelState::default(),
         }
     }
 
@@ -330,20 +309,18 @@ impl Container {
         self.scroll.reset();
         self.interaction.reset_all();
         self.measurement_mode = false;
-        self.panels.clear();
         self.tree_cache.clear();
     }
 
-    /// Clears root-only frame routing while preserving widget focus and panel state.
+    /// Clears root-only frame routing while preserving widget focus and scroll-area state.
     pub(crate) fn clear_root_frame_state(&mut self) {
         self.interaction.clear_root_frame_state();
     }
 
-    /// Prepares command, panel, interaction, and tree-cache state for traversal.
+    /// Prepares command, scroll-area, interaction, and tree-cache state for traversal.
     pub(crate) fn prepare(&mut self) {
         self.draw.clear_commands();
         self.draw.assert_clip_stack_empty();
-        self.panels.clear();
         self.interaction.prepare_frame();
         self.scroll.prepare_frame();
         self.tree_cache.begin_frame();
@@ -351,18 +328,17 @@ impl Container {
 
     /// Creates a shallow scratch copy for measurement without mutating live interaction state.
     pub(crate) fn measurement_scratch(&self) -> Self {
-        let mut scratch = Container::new(&self.name, self.atlas.clone(), self.style.clone(), self.input.clone());
+        let mut scratch = TraversalHost::new(&self.name, self.atlas.clone(), self.style.clone(), self.input.clone());
         scratch.rect = self.rect;
         scratch.body = self.body;
         scratch.content_size = self.content_size;
         scratch.scroll = self.scroll.clone();
-        scratch.zindex = self.zindex;
         scratch.layout = self.layout.clone();
         scratch.measurement_mode = true;
         scratch
     }
 
-    /// Seeds scroll delta before a root or panel traversal starts.
+    /// Seeds scroll delta before a root or scroll-area traversal starts.
     pub(crate) fn seed_pending_scroll(&mut self, delta: Option<Vec2i>) {
         self.interaction.seed_pending_scroll(delta);
     }
@@ -389,7 +365,6 @@ impl Container {
 
     /// Resets transient per-frame state after widgets have been processed.
     pub fn finish(&mut self) {
-        self.panels.finish_active();
         self.interaction.finish_frame();
         self.tree_cache.finish_frame();
     }
@@ -434,12 +409,12 @@ impl Container {
 
     /// Returns the current scroll offset.
     pub fn scroll(&self) -> Vec2i {
-        self.scroll.offset
+        self.scroll.offset()
     }
 
     /// Sets the current scroll offset.
     pub fn set_scroll(&mut self, scroll: Vec2i) {
-        self.scroll.offset = scroll;
+        self.scroll.set_offset(scroll);
     }
 
     /// Returns the content size derived from layout traversal.
@@ -483,22 +458,12 @@ impl Container {
         &self.input
     }
 
-    /// Returns z-order used by root sorting.
-    pub(crate) fn zindex(&self) -> i32 {
-        self.zindex
-    }
-
-    /// Sets z-order used by root sorting.
-    pub(crate) fn set_zindex(&mut self, zindex: i32) {
-        self.zindex = zindex;
-    }
-
-    /// Returns whether this root/panel currently receives hover routing.
+    /// Returns whether this root or scroll area currently receives hover routing.
     pub(crate) fn in_hover_root(&self) -> bool {
         self.interaction.in_hover_root
     }
 
-    /// Sets whether this root/panel currently receives hover routing.
+    /// Sets whether this root or scroll area currently receives hover routing.
     pub(crate) fn set_in_hover_root(&mut self, in_hover_root: bool) {
         self.interaction.in_hover_root = in_hover_root;
     }
@@ -533,13 +498,47 @@ impl Container {
         self.draw.push_raw_clip(rect);
     }
 
-    #[cfg(test)]
-    pub(crate) fn panel_count(&self) -> usize {
-        self.panels.len()
-    }
-
     /// Clamps `x` into the inclusive range `[a, b]`.
     fn clamp(x: i32, a: i32, b: i32) -> i32 {
         min(b, max(a, x))
+    }
+}
+
+impl Container {
+    /// Creates a root container with persistent retained state and shared style/input handles.
+    pub(crate) fn new(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>) -> Self {
+        Self {
+            host: TraversalHost::new(name, atlas, style, input),
+            zindex: 0,
+        }
+    }
+
+    /// Clears persistent container state when a root closes or is recreated.
+    pub(crate) fn reset(&mut self) {
+        self.host.reset();
+    }
+
+    /// Returns z-order used by root sorting.
+    pub(crate) fn zindex(&self) -> i32 {
+        self.zindex
+    }
+
+    /// Sets z-order used by root sorting.
+    pub(crate) fn set_zindex(&mut self, zindex: i32) {
+        self.zindex = zindex;
+    }
+}
+
+impl Deref for Container {
+    type Target = TraversalHost;
+
+    fn deref(&self) -> &Self::Target {
+        &self.host
+    }
+}
+
+impl DerefMut for Container {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.host
     }
 }

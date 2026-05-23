@@ -175,10 +175,10 @@ pub(crate) enum Command {
         /// Number of consecutive vertices in the triangle list.
         vertex_count: usize,
     },
-    /// Replays an embedded retained panel at its tree position.
-    RetainedPanel {
-        /// Panel handle whose command list should be replayed here.
-        handle: ContainerHandle,
+    /// Replays a retained scroll area at its tree position.
+    RetainedScrollArea {
+        /// Scroll-area handle whose command list should be replayed here.
+        handle: ScrollAreaHandle,
     },
     /// Invokes a backend extension callback for custom rendering.
     ///

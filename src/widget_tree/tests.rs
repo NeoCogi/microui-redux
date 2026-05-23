@@ -1,6 +1,6 @@
 //! Tests for retained widget-tree building and identity behavior.
 
-use crate::{test_support::test_atlas, Button, Container, ContainerHandle, Input, SizePolicy, Style};
+use crate::{test_support::test_atlas, Button, Input, ScrollArea, ScrollAreaHandle, SizePolicy, Style};
 use std::{cell::RefCell, rc::Rc};
 
 use super::*;
@@ -99,14 +99,14 @@ fn row_nodes_capture_children_and_track_policy() {
 }
 
 #[test]
-fn container_nodes_store_handle_and_children() {
+fn scroll_area_nodes_store_handle_and_children() {
     let atlas = test_atlas();
     let input = Rc::new(RefCell::new(Input::default()));
-    let handle = ContainerHandle::new(Container::new("panel", atlas, Rc::new(Style::default()), input));
+    let handle = ScrollAreaHandle::new(ScrollArea::new("panel", atlas, Rc::new(Style::default()), input));
     let leaf = widget_handle((crate::WidgetOption::NONE, crate::ScrollBehavior::NONE));
 
     let tree = WidgetTreeBuilder::build(|builder| {
-        builder.container_with(
+        builder.scroll_area_with(
             NodeOptions::with_policy(Policy::fill()),
             handle.clone(),
             crate::ContainerOption::NONE,
@@ -120,8 +120,8 @@ fn container_nodes_store_handle_and_children() {
     let node = &tree.roots()[0];
     assert_eq!(node.children().len(), 1);
     match node.kind() {
-        WidgetTreeNodeKind::Container { .. } => {}
-        _ => panic!("expected container node"),
+        WidgetTreeNodeKind::ScrollArea { .. } => {}
+        _ => panic!("expected scroll area node"),
     }
 }
 

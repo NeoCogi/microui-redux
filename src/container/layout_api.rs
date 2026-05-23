@@ -54,7 +54,7 @@
 
 use super::*;
 
-impl Container {
+impl TraversalHost {
     /// Temporarily overrides the row definition and restores it after `f` executes.
     ///
     /// Only the flow template is restored. Children emitted inside the scope still advance the

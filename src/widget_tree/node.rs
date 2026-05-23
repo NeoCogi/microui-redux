@@ -33,7 +33,7 @@
 use crate::{
     input::{ContainerOption, ScrollBehavior},
     layout::{SizePolicy, StackDirection},
-    ContainerHandle, Custom, Id, Node,
+    Custom, Id, Node, ScrollAreaHandle,
 };
 
 use super::{TreeCustomRender, WidgetHandle, WidgetStateHandleDyn};
@@ -96,13 +96,13 @@ pub(crate) enum WidgetTreeNodeKind {
         /// Deferred rendering callback enqueued after interaction handling.
         render: TreeCustomRender,
     },
-    /// Embedded container/panel node with its own child subtree.
-    Container {
-        /// Container handle used for the embedded panel.
-        handle: ContainerHandle,
-        /// Container rendering options.
+    /// Scrollable child subtree with its own retained scroll-area state.
+    ScrollArea {
+        /// Scroll-area handle used for the child content.
+        handle: ScrollAreaHandle,
+        /// Scroll area rendering options.
         opt: ContainerOption,
-        /// Scroll behavior applied while embedded.
+        /// Scroll behavior applied while traversing the scroll area.
         scroll_behavior: ScrollBehavior,
     },
     /// Collapsible header node with optional child content.
@@ -148,7 +148,7 @@ impl WidgetTreeNodeKind {
         match self {
             Self::Widget { .. } => 1,
             Self::CustomRender { .. } => 2,
-            Self::Container { .. } => 3,
+            Self::ScrollArea { .. } => 3,
             Self::Header { .. } => 4,
             Self::Tree { .. } => 5,
             Self::Row { .. } => 6,

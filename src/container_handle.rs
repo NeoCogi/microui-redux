@@ -18,7 +18,7 @@
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 // IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR ITS CONTRIBUTORS BE
 // LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
 // CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
 // SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Shared container handles used by windows, panels, and retained container nodes.
+//! Shared handles for retained scroll-area nodes.
 
 use std::{
     cell::{Ref, RefCell, RefMut},
@@ -58,25 +58,25 @@ use std::{
 };
 
 use crate::canvas::Canvas;
-use crate::container::Container;
+use crate::container::ScrollArea;
 use crate::render::Renderer;
 use crate::{Dimensioni, NodeId, Recti, RetainedId, Vec2i};
 
 #[derive(Clone)]
-/// Shared handle to a container that can be embedded inside windows or panels.
-pub struct ContainerHandle(pub(crate) Rc<RefCell<Container>>);
+/// Shared handle to a retained scroll area.
+pub struct ScrollAreaHandle(pub(crate) Rc<RefCell<ScrollArea>>);
 
-/// Read-only view into a container borrowed from a handle.
-pub struct ContainerView<'a> {
-    inner: &'a Container,
+/// Read-only view into a retained scroll area borrowed from a handle.
+pub struct ScrollAreaView<'a> {
+    inner: &'a ScrollArea,
 }
 
-impl<'a> ContainerView<'a> {
-    fn new(inner: &'a Container) -> Self {
+impl<'a> ScrollAreaView<'a> {
+    fn new(inner: &'a ScrollArea) -> Self {
         Self { inner }
     }
 
-    /// Returns the container outer rectangle.
+    /// Returns the scroll area outer rectangle.
     pub fn rect(&self) -> Recti {
         self.inner.rect()
     }
@@ -97,22 +97,22 @@ impl<'a> ContainerView<'a> {
     }
 }
 
-/// Mutable view into retained container state borrowed from a handle.
-pub struct ContainerViewMut<'a> {
-    inner: &'a mut Container,
+/// Mutable view into retained scroll-area state borrowed from a handle.
+pub struct ScrollAreaViewMut<'a> {
+    inner: &'a mut ScrollArea,
 }
 
-impl<'a> ContainerViewMut<'a> {
-    fn new(inner: &'a mut Container) -> Self {
+impl<'a> ScrollAreaViewMut<'a> {
+    fn new(inner: &'a mut ScrollArea) -> Self {
         Self { inner }
     }
 
-    /// Returns the container outer rectangle.
+    /// Returns the scroll area outer rectangle.
     pub fn rect(&self) -> Recti {
         self.inner.rect()
     }
 
-    /// Updates the container outer rectangle.
+    /// Updates the scroll area outer rectangle.
     pub fn set_rect(&mut self, rect: Recti) {
         self.inner.set_rect(rect);
     }
@@ -137,62 +137,66 @@ impl<'a> ContainerViewMut<'a> {
         self.inner.content_size()
     }
 
-    /// Sets focus to a retained node in this container.
+    /// Sets focus to a retained node in this scroll area.
     pub fn set_focus_node(&mut self, node_id: NodeId) {
         self.inner.set_focus_node(node_id);
     }
 
-    /// Clears focus in this container.
+    /// Clears focus in this scroll area.
     pub fn clear_focus(&mut self) {
         self.inner.clear_focus();
     }
 }
 
-impl ContainerHandle {
-    pub(crate) fn new(container: Container) -> Self {
-        Self(Rc::new(RefCell::new(container)))
+impl ScrollAreaHandle {
+    pub(crate) fn new(scroll_area: ScrollArea) -> Self {
+        Self(Rc::new(RefCell::new(scroll_area)))
     }
 
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
         self.0.borrow_mut().render(canvas)
     }
 
-    pub(crate) fn finish(&mut self) {
-        self.0.borrow_mut().finish()
-    }
-
-    /// Returns an immutable borrow of the underlying container.
+    /// Returns an immutable borrow of the underlying scroll area.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn inner<'a>(&'a self) -> Ref<'a, Container> {
+    pub(crate) fn inner<'a>(&'a self) -> Ref<'a, ScrollArea> {
         self.0.borrow()
     }
 
-    /// Returns a mutable borrow of the underlying container.
-    pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Container> {
+    /// Returns a mutable borrow of the underlying scroll area.
+    #[allow(dead_code)]
+    pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, ScrollArea> {
         self.0.borrow_mut()
     }
 
-    /// Executes `f` with a read-only view into the container.
-    pub fn with<R>(&self, f: impl FnOnce(&ContainerView<'_>) -> R) -> R {
-        let container = self.0.borrow();
-        let view = ContainerView::new(&container);
+    /// Executes `f` with a read-only view into the scroll area.
+    pub fn with<R>(&self, f: impl FnOnce(&ScrollAreaView<'_>) -> R) -> R {
+        let scroll_area = self.0.borrow();
+        let view = ScrollAreaView::new(&scroll_area);
         f(&view)
     }
 
-    /// Executes `f` with a mutable view into the container.
-    pub fn with_mut<R>(&mut self, f: impl FnOnce(&mut ContainerViewMut<'_>) -> R) -> R {
-        let mut container = self.0.borrow_mut();
-        let mut view = ContainerViewMut::new(&mut container);
+    /// Executes `f` with a mutable view into the scroll area.
+    pub fn with_mut<R>(&mut self, f: impl FnOnce(&mut ScrollAreaViewMut<'_>) -> R) -> R {
+        let mut scroll_area = self.0.borrow_mut();
+        let mut view = ScrollAreaViewMut::new(&mut scroll_area);
         f(&mut view)
     }
 
-    pub(crate) fn with_inner_mut<R>(&mut self, f: impl FnOnce(&mut Container) -> R) -> R {
-        let mut container = self.0.borrow_mut();
-        f(&mut container)
+    pub(crate) fn with_inner_mut<R>(&mut self, f: impl FnOnce(&mut ScrollArea) -> R) -> R {
+        let mut scroll_area = self.0.borrow_mut();
+        f(&mut scroll_area)
     }
 
-    /// Returns the retained interaction identity for a node inside this container.
+    /// Returns the retained interaction identity for a node inside this scroll area.
     pub fn retained_id_for_node(&self, node_id: NodeId) -> RetainedId {
         self.0.borrow().retained_id_for_node(node_id)
     }
 }
+
+/// Compatibility alias for code that still uses the old retained container name.
+pub type ContainerHandle = ScrollAreaHandle;
+/// Compatibility alias for the old read-only retained container view.
+pub type ContainerView<'a> = ScrollAreaView<'a>;
+/// Compatibility alias for the old mutable retained container view.
+pub type ContainerViewMut<'a> = ScrollAreaViewMut<'a>;

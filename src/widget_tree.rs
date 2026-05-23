@@ -30,7 +30,7 @@
 //! Retained widget tree module.
 //!
 //! The retained widget tree owns the long-lived UI structure. Composite nodes such as headers,
-//! tree nodes, and embedded containers store their child lists here and keep stable `NodeId`s
+//! tree nodes, and scroll areas store their child lists here and keep stable `NodeId`s
 //! across frames. Each frame the container uses the previous-frame cache for committed
 //! geometry/results, then traverses the retained nodes directly through the normal layout and
 //! widget paths.

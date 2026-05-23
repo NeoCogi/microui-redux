@@ -6,9 +6,9 @@ use crate::scrollbar::{scrollbar_max_scroll, ScrollAxis};
 #[derive(Clone)]
 pub(super) struct ScrollState {
     /// Accumulated scroll offset.
-    pub(super) offset: Vec2i,
+    offset: Vec2i,
     /// Determines whether container scrollbars and scroll consumption are enabled.
-    pub(super) enabled: bool,
+    enabled: bool,
     /// Internal widget state for the vertical scrollbar.
     vertical: Scrollbar,
     /// Internal widget state for the horizontal scrollbar.
@@ -43,6 +43,14 @@ impl ScrollState {
     pub(super) fn clear_offset(&mut self) {
         self.offset = Vec2i::default();
     }
+
+    pub(super) fn offset(&self) -> Vec2i {
+        self.offset
+    }
+
+    pub(super) fn set_offset(&mut self, offset: Vec2i) {
+        self.offset = offset;
+    }
 }
 
 impl ScrollState {
@@ -75,7 +83,7 @@ impl ScrollState {
     }
 }
 
-impl Container {
+impl TraversalHost {
     #[cfg(test)]
     pub(crate) fn scrollbar_node_ids_for_test(&self) -> (NodeId, NodeId) {
         (
@@ -126,6 +134,11 @@ impl Container {
             self.scroll.offset = scroll;
             self.interaction.clear_pending_scroll();
         }
+    }
+
+    /// Applies the caller's scroll policy to this container's scroll area state.
+    pub(crate) fn apply_scroll_behavior(&mut self, scroll_behavior: ScrollBehavior) {
+        self.scroll.enabled = !scroll_behavior.is_no_scroll();
     }
 
     /// Shrinks the body for visible scrollbars and clamps scroll offsets into valid ranges.
@@ -306,7 +319,7 @@ impl Container {
     /// Configures layout state for the container's client area without drawing.
     pub(crate) fn configure_container_body(&mut self, body: Recti, scroll_behavior: ScrollBehavior) {
         let mut body = body;
-        self.scroll.enabled = !scroll_behavior.is_no_scroll();
+        self.apply_scroll_behavior(scroll_behavior);
         if self.scroll.enabled {
             self.resolve_scrollbars(&mut body);
         }

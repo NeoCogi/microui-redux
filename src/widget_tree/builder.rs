@@ -39,7 +39,7 @@ use crate::{
     input::{ContainerOption, ScrollBehavior},
     layout::{SizePolicy, StackDirection},
     widget::Widget,
-    ContainerHandle, Custom, CustomRenderArgs, Node, TextBlock, TextWrap,
+    Custom, CustomRenderArgs, Node, ScrollAreaHandle, TextBlock, TextWrap,
 };
 
 use super::{erased_widget_state, widget_handle, NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetTree, WidgetTreeNode, WidgetTreeNodeKind};
@@ -213,21 +213,42 @@ impl WidgetTreeBuilder {
         self.push_leaf(options, WidgetTreeNodeKind::CustomRender { state, render })
     }
 
-    /// Adds an unkeyed embedded container node.
-    pub fn container(&mut self, handle: ContainerHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.container_with(NodeOptions::new(), handle, opt, scroll_behavior, f)
+    /// Adds an unkeyed scroll area node.
+    pub fn scroll_area(&mut self, handle: ScrollAreaHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut Self)) -> NodeId {
+        self.scroll_area_with(NodeOptions::new(), handle, opt, scroll_behavior, f)
     }
 
-    /// Adds an embedded container node with optional identity and placement metadata.
-    pub fn container_with(
+    /// Adds a scroll area node with optional identity and placement metadata.
+    pub fn scroll_area_with(
         &mut self,
         options: NodeOptions,
-        handle: ContainerHandle,
+        handle: ScrollAreaHandle,
         opt: ContainerOption,
         scroll_behavior: ScrollBehavior,
         f: impl FnOnce(&mut Self),
     ) -> NodeId {
-        self.push_group(options, WidgetTreeNodeKind::Container { handle, opt, scroll_behavior }, f)
+        self.push_group(options, WidgetTreeNodeKind::ScrollArea { handle, opt, scroll_behavior }, f)
+    }
+
+    /// Adds an unkeyed embedded container node.
+    ///
+    /// This is a compatibility alias for [`Self::scroll_area`].
+    pub fn container(&mut self, handle: ScrollAreaHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut Self)) -> NodeId {
+        self.scroll_area(handle, opt, scroll_behavior, f)
+    }
+
+    /// Adds an embedded container node with optional identity and placement metadata.
+    ///
+    /// This is a compatibility alias for [`Self::scroll_area_with`].
+    pub fn container_with(
+        &mut self,
+        options: NodeOptions,
+        handle: ScrollAreaHandle,
+        opt: ContainerOption,
+        scroll_behavior: ScrollBehavior,
+        f: impl FnOnce(&mut Self),
+    ) -> NodeId {
+        self.scroll_area_with(options, handle, opt, scroll_behavior, f)
     }
 
     /// Adds an unkeyed collapsible header node.

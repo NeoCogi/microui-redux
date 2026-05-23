@@ -168,6 +168,42 @@ fn resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
 }
 
 #[test]
+fn resize_handle_geometry_matches_scrollbar_corner_size() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 240));
+    let mut style = Style::default();
+    style.scrollbar_size = 10;
+    ctx.set_style(&style);
+
+    let root = ctx.create_window(
+        "window",
+        rect(4, 6, 80, 50),
+        WidgetTreeBuilder::build(|tree| {
+            tree.text("body");
+        }),
+    );
+    let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids();
+
+    ctx.update_ui();
+
+    let window = ctx.root_handle(root).unwrap();
+    let layout = window
+        .inner()
+        .main
+        .previous_node_layout(chrome.resize)
+        .expect("resize chrome node layout missing");
+    let rect = window.rect();
+    assert_eq!(layout.rect.width, style.scrollbar_size);
+    assert_eq!(layout.rect.height, style.scrollbar_size);
+    assert_eq!(layout.rect.x + layout.rect.width, rect.x + rect.width);
+    assert_eq!(layout.rect.y + layout.rect.height, rect.y + rect.height);
+    let resize_rect = (layout.rect.x, layout.rect.y, layout.rect.width, layout.rect.height);
+    assert!(window.inner().main.debug_commands().iter().any(|cmd| matches!(cmd, Command::Recti { rect, .. }
+            if (rect.x, rect.y, rect.width, rect.height) == resize_rect)));
+}
+
+#[test]
 fn context_result_accessors_expose_committed_and_current_generations() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
@@ -313,11 +349,11 @@ fn reshown_roots_drop_stale_panel_handles_after_a_gap() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-    let panel = ctx.new_panel("panel");
+    let panel = ctx.new_scroll_area("panel");
     let tree_with_panel = WidgetTreeBuilder::build({
         let panel = panel.clone();
         move |tree| {
-            tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                 tree.text("panel child");
             });
         }
@@ -329,7 +365,14 @@ fn reshown_roots_drop_stale_panel_handles_after_a_gap() {
 
     ctx.update_ui();
     let window = ctx.root_handle(root).unwrap();
-    assert_eq!(window.inner().main.panel_count(), 1);
+    assert!(
+        window
+            .inner()
+            .main
+            .debug_commands()
+            .iter()
+            .any(|cmd| matches!(cmd, Command::RetainedScrollArea { .. }))
+    );
 
     ctx.set_root_visible(root, false);
     ctx.update_ui();
@@ -339,7 +382,14 @@ fn reshown_roots_drop_stale_panel_handles_after_a_gap() {
     ctx.update_ui();
 
     let window = ctx.root_handle(root).unwrap();
-    assert_eq!(window.inner().main.panel_count(), 0);
+    assert!(
+        !window
+            .inner()
+            .main
+            .debug_commands()
+            .iter()
+            .any(|cmd| matches!(cmd, Command::RetainedScrollArea { .. }))
+    );
 }
 
 #[test]

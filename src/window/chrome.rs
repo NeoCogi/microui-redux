@@ -134,7 +134,7 @@ impl WindowChromeTree {
             return None;
         }
 
-        let size = container.style().title_height;
+        let size = container.style().scrollbar_size;
         let container_rect = container.rect();
         let rect = rect(
             container_rect.x + container_rect.width - size,
@@ -178,13 +178,8 @@ impl WindowChromeTree {
 
         let title_control = Self::dispatch_node(container, results, title_node, &mut self.title_state, "window chrome title");
         let name = container.name().to_string();
-        container.draw_control_text_with_font(
-            container.style().title_font,
-            &name,
-            title_node.rect,
-            ControlColor::TitleText,
-            WidgetOption::NONE,
-        );
+        let title_font = container.style().title_font;
+        container.draw_control_text_with_font(title_font, &name, title_node.rect, ControlColor::TitleText, WidgetOption::NONE);
         if title_control.active {
             // Active titlebar drag moves the whole root.
             let delta = container.input().borrow().mouse_delta;
@@ -210,6 +205,7 @@ impl WindowChromeTree {
         };
 
         let resize_control = Self::dispatch_node(container, results, resize_node, &mut self.resize_state, "window chrome resize");
+        container.draw_frame(resize_node.rect, ControlColor::WindowBG);
         if resize_control.active {
             // The hard minimum keeps the window usable while dragging inward.
             let delta = container.input().borrow().mouse_delta;

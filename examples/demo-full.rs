@@ -52,7 +52,7 @@
 //
 //! Full retained-mode demo application.
 //!
-//! This example exercises core widgets, layout groups, embedded panels, images, and optional 3D
+//! This example exercises core widgets, layout groups, scroll areas, images, and optional 3D
 //! renderer integrations in one interactive application.
 #[path = "./common/mod.rs"]
 mod common;
@@ -756,7 +756,7 @@ struct State {
     demo_window: WindowHandle,
     log_window: WindowHandle,
     popup_window: WindowHandle,
-    log_output: Option<ContainerHandle>,
+    log_output: Option<ScrollAreaHandle>,
     dialog_window: FileDialogState,
 
     fps: f32,
@@ -1019,7 +1019,7 @@ impl State {
             demo_window: ctx.root_handle(demo_root).expect("demo root window missing"),
             log_window: ctx.root_handle(log_root).expect("log root window missing"),
             popup_window: ctx.root_handle(popup_root).expect("popup root window missing"),
-            log_output: Some(ctx.new_panel("Log Output")),
+            log_output: Some(ctx.new_scroll_area("Log Output")),
             dialog_window: FileDialogState::new(ctx),
             fps: 0.0,
             last_frame: Instant::now(),
@@ -1240,7 +1240,7 @@ impl State {
         self.log_tree = WidgetTreeBuilder::build(|tree| {
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
-                tree.container(log_output.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.scroll_area(log_output.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                     tree.widget(log_text.clone());
                 });
             });
