@@ -345,23 +345,23 @@ fn open_dialog_does_not_bump_zindex_every_frame() {
 }
 
 #[test]
-fn reshown_roots_drop_stale_panel_handles_after_a_gap() {
+fn reshown_roots_drop_stale_scroll_area_handles_after_a_gap() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-    let panel = ctx.new_scroll_area("panel");
-    let tree_with_panel = WidgetTreeBuilder::build({
-        let panel = panel.clone();
+    let scroll_area = ctx.new_scroll_area("scroll area");
+    let tree_with_scroll_area = WidgetTreeBuilder::build({
+        let scroll_area = scroll_area.clone();
         move |tree| {
-            tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                tree.text("panel child");
+            tree.scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.text("scroll area child");
             });
         }
     });
-    let tree_without_panel = WidgetTreeBuilder::build(|tree| {
+    let tree_without_scroll_area = WidgetTreeBuilder::build(|tree| {
         tree.text("root only");
     });
-    let root = ctx.create_window("window", rect(0, 0, 100, 80), tree_with_panel);
+    let root = ctx.create_window("window", rect(0, 0, 100, 80), tree_with_scroll_area);
 
     ctx.update_ui();
     let window = ctx.root_handle(root).unwrap();
@@ -377,13 +377,43 @@ fn reshown_roots_drop_stale_panel_handles_after_a_gap() {
     ctx.set_root_visible(root, false);
     ctx.update_ui();
 
-    ctx.set_root_tree(root, tree_without_panel);
+    ctx.set_root_tree(root, tree_without_scroll_area);
     ctx.set_root_visible(root, true);
     ctx.update_ui();
 
     let window = ctx.root_handle(root).unwrap();
     assert!(
         !window
+            .inner()
+            .main
+            .debug_commands()
+            .iter()
+            .any(|cmd| matches!(cmd, Command::RetainedScrollArea { .. }))
+    );
+}
+
+#[allow(deprecated)]
+#[test]
+fn legacy_panel_container_aliases_render_scroll_area_node() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let panel: crate::ContainerHandle = ctx.new_panel("legacy panel");
+    let tree = WidgetTreeBuilder::build({
+        let panel = panel.clone();
+        move |tree| {
+            tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.text("legacy child");
+            });
+        }
+    });
+    let root = ctx.create_window("window", rect(0, 0, 100, 80), tree);
+
+    ctx.update_ui();
+
+    let window = ctx.root_handle(root).unwrap();
+    assert!(
+        window
             .inner()
             .main
             .debug_commands()

@@ -98,9 +98,7 @@ impl ScrollArea {
     /// Applies previously measured geometry to the child host before update/paint.
     fn apply_layout_state(&mut self, parent: &TraversalHost, scope: Id, scroll_behavior: ScrollBehavior, layout: NodeLayout) {
         Self::apply_base_state(&mut self.host, parent, scope);
-        self.host.rect = layout.rect;
-        self.host.body = layout.body;
-        self.host.content_size = layout.content_size;
+        self.host.apply_viewport_layout(layout);
         self.host.apply_scroll_behavior(scroll_behavior);
     }
 
@@ -108,7 +106,7 @@ impl ScrollArea {
     fn begin_layout_host(parent: &mut TraversalHost, host: &mut TraversalHost, scroll_behavior: ScrollBehavior, policy: Policy) {
         let rect = parent.layout.next_with_policies(Dimensioni::default(), policy.width, policy.height);
         host.prepare();
-        host.rect = rect;
+        host.set_rect(rect);
         host.configure_container_body(rect, scroll_behavior);
     }
 
@@ -117,7 +115,7 @@ impl ScrollArea {
         let layout_body = host.layout.current_body();
         let layout_max = host.layout.current_max();
         if let Some(lm) = layout_max {
-            host.content_size = Dimensioni::new(lm.x - layout_body.x, lm.y - layout_body.y);
+            host.set_content_size(Dimensioni::new(lm.x - layout_body.x, lm.y - layout_body.y));
         }
 
         host.layout.pop_scope();

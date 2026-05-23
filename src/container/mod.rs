@@ -57,7 +57,7 @@
 use super::*;
 use crate::draw_context::DrawCtx;
 use crate::widget::{FocusPolicy, RetainedId};
-use crate::widget_tree::{widget_handle_id, NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
+use crate::widget_tree::{widget_handle_id, NodeId, NodeLayout, Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
 use std::{
     cell::RefCell,
     ops::{Deref, DerefMut},
@@ -81,24 +81,68 @@ mod tests;
 use scroll::ScrollState;
 pub use scroll_area::ScrollArea;
 
+/// Persistent viewport state shared by root bodies and retained scroll areas.
+#[derive(Clone)]
+struct ViewportState {
+    /// Outer rectangle including frame and title.
+    rect: Recti,
+    /// Inner rectangle excluding frame/title and visible scrollbars.
+    body: Recti,
+    /// Size of the content region based on layout traversal.
+    content_size: Dimensioni,
+    scroll: ScrollState,
+}
+
+impl Default for ViewportState {
+    fn default() -> Self {
+        Self {
+            rect: Recti::default(),
+            body: Recti::default(),
+            content_size: Dimensioni::default(),
+            scroll: ScrollState::default(),
+        }
+    }
+}
+
+impl ViewportState {
+    /// Clears viewport-local state when a root or scroll area is reset.
+    fn reset(&mut self) {
+        self.body = Recti::default();
+        self.content_size = Dimensioni::default();
+        self.scroll.reset();
+    }
+
+    /// Prepares viewport-local state for a new traversal.
+    fn prepare_frame(&mut self) {
+        self.scroll.prepare_frame();
+    }
+
+    /// Applies a frozen retained-tree layout snapshot to this viewport.
+    fn apply_layout(&mut self, layout: NodeLayout) {
+        self.rect = layout.rect;
+        self.body = layout.body;
+        self.content_size = layout.content_size;
+    }
+
+    /// Clears content size and scroll offset together.
+    fn clear_content_and_scroll(&mut self) {
+        self.content_size = Dimensioni::default();
+        self.scroll.clear_offset();
+    }
+}
+
 /// Per-traversal execution state shared by root containers and retained scroll areas.
 ///
-/// `TraversalHost` owns layout, draw, interaction, scroll, and retained-tree caches for one
-/// traversed body. Root-only concerns such as z-order and window lifecycle stay on `Container`;
-/// retained child state lives in `ScrollArea`.
+/// `TraversalHost` owns layout, draw, interaction, and retained-tree caches for one traversed
+/// body. Viewport geometry and scroll offsets are kept in `ViewportState`; root-only concerns such
+/// as z-order and window lifecycle stay on `Container`; retained child state lives in `ScrollArea`.
 pub struct TraversalHost {
     atlas: AtlasHandle,
     /// Style used when drawing widgets in the container.
     style: Rc<Style>,
     /// Human-readable name for the container.
     name: String,
-    /// Outer rectangle including frame and title.
-    rect: Recti,
-    /// Inner rectangle excluding frame/title.
-    body: Recti,
-    /// Size of the content region based on layout traversal.
-    content_size: Dimensioni,
-    scroll: ScrollState,
+    viewport: ViewportState,
     /// Stable seed used to derive internal retained node IDs for framework controls.
     internal_id_seed: Id,
     draw: DrawState,
@@ -282,10 +326,7 @@ impl TraversalHost {
             name: name.to_string(),
             style,
             atlas,
-            rect: Recti::default(),
-            body: Recti::default(),
-            content_size: Dimensioni::default(),
-            scroll: ScrollState::default(),
+            viewport: ViewportState::default(),
             internal_id_seed: Id::from_str(name),
             draw: DrawState::default(),
             interaction: InteractionState::default(),
@@ -304,9 +345,7 @@ impl TraversalHost {
     /// Clears persistent container state when a root closes or is recreated.
     pub(crate) fn reset(&mut self) {
         self.draw.clear();
-        self.body = Recti::default();
-        self.content_size = Dimensioni::default();
-        self.scroll.reset();
+        self.viewport.reset();
         self.interaction.reset_all();
         self.measurement_mode = false;
         self.tree_cache.clear();
@@ -322,17 +361,14 @@ impl TraversalHost {
         self.draw.clear_commands();
         self.draw.assert_clip_stack_empty();
         self.interaction.prepare_frame();
-        self.scroll.prepare_frame();
+        self.viewport.prepare_frame();
         self.tree_cache.begin_frame();
     }
 
     /// Creates a shallow scratch copy for measurement without mutating live interaction state.
     pub(crate) fn measurement_scratch(&self) -> Self {
         let mut scratch = TraversalHost::new(&self.name, self.atlas.clone(), self.style.clone(), self.input.clone());
-        scratch.rect = self.rect;
-        scratch.body = self.body;
-        scratch.content_size = self.content_size;
-        scratch.scroll = self.scroll.clone();
+        scratch.viewport = self.viewport.clone();
         scratch.layout = self.layout.clone();
         scratch.measurement_mode = true;
         scratch
@@ -371,66 +407,76 @@ impl TraversalHost {
 
     /// Returns the outer container rectangle.
     pub fn rect(&self) -> Recti {
-        self.rect
+        self.viewport.rect
     }
 
     /// Sets the outer container rectangle.
     pub fn set_rect(&mut self, rect: Recti) {
-        self.rect = rect;
+        self.viewport.rect = rect;
     }
 
     /// Updates the outer container size without moving its origin.
     pub(crate) fn set_rect_size(&mut self, size: Dimensioni) {
-        self.rect.width = size.width;
-        self.rect.height = size.height;
+        self.viewport.rect.width = size.width;
+        self.viewport.rect.height = size.height;
     }
 
     /// Moves the outer rectangle by a drag delta.
     pub(crate) fn translate_rect(&mut self, delta: Vec2i) {
-        self.rect.x += delta.x;
-        self.rect.y += delta.y;
+        self.viewport.rect.x += delta.x;
+        self.viewport.rect.y += delta.y;
     }
 
     /// Resizes the outer rectangle while respecting a minimum size.
     pub(crate) fn resize_rect_by(&mut self, delta: Vec2i, min_size: Dimensioni) {
-        self.rect.width = (self.rect.width + delta.x).max(min_size.width);
-        self.rect.height = (self.rect.height + delta.y).max(min_size.height);
+        self.viewport.rect.width = (self.viewport.rect.width + delta.x).max(min_size.width);
+        self.viewport.rect.height = (self.viewport.rect.height + delta.y).max(min_size.height);
     }
 
     /// Returns whether a point is inside the outer container rectangle.
     pub(crate) fn contains_point(&self, point: Vec2i) -> bool {
-        self.rect.contains(&point)
+        self.viewport.rect.contains(&point)
     }
 
     /// Returns the inner container body rectangle.
     pub fn body(&self) -> Recti {
-        self.body
+        self.viewport.body
+    }
+
+    /// Sets the inner container body rectangle.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_body(&mut self, body: Recti) {
+        self.viewport.body = body;
     }
 
     /// Returns the current scroll offset.
     pub fn scroll(&self) -> Vec2i {
-        self.scroll.offset()
+        self.viewport.scroll.offset()
     }
 
     /// Sets the current scroll offset.
     pub fn set_scroll(&mut self, scroll: Vec2i) {
-        self.scroll.set_offset(scroll);
+        self.viewport.scroll.set_offset(scroll);
     }
 
     /// Returns the content size derived from layout traversal.
     pub fn content_size(&self) -> Dimensioni {
-        self.content_size
+        self.viewport.content_size
     }
 
     /// Stores content size measured during layout traversal.
     pub(crate) fn set_content_size(&mut self, content_size: Dimensioni) {
-        self.content_size = content_size;
+        self.viewport.content_size = content_size;
+    }
+
+    /// Applies a frozen retained-tree layout snapshot to the current viewport.
+    pub(crate) fn apply_viewport_layout(&mut self, layout: NodeLayout) {
+        self.viewport.apply_layout(layout);
     }
 
     /// Clears content size and scroll offset together.
     pub(crate) fn clear_content_and_scroll(&mut self) {
-        self.content_size = Dimensioni::default();
-        self.scroll.clear_offset();
+        self.viewport.clear_content_and_scroll();
     }
 
     /// Returns the container's debug/display name.

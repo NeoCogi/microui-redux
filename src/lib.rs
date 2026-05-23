@@ -126,6 +126,7 @@ pub mod backend {
 /// low-level renderer/canvas details or manual container drawing helpers through default imports.
 pub mod retained {
     pub use crate::container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
+    #[allow(deprecated)]
     pub use crate::container_handle::{ContainerHandle, ContainerView, ContainerViewMut, ScrollAreaHandle, ScrollAreaView, ScrollAreaViewMut};
     pub use crate::context::{Context, RootId};
     pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
@@ -150,6 +151,7 @@ pub mod prelude {
     };
     pub use crate::layout::{SizePolicy, StackDirection};
     pub use crate::render::{Renderer, RendererHandle};
+    #[allow(deprecated)]
     pub use crate::retained::{
         ContainerHandle, Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeId, NodeOptions, Policy, RetainedId, RootId,
         ScrollAreaHandle, TextWrap, Widget, WidgetCtx, WidgetHandle, WidgetTree, WidgetTreeBuilder, WindowHandle, WindowState, widget_handle,
@@ -171,6 +173,7 @@ pub use atlas::{
 };
 pub use container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
 pub use container::ScrollArea;
+#[allow(deprecated)]
 pub use container_handle::{ContainerHandle, ScrollAreaHandle};
 pub use context::{Context, RootId};
 pub use file_dialog::FileDialogState;
@@ -208,5 +211,5 @@ pub(crate) use std::{
 };
 pub(crate) use style::UNCLIPPED_RECT;
 pub(crate) use widget::FrameResults;
-pub(crate) use widget_tree::{NodeInteraction, NodeLayout, WidgetTreeCache};
+pub(crate) use widget_tree::{NodeInteraction, WidgetTreeCache};
 pub(crate) use widgets::{Internal, Scrollbar, ScrollbarLayout};

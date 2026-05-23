@@ -102,7 +102,7 @@ fn row_nodes_capture_children_and_track_policy() {
 fn scroll_area_nodes_store_handle_and_children() {
     let atlas = test_atlas();
     let input = Rc::new(RefCell::new(Input::default()));
-    let handle = ScrollAreaHandle::new(ScrollArea::new("panel", atlas, Rc::new(Style::default()), input));
+    let handle = ScrollAreaHandle::new(ScrollArea::new("scroll area", atlas, Rc::new(Style::default()), input));
     let leaf = widget_handle((crate::WidgetOption::NONE, crate::ScrollBehavior::NONE));
 
     let tree = WidgetTreeBuilder::build(|builder| {

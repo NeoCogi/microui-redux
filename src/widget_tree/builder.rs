@@ -233,6 +233,7 @@ impl WidgetTreeBuilder {
     /// Adds an unkeyed embedded container node.
     ///
     /// This is a compatibility alias for [`Self::scroll_area`].
+    #[deprecated(since = "0.6.1", note = "use scroll_area")]
     pub fn container(&mut self, handle: ScrollAreaHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut Self)) -> NodeId {
         self.scroll_area(handle, opt, scroll_behavior, f)
     }
@@ -240,6 +241,7 @@ impl WidgetTreeBuilder {
     /// Adds an embedded container node with optional identity and placement metadata.
     ///
     /// This is a compatibility alias for [`Self::scroll_area_with`].
+    #[deprecated(since = "0.6.1", note = "use scroll_area_with")]
     pub fn container_with(
         &mut self,
         options: NodeOptions,
