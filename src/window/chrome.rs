@@ -145,6 +145,26 @@ impl WindowChromeTree {
         Some(WindowChromeNode::new(self.ids.resize, WindowChromePart::Resize, rect))
     }
 
+    fn resize_min_size() -> Dimensioni {
+        Dimensioni::new(96, 64)
+    }
+
+    /// Applies in-progress chrome drags before layout and painting use the current root rectangle.
+    pub(super) fn apply_active_drag_deltas(&self, container: &mut TraversalHost, opt: ContainerOption) {
+        let delta = container.input().borrow().mouse_delta;
+        if delta.x == 0 && delta.y == 0 {
+            return;
+        }
+
+        if !opt.has_no_title() && container.node_pointer_active(self.ids.title) {
+            container.translate_rect(delta);
+        }
+
+        if !opt.is_auto_sizing() && !opt.is_fixed() && container.node_pointer_active(self.ids.resize) {
+            container.resize_rect_by(delta, Self::resize_min_size());
+        }
+    }
+
     /// Updates one chrome node, paints it, and records its retained interaction result.
     fn dispatch_node(
         container: &mut TraversalHost,
@@ -157,7 +177,7 @@ impl WindowChromeTree {
             node.id,
             NodeLayout::new(node.rect, node.rect, Dimensioni::new(node.rect.width, node.rect.height)),
         );
-        let (control, widget_result) = container.update_internal_node(node.id, state, node.rect);
+        let (control, widget_result) = container.update_internal_node_unblocked(node.id, state, node.rect);
         container.paint_internal_node(node.id, state, node.rect, &control);
         let submit_on_click = matches!(node.part, WindowChromePart::Close);
         let result = widget_result | chrome_result(&control, submit_on_click);
@@ -176,15 +196,10 @@ impl WindowChromeTree {
         let title_text_color = container.style().colors[ControlColor::TitleText as usize];
         container.draw_frame(title_node.rect, ControlColor::TitleBG);
 
-        let title_control = Self::dispatch_node(container, results, title_node, &mut self.title_state, "window chrome title");
+        Self::dispatch_node(container, results, title_node, &mut self.title_state, "window chrome title");
         let name = container.name().to_string();
         let title_font = container.style().title_font;
         container.draw_control_text_with_font(title_font, &name, title_node.rect, ControlColor::TitleText, WidgetOption::NONE);
-        if title_control.active {
-            // Active titlebar drag moves the whole root.
-            let delta = container.input().borrow().mouse_delta;
-            container.translate_rect(delta);
-        }
 
         let Some(close_node) = self.close_node(title_node.rect, opt) else {
             return;
@@ -198,18 +213,13 @@ impl WindowChromeTree {
         }
     }
 
-    /// Updates and paints the resize handle, applying drag deltas to the root rectangle.
+    /// Updates and paints the resize handle.
     pub(super) fn render_resize_handle(&mut self, container: &mut TraversalHost, results: &mut FrameResults, opt: ContainerOption) {
         let Some(resize_node) = self.resize_node(container, opt) else {
             return;
         };
 
-        let resize_control = Self::dispatch_node(container, results, resize_node, &mut self.resize_state, "window chrome resize");
+        Self::dispatch_node(container, results, resize_node, &mut self.resize_state, "window chrome resize");
         container.draw_frame(resize_node.rect, ControlColor::WindowBG);
-        if resize_control.active {
-            // The hard minimum keeps the window usable while dragging inward.
-            let delta = container.input().borrow().mouse_delta;
-            container.resize_rect_by(delta, Dimensioni::new(96, 64));
-        }
     }
 }

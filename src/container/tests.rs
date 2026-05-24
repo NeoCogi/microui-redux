@@ -212,6 +212,54 @@ fn scrollbars_shrink_body_when_needed() {
 }
 
 #[test]
+fn vertical_scrollbar_can_force_horizontal_scrollbar_gutter() {
+    let mut container = make_container();
+    let mut style = Style::default();
+    style.padding = 0;
+    style.scrollbar_size = 10;
+    container.style = Rc::new(style);
+
+    container.set_content_size(Dimensioni::new(95, 200));
+
+    let original = rect(0, 0, 100, 100);
+    let mut body = original;
+    container.scrollbars(&mut body);
+
+    let (_, horizontal_scrollbar) = container.scrollbar_node_ids_for_test();
+    let scrollbar = container
+        .current_node_layout(horizontal_scrollbar)
+        .expect("horizontal scrollbar layout missing");
+
+    assert_eq!(body.width, 90);
+    assert_eq!(body.height, 90);
+    assert_eq!(scrollbar.rect.y, body.y + body.height);
+    assert_eq!(scrollbar.rect.y + scrollbar.rect.height, original.y + original.height);
+}
+
+#[test]
+fn horizontal_scrollbar_can_force_vertical_scrollbar_gutter() {
+    let mut container = make_container();
+    let mut style = Style::default();
+    style.padding = 0;
+    style.scrollbar_size = 10;
+    container.style = Rc::new(style);
+
+    container.set_content_size(Dimensioni::new(200, 95));
+
+    let original = rect(0, 0, 100, 100);
+    let mut body = original;
+    container.scrollbars(&mut body);
+
+    let (vertical_scrollbar, _) = container.scrollbar_node_ids_for_test();
+    let scrollbar = container.current_node_layout(vertical_scrollbar).expect("vertical scrollbar layout missing");
+
+    assert_eq!(body.width, 90);
+    assert_eq!(body.height, 90);
+    assert_eq!(scrollbar.rect.x, body.x + body.width);
+    assert_eq!(scrollbar.rect.x + scrollbar.rect.width, original.x + original.width);
+}
+
+#[test]
 fn textbox_left_moves_over_multibyte() {
     let mut container = make_container();
     let input = container.input.clone();
@@ -719,6 +767,114 @@ fn retained_text_inside_scroll_area_grows_content_height() {
 
     let scroll_area = scroll_area.inner();
     assert!(scroll_area.content_size().height > scroll_area.body().height);
+}
+
+#[test]
+fn retained_scroll_area_reserves_horizontal_gutter_when_vertical_scrollbar_forces_overflow() {
+    let mut parent = make_container();
+    let mut style = Style::default();
+    style.padding = 0;
+    style.scrollbar_size = 10;
+    parent.style = Rc::new(style);
+
+    let scroll_area = make_scroll_area_handle(&parent, "scroll area");
+    let child = widget_handle(Button::new("child"));
+    let mut results = FrameResults::default();
+    let tree = WidgetTreeBuilder::build(|tree| {
+        tree.scroll_area_with(
+            NodeOptions::with_policy(Policy::fixed(100, 100)),
+            scroll_area.clone(),
+            ContainerOption::NONE,
+            ScrollBehavior::NONE,
+            |tree| {
+                tree.widget_with(NodeOptions::with_policy(Policy::fixed(95, 200)), child.clone());
+            },
+        );
+    });
+
+    results.begin_frame();
+    begin_test_frame(&mut parent, rect(0, 0, 120, 120));
+    parent.widget_tree(&mut results, &tree);
+    parent.finish();
+    results.finish_frame();
+
+    results.begin_frame();
+    begin_test_frame(&mut parent, rect(0, 0, 120, 120));
+    parent.widget_tree(&mut results, &tree);
+
+    let scroll_area = scroll_area.inner();
+    let (_, horizontal_scrollbar) = scroll_area.scrollbar_node_ids_for_test();
+    let scrollbar = scroll_area
+        .previous_node_layout(horizontal_scrollbar)
+        .expect("horizontal scrollbar layout missing");
+    let rect = scroll_area.rect();
+    let body = scroll_area.body();
+
+    assert_eq!(body.height, rect.height - style.scrollbar_size);
+    assert_eq!(scrollbar.rect.y, body.y + body.height);
+    assert_eq!(scrollbar.rect.y + scrollbar.rect.height, rect.y + rect.height);
+}
+
+#[test]
+fn retained_scroll_area_resize_does_not_reserve_transient_horizontal_gutter_for_fitting_content() {
+    let mut parent = make_container();
+    let mut style = Style::default();
+    style.padding = 0;
+    style.scrollbar_size = 10;
+    parent.style = Rc::new(style);
+
+    let scroll_area = make_scroll_area_handle(&parent, "scroll area");
+    let child = widget_handle(Button::new("child"));
+    let tree_100 = WidgetTreeBuilder::build(|tree| {
+        tree.scroll_area_with(
+            NodeOptions::with_policy(Policy::fixed(100, 100)),
+            scroll_area.clone(),
+            ContainerOption::NONE,
+            ScrollBehavior::NONE,
+            |tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(200), StackDirection::TopToBottom, |tree| {
+                    tree.widget(child.clone());
+                });
+            },
+        );
+    });
+    let tree_99 = WidgetTreeBuilder::build(|tree| {
+        tree.scroll_area_with(
+            NodeOptions::with_policy(Policy::fixed(99, 100)),
+            scroll_area.clone(),
+            ContainerOption::NONE,
+            ScrollBehavior::NONE,
+            |tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(200), StackDirection::TopToBottom, |tree| {
+                    tree.widget(child.clone());
+                });
+            },
+        );
+    });
+    let mut results = FrameResults::default();
+
+    for _ in 0..3 {
+        results.begin_frame();
+        begin_test_frame(&mut parent, rect(0, 0, 120, 120));
+        parent.widget_tree(&mut results, &tree_100);
+        parent.finish();
+        results.finish_frame();
+    }
+
+    results.begin_frame();
+    begin_test_frame(&mut parent, rect(0, 0, 120, 120));
+    parent.widget_tree(&mut results, &tree_99);
+    parent.finish();
+    results.finish_frame();
+
+    let scroll_area = scroll_area.inner();
+    let (_, horizontal_scrollbar) = scroll_area.scrollbar_node_ids_for_test();
+    let rect = scroll_area.rect();
+    let body = scroll_area.body();
+
+    assert!(scroll_area.previous_node_layout(horizontal_scrollbar).is_none());
+    assert_eq!(body.width, rect.width - style.scrollbar_size);
+    assert_eq!(body.height, rect.height);
 }
 
 #[test]

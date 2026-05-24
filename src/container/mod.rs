@@ -375,18 +375,9 @@ impl TraversalHost {
         self.draw.push_raw_clip(UNCLIPPED_RECT);
     }
 
-    /// Ends a root command scope and resolves content size, scrollbars, and scroll consumption.
+    /// Ends a root command scope.
     pub(crate) fn finish_root_command_scope(&mut self) {
         self.pop_clip_rect();
-
-        let layout_body = self.layout.current_body();
-        if let Some(lm) = self.layout.current_max() {
-            // Layout max is absolute, so subtract the active layout origin to get content size.
-            self.set_content_size(Dimensioni::new(lm.x - layout_body.x, lm.y - layout_body.y));
-        }
-        self.render_active_scrollbars();
-        self.consume_pending_scroll();
-        self.layout.pop_scope();
     }
 
     /// Resets transient per-frame state after widgets have been processed.
