@@ -9,8 +9,8 @@ use super::*;
 use crate::{
     container::Command,
     test_support::{test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer},
-    widget_handle, AtlasHandle, Combo, ControlState, ListItem, NodeId, ResourceState, RetainedId, SizePolicy, StackDirection, TextBlock, Widget, WidgetCtx,
-    WidgetHandle, WidgetOption, WidgetTreeBuilder,
+    widget_handle, AtlasHandle, Button, Combo, ControlState, ListItem, NodeId, NodeOptions, Policy, ResourceState, RetainedId, SizePolicy, StackDirection,
+    TextBlock, Widget, WidgetCtx, WidgetHandle, WidgetOption, WidgetTreeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
@@ -97,7 +97,6 @@ fn root_windows_render_scrollbars_after_content_size_is_known() {
     let root = ctx.create_window("window", rect(0, 0, 60, 30), tree);
 
     ctx.update_ui();
-    ctx.update_ui();
 
     let window = ctx.root_handle(root).unwrap();
     let inner = window.inner();
@@ -165,6 +164,58 @@ fn resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
     let resized = ctx.root_handle(root).unwrap().rect();
     assert!(resized.width > initial_rect.width);
     assert!(resized.height > initial_rect.height);
+}
+
+#[test]
+fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 240));
+    let mut style = Style::default();
+    style.padding = 0;
+    style.scrollbar_size = 10;
+    ctx.set_style(&style);
+
+    let scroll_area = ctx.new_scroll_area("scroll area");
+    let child = widget_handle(Button::new("child"));
+    let tree = WidgetTreeBuilder::build({
+        let scroll_area = scroll_area.clone();
+        let child = child.clone();
+        move |tree| {
+            tree.scroll_area_with(
+                NodeOptions::with_policy(Policy::fill()),
+                scroll_area.clone(),
+                ContainerOption::NONE,
+                ScrollBehavior::NONE,
+                |tree| {
+                    tree.widget_with(NodeOptions::with_policy(Policy::fixed(95, 200)), child.clone());
+                },
+            );
+        }
+    });
+    let root = ctx.create_window("window", rect(0, 0, 100, 100), tree);
+    ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NO_SCROLL);
+
+    ctx.update_ui();
+    ctx.update_ui();
+
+    let (_, horizontal_scrollbar) = scroll_area.inner().scrollbar_node_ids_for_test();
+    assert!(scroll_area.inner().previous_node_layout(horizontal_scrollbar).is_some());
+
+    let initial_rect = ctx.root_handle(root).unwrap().rect();
+    let corner_x = initial_rect.x + initial_rect.width - 1;
+    let corner_y = initial_rect.y + initial_rect.height - 1;
+
+    ctx.mousemove(corner_x, corner_y);
+    ctx.update_ui();
+    ctx.mousedown(corner_x, corner_y, MouseButton::LEFT);
+    ctx.update_ui();
+    ctx.mousemove(corner_x + 10, corner_y);
+    ctx.update_ui();
+
+    let resized = ctx.root_handle(root).unwrap().rect();
+    assert!(resized.width > initial_rect.width);
+    assert!(scroll_area.inner().previous_node_layout(horizontal_scrollbar).is_none());
 }
 
 #[test]

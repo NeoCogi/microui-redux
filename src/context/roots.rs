@@ -256,31 +256,6 @@ impl<R: Renderer> Context<R> {
         window.finish_root_command_scope();
     }
 
-    #[inline(never)]
-    #[must_use]
-    /// Opens a root for retained traversal and returns whether its body should be rendered.
-    fn begin_window(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior) -> bool {
-        if !window.is_open() {
-            return false;
-        }
-
-        if !self.update_popup_root_state(window) {
-            return false;
-        }
-
-        self.begin_root_container(window);
-        window.begin_window(&mut self.frame_results, opt, scroll_behavior);
-
-        true
-    }
-
-    /// Completes retained traversal for a root and applies resize results.
-    fn end_window(&mut self, window: &mut WindowHandle, opt: ContainerOption) {
-        window.end_window();
-        self.end_root_container(window);
-        window.finish_resize(&mut self.frame_results, opt);
-    }
-
     /// Handles popup auto-close behavior before a popup root is traversed.
     fn update_popup_root_state(&mut self, window: &mut WindowHandle) -> bool {
         if !window.root_is_popup() {
@@ -315,13 +290,10 @@ impl<R: Renderer> Context<R> {
             }
         }
 
-        if self.begin_window(window, opt, scroll_behavior) {
-            {
-                let mut inner = window.inner_mut();
-                // Widget traversal records layout, interaction, and draw commands into the root container.
-                inner.main.widget_tree(&mut self.frame_results, tree);
-            }
-            self.end_window(window, opt);
+        if window.is_open() && self.update_popup_root_state(window) {
+            self.begin_root_container(window);
+            window.render_tree(&mut self.frame_results, opt, scroll_behavior, tree);
+            self.end_root_container(window);
 
             if !window.is_open() {
                 window.reset_after_close();

@@ -104,11 +104,9 @@ impl TraversalHost {
 
         let mut consumed = false;
         let mut scroll = self.viewport.scroll.offset;
-        let mut content_size = self.viewport.content_size;
-        let padding = self.style.as_ref().padding * 2;
+        let padding = self.style.as_ref().padding;
         // Scrollbars account for padded content because layout extents are tracked inside padding.
-        content_size.width += padding;
-        content_size.height += padding;
+        let content_size = Self::padded_scrollbar_content_size(self.viewport.content_size, padding);
         let body = self.viewport.body;
 
         let maxscroll_y = content_size.height - body.height;
@@ -147,17 +145,8 @@ impl TraversalHost {
             let style = self.style.as_ref();
             (style.scrollbar_size, style.padding)
         };
-        let sz = scrollbar_size;
-        let mut cs = self.viewport.content_size;
-        cs.width += padding * 2;
-        cs.height += padding * 2;
-        let base_body = *body;
-        if cs.height > base_body.height {
-            body.width -= sz;
-        }
-        if cs.width > base_body.width {
-            body.height -= sz;
-        }
+        let cs = Self::padded_scrollbar_content_size(self.viewport.content_size, padding);
+        *body = Self::resolved_scrollbar_body(*body, cs, scrollbar_size);
         let body = *body;
         let maxscroll_y = scrollbar_max_scroll(cs.height, body.height);
         self.viewport.scroll.offset.y = if maxscroll_y > 0 && body.height > 0 {
@@ -172,6 +161,137 @@ impl TraversalHost {
         } else {
             0
         };
+    }
+
+    fn padded_scrollbar_content_size(mut content_size: Dimensioni, padding: i32) -> Dimensioni {
+        content_size.width += padding * 2;
+        content_size.height += padding * 2;
+        content_size
+    }
+
+    fn resolved_scrollbar_body(body: Recti, content_size: Dimensioni, scrollbar_size: i32) -> Recti {
+        let scrollbar_size = scrollbar_size.max(0);
+        let mut resolved = body;
+        for _ in 0..3 {
+            let needs_vertical = content_size.height > resolved.height && resolved.height > 0;
+            let needs_horizontal = content_size.width > resolved.width && resolved.width > 0;
+            let mut next = body;
+            if needs_vertical {
+                next.width = next.width.saturating_sub(scrollbar_size).max(0);
+            }
+            if needs_horizontal {
+                next.height = next.height.saturating_sub(scrollbar_size).max(0);
+            }
+            if (next.x, next.y, next.width, next.height) == (resolved.x, resolved.y, resolved.width, resolved.height) {
+                break;
+            }
+            resolved = next;
+        }
+        resolved
+    }
+
+    pub(crate) fn resolved_body_for_content(&self, body: Recti, scroll_behavior: ScrollBehavior, content_size: Dimensioni) -> Recti {
+        if scroll_behavior.is_no_scroll() {
+            return body;
+        }
+        let style = self.style.as_ref();
+        let content_size = Self::padded_scrollbar_content_size(content_size, style.padding);
+        Self::resolved_scrollbar_body(body, content_size, style.scrollbar_size)
+    }
+
+    /// Commits content size from the active layout scope.
+    pub(crate) fn commit_active_layout_content_size(&mut self) -> Dimensioni {
+        let layout_body = self.layout.current_body();
+        let content_size = self
+            .layout
+            .current_max()
+            .map(|lm| Dimensioni::new(lm.x - layout_body.x, lm.y - layout_body.y))
+            .unwrap_or_default();
+        self.set_content_size(content_size);
+        content_size
+    }
+
+    /// Finishes a body layout pass and returns the resolved viewport snapshot.
+    pub(crate) fn finish_body_layout_scope(&mut self) -> NodeLayout {
+        self.commit_active_layout_content_size();
+        let layout = NodeLayout::new(self.rect(), self.body(), self.content_size());
+        self.layout.pop_scope();
+        layout
+    }
+
+    /// Lays out retained children, repeating only when current content changes scrollbar gutters.
+    pub(crate) fn layout_body_until_scrollbars_stable(
+        &mut self,
+        results: &FrameResults,
+        rect: Recti,
+        scroll_behavior: ScrollBehavior,
+        children: &[WidgetTreeNode],
+    ) -> NodeLayout {
+        self.layout_viewport_body_until_scrollbars_stable(results, rect, rect, scroll_behavior, children)
+    }
+
+    /// Lays out a body inside an outer viewport, repeating when content changes scrollbar gutters.
+    pub(crate) fn layout_viewport_body_until_scrollbars_stable(
+        &mut self,
+        results: &FrameResults,
+        viewport_rect: Recti,
+        body_rect: Recti,
+        scroll_behavior: ScrollBehavior,
+        children: &[WidgetTreeNode],
+    ) -> NodeLayout {
+        let mut content_hint = self.content_size();
+        let mut layout = self.layout_body_with_content_hint(results, viewport_rect, body_rect, scroll_behavior, content_hint, children);
+        for _ in 0..3 {
+            let resolved_body = self.resolved_body_for_content(body_rect, scroll_behavior, layout.content_size);
+            if Self::same_rect(resolved_body, layout.body) {
+                return layout;
+            }
+            content_hint = layout.content_size;
+            layout = self.layout_body_with_content_hint(results, viewport_rect, body_rect, scroll_behavior, content_hint, children);
+        }
+        layout
+    }
+
+    fn layout_body_with_content_hint(
+        &mut self,
+        results: &FrameResults,
+        viewport_rect: Recti,
+        body_rect: Recti,
+        scroll_behavior: ScrollBehavior,
+        content_hint: Dimensioni,
+        children: &[WidgetTreeNode],
+    ) -> NodeLayout {
+        self.tree_cache.begin_frame();
+        self.set_rect(viewport_rect);
+        self.set_content_size(content_hint);
+        self.configure_container_body(body_rect, scroll_behavior);
+        self.layout_tree_nodes(results, children);
+        self.finish_body_layout_scope()
+    }
+
+    /// Runs the retained update pass for a resolved body and updates its scrollbar controls.
+    pub(crate) fn update_body_tree(&mut self, results: &mut FrameResults, layout: NodeLayout, scroll_behavior: ScrollBehavior, children: &[WidgetTreeNode]) {
+        self.apply_viewport_layout(layout);
+        self.apply_scroll_behavior(scroll_behavior);
+        self.push_clip_rect(layout.body);
+        self.update_tree_nodes(results, children);
+        self.pop_clip_rect();
+        self.update_active_scrollbars();
+        self.consume_pending_scroll();
+    }
+
+    /// Runs the retained paint pass for a resolved body and paints scrollbars above child content.
+    pub(crate) fn paint_body_tree(&mut self, layout: NodeLayout, scroll_behavior: ScrollBehavior, children: &[WidgetTreeNode]) {
+        self.apply_viewport_layout(layout);
+        self.apply_scroll_behavior(scroll_behavior);
+        self.push_clip_rect(layout.body);
+        self.paint_tree_nodes(children);
+        self.pop_clip_rect();
+        self.paint_active_scrollbars();
+    }
+
+    fn same_rect(a: Recti, b: Recti) -> bool {
+        (a.x, a.y, a.width, a.height) == (b.x, b.y, b.width, b.height)
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -212,10 +332,7 @@ impl TraversalHost {
 
     /// Returns content size including style padding that contributes to scrollbar range.
     fn scrollbar_content_size(&self, padding: i32) -> Dimensioni {
-        let mut cs = self.viewport.content_size;
-        cs.width += padding * 2;
-        cs.height += padding * 2;
-        cs
+        Self::padded_scrollbar_content_size(self.viewport.content_size, padding)
     }
 
     /// Expands the clip to include scrollbar gutters when scrollbars exist.

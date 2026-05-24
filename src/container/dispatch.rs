@@ -100,6 +100,19 @@ impl TraversalHost {
         (control, res)
     }
 
+    /// Updates a framework-owned control that is layered above child hover roots.
+    pub(crate) fn update_internal_node_unblocked<W: Widget + ?Sized>(&mut self, node_id: NodeId, widget: &mut W, rect: Recti) -> (ControlState, ResourceState) {
+        let opt = widget.effective_widget_opt();
+        let scroll_behavior = widget.effective_scroll_behavior();
+        let focus_policy = widget.focus_policy();
+        let retained_id = self.retained_id_for_node(node_id);
+        let control = self.update_control_for_unblocked(retained_id, rect, opt, scroll_behavior, focus_policy);
+        let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
+        let mut ctx = self.widget_ctx_for(retained_id, rect, input);
+        let res = widget.update(&mut ctx, &control);
+        (control, res)
+    }
+
     /// Paints a framework-owned internal widget.
     pub(crate) fn paint_internal_node<W: Widget + ?Sized>(&mut self, node_id: NodeId, widget: &mut W, rect: Recti, control: &ControlState) {
         let retained_id = self.retained_id_for_node(node_id);

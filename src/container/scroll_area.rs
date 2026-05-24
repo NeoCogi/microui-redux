@@ -95,30 +95,11 @@ impl ScrollArea {
         host.style = parent.style.clone();
     }
 
-    /// Applies previously measured geometry to the child host before update/paint.
-    fn apply_layout_state(&mut self, parent: &TraversalHost, scope: Id, scroll_behavior: ScrollBehavior, layout: NodeLayout) {
-        Self::apply_base_state(&mut self.host, parent, scope);
-        self.host.apply_viewport_layout(layout);
-        self.host.apply_scroll_behavior(scroll_behavior);
-    }
-
-    /// Allocates a viewport rect in the parent and prepares child layout.
-    fn begin_layout_host(parent: &mut TraversalHost, host: &mut TraversalHost, scroll_behavior: ScrollBehavior, policy: Policy) {
+    /// Allocates a viewport rect in the parent.
+    fn allocate_layout_rect(parent: &mut TraversalHost, host: &mut TraversalHost, policy: Policy) -> Recti {
         let rect = parent.layout.next_with_policies(Dimensioni::default(), policy.width, policy.height);
-        host.prepare();
         host.set_rect(rect);
-        host.configure_container_body(rect, scroll_behavior);
-    }
-
-    /// Ends a scroll-area content layout scope and stores its measured content size.
-    fn pop_layout_host(host: &mut TraversalHost) {
-        let layout_body = host.layout.current_body();
-        let layout_max = host.layout.current_max();
-        if let Some(lm) = layout_max {
-            host.set_content_size(Dimensioni::new(lm.x - layout_body.x, lm.y - layout_body.y));
-        }
-
-        host.layout.pop_scope();
+        rect
     }
 
     /// Measures this scroll area through a scratch host so live state is not mutated.
@@ -134,10 +115,9 @@ impl ScrollArea {
         let mut scratch = self.host.measurement_scratch();
         scratch.measurement_mode = true;
         Self::apply_base_state(&mut scratch, parent, parent.scroll_area_scope_id(node_id));
-        Self::begin_layout_host(parent, &mut scratch, scroll_behavior, policy);
-        scratch.layout_tree_nodes(results, children);
-        Self::pop_layout_host(&mut scratch);
-        NodeLayout::new(scratch.rect(), scratch.body(), scratch.content_size())
+        scratch.prepare();
+        let rect = Self::allocate_layout_rect(parent, &mut scratch, policy);
+        scratch.layout_body_until_scrollbars_stable(results, rect, scroll_behavior, children)
     }
 
     /// Runs the layout pass for this scroll area's child subtree.
@@ -156,10 +136,9 @@ impl ScrollArea {
 
         let scope = parent.scroll_area_scope_id(node_id);
         Self::apply_base_state(&mut self.host, parent, scope);
-        Self::begin_layout_host(parent, &mut self.host, scroll_behavior, policy);
-        self.host.layout_tree_nodes(results, children);
-        Self::pop_layout_host(&mut self.host);
-        NodeLayout::new(self.host.rect(), self.host.body(), self.host.content_size())
+        self.host.prepare();
+        let rect = Self::allocate_layout_rect(parent, &mut self.host, policy);
+        self.host.layout_body_until_scrollbars_stable(results, rect, scroll_behavior, children)
     }
 
     /// Runs the update pass for this scroll area's child subtree.
@@ -178,19 +157,13 @@ impl ScrollArea {
             parent.interaction.set_next_hover_root_child(area_id, layout.rect);
         }
 
-        self.apply_layout_state(parent, scope, scroll_behavior, layout);
-
         self.host.interaction.in_hover_root = parent.interaction.in_hover_root && parent.interaction.hover_root_child == Some(area_id);
         if parent.interaction.pending_scroll.is_some() && self.host.interaction.in_hover_root {
             self.host.interaction.seed_pending_scroll(parent.interaction.take_pending_scroll());
         }
 
-        self.host.push_clip_rect(layout.body);
-        self.host.update_tree_nodes(results, children);
-        self.host.pop_clip_rect();
-
-        self.host.update_active_scrollbars();
-        self.host.consume_pending_scroll();
+        Self::apply_base_state(&mut self.host, parent, scope);
+        self.host.update_body_tree(results, layout, scroll_behavior, children);
         let pending = self.host.interaction.take_pending_scroll();
         if parent.interaction.pending_scroll.is_none() {
             parent.interaction.seed_pending_scroll(pending);
@@ -208,16 +181,13 @@ impl ScrollArea {
         children: &[WidgetTreeNode],
     ) {
         let scope = parent.scroll_area_scope_id(node_id);
-        self.apply_layout_state(parent, scope, scroll_behavior, layout);
+        Self::apply_base_state(&mut self.host, parent, scope);
 
         if !opt.has_no_frame() {
             parent.draw_frame(layout.rect, ControlColor::PanelBG);
         }
 
-        self.host.paint_active_scrollbars();
-        self.host.push_clip_rect(layout.body);
-        self.host.paint_tree_nodes(children);
-        self.host.pop_clip_rect();
+        self.host.paint_body_tree(layout, scroll_behavior, children);
         self.finish_frame();
     }
 }

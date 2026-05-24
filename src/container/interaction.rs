@@ -98,8 +98,36 @@ impl TraversalHost {
         scroll_behavior: ScrollBehavior,
         focus_policy: FocusPolicy,
     ) -> ControlState {
+        self.update_control_for_with_hover_block(interaction_id, rect, opt, scroll_behavior, focus_policy, true)
+    }
+
+    /// Computes control state for chrome/internal controls that intentionally sit above child roots.
+    pub(crate) fn update_control_for_unblocked(
+        &mut self,
+        interaction_id: RetainedId,
+        rect: Recti,
+        opt: WidgetOption,
+        scroll_behavior: ScrollBehavior,
+        focus_policy: FocusPolicy,
+    ) -> ControlState {
+        self.update_control_for_with_hover_block(interaction_id, rect, opt, scroll_behavior, focus_policy, false)
+    }
+
+    fn update_control_for_with_hover_block(
+        &mut self,
+        interaction_id: RetainedId,
+        rect: Recti,
+        opt: WidgetOption,
+        scroll_behavior: ScrollBehavior,
+        focus_policy: FocusPolicy,
+        block_child_hover: bool,
+    ) -> ControlState {
         let in_hover_root = self.interaction.in_hover_root;
-        let mouseover = self.mouse_over(rect, in_hover_root);
+        let mouseover = if block_child_hover {
+            self.mouse_over(rect, in_hover_root)
+        } else {
+            self.hit_test_rect(rect, in_hover_root)
+        };
         if self.interaction.focus == Some(interaction_id) {
             // A focused retained widget must be seen each frame or focus is cleared at finish.
             self.interaction.mark_focus_seen();
@@ -164,6 +192,11 @@ impl TraversalHost {
             active,
             scroll_delta: scroll,
         }
+    }
+
+    /// Returns whether a retained node is currently pointer-active from a previous dispatch.
+    pub(crate) fn node_pointer_active(&self, node_id: NodeId) -> bool {
+        self.interaction.focus == Some(self.retained_id_for_node(node_id)) && self.input.borrow().mouse_down.is_left()
     }
 
     #[allow(dead_code)]

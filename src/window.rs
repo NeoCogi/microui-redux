@@ -193,28 +193,17 @@ impl Window {
     }
 
     #[inline(never)]
-    /// Begins rendering a root window body and chrome.
-    fn begin_window(&mut self, results: &mut FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior) {
+    /// Begins rendering a root window and returns its client body rectangle.
+    fn begin_window_frame(&mut self, opt: ContainerOption) -> Recti {
         Self::apply_auto_size(&mut self.main, opt);
+        self.chrome_tree.apply_active_drag_deltas(&mut self.main, opt);
 
         let r = self.main.rect();
         if !opt.has_no_frame() {
             self.main.draw_frame(r, ControlColor::WindowBG);
         }
 
-        self.chrome_tree.render_title_bar(&mut self.main, results, &mut self.win_state, opt);
-
-        let body = Self::body_rect_for(&self.main, opt);
-        // Root body setup accounts for scrollbars before child layout begins.
-        self.main.configure_container_body(body, scroll_behavior);
-        let body = self.main.body();
-        self.main.push_clip_rect(body);
-    }
-
-    /// Ends rendering a root window body.
-    fn end_window(&mut self) {
-        let container = &mut self.main;
-        container.pop_clip_rect();
+        Self::body_rect_for(&self.main, opt)
     }
 
     /// Prepares the underlying container exactly once per context frame.
@@ -250,8 +239,15 @@ impl Window {
         Self::apply_auto_size(&mut self.main, opt);
     }
 
-    /// Finishes resize chrome after children have been traversed.
-    fn finish_resize(&mut self, results: &mut FrameResults, opt: ContainerOption) {
+    /// Renders a root body and then paints chrome above it.
+    fn render_tree(&mut self, results: &mut FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
+        let body = self.begin_window_frame(opt);
+        let layout = self
+            .main
+            .layout_viewport_body_until_scrollbars_stable(results, self.main.rect(), body, scroll_behavior, tree.roots());
+        self.main.update_body_tree(results, layout, scroll_behavior, tree.roots());
+        self.main.paint_body_tree(layout, scroll_behavior, tree.roots());
+        self.chrome_tree.render_title_bar(&mut self.main, results, &mut self.win_state, opt);
         self.chrome_tree.render_resize_handle(&mut self.main, results, opt);
     }
 
@@ -411,24 +407,14 @@ impl WindowHandle {
         self.inner_mut().main.finish_root_command_scope();
     }
 
-    /// Begins window body traversal.
-    pub(crate) fn begin_window(&mut self, results: &mut FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior) {
-        self.0.borrow_mut().begin_window(results, opt, scroll_behavior)
-    }
-
     /// Measures auto-size content for this root.
     pub(crate) fn measure_auto_size(&mut self, results: &FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         self.inner_mut().measure_auto_size(results, opt, scroll_behavior, tree)
     }
 
-    /// Ends window body traversal.
-    pub(crate) fn end_window(&mut self) {
-        self.inner_mut().end_window()
-    }
-
-    /// Applies resize chrome side effects.
-    pub(crate) fn finish_resize(&mut self, results: &mut FrameResults, opt: ContainerOption) {
-        self.inner_mut().finish_resize(results, opt)
+    /// Renders the retained tree inside this root body.
+    pub(crate) fn render_tree(&mut self, results: &mut FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
+        self.inner_mut().render_tree(results, opt, scroll_behavior, tree)
     }
 
     /// Resets closed-window state.
