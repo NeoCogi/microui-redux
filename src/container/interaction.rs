@@ -132,10 +132,10 @@ impl TraversalHost {
             // A focused retained widget must be seen each frame or focus is cleared at finish.
             self.interaction.mark_focus_seen();
         }
-        if opt.is_not_interactive() {
+        if opt.intersects(WidgetOption::NO_INTERACT) {
             return ControlState::default();
         }
-        if mouseover && self.input.borrow().mouse_down.is_none() {
+        if mouseover && self.input.borrow().mouse_down.is_empty() {
             // Hover moves only when the pointer is not dragging another control.
             self.interaction.hover = Some(interaction_id);
         }
@@ -143,8 +143,8 @@ impl TraversalHost {
             let should_clear_focus = {
                 let input = self.input.borrow();
                 // Focus clears on outside press or on mouse-up for controls that don't hold focus.
-                let pressed_outside = !input.mouse_pressed.is_none() && !mouseover;
-                let released_without_hold_focus = input.mouse_down.is_none() && focus_policy.releases_on_mouse_up();
+                let pressed_outside = !input.mouse_pressed.is_empty() && !mouseover;
+                let released_without_hold_focus = input.mouse_down.is_empty() && focus_policy.releases_on_mouse_up();
                 pressed_outside || released_without_hold_focus
             };
             if should_clear_focus {
@@ -154,7 +154,7 @@ impl TraversalHost {
         if self.interaction.hover == Some(interaction_id) {
             if !mouseover {
                 self.interaction.hover = None;
-            } else if !self.input.borrow().mouse_pressed.is_none() {
+            } else if !self.input.borrow().mouse_pressed.is_empty() {
                 // Pressing the hovered control transfers focus to it.
                 self.interaction.set_focus(interaction_id);
             }
@@ -182,7 +182,10 @@ impl TraversalHost {
         let hovered = self.interaction.hover == Some(interaction_id);
         let (clicked, active) = {
             let input = self.input.borrow();
-            (focused && input.mouse_pressed.is_left(), focused && input.mouse_down.is_left())
+            (
+                focused && input.mouse_pressed.intersects(MouseButton::LEFT),
+                focused && input.mouse_down.intersects(MouseButton::LEFT),
+            )
         };
 
         ControlState {
@@ -196,11 +199,11 @@ impl TraversalHost {
 
     /// Returns whether a retained node is currently pointer-active from a previous dispatch.
     pub(crate) fn node_pointer_active(&self, node_id: NodeId) -> bool {
-        self.interaction.focus == Some(self.retained_id_for_node(node_id)) && self.input.borrow().mouse_down.is_left()
+        self.interaction.focus == Some(self.retained_id_for_node(node_id)) && self.input.borrow().mouse_down.intersects(MouseButton::LEFT)
     }
 
-    #[allow(dead_code)]
     /// Computes control state for a retained tree node id.
+    #[cfg(test)]
     pub(crate) fn update_control_for_node(
         &mut self,
         node_id: NodeId,
@@ -262,11 +265,11 @@ impl TraversalHost {
         let mouse_down = input.mouse_down;
         let mouse_pressed = input.mouse_pressed;
 
-        if control.focused && mouse_down.is_left() {
+        if control.focused && mouse_down.intersects(MouseButton::LEFT) {
             return MouseEvent::Drag { prev_pos, curr_pos };
         }
 
-        if control.hovered && mouse_pressed.is_left() {
+        if control.hovered && mouse_pressed.intersects(MouseButton::LEFT) {
             return MouseEvent::Click(curr_pos);
         }
 

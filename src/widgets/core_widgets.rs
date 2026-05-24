@@ -55,6 +55,7 @@
 //! The split widget modules keep concrete widget state small; this file holds common sizing,
 //! coloring, and submit helpers used by buttons, lists, combos, checkboxes, and custom controls.
 use crate::*;
+use super::WidgetConfig;
 /// Measures text with the widget's resolved font choice.
 fn text_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, text: &str) -> Dimensioni {
     atlas.get_text_size(style.resolve_font_choice(font), text)
@@ -135,15 +136,15 @@ fn layout_inline_content(bounds: Recti, style: &Style, label: &str, visual_size:
 
 /// Selects which control color should be painted for a widget's fill policy and state.
 fn widget_fill_color(control: &ControlState, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
-    if control.focused && fill.fill_click() {
+    if control.focused && fill.intersects(WidgetFillOption::CLICK) {
         let mut color = base;
         color.focus();
         Some(color)
-    } else if control.hovered && fill.fill_hover() {
+    } else if control.hovered && fill.intersects(WidgetFillOption::HOVER) {
         let mut color = base;
         color.hover();
         Some(color)
-    } else if fill.fill_normal() {
+    } else if fill.intersects(WidgetFillOption::NORMAL) {
         Some(base)
     } else {
         None

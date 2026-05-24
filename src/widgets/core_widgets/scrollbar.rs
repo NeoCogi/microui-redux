@@ -27,8 +27,7 @@ pub(crate) struct Scrollbar {
     max_value: i32,
     view_len: i32,
     content_len: i32,
-    opt: WidgetOption,
-    scroll_behavior: ScrollBehavior,
+    config: WidgetConfig,
 }
 
 impl Scrollbar {
@@ -40,8 +39,7 @@ impl Scrollbar {
             max_value: 0,
             view_len: 0,
             content_len: 0,
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::default(),
         }
     }
 
@@ -93,11 +91,11 @@ impl Scrollbar {
 
 impl Widget for Scrollbar {
     fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
+        &self.config.opt
     }
 
     fn scroll_behavior(&self) -> ScrollBehavior {
-        self.scroll_behavior
+        self.config.scroll_behavior
     }
 
     fn measure(&self, style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
@@ -108,14 +106,14 @@ impl Widget for Scrollbar {
     fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         if control.active {
             let delta = ctx.input_or_default().mouse_delta;
-            self.value += scrollbar_drag_delta(self.axis, delta, self.content_len, ctx.rect());
+            self.value += scrollbar_drag_delta(self.axis, delta, self.content_len, ctx.screen_rect());
             self.value = self.value.clamp(0, self.max_value);
         }
         ResourceState::NONE
     }
 
     fn paint(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) {
-        let base = ctx.rect();
+        let base = ctx.screen_rect();
         ctx.draw_frame(base, ControlColor::ScrollBase);
         let thumb = scrollbar_thumb(self.axis, base, self.view_len, self.content_len, self.value, ctx.style().thumb_size);
         ctx.draw_frame(thumb, ControlColor::ScrollThumb);

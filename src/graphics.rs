@@ -376,7 +376,7 @@ impl<'a, 'b> Graphics<'a, 'b> {
     /// Draws one widget frame using the same focus/hover color promotion as the legacy widget
     /// helpers.
     pub fn draw_widget_frame(&mut self, focused: bool, hovered: bool, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
-        if opt.has_no_frame() {
+        if opt.intersects(WidgetOption::NO_FRAME) {
             return;
         }
         if focused {

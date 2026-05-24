@@ -177,21 +177,21 @@ impl<S> Application<S> {
                     }
                     Event::KeyDown { keycode, .. } => {
                         let km = map_keymode(keycode);
-                        if !km.is_none() {
+                        if !km.is_empty() {
                             self.ctx.keydown(km);
                         }
                         let kc = map_keycode(keycode);
-                        if !kc.is_none() {
+                        if !kc.is_empty() {
                             self.ctx.keydown_code(kc);
                         }
                     }
                     Event::KeyUp { keycode, .. } => {
                         let km = map_keymode(keycode);
-                        if !km.is_none() {
+                        if !km.is_empty() {
                             self.ctx.keyup(km);
                         }
                         let kc = map_keycode(keycode);
-                        if !kc.is_none() {
+                        if !kc.is_empty() {
                             self.ctx.keyup_code(kc);
                         }
                     }

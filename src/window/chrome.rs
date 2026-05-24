@@ -100,7 +100,7 @@ impl WindowChromeTree {
 
     /// Resolves the titlebar drag node when the window has a title.
     fn title_node(&self, container: &TraversalHost, opt: ContainerOption) -> Option<WindowChromeNode> {
-        if opt.has_no_title() {
+        if opt.intersects(ContainerOption::NO_TITLE) {
             return None;
         }
 
@@ -111,7 +111,7 @@ impl WindowChromeTree {
 
     /// Resolves the close button node inside the titlebar.
     fn close_node(&self, title_rect: Recti, opt: ContainerOption) -> Option<WindowChromeNode> {
-        if opt.has_no_close() {
+        if opt.intersects(ContainerOption::NO_CLOSE) {
             return None;
         }
 
@@ -126,7 +126,7 @@ impl WindowChromeTree {
 
     /// Resolves the resize handle node when resizing is enabled.
     fn resize_node(&self, container: &TraversalHost, opt: ContainerOption) -> Option<WindowChromeNode> {
-        if opt.is_auto_sizing() || opt.is_fixed() {
+        if opt.intersects(ContainerOption::AUTO_SIZE) || opt.intersects(ContainerOption::NO_RESIZE) {
             return None;
         }
 
@@ -152,11 +152,11 @@ impl WindowChromeTree {
             return;
         }
 
-        if !opt.has_no_title() && container.node_pointer_active(self.ids.title) {
+        if !opt.intersects(ContainerOption::NO_TITLE) && container.node_pointer_active(self.ids.title) {
             container.translate_rect(delta);
         }
 
-        if !opt.is_auto_sizing() && !opt.is_fixed() && container.node_pointer_active(self.ids.resize) {
+        if !opt.intersects(ContainerOption::AUTO_SIZE) && !opt.intersects(ContainerOption::NO_RESIZE) && container.node_pointer_active(self.ids.resize) {
             container.resize_rect_by(delta, Self::resize_min_size());
         }
     }

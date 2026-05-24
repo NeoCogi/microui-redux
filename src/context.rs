@@ -178,7 +178,7 @@ impl<R: Renderer> Context<R> {
         self.frame_results.finish_frame();
 
         let mouse_pressed = self.input.borrow().mouse_pressed;
-        let next_front = match (mouse_pressed.is_none(), &self.next_hover_root) {
+        let next_front = match (mouse_pressed.is_empty(), &self.next_hover_root) {
             (false, Some(next_hover_root)) if next_hover_root.zindex() < self.last_zindex && next_hover_root.zindex() >= 0 => Some(next_hover_root.clone()),
             _ => None,
         };
@@ -228,7 +228,7 @@ impl<R: Renderer> Context<R> {
     ///
     /// This is mainly useful for framework internals or advanced debugging.
     /// Normal application/business logic should prefer [`Context::committed_results`].
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(crate) fn current_results(&self) -> FrameResultGeneration<'_> {
         self.frame_results.current()
     }

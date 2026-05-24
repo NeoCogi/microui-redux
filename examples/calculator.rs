@@ -344,7 +344,6 @@ fn main() {
             CalcButton::new(".", Action::Dot),
             CalcButton::new("=", Action::Equals),
         ];
-        let button_widgets: Vec<_> = buttons.iter().map(|button| button.widget.clone()).collect();
         let mut button_node_ids = [NodeId::default(); 20];
         let tree = WidgetTreeBuilder::build(|tree| {
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION), |tree| {
@@ -360,8 +359,8 @@ fn main() {
                     ];
                     let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
                     tree.grid(&columns, &rows, |tree| {
-                        for (index, button) in button_widgets.iter().enumerate() {
-                            button_node_ids[index] = tree.widget(button);
+                        for (index, button) in buttons.iter().enumerate() {
+                            button_node_ids[index] = tree.widget(&button.widget);
                         }
                     });
                 });

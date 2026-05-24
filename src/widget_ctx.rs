@@ -61,7 +61,7 @@ use crate::canvas::Vertex;
 use crate::container::Command;
 use crate::draw_context::DrawCtx;
 use crate::graphics::Graphics;
-use crate::input::{Clip, ControlColor, ControlState, InputSnapshot, WidgetOption};
+use crate::input::{ControlColor, ControlState, InputSnapshot, WidgetOption};
 use crate::style::{Color, Image, Style};
 use crate::widget::RetainedId;
 
@@ -124,9 +124,27 @@ impl<'a> WidgetCtx<'a> {
         }
     }
 
-    /// Returns the widget rectangle.
-    pub fn rect(&self) -> Recti {
+    /// Returns the widget-local rectangle for this context.
+    ///
+    /// The top-left corner is always `(0, 0)`. Use this with [`Self::input`] and
+    /// [`Self::graphics`], which also operate in widget-local coordinates.
+    pub fn local_rect(&self) -> Recti {
+        Recti::new(0, 0, self.rect.width, self.rect.height)
+    }
+
+    /// Returns the widget rectangle in container/screen coordinates.
+    ///
+    /// Built-in paint helpers and backend-facing callbacks use this coordinate space.
+    pub fn screen_rect(&self) -> Recti {
         self.rect
+    }
+
+    /// Returns the widget-local rectangle for this context.
+    ///
+    /// This is kept as the short geometry accessor for custom widgets. Code that needs absolute
+    /// container coordinates should call [`Self::screen_rect`] explicitly.
+    pub fn rect(&self) -> Recti {
+        self.local_rect()
     }
 
     /// Returns the widget-local input snapshot for this widget, if provided.
@@ -152,20 +170,13 @@ impl<'a> WidgetCtx<'a> {
     }
 
     /// Pushes a new clip rectangle onto the stack.
-    pub fn push_clip_rect(&mut self, rect: Recti) {
+    pub(crate) fn push_clip_rect(&mut self, rect: Recti) {
         self.draw.push_clip_rect(rect);
     }
 
     /// Pops the current clip rectangle.
-    pub fn pop_clip_rect(&mut self) {
+    pub(crate) fn pop_clip_rect(&mut self) {
         self.draw.pop_clip_rect();
-    }
-
-    /// Executes `f` with the provided clip rect applied.
-    pub fn with_clip<F: FnOnce(&mut Self)>(&mut self, rect: Recti, f: F) {
-        self.push_clip_rect(rect);
-        f(self);
-        self.pop_clip_rect();
     }
 
     /// Executes `f` with a widget-local 2D graphics builder.
@@ -213,16 +224,6 @@ impl<'a> WidgetCtx<'a> {
         self.draw.atlas()
     }
 
-    /// Sets the current clip rectangle for subsequent draw commands.
-    pub fn set_clip(&mut self, rect: Recti) {
-        self.draw.set_current_clip_rect(rect);
-    }
-
-    /// Returns the clipping relation between `r` and the current clip rect.
-    pub fn check_clip(&self, r: Recti) -> Clip {
-        self.draw.check_clip(r)
-    }
-
     /// Draws a filled rectangle through the widget-local graphics path.
     pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
         let rect = self.local_rect_for(rect);
@@ -231,7 +232,7 @@ impl<'a> WidgetCtx<'a> {
     }
 
     /// Draws a 1-pixel box outline using the supplied color.
-    pub fn draw_box(&mut self, r: Recti, color: Color) {
+    pub(crate) fn draw_box(&mut self, r: Recti, color: Color) {
         let rect = self.local_rect_for(r);
         let mut graphics = self.begin_widget_paint();
         graphics.draw_box(rect, color);

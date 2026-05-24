@@ -12,12 +12,8 @@ pub struct Checkbox {
     pub label: String,
     /// Current value of the checkbox.
     pub value: bool,
-    /// Font selection used for the checkbox label.
-    pub font: FontChoice,
-    /// Widget options applied to the checkbox.
-    pub opt: WidgetOption,
-    /// Scroll behavior applied to the checkbox.
-    pub scroll_behavior: ScrollBehavior,
+    /// Shared widget configuration.
+    pub config: WidgetConfig,
 }
 
 impl Checkbox {
@@ -26,9 +22,7 @@ impl Checkbox {
         Self {
             label: label.into(),
             value,
-            font: FontChoice::default(),
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::default(),
         }
     }
 
@@ -37,9 +31,7 @@ impl Checkbox {
         Self {
             label: label.into(),
             value,
-            font: FontChoice::default(),
-            opt,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
         }
     }
 
@@ -47,10 +39,10 @@ impl Checkbox {
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let check_icon = atlas.get_icon_size(CHECK_ICON);
-        let height = content_height(style, atlas, self.font, check_icon.height);
+        let height = content_height(style, atlas, self.config.font, check_icon.height);
         let mut width = padding * 2 + height;
         if !self.label.is_empty() {
-            width += text_size(style, atlas, self.font, &self.label).width + padding;
+            width += text_size(style, atlas, self.config.font, &self.label).width + padding;
         }
         Dimensioni::new(width.max(0), height)
     }
@@ -68,28 +60,28 @@ impl Checkbox {
 
     /// Paints the checkbox square, check mark, and label.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        let bounds = ctx.rect();
+        let bounds = ctx.screen_rect();
         let box_rect = rect(bounds.x, bounds.y, bounds.height, bounds.height);
-        ctx.draw_widget_frame(control, box_rect, ControlColor::Base, self.opt);
+        ctx.draw_widget_frame(control, box_rect, ControlColor::Base, self.config.opt);
         if self.value {
             let color = ctx.style().colors[ControlColor::Text as usize];
             ctx.draw_icon(CHECK_ICON, box_rect, color);
         }
         let text_rect = rect(bounds.x + box_rect.width, bounds.y, bounds.width - box_rect.width, bounds.height);
         if !self.label.is_empty() {
-            let font = ctx.style().resolve_font_choice(self.font);
-            ctx.draw_control_text_with_font(font, &self.label, text_rect, ControlColor::Text, self.opt);
+            let font = ctx.style().resolve_font_choice(self.config.font);
+            ctx.draw_control_text_with_font(font, &self.label, text_rect, ControlColor::Text, self.config.opt);
         }
     }
 }
 
 impl Widget for Checkbox {
     fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
+        &self.config.opt
     }
 
     fn scroll_behavior(&self) -> ScrollBehavior {
-        self.scroll_behavior
+        self.config.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

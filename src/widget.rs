@@ -78,7 +78,11 @@ pub enum FocusPolicy {
 impl FocusPolicy {
     /// Derives a policy from legacy widget options.
     pub fn from_widget_options(opt: WidgetOption) -> Self {
-        if opt.is_holding_focus() { Self::HoldUntilBlur } else { Self::Momentary }
+        if opt.intersects(WidgetOption::HOLD_FOCUS) {
+            Self::HoldUntilBlur
+        } else {
+            Self::Momentary
+        }
     }
 
     /// Returns whether focus should clear when the pointer button is released.
@@ -332,7 +336,7 @@ impl FrameResults {
     }
 
     /// Returns the in-progress result generation for the current frame.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(crate) fn current(&self) -> FrameResultGeneration<'_> {
         self.current.generation()
     }

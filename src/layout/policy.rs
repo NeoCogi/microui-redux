@@ -1,6 +1,12 @@
 //! Public layout sizing policy types.
 
-/// Size policy used by rows and columns when resolving cells.
+/// Size policy used by retained nodes, row/grid tracks, and stack items when resolving cells.
+///
+/// Cell sizing resolves in this order:
+/// 1. A retained node [`crate::retained::Policy`] override wins when it is not `Auto`.
+/// 2. Otherwise the active row/grid/stack track policy is used.
+/// 3. `Auto` uses the widget's measured preferred size when it is positive.
+/// 4. If a widget reports no preferred size for an axis, the style/default cell fallback is used.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SizePolicy {
     /// Uses the default cell size defined by the style.

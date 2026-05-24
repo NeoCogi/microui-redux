@@ -38,12 +38,8 @@ pub enum ButtonContent {
 pub struct Button {
     /// Content rendered inside the button.
     pub content: ButtonContent,
-    /// Font selection used for the button label.
-    pub font: FontChoice,
-    /// Widget options applied to the button.
-    pub opt: WidgetOption,
-    /// Scroll behavior applied to the button.
-    pub scroll_behavior: ScrollBehavior,
+    /// Shared widget configuration.
+    pub config: WidgetConfig,
     /// Fill behavior for the button background.
     pub fill: WidgetFillOption,
 }
@@ -53,9 +49,7 @@ impl Button {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             content: ButtonContent::Text { label: label.into(), icon: None },
-            font: FontChoice::default(),
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::default(),
             fill: WidgetFillOption::ALL,
         }
     }
@@ -64,9 +58,7 @@ impl Button {
     pub fn with_opt(label: impl Into<String>, opt: WidgetOption) -> Self {
         Self {
             content: ButtonContent::Text { label: label.into(), icon: None },
-            font: FontChoice::default(),
-            opt,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
             fill: WidgetFillOption::ALL,
         }
     }
@@ -75,9 +67,7 @@ impl Button {
     pub fn with_image(label: impl Into<String>, image: Option<Image>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::Image { label: label.into(), image },
-            font: FontChoice::default(),
-            opt,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
             fill,
         }
     }
@@ -86,9 +76,7 @@ impl Button {
     pub fn with_slot(label: impl Into<String>, slot: SlotId, paint: Rc<dyn Fn(usize, usize) -> Color4b>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::Slot { label: label.into(), slot, paint },
-            font: FontChoice::default(),
-            opt,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
             fill,
         }
     }
@@ -98,15 +86,15 @@ impl Button {
         match &self.content {
             ButtonContent::Text { label, icon } => {
                 let visual = icon.map(|icon| atlas.get_icon_size(icon));
-                inline_content_size(style, atlas, self.font, label, visual)
+                inline_content_size(style, atlas, self.config.font, label, visual)
             }
             ButtonContent::Image { label, image } => {
                 let visual = image.map(|image| image.size(atlas));
-                inline_content_size(style, atlas, self.font, label, visual)
+                inline_content_size(style, atlas, self.config.font, label, visual)
             }
             ButtonContent::Slot { label, slot, .. } => {
                 let visual = Some(atlas.get_slot_size(*slot));
-                inline_content_size(style, atlas, self.font, label, visual)
+                inline_content_size(style, atlas, self.config.font, label, visual)
             }
         }
     }
@@ -118,20 +106,20 @@ impl Button {
 
     /// Paints the button frame, text, and optional visual payload.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        let rect = ctx.rect();
-        if !self.opt.has_no_frame() {
+        let rect = ctx.screen_rect();
+        if !self.config.opt.intersects(WidgetOption::NO_FRAME) {
             if let Some(colorid) = widget_fill_color(control, ControlColor::Button, self.fill) {
                 ctx.draw_frame(rect, colorid);
             }
         }
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.style().resolve_font_choice(self.config.font);
         match &self.content {
             ButtonContent::Text { label, icon } => {
                 // Text/icon buttons use atlas icon metrics when laying out the inline visual.
                 let visual_size = icon.map(|icon| ctx.atlas().get_icon_size(icon));
                 let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.config.opt);
                 }
                 if let (Some(icon), Some(visual)) = (icon, layout.visual) {
                     let color = ctx.style().colors[ControlColor::Text as usize];
@@ -143,7 +131,7 @@ impl Button {
                 let visual_size = image.map(|image| image.size(ctx.atlas()));
                 let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.config.opt);
                 }
                 if let (Some(image), Some(visual)) = (*image, layout.visual) {
                     let color = ctx.style().colors[ControlColor::Text as usize];
@@ -155,7 +143,7 @@ impl Button {
                 let visual_size = Some(ctx.atlas().get_slot_size(*slot));
                 let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.config.opt);
                 }
                 if let Some(visual) = layout.visual {
                     let color = ctx.style().colors[ControlColor::Text as usize];

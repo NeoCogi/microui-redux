@@ -69,6 +69,37 @@ fn inserting_keyed_widget_does_not_shift_later_unkeyed_ids() {
 }
 
 #[test]
+#[should_panic(expected = "duplicate retained node id")]
+fn duplicate_keyed_sibling_ids_are_rejected_at_build_time() {
+    let button_a = widget_handle(Button::new("A"));
+    let button_b = widget_handle(Button::new("B"));
+
+    WidgetTreeBuilder::build(|builder| {
+        builder.node(NodeOptions::keyed("same")).widget(&button_a);
+        builder.node(NodeOptions::keyed("same")).widget(&button_b);
+    });
+}
+
+#[test]
+fn matching_child_keys_in_different_scopes_remain_distinct() {
+    let button_a = widget_handle(Button::new("A"));
+    let button_b = widget_handle(Button::new("B"));
+    let mut first_child = NodeId::default();
+    let mut second_child = NodeId::default();
+
+    WidgetTreeBuilder::build(|builder| {
+        builder.row(&[SizePolicy::Auto], SizePolicy::Auto, |builder| {
+            first_child = builder.node(NodeOptions::keyed("same")).widget(&button_a);
+        });
+        builder.row(&[SizePolicy::Auto], SizePolicy::Auto, |builder| {
+            second_child = builder.node(NodeOptions::keyed("same")).widget(&button_b);
+        });
+    });
+
+    assert_ne!(first_child, second_child);
+}
+
+#[test]
 fn row_nodes_capture_children_and_track_policy() {
     let button_a = widget_handle(Button::new("A"));
     let button_b = widget_handle(Button::new("B"));

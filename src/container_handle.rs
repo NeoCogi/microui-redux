@@ -53,7 +53,7 @@
 //! Shared handles for retained scroll-area nodes.
 
 use std::{
-    cell::{Ref, RefCell, RefMut},
+    cell::{Ref, RefCell},
     rc::Rc,
 };
 
@@ -164,15 +164,8 @@ impl ScrollAreaHandle {
     }
 
     /// Returns an immutable borrow of the underlying scroll area.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn inner<'a>(&'a self) -> Ref<'a, ScrollArea> {
         self.0.borrow()
-    }
-
-    /// Returns a mutable borrow of the underlying scroll area.
-    #[allow(dead_code)]
-    pub(crate) fn inner_mut<'a>(&'a self) -> RefMut<'a, ScrollArea> {
-        self.0.borrow_mut()
     }
 
     /// Executes `f` with a read-only view into the scroll area.

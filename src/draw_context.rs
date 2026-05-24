@@ -82,8 +82,8 @@ pub(crate) fn clip_relation(bounds: Recti, clip: Recti) -> Clip {
     Clip::Part
 }
 
-/// Mutable command recording context shared by container draw helpers and custom widget graphics.
-pub(crate) struct DrawCtx<'a> {
+/// Internal command emitter shared by container chrome, built-in widgets, and custom graphics.
+pub(crate) struct CommandEmitter<'a> {
     commands: &'a mut Vec<Command>,
     triangle_vertices: &'a mut Vec<Vertex>,
     clip_stack: &'a mut Vec<Recti>,
@@ -91,7 +91,9 @@ pub(crate) struct DrawCtx<'a> {
     atlas: &'a AtlasHandle,
 }
 
-impl<'a> DrawCtx<'a> {
+pub(crate) type DrawCtx<'a> = CommandEmitter<'a>;
+
+impl<'a> CommandEmitter<'a> {
     /// Creates a recorder around the container-owned command and vertex buffers.
     pub(crate) fn new(
         commands: &'a mut Vec<Command>,
@@ -179,11 +181,6 @@ impl<'a> DrawCtx<'a> {
         self.triangle_vertices.push(v2);
     }
 
-    /// Replaces the active clip rectangle.
-    pub(crate) fn set_current_clip_rect(&mut self, rect: Recti) {
-        self.replace_current_clip_rect(rect);
-    }
-
     /// Emits a replay command that pushes a clip during render playback.
     fn push_replay_clip(&mut self, rect: Recti) {
         self.push_command(Command::PushClip { rect });
@@ -213,11 +210,6 @@ impl<'a> DrawCtx<'a> {
         if clipped != Clip::None {
             self.pop_replay_clip();
         }
-    }
-
-    /// Checks how `r` relates to the current draw clip.
-    pub(crate) fn check_clip(&self, r: Recti) -> Clip {
-        clip_relation(r, self.current_clip_rect())
     }
 
     /// Records a solid rectangle after applying the active clip immediately.

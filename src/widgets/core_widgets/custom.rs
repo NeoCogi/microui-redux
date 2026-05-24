@@ -10,10 +10,8 @@ use super::*;
 pub struct Custom {
     /// Label used for debugging or inspection.
     pub name: String,
-    /// Widget options applied to the custom widget.
-    pub opt: WidgetOption,
-    /// Scroll behavior applied to the custom widget.
-    pub scroll_behavior: ScrollBehavior,
+    /// Shared widget configuration.
+    pub config: WidgetConfig,
 }
 
 impl Custom {
@@ -21,14 +19,16 @@ impl Custom {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::default(),
         }
     }
 
     /// Creates a custom widget state with explicit options.
     pub fn with_opt(name: impl Into<String>, opt: WidgetOption, scroll_behavior: ScrollBehavior) -> Self {
-        Self { name: name.into(), opt, scroll_behavior }
+        Self {
+            name: name.into(),
+            config: WidgetConfig::new(opt, scroll_behavior),
+        }
     }
 
     /// Measures the custom widget's debug label as its default preferred size.

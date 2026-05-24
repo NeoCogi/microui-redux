@@ -90,6 +90,7 @@ impl<T> FrameCache<T> {
         self.current.clear();
     }
 
+    #[cfg(test)]
     fn previous(&self, node_id: NodeId) -> Option<&T> {
         self.previous.get(&node_id)
     }
@@ -123,6 +124,7 @@ impl WidgetTreeCache {
     }
 
     /// Returns the previous frame layout for `node_id`.
+    #[cfg(test)]
     pub fn prev_layout(&self, node_id: NodeId) -> Option<&NodeLayout> {
         self.layout.previous(node_id)
     }
@@ -140,13 +142,17 @@ impl WidgetTreeCache {
     /// Records the current frame layout for `node_id`.
     pub fn record_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
         let prev = self.layout.record(node_id, layout);
-        debug_assert!(prev.is_none(), "Node {:?} layout was recorded more than once in the same frame", node_id);
+        if prev.is_some() {
+            panic!("Node {:?} layout was recorded more than once in the same frame", node_id);
+        }
     }
 
     /// Records the current frame control state for `node_id`.
     pub fn record_control(&mut self, node_id: NodeId, control: ControlState) {
         let prev = self.control.record(node_id, control);
-        debug_assert!(prev.is_none(), "Node {:?} control state was recorded more than once in the same frame", node_id);
+        if prev.is_some() {
+            panic!("Node {:?} control state was recorded more than once in the same frame", node_id);
+        }
     }
 }
 

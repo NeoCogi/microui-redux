@@ -55,6 +55,7 @@
 //! These widgets own expansion state while container traversal decides whether child nodes are
 //! included in each retained pass.
 use crate::*;
+use super::WidgetConfig;
 
 #[derive(Clone, Copy)]
 enum NodeKind {
@@ -96,12 +97,8 @@ pub struct Node {
     pub label: String,
     /// Current expansion state.
     pub state: NodeStateValue,
-    /// Font selection used for the node label.
-    pub font: FontChoice,
-    /// Widget options applied to the node.
-    pub opt: WidgetOption,
-    /// Scroll behavior applied to the node.
-    pub scroll_behavior: ScrollBehavior,
+    /// Shared widget configuration.
+    pub config: WidgetConfig,
     kind: NodeKind,
 }
 
@@ -111,9 +108,7 @@ impl Node {
         Self {
             label: label.into(),
             state,
-            font: FontChoice::default(),
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::default(),
             kind: NodeKind::Header,
         }
     }
@@ -123,16 +118,14 @@ impl Node {
         Self {
             label: label.into(),
             state,
-            font: FontChoice::default(),
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::default(),
             kind: NodeKind::Tree,
         }
     }
 
     /// Applies widget options to this node state.
     pub fn with_options(mut self, opt: WidgetOption) -> Self {
-        self.opt = opt;
+        self.config.opt = opt;
         self
     }
 
@@ -160,7 +153,7 @@ impl Node {
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
-        let font = style.resolve_font_choice(self.font);
+        let font = style.resolve_font_choice(self.config.font);
         let font_height = atlas.get_font_height(font) as i32;
         let icon = atlas.get_icon_size(EXPAND_ICON);
         let text_w = if self.label.is_empty() {
@@ -195,7 +188,7 @@ impl Node {
         let style = ctx.style();
         let padding = style.padding;
         let text_color = style.colors[ControlColor::Text as usize];
-        let mut r = ctx.rect();
+        let mut r = ctx.screen_rect();
 
         match self.kind {
             NodeKind::Tree => {
@@ -204,7 +197,7 @@ impl Node {
                 }
             }
             NodeKind::Header => {
-                ctx.draw_widget_frame(control, r, ControlColor::Button, self.opt);
+                ctx.draw_widget_frame(control, r, ControlColor::Button, self.config.opt);
             }
         }
 
@@ -216,18 +209,18 @@ impl Node {
         );
         r.x += r.height - padding;
         r.width -= r.height - padding;
-        let font = ctx.style().resolve_font_choice(self.font);
-        ctx.draw_control_text_with_font(font, self.label.as_str(), r, ControlColor::Text, self.opt);
+        let font = ctx.style().resolve_font_choice(self.config.font);
+        ctx.draw_control_text_with_font(font, self.label.as_str(), r, ControlColor::Text, self.config.opt);
     }
 }
 
 impl Widget for Node {
     fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
+        &self.config.opt
     }
 
     fn scroll_behavior(&self) -> ScrollBehavior {
-        self.scroll_behavior
+        self.config.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
