@@ -110,7 +110,7 @@ fn number_focus_policy(editing: bool) -> FocusPolicy {
 /// Persistent state for slider widgets.
 pub struct Slider {
     /// Current slider value.
-    pub value: Real,
+    value: Real,
     /// Lower bound of the slider range.
     pub low: Real,
     /// Upper bound of the slider range.
@@ -126,14 +126,14 @@ pub struct Slider {
     /// Scroll behavior applied to the slider.
     pub scroll_behavior: ScrollBehavior,
     /// Text editing state for shift-click numeric entry.
-    pub edit: NumberEditState,
+    edit: NumberEditState,
 }
 
 impl Slider {
     /// Creates a slider with default widget options.
     pub fn new(value: Real, low: Real, high: Real) -> Self {
         Self {
-            value,
+            value: clamp_slider_value(value, low, high),
             low,
             high,
             step: 0.0,
@@ -148,7 +148,7 @@ impl Slider {
     /// Creates a slider with explicit widget options.
     pub fn with_opt(value: Real, low: Real, high: Real, step: Real, precision: usize, opt: WidgetOption) -> Self {
         Self {
-            value,
+            value: clamp_slider_value(value, low, high),
             low,
             high,
             step,
@@ -158,6 +158,21 @@ impl Slider {
             scroll_behavior: ScrollBehavior::GRAB_SCROLL,
             edit: NumberEditState::default(),
         }
+    }
+
+    /// Returns the current slider value.
+    pub fn value(&self) -> Real {
+        self.value
+    }
+
+    /// Updates the current value, clamping it to the slider range.
+    pub fn set_value(&mut self, value: Real) {
+        self.value = clamp_slider_value(value, self.low, self.high);
+    }
+
+    /// Returns whether the inline numeric editor is active.
+    pub fn is_editing(&self) -> bool {
+        self.edit.editing
     }
 
     /// Measures the slider track plus formatted value label.
@@ -246,7 +261,9 @@ fn snap_slider_value(value: Real, low: Real, step: Real) -> Real {
 fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
     let min = low.min(high);
     let max = low.max(high);
-    if value < min {
+    if !value.is_finite() {
+        min
+    } else if value < min {
         min
     } else if value > max {
         max
@@ -341,7 +358,7 @@ impl Widget for Slider {
 /// Persistent state for number input widgets.
 pub struct Number {
     /// Current number value.
-    pub value: Real,
+    value: Real,
     /// Step applied when dragging.
     pub step: Real,
     /// Number of digits after the decimal point when rendering.
@@ -353,25 +370,25 @@ pub struct Number {
     /// Scroll behavior applied to the number input.
     pub scroll_behavior: ScrollBehavior,
     /// Text editing state for shift-click numeric entry.
-    pub edit: NumberEditState,
+    edit: NumberEditState,
 }
 
 #[derive(Clone, Default, PartialEq)]
 /// Editing buffer for number-style widgets.
-pub struct NumberEditState {
+struct NumberEditState {
     /// Whether the widget is currently in edit mode.
-    pub editing: bool,
+    editing: bool,
     /// Text buffer for numeric input.
-    pub buf: String,
+    buf: String,
     /// Cursor position within the buffer (byte index).
-    pub cursor: usize,
+    cursor: usize,
 }
 
 impl Number {
     /// Creates a number input with default widget options.
     pub fn new(value: Real, step: Real, precision: usize) -> Self {
         Self {
-            value,
+            value: if value.is_finite() { value } else { 0.0 },
             step,
             precision,
             font: FontChoice::default(),
@@ -381,10 +398,25 @@ impl Number {
         }
     }
 
+    /// Returns the current number value.
+    pub fn value(&self) -> Real {
+        self.value
+    }
+
+    /// Updates the current number value, replacing non-finite input with zero.
+    pub fn set_value(&mut self, value: Real) {
+        self.value = if value.is_finite() { value } else { 0.0 };
+    }
+
+    /// Returns whether the inline numeric editor is active.
+    pub fn is_editing(&self) -> bool {
+        self.edit.editing
+    }
+
     /// Creates a number input with explicit widget options.
     pub fn with_opt(value: Real, step: Real, precision: usize, opt: WidgetOption) -> Self {
         Self {
-            value,
+            value: if value.is_finite() { value } else { 0.0 },
             step,
             precision,
             font: FontChoice::default(),
@@ -406,11 +438,14 @@ impl Number {
         let font = ctx.style().resolve_font_choice(self.font);
         if !number_textbox_update(ctx, control, &mut self.edit, self.precision, font, &mut self.value).is_none() {
             // Text editing suppresses drag updates while active.
+            self.set_value(self.value);
             return res;
         }
         let input = ctx.input_or_default();
         if control.focused && input.mouse_down.is_left() {
-            self.value += input.mouse_delta.x as Real * self.step;
+            self.set_value(self.value + input.mouse_delta.x as Real * self.step);
+        } else {
+            self.set_value(self.value);
         }
         if self.value != last {
             res |= ResourceState::CHANGE;

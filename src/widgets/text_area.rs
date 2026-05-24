@@ -67,11 +67,11 @@ use super::text_edit::{
 /// Persistent state for multi-line text area widgets.
 pub struct TextArea {
     /// Buffer edited by the text area.
-    pub buf: String,
+    buf: String,
     /// Current cursor position within the buffer (byte index).
-    pub cursor: usize,
+    cursor: usize,
     /// Scroll offset applied to the text view.
-    pub scroll: Vec2i,
+    scroll: Vec2i,
     /// Wrapping mode used when rendering the buffer.
     pub wrap: TextWrap,
     /// Font selection used for the text area's content.
@@ -120,6 +120,53 @@ impl TextArea {
             dragging_y: false,
             dragging_x: false,
         }
+    }
+
+    /// Returns the current text buffer.
+    pub fn text(&self) -> &str {
+        self.buf.as_str()
+    }
+
+    /// Replaces the current text and moves the cursor to the end.
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.buf = text.into();
+        self.cursor = self.buf.len();
+        self.preferred_x = None;
+    }
+
+    /// Clears the current text and resets cursor/scroll state.
+    pub fn clear(&mut self) {
+        self.buf.clear();
+        self.cursor = 0;
+        self.scroll = vec2(0, 0);
+        self.preferred_x = None;
+    }
+
+    /// Returns the current cursor byte position.
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    /// Moves the cursor to a valid UTF-8 boundary within the current text.
+    pub fn set_cursor(&mut self, cursor: usize) {
+        self.cursor = clamp_cursor_boundary(&self.buf, cursor);
+        self.preferred_x = None;
+    }
+
+    /// Moves the cursor to the end of the current text.
+    pub fn move_cursor_to_end(&mut self) {
+        self.cursor = self.buf.len();
+        self.preferred_x = None;
+    }
+
+    /// Returns the current scroll offset.
+    pub fn scroll(&self) -> Vec2i {
+        self.scroll
+    }
+
+    /// Updates the current scroll offset, clamping negative offsets to zero.
+    pub fn set_scroll(&mut self, scroll: Vec2i) {
+        self.scroll = vec2(scroll.x.max(0), scroll.y.max(0));
     }
 
     /// Measures the text area content, respecting wrapping and available constraints.

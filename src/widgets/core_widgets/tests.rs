@@ -72,7 +72,7 @@ fn combo_run_toggles_open_state() {
     combo.update(&mut ctx, &control);
     assert!(combo.is_open());
 
-    combo.popup.open();
+    combo.open_popup();
     let mut ctx = WidgetCtx::new_with_interaction(
         RetainedId::node(Id::new(1)),
         rect,
@@ -88,7 +88,7 @@ fn combo_run_toggles_open_state() {
     );
     combo.update(&mut ctx, &control);
     assert!(!combo.is_open());
-    assert!(!combo.popup.is_open());
+    assert!(!combo.popup().is_open());
 }
 
 #[test]
@@ -100,12 +100,11 @@ fn combo_select_updates_label_and_closes_popup() {
     let mut combo = Combo::new(popup);
     let items = ["Apple", "Banana", "Cherry"];
 
-    combo.open = true;
-    combo.popup.open();
+    combo.open_popup();
     let selected = combo.select(1, &items);
 
     assert_eq!(selected.as_deref(), Some("Banana"));
-    assert_eq!(combo.selected, 1);
+    assert_eq!(combo.selected(), 1);
     assert!(!combo.is_open());
-    assert!(!combo.popup.is_open());
+    assert!(!combo.popup().is_open());
 }

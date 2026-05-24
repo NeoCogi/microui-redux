@@ -62,9 +62,9 @@ use super::text_edit::{apply_text_input, caret_rect, centered_line_top, clamp_cu
 /// Persistent state for textbox widgets.
 pub struct Textbox {
     /// Buffer edited by the textbox.
-    pub buf: String,
+    buf: String,
     /// Current cursor position within the buffer (byte index).
-    pub cursor: usize,
+    cursor: usize,
     /// Font selection used for the textbox content.
     pub font: FontChoice,
     /// Widget options applied to the textbox.
@@ -98,6 +98,38 @@ impl Textbox {
             opt,
             scroll_behavior: ScrollBehavior::NONE,
         }
+    }
+
+    /// Returns the current text buffer.
+    pub fn text(&self) -> &str {
+        self.buf.as_str()
+    }
+
+    /// Replaces the current text and moves the cursor to the end.
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.buf = text.into();
+        self.cursor = self.buf.len();
+    }
+
+    /// Clears the current text and resets the cursor.
+    pub fn clear(&mut self) {
+        self.buf.clear();
+        self.cursor = 0;
+    }
+
+    /// Returns the current cursor byte position.
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    /// Moves the cursor to a valid UTF-8 boundary within the current text.
+    pub fn set_cursor(&mut self, cursor: usize) {
+        self.cursor = clamp_cursor_boundary(&self.buf, cursor);
+    }
+
+    /// Moves the cursor to the end of the current text.
+    pub fn move_cursor_to_end(&mut self) {
+        self.cursor = self.buf.len();
     }
 
     /// Measures a single-line editor, bounded by available width when supplied.

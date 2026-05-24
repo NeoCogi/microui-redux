@@ -73,7 +73,7 @@ fn main() {
             let hello_button = hello_button.clone();
             move |tree| {
                 tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
-                    tree.widget(hello_button.clone());
+                    tree.widget(&hello_button);
                 });
             }
         });

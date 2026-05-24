@@ -70,20 +70,65 @@ use crate::{
 ///
 /// Cloning a handle shares one widget state object. Handles may be cloned freely for ownership
 /// convenience, but the same handle must not be rendered in multiple tree positions during one
-/// frame; duplicate dispatch will panic.
-pub type WidgetHandle<T> = Rc<RefCell<T>>;
+/// frame; duplicate dispatch will panic. The reference-counting and interior-mutability storage is
+/// intentionally private; callers should use [`WidgetHandle::read`], [`WidgetHandle::update`], or
+/// [`WidgetHandle::replace`] instead of depending on the handle representation.
+pub struct WidgetHandle<T> {
+    inner: Rc<RefCell<T>>,
+}
+
+impl<T> Clone for WidgetHandle<T> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
+
+impl<T> From<&WidgetHandle<T>> for WidgetHandle<T> {
+    fn from(handle: &WidgetHandle<T>) -> Self {
+        handle.clone()
+    }
+}
+
+impl<T> WidgetHandle<T> {
+    /// Creates a handle around persistent widget state.
+    pub fn new(value: T) -> Self {
+        Self { inner: Rc::new(RefCell::new(value)) }
+    }
+
+    /// Returns the stable identity of this widget state allocation.
+    pub fn id(&self) -> Id {
+        Id::new(Rc::as_ptr(&self.inner) as *const () as usize as u64)
+    }
+
+    /// Runs `f` with read-only access to the widget state.
+    pub fn read<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        let state = self.inner.borrow();
+        f(&state)
+    }
+
+    /// Runs `f` with mutable access to the widget state.
+    pub fn update<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
+        let mut state = self.inner.borrow_mut();
+        f(&mut state)
+    }
+
+    /// Replaces the widget state and returns the previous value.
+    pub fn replace(&self, value: T) -> T {
+        self.inner.replace(value)
+    }
+}
 
 /// Wraps widget state into a retained handle.
 ///
 /// The returned handle may be cloned to share ownership, but each frame may dispatch that handle
 /// at most once.
 pub fn widget_handle<T>(value: T) -> WidgetHandle<T> {
-    Rc::new(RefCell::new(value))
+    WidgetHandle::new(value)
 }
 
 /// Uses the shared handle allocation address as the stable widget-state id.
 pub(crate) fn widget_handle_id<W>(handle: &WidgetHandle<W>) -> Id {
-    Id::new(Rc::as_ptr(handle) as *const () as usize as u64)
+    handle.id()
 }
 
 /// Shared custom-render command object stored by retained custom nodes.
@@ -120,40 +165,33 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
-        let widget = self.handle.borrow();
-        widget.effective_widget_opt()
+        self.handle.read(Widget::effective_widget_opt)
     }
 
     fn effective_scroll_behavior(&self) -> ScrollBehavior {
-        let widget = self.handle.borrow();
-        widget.effective_scroll_behavior()
+        self.handle.read(Widget::effective_scroll_behavior)
     }
 
     fn focus_policy(&self) -> FocusPolicy {
-        let widget = self.handle.borrow();
-        widget.focus_policy()
+        self.handle.read(Widget::focus_policy)
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        let widget = self.handle.borrow();
-        widget.measure(style, atlas, avail)
+        self.handle.read(|widget| widget.measure(style, atlas, avail))
     }
 
     fn needs_input_snapshot(&self) -> bool {
-        let widget = self.handle.borrow();
-        widget.needs_input_snapshot()
+        self.handle.read(Widget::needs_input_snapshot)
     }
 
     fn update(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         // Borrow only for the duration of dispatch so later result recording cannot hold state.
-        let mut widget = self.handle.borrow_mut();
-        widget.update(ctx, control)
+        self.handle.update(|widget| widget.update(ctx, control))
     }
 
     fn paint(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
         // Paint may mutate retained widget state for caches such as text layout.
-        let mut widget = self.handle.borrow_mut();
-        widget.paint(ctx, control);
+        self.handle.update(|widget| widget.paint(ctx, control));
     }
 }
 

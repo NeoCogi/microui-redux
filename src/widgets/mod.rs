@@ -95,6 +95,6 @@ pub(crate) use core_widgets::{Internal, Scrollbar, ScrollbarLayout};
 pub use core_widgets::{Button, ButtonContent, Checkbox, Combo, Custom, ListBox, ListItem};
 pub use display::{ColorSwatch, TextBlock};
 pub use nodes::{Node, NodeStateValue};
-pub use slider::{Number, NumberEditState, Slider};
+pub use slider::{Number, Slider};
 pub use text_area::TextArea;
 pub use textbox::Textbox;

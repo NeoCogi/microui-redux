@@ -33,7 +33,8 @@
 
 use microui_redux::{
     backend::{Canvas, Vertex},
-    color, AtlasHandle, AtlasSource, Color, Dimensioni, Image, Recti, Renderer, RendererHandle, SourceFormat, TextureId, Vec2f, WHITE_ICON,
+    prelude::*,
+    AtlasSource,
 };
 
 enum SmokeEvent {

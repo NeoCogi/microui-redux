@@ -266,7 +266,7 @@ fn textbox_left_moves_over_multibyte() {
     let mut state = Textbox::new("a\u{1F600}b");
     let textbox_id = NodeId::new(0x1001);
     container.set_focus_node(textbox_id);
-    state.cursor = 5;
+    state.set_cursor(5);
 
     input.borrow_mut().keydown_code(KeyCode::LEFT);
     let rect = container.layout.next();
@@ -275,7 +275,7 @@ fn textbox_left_moves_over_multibyte() {
     let input = container.snapshot_input();
     let mut ctx = widget_ctx_for_node(&mut container, textbox_id, rect, Some(input));
     state.update(&mut ctx, &control);
-    assert_eq!(state.cursor, 1);
+    assert_eq!(state.cursor(), 1);
 }
 
 #[test]
@@ -285,7 +285,7 @@ fn textbox_backspace_removes_multibyte() {
     let mut state = Textbox::new("a\u{1F600}b");
     let textbox_id = NodeId::new(0x1002);
     container.set_focus_node(textbox_id);
-    state.cursor = 5;
+    state.set_cursor(5);
 
     input.borrow_mut().keydown(KeyMode::BACKSPACE);
     let rect = container.layout.next();
@@ -294,8 +294,8 @@ fn textbox_backspace_removes_multibyte() {
     let input = container.snapshot_input();
     let mut ctx = widget_ctx_for_node(&mut container, textbox_id, rect, Some(input));
     state.update(&mut ctx, &control);
-    assert_eq!(state.buf, "ab");
-    assert_eq!(state.cursor, 1);
+    assert_eq!(state.text(), "ab");
+    assert_eq!(state.cursor(), 1);
 }
 
 #[test]
@@ -386,7 +386,7 @@ fn widget_node_policy_overrides_auto_cell_size() {
 
     begin_test_frame(&mut container, rect(0, 0, 100, 40));
     let tree = WidgetTreeBuilder::build(|tree| {
-        node_id = tree.widget_with(NodeOptions::with_policy(Policy::fixed(42, 13)), button.clone());
+        node_id = tree.node(NodeOptions::with_policy(Policy::fixed(42, 13))).widget(button.clone());
     });
     container.widget_tree(&mut results, &tree);
 
@@ -409,8 +409,7 @@ fn structural_node_policy_allocates_outer_scope() {
 
     begin_test_frame(&mut container, rect(0, 0, 100, 60));
     let tree = WidgetTreeBuilder::build(|tree| {
-        row_id = tree.row_with(
-            NodeOptions::with_policy(Policy::fixed(60, 20)),
+        row_id = tree.node(NodeOptions::with_policy(Policy::fixed(60, 20))).row(
             &[SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)],
             SizePolicy::Fixed(10),
             |tree| {
@@ -511,7 +510,7 @@ fn retained_widget_value_commits_on_next_frame() {
 
     let retained_checkbox_id = container.retained_id_for_node(checkbox_node_id);
     assert!(results.current().state_of_retained(retained_checkbox_id).is_changed());
-    assert!(checkbox.borrow().value);
+    assert!(checkbox.read(|checkbox| checkbox.value));
     container.finish();
     results.finish_frame();
 
@@ -528,7 +527,7 @@ fn retained_widget_value_commits_on_next_frame() {
     });
     container.widget_tree(&mut results, &tree);
 
-    assert!(checkbox.borrow().value);
+    assert!(checkbox.read(|checkbox| checkbox.value));
 }
 
 #[test]
@@ -726,7 +725,7 @@ fn retained_focus_follows_stable_node_id_when_widget_handle_changes() {
     begin_test_frame(&mut container, rect(0, 0, 80, 30));
     let first = widget_handle(FocusProbe::new(Rc::new(Cell::new(false))));
     let tree = WidgetTreeBuilder::build(|tree| {
-        focused_node_id = tree.widget_with(NodeOptions::keyed("stable-probe"), first.clone());
+        focused_node_id = tree.node(NodeOptions::keyed("stable-probe")).widget(first.clone());
     });
     container.widget_tree(&mut results, &tree);
     container.set_focus_node(focused_node_id);
@@ -736,7 +735,7 @@ fn retained_focus_follows_stable_node_id_when_widget_handle_changes() {
     begin_test_frame(&mut container, rect(0, 0, 80, 30));
     let second = widget_handle(FocusProbe::new(second_focus.clone()));
     let tree = WidgetTreeBuilder::build(|tree| {
-        tree.widget_with(NodeOptions::keyed("stable-probe"), second.clone());
+        tree.node(NodeOptions::keyed("stable-probe")).widget(second.clone());
     });
     container.widget_tree(&mut results, &tree);
 
@@ -781,15 +780,10 @@ fn retained_scroll_area_reserves_horizontal_gutter_when_vertical_scrollbar_force
     let child = widget_handle(Button::new("child"));
     let mut results = FrameResults::default();
     let tree = WidgetTreeBuilder::build(|tree| {
-        tree.scroll_area_with(
-            NodeOptions::with_policy(Policy::fixed(100, 100)),
-            scroll_area.clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            |tree| {
-                tree.widget_with(NodeOptions::with_policy(Policy::fixed(95, 200)), child.clone());
-            },
-        );
+        tree.node(NodeOptions::with_policy(Policy::fixed(100, 100)))
+            .scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.node(NodeOptions::with_policy(Policy::fixed(95, 200))).widget(child.clone());
+            });
     });
 
     results.begin_frame();
@@ -826,30 +820,20 @@ fn retained_scroll_area_resize_does_not_reserve_transient_horizontal_gutter_for_
     let scroll_area = make_scroll_area_handle(&parent, "scroll area");
     let child = widget_handle(Button::new("child"));
     let tree_100 = WidgetTreeBuilder::build(|tree| {
-        tree.scroll_area_with(
-            NodeOptions::with_policy(Policy::fixed(100, 100)),
-            scroll_area.clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            |tree| {
+        tree.node(NodeOptions::with_policy(Policy::fixed(100, 100)))
+            .scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                 tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(200), StackDirection::TopToBottom, |tree| {
                     tree.widget(child.clone());
                 });
-            },
-        );
+            });
     });
     let tree_99 = WidgetTreeBuilder::build(|tree| {
-        tree.scroll_area_with(
-            NodeOptions::with_policy(Policy::fixed(99, 100)),
-            scroll_area.clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            |tree| {
+        tree.node(NodeOptions::with_policy(Policy::fixed(99, 100)))
+            .scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                 tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(200), StackDirection::TopToBottom, |tree| {
                     tree.widget(child.clone());
                 });
-            },
-        );
+            });
     });
     let mut results = FrameResults::default();
 
@@ -915,7 +899,7 @@ fn tree_nodes_expand_children_from_committed_previous_frame_results() {
         });
     });
     container.widget_tree(&mut results, &tree);
-    assert!(header.borrow().is_closed());
+    assert!(header.read(Node::is_closed));
     assert!(container.current_node_layout(child_node_id).is_none());
     container.finish();
     results.finish_frame();
@@ -933,7 +917,7 @@ fn tree_nodes_expand_children_from_committed_previous_frame_results() {
         });
     });
     container.widget_tree(&mut results, &tree);
-    assert!(header.borrow().is_expanded());
+    assert!(header.read(Node::is_expanded));
     assert!(container.current_node_layout(child_node_id).is_none());
     container.finish();
     results.finish_frame();
@@ -952,7 +936,7 @@ fn tree_nodes_expand_children_from_committed_previous_frame_results() {
         });
     });
     container.widget_tree(&mut results, &tree);
-    assert!(header.borrow().is_expanded());
+    assert!(header.read(Node::is_expanded));
     assert!(container.current_node_layout(child_node_id).is_some());
 }
 
@@ -975,7 +959,7 @@ fn retained_tree_node_stays_expanded_after_click_is_committed() {
         });
     });
     container.widget_tree(&mut results, &tree);
-    assert!(header.borrow().is_closed());
+    assert!(header.read(Node::is_closed));
     assert!(container.current_node_layout(child_node_id).is_none());
     container.finish();
     results.finish_frame();
@@ -994,7 +978,7 @@ fn retained_tree_node_stays_expanded_after_click_is_committed() {
         });
     });
     container.widget_tree(&mut results, &tree);
-    assert!(header.borrow().is_closed());
+    assert!(header.read(Node::is_closed));
     assert!(container.current_node_layout(child_node_id).is_none());
     container.finish();
     results.finish_frame();
@@ -1012,7 +996,7 @@ fn retained_tree_node_stays_expanded_after_click_is_committed() {
         });
     });
     container.widget_tree(&mut results, &tree);
-    assert!(header.borrow().is_expanded());
+    assert!(header.read(Node::is_expanded));
     assert!(container.current_node_layout(child_node_id).is_none());
     container.finish();
     results.finish_frame();
@@ -1031,7 +1015,7 @@ fn retained_tree_node_stays_expanded_after_click_is_committed() {
         });
     });
     container.widget_tree(&mut results, &tree);
-    assert!(header.borrow().is_expanded());
+    assert!(header.read(Node::is_expanded));
     assert!(container.current_node_layout(child_node_id).is_some());
     container.finish();
     results.finish_frame();
@@ -1044,7 +1028,7 @@ fn retained_tree_node_stays_expanded_after_click_is_committed() {
         });
     });
     container.widget_tree(&mut results, &tree);
-    assert!(header.borrow().is_expanded());
+    assert!(header.read(Node::is_expanded));
     assert!(container.current_node_layout(child_node_id).is_some());
 }
 
@@ -1108,24 +1092,19 @@ fn nested_scroll_areas_preserve_focus_hover_scroll_and_content_size() {
     let mut results = FrameResults::default();
 
     let tree = WidgetTreeBuilder::build(|tree| {
-        outer_node_id = tree.scroll_area_with(
-            NodeOptions::with_policy(Policy::fixed(80, 40)),
-            outer.clone(),
-            ContainerOption::NONE,
-            ScrollBehavior::NONE,
-            |tree| {
-                inner_node_id = tree.scroll_area_with(
-                    NodeOptions::with_policy(Policy::fixed(60, 18)),
-                    inner.clone(),
-                    ContainerOption::NONE,
-                    ScrollBehavior::NONE,
-                    |tree| {
-                        probe_node_id = tree.widget(probe.clone());
-                        tree.widget(text.clone());
-                    },
-                );
-            },
-        );
+        outer_node_id =
+            tree.node(NodeOptions::with_policy(Policy::fixed(80, 40)))
+                .scroll_area(outer.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    inner_node_id = tree.node(NodeOptions::with_policy(Policy::fixed(60, 18))).scroll_area(
+                        inner.clone(),
+                        ContainerOption::NONE,
+                        ScrollBehavior::NONE,
+                        |tree| {
+                            probe_node_id = tree.widget(probe.clone());
+                            tree.widget(text.clone());
+                        },
+                    );
+                });
     });
 
     input.borrow_mut().mousemove(5, 5);
@@ -1143,7 +1122,7 @@ fn nested_scroll_areas_preserve_focus_hover_scroll_and_content_size() {
     assert_eq!(outer.inner().interaction.hover_root_child, Some(expected_inner_hover));
     assert!(inner.inner().interaction.in_hover_root);
 
-    let mut inner_focus = inner.clone();
+    let inner_focus = inner.clone();
     inner_focus.with_mut(|scroll_area| scroll_area.set_focus_node(probe_node_id));
     focused.set(false);
     results.begin_frame();
@@ -1315,9 +1294,10 @@ fn retained_custom_render_callback_receives_content_clipped_view() {
     begin_test_frame(&mut container, rect(0, 0, 120, 40));
     container.push_clip_rect(rect(8, 8, 16, 8));
     let tree = WidgetTreeBuilder::build(move |tree| {
-        tree.custom_render_with(NodeOptions::with_policy(Policy::fixed(40, 20)), custom.clone(), move |_dim, args| {
-            *observed_for_render.borrow_mut() = Some((args.content_area, args.view));
-        });
+        tree.node(NodeOptions::with_policy(Policy::fixed(40, 20)))
+            .custom_render(custom.clone(), move |_dim, args| {
+                *observed_for_render.borrow_mut() = Some((args.content_area, args.view));
+            });
     });
     container.widget_tree(&mut results, &tree);
     container.pop_clip_rect();

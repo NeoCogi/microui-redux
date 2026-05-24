@@ -1,11 +1,7 @@
 //! Retained chrome controls for windows, dialogs, and popups.
 
 use super::*;
-use crate::{
-    id::IdNamespace,
-    widget::FrameResults,
-    widget_tree::{NodeInteraction, NodeLayout},
-};
+use crate::{id::IdNamespace, widget::FrameResults, widget_tree::NodeLayout};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) struct WindowChromeIds {
@@ -181,7 +177,7 @@ impl WindowChromeTree {
         container.paint_internal_node(node.id, state, node.rect, &control);
         let submit_on_click = matches!(node.part, WindowChromePart::Close);
         let result = widget_result | chrome_result(&control, submit_on_click);
-        container.record_tree_interaction(node.id, NodeInteraction::new(control, result));
+        container.record_tree_control(node.id, control);
         // Chrome controls publish through the same result channel as retained tree widgets.
         results.record_node_with_context(container.retained_id_for_node(node.id), node.id, result, dispatch_site);
         control

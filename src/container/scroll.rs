@@ -303,6 +303,7 @@ impl TraversalHost {
     }
 
     /// Updates and paints scrollbars for the active body when scrolling is enabled.
+    #[cfg(test)]
     pub(crate) fn render_active_scrollbars(&mut self) {
         if self.viewport.scroll.enabled {
             self.update_scrollbars(self.viewport.body);
@@ -377,8 +378,8 @@ impl TraversalHost {
             layout.node_id,
             NodeLayout::new(layout.base, layout.base, Dimensioni::new(layout.base.width, layout.base.height)),
         );
-        let (control, result) = self.update_internal_node(layout.node_id, &mut scrollbar, layout.base);
-        self.record_tree_interaction(layout.node_id, NodeInteraction::new(control, result));
+        let (control, _result) = self.update_internal_node(layout.node_id, &mut scrollbar, layout.base);
+        self.record_tree_control(layout.node_id, control);
         self.viewport.scroll.set_axis(axis, scrollbar.value());
         self.viewport.scroll.restore_scrollbar(scrollbar);
     }
@@ -392,11 +393,7 @@ impl TraversalHost {
         let scroll_value = self.viewport.scroll.axis(axis);
         let mut scrollbar = self.viewport.scroll.take_scrollbar(axis);
         scrollbar.configure(layout, scroll_value);
-        let control = self
-            .tree_cache
-            .current_interaction(layout.node_id)
-            .map(|interaction| interaction.control)
-            .unwrap_or_default();
+        let control = self.tree_cache.current_control(layout.node_id).copied().unwrap_or_default();
         self.paint_internal_node(layout.node_id, &mut scrollbar, layout.base, &control);
         self.viewport.scroll.restore_scrollbar(scrollbar);
     }

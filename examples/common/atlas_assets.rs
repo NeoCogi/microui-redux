@@ -52,7 +52,7 @@
 //
 //! Default atlas asset configuration shared by examples and the build-time atlas exporter.
 
-use microui_redux::{AtlasHandle, Dimensioni};
+use microui_redux::prelude::{AtlasHandle, Dimensioni};
 
 #[cfg(feature = "builder")]
 use microui_redux::atlas::builder;
@@ -117,7 +117,7 @@ pub fn load_atlas(slots: &[Dimensioni]) -> AtlasHandle {
 
 #[cfg(feature = "prebuilt-atlas")]
 mod prebuilt {
-    use microui_redux::AtlasHandle;
+    use microui_redux::prelude::AtlasHandle;
     include!(concat!(env!("OUT_DIR"), "/prebuilt_atlas.rs"));
 
     pub fn load() -> AtlasHandle {

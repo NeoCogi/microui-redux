@@ -57,7 +57,9 @@
 use super::*;
 use crate::draw_context::DrawCtx;
 use crate::widget::{FocusPolicy, RetainedId};
-use crate::widget_tree::{widget_handle_id, NodeId, NodeLayout, Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
+use crate::widget_tree::{
+    erased_widget_state, NodeId, NodeLayout, Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind,
+};
 use std::cell::RefCell;
 
 mod command;

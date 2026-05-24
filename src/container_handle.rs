@@ -66,6 +66,12 @@ use crate::{Dimensioni, NodeId, Recti, RetainedId, Vec2i};
 /// Shared handle to a retained scroll area.
 pub struct ScrollAreaHandle(pub(crate) Rc<RefCell<ScrollArea>>);
 
+impl From<&ScrollAreaHandle> for ScrollAreaHandle {
+    fn from(handle: &ScrollAreaHandle) -> Self {
+        handle.clone()
+    }
+}
+
 /// Read-only view into a retained scroll area borrowed from a handle.
 pub struct ScrollAreaView<'a> {
     inner: &'a ScrollArea,
@@ -153,7 +159,7 @@ impl ScrollAreaHandle {
         Self(Rc::new(RefCell::new(scroll_area)))
     }
 
-    pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
+    pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
         self.0.borrow_mut().render(canvas)
     }
 
@@ -165,7 +171,7 @@ impl ScrollAreaHandle {
 
     /// Returns a mutable borrow of the underlying scroll area.
     #[allow(dead_code)]
-    pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, ScrollArea> {
+    pub(crate) fn inner_mut<'a>(&'a self) -> RefMut<'a, ScrollArea> {
         self.0.borrow_mut()
     }
 
@@ -177,13 +183,13 @@ impl ScrollAreaHandle {
     }
 
     /// Executes `f` with a mutable view into the scroll area.
-    pub fn with_mut<R>(&mut self, f: impl FnOnce(&mut ScrollAreaViewMut<'_>) -> R) -> R {
+    pub fn with_mut<R>(&self, f: impl FnOnce(&mut ScrollAreaViewMut<'_>) -> R) -> R {
         let mut scroll_area = self.0.borrow_mut();
         let mut view = ScrollAreaViewMut::new(&mut scroll_area);
         f(&mut view)
     }
 
-    pub(crate) fn with_inner_mut<R>(&mut self, f: impl FnOnce(&mut ScrollArea) -> R) -> R {
+    pub(crate) fn with_inner_mut<R>(&self, f: impl FnOnce(&mut ScrollArea) -> R) -> R {
         let mut scroll_area = self.0.borrow_mut();
         f(&mut scroll_area)
     }

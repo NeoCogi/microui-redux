@@ -40,13 +40,13 @@ mod cache;
 mod node;
 mod retained;
 
-pub use builder::{NodeOptions, WidgetTreeBuilder};
+pub use builder::{NodeBuilder, NodeOptions, WidgetTreeBuilder};
 pub use node::{NodeId, Policy, WidgetTree, WidgetTreeNode};
 pub use retained::{widget_handle, WidgetHandle};
 
-pub(crate) use cache::{NodeInteraction, NodeLayout, WidgetTreeCache};
+pub(crate) use cache::{NodeLayout, WidgetTreeCache};
 pub(crate) use node::WidgetTreeNodeKind;
-pub(crate) use retained::{erased_widget_state, widget_handle_id, TreeCustomRender, WidgetStateHandleDyn};
+pub(crate) use retained::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
 
 #[cfg(test)]
 mod tests;

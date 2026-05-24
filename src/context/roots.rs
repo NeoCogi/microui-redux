@@ -32,8 +32,8 @@ impl<R: Renderer> Context<R> {
     /// Creates an open top-level window handle with a new root id.
     fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
         let root_id = self.next_root_id();
-        let mut window = WindowHandle::window(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone(), initial_rect);
-        self.bring_to_front(&mut window);
+        let window = WindowHandle::window(root_id, name, self.canvas.get_atlas(), self.style.clone(), self.input.clone(), initial_rect);
+        self.bring_to_front(&window);
         window
     }
 
@@ -165,7 +165,7 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Bumps the window's Z order so it renders above others.
-    pub fn bring_to_front(&mut self, window: &mut WindowHandle) {
+    pub fn bring_to_front(&mut self, window: &WindowHandle) {
         self.last_zindex += 1;
         window.set_zindex(self.last_zindex);
     }
@@ -213,8 +213,8 @@ impl<R: Renderer> Context<R> {
             }
         }
 
-        if let Some(mut window) = bring_to_front {
-            self.bring_to_front(&mut window);
+        if let Some(window) = bring_to_front {
+            self.bring_to_front(&window);
         }
         if let Some(window) = hover_root {
             self.next_hover_root = Some(window.clone());
@@ -223,7 +223,7 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Brings a window forward only when it is not already top-most.
-    fn bring_to_front_if_behind(&mut self, window: &mut WindowHandle) {
+    fn bring_to_front_if_behind(&mut self, window: &WindowHandle) {
         if window.zindex() < self.last_zindex {
             self.bring_to_front(window);
         }
@@ -231,7 +231,7 @@ impl<R: Renderer> Context<R> {
 
     #[inline(never)]
     /// Starts command recording and hover/scroll routing for a root container.
-    fn begin_root_container(&mut self, window: &mut WindowHandle) {
+    fn begin_root_container(&mut self, window: &WindowHandle) {
         window.prepare_for_frame(self.frame);
         self.root_list.push(window.clone());
 
@@ -252,12 +252,12 @@ impl<R: Renderer> Context<R> {
 
     #[inline(never)]
     /// Ends command recording for a root container.
-    fn end_root_container(&mut self, window: &mut WindowHandle) {
+    fn end_root_container(&mut self, window: &WindowHandle) {
         window.finish_root_command_scope();
     }
 
     /// Handles popup auto-close behavior before a popup root is traversed.
-    fn update_popup_root_state(&mut self, window: &mut WindowHandle) -> bool {
+    fn update_popup_root_state(&mut self, window: &WindowHandle) -> bool {
         if !window.root_is_popup() {
             return true;
         }
@@ -281,7 +281,7 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Measures, begins, traverses, and ends one window-like retained tree.
-    fn render_window_tree(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
+    fn render_window_tree(&mut self, window: &WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         if window.is_open() {
             window.set_root_style(self.style.clone());
             if opt.is_auto_sizing() {
@@ -302,7 +302,7 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Renders an open dialog and forces it to remain the active hover/root focus layer.
-    fn render_dialog_tree(&mut self, window: &mut WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
+    fn render_dialog_tree(&mut self, window: &WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         if window.is_open() {
             self.next_hover_root = Some(window.clone());
             self.hover_root = self.next_hover_root.clone();
@@ -324,9 +324,9 @@ impl<R: Renderer> Context<R> {
         }
 
         match entry.kind {
-            RootKind::Window => self.render_window_tree(&mut entry.handle, entry.opt, entry.scroll_behavior, &entry.tree),
-            RootKind::Dialog => self.render_dialog_tree(&mut entry.handle, entry.opt, entry.scroll_behavior, &entry.tree),
-            RootKind::Popup => self.render_window_tree(&mut entry.handle, entry.opt, entry.scroll_behavior, &entry.tree),
+            RootKind::Window => self.render_window_tree(&entry.handle, entry.opt, entry.scroll_behavior, &entry.tree),
+            RootKind::Dialog => self.render_dialog_tree(&entry.handle, entry.opt, entry.scroll_behavior, &entry.tree),
+            RootKind::Popup => self.render_window_tree(&entry.handle, entry.opt, entry.scroll_behavior, &entry.tree),
         }
 
         if !entry.handle.is_open() {

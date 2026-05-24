@@ -294,7 +294,7 @@ impl WindowHandle {
     /// Updates the window visibility state.
     ///
     /// Closing a window resets its container state so the next open starts cleanly.
-    pub fn set_state(&mut self, state: WindowState) {
+    pub fn set_state(&self, state: WindowState) {
         let mut inner = self.inner_mut();
         inner.win_state = state;
         if matches!(state, WindowState::Closed) {
@@ -303,12 +303,12 @@ impl WindowHandle {
     }
 
     /// Marks the window as open.
-    pub fn open(&mut self) {
+    pub fn open(&self) {
         self.set_state(WindowState::Open);
     }
 
     /// Marks the window as closed and resets its container state.
-    pub fn close(&mut self) {
+    pub fn close(&self) {
         self.set_state(WindowState::Closed);
     }
 
@@ -318,22 +318,22 @@ impl WindowHandle {
     }
 
     /// Replaces the current window rectangle.
-    pub fn set_rect(&mut self, rect: Recti) {
+    pub fn set_rect(&self, rect: Recti) {
         self.inner_mut().main.set_rect(rect);
     }
 
     /// Sets focus to a retained node inside the window's root container.
-    pub fn set_focus_node(&mut self, node_id: NodeId) {
+    pub fn set_focus_node(&self, node_id: NodeId) {
         self.inner_mut().main.set_focus_node(node_id);
     }
 
     /// Clears focus in the window's root container.
-    pub fn clear_focus(&mut self) {
+    pub fn clear_focus(&self) {
         self.inner_mut().main.clear_focus();
     }
 
     /// Borrows the inner window mutably.
-    pub(crate) fn inner_mut<'a>(&'a mut self) -> RefMut<'a, Window> {
+    pub(crate) fn inner_mut<'a>(&'a self) -> RefMut<'a, Window> {
         self.0.borrow_mut()
     }
 
@@ -348,17 +348,17 @@ impl WindowHandle {
     }
 
     /// Prepares the inner window for a context frame.
-    pub(crate) fn prepare_for_frame(&mut self, frame: usize) {
+    pub(crate) fn prepare_for_frame(&self, frame: usize) {
         self.inner_mut().prepare_for_root_frame(frame)
     }
 
     /// Replays the inner container draw commands.
-    pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
+    pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
         self.0.borrow_mut().main.render(canvas)
     }
 
     /// Finishes inner container frame state.
-    pub(crate) fn finish(&mut self) {
+    pub(crate) fn finish(&self) {
         self.inner_mut().main.finish()
     }
 
@@ -368,12 +368,12 @@ impl WindowHandle {
     }
 
     /// Sets the root z-index.
-    pub(crate) fn set_zindex(&mut self, zindex: i32) {
+    pub(crate) fn set_zindex(&self, zindex: i32) {
         self.inner_mut().zindex = zindex;
     }
 
     /// Replaces the root style handle.
-    pub(crate) fn set_root_style(&mut self, style: Rc<Style>) {
+    pub(crate) fn set_root_style(&self, style: Rc<Style>) {
         self.inner_mut().main.set_style_handle(style);
     }
 
@@ -388,37 +388,37 @@ impl WindowHandle {
     }
 
     /// Sets whether this root currently owns hover routing.
-    pub(crate) fn set_root_hover_active(&mut self, active: bool) {
+    pub(crate) fn set_root_hover_active(&self, active: bool) {
         self.inner_mut().main.set_in_hover_root(active);
     }
 
     /// Marks the popup just-opened guard on the inner container.
-    pub(crate) fn mark_popup_just_opened(&mut self) {
+    pub(crate) fn mark_popup_just_opened(&self) {
         self.inner_mut().main.mark_popup_just_opened();
     }
 
     /// Begins command recording for the root container.
-    pub(crate) fn begin_root_command_scope(&mut self, pending_scroll: Option<Vec2i>) {
+    pub(crate) fn begin_root_command_scope(&self, pending_scroll: Option<Vec2i>) {
         self.inner_mut().main.begin_root_command_scope(pending_scroll);
     }
 
     /// Ends command recording for the root container.
-    pub(crate) fn finish_root_command_scope(&mut self) {
+    pub(crate) fn finish_root_command_scope(&self) {
         self.inner_mut().main.finish_root_command_scope();
     }
 
     /// Measures auto-size content for this root.
-    pub(crate) fn measure_auto_size(&mut self, results: &FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
+    pub(crate) fn measure_auto_size(&self, results: &FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         self.inner_mut().measure_auto_size(results, opt, scroll_behavior, tree)
     }
 
     /// Renders the retained tree inside this root body.
-    pub(crate) fn render_tree(&mut self, results: &mut FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
+    pub(crate) fn render_tree(&self, results: &mut FrameResults, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         self.inner_mut().render_tree(results, opt, scroll_behavior, tree)
     }
 
     /// Resets closed-window state.
-    pub(crate) fn reset_after_close(&mut self) {
+    pub(crate) fn reset_after_close(&self) {
         self.inner_mut().reset_after_close()
     }
 
@@ -433,12 +433,12 @@ impl WindowHandle {
     }
 
     /// Clears the popup just-opened guard.
-    pub(crate) fn clear_root_popup_just_opened(&mut self) {
+    pub(crate) fn clear_root_popup_just_opened(&self) {
         self.inner_mut().main.clear_popup_just_opened();
     }
 
     /// Resizes the underlying window rectangle.
-    pub fn set_size(&mut self, size: &Dimensioni) {
+    pub fn set_size(&self, size: &Dimensioni) {
         self.inner_mut().main.set_rect_size(*size);
     }
 }
