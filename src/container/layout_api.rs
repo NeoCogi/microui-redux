@@ -68,7 +68,7 @@ impl TraversalHost {
 
     /// Temporarily overrides the layout with explicit column and row tracks and restores it after `f`.
     ///
-    /// Widgets are emitted row-major within the provided track matrix. Like [`Container::with_row`],
+    /// Widgets are emitted row-major within the provided track matrix. Like [`Self::with_row`],
     /// this restores the active flow template but preserves cursor/content advancement caused by
     /// emitted children.
     pub(crate) fn with_grid<F: FnOnce(&mut Self)>(&mut self, widths: &[SizePolicy], heights: &[SizePolicy], f: F) {

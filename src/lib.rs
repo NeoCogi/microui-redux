@@ -201,7 +201,7 @@ pub use widgets::{
 pub use window::{WindowHandle, WindowState};
 
 pub(crate) use canvas::{Canvas, Vertex};
-pub(crate) use container::Container;
+pub(crate) use container::TraversalHost;
 pub(crate) use layout::LayoutManager;
 pub(crate) use std::{
     cell::RefCell,

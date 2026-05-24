@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Tests for container layout, retained traversal, scroll areas, focus, and draw command behavior.
+//! Tests for traversal-host layout, retained traversal, scroll areas, focus, and draw command behavior.
 use super::*;
 use crate::test_support::{test_atlas, NoopRenderer};
 use std::{
@@ -58,23 +58,23 @@ use std::{
     rc::Rc,
 };
 
-fn make_container() -> Container {
+fn make_container() -> TraversalHost {
     let atlas = test_atlas();
     let input = Rc::new(RefCell::new(Input::default()));
-    let mut container = Container::new("test", atlas, Rc::new(Style::default()), input);
+    let mut container = TraversalHost::new("test", atlas, Rc::new(Style::default()), input);
     container.interaction.in_hover_root = true;
     container.push_container_body(rect(0, 0, 100, 30), ContainerOption::NONE, ScrollBehavior::NONE);
     container
 }
 
-fn begin_test_frame(container: &mut Container, body: Recti) {
+fn begin_test_frame(container: &mut TraversalHost, body: Recti) {
     container.prepare();
     container.set_rect(body);
     container.set_content_size(Dimensioni::default());
     container.push_container_body(body, ContainerOption::NONE, ScrollBehavior::NONE);
 }
 
-fn update_control_for_widget<W: Widget + ?Sized>(container: &mut Container, node_id: NodeId, rect: Recti, state: &W) -> ControlState {
+fn update_control_for_widget<W: Widget + ?Sized>(container: &mut TraversalHost, node_id: NodeId, rect: Recti, state: &W) -> ControlState {
     container.update_control_for_node(
         node_id,
         rect,
@@ -84,12 +84,12 @@ fn update_control_for_widget<W: Widget + ?Sized>(container: &mut Container, node
     )
 }
 
-fn widget_ctx_for_node<'a>(container: &'a mut Container, node_id: NodeId, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'a> {
+fn widget_ctx_for_node<'a>(container: &'a mut TraversalHost, node_id: NodeId, rect: Recti, input: Option<Rc<InputSnapshot>>) -> WidgetCtx<'a> {
     let interaction_id = container.retained_id_for_node(node_id);
     container.widget_ctx_for(interaction_id, rect, input)
 }
 
-fn make_scroll_area_handle(container: &Container, name: &str) -> ScrollAreaHandle {
+fn make_scroll_area_handle(container: &TraversalHost, name: &str) -> ScrollAreaHandle {
     ScrollAreaHandle::new(ScrollArea::new(name, container.atlas.clone(), container.style.clone(), container.input.clone()))
 }
 

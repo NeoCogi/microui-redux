@@ -14,11 +14,11 @@ pub(super) enum RootKind {
 pub(super) struct RootEntry {
     /// Stable application-facing identifier for this root.
     pub(super) id: RootId,
-    /// Window/dialog/popup runtime handle containing container state.
+    /// Window/dialog/popup runtime handle containing root traversal state.
     pub(super) handle: WindowHandle,
     /// Retained tree rendered inside the root body.
     tree: WidgetTree,
-    /// Container chrome/sizing options.
+    /// Root chrome/sizing options.
     opt: ContainerOption,
     /// Scroll behavior applied to the root body.
     scroll_behavior: ScrollBehavior,
