@@ -120,18 +120,28 @@ pub mod backend {
     pub use crate::render::{Renderer, RendererHandle};
 }
 
+/// Advanced compatibility and inspection types.
+///
+/// These are intentionally outside the default retained prelude because they expose migration
+/// aliases or low-level state views rather than the primary retained UI authoring model.
+pub mod advanced {
+    #[allow(deprecated)]
+    pub use crate::container_handle::{ContainerHandle, ContainerView, ContainerViewMut};
+    pub use crate::container_handle::{ScrollAreaView, ScrollAreaViewMut};
+    pub use crate::graphics::Graphics;
+    pub use crate::window::{WindowHandle, WindowState};
+}
+
 /// Retained UI authoring types.
 ///
 /// This module groups the stable retained concepts used by application code without exposing
 /// low-level renderer/canvas details or manual container drawing helpers through default imports.
 pub mod retained {
     pub use crate::container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
-    #[allow(deprecated)]
-    pub use crate::container_handle::{ContainerHandle, ContainerView, ContainerViewMut, ScrollAreaHandle, ScrollAreaView, ScrollAreaViewMut};
+    pub use crate::container_handle::ScrollAreaHandle;
     pub use crate::context::{Context, RootId};
     pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
-    pub use crate::widget_tree::{NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
-    pub use crate::window::{WindowHandle, WindowState};
+    pub use crate::widget_tree::{NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
 }
 
 /// Common imports for retained UI applications.
@@ -144,22 +154,19 @@ pub mod prelude {
         IconId, OPEN_FOLDER_16_ICON, SlotId, SourceFormat, WHITE_ICON, load_image_bytes,
     };
     pub use crate::file_dialog::FileDialogState;
-    pub use crate::graphics::Graphics;
     pub use crate::input::{
         Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, InputSnapshot, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState,
         ScrollBehavior, WidgetFillOption, WidgetOption,
     };
     pub use crate::layout::{SizePolicy, StackDirection};
     pub use crate::render::{Renderer, RendererHandle};
-    #[allow(deprecated)]
     pub use crate::retained::{
-        ContainerHandle, Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeId, NodeOptions, Policy, RetainedId, RootId,
-        ScrollAreaHandle, TextWrap, Widget, WidgetCtx, WidgetHandle, WidgetTree, WidgetTreeBuilder, WindowHandle, WindowState, widget_handle,
+        Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeBuilder, NodeId, NodeOptions, Policy, RetainedId, RootId,
+        ScrollAreaHandle, TextWrap, Widget, WidgetCtx, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
-        Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, NumberEditState, Slider, TextArea,
-        TextBlock, Textbox,
+        Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, Slider, TextArea, TextBlock, Textbox,
     };
     pub use rs_math3d::{
         Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3,
@@ -172,12 +179,8 @@ pub use atlas::{
     FontId, IconId, OPEN_FOLDER_16_ICON, SlotId, SourceFormat, WHITE_ICON, load_image_bytes,
 };
 pub use container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
-pub use container::ScrollArea;
-#[allow(deprecated)]
-pub use container_handle::{ContainerHandle, ScrollAreaHandle};
 pub use context::{Context, RootId};
 pub use file_dialog::FileDialogState;
-pub use graphics::Graphics;
 pub use id::Id;
 pub use input::{
     Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, InputSnapshot, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState,
@@ -187,22 +190,22 @@ pub use input::{
 pub use input::WidgetBehaviourOption;
 pub use layout::{SizePolicy, StackDirection};
 pub use render::{Renderer, RendererHandle};
-pub use rs_math3d::{
+pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
+pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
+pub use widget_tree::{NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
+pub use widgets::{
+    Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, Slider, TextArea, TextBlock, Textbox,
+};
+
+pub(crate) use canvas::{Canvas, Vertex};
+pub(crate) use container::{ScrollArea, TraversalHost};
+pub(crate) use container_handle::ScrollAreaHandle;
+pub(crate) use layout::LayoutManager;
+#[allow(unused_imports)]
+pub(crate) use rs_math3d::{
     Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3, color4b,
     ortho4,
 };
-pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
-pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
-pub use widget_tree::{NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
-pub use widgets::{
-    Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, NumberEditState, Slider, TextArea, TextBlock,
-    Textbox,
-};
-pub use window::{WindowHandle, WindowState};
-
-pub(crate) use canvas::{Canvas, Vertex};
-pub(crate) use container::TraversalHost;
-pub(crate) use layout::LayoutManager;
 pub(crate) use std::{
     cell::RefCell,
     cmp::{max, min},
@@ -211,5 +214,6 @@ pub(crate) use std::{
 };
 pub(crate) use style::UNCLIPPED_RECT;
 pub(crate) use widget::FrameResults;
-pub(crate) use widget_tree::{NodeInteraction, WidgetTreeCache};
+pub(crate) use widget_tree::WidgetTreeCache;
 pub(crate) use widgets::{Internal, Scrollbar, ScrollbarLayout};
+pub(crate) use window::WindowHandle;

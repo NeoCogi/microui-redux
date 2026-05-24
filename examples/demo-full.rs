@@ -75,7 +75,11 @@ use common::vulkan_renderer::VulkanRenderer as BackendRenderer;
 use common::wgpu_renderer::WgpuRenderer as BackendRenderer;
 #[cfg(feature = "builder")]
 use microui_redux::atlas::builder;
-use microui_redux::{backend::Vertex, prelude::*};
+use microui_redux::{
+    advanced::{Graphics, WindowHandle},
+    backend::Vertex,
+    prelude::*,
+};
 use rand::{RngExt, rng};
 use std::{
     cell::RefCell,
@@ -1125,32 +1129,33 @@ impl State {
     }
 
     fn sync_background_controls_from_bg(&mut self) {
-        self.bg_sliders[0].borrow_mut().value = self.bg[0];
-        self.bg_sliders[1].borrow_mut().value = self.bg[1];
-        self.bg_sliders[2].borrow_mut().value = self.bg[2];
+        self.bg_sliders[0].update(|slider| slider.set_value(self.bg[0]));
+        self.bg_sliders[1].update(|slider| slider.set_value(self.bg[1]));
+        self.bg_sliders[2].update(|slider| slider.set_value(self.bg[2]));
         self.sync_background_swatch();
     }
 
     fn sync_background_swatch(&mut self) {
-        let mut swatch = self.background_swatch.borrow_mut();
-        swatch.fill = color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255);
-        swatch.label = format!("#{:02X}{:02X}{:02X}", swatch.fill.r, swatch.fill.g, swatch.fill.b);
+        self.background_swatch.update(|swatch| {
+            swatch.fill = color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255);
+            swatch.label = format!("#{:02X}{:02X}{:02X}", swatch.fill.r, swatch.fill.g, swatch.fill.b);
+        });
     }
 
     fn sync_style_controls_from_style(&mut self) {
         for (i, color) in self.style.colors.iter().enumerate() {
             let slider_base = i * 4;
-            self.style_color_sliders[slider_base].borrow_mut().value = color.r as Real;
-            self.style_color_sliders[slider_base + 1].borrow_mut().value = color.g as Real;
-            self.style_color_sliders[slider_base + 2].borrow_mut().value = color.b as Real;
-            self.style_color_sliders[slider_base + 3].borrow_mut().value = color.a as Real;
-            self.style_color_swatches[i].borrow_mut().fill = *color;
+            self.style_color_sliders[slider_base].update(|slider| slider.set_value(color.r as Real));
+            self.style_color_sliders[slider_base + 1].update(|slider| slider.set_value(color.g as Real));
+            self.style_color_sliders[slider_base + 2].update(|slider| slider.set_value(color.b as Real));
+            self.style_color_sliders[slider_base + 3].update(|slider| slider.set_value(color.a as Real));
+            self.style_color_swatches[i].update(|swatch| swatch.fill = *color);
         }
-        self.style_value_sliders[0].borrow_mut().value = self.style.padding as Real;
-        self.style_value_sliders[1].borrow_mut().value = self.style.spacing as Real;
-        self.style_value_sliders[2].borrow_mut().value = self.style.title_height as Real;
-        self.style_value_sliders[3].borrow_mut().value = self.style.thumb_size as Real;
-        self.style_value_sliders[4].borrow_mut().value = self.style.scrollbar_size as Real;
+        self.style_value_sliders[0].update(|slider| slider.set_value(self.style.padding as Real));
+        self.style_value_sliders[1].update(|slider| slider.set_value(self.style.spacing as Real));
+        self.style_value_sliders[2].update(|slider| slider.set_value(self.style.title_height as Real));
+        self.style_value_sliders[3].update(|slider| slider.set_value(self.style.thumb_size as Real));
+        self.style_value_sliders[4].update(|slider| slider.set_value(self.style.scrollbar_size as Real));
     }
 
     fn install_root_trees(&mut self, ctx: &mut Context<BackendRenderer>) {
@@ -1180,7 +1185,7 @@ impl State {
     }
 
     fn section(tree: &mut WidgetTreeBuilder, node: &WidgetHandle<Node>, f: impl FnOnce(&mut WidgetTreeBuilder)) {
-        tree.header(node.clone(), f);
+        tree.header(node, f);
     }
 
     fn root_submitted(results: FrameResultGeneration<'_>, root: RootId, node_id: NodeId) -> bool {
@@ -1188,7 +1193,7 @@ impl State {
     }
 
     fn remember_widget<W: Widget + 'static>(tree: &mut WidgetTreeBuilder, slot: &mut NodeId, handle: &WidgetHandle<W>) {
-        *slot = tree.widget(handle.clone());
+        *slot = tree.widget(handle);
     }
 
     fn rebuild_trees(&mut self) {
@@ -1214,19 +1219,19 @@ impl State {
                 .zip(style_color_swatches.iter())
             {
                 tree.row(&color_row, SizePolicy::Auto, |tree| {
-                    tree.widget(label.clone());
-                    tree.widget(sliders[0].clone());
-                    tree.widget(sliders[1].clone());
-                    tree.widget(sliders[2].clone());
-                    tree.widget(sliders[3].clone());
-                    tree.widget(swatch.clone());
+                    tree.widget(label);
+                    tree.widget(&sliders[0]);
+                    tree.widget(&sliders[1]);
+                    tree.widget(&sliders[2]);
+                    tree.widget(&sliders[3]);
+                    tree.widget(swatch);
                 });
             }
 
             for (label, slider) in style_metric_labels.iter().zip(style_value_sliders.iter()) {
                 tree.row(&metrics_row, SizePolicy::Auto, |tree| {
-                    tree.widget(label.clone());
-                    tree.widget(slider.clone());
+                    tree.widget(label);
+                    tree.widget(slider);
                 });
             }
         });
@@ -1240,8 +1245,8 @@ impl State {
         self.log_tree = WidgetTreeBuilder::build(|tree| {
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
-                tree.scroll_area(log_output.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                    tree.widget(log_text.clone());
+                tree.scroll_area(&log_output, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    tree.widget(&log_text);
                 });
             });
             tree.row(&submit_row, SizePolicy::Auto, |tree| {
@@ -1257,9 +1262,9 @@ impl State {
         let typography_button = self.typography_button.clone();
         self.typography_tree = WidgetTreeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                tree.widget(typography_heading.clone());
-                tree.widget(typography_body.clone());
-                tree.widget(typography_button.clone());
+                tree.widget(&typography_heading);
+                tree.widget(&typography_body);
+                tree.widget(&typography_button);
             });
         });
 
@@ -1271,7 +1276,7 @@ impl State {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
                 let triangle_data = triangle_data.clone();
                 let renderer = renderer.clone();
-                tree.custom_render(triangle_widget.clone(), move |_dim, cra| {
+                tree.custom_render(&triangle_widget, move |_dim, cra| {
                     if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                         return;
                     }
@@ -1296,7 +1301,7 @@ impl State {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
                 let suzanne_data = suzanne_data.clone();
                 let renderer = renderer.clone();
-                tree.custom_render(suzanne_widget.clone(), move |_dim, cra| {
+                tree.custom_render(&suzanne_widget, move |_dim, cra| {
                     if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                         return;
                     }
@@ -1360,14 +1365,14 @@ impl State {
         let graphics_widget = self.graphics_widget.clone();
         self.graphics_tree = WidgetTreeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                tree.widget(graphics_widget.clone());
+                tree.widget(&graphics_widget);
             });
         });
 
         let falloff_widget = self.falloff_widget.clone();
         self.falloff_tree = WidgetTreeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                tree.widget(falloff_widget.clone());
+                tree.widget(&falloff_widget);
             });
         });
 
@@ -1379,8 +1384,8 @@ impl State {
             let [label_top, label_bottom] = stack_direction_labels.clone();
             let [button_top_0, button_top_1, button_top_2, button_bottom_0, button_bottom_1, button_bottom_2] = stack_direction_buttons.clone();
             tree.row(&columns, SizePolicy::Auto, |tree| {
-                tree.widget(label_top.clone());
-                tree.widget(label_bottom.clone());
+                tree.widget(&label_top);
+                tree.widget(&label_bottom);
             });
             tree.row(&columns, SizePolicy::Fixed(120), |tree| {
                 tree.column(|tree| {
@@ -1421,7 +1426,7 @@ impl State {
             let cols = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
             let rows = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
-                tree.widget(row_weight_label.clone());
+                tree.widget(&row_weight_label);
             });
             tree.row(&row, SizePolicy::Fixed(28), |tree| {
                 Self::remember_widget(tree, &mut weight_button_ids[0], &button_row_0);
@@ -1429,7 +1434,7 @@ impl State {
                 Self::remember_widget(tree, &mut weight_button_ids[2], &button_row_2);
             });
             tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |tree| {
-                tree.widget(grid_weight_label.clone());
+                tree.widget(&grid_weight_label);
             });
             tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |tree| {
                 tree.column(|tree| {
@@ -1516,32 +1521,32 @@ impl State {
 
             Self::section(tree, &window_header, |tree| {
                 tree.row(&window_info_row, SizePolicy::Auto, |tree| {
-                    tree.widget(label_pos.clone());
-                    tree.widget(value_pos.clone());
+                    tree.widget(&label_pos);
+                    tree.widget(&value_pos);
                 });
                 tree.row(&window_info_row, SizePolicy::Auto, |tree| {
-                    tree.widget(label_size.clone());
-                    tree.widget(value_size.clone());
+                    tree.widget(&label_size);
+                    tree.widget(&value_size);
                 });
                 tree.row(&window_info_row, SizePolicy::Auto, |tree| {
-                    tree.widget(label_fps.clone());
-                    tree.widget(value_fps.clone());
+                    tree.widget(&label_fps);
+                    tree.widget(&value_fps);
                 });
             });
 
             Self::section(tree, &test_buttons_header, |tree| {
                 tree.row(&button_widths, SizePolicy::Auto, |tree| {
-                    tree.widget(test_label0.clone());
+                    tree.widget(&test_label0);
                     Self::remember_widget(tree, &mut test_button_ids[0], &button0);
                     Self::remember_widget(tree, &mut test_button_ids[1], &button1);
                 });
                 tree.row(&button_widths, SizePolicy::Auto, |tree| {
-                    tree.widget(test_label1.clone());
+                    tree.widget(&test_label1);
                     Self::remember_widget(tree, &mut test_button_ids[2], &button2);
                     Self::remember_widget(tree, &mut test_button_ids[3], &button3);
                 });
                 tree.row(&button_widths, SizePolicy::Auto, |tree| {
-                    tree.widget(test_label2.clone());
+                    tree.widget(&test_label2);
                     Self::remember_widget(tree, &mut test_button_ids[4], &button4);
                     Self::remember_widget(tree, &mut test_button_ids[5], &button5);
                 });
@@ -1549,24 +1554,24 @@ impl State {
 
             Self::section(tree, &combo_header, |tree| {
                 tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                    tree.widget(combo_state.clone());
+                    tree.widget(&combo_state);
                 });
             });
 
             Self::section(tree, &tree_and_text_header, |tree| {
                 tree.row(&tree_widths, SizePolicy::Auto, |tree| {
                     tree.column(|tree| {
-                        tree.tree_node(test1_tn.clone(), |tree| {
-                            tree.tree_node(test1a_tn.clone(), |tree| {
-                                tree.widget(tree_label_hello.clone());
-                                tree.widget(tree_label_world.clone());
+                        tree.tree_node(&test1_tn, |tree| {
+                            tree.tree_node(&test1a_tn, |tree| {
+                                tree.widget(&tree_label_hello);
+                                tree.widget(&tree_label_world);
                             });
-                            tree.tree_node(test1b_tn.clone(), |tree| {
+                            tree.tree_node(&test1b_tn, |tree| {
                                 Self::remember_widget(tree, &mut tree_button_ids[0], &tree_button0);
                                 Self::remember_widget(tree, &mut tree_button_ids[1], &tree_button1);
                             });
                         });
-                        tree.tree_node(test2_tn.clone(), |tree| {
+                        tree.tree_node(&test2_tn, |tree| {
                             tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
                                 Self::remember_widget(tree, &mut tree_button_ids[2], &tree_button2);
                                 Self::remember_widget(tree, &mut tree_button_ids[3], &tree_button3);
@@ -1576,10 +1581,10 @@ impl State {
                                 Self::remember_widget(tree, &mut tree_button_ids[5], &tree_button5);
                             });
                         });
-                        tree.tree_node(test3_tn.clone(), |tree| {
-                            tree.widget(checkbox0.clone());
-                            tree.widget(checkbox1.clone());
-                            tree.widget(checkbox2.clone());
+                        tree.tree_node(&test3_tn, |tree| {
+                            tree.widget(&checkbox0);
+                            tree.widget(&checkbox1);
+                            tree.widget(&checkbox2);
                         });
                     });
                     tree.column(|tree| {
@@ -1595,7 +1600,7 @@ impl State {
 
             Self::section(tree, &text_area_header, |tree| {
                 tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(120), StackDirection::TopToBottom, |tree| {
-                    tree.widget(text_area.clone());
+                    tree.widget(&text_area);
                 });
             });
 
@@ -1603,35 +1608,35 @@ impl State {
                 tree.row(&background_widths, SizePolicy::Fixed(74), |tree| {
                     tree.column(|tree| {
                         tree.row(&slider_row, SizePolicy::Auto, |tree| {
-                            tree.widget(label_red.clone());
-                            tree.widget(slider_red.clone());
+                            tree.widget(&label_red);
+                            tree.widget(&slider_red);
                         });
                         tree.row(&slider_row, SizePolicy::Auto, |tree| {
-                            tree.widget(label_green.clone());
-                            tree.widget(slider_green.clone());
+                            tree.widget(&label_green);
+                            tree.widget(&slider_green);
                         });
                         tree.row(&slider_row, SizePolicy::Auto, |tree| {
-                            tree.widget(label_blue.clone());
-                            tree.widget(slider_blue.clone());
+                            tree.widget(&label_blue);
+                            tree.widget(&slider_blue);
                         });
                     });
-                    tree.widget(background_swatch.clone());
+                    tree.widget(&background_swatch);
                 });
             });
 
             Self::section(tree, &slot_header, |tree| {
                 tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(67), StackDirection::TopToBottom, |tree| {
-                    tree.widget(slot0.clone());
-                    tree.widget(slot1.clone());
-                    tree.widget(slot2.clone());
-                    if let Some(button) = external_image_button.clone() {
+                    tree.widget(&slot0);
+                    tree.widget(&slot1);
+                    tree.widget(&slot2);
+                    if let Some(button) = &external_image_button {
                         tree.stack(SizePolicy::Fixed(256), SizePolicy::Fixed(256), StackDirection::TopToBottom, |tree| {
-                            tree.widget(button.clone());
+                            tree.widget(button);
                         });
                     }
                 });
                 tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(67), StackDirection::TopToBottom, |tree| {
-                    tree.widget(slot3.clone());
+                    tree.widget(&slot3);
                 });
             });
         });
@@ -1641,27 +1646,29 @@ impl State {
 
     fn style_window(&mut self, ctx: &mut Context<BackendRenderer>) {
         for (color, sliders) in self.style.colors.iter_mut().zip(self.style_color_sliders.chunks_exact(4)) {
-            color.r = sliders[0].borrow().value as u8;
-            color.g = sliders[1].borrow().value as u8;
-            color.b = sliders[2].borrow().value as u8;
-            color.a = sliders[3].borrow().value as u8;
+            color.r = sliders[0].read(|slider| slider.value() as u8);
+            color.g = sliders[1].read(|slider| slider.value() as u8);
+            color.b = sliders[2].read(|slider| slider.value() as u8);
+            color.a = sliders[3].read(|slider| slider.value() as u8);
         }
         for (swatch, color) in self.style_color_swatches.iter().zip(self.style.colors.iter()) {
-            swatch.borrow_mut().fill = *color;
+            swatch.update(|swatch| swatch.fill = *color);
         }
-        self.style.padding = self.style_value_sliders[0].borrow().value as i32;
-        self.style.spacing = self.style_value_sliders[1].borrow().value as i32;
-        self.style.title_height = self.style_value_sliders[2].borrow().value as i32;
-        self.style.thumb_size = self.style_value_sliders[3].borrow().value as i32;
-        self.style.scrollbar_size = self.style_value_sliders[4].borrow().value as i32;
+        self.style.padding = self.style_value_sliders[0].read(|slider| slider.value() as i32);
+        self.style.spacing = self.style_value_sliders[1].read(|slider| slider.value() as i32);
+        self.style.title_height = self.style_value_sliders[2].read(|slider| slider.value() as i32);
+        self.style.thumb_size = self.style_value_sliders[3].read(|slider| slider.value() as i32);
+        self.style.scrollbar_size = self.style_value_sliders[4].read(|slider| slider.value() as i32);
         ctx.set_style(&self.style);
     }
 
     fn log_window(&mut self, ctx: &mut Context<BackendRenderer>) {
-        self.log_text.borrow_mut().text = self.logbuf.borrow().clone();
+        self.log_text.update(|log_text| {
+            log_text.text = self.logbuf.borrow().clone();
+        });
 
         if self.logbuf_updated {
-            let mut log_output = self.log_output.as_mut().unwrap().clone();
+            let log_output = self.log_output.as_mut().unwrap().clone();
             log_output.with_mut(|scroll_area| {
                 let mut scroll = scroll_area.scroll();
                 scroll.y = scroll_area.content_size().height;
@@ -1685,9 +1692,9 @@ impl State {
         }
         if submitted {
             let mut buf = String::new();
-            buf.push_str(self.submit_buf.borrow().buf.as_str());
+            self.submit_buf.read(|submit_buf| buf.push_str(submit_buf.text()));
             self.write_log(buf.as_str());
-            self.submit_buf.borrow_mut().buf.clear();
+            self.submit_buf.update(Textbox::clear);
         }
     }
 
@@ -1775,17 +1782,17 @@ impl State {
             window.set_rect(win);
 
             let [value_pos, value_size, value_fps] = self.window_info_values.clone();
-            value_pos.borrow_mut().label = format!("{}, {}", win.x, win.y);
-            value_size.borrow_mut().label = format!("{}, {}", win.width, win.height);
-            value_fps.borrow_mut().label = format!("{:.1}", self.fps);
+            value_pos.update(|value| value.label = format!("{}, {}", win.x, win.y));
+            value_size.update(|value| value.label = format!("{}, {}", win.width, win.height));
+            value_fps.update(|value| value.label = format!("{:.1}", self.fps));
         }
 
-        let combo_labels: Vec<String> = self.combo_items.iter().map(|item| item.borrow().label.clone()).collect();
-        self.combo_state.borrow_mut().update_items(&combo_labels);
+        let combo_labels: Vec<String> = self.combo_items.iter().map(|item| item.read(|item| item.label.clone())).collect();
+        self.combo_state.update(|combo| combo.update_items(&combo_labels));
 
         let mut button_logs: Vec<&'static str> = Vec::new();
         let mut tree_logs: Vec<&'static str> = Vec::new();
-        let combo_anchor = self.combo_state.borrow().anchor();
+        let combo_anchor = self.combo_state.read(Combo::anchor);
         {
             let results = ctx.committed_results();
             if Self::root_submitted(results, self.demo_root, self.test_button_ids[0]) {
@@ -1825,9 +1832,9 @@ impl State {
                 tree_logs.push("Pressed button 6");
             }
         }
-        self.bg[0] = self.bg_sliders[0].borrow().value;
-        self.bg[1] = self.bg_sliders[1].borrow().value;
-        self.bg[2] = self.bg_sliders[2].borrow().value;
+        self.bg[0] = self.bg_sliders[0].read(Slider::value);
+        self.bg[1] = self.bg_sliders[1].read(Slider::value);
+        self.bg[2] = self.bg_sliders[2].read(Slider::value);
         self.sync_background_swatch();
         for msg in button_logs {
             self.write_log(msg);
@@ -1836,8 +1843,8 @@ impl State {
             self.write_log(msg);
         }
 
-        let mut popup = self.combo_state.borrow().popup.clone();
-        if self.combo_state.borrow().is_open() {
+        let popup = self.combo_state.read(Combo::popup);
+        if self.combo_state.read(Combo::is_open) {
             ctx.set_root_visible(self.combo_popup_root, true);
             popup.set_rect(combo_anchor);
         } else {
@@ -1849,7 +1856,7 @@ impl State {
             let mut selected_label = None;
             for (idx, node_id) in self.combo_item_ids.iter().enumerate() {
                 if Self::root_submitted(results, self.combo_popup_root, *node_id) {
-                    selected_label = self.combo_state.borrow_mut().select(idx, &combo_labels);
+                    selected_label = self.combo_state.update(|combo| combo.select(idx, &combo_labels));
                     break;
                 }
             }

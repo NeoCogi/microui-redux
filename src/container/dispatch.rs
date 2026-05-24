@@ -32,14 +32,6 @@
 use super::*;
 
 impl TraversalHost {
-    /// Measures a concrete widget and advances layout using the supplied node policy.
-    pub(crate) fn measure_widget_rect_with_policy<W: Widget + ?Sized>(&mut self, state: &W, policy: Policy) -> Recti {
-        let body = self.layout.current_body();
-        let avail = Dimensioni::new(body.width.max(0), body.height.max(0));
-        let preferred = state.measure(self.style.as_ref(), &self.atlas, avail);
-        self.layout.next_with_policies(preferred, policy.width, policy.height)
-    }
-
     /// Measures an erased retained widget handle and advances layout using the supplied node policy.
     pub(crate) fn measure_widget_rect_dyn_with_policy(&mut self, widget: &dyn WidgetStateHandleDyn, policy: Policy) -> Recti {
         let body = self.layout.current_body();
@@ -119,52 +111,5 @@ impl TraversalHost {
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let mut ctx = self.widget_ctx_for(retained_id, rect, input);
         widget.paint(&mut ctx, control);
-    }
-
-    /// Measures a strongly typed retained widget handle.
-    pub(crate) fn measure_widget_rect_handle_with_policy<W: Widget>(&mut self, handle: &WidgetHandle<W>, policy: Policy) -> Recti {
-        let state = handle.borrow();
-        self.measure_widget_rect_with_policy(&*state, policy)
-    }
-
-    /// Updates a strongly typed retained widget handle and records its frame result.
-    pub(crate) fn update_node_handle<W: Widget>(
-        &mut self,
-        results: &mut FrameResults,
-        node_id: NodeId,
-        handle: &WidgetHandle<W>,
-        rect: Recti,
-        input: Option<Rc<InputSnapshot>>,
-        opt: WidgetOption,
-        scroll_behavior: ScrollBehavior,
-        focus_policy: FocusPolicy,
-        dispatch_site: String,
-    ) -> (ControlState, ResourceState) {
-        let widget_handle_id = widget_handle_id(handle);
-        let retained_id = self.retained_id_for_node(node_id);
-        let control = self.update_control_for(retained_id, rect, opt, scroll_behavior, focus_policy);
-        let mut ctx = self.widget_ctx_for(retained_id, rect, input);
-        let res = {
-            // Borrow the widget only for the update call so result recording cannot hold user state.
-            let mut state = handle.borrow_mut();
-            state.update(&mut ctx, &control)
-        };
-        results.record_retained_with_context(retained_id, node_id, widget_handle_id, res, dispatch_site);
-        (control, res)
-    }
-
-    /// Paints a strongly typed retained widget handle.
-    pub(crate) fn paint_node_handle<W: Widget>(
-        &mut self,
-        node_id: NodeId,
-        handle: &WidgetHandle<W>,
-        rect: Recti,
-        input: Option<Rc<InputSnapshot>>,
-        control: &ControlState,
-    ) {
-        let retained_id = self.retained_id_for_node(node_id);
-        let mut ctx = self.widget_ctx_for(retained_id, rect, input);
-        let mut state = handle.borrow_mut();
-        state.paint(&mut ctx, control);
     }
 }

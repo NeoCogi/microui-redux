@@ -32,10 +32,7 @@
 //! This example demonstrates implementing a custom widget that emits widget-local triangle
 //! geometry through `WidgetCtx::graphics`.
 
-use microui_redux::{
-    backend::Vertex, color, rect, widget_handle, AtlasHandle, AtlasSource, CharEntry, Color, Context, ControlState, Dimensioni, FontEntry, Renderer,
-    RendererHandle, ResourceState, ScrollBehavior, SourceFormat, Style, TextureId, Vec2f, Vec2i, Widget, WidgetCtx, WidgetOption, WidgetTreeBuilder,
-};
+use microui_redux::{backend::Vertex, prelude::*, AtlasSource};
 
 const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
 
@@ -115,7 +112,7 @@ impl Widget for RetainedPaint {
 
 fn make_atlas() -> AtlasHandle {
     let pixels = [0xFF, 0xFF, 0xFF, 0xFF];
-    let icons: Vec<(&str, microui_redux::Recti)> = ICON_NAMES.iter().map(|name| (*name, rect(0, 0, 1, 1))).collect();
+    let icons: Vec<(&str, Recti)> = ICON_NAMES.iter().map(|name| (*name, rect(0, 0, 1, 1))).collect();
     let entries = vec![
         (
             '_',
@@ -160,7 +157,7 @@ fn main() {
     let mut ctx = Context::new(renderer, Dimensioni::new(160, 100));
     let paint = widget_handle(RetainedPaint::new());
     let tree = WidgetTreeBuilder::build(move |tree| {
-        tree.widget(paint.clone());
+        tree.widget(&paint);
     });
     ctx.create_window("retained custom drawing", rect(12, 12, 132, 84), tree);
 

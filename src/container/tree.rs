@@ -56,7 +56,7 @@
 //! 1. a layout pass that measures widgets, allocates rectangles, and records geometry into the
 //!    per-frame tree cache;
 //! 2. an update pass that reuses the cached rectangles, samples interaction, mutates retained
-//!    widget state, and stores `NodeInteraction` entries for the same tree nodes;
+//!    widget state, and stores the current `ControlState` for the same tree nodes;
 //! 3. a paint pass that replays the same tree shape and records draw commands from the already
 //!    updated widget state.
 //!
@@ -104,9 +104,9 @@ impl TraversalHost {
         self.tree_cache.record_layout(node_id, layout);
     }
 
-    /// Stores the current frame control/result snapshot for a retained tree node.
-    pub(crate) fn record_tree_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
-        self.tree_cache.record_interaction(node_id, interaction);
+    /// Stores the current frame control snapshot for a retained tree node.
+    pub(crate) fn record_tree_control(&mut self, node_id: NodeId, control: ControlState) {
+        self.tree_cache.record_control(node_id, control);
     }
 
     /// Returns the current frame layout for `node_id` or panics if layout was skipped.
@@ -117,12 +117,12 @@ impl TraversalHost {
             .unwrap_or_else(|| panic!("tree node {:?} missing current layout", node_id))
     }
 
-    /// Returns the current frame interaction for `node_id` or panics if update was skipped.
-    fn current_tree_interaction_or_panic(&self, node_id: NodeId) -> NodeInteraction {
+    /// Returns the current frame control state for `node_id` or panics if update was skipped.
+    fn current_tree_control_or_panic(&self, node_id: NodeId) -> ControlState {
         self.tree_cache
-            .current_interaction(node_id)
+            .current_control(node_id)
             .copied()
-            .unwrap_or_else(|| panic!("tree node {:?} missing current interaction", node_id))
+            .unwrap_or_else(|| panic!("tree node {:?} missing current control state", node_id))
     }
 
     /// Returns whether layout included this node's children in the current frame.
@@ -218,52 +218,49 @@ impl TraversalHost {
         let focus_policy = widget.focus_policy();
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         let dispatch_site = self.widget_dispatch_site(node_id, "widget");
-        let (control, result) = self.update_node_dyn(results, node_id, widget, rect, input, opt, scroll_behavior, focus_policy, dispatch_site);
-        self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
+        let (control, _result) = self.update_node_dyn(results, node_id, widget, rect, input, opt, scroll_behavior, focus_policy, dispatch_site);
+        self.record_tree_control(node_id, control);
     }
 
     /// Paints a leaf widget node from the state produced by the update pass.
     fn paint_tree_widget(&mut self, node_id: NodeId, widget: &dyn WidgetStateHandleDyn) {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
-        let control = self.current_tree_interaction_or_panic(node_id).control;
+        let control = self.current_tree_control_or_panic(node_id);
         let input = if widget.needs_input_snapshot() { Some(self.snapshot_input()) } else { None };
         self.paint_node_dyn(node_id, widget, rect, input, &control);
     }
 
     /// Measures a retained custom-render node and records its allocated rectangle.
     fn layout_tree_custom_render(&mut self, node_id: NodeId, policy: Policy, state: &WidgetHandle<Custom>) {
-        let rect = self.measure_widget_rect_handle_with_policy(state, policy);
+        let widget = erased_widget_state(state.clone());
+        let rect = self.measure_widget_rect_dyn_with_policy(&*widget, policy);
         self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Dimensioni::default()));
     }
 
     /// Updates a retained custom-render node and records its interaction payload.
     fn update_tree_custom_render(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Custom>) {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
-        let (opt, scroll_behavior, focus_policy, needs_input) = {
-            let state = state.borrow();
-            (
-                state.effective_widget_opt(),
-                state.effective_scroll_behavior(),
-                state.focus_policy(),
-                state.needs_input_snapshot(),
-            )
-        };
+        let widget = erased_widget_state(state.clone());
+        let opt = widget.effective_widget_opt();
+        let scroll_behavior = widget.effective_scroll_behavior();
+        let focus_policy = widget.focus_policy();
+        let needs_input = widget.needs_input_snapshot();
         let input = if needs_input { Some(self.snapshot_input()) } else { None };
         let dispatch_site = self.widget_dispatch_site(node_id, "custom render");
-        let (control, result) = self.update_node_handle(results, node_id, state, rect, input, opt, scroll_behavior, focus_policy, dispatch_site);
-        self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
+        let (control, _result) = self.update_node_dyn(results, node_id, &*widget, rect, input, opt, scroll_behavior, focus_policy, dispatch_site);
+        self.record_tree_control(node_id, control);
     }
 
     /// Paints a retained custom-render node and records its backend callback payload.
     fn paint_tree_custom_render(&mut self, node_id: NodeId, state: &WidgetHandle<Custom>, render: &TreeCustomRender) {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
-        let control = self.current_tree_interaction_or_panic(node_id).control;
-        let (opt, scroll_behavior, needs_input) = {
-            let state = state.borrow();
-            (state.effective_widget_opt(), state.effective_scroll_behavior(), state.needs_input_snapshot())
-        };
+        let control = self.current_tree_control_or_panic(node_id);
+        let widget = erased_widget_state(state.clone());
+        let opt = widget.effective_widget_opt();
+        let scroll_behavior = widget.effective_scroll_behavior();
+        let needs_input = widget.needs_input_snapshot();
         let input = if needs_input { Some(self.snapshot_input()) } else { None };
-        self.paint_node_handle(node_id, state, rect, input, &control);
+        self.paint_node_dyn(node_id, &*widget, rect, input, &control);
 
         let snapshot = self.snapshot_input();
         let input_ref = snapshot.as_ref();
@@ -299,11 +296,9 @@ impl TraversalHost {
         // Header/tree nodes always reserve a full-width row for the disclosure widget itself. The
         // returned stable state decides whether children participate in the current layout pass.
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
-        let rect = self.measure_widget_rect_handle_with_policy(state, policy);
-        let stable_state = {
-            let state = state.borrow();
-            state.state
-        };
+        let widget = erased_widget_state(state.clone());
+        let rect = self.measure_widget_rect_dyn_with_policy(&*widget, policy);
+        let stable_state = state.read(|state| state.state);
         self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Dimensioni::default()));
         stable_state
     }
@@ -347,18 +342,14 @@ impl TraversalHost {
     /// Updates a header/tree disclosure node and returns the layout-time expansion state.
     fn update_tree_node_scope(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Node>) -> NodeStateValue {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
-        let (opt, scroll_behavior, focus_policy, stable_state) = {
-            let state = state.borrow();
-            (
-                state.effective_widget_opt(),
-                state.effective_scroll_behavior(),
-                state.focus_policy(),
-                state.state,
-            )
-        };
+        let stable_state = state.read(|state| state.state);
+        let widget = erased_widget_state(state.clone());
+        let opt = widget.effective_widget_opt();
+        let scroll_behavior = widget.effective_scroll_behavior();
+        let focus_policy = widget.focus_policy();
         let dispatch_site = self.widget_dispatch_site(node_id, "node disclosure");
-        let (control, result) = self.update_node_handle(results, node_id, state, rect, None, opt, scroll_behavior, focus_policy, dispatch_site);
-        self.record_tree_interaction(node_id, NodeInteraction::new(control, result));
+        let (control, _result) = self.update_node_dyn(results, node_id, &*widget, rect, None, opt, scroll_behavior, focus_policy, dispatch_site);
+        self.record_tree_control(node_id, control);
         stable_state
     }
 
@@ -371,8 +362,9 @@ impl TraversalHost {
     /// Paints a header/tree disclosure node.
     fn paint_tree_node_scope(&mut self, node_id: NodeId, state: &WidgetHandle<Node>) {
         let rect = self.current_tree_layout_or_panic(node_id).rect;
-        let control = self.current_tree_interaction_or_panic(node_id).control;
-        self.paint_node_handle(node_id, state, rect, None, &control);
+        let control = self.current_tree_control_or_panic(node_id);
+        let widget = erased_widget_state(state.clone());
+        self.paint_node_dyn(node_id, &*widget, rect, None, &control);
     }
 
     fn paint_tree_node_scope_children(&mut self, node_id: NodeId, state: &WidgetHandle<Node>, children: &[WidgetTreeNode]) {
@@ -418,19 +410,19 @@ impl TraversalHost {
     ) {
         match pass {
             TreePass::Layout(results) => {
-                let mut handle = handle.clone();
+                let handle = handle.clone();
                 let layout = handle.with_inner_mut(|area| area.layout_children(self, *results, node_id, policy, scroll_behavior, children));
                 self.record_tree_layout(node_id, layout);
             }
             TreePass::Update(results) => {
-                let mut handle = handle.clone();
+                let handle = handle.clone();
                 let layout = self.current_tree_layout_or_panic(node_id);
                 handle.with_inner_mut(|area| {
                     area.update_children(self, &mut **results, node_id, layout, scroll_behavior, children);
                 });
             }
             TreePass::Paint => {
-                let mut handle = handle.clone();
+                let handle = handle.clone();
                 let layout = self.current_tree_layout_or_panic(node_id);
                 handle.with_inner_mut(|area| {
                     area.paint_children(self, node_id, layout, opt, scroll_behavior, children);
@@ -552,6 +544,7 @@ impl TraversalHost {
     }
 
     /// Evaluates a prebuilt widget tree using the current container layout.
+    #[cfg(test)]
     pub(crate) fn widget_tree(&mut self, results: &mut FrameResults, tree: &WidgetTree) {
         // Layout must always happen before update and paint so the cache contains every rect the
         // later passes reuse. Update then walks the whole tree before paint records any commands.

@@ -90,7 +90,7 @@ impl TraversalHost {
                     canvas.flush();
                     canvas.set_clip_rect(prev_clip);
                 }
-                Some(Command::RetainedScrollArea { mut handle }) => {
+                Some(Command::RetainedScrollArea { handle }) => {
                     canvas.flush();
                     handle.render(canvas);
                     canvas.flush();

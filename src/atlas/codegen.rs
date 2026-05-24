@@ -9,7 +9,13 @@ impl AtlasHandle {
     /// Serializes the atlas into Rust source files for reuse at build time.
     pub fn to_rust_files(&self, atlas_name: &str, format: SourceFormat, path: &str) -> Result<()> {
         let mut font_meta = String::new();
-        font_meta.push_str(format!("use microui_redux::*; pub const {} : AtlasSource = AtlasSource {{\n", atlas_name).as_str());
+        font_meta.push_str(
+            format!(
+                "use microui_redux::prelude::*; use microui_redux::AtlasSource; pub const {} : AtlasSource = AtlasSource {{\n",
+                atlas_name
+            )
+            .as_str(),
+        );
         font_meta.push_str(format!("width: {}, height: {},\n", self.width(), self.height()).as_str());
         let mut icons = String::from_str("&[\n").unwrap();
         for (i, r) in &self.0.borrow().icons {

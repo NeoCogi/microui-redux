@@ -34,7 +34,7 @@ use std::collections::HashMap;
 
 use rs_math3d::{Dimensioni, Recti};
 
-use crate::input::{ControlState, ResourceState};
+use crate::input::ControlState;
 use super::NodeId;
 
 /// Geometry resolved for a retained node in one frame.
@@ -59,37 +59,14 @@ impl NodeLayout {
     }
 }
 
-/// Interaction data sampled for a retained node in one frame.
-#[allow(dead_code)]
-#[derive(Copy, Clone, Debug)]
-pub struct NodeInteraction {
-    /// Control state observed while handling the node this frame.
-    pub control: ControlState,
-    /// Resource state returned by the node this frame.
-    pub result: ResourceState,
-}
-
-impl NodeInteraction {
-    /// Creates an interaction snapshot for one node.
-    pub const fn new(control: ControlState, result: ResourceState) -> Self {
-        Self { control, result }
-    }
-}
-
-impl Default for NodeInteraction {
-    fn default() -> Self {
-        Self::new(ControlState::default(), ResourceState::NONE)
-    }
-}
-
 /// Previous/current frame cache for widget tree nodes.
 ///
-/// Layout and interaction are stored in separate generations so retained traversal can read
-/// previous-frame geometry while writing the next frame's layout and update outputs independently.
+/// Layout and control state are stored separately so retained traversal can read previous-frame
+/// geometry while painting with the control state produced by the current update pass.
 #[derive(Default)]
 pub struct WidgetTreeCache {
     layout: FrameCache<NodeLayout>,
-    interaction: FrameCache<NodeInteraction>,
+    control: FrameCache<ControlState>,
 }
 
 #[derive(Default)]
@@ -130,19 +107,19 @@ impl WidgetTreeCache {
     /// Clears the in-progress frame cache while preserving the committed frame.
     pub fn begin_frame(&mut self) {
         self.layout.begin_frame();
-        self.interaction.begin_frame();
+        self.control.begin_frame();
     }
 
     /// Publishes the current frame cache as the previous frame for the next run.
     pub fn finish_frame(&mut self) {
         self.layout.finish_frame();
-        self.interaction.finish_frame();
+        self.control.finish_frame();
     }
 
     /// Drops both previous and current cached node data.
     pub fn clear(&mut self) {
         self.layout.clear();
-        self.interaction.clear();
+        self.control.clear();
     }
 
     /// Returns the previous frame layout for `node_id`.
@@ -155,16 +132,9 @@ impl WidgetTreeCache {
         self.layout.current(node_id)
     }
 
-    /// Returns the previous frame interaction for `node_id`.
-    #[allow(dead_code)]
-    pub fn prev_interaction(&self, node_id: NodeId) -> Option<&NodeInteraction> {
-        self.interaction.previous(node_id)
-    }
-
-    /// Returns the current frame interaction for `node_id`.
-    #[allow(dead_code)]
-    pub fn current_interaction(&self, node_id: NodeId) -> Option<&NodeInteraction> {
-        self.interaction.current(node_id)
+    /// Returns the current frame control state for `node_id`.
+    pub fn current_control(&self, node_id: NodeId) -> Option<&ControlState> {
+        self.control.current(node_id)
     }
 
     /// Records the current frame layout for `node_id`.
@@ -173,10 +143,10 @@ impl WidgetTreeCache {
         debug_assert!(prev.is_none(), "Node {:?} layout was recorded more than once in the same frame", node_id);
     }
 
-    /// Records the current frame interaction for `node_id`.
-    pub fn record_interaction(&mut self, node_id: NodeId, interaction: NodeInteraction) {
-        let prev = self.interaction.record(node_id, interaction);
-        debug_assert!(prev.is_none(), "Node {:?} interaction was recorded more than once in the same frame", node_id);
+    /// Records the current frame control state for `node_id`.
+    pub fn record_control(&mut self, node_id: NodeId, control: ControlState) {
+        let prev = self.control.record(node_id, control);
+        debug_assert!(prev.is_none(), "Node {:?} control state was recorded more than once in the same frame", node_id);
     }
 }
 

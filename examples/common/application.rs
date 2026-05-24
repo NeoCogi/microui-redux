@@ -33,7 +33,10 @@
 //! loop used by retained-mode demos.
 use crate::*;
 use common::*;
-use microui_redux::{self as microui, AtlasHandle, Dimensioni, RendererHandle};
+use microui_redux::{
+    self as microui,
+    prelude::{AtlasHandle, Dimensioni, RendererHandle},
+};
 
 #[cfg(feature = "example-glow")]
 use std::sync::Arc;

@@ -182,15 +182,10 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
         let scroll_area = scroll_area.clone();
         let child = child.clone();
         move |tree| {
-            tree.scroll_area_with(
-                NodeOptions::with_policy(Policy::fill()),
-                scroll_area.clone(),
-                ContainerOption::NONE,
-                ScrollBehavior::NONE,
-                |tree| {
-                    tree.widget_with(NodeOptions::with_policy(Policy::fixed(95, 200)), child.clone());
-                },
-            );
+            tree.node(NodeOptions::with_policy(Policy::fill()))
+                .scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    tree.node(NodeOptions::with_policy(Policy::fixed(95, 200))).widget(child.clone());
+                });
         }
     });
     let root = ctx.create_window("window", rect(0, 0, 100, 100), tree);
@@ -281,7 +276,7 @@ fn closing_window_resets_transient_render_state() {
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
     let root = ctx.create_window("window", rect(0, 0, 80, 40), WidgetTree::default());
-    let mut window = ctx.root_handle(root).unwrap();
+    let window = ctx.root_handle(root).unwrap();
 
     {
         let mut inner = window.inner_mut();
@@ -316,7 +311,7 @@ fn reshown_windows_prepare_on_first_render_after_a_gap() {
     ctx.update_ui();
 
     {
-        let mut window = ctx.root_handle(root).unwrap();
+        let window = ctx.root_handle(root).unwrap();
         let mut inner = window.inner_mut();
         inner.main.debug_push_command(Command::None);
     }
@@ -449,11 +444,11 @@ fn legacy_panel_container_aliases_render_scroll_area_node() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-    let panel: crate::ContainerHandle = ctx.new_panel("legacy panel");
+    let panel: crate::advanced::ContainerHandle = ctx.new_panel("legacy panel");
     let tree = WidgetTreeBuilder::build({
         let panel = panel.clone();
         move |tree| {
-            tree.container(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                 tree.text("legacy child");
             });
         }
@@ -700,7 +695,9 @@ fn registered_window_renders_across_frames_without_resubmission() {
     let handle = ctx.root_handle(root).unwrap();
     assert!(window_texts(&handle).iter().any(|text| text == "before"));
 
-    text.borrow_mut().text = "after".to_string();
+    text.update(|text| {
+        text.text = "after".to_string();
+    });
     ctx.update_ui();
     let handle = ctx.root_handle(root).unwrap();
     let texts = window_texts(&handle);
@@ -1073,11 +1070,11 @@ fn run_combo_frame(
     items: &[WidgetHandle<ListItem>; 2],
     item_ids: &[NodeId; 2],
 ) -> Option<String> {
-    let labels: Vec<String> = items.iter().map(|item| item.borrow().label.clone()).collect();
-    combo.borrow_mut().update_items(&labels);
-    let combo_anchor = combo.borrow().anchor();
-    let mut popup = combo.borrow().popup.clone();
-    if combo.borrow().is_open() {
+    let labels: Vec<String> = items.iter().map(|item| item.read(|item| item.label.clone())).collect();
+    combo.update(|combo| combo.update_items(&labels));
+    let combo_anchor = combo.read(Combo::anchor);
+    let popup = combo.read(Combo::popup);
+    if combo.read(Combo::is_open) {
         ctx.set_root_visible(popup_root, true);
         popup.set_rect(combo_anchor);
     } else {
@@ -1088,7 +1085,7 @@ fn run_combo_frame(
     let results = ctx.committed_results();
     for (idx, node_id) in item_ids.iter().enumerate() {
         if results.state_of_retained(RetainedId::root_node(popup_root, *node_id)).is_submitted() {
-            selected_label = combo.borrow_mut().select(idx, &labels);
+            selected_label = combo.update(|combo| combo.select(idx, &labels));
             break;
         }
     }
@@ -1144,7 +1141,7 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
     ctx.mouseup(10, 10, MouseButton::LEFT);
     run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
-    assert!(combo.borrow().is_open());
+    assert!(combo.read(Combo::is_open));
     assert!(ctx.root_handle(popup_root).unwrap().is_open());
 
     let popup_rect = ctx.root_handle(popup_root).unwrap().rect();
@@ -1158,10 +1155,10 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     let selected = run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
 
     assert_eq!(selected.as_deref(), Some("Apple"));
-    assert!(!combo.borrow().is_open());
+    assert!(!combo.read(Combo::is_open));
     assert!(!ctx.root_handle(popup_root).unwrap().is_open());
 
     run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
-    assert!(!combo.borrow().is_open());
+    assert!(!combo.read(Combo::is_open));
     assert!(!ctx.root_handle(popup_root).unwrap().is_open());
 }

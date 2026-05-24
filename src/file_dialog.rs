@@ -305,8 +305,10 @@ impl FileDialogState {
 
     /// Synchronizes text boxes and tree structure with the current dialog state.
     fn sync_retained_view(&mut self) {
-        if self.path_box.borrow().buf != self.current_working_directory {
-            self.path_box.borrow_mut().buf = self.current_working_directory.clone();
+        if self.path_box.read(|path_box| path_box.text() != self.current_working_directory) {
+            self.path_box.update(|path_box| {
+                path_box.set_text(self.current_working_directory.clone());
+            });
         }
         self.rebuild_tree();
     }
@@ -318,7 +320,9 @@ impl FileDialogState {
         }
         self.current_working_directory = path;
         self.selected_folder = None;
-        self.path_box.borrow_mut().buf = self.current_working_directory.clone();
+        self.path_box.update(|path_box| {
+            path_box.set_text(self.current_working_directory.clone());
+        });
         true
     }
 
@@ -350,7 +354,7 @@ impl FileDialogState {
         }
 
         if self.root_submitted(results, self.path_box_id) || self.root_submitted(results, self.go_button_id) {
-            let path_input = self.path_box.borrow().buf.clone();
+            let path_input = self.path_box.read(|path_box| path_box.text().to_owned());
             if let Some(path) = Self::resolve_directory_path(self.current_working_directory.as_str(), path_input.as_str()) {
                 return self.navigate_to(path);
             }
@@ -388,7 +392,9 @@ impl FileDialogState {
         });
 
         if let Some(name) = selected_file {
-            self.tmp_file_name.borrow_mut().buf = name;
+            self.tmp_file_name.update(|tmp_file_name| {
+                tmp_file_name.set_text(name);
+            });
         }
     }
 
@@ -401,7 +407,7 @@ impl FileDialogState {
         }
 
         if self.root_submitted(results, self.ok_button_id) {
-            let typed_name = self.tmp_file_name.borrow().buf.clone();
+            let typed_name = self.tmp_file_name.read(|tmp_file_name| tmp_file_name.text().to_owned());
             if typed_name.is_empty() {
                 self.file_name = None;
                 self.file_path = None;
@@ -464,7 +470,9 @@ impl FileDialogState {
             spacer_label: widget_handle(ListItem::with_opt("", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),
             tree: WidgetTree::default(),
         };
-        dialog.path_box.borrow_mut().buf = dialog.current_working_directory.clone();
+        dialog.path_box.update(|path_box| {
+            path_box.set_text(dialog.current_working_directory.clone());
+        });
         dialog.refresh_entries();
         dialog.sync_retained_root(ctx);
         dialog

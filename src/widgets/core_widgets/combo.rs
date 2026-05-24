@@ -9,11 +9,11 @@ use super::*;
 #[derive(Clone)]
 pub struct Combo {
     /// Popup window backing the dropdown list.
-    pub popup: WindowHandle,
+    popup: WindowHandle,
     /// Currently selected item index.
-    pub selected: usize,
+    selected: usize,
     /// Whether the combo popup should be open.
-    pub open: bool,
+    open: bool,
     /// Widget options applied to the combo header.
     pub opt: WidgetOption,
     /// Scroll behavior applied to the combo header.
@@ -61,9 +61,25 @@ impl Combo {
         self.last_anchor
     }
 
+    /// Returns a clone of the popup window handle backing this combo.
+    pub fn popup(&self) -> WindowHandle {
+        self.popup.clone()
+    }
+
+    /// Returns the currently selected item index.
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
     /// Returns `true` when the combo popup should be open this frame.
     pub fn is_open(&self) -> bool {
         self.open
+    }
+
+    /// Opens the popup and marks the combo open.
+    pub fn open_popup(&mut self) {
+        self.popup.open();
+        self.open = true;
     }
 
     /// Closes the popup and clears any popup-local focus state.

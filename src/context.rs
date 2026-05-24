@@ -178,12 +178,13 @@ impl<R: Renderer> Context<R> {
         self.frame_results.finish_frame();
 
         let mouse_pressed = self.input.borrow().mouse_pressed;
-        match (mouse_pressed.is_none(), &self.next_hover_root) {
-            (false, Some(next_hover_root)) if next_hover_root.zindex() < self.last_zindex && next_hover_root.zindex() >= 0 => {
-                // Clicking a window brings it forward after all roots have had a chance to report hover.
-                self.bring_to_front(&mut next_hover_root.clone());
-            }
-            _ => (),
+        let next_front = match (mouse_pressed.is_none(), &self.next_hover_root) {
+            (false, Some(next_hover_root)) if next_hover_root.zindex() < self.last_zindex && next_hover_root.zindex() >= 0 => Some(next_hover_root.clone()),
+            _ => None,
+        };
+        if let Some(next_hover_root) = next_front {
+            // Clicking a window brings it forward after all roots have had a chance to report hover.
+            self.bring_to_front(&next_hover_root);
         }
 
         self.input.borrow_mut().epilogue();

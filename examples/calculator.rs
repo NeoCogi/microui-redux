@@ -36,7 +36,7 @@ mod common;
 
 use application::Application;
 use common::{atlas_assets, *};
-use microui_redux::prelude::*;
+use microui_redux::{advanced::WindowHandle, prelude::*};
 
 const DISPLAY_MAX_LEN: usize = 24;
 const DISPLAY_HEIGHT_FRACTION: f32 = 0.20;
@@ -348,7 +348,7 @@ fn main() {
         let mut button_node_ids = [NodeId::default(); 20];
         let tree = WidgetTreeBuilder::build(|tree| {
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION), |tree| {
-                tree.widget(display.clone());
+                tree.widget(&display);
             });
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
                 tree.column(|tree| {
@@ -361,7 +361,7 @@ fn main() {
                     let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
                     tree.grid(&columns, &rows, |tree| {
                         for (index, button) in button_widgets.iter().enumerate() {
-                            button_node_ids[index] = tree.widget(button.clone());
+                            button_node_ids[index] = tree.widget(button);
                         }
                     });
                 });
@@ -385,11 +385,9 @@ fn main() {
     fw.event_loop(|ctx, state| {
         let dim = ctx.canvas().current_dimension();
         state.window.set_size(&dim);
-        {
-            let mut display = state.display.borrow_mut();
-            display.buf = state.calculator.display_text().to_string();
-            display.cursor = display.buf.len();
-        }
+        state.display.update(|display| {
+            display.set_text(state.calculator.display_text());
+        });
 
         ctx.update_ui();
 

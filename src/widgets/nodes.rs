@@ -107,11 +107,6 @@ pub struct Node {
 
 impl Node {
     /// Creates a header node state with the default widget options.
-    pub fn new(label: impl Into<String>, state: NodeStateValue) -> Self {
-        Self::header(label, state)
-    }
-
-    /// Creates a header node state with the default widget options.
     pub fn header(label: impl Into<String>, state: NodeStateValue) -> Self {
         Self {
             label: label.into(),
@@ -135,33 +130,10 @@ impl Node {
         }
     }
 
-    /// Creates a header node state with explicit widget options.
-    pub fn with_opt(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self {
-        Self::with_opt_header(label, state, opt)
-    }
-
-    /// Creates a header node state with explicit widget options.
-    pub fn with_opt_header(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self {
-        Self {
-            label: label.into(),
-            state,
-            font: FontChoice::default(),
-            opt,
-            scroll_behavior: ScrollBehavior::NONE,
-            kind: NodeKind::Header,
-        }
-    }
-
-    /// Creates a tree node state with explicit widget options.
-    pub fn with_opt_tree(label: impl Into<String>, state: NodeStateValue, opt: WidgetOption) -> Self {
-        Self {
-            label: label.into(),
-            state,
-            font: FontChoice::default(),
-            opt,
-            scroll_behavior: ScrollBehavior::NONE,
-            kind: NodeKind::Tree,
-        }
+    /// Applies widget options to this node state.
+    pub fn with_options(mut self, opt: WidgetOption) -> Self {
+        self.opt = opt;
+        self
     }
 
     /// Returns `true` when the node is expanded.
