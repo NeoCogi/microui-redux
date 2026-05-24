@@ -55,6 +55,7 @@
 //! Text areas share the UTF-8 editing core with textboxes but track line layout, vertical scroll,
 //! and mouse-driven cursor placement across multiple wrapped lines.
 use crate::*;
+use super::WidgetConfig;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::text_layout::{build_text_lines, TextLine};
 
@@ -74,12 +75,8 @@ pub struct TextArea {
     scroll: Vec2i,
     /// Wrapping mode used when rendering the buffer.
     pub wrap: TextWrap,
-    /// Font selection used for the text area's content.
-    pub font: FontChoice,
-    /// Widget options applied to the text area.
-    pub opt: WidgetOption,
-    /// Scroll behavior applied to the text area.
-    pub scroll_behavior: ScrollBehavior,
+    /// Shared widget configuration.
+    pub config: WidgetConfig,
     preferred_x: Option<i32>,
     dragging_y: bool,
     dragging_x: bool,
@@ -95,9 +92,7 @@ impl TextArea {
             cursor,
             scroll: vec2(0, 0),
             wrap: TextWrap::None,
-            font: FontChoice::default(),
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::GRAB_SCROLL,
+            config: WidgetConfig::new(WidgetOption::NONE, ScrollBehavior::GRAB_SCROLL),
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
@@ -113,9 +108,7 @@ impl TextArea {
             cursor,
             scroll: vec2(0, 0),
             wrap: TextWrap::None,
-            font: FontChoice::default(),
-            opt,
-            scroll_behavior: ScrollBehavior::GRAB_SCROLL,
+            config: WidgetConfig::new(opt, ScrollBehavior::GRAB_SCROLL),
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
@@ -172,7 +165,7 @@ impl TextArea {
     /// Measures the text area content, respecting wrapping and available constraints.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
-        let font = style.resolve_font_choice(self.font);
+        let font = style.resolve_font_choice(self.config.font);
         let max_width = if self.wrap == TextWrap::Word && avail.width > 0 {
             (avail.width - padding * 2).max(1)
         } else {
@@ -195,13 +188,13 @@ impl TextArea {
 
     /// Applies multiline editing, scrolling, and scrollbar dragging.
     fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.style().resolve_font_choice(self.config.font);
         textarea_update(ctx, control, self, font)
     }
 
     /// Paints the multiline editor and scrollbars.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.style().resolve_font_choice(self.config.font);
         textarea_paint(ctx, control, self, font);
     }
 }
@@ -226,7 +219,7 @@ struct TextAreaLayout {
 
 /// Resolves wrapped lines, content size, scrollbar visibility, and scrollbar geometry.
 fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextAreaLayout {
-    let bounds = ctx.rect();
+    let bounds = ctx.screen_rect();
     let style = ctx.style();
     let padding = style.padding;
     let scrollbar_size = style.scrollbar_size;
@@ -347,7 +340,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         }
     }
 
-    if !input.mouse_down.is_left() {
+    if !input.mouse_down.intersects(MouseButton::LEFT) {
         state.dragging_y = false;
         state.dragging_x = false;
     }
@@ -361,7 +354,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
             layout.vscroll_base.width,
             layout.vscroll_base.height,
         );
-        if input.mouse_pressed.is_left() && vscroll_base_local.contains(&input.mouse_pos) {
+        if input.mouse_pressed.intersects(MouseButton::LEFT) && vscroll_base_local.contains(&input.mouse_pos) {
             // Track scrollbar drag separately so text clicks do not also move the caret.
             state.dragging_y = true;
             clicked_scrollbar = true;
@@ -378,7 +371,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
             layout.hscroll_base.width,
             layout.hscroll_base.height,
         );
-        if input.mouse_pressed.is_left() && hscroll_base_local.contains(&input.mouse_pos) {
+        if input.mouse_pressed.intersects(MouseButton::LEFT) && hscroll_base_local.contains(&input.mouse_pos) {
             state.dragging_x = true;
             clicked_scrollbar = true;
         }
@@ -391,14 +384,14 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     let mut caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
     if control.focused {
-        if input.key_code_pressed.is_end() {
+        if input.key_code_pressed.intersects(KeyCode::END) {
             cursor_pos = layout.lines[cursor_line].end;
             caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
             ensure_visible = true;
             reset_preferred = true;
         }
 
-        if input.key_code_pressed.is_up() {
+        if input.key_code_pressed.intersects(KeyCode::UP) {
             // Vertical movement preserves preferred x so repeated Up/Down follows a visual column.
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line > 0 {
@@ -410,7 +403,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
             vertical_moved = true;
         }
 
-        if input.key_code_pressed.is_down() {
+        if input.key_code_pressed.intersects(KeyCode::DOWN) {
             // Vertical movement preserves preferred x so repeated Up/Down follows a visual column.
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line + 1 < layout.lines.len() {
@@ -423,7 +416,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         }
     }
 
-    if control.focused && input.mouse_pressed.is_left() && ctx.mouse_over(layout.bounds) && !clicked_scrollbar {
+    if control.focused && input.mouse_pressed.intersects(MouseButton::LEFT) && ctx.mouse_over(layout.bounds) && !clicked_scrollbar {
         // Convert a widget-local click to content-local coordinates before resolving cursor.
         let local_x = input.mouse_pos.x - (layout.body_local.x + layout.padding) + state.scroll.x;
         let local_y = input.mouse_pos.y - (layout.body_local.y + layout.padding) + state.scroll.y;
@@ -479,7 +472,7 @@ fn textarea_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut T
     let cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
     let caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
-    ctx.draw_widget_frame(control, layout.bounds, ControlColor::Base, state.opt);
+    ctx.draw_widget_frame(control, layout.bounds, ControlColor::Base, state.config.opt);
 
     let text_origin = vec2(layout.body.x + layout.padding - state.scroll.x, layout.body.y + layout.padding - state.scroll.y);
     let color = ctx.style().colors[ControlColor::Text as usize];
@@ -533,11 +526,11 @@ fn textarea_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut T
 
 impl Widget for TextArea {
     fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
+        &self.config.opt
     }
 
     fn scroll_behavior(&self) -> ScrollBehavior {
-        self.scroll_behavior
+        self.config.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
@@ -570,7 +563,7 @@ impl Widget for TextArea {
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
-        self.opt | WidgetOption::HOLD_FOCUS
+        self.config.opt | WidgetOption::HOLD_FOCUS
     }
 
     fn focus_policy(&self) -> FocusPolicy {

@@ -14,12 +14,8 @@ pub struct Combo {
     selected: usize,
     /// Whether the combo popup should be open.
     open: bool,
-    /// Widget options applied to the combo header.
-    pub opt: WidgetOption,
-    /// Scroll behavior applied to the combo header.
-    pub scroll_behavior: ScrollBehavior,
-    /// Font selection used for the combo label.
-    pub font: FontChoice,
+    /// Shared widget configuration.
+    pub config: WidgetConfig,
     label: String,
     clamped: bool,
     last_anchor: Recti,
@@ -32,9 +28,7 @@ impl Combo {
             popup,
             selected: 0,
             open: false,
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
-            font: FontChoice::default(),
+            config: WidgetConfig::default(),
             label: String::new(),
             clamped: false,
             last_anchor: Recti::default(),
@@ -47,9 +41,7 @@ impl Combo {
             popup,
             selected: 0,
             open: false,
-            opt,
-            scroll_behavior,
-            font: FontChoice::default(),
+            config: WidgetConfig::new(opt, scroll_behavior),
             label: String::new(),
             clamped: false,
             last_anchor: Recti::default(),
@@ -95,11 +87,11 @@ impl Combo {
         let text_w = if self.label.is_empty() {
             0
         } else {
-            text_size(style, atlas, self.font, self.label.as_str()).width
+            text_size(style, atlas, self.config.font, self.label.as_str()).width
         };
         let indicator = atlas.get_icon_size(EXPAND_DOWN_ICON);
         let width = (padding * 3 + text_w + indicator.width).max(0);
-        let height = content_height(style, atlas, self.font, indicator.height);
+        let height = content_height(style, atlas, self.config.font, indicator.height);
         Dimensioni::new(width, height)
     }
 
@@ -173,9 +165,9 @@ impl Combo {
 
     /// Paints the combo header and records the popup anchor below it.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        let header = ctx.rect();
+        let header = ctx.screen_rect();
         self.last_anchor = rect(header.x, header.y + header.height, header.width, 1);
-        ctx.draw_widget_frame(control, header, ControlColor::Button, self.opt);
+        ctx.draw_widget_frame(control, header, ControlColor::Button, self.config.opt);
 
         let indicator_size = ctx.atlas().get_icon_size(EXPAND_DOWN_ICON);
         let indicator_x = header.x + header.width - indicator_size.width;
@@ -185,10 +177,10 @@ impl Combo {
         let mut text_rect = header;
         let reserved_width = indicator_size.width;
         text_rect.width = (text_rect.width - reserved_width).max(0);
-        let font = ctx.style().resolve_font_choice(self.font);
-        ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, ControlColor::Text, self.opt);
+        let font = ctx.style().resolve_font_choice(self.config.font);
+        ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, ControlColor::Text, self.config.opt);
 
-        ctx.draw_widget_frame(control, indicator, ControlColor::Button, self.opt);
+        ctx.draw_widget_frame(control, indicator, ControlColor::Button, self.config.opt);
         let icon_color = ctx.style().colors[ControlColor::Text as usize];
         ctx.draw_icon(EXPAND_DOWN_ICON, indicator, icon_color);
     }
@@ -196,11 +188,11 @@ impl Combo {
 
 impl Widget for Combo {
     fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
+        &self.config.opt
     }
 
     fn scroll_behavior(&self) -> ScrollBehavior {
-        self.scroll_behavior
+        self.config.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

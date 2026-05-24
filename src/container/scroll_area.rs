@@ -89,6 +89,10 @@ impl ScrollArea {
         self.host.finish();
     }
 
+    pub(crate) fn host(&self) -> &TraversalHost {
+        &self.host
+    }
+
     /// Applies parent-driven state that must stay synchronized on every scroll-area pass.
     fn apply_base_state(host: &mut TraversalHost, parent: &TraversalHost, scope: Id) {
         host.set_internal_id_seed(scope);
@@ -102,43 +106,23 @@ impl ScrollArea {
         rect
     }
 
-    /// Measures this scroll area through a scratch host so live state is not mutated.
-    fn measure_layout(
-        &self,
-        parent: &mut TraversalHost,
-        results: &FrameResults,
-        node_id: NodeId,
-        scroll_behavior: ScrollBehavior,
-        policy: Policy,
-        children: &[WidgetTreeNode],
-    ) -> NodeLayout {
-        let mut scratch = self.host.measurement_scratch();
-        scratch.measurement_mode = true;
-        Self::apply_base_state(&mut scratch, parent, parent.scroll_area_scope_id(node_id));
-        scratch.prepare();
-        let rect = Self::allocate_layout_rect(parent, &mut scratch, policy);
-        scratch.layout_body_until_scrollbars_stable(results, rect, scroll_behavior, children)
-    }
-
     /// Runs the layout pass for this scroll area's child subtree.
     pub(crate) fn layout_children(
         &mut self,
         parent: &mut TraversalHost,
         results: &FrameResults,
+        resources: &WidgetTreeResources,
         node_id: NodeId,
         policy: Policy,
         scroll_behavior: ScrollBehavior,
         children: &[WidgetTreeNode],
     ) -> NodeLayout {
-        if parent.measurement_mode {
-            return self.measure_layout(parent, results, node_id, scroll_behavior, policy, children);
-        }
-
         let scope = parent.scroll_area_scope_id(node_id);
         Self::apply_base_state(&mut self.host, parent, scope);
         self.host.prepare();
         let rect = Self::allocate_layout_rect(parent, &mut self.host, policy);
-        self.host.layout_body_until_scrollbars_stable(results, rect, scroll_behavior, children)
+        self.host
+            .layout_body_until_scrollbars_stable(results, resources, rect, scroll_behavior, children)
     }
 
     /// Runs the update pass for this scroll area's child subtree.
@@ -146,6 +130,7 @@ impl ScrollArea {
         &mut self,
         parent: &mut TraversalHost,
         results: &mut FrameResults,
+        resources: &WidgetTreeResources,
         node_id: NodeId,
         layout: NodeLayout,
         scroll_behavior: ScrollBehavior,
@@ -163,7 +148,7 @@ impl ScrollArea {
         }
 
         Self::apply_base_state(&mut self.host, parent, scope);
-        self.host.update_body_tree(results, layout, scroll_behavior, children);
+        self.host.update_body_tree(results, resources, layout, scroll_behavior, children);
         let pending = self.host.interaction.take_pending_scroll();
         if parent.interaction.pending_scroll.is_none() {
             parent.interaction.seed_pending_scroll(pending);
@@ -174,6 +159,7 @@ impl ScrollArea {
     pub(crate) fn paint_children(
         &mut self,
         parent: &mut TraversalHost,
+        resources: &WidgetTreeResources,
         node_id: NodeId,
         layout: NodeLayout,
         opt: ContainerOption,
@@ -183,11 +169,11 @@ impl ScrollArea {
         let scope = parent.scroll_area_scope_id(node_id);
         Self::apply_base_state(&mut self.host, parent, scope);
 
-        if !opt.has_no_frame() {
+        if !opt.intersects(ContainerOption::NO_FRAME) {
             parent.draw_frame(layout.rect, ControlColor::PanelBG);
         }
 
-        self.host.paint_body_tree(layout, scroll_behavior, children);
+        self.host.paint_body_tree(resources, layout, scroll_behavior, children);
         self.finish_frame();
     }
 }

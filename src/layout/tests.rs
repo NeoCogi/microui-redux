@@ -38,6 +38,34 @@ fn layout_remainder_consumes_available_width() {
 }
 
 #[test]
+fn layout_resolution_order_uses_node_track_measure_then_style_fallback() {
+    let mut layout = LayoutManager::default();
+    layout.style = Style::default();
+    let body = rect(0, 0, 160, 80);
+    layout.reset(body, vec2(0, 0));
+    layout.set_default_cell_height(10);
+
+    layout.row(&[SizePolicy::Fixed(40), SizePolicy::Weight(1.0), SizePolicy::Auto], SizePolicy::Fixed(12));
+    let preferred = Dimensioni::new(70, 18);
+
+    let track_over_measure = layout.next_with_preferred(preferred);
+    let node_over_track = layout.next_with_policies(preferred, SizePolicy::Fixed(30), SizePolicy::Fixed(8));
+    let auto_uses_measure = layout.next_with_preferred(preferred);
+
+    assert_eq!(track_over_measure.width, 40);
+    assert_eq!(track_over_measure.height, 12);
+    assert_eq!(node_over_track.width, 30);
+    assert_eq!(node_over_track.height, 8);
+    assert_eq!(auto_uses_measure.width, preferred.width);
+    assert_eq!(auto_uses_measure.height, 12);
+
+    layout.row(&[SizePolicy::Auto], SizePolicy::Auto);
+    let style_fallback = layout.next_with_preferred(Dimensioni::default());
+    assert_eq!(style_fallback.width, layout.style.default_cell_width + layout.style.padding * 2);
+    assert_eq!(style_fallback.height, 10);
+}
+
+#[test]
 fn stack_flow_uses_full_width_by_default() {
     let mut layout = LayoutManager::default();
     layout.style = Style::default();

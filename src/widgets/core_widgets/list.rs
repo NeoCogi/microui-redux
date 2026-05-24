@@ -12,12 +12,8 @@ pub struct ListItem {
     pub label: String,
     /// Optional atlas icon rendered alongside the label.
     pub icon: Option<IconId>,
-    /// Font selection used for the list item label.
-    pub font: FontChoice,
-    /// Widget options applied to the list item.
-    pub opt: WidgetOption,
-    /// Scroll behavior applied to the list item.
-    pub scroll_behavior: ScrollBehavior,
+    /// Shared widget configuration.
+    pub config: WidgetConfig,
 }
 
 impl ListItem {
@@ -26,9 +22,7 @@ impl ListItem {
         Self {
             label: label.into(),
             icon: None,
-            font: FontChoice::default(),
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::default(),
         }
     }
 
@@ -37,9 +31,7 @@ impl ListItem {
         Self {
             label: label.into(),
             icon: None,
-            font: FontChoice::default(),
-            opt,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
         }
     }
 
@@ -48,9 +40,7 @@ impl ListItem {
         Self {
             label: label.into(),
             icon: Some(icon),
-            font: FontChoice::default(),
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::default(),
         }
     }
 
@@ -59,9 +49,7 @@ impl ListItem {
         Self {
             label: label.into(),
             icon: Some(icon),
-            font: FontChoice::default(),
-            opt,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
         }
     }
 
@@ -76,9 +64,9 @@ impl ListItem {
             visual_h = size.height;
         }
         if !self.label.is_empty() {
-            width += text_size(style, atlas, self.font, &self.label).width;
+            width += text_size(style, atlas, self.config.font, &self.label).width;
         }
-        let height = content_height(style, atlas, self.font, visual_h);
+        let height = content_height(style, atlas, self.config.font, visual_h);
         Dimensioni::new(width.max(0), height)
     }
 
@@ -89,7 +77,7 @@ impl ListItem {
 
     /// Paints row highlight, optional icon, and label.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        let bounds = ctx.rect();
+        let bounds = ctx.screen_rect();
 
         if control.focused || control.hovered {
             let mut color = ControlColor::Button;
@@ -118,8 +106,8 @@ impl ListItem {
         }
 
         if !self.label.is_empty() {
-            let font = ctx.style().resolve_font_choice(self.font);
-            ctx.draw_control_text_with_font(font, &self.label, text_rect, ControlColor::Text, self.opt);
+            let font = ctx.style().resolve_font_choice(self.config.font);
+            ctx.draw_control_text_with_font(font, &self.label, text_rect, ControlColor::Text, self.config.opt);
         }
     }
 }
@@ -133,12 +121,8 @@ pub struct ListBox {
     pub label: String,
     /// Optional image rendered alongside the label.
     pub image: Option<Image>,
-    /// Font selection used for the list box label.
-    pub font: FontChoice,
-    /// Widget options applied to the list box.
-    pub opt: WidgetOption,
-    /// Scroll behavior applied to the list box.
-    pub scroll_behavior: ScrollBehavior,
+    /// Shared widget configuration.
+    pub config: WidgetConfig,
 }
 
 impl ListBox {
@@ -147,9 +131,7 @@ impl ListBox {
         Self {
             label: label.into(),
             image,
-            font: FontChoice::default(),
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::default(),
         }
     }
 
@@ -158,16 +140,14 @@ impl ListBox {
         Self {
             label: label.into(),
             image,
-            font: FontChoice::default(),
-            opt,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
         }
     }
 
     /// Measures list-box inline label and optional image.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let visual = self.image.map(|image| image.size(atlas));
-        inline_content_size(style, atlas, self.font, &self.label, visual)
+        inline_content_size(style, atlas, self.config.font, &self.label, visual)
     }
 
     /// List boxes submit on click and otherwise keep no local transient state.
@@ -177,8 +157,8 @@ impl ListBox {
 
     /// Paints list-box frame, label, and optional image.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        let rect = ctx.rect();
-        if !self.opt.has_no_frame() {
+        let rect = ctx.screen_rect();
+        if !self.config.opt.intersects(WidgetOption::NO_FRAME) {
             if let Some(colorid) = widget_fill_color(control, ControlColor::Button, WidgetFillOption::HOVER | WidgetFillOption::CLICK) {
                 ctx.draw_frame(rect, colorid);
             }
@@ -186,8 +166,8 @@ impl ListBox {
         let visual_size = self.image.map(|image| image.size(ctx.atlas()));
         let layout = layout_inline_content(rect, ctx.style(), &self.label, visual_size);
         if !self.label.is_empty() {
-            let font = ctx.style().resolve_font_choice(self.font);
-            ctx.draw_control_text_with_font(font, &self.label, layout.text, ControlColor::Text, self.opt);
+            let font = ctx.style().resolve_font_choice(self.config.font);
+            ctx.draw_control_text_with_font(font, &self.label, layout.text, ControlColor::Text, self.config.opt);
         }
         if let (Some(image), Some(visual)) = (self.image, layout.visual) {
             let color = ctx.style().colors[ControlColor::Text as usize];

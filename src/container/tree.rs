@@ -88,13 +88,13 @@ impl TraversalHost {
     }
 
     /// Returns the previous frame layout for `node_id`, if any.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(crate) fn previous_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
         self.tree_cache.prev_layout(node_id).copied()
     }
 
     /// Returns the current frame layout for `node_id`, if any.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(crate) fn current_node_layout(&self, node_id: NodeId) -> Option<NodeLayout> {
         self.tree_cache.current_layout(node_id).copied()
     }
@@ -158,44 +158,58 @@ impl TraversalHost {
     }
 
     /// Runs the retained layout pass for a slice of sibling tree nodes.
-    pub(crate) fn layout_tree_nodes(&mut self, results: &FrameResults, nodes: &[WidgetTreeNode]) {
+    pub(crate) fn layout_tree_nodes(&mut self, results: &FrameResults, resources: &WidgetTreeResources, nodes: &[WidgetTreeNode]) {
         let mut pass = TreePass::Layout(results);
-        self.visit_tree_nodes(&mut pass, nodes);
+        self.visit_tree_nodes(&mut pass, resources, nodes);
     }
 
     /// Runs the retained widget update pass for a slice of sibling tree nodes.
-    pub(super) fn update_tree_nodes(&mut self, results: &mut FrameResults, nodes: &[WidgetTreeNode]) {
+    pub(super) fn update_tree_nodes(&mut self, results: &mut FrameResults, resources: &WidgetTreeResources, nodes: &[WidgetTreeNode]) {
         let mut pass = TreePass::Update(results);
-        self.visit_tree_nodes(&mut pass, nodes);
+        self.visit_tree_nodes(&mut pass, resources, nodes);
     }
 
     /// Runs the retained widget paint pass for a slice of sibling tree nodes.
-    pub(super) fn paint_tree_nodes(&mut self, nodes: &[WidgetTreeNode]) {
+    pub(super) fn paint_tree_nodes(&mut self, resources: &WidgetTreeResources, nodes: &[WidgetTreeNode]) {
         let mut pass = TreePass::Paint;
-        self.visit_tree_nodes(&mut pass, nodes);
+        self.visit_tree_nodes(&mut pass, resources, nodes);
     }
 
-    fn visit_tree_nodes(&mut self, pass: &mut TreePass<'_>, nodes: &[WidgetTreeNode]) {
+    fn visit_tree_nodes(&mut self, pass: &mut TreePass<'_>, resources: &WidgetTreeResources, nodes: &[WidgetTreeNode]) {
         for node in nodes {
-            self.visit_tree_node(pass, node);
+            self.visit_tree_node(pass, resources, node);
         }
     }
 
-    fn visit_tree_node(&mut self, pass: &mut TreePass<'_>, node: &WidgetTreeNode) {
+    fn visit_tree_node(&mut self, pass: &mut TreePass<'_>, resources: &WidgetTreeResources, node: &WidgetTreeNode) {
         let (node_id, kind, children) = node.parts();
         let policy = node.policy();
         match kind {
-            WidgetTreeNodeKind::Widget { widget } => self.visit_tree_widget(pass, node_id, policy, &**widget),
-            WidgetTreeNodeKind::CustomRender { state, render } => self.visit_tree_custom_render(pass, node_id, policy, state, render),
-            WidgetTreeNodeKind::ScrollArea { handle, opt, scroll_behavior } => {
-                self.visit_tree_scroll_area(pass, node_id, policy, handle, *opt, *scroll_behavior, children);
+            WidgetTreeNodeKind::Widget { resource } => self.visit_tree_widget(pass, node_id, policy, resources.widget(*resource)),
+            WidgetTreeNodeKind::CustomRender { resource } => {
+                let (state, render) = resources.custom_render(*resource);
+                self.visit_tree_custom_render(pass, node_id, policy, state, render);
             }
-            WidgetTreeNodeKind::Header { state } => self.visit_tree_scope(pass, node_id, policy, state, children, false),
-            WidgetTreeNodeKind::Tree { state } => self.visit_tree_scope(pass, node_id, policy, state, children, true),
-            WidgetTreeNodeKind::Row { widths, height } => self.visit_tree_row(pass, node_id, policy, children, widths, *height),
-            WidgetTreeNodeKind::Grid { widths, heights } => self.visit_tree_grid(pass, node_id, policy, children, widths, heights),
-            WidgetTreeNodeKind::Column => self.visit_tree_column(pass, node_id, policy, children),
-            WidgetTreeNodeKind::Stack { width, height, direction } => self.visit_tree_stack(pass, node_id, policy, children, *width, *height, *direction),
+            WidgetTreeNodeKind::ScrollArea { resource, opt, scroll_behavior } => {
+                self.visit_tree_scroll_area(
+                    pass,
+                    resources,
+                    node_id,
+                    policy,
+                    resources.scroll_area(*resource),
+                    *opt,
+                    *scroll_behavior,
+                    children,
+                );
+            }
+            WidgetTreeNodeKind::Header { resource } => self.visit_tree_scope(pass, resources, node_id, policy, resources.node(*resource), children, false),
+            WidgetTreeNodeKind::Tree { resource } => self.visit_tree_scope(pass, resources, node_id, policy, resources.node(*resource), children, true),
+            WidgetTreeNodeKind::Row { widths, height } => self.visit_tree_row(pass, resources, node_id, policy, children, widths, *height),
+            WidgetTreeNodeKind::Grid { widths, heights } => self.visit_tree_grid(pass, resources, node_id, policy, children, widths, heights),
+            WidgetTreeNodeKind::Column => self.visit_tree_column(pass, resources, node_id, policy, children),
+            WidgetTreeNodeKind::Stack { width, height, direction } => {
+                self.visit_tree_stack(pass, resources, node_id, policy, children, *width, *height, *direction);
+            }
         }
     }
 
@@ -319,6 +333,7 @@ impl TraversalHost {
     fn layout_tree_node_scope_children(
         &mut self,
         results: &FrameResults,
+        resources: &WidgetTreeResources,
         node_id: NodeId,
         policy: Policy,
         state: &WidgetHandle<Node>,
@@ -332,10 +347,10 @@ impl TraversalHost {
         if indent_children {
             let indent_size = self.style.as_ref().indent;
             self.layout.adjust_indent(indent_size);
-            self.layout_tree_nodes(results, children);
+            self.layout_tree_nodes(results, resources, children);
             self.layout.adjust_indent(-indent_size);
         } else {
-            self.layout_tree_nodes(results, children);
+            self.layout_tree_nodes(results, resources, children);
         }
     }
 
@@ -353,9 +368,16 @@ impl TraversalHost {
         stable_state
     }
 
-    fn update_tree_node_scope_children(&mut self, results: &mut FrameResults, node_id: NodeId, state: &WidgetHandle<Node>, children: &[WidgetTreeNode]) {
+    fn update_tree_node_scope_children(
+        &mut self,
+        results: &mut FrameResults,
+        resources: &WidgetTreeResources,
+        node_id: NodeId,
+        state: &WidgetHandle<Node>,
+        children: &[WidgetTreeNode],
+    ) {
         if self.update_tree_node_scope(results, node_id, state).is_expanded() {
-            self.update_tree_nodes(results, children);
+            self.update_tree_nodes(results, resources, children);
         }
     }
 
@@ -367,19 +389,19 @@ impl TraversalHost {
         self.paint_node_dyn(node_id, &*widget, rect, None, &control);
     }
 
-    fn paint_tree_node_scope_children(&mut self, node_id: NodeId, state: &WidgetHandle<Node>, children: &[WidgetTreeNode]) {
+    fn paint_tree_node_scope_children(&mut self, resources: &WidgetTreeResources, node_id: NodeId, state: &WidgetHandle<Node>, children: &[WidgetTreeNode]) {
         self.paint_tree_node_scope(node_id, state);
         if self.tree_children_were_laid_out(children) {
-            self.paint_tree_nodes(children);
+            self.paint_tree_nodes(resources, children);
         }
     }
 
-    fn update_structural_tree_node(&mut self, results: &mut FrameResults, children: &[WidgetTreeNode]) {
-        self.update_tree_nodes(results, children);
+    fn update_structural_tree_node(&mut self, results: &mut FrameResults, resources: &WidgetTreeResources, children: &[WidgetTreeNode]) {
+        self.update_tree_nodes(results, resources, children);
     }
 
-    fn paint_structural_tree_node(&mut self, children: &[WidgetTreeNode]) {
-        self.paint_tree_nodes(children);
+    fn paint_structural_tree_node(&mut self, resources: &WidgetTreeResources, children: &[WidgetTreeNode]) {
+        self.paint_tree_nodes(resources, children);
     }
 
     fn visit_tree_widget(&mut self, pass: &mut TreePass<'_>, node_id: NodeId, policy: Policy, widget: &dyn WidgetStateHandleDyn) {
@@ -401,6 +423,7 @@ impl TraversalHost {
     fn visit_tree_scroll_area(
         &mut self,
         pass: &mut TreePass<'_>,
+        resources: &WidgetTreeResources,
         node_id: NodeId,
         policy: Policy,
         handle: &ScrollAreaHandle,
@@ -411,21 +434,21 @@ impl TraversalHost {
         match pass {
             TreePass::Layout(results) => {
                 let handle = handle.clone();
-                let layout = handle.with_inner_mut(|area| area.layout_children(self, *results, node_id, policy, scroll_behavior, children));
+                let layout = handle.with_inner_mut(|area| area.layout_children(self, *results, resources, node_id, policy, scroll_behavior, children));
                 self.record_tree_layout(node_id, layout);
             }
             TreePass::Update(results) => {
                 let handle = handle.clone();
                 let layout = self.current_tree_layout_or_panic(node_id);
                 handle.with_inner_mut(|area| {
-                    area.update_children(self, &mut **results, node_id, layout, scroll_behavior, children);
+                    area.update_children(self, &mut **results, resources, node_id, layout, scroll_behavior, children);
                 });
             }
             TreePass::Paint => {
                 let handle = handle.clone();
                 let layout = self.current_tree_layout_or_panic(node_id);
                 handle.with_inner_mut(|area| {
-                    area.paint_children(self, node_id, layout, opt, scroll_behavior, children);
+                    area.paint_children(self, resources, node_id, layout, opt, scroll_behavior, children);
                 });
                 self.draw.push_command(Command::RetainedScrollArea { handle });
             }
@@ -435,6 +458,7 @@ impl TraversalHost {
     fn visit_tree_scope(
         &mut self,
         pass: &mut TreePass<'_>,
+        resources: &WidgetTreeResources,
         node_id: NodeId,
         policy: Policy,
         state: &WidgetHandle<Node>,
@@ -445,16 +469,17 @@ impl TraversalHost {
             TreePass::Layout(results) => {
                 // Headers gate child participation entirely. In the strict retained model the
                 // current stable state decides whether descendants exist for this frame.
-                self.layout_tree_node_scope_children(*results, node_id, policy, state, children, indent_children);
+                self.layout_tree_node_scope_children(*results, resources, node_id, policy, state, children, indent_children);
             }
-            TreePass::Update(results) => self.update_tree_node_scope_children(&mut **results, node_id, state, children),
-            TreePass::Paint => self.paint_tree_node_scope_children(node_id, state, children),
+            TreePass::Update(results) => self.update_tree_node_scope_children(&mut **results, resources, node_id, state, children),
+            TreePass::Paint => self.paint_tree_node_scope_children(resources, node_id, state, children),
         }
     }
 
     fn visit_tree_row(
         &mut self,
         pass: &mut TreePass<'_>,
+        resources: &WidgetTreeResources,
         node_id: NodeId,
         policy: Policy,
         children: &[WidgetTreeNode],
@@ -466,18 +491,19 @@ impl TraversalHost {
                 let results = *results;
                 self.layout_policy_group(node_id, policy, children, |container| {
                     container.with_row(widths, height, |container| {
-                        container.layout_tree_nodes(results, children);
+                        container.layout_tree_nodes(results, resources, children);
                     });
                 });
             }
-            TreePass::Update(results) => self.update_structural_tree_node(&mut **results, children),
-            TreePass::Paint => self.paint_structural_tree_node(children),
+            TreePass::Update(results) => self.update_structural_tree_node(&mut **results, resources, children),
+            TreePass::Paint => self.paint_structural_tree_node(resources, children),
         }
     }
 
     fn visit_tree_grid(
         &mut self,
         pass: &mut TreePass<'_>,
+        resources: &WidgetTreeResources,
         node_id: NodeId,
         policy: Policy,
         children: &[WidgetTreeNode],
@@ -489,39 +515,40 @@ impl TraversalHost {
                 let results = *results;
                 self.layout_policy_group(node_id, policy, children, |container| {
                     container.with_grid(widths, heights, |container| {
-                        container.layout_tree_nodes(results, children);
+                        container.layout_tree_nodes(results, resources, children);
                     });
                 });
             }
-            TreePass::Update(results) => self.update_structural_tree_node(&mut **results, children),
-            TreePass::Paint => self.paint_structural_tree_node(children),
+            TreePass::Update(results) => self.update_structural_tree_node(&mut **results, resources, children),
+            TreePass::Paint => self.paint_structural_tree_node(resources, children),
         }
     }
 
-    fn visit_tree_column(&mut self, pass: &mut TreePass<'_>, node_id: NodeId, policy: Policy, children: &[WidgetTreeNode]) {
+    fn visit_tree_column(&mut self, pass: &mut TreePass<'_>, resources: &WidgetTreeResources, node_id: NodeId, policy: Policy, children: &[WidgetTreeNode]) {
         match pass {
             TreePass::Layout(results) => {
                 let results = *results;
                 if policy == Policy::auto() {
                     self.column(|container| {
-                        container.layout_tree_nodes(results, children);
+                        container.layout_tree_nodes(results, resources, children);
                     });
                     self.record_tree_group_from_children(node_id, children);
                 } else {
                     let rect = self.layout.begin_node_scope_with_policies(Dimensioni::default(), policy.width, policy.height);
-                    self.layout_tree_nodes(results, children);
+                    self.layout_tree_nodes(results, resources, children);
                     let content_size = self.layout.end_node_scope();
                     self.record_tree_layout(node_id, NodeLayout::new(rect, rect, content_size));
                 }
             }
-            TreePass::Update(results) => self.update_structural_tree_node(&mut **results, children),
-            TreePass::Paint => self.paint_structural_tree_node(children),
+            TreePass::Update(results) => self.update_structural_tree_node(&mut **results, resources, children),
+            TreePass::Paint => self.paint_structural_tree_node(resources, children),
         }
     }
 
     fn visit_tree_stack(
         &mut self,
         pass: &mut TreePass<'_>,
+        resources: &WidgetTreeResources,
         node_id: NodeId,
         policy: Policy,
         children: &[WidgetTreeNode],
@@ -534,12 +561,12 @@ impl TraversalHost {
                 let results = *results;
                 self.layout_policy_group(node_id, policy, children, |container| {
                     container.stack_with_width_direction(width, height, direction, |container| {
-                        container.layout_tree_nodes(results, children);
+                        container.layout_tree_nodes(results, resources, children);
                     });
                 });
             }
-            TreePass::Update(results) => self.update_structural_tree_node(&mut **results, children),
-            TreePass::Paint => self.paint_structural_tree_node(children),
+            TreePass::Update(results) => self.update_structural_tree_node(&mut **results, resources, children),
+            TreePass::Paint => self.paint_structural_tree_node(resources, children),
         }
     }
 
@@ -548,22 +575,8 @@ impl TraversalHost {
     pub(crate) fn widget_tree(&mut self, results: &mut FrameResults, tree: &WidgetTree) {
         // Layout must always happen before update and paint so the cache contains every rect the
         // later passes reuse. Update then walks the whole tree before paint records any commands.
-        self.layout_tree_nodes(results, tree.roots());
-        self.update_tree_nodes(results, tree.roots());
-        self.paint_tree_nodes(tree.roots());
-    }
-
-    /// Measures a prebuilt widget tree using the current container layout without rendering it.
-    pub(crate) fn measure_widget_tree_content(&mut self, results: &FrameResults, tree: &WidgetTree) -> Dimensioni {
-        let mut scratch = self.measurement_scratch();
-        scratch.layout_tree_nodes(results, tree.roots());
-
-        match scratch.layout.current_max() {
-            Some(max_rect) => {
-                let body = scratch.layout.current_body();
-                Dimensioni::new(max_rect.x - body.x, max_rect.y - body.y)
-            }
-            None => Dimensioni::default(),
-        }
+        self.layout_tree_nodes(results, tree.resources(), tree.roots());
+        self.update_tree_nodes(results, tree.resources(), tree.roots());
+        self.paint_tree_nodes(tree.resources(), tree.roots());
     }
 }

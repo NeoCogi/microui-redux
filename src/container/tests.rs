@@ -270,7 +270,7 @@ fn textbox_left_moves_over_multibyte() {
 
     input.borrow_mut().keydown_code(KeyCode::LEFT);
     let rect = container.layout.next();
-    let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.scroll_behavior);
+    let control_state = (state.config.opt | WidgetOption::HOLD_FOCUS, state.config.scroll_behavior);
     let control = update_control_for_widget(&mut container, textbox_id, rect, &control_state);
     let input = container.snapshot_input();
     let mut ctx = widget_ctx_for_node(&mut container, textbox_id, rect, Some(input));
@@ -289,7 +289,7 @@ fn textbox_backspace_removes_multibyte() {
 
     input.borrow_mut().keydown(KeyMode::BACKSPACE);
     let rect = container.layout.next();
-    let control_state = (state.opt | WidgetOption::HOLD_FOCUS, state.scroll_behavior);
+    let control_state = (state.config.opt | WidgetOption::HOLD_FOCUS, state.config.scroll_behavior);
     let control = update_control_for_widget(&mut container, textbox_id, rect, &control_state);
     let input = container.snapshot_input();
     let mut ctx = widget_ctx_for_node(&mut container, textbox_id, rect, Some(input));
@@ -353,7 +353,7 @@ fn focus_policy_holds_focus_without_hold_focus_widget_option() {
     let control = update_control_for_widget(&mut container, probe_id, rect(0, 0, 50, 20), &probe);
 
     assert!(control.focused);
-    assert!(!probe.widget_opt().is_holding_focus());
+    assert!(!probe.widget_opt().intersects(WidgetOption::HOLD_FOCUS));
 }
 
 #[test]
@@ -565,7 +565,7 @@ fn measurement_tree_does_not_mutate_live_root_or_scroll_area_state() {
         });
     });
 
-    let measured = parent.measure_widget_tree_content(&results, &tree);
+    let measured = MeasurementContext::from_host(&parent).measure_widget_tree_content(&results, &tree);
 
     assert!(measured.width > 0);
     assert!(measured.height > 0);

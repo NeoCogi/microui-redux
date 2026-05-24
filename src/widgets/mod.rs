@@ -52,19 +52,55 @@
 //
 //! Built-in retained widget state.
 //!
-//! The widget structs intentionally keep their user-facing fields public so applications can update
-//! labels, values, options, fonts, and local state between frames. Raw input remains owned by
+//! The widget structs intentionally keep their user-facing state public so applications can update
+//! labels, values, configuration, and local state between frames. Raw input remains owned by
 //! [`crate::Context`], and each widget's `update` path clamps transient invariants such as text
 //! cursors, scroll offsets, selected indices, and numeric ranges before `paint` records commands.
+
+use crate::{FontChoice, FontRole, ScrollBehavior, WidgetOption};
+
+#[derive(Copy, Clone)]
+/// Shared configuration carried by built-in retained widgets.
+pub struct WidgetConfig {
+    /// Font selection used by text-bearing widgets.
+    pub font: FontChoice,
+    /// Widget options applied during interaction and painting.
+    pub opt: WidgetOption,
+    /// Scroll behavior requested by the widget.
+    pub scroll_behavior: ScrollBehavior,
+}
+
+impl Default for WidgetConfig {
+    fn default() -> Self {
+        Self::new(WidgetOption::NONE, ScrollBehavior::NONE)
+    }
+}
+
+impl WidgetConfig {
+    /// Creates a config with the body font and explicit behavior flags.
+    pub const fn new(opt: WidgetOption, scroll_behavior: ScrollBehavior) -> Self {
+        Self {
+            font: FontChoice::Role(FontRole::Body),
+            opt,
+            scroll_behavior,
+        }
+    }
+
+    /// Sets the font selection.
+    pub const fn font(mut self, font: FontChoice) -> Self {
+        self.font = font;
+        self
+    }
+}
 
 macro_rules! implement_widget {
     ($ty:ty, $update:ident, $paint:ident, $measure:ident) => {
         impl Widget for $ty {
             fn widget_opt(&self) -> &WidgetOption {
-                &self.opt
+                &self.config.opt
             }
             fn scroll_behavior(&self) -> ScrollBehavior {
-                self.scroll_behavior
+                self.config.scroll_behavior
             }
             fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
                 self.$measure(style, atlas, avail)

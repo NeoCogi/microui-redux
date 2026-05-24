@@ -151,7 +151,7 @@ impl Widget for GraphicsDemo {
     }
 
     fn update(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
-        let bounds = ctx.rect();
+        let bounds = ctx.local_rect();
         let local_width = bounds.width.max(0) as f32;
         let local_height = bounds.height.max(0) as f32;
         if local_width <= 0.0 || local_height <= 0.0 {
@@ -163,7 +163,7 @@ impl Widget for GraphicsDemo {
     }
 
     fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        let bounds = ctx.rect();
+        let bounds = ctx.local_rect();
         let local_width = bounds.width.max(0) as f32;
         let local_height = bounds.height.max(0) as f32;
         if local_width <= 0.0 || local_height <= 0.0 {
@@ -543,7 +543,7 @@ impl Widget for FalloffEditor {
     }
 
     fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        let bounds = ctx.rect();
+        let bounds = ctx.local_rect();
         let graph = Self::graph_rect(bounds);
         if graph.width <= 0 || graph.height <= 0 {
             return ResourceState::NONE;
@@ -596,7 +596,7 @@ impl Widget for FalloffEditor {
     }
 
     fn paint(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) {
-        let bounds = ctx.rect();
+        let bounds = ctx.local_rect();
         let graph = Self::graph_rect(bounds);
         if graph.width <= 0 || graph.height <= 0 {
             return;
@@ -921,16 +921,16 @@ impl State {
             TextArea::new("This is a multi-line TextArea.\nYou can type, scroll, and resize the window.\n\nTry adding more lines to see the scrollbars.");
         text_area.wrap = TextWrap::Word;
         let mut submit_buf = Textbox::new("");
-        submit_buf.font = FontRole::Mono.into();
+        submit_buf.config.font = FontRole::Mono.into();
         let mut log_text = TextBlock::new("");
-        log_text.font = FontRole::Mono.into();
+        log_text.config.font = FontRole::Mono.into();
         let mut typography_heading = TextBlock::new("NORMAL.ttf at 18px");
-        typography_heading.font = FontRole::Heading.into();
+        typography_heading.config.font = FontRole::Heading.into();
         let mut typography_body = TextBlock::with_wrap(
             "NORMAL.ttf at 12px remains the control font. Window titles use BOLD.ttf, and the log window uses CONSOLE.ttf for input and output.",
             TextWrap::Word,
         );
-        typography_body.font = FontRole::Body.into();
+        typography_body.config.font = FontRole::Body.into();
         let style = Style::default().with_named_fonts(&ctx.canvas().get_atlas());
         let demo_root = ctx.create_window("Demo Window", rect(40, 40, 300, 450), WidgetTree::default());
         let style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), WidgetTree::default());
@@ -1317,16 +1317,16 @@ impl State {
                         if !matches!(cra.mouse_event, MouseEvent::Drag { .. }) && cra.scroll_delta.is_none() {
                             let step = 20;
                             let mut delta = Vec2i::new(0, 0);
-                            if cra.key_codes.is_left() {
+                            if cra.key_codes.intersects(KeyCode::LEFT) {
                                 delta.x -= step;
                             }
-                            if cra.key_codes.is_right() {
+                            if cra.key_codes.intersects(KeyCode::RIGHT) {
                                 delta.x += step;
                             }
-                            if cra.key_codes.is_up() {
+                            if cra.key_codes.intersects(KeyCode::UP) {
                                 delta.y -= step;
                             }
-                            if cra.key_codes.is_down() {
+                            if cra.key_codes.intersects(KeyCode::DOWN) {
                                 delta.y += step;
                             }
                             if delta.x != 0 || delta.y != 0 {

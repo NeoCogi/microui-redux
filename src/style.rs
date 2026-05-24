@@ -340,7 +340,7 @@ impl Style {
 
     /// Binds semantic font roles only for fields that still use default/unset font IDs.
     ///
-    /// This is intended for compatibility paths such as [`Context::set_style`], where callers
+    /// This is intended for compatibility paths such as [`crate::Context::set_style`], where callers
     /// often start from [`Style::default`] and only tweak colors or spacing. Explicit non-default
     /// font IDs are preserved.
     pub fn bind_default_named_fonts(&mut self, atlas: &AtlasHandle) {

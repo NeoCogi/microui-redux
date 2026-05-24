@@ -195,27 +195,8 @@ impl FileDialogState {
 
     /// Rebuilds the retained widget tree and records the node ids used for result lookup.
     fn rebuild_tree(&mut self) {
-        let folder_panel = self.folder_panel.clone();
-        let file_panel = self.file_panel.clone();
-        let up_button = self.up_button.clone();
-        let home_button = self.home_button.clone();
-        let path_box = self.path_box.clone();
-        let go_button = self.go_button.clone();
-        let folders_label = self.folders_label.clone();
-        let no_folders_label = self.no_folders_label.clone();
-        let files_label = self.files_label.clone();
-        let no_files_label = self.no_files_label.clone();
-        let file_name_label = self.file_name_label.clone();
-        let tmp_file_name = self.tmp_file_name.clone();
-        let spacer_label = self.spacer_label.clone();
-        let cancel_button = self.cancel_button.clone();
-        let ok_button = self.ok_button.clone();
-        let folder_items = self.folder_items.clone();
-        let file_items = self.file_items.clone();
-        let no_folder_items = folder_items.is_empty();
-        let no_file_items = file_items.is_empty();
-        let mut folder_item_ids = Vec::with_capacity(folder_items.len());
-        let mut file_item_ids = Vec::with_capacity(file_items.len());
+        let mut folder_item_ids = Vec::with_capacity(self.folder_items.len());
+        let mut file_item_ids = Vec::with_capacity(self.file_items.len());
         let mut up_button_id = NodeId::default();
         let mut home_button_id = NodeId::default();
         let mut path_box_id = NodeId::default();
@@ -235,64 +216,87 @@ impl FileDialogState {
             (std::cmp::max(font_height + vertical_pad * 2, icon_height), style.spacing.max(0))
         };
 
-        self.tree = WidgetTreeBuilder::build(|tree| {
-            let toolbar_widths = [
-                SizePolicy::Fixed(56),
-                SizePolicy::Fixed(56),
-                SizePolicy::Remainder(56 + spacing),
-                SizePolicy::Fixed(56),
-            ];
-            let pane_widths = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
-            let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
-            let action_widths = [SizePolicy::Remainder(96 * 2 + spacing * 2), SizePolicy::Fixed(96), SizePolicy::Fixed(96)];
-            let footer_reserved = control_height * 2 + spacing * 2;
-            // Toolbar: up/home/path/go.
-            tree.row(&toolbar_widths, SizePolicy::Auto, |tree| {
-                up_button_id = tree.widget(up_button.clone());
-                home_button_id = tree.widget(home_button.clone());
-                path_box_id = tree.widget(path_box.clone());
-                go_button_id = tree.widget(go_button.clone());
-            });
+        let tree = {
+            let folder_panel = &self.folder_panel;
+            let file_panel = &self.file_panel;
+            let up_button = &self.up_button;
+            let home_button = &self.home_button;
+            let path_box = &self.path_box;
+            let go_button = &self.go_button;
+            let folders_label = &self.folders_label;
+            let no_folders_label = &self.no_folders_label;
+            let files_label = &self.files_label;
+            let no_files_label = &self.no_files_label;
+            let file_name_label = &self.file_name_label;
+            let tmp_file_name = &self.tmp_file_name;
+            let spacer_label = &self.spacer_label;
+            let cancel_button = &self.cancel_button;
+            let ok_button = &self.ok_button;
+            let folder_items = &self.folder_items;
+            let file_items = &self.file_items;
+            let no_folder_items = folder_items.is_empty();
+            let no_file_items = file_items.is_empty();
 
-            // Main pane: folders on the left, files on the right, both scrollable through scroll areas.
-            tree.row(&pane_widths, SizePolicy::Remainder(footer_reserved), |tree| {
-                tree.scroll_area(folder_panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                        tree.widget(folders_label.clone());
-                        for item in &folder_items {
-                            folder_item_ids.push(tree.widget(item.clone()));
-                        }
-                        if no_folder_items {
-                            tree.widget(no_folders_label.clone());
-                        }
+            WidgetTreeBuilder::build(|tree| {
+                let toolbar_widths = [
+                    SizePolicy::Fixed(56),
+                    SizePolicy::Fixed(56),
+                    SizePolicy::Remainder(56 + spacing),
+                    SizePolicy::Fixed(56),
+                ];
+                let pane_widths = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
+                let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
+                let action_widths = [SizePolicy::Remainder(96 * 2 + spacing * 2), SizePolicy::Fixed(96), SizePolicy::Fixed(96)];
+                let footer_reserved = control_height * 2 + spacing * 2;
+                // Toolbar: up/home/path/go.
+                tree.row(&toolbar_widths, SizePolicy::Auto, |tree| {
+                    up_button_id = tree.widget(up_button);
+                    home_button_id = tree.widget(home_button);
+                    path_box_id = tree.widget(path_box);
+                    go_button_id = tree.widget(go_button);
+                });
+
+                // Main pane: folders on the left, files on the right, both scrollable through scroll areas.
+                tree.row(&pane_widths, SizePolicy::Remainder(footer_reserved), |tree| {
+                    tree.scroll_area(folder_panel, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                        tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                            tree.widget(folders_label);
+                            for item in folder_items {
+                                folder_item_ids.push(tree.widget(item));
+                            }
+                            if no_folder_items {
+                                tree.widget(no_folders_label);
+                            }
+                        });
+                    });
+
+                    tree.scroll_area(file_panel, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                        tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                            tree.widget(files_label);
+                            for item in file_items {
+                                file_item_ids.push(tree.widget(item));
+                            }
+                            if no_file_items {
+                                tree.widget(no_files_label);
+                            }
+                        });
                     });
                 });
 
-                tree.scroll_area(file_panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                        tree.widget(files_label.clone());
-                        for item in &file_items {
-                            file_item_ids.push(tree.widget(item.clone()));
-                        }
-                        if no_file_items {
-                            tree.widget(no_files_label.clone());
-                        }
-                    });
+                // Filename row and action buttons.
+                tree.row(&filename_widths, SizePolicy::Auto, |tree| {
+                    tree.widget(file_name_label);
+                    tree.widget(tmp_file_name);
                 });
-            });
 
-            // Filename row and action buttons.
-            tree.row(&filename_widths, SizePolicy::Auto, |tree| {
-                tree.widget(file_name_label.clone());
-                tree.widget(tmp_file_name.clone());
-            });
-
-            tree.row(&action_widths, SizePolicy::Auto, |tree| {
-                tree.widget(spacer_label.clone());
-                cancel_button_id = tree.widget(cancel_button.clone());
-                ok_button_id = tree.widget(ok_button.clone());
-            });
-        });
+                tree.row(&action_widths, SizePolicy::Auto, |tree| {
+                    tree.widget(spacer_label);
+                    cancel_button_id = tree.widget(cancel_button);
+                    ok_button_id = tree.widget(ok_button);
+                });
+            })
+        };
+        self.tree = tree;
         self.folder_item_ids = folder_item_ids;
         self.file_item_ids = file_item_ids;
         self.up_button_id = up_button_id;

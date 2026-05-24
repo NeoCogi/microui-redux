@@ -182,14 +182,14 @@ impl TraversalHost {
     /// Determines whether `r` is fully visible, partially visible, or completely clipped.
     #[cfg(test)]
     pub fn check_clip(&mut self, r: Recti) -> Clip {
-        self.draw_ctx().check_clip(r)
+        crate::draw_context::clip_relation(r, self.get_clip_rect())
     }
 
     /// Adjusts the current clip rectangle.
     #[cfg(test)]
     pub fn set_clip(&mut self, rect: Recti) {
         let mut draw = self.draw_ctx();
-        draw.set_current_clip_rect(rect);
+        draw.replace_current_clip_rect(rect);
     }
 
     /// Records a filled rectangle draw command.

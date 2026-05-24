@@ -55,6 +55,7 @@
 //! This file owns chrome controls, window open/close state, z-order-facing handles, and the bridge
 //! between top-level roots and their underlying [`TraversalHost`].
 use super::*;
+use crate::container::MeasurementContext;
 use crate::{context::RootId, widget::FrameResults, widget_tree::WidgetTree};
 use std::cell::{Ref, RefMut};
 
@@ -102,7 +103,7 @@ impl Window {
     /// Computes the client body rect after titlebar chrome is reserved.
     fn body_rect_for(container: &TraversalHost, opt: ContainerOption) -> Recti {
         let mut body = container.rect();
-        if !opt.has_no_title() {
+        if !opt.intersects(ContainerOption::NO_TITLE) {
             let title_h = Self::titlebar_height(container);
             body.y += title_h;
             body.height -= title_h;
@@ -113,7 +114,7 @@ impl Window {
     /// Applies measured content size to an auto-sized root while preserving chrome thickness.
     fn apply_auto_size(container: &mut TraversalHost, opt: ContainerOption) {
         let content_size = container.content_size();
-        if !opt.is_auto_sizing() || (content_size.width <= 0 && content_size.height <= 0) {
+        if !opt.intersects(ContainerOption::AUTO_SIZE) || (content_size.width <= 0 && content_size.height <= 0) {
             return;
         }
 
@@ -199,7 +200,7 @@ impl Window {
         self.chrome_tree.apply_active_drag_deltas(&mut self.main, opt);
 
         let r = self.main.rect();
-        if !opt.has_no_frame() {
+        if !opt.intersects(ContainerOption::NO_FRAME) {
             self.main.draw_frame(r, ControlColor::WindowBG);
         }
 
@@ -232,10 +233,10 @@ impl Window {
         let body = Self::body_rect_for(&self.main, opt);
         // Auto-size should measure desired content against the raw body rect rather than inheriting
         // last frame's scrollbar decision or scroll offset.
-        let mut scratch = self.main.measurement_scratch();
-        scratch.clear_content_and_scroll();
-        scratch.configure_container_body(body, scroll_behavior);
-        self.main.set_content_size(scratch.measure_widget_tree_content(results, tree));
+        let mut measurement = MeasurementContext::from_host(&self.main);
+        measurement.clear_content_and_scroll();
+        measurement.configure_container_body(body, scroll_behavior);
+        self.main.set_content_size(measurement.measure_widget_tree_content(results, tree));
         Self::apply_auto_size(&mut self.main, opt);
     }
 
@@ -244,9 +245,9 @@ impl Window {
         let body = self.begin_window_frame(opt);
         let layout = self
             .main
-            .layout_viewport_body_until_scrollbars_stable(results, self.main.rect(), body, scroll_behavior, tree.roots());
-        self.main.update_body_tree(results, layout, scroll_behavior, tree.roots());
-        self.main.paint_body_tree(layout, scroll_behavior, tree.roots());
+            .layout_viewport_body_until_scrollbars_stable(results, tree.resources(), self.main.rect(), body, scroll_behavior, tree.roots());
+        self.main.update_body_tree(results, tree.resources(), layout, scroll_behavior, tree.roots());
+        self.main.paint_body_tree(tree.resources(), layout, scroll_behavior, tree.roots());
         self.chrome_tree.render_title_bar(&mut self.main, results, &mut self.win_state, opt);
         self.chrome_tree.render_resize_handle(&mut self.main, results, opt);
     }

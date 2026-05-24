@@ -57,6 +57,7 @@
 
 use crate::text_layout::{baseline_aligned_top, build_display_text_lines, text_block_size};
 use crate::*;
+use super::WidgetConfig;
 
 #[derive(Clone)]
 /// Non-interactive retained text block that can optionally wrap.
@@ -65,12 +66,8 @@ pub struct TextBlock {
     pub text: String,
     /// Wrapping mode used for layout and rendering.
     pub wrap: TextWrap,
-    /// Font selection used for the block text.
-    pub font: FontChoice,
-    /// Widget options applied to the block.
-    pub opt: WidgetOption,
-    /// Scroll behavior applied to the block.
-    pub scroll_behavior: ScrollBehavior,
+    /// Shared widget configuration.
+    pub config: WidgetConfig,
 }
 
 impl TextBlock {
@@ -84,9 +81,7 @@ impl TextBlock {
         Self {
             text: text.into(),
             wrap,
-            font: FontChoice::default(),
-            opt: WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::new(WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME, ScrollBehavior::NONE),
         }
     }
 
@@ -96,7 +91,7 @@ impl TextBlock {
             return Dimensioni::new(0, 0);
         }
 
-        let font = style.resolve_font_choice(self.font);
+        let font = style.resolve_font_choice(self.config.font);
         let line_height = atlas.get_font_height(font) as i32;
         let max_width = if self.wrap == TextWrap::Word && avail.width > 0 {
             avail.width.max(1)
@@ -118,8 +113,8 @@ impl TextBlock {
             return;
         }
 
-        let bounds = ctx.rect();
-        let font = ctx.style().resolve_font_choice(self.font);
+        let bounds = ctx.screen_rect();
+        let font = ctx.style().resolve_font_choice(self.config.font);
         let color = ctx.style().colors[ControlColor::Text as usize];
         let line_height = ctx.atlas().get_font_height(font) as i32;
         let baseline = ctx.atlas().get_font_baseline(font);
@@ -149,12 +144,8 @@ pub struct ColorSwatch {
     pub fill: Color,
     /// Optional label rendered on top of the swatch.
     pub label: String,
-    /// Font selection used for the label.
-    pub font: FontChoice,
-    /// Widget options applied to the swatch.
-    pub opt: WidgetOption,
-    /// Scroll behavior applied to the swatch.
-    pub scroll_behavior: ScrollBehavior,
+    /// Shared widget configuration.
+    pub config: WidgetConfig,
 }
 
 impl ColorSwatch {
@@ -163,16 +154,14 @@ impl ColorSwatch {
         Self {
             fill,
             label: String::new(),
-            font: FontChoice::default(),
-            opt: WidgetOption::NO_INTERACT | WidgetOption::ALIGN_CENTER,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::new(WidgetOption::NO_INTERACT | WidgetOption::ALIGN_CENTER, ScrollBehavior::NONE),
         }
     }
 
     /// Measures a square-ish color swatch with a text-friendly default height.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
-        let font = style.resolve_font_choice(self.font);
+        let font = style.resolve_font_choice(self.config.font);
         let label_width = if self.label.is_empty() {
             0
         } else {
@@ -189,13 +178,13 @@ impl ColorSwatch {
 
     /// Paints the swatch fill, border, and optional label.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) {
-        let rect = ctx.rect();
+        let rect = ctx.screen_rect();
         ctx.draw_rect(rect, self.fill);
         let border = ctx.style().colors[ControlColor::Border as usize];
         ctx.draw_box(rect, border);
         if !self.label.is_empty() {
-            let font = ctx.style().resolve_font_choice(self.font);
-            ctx.draw_control_text_with_font(font, self.label.as_str(), rect, ControlColor::Text, self.opt);
+            let font = ctx.style().resolve_font_choice(self.config.font);
+            ctx.draw_control_text_with_font(font, self.label.as_str(), rect, ControlColor::Text, self.config.opt);
         }
     }
 }

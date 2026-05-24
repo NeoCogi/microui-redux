@@ -330,82 +330,6 @@ impl Default for InputSnapshot {
     }
 }
 
-impl ContainerOption {
-    /// Returns `true` if the option requests automatic sizing.
-    pub fn is_auto_sizing(&self) -> bool {
-        self.intersects(Self::AUTO_SIZE)
-    }
-
-    /// Returns `true` if the title bar should be hidden.
-    pub fn has_no_title(&self) -> bool {
-        self.intersects(Self::NO_TITLE)
-    }
-
-    /// Returns `true` if the close button should be hidden.
-    pub fn has_no_close(&self) -> bool {
-        self.intersects(Self::NO_CLOSE)
-    }
-
-    /// Returns `true` if the container is fixed-size.
-    pub fn is_fixed(&self) -> bool {
-        self.intersects(Self::NO_RESIZE)
-    }
-
-    /// Returns `true` if the outer frame is hidden.
-    pub fn has_no_frame(&self) -> bool {
-        self.intersects(Self::NO_FRAME)
-    }
-}
-
-impl WidgetOption {
-    /// Returns `true` if the widget should keep focus while held.
-    pub fn is_holding_focus(&self) -> bool {
-        self.intersects(WidgetOption::HOLD_FOCUS)
-    }
-
-    /// Returns `true` if the widget should not draw its frame.
-    pub fn has_no_frame(&self) -> bool {
-        self.intersects(WidgetOption::NO_FRAME)
-    }
-
-    /// Returns `true` if the widget is non-interactive.
-    pub fn is_not_interactive(&self) -> bool {
-        self.intersects(WidgetOption::NO_INTERACT)
-    }
-
-    /// Returns `true` if the widget prefers right alignment.
-    pub fn is_aligned_right(&self) -> bool {
-        self.intersects(WidgetOption::ALIGN_RIGHT)
-    }
-
-    /// Returns `true` if the widget prefers centered alignment.
-    pub fn is_aligned_center(&self) -> bool {
-        self.intersects(WidgetOption::ALIGN_CENTER)
-    }
-
-    /// Returns `true` if the option set is empty.
-    pub fn is_none(&self) -> bool {
-        self.bits() == 0
-    }
-}
-
-impl WidgetFillOption {
-    /// Returns `true` when the normal state should be filled.
-    pub fn fill_normal(&self) -> bool {
-        self.intersects(Self::NORMAL)
-    }
-
-    /// Returns `true` when the hover state should be filled.
-    pub fn fill_hover(&self) -> bool {
-        self.intersects(Self::HOVER)
-    }
-
-    /// Returns `true` when the clicked state should be filled.
-    pub fn fill_click(&self) -> bool {
-        self.intersects(Self::CLICK)
-    }
-}
-
 bitflags! {
     #[derive(Copy, Clone, Debug)]
     /// Mouse button state as reported by the input system.
@@ -418,28 +342,6 @@ bitflags! {
         const LEFT = 1;
         /// No buttons pressed.
         const NONE = 0;
-    }
-}
-
-impl MouseButton {
-    /// Returns `true` if the middle mouse button is pressed.
-    pub fn is_middle(&self) -> bool {
-        self.intersects(Self::MIDDLE)
-    }
-
-    /// Returns `true` if the right mouse button is pressed.
-    pub fn is_right(&self) -> bool {
-        self.intersects(Self::RIGHT)
-    }
-
-    /// Returns `true` if the left mouse button is pressed.
-    pub fn is_left(&self) -> bool {
-        self.intersects(Self::LEFT)
-    }
-
-    /// Returns `true` if no mouse buttons are pressed.
-    pub fn is_none(&self) -> bool {
-        self.bits() == 0
     }
 }
 
@@ -464,43 +366,6 @@ bitflags! {
     }
 }
 
-impl KeyMode {
-    /// Returns `true` if no modifiers are active.
-    pub fn is_none(&self) -> bool {
-        self.bits() == 0
-    }
-
-    /// Returns `true` if Delete is held.
-    pub fn is_delete(&self) -> bool {
-        self.intersects(Self::DELETE)
-    }
-
-    /// Returns `true` if Return/Enter is held.
-    pub fn is_return(&self) -> bool {
-        self.intersects(Self::RETURN)
-    }
-
-    /// Returns `true` if Backspace is held.
-    pub fn is_backspace(&self) -> bool {
-        self.intersects(Self::BACKSPACE)
-    }
-
-    /// Returns `true` if Alt is held.
-    pub fn is_alt(&self) -> bool {
-        self.intersects(Self::ALT)
-    }
-
-    /// Returns `true` if Control is held.
-    pub fn is_ctrl(&self) -> bool {
-        self.intersects(Self::CTRL)
-    }
-
-    /// Returns `true` if Shift is held.
-    pub fn is_shift(&self) -> bool {
-        self.intersects(Self::SHIFT)
-    }
-}
-
 bitflags! {
     #[derive(Copy, Clone, Debug)]
     /// Logical navigation keys handled by the UI.
@@ -519,43 +384,6 @@ bitflags! {
         const UP = 1;
         /// No navigation keys pressed.
         const NONE = 0;
-    }
-}
-
-impl KeyCode {
-    /// Returns `true` if no navigation key is pressed.
-    pub fn is_none(&self) -> bool {
-        self.bits() == 0
-    }
-
-    /// Returns `true` if Delete is pressed.
-    pub fn is_delete(&self) -> bool {
-        self.intersects(Self::DELETE)
-    }
-
-    /// Returns `true` if End is pressed.
-    pub fn is_end(&self) -> bool {
-        self.intersects(Self::END)
-    }
-
-    /// Returns `true` if up is pressed.
-    pub fn is_up(&self) -> bool {
-        self.intersects(Self::UP)
-    }
-
-    /// Returns `true` if down is pressed.
-    pub fn is_down(&self) -> bool {
-        self.intersects(Self::DOWN)
-    }
-
-    /// Returns `true` if left is pressed.
-    pub fn is_left(&self) -> bool {
-        self.intersects(Self::LEFT)
-    }
-
-    /// Returns `true` if right is pressed.
-    pub fn is_right(&self) -> bool {
-        self.intersects(Self::RIGHT)
     }
 }
 

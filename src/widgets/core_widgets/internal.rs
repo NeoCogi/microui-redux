@@ -10,20 +10,14 @@ use super::*;
 pub struct Internal {
     /// Stable tag describing the internal control.
     pub tag: &'static str,
-    /// Widget options applied to the internal control.
-    pub opt: WidgetOption,
-    /// Scroll behavior applied to the internal control.
-    pub scroll_behavior: ScrollBehavior,
+    /// Shared widget configuration.
+    pub config: WidgetConfig,
 }
 
 impl Internal {
     /// Creates an internal control state with a stable tag.
     pub fn new(tag: &'static str) -> Self {
-        Self {
-            tag,
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
-        }
+        Self { tag, config: WidgetConfig::default() }
     }
 
     /// Measures the internal tag for debug-visible chrome controls.

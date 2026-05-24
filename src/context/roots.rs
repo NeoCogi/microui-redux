@@ -57,7 +57,7 @@ impl<R: Renderer> Context<R> {
         ScrollAreaHandle::new(ScrollArea::new(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone()))
     }
 
-    /// Creates a retained panel handle for use with [`crate::WidgetTreeBuilder::container`].
+    /// Creates a retained panel handle for use with [`crate::WidgetTreeBuilder::scroll_area`].
     ///
     /// This is a compatibility alias for [`Self::new_scroll_area`].
     #[deprecated(since = "0.6.1", note = "use new_scroll_area")]
@@ -270,7 +270,7 @@ impl<R: Renderer> Context<R> {
         let click_outside_popup = {
             let input = self.input.borrow();
             // A popup closes only on a press outside both its hover root and rectangle.
-            !input.mouse_pressed.is_none() && !window.root_in_hover_root() && !window.root_contains_point(input.mouse_pos)
+            !input.mouse_pressed.is_empty() && !window.root_in_hover_root() && !window.root_contains_point(input.mouse_pos)
         };
         if click_outside_popup {
             window.close();
@@ -284,7 +284,7 @@ impl<R: Renderer> Context<R> {
     fn render_window_tree(&mut self, window: &WindowHandle, opt: ContainerOption, scroll_behavior: ScrollBehavior, tree: &WidgetTree) {
         if window.is_open() {
             window.set_root_style(self.style.clone());
-            if opt.is_auto_sizing() {
+            if opt.intersects(ContainerOption::AUTO_SIZE) {
                 // Auto-size is measured against committed previous-frame results before the live traversal.
                 window.measure_auto_size(&self.frame_results, opt, scroll_behavior, tree);
             }

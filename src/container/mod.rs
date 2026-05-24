@@ -59,6 +59,7 @@ use crate::draw_context::DrawCtx;
 use crate::widget::{FocusPolicy, RetainedId};
 use crate::widget_tree::{
     erased_widget_state, NodeId, NodeLayout, Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind,
+    WidgetTreeResources,
 };
 use std::cell::RefCell;
 
@@ -70,6 +71,8 @@ mod dispatch;
 mod draw;
 mod interaction;
 mod layout_api;
+mod measurement;
+pub(crate) use measurement::MeasurementContext;
 mod scroll;
 mod scroll_area;
 mod tree;
@@ -122,12 +125,6 @@ impl ViewportState {
         self.body = layout.body;
         self.content_size = layout.content_size;
     }
-
-    /// Clears content size and scroll offset together.
-    fn clear_content_and_scroll(&mut self) {
-        self.content_size = Dimensioni::default();
-        self.scroll.clear_offset();
-    }
 }
 
 /// Per-traversal execution state shared by root windows and retained scroll areas.
@@ -149,8 +146,6 @@ pub struct TraversalHost {
     interaction: InteractionState,
     /// Shared access to the input state.
     input: Rc<RefCell<Input>>,
-    /// True when this container is a scratch container used only for measurement.
-    measurement_mode: bool,
     /// Previous/current frame cache for retained tree node geometry and interaction state.
     tree_cache: WidgetTreeCache,
 }
@@ -324,7 +319,6 @@ impl TraversalHost {
             interaction: InteractionState::default(),
             layout: LayoutManager::default(),
             input,
-            measurement_mode: false,
             tree_cache: WidgetTreeCache::default(),
         }
     }
@@ -339,7 +333,6 @@ impl TraversalHost {
         self.draw.clear();
         self.viewport.reset();
         self.interaction.reset_all();
-        self.measurement_mode = false;
         self.tree_cache.clear();
     }
 
@@ -355,15 +348,6 @@ impl TraversalHost {
         self.interaction.prepare_frame();
         self.viewport.prepare_frame();
         self.tree_cache.begin_frame();
-    }
-
-    /// Creates a shallow scratch copy for measurement without mutating live interaction state.
-    pub(crate) fn measurement_scratch(&self) -> Self {
-        let mut scratch = TraversalHost::new(&self.name, self.atlas.clone(), self.style.clone(), self.input.clone());
-        scratch.viewport = self.viewport.clone();
-        scratch.layout = self.layout.clone();
-        scratch.measurement_mode = true;
-        scratch
     }
 
     /// Seeds scroll delta before a root or scroll-area traversal starts.
@@ -427,7 +411,7 @@ impl TraversalHost {
     }
 
     /// Sets the inner container body rectangle.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(crate) fn set_body(&mut self, body: Recti) {
         self.viewport.body = body;
     }
@@ -455,11 +439,6 @@ impl TraversalHost {
     /// Applies a frozen retained-tree layout snapshot to the current viewport.
     pub(crate) fn apply_viewport_layout(&mut self, layout: NodeLayout) {
         self.viewport.apply_layout(layout);
-    }
-
-    /// Clears content size and scroll offset together.
-    pub(crate) fn clear_content_and_scroll(&mut self) {
-        self.viewport.clear_content_and_scroll();
     }
 
     /// Returns the container's debug/display name.

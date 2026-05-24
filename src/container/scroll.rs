@@ -40,16 +40,16 @@ impl ScrollState {
         self.enabled = true;
     }
 
-    pub(super) fn clear_offset(&mut self) {
-        self.offset = Vec2i::default();
-    }
-
     pub(super) fn offset(&self) -> Vec2i {
         self.offset
     }
 
     pub(super) fn set_offset(&mut self, offset: Vec2i) {
         self.offset = offset;
+    }
+
+    pub(super) fn enabled(&self) -> bool {
+        self.enabled
     }
 }
 
@@ -223,31 +223,33 @@ impl TraversalHost {
     pub(crate) fn layout_body_until_scrollbars_stable(
         &mut self,
         results: &FrameResults,
+        resources: &WidgetTreeResources,
         rect: Recti,
         scroll_behavior: ScrollBehavior,
         children: &[WidgetTreeNode],
     ) -> NodeLayout {
-        self.layout_viewport_body_until_scrollbars_stable(results, rect, rect, scroll_behavior, children)
+        self.layout_viewport_body_until_scrollbars_stable(results, resources, rect, rect, scroll_behavior, children)
     }
 
     /// Lays out a body inside an outer viewport, repeating when content changes scrollbar gutters.
     pub(crate) fn layout_viewport_body_until_scrollbars_stable(
         &mut self,
         results: &FrameResults,
+        resources: &WidgetTreeResources,
         viewport_rect: Recti,
         body_rect: Recti,
         scroll_behavior: ScrollBehavior,
         children: &[WidgetTreeNode],
     ) -> NodeLayout {
         let mut content_hint = self.content_size();
-        let mut layout = self.layout_body_with_content_hint(results, viewport_rect, body_rect, scroll_behavior, content_hint, children);
+        let mut layout = self.layout_body_with_content_hint(results, resources, viewport_rect, body_rect, scroll_behavior, content_hint, children);
         for _ in 0..3 {
             let resolved_body = self.resolved_body_for_content(body_rect, scroll_behavior, layout.content_size);
             if Self::same_rect(resolved_body, layout.body) {
                 return layout;
             }
             content_hint = layout.content_size;
-            layout = self.layout_body_with_content_hint(results, viewport_rect, body_rect, scroll_behavior, content_hint, children);
+            layout = self.layout_body_with_content_hint(results, resources, viewport_rect, body_rect, scroll_behavior, content_hint, children);
         }
         layout
     }
@@ -255,6 +257,7 @@ impl TraversalHost {
     fn layout_body_with_content_hint(
         &mut self,
         results: &FrameResults,
+        resources: &WidgetTreeResources,
         viewport_rect: Recti,
         body_rect: Recti,
         scroll_behavior: ScrollBehavior,
@@ -265,27 +268,40 @@ impl TraversalHost {
         self.set_rect(viewport_rect);
         self.set_content_size(content_hint);
         self.configure_container_body(body_rect, scroll_behavior);
-        self.layout_tree_nodes(results, children);
+        self.layout_tree_nodes(results, resources, children);
         self.finish_body_layout_scope()
     }
 
     /// Runs the retained update pass for a resolved body and updates its scrollbar controls.
-    pub(crate) fn update_body_tree(&mut self, results: &mut FrameResults, layout: NodeLayout, scroll_behavior: ScrollBehavior, children: &[WidgetTreeNode]) {
+    pub(crate) fn update_body_tree(
+        &mut self,
+        results: &mut FrameResults,
+        resources: &WidgetTreeResources,
+        layout: NodeLayout,
+        scroll_behavior: ScrollBehavior,
+        children: &[WidgetTreeNode],
+    ) {
         self.apply_viewport_layout(layout);
         self.apply_scroll_behavior(scroll_behavior);
         self.push_clip_rect(layout.body);
-        self.update_tree_nodes(results, children);
+        self.update_tree_nodes(results, resources, children);
         self.pop_clip_rect();
         self.update_active_scrollbars();
         self.consume_pending_scroll();
     }
 
     /// Runs the retained paint pass for a resolved body and paints scrollbars above child content.
-    pub(crate) fn paint_body_tree(&mut self, layout: NodeLayout, scroll_behavior: ScrollBehavior, children: &[WidgetTreeNode]) {
+    pub(crate) fn paint_body_tree(
+        &mut self,
+        resources: &WidgetTreeResources,
+        layout: NodeLayout,
+        scroll_behavior: ScrollBehavior,
+        children: &[WidgetTreeNode],
+    ) {
         self.apply_viewport_layout(layout);
         self.apply_scroll_behavior(scroll_behavior);
         self.push_clip_rect(layout.body);
-        self.paint_tree_nodes(children);
+        self.paint_tree_nodes(resources, children);
         self.pop_clip_rect();
         self.paint_active_scrollbars();
     }
@@ -294,9 +310,9 @@ impl TraversalHost {
         (a.x, a.y, a.width, a.height) == (b.x, b.y, b.width, b.height)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     #[inline(never)]
     /// Updates and paints scrollbars for tests and legacy callers.
+    #[cfg(test)]
     pub(crate) fn scrollbars(&mut self, body: &mut Recti) {
         self.resolve_scrollbars(body);
         self.render_scrollbars(*body);
@@ -326,6 +342,7 @@ impl TraversalHost {
     }
 
     /// Runs scrollbar update and paint passes for `body`.
+    #[cfg(test)]
     pub(crate) fn render_scrollbars(&mut self, body: Recti) {
         self.update_scrollbars(body);
         self.paint_scrollbars(body);

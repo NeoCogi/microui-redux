@@ -55,6 +55,7 @@
 //! The textbox stores a UTF-8 byte cursor and uses shared text-edit helpers to keep cursor movement
 //! and deletion on valid character boundaries.
 use crate::*;
+use super::WidgetConfig;
 
 use super::text_edit::{apply_text_input, caret_rect, centered_line_top, clamp_cursor_boundary, cursor_from_text_x, font_line_metrics, ReturnBehavior};
 
@@ -65,12 +66,8 @@ pub struct Textbox {
     buf: String,
     /// Current cursor position within the buffer (byte index).
     cursor: usize,
-    /// Font selection used for the textbox content.
-    pub font: FontChoice,
-    /// Widget options applied to the textbox.
-    pub opt: WidgetOption,
-    /// Scroll behavior applied to the textbox.
-    pub scroll_behavior: ScrollBehavior,
+    /// Shared widget configuration.
+    pub config: WidgetConfig,
 }
 
 impl Textbox {
@@ -81,9 +78,7 @@ impl Textbox {
         Self {
             buf,
             cursor,
-            font: FontChoice::default(),
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::default(),
         }
     }
 
@@ -94,9 +89,7 @@ impl Textbox {
         Self {
             buf,
             cursor,
-            font: FontChoice::default(),
-            opt,
-            scroll_behavior: ScrollBehavior::NONE,
+            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
         }
     }
 
@@ -136,7 +129,7 @@ impl Textbox {
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
-        let font = style.resolve_font_choice(self.font);
+        let font = style.resolve_font_choice(self.config.font);
         let font_height = atlas.get_font_height(font) as i32;
         let text_w = if self.buf.is_empty() {
             0
@@ -153,14 +146,14 @@ impl Textbox {
 
     /// Applies input and cursor movement for this textbox.
     fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        let font = ctx.style().resolve_font_choice(self.font);
-        textbox_update(ctx, control, &mut self.buf, &mut self.cursor, self.opt, font)
+        let font = ctx.style().resolve_font_choice(self.config.font);
+        textbox_update(ctx, control, &mut self.buf, &mut self.cursor, self.config.opt, font)
     }
 
     /// Paints the textbox frame, text, and caret.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        let font = ctx.style().resolve_font_choice(self.font);
-        textbox_paint(ctx, control, self.buf.as_str(), self.cursor, self.opt, font);
+        let font = ctx.style().resolve_font_choice(self.config.font);
+        textbox_paint(ctx, control, self.buf.as_str(), self.cursor, self.config.opt, font);
     }
 }
 
@@ -174,7 +167,7 @@ pub(crate) fn textbox_update(
     font: FontId,
 ) -> ResourceState {
     let mut res = ResourceState::NONE;
-    let r = ctx.rect();
+    let r = ctx.screen_rect();
     if !control.focused {
         // Reset to end when blurred so refocusing starts from a predictable position.
         *cursor = buf.len();
@@ -194,7 +187,7 @@ pub(crate) fn textbox_update(
                 submit: false,
             }
         };
-        (input.mouse_pressed, input.mouse_pos, input.key_code_pressed.is_end(), edit)
+        (input.mouse_pressed, input.mouse_pos, input.key_code_pressed.intersects(KeyCode::END), edit)
     };
     if control.focused {
         cursor_pos = edit.cursor;
@@ -218,7 +211,7 @@ pub(crate) fn textbox_update(
     let ofx = r.width - padding - text_metrics.width - 1;
     let textx = r.x + if ofx < padding { ofx } else { padding };
 
-    if control.focused && mouse_pressed.is_left() && ctx.mouse_over(r) {
+    if control.focused && mouse_pressed.intersects(MouseButton::LEFT) && ctx.mouse_over(r) {
         // Convert local click x into a UTF-8 boundary cursor position.
         let click_x = mouse_pos.x - (textx - r.x);
         cursor_pos = cursor_from_text_x(buf, click_x, font, ctx.atlas());
@@ -231,7 +224,7 @@ pub(crate) fn textbox_update(
 
 /// Shared single-line textbox painting used by textbox and numeric inline editors.
 pub(crate) fn textbox_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, buf: &str, cursor: usize, opt: WidgetOption, font: FontId) {
-    let r = ctx.rect();
+    let r = ctx.screen_rect();
     ctx.draw_widget_frame(control, r, ControlColor::Base, opt);
 
     let metrics = font_line_metrics(font, ctx.atlas());
@@ -263,11 +256,11 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, buf
 
 impl Widget for Textbox {
     fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
+        &self.config.opt
     }
 
     fn scroll_behavior(&self) -> ScrollBehavior {
-        self.scroll_behavior
+        self.config.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
@@ -290,7 +283,7 @@ impl Widget for Textbox {
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
-        self.opt | WidgetOption::HOLD_FOCUS
+        self.config.opt | WidgetOption::HOLD_FOCUS
     }
 
     fn focus_policy(&self) -> FocusPolicy {

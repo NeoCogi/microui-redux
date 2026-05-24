@@ -82,24 +82,79 @@ impl Policy {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+/// Identifier for live state stored outside the retained node description.
+pub(crate) struct TreeResourceId(usize);
+
+/// Live state owned by a retained tree.
+///
+/// Tree nodes describe structure and stable IDs; this registry owns the state handles and callbacks
+/// needed to execute that structure.
+pub(crate) enum WidgetTreeResource {
+    Widget(Box<dyn WidgetStateHandleDyn>),
+    CustomRender { state: WidgetHandle<Custom>, render: TreeCustomRender },
+    ScrollArea(ScrollAreaHandle),
+    Node(WidgetHandle<Node>),
+}
+
+#[derive(Default)]
+/// Registry for live resources referenced by retained tree nodes.
+pub(crate) struct WidgetTreeResources {
+    entries: Vec<WidgetTreeResource>,
+}
+
+impl WidgetTreeResources {
+    pub(crate) fn push(&mut self, resource: WidgetTreeResource) -> TreeResourceId {
+        let id = TreeResourceId(self.entries.len());
+        self.entries.push(resource);
+        id
+    }
+
+    pub(crate) fn widget(&self, id: TreeResourceId) -> &dyn WidgetStateHandleDyn {
+        match &self.entries[id.0] {
+            WidgetTreeResource::Widget(widget) => &**widget,
+            _ => panic!("tree resource {:?} is not a widget", id),
+        }
+    }
+
+    pub(crate) fn custom_render(&self, id: TreeResourceId) -> (&WidgetHandle<Custom>, &TreeCustomRender) {
+        match &self.entries[id.0] {
+            WidgetTreeResource::CustomRender { state, render } => (state, render),
+            _ => panic!("tree resource {:?} is not a custom-render resource", id),
+        }
+    }
+
+    pub(crate) fn scroll_area(&self, id: TreeResourceId) -> &ScrollAreaHandle {
+        match &self.entries[id.0] {
+            WidgetTreeResource::ScrollArea(handle) => handle,
+            _ => panic!("tree resource {:?} is not a scroll-area resource", id),
+        }
+    }
+
+    pub(crate) fn node(&self, id: TreeResourceId) -> &WidgetHandle<Node> {
+        match &self.entries[id.0] {
+            WidgetTreeResource::Node(state) => state,
+            _ => panic!("tree resource {:?} is not a node resource", id),
+        }
+    }
+}
+
 /// Kind of a retained node emitted by [`super::WidgetTreeBuilder`].
 pub(crate) enum WidgetTreeNodeKind {
     /// Leaf node that dispatches widget state through the normal widget pipeline.
     Widget {
-        /// Retained widget state handle.
-        widget: Box<dyn WidgetStateHandleDyn>,
+        /// Resource registry entry for the retained widget state handle.
+        resource: TreeResourceId,
     },
     /// Leaf node that records a deferred custom-render callback.
     CustomRender {
-        /// Retained widget state handle.
-        state: WidgetHandle<Custom>,
-        /// Deferred rendering callback enqueued after interaction handling.
-        render: TreeCustomRender,
+        /// Resource registry entry for custom widget state and backend callback.
+        resource: TreeResourceId,
     },
     /// Scrollable child subtree with its own retained scroll-area state.
     ScrollArea {
-        /// Scroll-area handle used for the child content.
-        handle: ScrollAreaHandle,
+        /// Resource registry entry for the scroll-area handle.
+        resource: TreeResourceId,
         /// Scroll area rendering options.
         opt: ContainerOption,
         /// Scroll behavior applied while traversing the scroll area.
@@ -107,13 +162,13 @@ pub(crate) enum WidgetTreeNodeKind {
     },
     /// Collapsible header node with optional child content.
     Header {
-        /// Header state handle that owns the expanded/collapsed state.
-        state: WidgetHandle<Node>,
+        /// Resource registry entry for the header state handle.
+        resource: TreeResourceId,
     },
     /// Tree node with automatic indentation while expanded.
     Tree {
-        /// Tree state handle that owns the expanded/collapsed state.
-        state: WidgetHandle<Node>,
+        /// Resource registry entry for the tree node state handle.
+        resource: TreeResourceId,
     },
     /// Horizontal row flow group.
     Row {
@@ -143,6 +198,21 @@ pub(crate) enum WidgetTreeNodeKind {
 }
 
 impl WidgetTreeNodeKind {
+    /// Returns a compact name used in validation diagnostics.
+    pub(super) fn name(&self) -> &'static str {
+        match self {
+            Self::Widget { .. } => "widget",
+            Self::CustomRender { .. } => "custom_render",
+            Self::ScrollArea { .. } => "scroll_area",
+            Self::Header { .. } => "header",
+            Self::Tree { .. } => "tree_node",
+            Self::Row { .. } => "row",
+            Self::Grid { .. } => "grid",
+            Self::Column => "column",
+            Self::Stack { .. } => "stack",
+        }
+    }
+
     /// Returns the stable kind discriminator used by builder id hashing.
     pub(super) fn tag(&self) -> u8 {
         match self {
@@ -199,11 +269,16 @@ impl WidgetTreeNode {
 #[derive(Default)]
 pub struct WidgetTree {
     pub(super) roots: Vec<WidgetTreeNode>,
+    pub(crate) resources: WidgetTreeResources,
 }
 
 impl WidgetTree {
     /// Returns the root nodes of the tree.
     pub fn roots(&self) -> &[WidgetTreeNode] {
         &self.roots
+    }
+
+    pub(crate) fn resources(&self) -> &WidgetTreeResources {
+        &self.resources
     }
 }

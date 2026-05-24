@@ -187,9 +187,9 @@ pub(crate) fn control_text_position_with_font(style: &Style, atlas: &AtlasHandle
     let line_height = atlas.get_font_height(font) as i32;
     let baseline = atlas.get_font_baseline(font);
     let y = baseline_aligned_top(rect, line_height, baseline);
-    let x = if opt.is_aligned_center() {
+    let x = if opt.intersects(WidgetOption::ALIGN_CENTER) {
         rect.x + (rect.width - tsize.width) / 2
-    } else if opt.is_aligned_right() {
+    } else if opt.intersects(WidgetOption::ALIGN_RIGHT) {
         rect.x + rect.width - tsize.width - padding
     } else {
         rect.x + padding
