@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Container state and traversal logic are split by concern so rendering,
+//! Traversal state and retained scroll-area logic are split by concern so rendering,
 //! interaction, retained-tree traversal, and widget helpers can evolve
 //! independently without one file becoming the crate's de facto core.
 
@@ -58,10 +58,7 @@ use super::*;
 use crate::draw_context::DrawCtx;
 use crate::widget::{FocusPolicy, RetainedId};
 use crate::widget_tree::{widget_handle_id, NodeId, NodeLayout, Policy, TreeCustomRender, WidgetHandle, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind};
-use std::{
-    cell::RefCell,
-    ops::{Deref, DerefMut},
-};
+use std::cell::RefCell;
 
 mod command;
 pub use command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
@@ -131,11 +128,11 @@ impl ViewportState {
     }
 }
 
-/// Per-traversal execution state shared by root containers and retained scroll areas.
+/// Per-traversal execution state shared by root windows and retained scroll areas.
 ///
 /// `TraversalHost` owns layout, draw, interaction, and retained-tree caches for one traversed
 /// body. Viewport geometry and scroll offsets are kept in `ViewportState`; root-only concerns such
-/// as z-order and window lifecycle stay on `Container`; retained child state lives in `ScrollArea`.
+/// as z-order and window lifecycle stay on `Window`; retained child state lives in `ScrollArea`.
 pub struct TraversalHost {
     atlas: AtlasHandle,
     /// Style used when drawing widgets in the container.
@@ -154,13 +151,6 @@ pub struct TraversalHost {
     measurement_mode: bool,
     /// Previous/current frame cache for retained tree node geometry and interaction state.
     tree_cache: WidgetTreeCache,
-}
-
-/// Root UI building block used by windows, dialogs, and popups.
-pub struct Container {
-    host: TraversalHost,
-    /// Z-index used to order overlapping windows.
-    zindex: i32,
 }
 
 #[derive(Default)]
@@ -547,44 +537,5 @@ impl TraversalHost {
     /// Clamps `x` into the inclusive range `[a, b]`.
     fn clamp(x: i32, a: i32, b: i32) -> i32 {
         min(b, max(a, x))
-    }
-}
-
-impl Container {
-    /// Creates a root container with persistent retained state and shared style/input handles.
-    pub(crate) fn new(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>) -> Self {
-        Self {
-            host: TraversalHost::new(name, atlas, style, input),
-            zindex: 0,
-        }
-    }
-
-    /// Clears persistent container state when a root closes or is recreated.
-    pub(crate) fn reset(&mut self) {
-        self.host.reset();
-    }
-
-    /// Returns z-order used by root sorting.
-    pub(crate) fn zindex(&self) -> i32 {
-        self.zindex
-    }
-
-    /// Sets z-order used by root sorting.
-    pub(crate) fn set_zindex(&mut self, zindex: i32) {
-        self.zindex = zindex;
-    }
-}
-
-impl Deref for Container {
-    type Target = TraversalHost;
-
-    fn deref(&self) -> &Self::Target {
-        &self.host
-    }
-}
-
-impl DerefMut for Container {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.host
     }
 }

@@ -50,10 +50,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Window, dialog, and popup wrappers around root containers.
+//! Window, dialog, and popup wrappers around root traversal hosts.
 //!
 //! This file owns chrome controls, window open/close state, z-order-facing handles, and the bridge
-//! between top-level roots and their underlying [`Container`].
+//! between top-level roots and their underlying [`TraversalHost`].
 use super::*;
 use crate::{context::RootId, widget::FrameResults, widget_tree::WidgetTree};
 use std::cell::{Ref, RefMut};
@@ -84,13 +84,14 @@ pub(crate) struct Window {
     pub(crate) win_state: WindowState,
     root_id: RootId,
     last_root_frame: Option<usize>,
-    pub(crate) main: Container,
+    pub(crate) main: TraversalHost,
+    zindex: i32,
     chrome_tree: WindowChromeTree,
 }
 
 impl Window {
     /// Computes titlebar height from style minimums and current title font metrics.
-    fn titlebar_height(container: &Container) -> i32 {
+    fn titlebar_height(container: &TraversalHost) -> i32 {
         let style = container.style();
         let font_height = container.atlas().get_font_height(style.title_font) as i32;
         let padding = style.padding.max(0);
@@ -99,7 +100,7 @@ impl Window {
     }
 
     /// Computes the client body rect after titlebar chrome is reserved.
-    fn body_rect_for(container: &Container, opt: ContainerOption) -> Recti {
+    fn body_rect_for(container: &TraversalHost, opt: ContainerOption) -> Recti {
         let mut body = container.rect();
         if !opt.has_no_title() {
             let title_h = Self::titlebar_height(container);
@@ -110,7 +111,7 @@ impl Window {
     }
 
     /// Applies measured content size to an auto-sized root while preserving chrome thickness.
-    fn apply_auto_size(container: &mut Container, opt: ContainerOption) {
+    fn apply_auto_size(container: &mut TraversalHost, opt: ContainerOption) {
         let content_size = container.content_size();
         if !opt.is_auto_sizing() || (content_size.width <= 0 && content_size.height <= 0) {
             return;
@@ -131,7 +132,7 @@ impl Window {
 
     /// Creates a dialog window that starts closed.
     pub fn dialog(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
-        let mut main = Container::new(name, atlas, style, input);
+        let mut main = TraversalHost::new(name, atlas, style, input);
         main.set_internal_id_seed(Id::new(root_id.raw() as u64));
         main.set_rect(initial_rect);
         let chrome_ids = WindowChromeIds::from_root(root_id);
@@ -142,13 +143,14 @@ impl Window {
             root_id,
             last_root_frame: None,
             main,
+            zindex: 0,
             chrome_tree: WindowChromeTree::new(chrome_ids),
         }
     }
 
     /// Creates a standard window that starts open.
     pub fn window(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
-        let mut main = Container::new(name, atlas, style, input);
+        let mut main = TraversalHost::new(name, atlas, style, input);
         main.set_internal_id_seed(Id::new(root_id.raw() as u64));
         main.set_rect(initial_rect);
         let chrome_ids = WindowChromeIds::from_root(root_id);
@@ -159,13 +161,14 @@ impl Window {
             root_id,
             last_root_frame: None,
             main,
+            zindex: 0,
             chrome_tree: WindowChromeTree::new(chrome_ids),
         }
     }
 
     /// Creates a popup window that starts closed.
     pub fn popup(root_id: RootId, name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>, initial_rect: Recti) -> Self {
-        let mut main = Container::new(name, atlas, style, input);
+        let mut main = TraversalHost::new(name, atlas, style, input);
         main.set_internal_id_seed(Id::new(root_id.raw() as u64));
         main.set_rect(initial_rect);
         let chrome_ids = WindowChromeIds::from_root(root_id);
@@ -176,6 +179,7 @@ impl Window {
             root_id,
             last_root_frame: None,
             main,
+            zindex: 0,
             chrome_tree: WindowChromeTree::new(chrome_ids),
         }
     }
@@ -201,7 +205,7 @@ impl Window {
         self.chrome_tree.render_title_bar(&mut self.main, results, &mut self.win_state, opt);
 
         let body = Self::body_rect_for(&self.main, opt);
-        // Container body setup accounts for scrollbars before child layout begins.
+        // Root body setup accounts for scrollbars before child layout begins.
         self.main.configure_container_body(body, scroll_behavior);
         let body = self.main.body();
         self.main.push_clip_rect(body);
@@ -364,12 +368,12 @@ impl WindowHandle {
 
     /// Returns the root z-index.
     pub(crate) fn zindex(&self) -> i32 {
-        self.0.borrow().main.zindex()
+        self.0.borrow().zindex
     }
 
     /// Sets the root z-index.
     pub(crate) fn set_zindex(&mut self, zindex: i32) {
-        self.inner_mut().main.set_zindex(zindex);
+        self.inner_mut().zindex = zindex;
     }
 
     /// Replaces the root style handle.

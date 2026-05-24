@@ -103,7 +103,7 @@ impl WindowChromeTree {
     }
 
     /// Resolves the titlebar drag node when the window has a title.
-    fn title_node(&self, container: &Container, opt: ContainerOption) -> Option<WindowChromeNode> {
+    fn title_node(&self, container: &TraversalHost, opt: ContainerOption) -> Option<WindowChromeNode> {
         if opt.has_no_title() {
             return None;
         }
@@ -129,7 +129,7 @@ impl WindowChromeTree {
     }
 
     /// Resolves the resize handle node when resizing is enabled.
-    fn resize_node(&self, container: &Container, opt: ContainerOption) -> Option<WindowChromeNode> {
+    fn resize_node(&self, container: &TraversalHost, opt: ContainerOption) -> Option<WindowChromeNode> {
         if opt.is_auto_sizing() || opt.is_fixed() {
             return None;
         }
@@ -147,7 +147,7 @@ impl WindowChromeTree {
 
     /// Updates one chrome node, paints it, and records its retained interaction result.
     fn dispatch_node(
-        container: &mut Container,
+        container: &mut TraversalHost,
         results: &mut FrameResults,
         node: WindowChromeNode,
         state: &mut Internal,
@@ -168,7 +168,7 @@ impl WindowChromeTree {
     }
 
     /// Updates and paints titlebar chrome, applying drag/close side effects.
-    pub(super) fn render_title_bar(&mut self, container: &mut Container, results: &mut FrameResults, win_state: &mut WindowState, opt: ContainerOption) {
+    pub(super) fn render_title_bar(&mut self, container: &mut TraversalHost, results: &mut FrameResults, win_state: &mut WindowState, opt: ContainerOption) {
         let Some(title_node) = self.title_node(container, opt) else {
             return;
         };
@@ -199,7 +199,7 @@ impl WindowChromeTree {
     }
 
     /// Updates and paints the resize handle, applying drag deltas to the root rectangle.
-    pub(super) fn render_resize_handle(&mut self, container: &mut Container, results: &mut FrameResults, opt: ContainerOption) {
+    pub(super) fn render_resize_handle(&mut self, container: &mut TraversalHost, results: &mut FrameResults, opt: ContainerOption) {
         let Some(resize_node) = self.resize_node(container, opt) else {
             return;
         };

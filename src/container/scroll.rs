@@ -1,4 +1,4 @@
-//! Container scroll state, scrollbar geometry, and scrollbar dispatch.
+//! Viewport scroll state, scrollbar geometry, and scrollbar dispatch.
 
 use super::*;
 use crate::scrollbar::{scrollbar_max_scroll, ScrollAxis};
