@@ -58,9 +58,9 @@ use std::{
 };
 
 use crate::canvas::Canvas;
-use crate::container::ScrollArea;
 use crate::render::Renderer;
 use crate::{Dimensioni, NodeId, Recti, RetainedId, Vec2i};
+use super::ScrollArea;
 
 #[derive(Clone)]
 /// Shared handle to a retained scroll area.

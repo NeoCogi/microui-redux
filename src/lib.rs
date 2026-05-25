@@ -89,7 +89,6 @@
 pub mod atlas;
 mod canvas;
 mod container;
-mod container_handle;
 mod context;
 mod draw_context;
 mod file_dialog;
@@ -125,7 +124,7 @@ pub mod backend {
 /// These are intentionally outside the default retained prelude because they expose low-level state
 /// views rather than the primary retained UI authoring model.
 pub mod advanced {
-    pub use crate::container_handle::{ScrollAreaView, ScrollAreaViewMut};
+    pub use crate::container::{ScrollAreaView, ScrollAreaViewMut};
     pub use crate::graphics::Graphics;
     pub use crate::window::{WindowHandle, WindowState};
 }
@@ -135,8 +134,7 @@ pub mod advanced {
 /// This module groups the stable retained concepts used by application code without exposing
 /// low-level renderer/canvas details or manual container drawing helpers through default imports.
 pub mod retained {
-    pub use crate::container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
-    pub use crate::container_handle::ScrollAreaHandle;
+    pub use crate::container::{CustomRenderArgs, CustomRenderCommand, ScrollAreaHandle, TextWrap};
     pub use crate::context::{Context, RootId};
     pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
     pub use crate::widget_tree::{NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
@@ -177,7 +175,7 @@ pub use atlas::{
     AtlasHandle, AtlasSource, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry,
     FontId, IconId, OPEN_FOLDER_16_ICON, SlotId, SourceFormat, WHITE_ICON, load_image_bytes,
 };
-pub use container::{CustomRenderArgs, CustomRenderCommand, TextWrap};
+pub use container::{CustomRenderArgs, CustomRenderCommand, ScrollAreaHandle, TextWrap};
 pub use context::{Context, RootId};
 pub use file_dialog::FileDialogState;
 pub use id::Id;
@@ -197,7 +195,6 @@ pub use widgets::{
 
 pub(crate) use canvas::{Canvas, Vertex};
 pub(crate) use container::{ScrollArea, TraversalHost};
-pub(crate) use container_handle::ScrollAreaHandle;
 pub(crate) use layout::LayoutManager;
 #[allow(unused_imports)]
 pub(crate) use rs_math3d::{

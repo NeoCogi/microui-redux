@@ -69,6 +69,8 @@ pub(crate) use command::Command;
 
 mod dispatch;
 mod draw;
+mod handle;
+pub use handle::{ScrollAreaHandle, ScrollAreaView, ScrollAreaViewMut};
 mod interaction;
 mod layout_api;
 mod measurement;
