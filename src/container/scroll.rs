@@ -4,6 +4,7 @@ use super::*;
 use crate::scrollbar::{scrollbar_max_scroll, ScrollAxis};
 
 #[derive(Clone)]
+/// Per-container scroll offsets and retained scrollbar widget state.
 pub(super) struct ScrollState {
     /// Accumulated scroll offset.
     offset: Vec2i,
@@ -22,6 +23,7 @@ impl Default for ScrollState {
 }
 
 impl ScrollState {
+    /// Creates enabled scroll state with fresh axis-specific scrollbar widgets.
     fn new() -> Self {
         Self {
             offset: Vec2i::default(),
@@ -31,29 +33,35 @@ impl ScrollState {
         }
     }
 
+    /// Restores the scroll state to its initial enabled, unscrolled state.
     pub(super) fn reset(&mut self) {
         self.offset = Vec2i::default();
         self.enabled = true;
     }
 
+    /// Re-enables scrolling at the beginning of a frame before widget policy is applied.
     pub(super) fn prepare_frame(&mut self) {
         self.enabled = true;
     }
 
+    /// Returns the current scroll offset.
     pub(super) fn offset(&self) -> Vec2i {
         self.offset
     }
 
+    /// Replaces the current scroll offset.
     pub(super) fn set_offset(&mut self, offset: Vec2i) {
         self.offset = offset;
     }
 
+    /// Returns whether scrolling is currently enabled for this viewport.
     pub(super) fn enabled(&self) -> bool {
         self.enabled
     }
 }
 
 impl ScrollState {
+    /// Returns the scroll offset for one axis.
     fn axis(&self, axis: ScrollAxis) -> i32 {
         match axis {
             ScrollAxis::Vertical => self.offset.y,
@@ -61,6 +69,7 @@ impl ScrollState {
         }
     }
 
+    /// Replaces the scroll offset for one axis.
     fn set_axis(&mut self, axis: ScrollAxis, value: i32) {
         match axis {
             ScrollAxis::Vertical => self.offset.y = value,
@@ -68,6 +77,7 @@ impl ScrollState {
         }
     }
 
+    /// Temporarily removes a scrollbar so it can be updated without borrowing `self`.
     fn take_scrollbar(&mut self, axis: ScrollAxis) -> Scrollbar {
         match axis {
             ScrollAxis::Vertical => std::mem::replace(&mut self.vertical, Scrollbar::new(ScrollAxis::Vertical)),
@@ -75,6 +85,7 @@ impl ScrollState {
         }
     }
 
+    /// Restores a scrollbar after update or paint dispatch.
     fn restore_scrollbar(&mut self, scrollbar: Scrollbar) {
         match scrollbar.axis() {
             ScrollAxis::Vertical => self.vertical = scrollbar,
@@ -163,15 +174,19 @@ impl TraversalHost {
         };
     }
 
+    /// Adds style padding to content size before evaluating scrollbar ranges.
     fn padded_scrollbar_content_size(mut content_size: Dimensioni, padding: i32) -> Dimensioni {
         content_size.width += padding * 2;
         content_size.height += padding * 2;
         content_size
     }
 
+    /// Resolves the body rectangle after vertical and horizontal scrollbar gutters are considered.
     fn resolved_scrollbar_body(body: Recti, content_size: Dimensioni, scrollbar_size: i32) -> Recti {
         let scrollbar_size = scrollbar_size.max(0);
         let mut resolved = body;
+        // A vertical bar can force a horizontal bar and vice versa. Re-evaluate until body size
+        // stops shrinking.
         for _ in 0..3 {
             let needs_vertical = content_size.height > resolved.height && resolved.height > 0;
             let needs_horizontal = content_size.width > resolved.width && resolved.width > 0;
@@ -190,6 +205,7 @@ impl TraversalHost {
         resolved
     }
 
+    /// Resolves the scrollable body for a content-size hint without mutating the container.
     pub(crate) fn resolved_body_for_content(&self, body: Recti, scroll_behavior: ScrollBehavior, content_size: Dimensioni) -> Recti {
         if scroll_behavior.is_no_scroll() {
             return body;
@@ -254,6 +270,7 @@ impl TraversalHost {
         layout
     }
 
+    /// Performs one retained child layout pass using `content_hint` for scrollbar decisions.
     fn layout_body_with_content_hint(
         &mut self,
         results: &FrameResults,
@@ -306,6 +323,7 @@ impl TraversalHost {
         self.paint_active_scrollbars();
     }
 
+    /// Compares rectangle components without relying on external trait behavior.
     fn same_rect(a: Recti, b: Recti) -> bool {
         (a.x, a.y, a.width, a.height) == (b.x, b.y, b.width, b.height)
     }

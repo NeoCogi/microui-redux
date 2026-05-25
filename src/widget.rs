@@ -188,12 +188,16 @@ impl RetainedId {
 /// - and the current in-progress result set being written by this frame.
 #[derive(Default)]
 pub(crate) struct FrameResults {
+    /// Result generation published after the previous frame.
     committed: FrameResultStore,
+    /// Result generation being written by the current frame.
     current: FrameResultStore,
+    /// Duplicate-dispatch detector for the current frame.
     current_dispatch: FrameDispatchTracker,
 }
 
 #[derive(Default)]
+/// Mutable storage for one frame-result generation.
 struct FrameResultStore {
     /// Primary public result storage keyed by fully scoped retained identity.
     entries: HashMap<RetainedId, ResourceState>,
@@ -202,26 +206,31 @@ struct FrameResultStore {
 }
 
 impl FrameResultStore {
+    /// Clears retained results and compatibility indexes.
     fn clear(&mut self) {
         self.entries.clear();
         self.node_index.clear();
     }
 
+    /// Records a compatibility mapping from raw node id to scoped retained id.
     fn record_node_index(&mut self, node_id: Id, retained_id: RetainedId) {
         self.node_index.entry(node_id).or_insert(retained_id);
     }
 
+    /// Records the state produced by one retained widget dispatch.
     fn record_retained(&mut self, retained_id: RetainedId, state: ResourceState) {
         let prev_state = self.entries.insert(retained_id, state);
         debug_assert!(prev_state.is_none(), "retained result for {:?} was recorded more than once", retained_id);
     }
 
+    /// Returns a read-only view over this generation.
     fn generation(&self) -> FrameResultGeneration<'_> {
         FrameResultGeneration::new(&self.entries, &self.node_index)
     }
 }
 
 #[derive(Default)]
+/// Detects duplicate widget or retained-id dispatch within one frame.
 struct FrameDispatchTracker {
     /// Dispatch site for each retained ID seen in the current frame.
     retained_sites: HashMap<RetainedId, String>,
@@ -230,11 +239,13 @@ struct FrameDispatchTracker {
 }
 
 impl FrameDispatchTracker {
+    /// Clears all dispatch sites before a new frame.
     fn clear(&mut self) {
         self.retained_sites.clear();
         self.widget_sites.clear();
     }
 
+    /// Records one widget-handle dispatch and panics on duplicate use.
     fn record_widget(&mut self, widget_handle_id: Id, dispatch_site: &str) {
         if let Some(first_site) = self.widget_sites.get(&widget_handle_id) {
             panic!(
@@ -246,6 +257,7 @@ impl FrameDispatchTracker {
         self.widget_sites.insert(widget_handle_id, dispatch_site.to_string());
     }
 
+    /// Records one retained-id dispatch and panics on duplicate use.
     fn record_retained(&mut self, retained_id: RetainedId, dispatch_site: String) {
         if let Some(first_site) = self.retained_sites.get(&retained_id) {
             panic!(
@@ -261,7 +273,9 @@ impl FrameDispatchTracker {
 /// Read-only view over one frame-result generation.
 #[derive(Copy, Clone)]
 pub struct FrameResultGeneration<'a> {
+    /// Retained result map for this generation.
     entries: &'a HashMap<RetainedId, ResourceState>,
+    /// Compatibility index from raw node ids to scoped retained ids.
     node_ids: &'a HashMap<Id, RetainedId>,
 }
 

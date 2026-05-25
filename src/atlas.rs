@@ -47,11 +47,16 @@ pub struct CharEntry {
 }
 
 #[derive(Clone)]
+/// Internal font record stored in the atlas.
 struct Font {
-    line_size: usize,                  // line size
-    baseline: i32,                     // distance from top of line to baseline
-    font_size: usize,                  // font size in pixels
-    entries: HashMap<char, CharEntry>, // all printable chars [32-127]
+    /// Distance between text baselines in pixels.
+    line_size: usize,
+    /// Distance from the top of a line to its baseline.
+    baseline: i32,
+    /// Requested font size in pixels.
+    font_size: usize,
+    /// Glyph entries for the printable ASCII range baked into the atlas.
+    entries: HashMap<char, CharEntry>,
 }
 
 impl Debug for Font {
@@ -93,17 +98,27 @@ impl Into<u32> for SlotId {
 }
 
 #[derive(Debug, Clone)]
+/// Internal bitmap icon record stored in the atlas.
 struct Icon {
+    /// Rectangle occupied by the icon in atlas pixel coordinates.
     rect: Recti,
 }
 
+/// Mutable atlas storage shared through [`AtlasHandle`].
 struct Atlas {
+    /// Width of the atlas texture in pixels.
     width: usize,
+    /// Height of the atlas texture in pixels.
     height: usize,
+    /// RGBA pixel data in row-major order.
     pixels: Vec<Color4b>,
+    /// Named fonts available to text layout and rendering.
     fonts: Vec<(String, Font)>,
+    /// Named icons available to widgets.
     icons: Vec<(String, Icon)>,
+    /// User-reserved atlas rectangles for external drawing needs.
     slots: Vec<Recti>,
+    /// Monotonic version incremented after mutable pixel/slot updates.
     last_update_id: usize,
 }
 

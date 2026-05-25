@@ -7,58 +7,66 @@ use crate::{rect, vec2, Recti, Vec2i};
 use super::{SizePolicy, StackDirection};
 
 #[derive(Clone, Default)]
+/// Cursor and content-extents state for one layout scope.
 pub(super) struct ScopeState {
-    // Scope rectangle expressed in local space (already offset by scroll).
+    /// Scope rectangle expressed in local space after scroll offset is folded in.
     pub(super) body: Recti,
-    // Current cursor in local coordinates.
+    /// Current cursor in local coordinates.
     pub(super) cursor: Vec2i,
-    // Max absolute extent reached by generated cells (for scroll/content sizing).
+    /// Max absolute extent reached by generated cells for scroll/content sizing.
     pub(super) max: Option<Vec2i>,
-    // Y coordinate where the next logical line should start.
+    /// Y coordinate where the next logical line should start.
     pub(super) next_row: i32,
-    // Horizontal indentation applied to the scope.
+    /// Horizontal indentation applied to the scope.
     pub(super) indent: i32,
 }
 
 impl ScopeState {
-    // Reset cursor to the start of the next line while preserving active indentation.
+    /// Resets the cursor to the start of the next line while preserving indentation.
     pub(super) fn reset_cursor_for_next_row(&mut self) {
         self.cursor = vec2(self.indent, self.next_row);
     }
 }
 
 #[derive(Copy, Clone)]
+/// Dimension-resolution inputs shared by all flow implementations.
 pub(super) struct ResolveCtx {
-    // Global inter-cell spacing from style.
+    /// Global inter-cell spacing from style.
     pub(super) spacing: i32,
-    // Width fallback after preferred-size resolution.
+    /// Width fallback after preferred-size resolution.
     pub(super) default_width: i32,
-    // Height fallback after preferred-size resolution.
+    /// Height fallback after preferred-size resolution.
     pub(super) default_height: i32,
-    // Optional node-local width policy override.
+    /// Optional node-local width policy override.
     pub(super) width_override: Option<SizePolicy>,
-    // Optional node-local height policy override.
+    /// Optional node-local height policy override.
     pub(super) height_override: Option<SizePolicy>,
 }
 
 impl ResolveCtx {
+    /// Returns the effective width policy after applying any node-local override.
     fn width_policy(&self, fallback: SizePolicy) -> SizePolicy {
         self.width_override.unwrap_or(fallback)
     }
 
+    /// Returns the effective height policy after applying any node-local override.
     fn height_policy(&self, fallback: SizePolicy) -> SizePolicy {
         self.height_override.unwrap_or(fallback)
     }
 }
 
+/// Placement strategy for allocating the next local cell.
 trait LayoutFlow {
-    // Produces the next local cell and advances scope-local cursors/state.
+    /// Produces the next local cell and advances scope-local cursors/state.
     fn next_local(&mut self, scope: &mut ScopeState, ctx: ResolveCtx) -> Recti;
 }
 
 #[derive(Clone)]
+/// Height policy mode for row/grid flows.
 pub(super) enum RowHeights {
+    /// One height policy shared by every emitted row.
     Uniform(SizePolicy),
+    /// Repeating list of row-height tracks.
     Tracks(Vec<SizePolicy>),
 }
 
@@ -69,14 +77,15 @@ impl Default for RowHeights {
 }
 
 #[derive(Clone, Default)]
+/// Repeating row/grid flow that allocates cells left-to-right.
 pub(super) struct RowFlow {
-    // Width policy for each slot in the active row pattern.
+    /// Width policy for each slot in the active row pattern.
     widths: Vec<SizePolicy>,
-    // Height policy shared by all cells in the row pattern, or one policy per row track.
+    /// Height policy shared by rows or repeated by grid track.
     heights: RowHeights,
-    // Current slot index in `widths`.
+    /// Current slot index in `widths`.
     item_index: usize,
-    // Current row index in the active pattern.
+    /// Current row index in the active pattern.
     row_index: usize,
 }
 
@@ -203,14 +212,15 @@ impl LayoutFlow for RowFlow {
 }
 
 #[derive(Clone)]
+/// Vertical stack flow that allocates one item per line.
 pub(super) struct StackFlow {
-    // Width policy used for every stacked item.
+    /// Width policy used for every stacked item.
     width: SizePolicy,
-    // Height policy used for every stacked item.
+    /// Height policy used for every stacked item.
     height: SizePolicy,
-    // Vertical direction for cell emission.
+    /// Vertical direction for cell emission.
     direction: StackDirection,
-    // Offset consumed from the stack anchor (used by bottom-up stacks).
+    /// Offset consumed from the stack anchor for bottom-up stacks.
     offset: i32,
 }
 
@@ -276,10 +286,11 @@ impl LayoutFlow for StackFlow {
 }
 
 #[derive(Clone)]
+/// Active flow implementation for a layout frame.
 pub(super) enum FlowState {
-    // Repeating row pattern with N slots.
+    /// Repeating row/grid pattern.
     Row(RowFlow),
-    // One-cell-per-line vertical stack.
+    /// One-cell-per-line vertical stack.
     Stack(StackFlow),
 }
 
@@ -290,7 +301,7 @@ impl Default for FlowState {
 }
 
 impl FlowState {
-    // Store a flow as a lightweight template so scoped overrides can be restored later.
+    /// Stores the active flow as a lightweight template for later restoration.
     pub(super) fn as_template(&self) -> FlowTemplate {
         match self {
             FlowState::Row(row) => FlowTemplate::Row {
@@ -323,7 +334,7 @@ impl FlowState {
         }
     }
 
-    // Delegate cell generation to the active flow implementation.
+    /// Delegates cell generation to the active flow implementation.
     pub(super) fn next_local(&mut self, scope: &mut ScopeState, ctx: ResolveCtx) -> Recti {
         match self {
             FlowState::Row(flow) => flow.next_local(scope, ctx),
@@ -333,16 +344,22 @@ impl FlowState {
 }
 
 #[derive(Clone)]
+/// Saved flow configuration used by temporary scoped layout overrides.
 pub(super) enum FlowTemplate {
-    // Snapshot for row flow configuration.
+    /// Snapshot for row/grid flow configuration.
     Row {
+        /// Saved row width tracks.
         widths: Vec<SizePolicy>,
+        /// Saved row height policy.
         heights: RowHeights,
     },
-    // Snapshot for stack flow configuration.
+    /// Snapshot for stack flow configuration.
     Stack {
+        /// Saved stack width policy.
         width: SizePolicy,
+        /// Saved stack height policy.
         height: SizePolicy,
+        /// Saved stack direction.
         direction: StackDirection,
     },
 }

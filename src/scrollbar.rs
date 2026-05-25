@@ -59,7 +59,9 @@ use crate::{Recti, Vec2i};
 #[derive(Copy, Clone, Debug)]
 /// Axis selector used by shared scrollbar geometry helpers.
 pub(crate) enum ScrollAxis {
+    /// Vertical scrollbar operating on y offsets.
     Vertical,
+    /// Horizontal scrollbar operating on x offsets.
     Horizontal,
 }
 

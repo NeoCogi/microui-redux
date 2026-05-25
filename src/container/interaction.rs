@@ -113,6 +113,7 @@ impl TraversalHost {
         self.update_control_for_with_hover_block(interaction_id, rect, opt, scroll_behavior, focus_policy, false)
     }
 
+    /// Computes control state with optional child-root hover blocking.
     fn update_control_for_with_hover_block(
         &mut self,
         interaction_id: RetainedId,

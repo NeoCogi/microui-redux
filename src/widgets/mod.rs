@@ -93,6 +93,7 @@ impl WidgetConfig {
     }
 }
 
+/// Implements the common [`Widget`] forwarding methods for built-in widget state types.
 macro_rules! implement_widget {
     ($ty:ty, $update:ident, $paint:ident, $measure:ident) => {
         impl Widget for $ty {

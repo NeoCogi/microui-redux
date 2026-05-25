@@ -52,23 +52,29 @@ use std::rc::Rc;
 mod clip;
 pub(crate) use clip::clip_triangle_vertices_to_rect;
 
+/// Floating-point tolerance used by polygon orientation and geometry simplification.
 const GEOM_EPS: f32 = 1.0e-5;
+/// Squared tolerance used by duplicate-point checks.
 const GEOM_EPS_SQ: f32 = GEOM_EPS * GEOM_EPS;
 
-// Applies an integer translation without changing extents. Geometry code uses this to hop
-// between widget-local and screen-space rectangles while keeping clip math reusable.
+/// Applies an integer translation without changing extents.
+///
+/// Geometry code uses this to hop between widget-local and screen-space rectangles while keeping
+/// clip math reusable.
 fn translate_rect(rect: Recti, offset: Vec2i) -> Recti {
     Recti::new(rect.x + offset.x, rect.y + offset.y, rect.width, rect.height)
 }
 
-// Applies the widget's screen-space origin to one retained triangle vertex without disturbing its
-// UV or color payload.
+/// Applies the widget's screen-space origin to one retained triangle vertex.
+///
+/// The vertex UV and color payload are preserved unchanged.
 fn translate_vertex(vertex: Vertex, offset: Vec2f) -> Vertex {
     Vertex::new(vertex.position() + offset, vertex.tex_coord(), vertex.color())
 }
 
-// Computes a conservative integer bounding box for a set of floating-point positions. The helper
-// is only used by tests to verify geometric translation behavior.
+/// Computes a conservative integer bounding box for floating-point positions.
+///
+/// The helper is only used by tests to verify geometric translation behavior.
 #[cfg(test)]
 fn rect_from_points(points: &[Vec2f]) -> Recti {
     let mut min_x = f32::INFINITY;
@@ -90,22 +96,28 @@ fn rect_from_points(points: &[Vec2f]) -> Recti {
     Recti::new(x0, y0, (x1 - x0).max(0), (y1 - y0).max(0))
 }
 
-// Returns the signed 2D cross product. This is the core orientation predicate reused by the
-// polygon cleanup, convexity tests, and point-in-triangle checks.
+/// Returns the signed 2D cross product.
+///
+/// This is the core orientation predicate reused by polygon cleanup, convexity tests, and
+/// point-in-triangle checks.
 fn cross2(a: Vec2f, b: Vec2f) -> f32 {
     a.x * b.y - a.y * b.x
 }
 
-// Uses squared distance so degenerate/duplicate vertices can be rejected without paying for a
-// square root in hot polygon preprocessing code.
+/// Returns squared distance between two points.
+///
+/// Squared distance lets degenerate/duplicate vertices be rejected without paying for a square
+/// root in hot polygon preprocessing code.
 fn distance_sq(a: Vec2f, b: Vec2f) -> f32 {
     let dx = a.x - b.x;
     let dy = a.y - b.y;
     dx * dx + dy * dy
 }
 
-// Computes polygon winding and area in one pass. The sign decides whether the input needs to be
-// reversed before triangulation, while near-zero area indicates a degenerate polygon.
+/// Computes polygon winding and area in one pass.
+///
+/// The sign decides whether the input needs to be reversed before triangulation, while near-zero
+/// area indicates a degenerate polygon.
 fn signed_area(points: &[Vec2f]) -> f32 {
     if points.len() < 3 {
         return 0.0;
@@ -120,9 +132,10 @@ fn signed_area(points: &[Vec2f]) -> f32 {
     area * 0.5
 }
 
-// Removes duplicate closing points, repeated neighbors, and strictly collinear vertices before
-// triangulation. The fill paths rely on a compact boundary because both the convex fast path and
-// ear clipping become simpler and faster once obvious redundancy is stripped out.
+/// Removes duplicate closing points, repeated neighbors, and strictly collinear vertices.
+///
+/// Fill paths rely on a compact boundary because both the convex fast path and ear clipping become
+/// simpler and faster once obvious redundancy is stripped out.
 fn dedupe_and_simplify_polygon(points: &[Vec2f]) -> Vec<Vec2f> {
     let mut deduped = Vec::with_capacity(points.len());
     for point in points {
@@ -159,13 +172,14 @@ fn dedupe_and_simplify_polygon(points: &[Vec2f]) -> Vec<Vec2f> {
     simplified
 }
 
-// Ear clipping assumes counter-clockwise winding, so "convex" means a positive turn here.
+/// Returns whether the three points form a convex counter-clockwise corner.
 fn is_convex_ccw(prev: Vec2f, curr: Vec2f, next: Vec2f) -> bool {
     cross2(curr - prev, next - curr) > GEOM_EPS
 }
 
-// Detects the cheap convex case up front so common polygons can skip the heavier ear-clipping
-// loop and fall straight into a triangle fan.
+/// Returns whether all polygon corners are convex in counter-clockwise order.
+///
+/// Detecting this cheap case lets common polygons skip the heavier ear-clipping loop.
 fn is_convex_polygon_ccw(points: &[Vec2f]) -> bool {
     if points.len() < 3 {
         return false;
@@ -182,8 +196,10 @@ fn is_convex_polygon_ccw(points: &[Vec2f]) -> bool {
     true
 }
 
-// Uses inclusive edge tests so boundary points still count as inside. That makes the ear test
-// robust against vertices that land directly on a candidate triangle edge after simplification.
+/// Returns whether a point lies inside or on a counter-clockwise triangle.
+///
+/// Inclusive edge tests make the ear test robust against vertices that land directly on a
+/// candidate triangle edge after simplification.
 fn point_in_triangle_ccw(point: Vec2f, a: Vec2f, b: Vec2f, c: Vec2f) -> bool {
     let ab = cross2(b - a, point - a);
     let bc = cross2(c - b, point - b);
@@ -204,23 +220,33 @@ fn point_in_triangle_ccw(point: Vec2f, a: Vec2f, b: Vec2f, c: Vec2f) -> bool {
 /// triangles are already clipped, nested local clip scopes do not need to flush the batch or emit
 /// retained clip commands.
 pub struct Graphics<'a, 'b> {
+    /// Shared draw context receiving commands and triangle vertices.
     draw: &'a mut DrawCtx<'b>,
+    /// Screen-space widget rectangle that anchors local coordinates.
     widget_rect: Recti,
+    /// Floating-point widget origin used when translating triangle vertices.
     widget_origin: Vec2f,
+    /// UV coordinate of the atlas white pixel used by solid geometry.
     white_uv: Vec2f,
+    /// Clip-stack depth that existed before this builder was created.
     clip_base_depth: usize,
+    /// First vertex of the current unflushed triangle batch.
     triangle_batch_start: usize,
+    /// Number of vertices in the current unflushed triangle batch.
     triangle_batch_count: usize,
 }
 
 impl<'a, 'b> Graphics<'a, 'b> {
+    /// Creates a graphics builder clipped to the widget rectangle.
     pub(crate) fn new(draw: &'a mut DrawCtx<'b>, widget_rect: Recti) -> Self {
         Self::new_with_clip_root(draw, widget_rect, widget_rect)
     }
 
-    // Public widget-local graphics keep their clip root inside the widget bounds. Internal widget
-    // paint adapters can supply a wider clip root to preserve legacy frame overflow behavior while
-    // still reusing the same local-coordinate drawing code.
+    /// Creates a graphics builder with an explicit screen-space clip root.
+    ///
+    /// Public widget-local graphics keep their clip root inside the widget bounds. Internal widget
+    /// paint adapters can supply a wider clip root to preserve legacy frame overflow behavior while
+    /// still reusing the same local-coordinate drawing code.
     pub(crate) fn new_with_clip_root(draw: &'a mut DrawCtx<'b>, widget_rect: Recti, clip_root: Recti) -> Self {
         // The builder records how deep the shared clip stack was before it started, then pushes one
         // root clip in screen space. All later widget-local clip changes are translated onto that
@@ -521,33 +547,33 @@ impl<'a, 'b> Graphics<'a, 'b> {
         }
     }
 
-    // Converts the current widget-local clip into the screen-space clip consumed by retained text,
-    // icon, image, and slot commands.
+    /// Returns the current screen-space clip consumed by retained non-triangle commands.
     fn current_screen_clip_rect(&self) -> Recti {
         self.draw.current_clip_rect()
     }
 
-    // Converts widget-local integer positions into the screen-space coordinates used by the rest
-    // of the retained command stream.
+    /// Converts a widget-local integer position into screen-space coordinates.
     fn local_to_screen_pos(&self, pos: Vec2i) -> Vec2i {
         pos + Vec2i::new(self.widget_rect.x, self.widget_rect.y)
     }
 
-    // Converts widget-local integer rectangles into screen-space rectangles while preserving
-    // extents.
+    /// Converts a widget-local integer rectangle into a screen-space rectangle.
     fn local_to_screen_rect(&self, rect: Recti) -> Recti {
         translate_rect(rect, Vec2i::new(self.widget_rect.x, self.widget_rect.y))
     }
 
-    // Converts the shared screen-space clip back into widget-local coordinates so the tessellator
-    // can software-clip generated triangles before they ever reach the retained command stream.
+    /// Converts a screen-space rectangle into widget-local coordinates.
+    ///
+    /// This lets the tessellator software-clip generated triangles before they ever reach the
+    /// retained command stream.
     fn screen_to_local_rect(&self, rect: Recti) -> Recti {
         translate_rect(rect, Vec2i::new(-self.widget_rect.x, -self.widget_rect.y))
     }
 
-    // Flushes any pending triangle batch, then emits a retained non-triangle command clipped
-    // against the current local clip rect. This keeps ordering correct when widgets mix text,
-    // images, and solid geometry inside one graphics builder.
+    /// Flushes pending triangles, then emits a clipped non-triangle command.
+    ///
+    /// This keeps ordering correct when widgets mix text, images, and solid geometry inside one
+    /// graphics builder.
     fn emit_clipped_command<F>(&mut self, bounds_local: Recti, emit: F)
     where
         F: FnOnce(&mut DrawCtx<'b>),
@@ -558,25 +584,27 @@ impl<'a, 'b> Graphics<'a, 'b> {
         self.draw.emit_clipped(bounds, clip, emit);
     }
 
-    // Emits a convex polygon as a triangle fan rooted at the first point. This is the fastest path
-    // for fills and avoids any temporary index bookkeeping.
+    /// Emits a convex polygon as a triangle fan rooted at the first point.
     fn push_triangle_fan(&mut self, points: &[Vec2f], color: Color4b) {
         for idx in 1..points.len() - 1 {
             self.push_triangle_local(points[0], points[idx], points[idx + 1], color);
         }
     }
 
-    // Reuses the triangle path for thick-line quads and other four-corner shapes. Keeping quads as
-    // two triangles avoids a separate code path in the retained command stream and the backends.
+    /// Emits a four-corner shape as two local triangles.
+    ///
+    /// Keeping quads as triangles avoids a separate code path in the retained command stream and
+    /// the backends.
     fn push_quad_local(&mut self, p0: Vec2f, p1: Vec2f, p2: Vec2f, p3: Vec2f, color: Color) {
         let rgba = color4b(color.r, color.g, color.b, color.a);
         self.push_triangle_local(p0, p1, p2, rgba);
         self.push_triangle_local(p0, p2, p3, rgba);
     }
 
-    // Clips one local triangle against the current local clip and appends the surviving triangles
-    // into the shared container-owned arena. Clipping here means later clip-stack changes no
-    // longer need to fragment the retained command stream.
+    /// Clips and appends one widget-local triangle into the shared vertex arena.
+    ///
+    /// Clipping here means later clip-stack changes no longer need to fragment the retained
+    /// command stream.
     fn push_triangle_local(&mut self, a: Vec2f, b: Vec2f, c: Vec2f, color: Color4b) {
         let clip = self.current_clip_rect();
         let widget_origin = self.widget_origin;
@@ -596,9 +624,10 @@ impl<'a, 'b> Graphics<'a, 'b> {
         );
     }
 
-    // Finalizes the current triangle batch. At this point every triangle has already been clipped
-    // in software, so replay only needs the range into the shared arena and no extra clip-state
-    // changes.
+    /// Finalizes the current triangle batch as one retained command.
+    ///
+    /// Every triangle has already been clipped in software, so replay only needs the range into
+    /// the shared arena and no extra clip-state changes.
     fn flush_batch(&mut self) {
         if self.triangle_batch_count == 0 {
             return;

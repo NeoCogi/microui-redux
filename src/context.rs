@@ -94,19 +94,30 @@ impl RootId {
 
 /// Primary entry point used to drive the UI over a renderer implementation.
 pub struct Context<R: Renderer> {
+    /// Renderer-facing canvas that replays root command lists.
     canvas: Canvas<R>,
+    /// Shared style used by all roots and scroll areas.
     style: Rc<Style>,
 
+    /// Highest z-index allocated to an open root.
     last_zindex: i32,
+    /// Monotonic frame counter used for root freshness bookkeeping.
     frame: usize,
+    /// Root that owned hover routing during the current frame.
     hover_root: Option<WindowHandle>,
+    /// Root selected to own hover routing in the next frame.
     next_hover_root: Option<WindowHandle>,
 
+    /// Roots submitted for the current frame in render order.
     root_list: Vec<WindowHandle>,
+    /// Registered retained roots that are replayed by [`Context::update_ui`].
     retained_roots: Vec<RootEntry>,
+    /// Next root id counter.
     next_root_id: usize,
+    /// Double-buffered retained widget result store.
     frame_results: FrameResults,
 
+    /// Shared input state mutated by public input APIs and consumed during traversal.
     input: Rc<RefCell<Input>>,
 }
 

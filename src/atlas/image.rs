@@ -27,6 +27,7 @@ pub fn load_image_bytes(source: ImageSource) -> std::io::Result<(usize, usize, V
     }
 }
 
+/// Returns the byte length required for an RGBA buffer with positive dimensions.
 pub(crate) fn checked_rgba_byte_len(width: i32, height: i32) -> std::result::Result<usize, String> {
     if width <= 0 || height <= 0 {
         return Err(String::from("Image dimensions must be positive"));
@@ -39,6 +40,7 @@ pub(crate) fn checked_rgba_byte_len(width: i32, height: i32) -> std::result::Res
         .ok_or_else(|| String::from("Image dimensions overflow RGBA byte count"))
 }
 
+/// Validates that `len` exactly matches the expected RGBA byte count.
 pub(crate) fn validate_rgba_buffer(width: i32, height: i32, len: usize) -> std::result::Result<usize, String> {
     let expected = checked_rgba_byte_len(width, height)?;
     if len != expected {
@@ -48,6 +50,7 @@ pub(crate) fn validate_rgba_buffer(width: i32, height: i32, len: usize) -> std::
 }
 
 #[cfg(any(feature = "builder", feature = "png_source"))]
+/// Decodes a PNG stream into normalized RGBA pixels.
 fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Color4b>)> {
     let mut cursor = Cursor::new(bytes);
     let mut decoder = Decoder::new(&mut cursor);
@@ -78,6 +81,8 @@ fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Colo
         .ok_or_else(|| Error::new(ErrorKind::Other, "PNG dimensions overflow pixel count"))?;
     let mut pixels = vec![Color4b::default(); pixel_count];
     let line_size = info.line_size;
+    // The decoder can normalize bit depth, but not all color models become RGBA directly. Expand
+    // each source row explicitly so atlas construction has one canonical pixel format.
     for y in 0..info.height {
         let line = &img_data[(y as usize * line_size)..((y as usize + 1) * line_size)];
 

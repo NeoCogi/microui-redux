@@ -74,6 +74,7 @@ use crate::{
 /// intentionally private; callers should use [`WidgetHandle::read`], [`WidgetHandle::update`], or
 /// [`WidgetHandle::replace`] instead of depending on the handle representation.
 pub struct WidgetHandle<T> {
+    /// Shared retained widget state.
     inner: Rc<RefCell<T>>,
 }
 
@@ -156,6 +157,7 @@ pub(crate) trait WidgetStateHandleDyn {
 
 /// Concrete erased adapter around a strongly typed widget handle.
 struct WidgetStateHandle<W: Widget + 'static> {
+    /// Strongly typed handle being erased.
     handle: WidgetHandle<W>,
 }
 

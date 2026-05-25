@@ -49,8 +49,11 @@ use super::{
 
 /// Stack frame used while the builder collects a group node's children.
 struct BuilderFrame {
+    /// Seed mixed into automatic child ids for this scope.
     scope_seed: u64,
+    /// Next ordinal for unkeyed automatic children.
     next_auto: u64,
+    /// Nodes collected inside this frame.
     nodes: Vec<WidgetTreeNode>,
 }
 
@@ -80,7 +83,9 @@ impl BuilderFrame {
 /// This keeps identity and placement concerns in one place so the builder API
 /// does not need separate `keyed_*` and `*_with_policy` method families.
 pub struct NodeOptions {
+    /// Layout policy applied to the inserted node.
     policy: Policy,
+    /// Optional application-supplied identity key.
     key: Option<u64>,
 }
 
@@ -133,13 +138,17 @@ fn hash_builder_key<K: Hash>(key: K) -> u64 {
 /// Use [`WidgetTreeBuilder::node`] together with [`NodeOptions::keyed`] for dynamic or
 /// reorderable children.
 pub struct WidgetTreeBuilder {
+    /// Stack of open builder scopes.
     frames: Vec<BuilderFrame>,
+    /// Resource registry populated while nodes are inserted.
     resources: WidgetTreeResources,
 }
 
 /// Builder adapter that applies one [`NodeOptions`] value to the next inserted node.
 pub struct NodeBuilder<'a> {
+    /// Builder receiving the next node.
     builder: &'a mut WidgetTreeBuilder,
+    /// Options consumed by the next insertion.
     options: NodeOptions,
 }
 
@@ -455,6 +464,7 @@ impl WidgetTreeBuilder {
         Self::collect_node_ids(nodes, "root", &mut seen);
     }
 
+    /// Recursively collects node ids and panics if the same id appears twice.
     fn collect_node_ids(nodes: &[WidgetTreeNode], parent_path: &str, seen: &mut HashMap<NodeId, String>) {
         for (index, node) in nodes.iter().enumerate() {
             let (node_id, kind, children) = node.parts();

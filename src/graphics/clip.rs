@@ -2,41 +2,53 @@
 
 use crate::*;
 
+/// Floating-point tolerance used by clipping predicates.
 const CLIP_EPS: f32 = 1.0e-5;
+/// Squared clipping tolerance used by duplicate-vertex checks.
 const CLIP_EPS_SQ: f32 = CLIP_EPS * CLIP_EPS;
 
 #[derive(Copy, Clone)]
+/// One boundary of the rectangular clipping region.
 enum RectClipEdge {
+    /// Left x boundary.
     Left,
+    /// Right x boundary.
     Right,
+    /// Top y boundary.
     Top,
+    /// Bottom y boundary.
     Bottom,
 }
 
+/// Returns the signed 2D cross product.
 fn cross2(a: Vec2f, b: Vec2f) -> f32 {
     a.x * b.y - a.y * b.x
 }
 
+/// Returns squared distance between two points.
 fn distance_sq(a: Vec2f, b: Vec2f) -> f32 {
     let dx = a.x - b.x;
     let dy = a.y - b.y;
     dx * dx + dy * dy
 }
 
-// Linear interpolation for positions/UVs used when a triangle edge intersects a clip boundary.
+/// Linearly interpolates two 2D vectors.
 fn lerp_vec2(a: Vec2f, b: Vec2f, t: f32) -> Vec2f {
     let omt = 1.0 - t;
     Vec2f::new(a.x * omt + b.x * t, a.y * omt + b.y * t)
 }
 
+/// Linearly interpolates two byte channels and clamps to the channel range.
 fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
     ((a as f32) + (b as f32 - a as f32) * t).round().clamp(0.0, 255.0) as u8
 }
 
+/// Linearly interpolates two packed RGBA colors.
 fn lerp_color4b(a: Color4b, b: Color4b, t: f32) -> Color4b {
     color4b(lerp_u8(a.x, b.x, t), lerp_u8(a.y, b.y, t), lerp_u8(a.z, b.z, t), lerp_u8(a.w, b.w, t))
 }
 
+/// Linearly interpolates position, UV, and color for a clipped vertex.
 fn lerp_vertex(a: Vertex, b: Vertex, t: f32) -> Vertex {
     Vertex::new(
         lerp_vec2(a.position(), b.position(), t),
@@ -45,6 +57,7 @@ fn lerp_vertex(a: Vertex, b: Vertex, t: f32) -> Vertex {
     )
 }
 
+/// Returns whether `point` is inside one edge half-plane.
 fn point_inside_clip_edge(point: Vec2f, edge: RectClipEdge, clip: Recti) -> bool {
     let left = clip.x as f32;
     let right = (clip.x + clip.width) as f32;
@@ -58,6 +71,7 @@ fn point_inside_clip_edge(point: Vec2f, edge: RectClipEdge, clip: Recti) -> bool
     }
 }
 
+/// Finds the normalized segment parameter where `a..b` intersects an edge boundary.
 fn intersection_t_for_edge(a: Vec2f, b: Vec2f, edge: RectClipEdge, clip: Recti) -> f32 {
     let (start, delta, boundary) = match edge {
         RectClipEdge::Left => (a.x, b.x - a.x, clip.x as f32),
@@ -73,11 +87,13 @@ fn intersection_t_for_edge(a: Vec2f, b: Vec2f, edge: RectClipEdge, clip: Recti) 
     }
 }
 
+/// Computes the interpolated vertex at a segment/edge intersection.
 fn intersect_vertex_edge(a: Vertex, b: Vertex, edge: RectClipEdge, clip: Recti) -> Vertex {
     let t = intersection_t_for_edge(a.position(), b.position(), edge, clip);
     lerp_vertex(a, b, t)
 }
 
+/// Pushes a vertex unless it duplicates the previous output vertex.
 fn push_unique_vertex(dst: &mut [Vertex; 8], count: &mut usize, vertex: Vertex) {
     if *count > 0 && distance_sq(dst[*count - 1].position(), vertex.position()) <= CLIP_EPS_SQ {
         dst[*count - 1] = vertex;
@@ -89,6 +105,7 @@ fn push_unique_vertex(dst: &mut [Vertex; 8], count: &mut usize, vertex: Vertex) 
     *count += 1;
 }
 
+/// Clips a convex polygon against one rectangular edge using Sutherland-Hodgman clipping.
 fn clip_polygon_against_edge(input: &[Vertex; 8], input_count: usize, edge: RectClipEdge, clip: Recti, output: &mut [Vertex; 8]) -> usize {
     if input_count == 0 {
         return 0;
@@ -120,6 +137,7 @@ fn clip_polygon_against_edge(input: &[Vertex; 8], input_count: usize, edge: Rect
     out_count
 }
 
+/// Computes signed area for a vertex polygon.
 fn signed_area_vertices(points: &[Vertex]) -> f32 {
     if points.len() < 3 {
         return 0.0;

@@ -68,6 +68,7 @@ use crate::id::IdNamespace;
 
 /// Retained state for one scrollable child subtree.
 pub struct ScrollArea {
+    /// Traversal state owned by this nested scrollable region.
     host: TraversalHost,
 }
 
@@ -89,6 +90,7 @@ impl ScrollArea {
         self.host.finish();
     }
 
+    /// Returns the immutable traversal host backing this scroll area.
     pub(crate) fn host(&self) -> &TraversalHost {
         &self.host
     }

@@ -59,23 +59,35 @@ use crate::{rect, AtlasHandle, FontId, InputSnapshot, KeyCode, KeyMode, Recti};
 
 /// Determines what pressing return means for the active editor.
 pub(crate) enum ReturnBehavior {
+    /// Return submits the edit.
     Submit,
-    Newline { submit_on_ctrl: bool },
+    /// Return inserts a newline, optionally submitting when Ctrl is held.
+    Newline {
+        /// Whether Ctrl+Return should submit instead of inserting a newline.
+        submit_on_ctrl: bool,
+    },
 }
 
 /// Result of applying one input snapshot to a text buffer.
 pub(crate) struct TextEditOutcome {
+    /// New cursor byte position.
     pub cursor: usize,
+    /// Whether the text buffer changed.
     pub changed: bool,
+    /// Whether the cursor moved.
     pub moved: bool,
+    /// Whether the edit requested submission.
     pub submit: bool,
 }
 
 #[derive(Copy, Clone)]
 /// Metrics needed to align text and draw a caret consistently.
 pub(crate) struct FontLineMetrics {
+    /// Distance between baselines in pixels.
     pub line_height: i32,
+    /// Baseline offset from the top of the line.
     pub baseline: i32,
+    /// Descent below the baseline.
     pub descent: i32,
 }
 

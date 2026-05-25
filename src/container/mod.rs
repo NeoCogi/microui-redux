@@ -92,6 +92,7 @@ struct ViewportState {
     body: Recti,
     /// Size of the content region based on layout traversal.
     content_size: Dimensioni,
+    /// Scroll offset and scrollbar widget state.
     scroll: ScrollState,
 }
 
@@ -133,16 +134,21 @@ impl ViewportState {
 /// body. Viewport geometry and scroll offsets are kept in `ViewportState`; root-only concerns such
 /// as z-order and window lifecycle stay on `Window`; retained child state lives in `ScrollArea`.
 pub struct TraversalHost {
+    /// Atlas used by widgets inside this traversal host.
     atlas: AtlasHandle,
     /// Style used when drawing widgets in the container.
     style: Rc<Style>,
     /// Human-readable name for the container.
     name: String,
+    /// Viewport rectangle, content size, and scroll state.
     viewport: ViewportState,
     /// Stable seed used to derive internal retained node IDs for framework controls.
     internal_id_seed: Id,
+    /// Frame-local draw command buffers.
     draw: DrawState,
+    /// Flow layout engine for the active traversal.
     layout: LayoutManager,
+    /// Focus, hover, input snapshot, and scroll-routing state.
     interaction: InteractionState,
     /// Shared access to the input state.
     input: Rc<RefCell<Input>>,
@@ -151,6 +157,7 @@ pub struct TraversalHost {
 }
 
 #[derive(Default)]
+/// Frame-local draw buffers owned by a traversal host.
 struct DrawState {
     /// Recorded draw commands for this frame.
     commands: Vec<Command>,
@@ -200,6 +207,7 @@ impl DrawState {
 }
 
 #[derive(Default)]
+/// Per-host focus, hover, popup, and scroll-routing state.
 struct InteractionState {
     /// ID of the widget currently hovered, if any.
     hover: Option<RetainedId>,

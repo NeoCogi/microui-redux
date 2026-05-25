@@ -54,8 +54,11 @@
 
 use std::hash::{Hash, Hasher};
 
+/// FNV-1a offset basis used by stable internal id hashing.
 const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+/// FNV-1a prime used by stable internal id hashing.
 const FNV_PRIME: u64 = 0x100000001b3;
+/// Global salt mixed into scoped framework-generated ids.
 const MICROUI_ID_SALT: u64 = 0x6d69_6372_6f75_695f;
 
 /// Numeric identifier value.
@@ -88,7 +91,9 @@ impl Id {
 }
 
 #[derive(Clone, Debug)]
+/// Deterministic FNV-1a hasher used for UI ids.
 pub(crate) struct IdHasher {
+    /// Current hash accumulator.
     hash: u64,
 }
 
@@ -99,10 +104,12 @@ impl Default for IdHasher {
 }
 
 impl IdHasher {
+    /// Creates a hasher initialized to the FNV-1a offset basis.
     pub(crate) const fn new() -> Self {
         Self { hash: FNV_OFFSET_BASIS }
     }
 
+    /// Converts the current hash accumulator into an [`Id`].
     pub(crate) fn into_id(self) -> Id {
         Id::new(self.hash)
     }
@@ -170,20 +177,28 @@ impl Hasher for IdHasher {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+/// Salted namespace for framework-generated ids.
 pub(crate) struct IdNamespace {
+    /// Namespace-specific salt mixed into every id generated through this value.
     salt: u64,
 }
 
 impl IdNamespace {
+    /// Namespace used for window chrome controls.
     pub(crate) const WINDOW_CHROME: Self = Self::new(0x726f_6f74);
+    /// Namespace used for nested panel/scroll-area scopes.
     pub(crate) const PANEL_SCOPE: Self = Self::new(0x7061_6e65_6c5f_7363);
+    /// Namespace used for internal widgets inside composite controls.
     pub(crate) const INTERNAL_CONTROL: Self = Self::new(0x696e_7465_726e_616c);
+    /// Namespace used for auto-generated retained tree nodes.
     pub(crate) const WIDGET_TREE_BUILDER: Self = Self::new(0x7769_6467_6574_7472);
 
+    /// Creates a namespace from a caller-provided salt.
     const fn new(salt: u64) -> Self {
         Self { salt }
     }
 
+    /// Hashes the provided values into a stable id within this namespace.
     pub(crate) fn id(self, values: impl IntoIterator<Item = u64>) -> Id {
         let mut hash = IdHasher::new();
         MICROUI_ID_SALT.hash(&mut hash);
@@ -195,6 +210,7 @@ impl IdNamespace {
     }
 }
 
+/// Hashes a stable key into a raw `u64` for retained id generation.
 pub(crate) fn hash_id_key<K: Hash>(key: K) -> u64 {
     let mut hash = IdHasher::new();
     key.hash(&mut hash);

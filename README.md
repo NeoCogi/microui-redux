@@ -43,7 +43,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 - **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and stored in retained roots through `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)`. Tree nodes cover widgets, scroll areas, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
 - **Graphics**: widget-local primitive drawing exposed through `WidgetCtx::graphics(...)` and the `Graphics` builder. It covers rectangles, frames, text/icons/images, thick line strokes, filled polygons, and nested local clip scopes.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override `config.font`.
-- **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2 + glow example demonstrates how to batch the commands produced by a container and upload them to the GPU.
+- **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2-backed glow, Vulkan, and WGPU examples demonstrate how to batch the commands produced by a container and upload them to the GPU.
 
 The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `ScrollAreaHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. Backend-specific canvas and vertex access is available as `microui_redux::backend::{Canvas, Vertex}`; atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, rect-packing details, and container-level manual drawing are not part of the application authoring surface.
 
@@ -220,16 +220,16 @@ Equivalent command using the shared gate explicitly:
 To embed the generated atlas instead, add `prebuilt-atlas` explicitly:
 `cargo run --example demo-full --no-default-features --features "example-vulkan prebuilt-atlas"`
 
-To export an atlas as Rust, enable `save-to-rust` (optionally `png_source` for PNG bytes) and call `AtlasHandle::to_rust_files`, or use the helper binary:
-`cargo run --bin atlas_export --features "builder save-to-rust" -- --output path/to/atlas.rs`
+To export an atlas as Rust, enable `save-to-rust` (and `png_source` when serializing PNG-backed atlas data) and call `AtlasHandle::to_rust_files`. The helper binary requires `builder`, `save-to-rust`, and `png_source`:
+`cargo run --bin atlas_export --features "builder save-to-rust png_source" -- --output path/to/atlas.rs`
 
 ## Text rendering and layout
 - Retained text widgets automatically center the font’s **baseline** inside each cell, and every line gets a small vertical pad so glyphs never touch the widget borders.
 - `TextBlock` supports wrapped multi-line content while preserving outer padding without adding extra spacing between lines.
 - Custom rendering still goes through retained `custom_render` nodes, which receive layout, input, and clip information through `CustomRenderArgs`.
 
-### Version 0.6
-Version `0.6.0` is the retained-tree release. Compared to `0.5.0`, it replaces the public immediate/closure authoring path with retained widget trees and committed interaction results.
+### Version 0.6.x
+Version `0.6.0` introduced the retained-tree release line. Compared to `0.5.0`, `0.6.x` replaces the public immediate/closure authoring path with retained widget trees and committed interaction results.
 
 - [x] Replaced the v0.5 public immediate/closure authoring path with retained widget trees.
     - [x] `Context` now owns registered roots and traverses them through `update_ui()`.

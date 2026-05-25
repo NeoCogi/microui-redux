@@ -42,8 +42,11 @@ use quad::textured_quad_vertices;
 #[repr(C)]
 /// Vertex submitted by the UI.
 pub struct Vertex {
+    /// Screen-space position in pixels.
     pos: Vec2f,
+    /// Normalized texture coordinate.
     tex: Vec2f,
+    /// Vertex color multiplied with the sampled texture.
     color: Color4b,
 }
 
@@ -71,21 +74,32 @@ impl Vertex {
 
 /// High-level drawing helper that batches draw commands for a renderer.
 pub struct Canvas<R: Renderer> {
+    /// Current viewport dimensions in pixels.
     current_dim: Dimensioni,
+    /// Shared renderer handle used for frame-scoped backend access.
     renderer: RendererHandle<R>,
+    /// Atlas cached from the renderer.
     atlas: AtlasHandle,
+    /// Atlas texture dimensions used for UV normalization.
     atlas_dim: Dimensioni,
+    /// Rectangle of the baked white icon used for solid-color fills.
     white_icon_rect: Recti,
+    /// Active screen-space clip rectangle.
     clip: Recti,
+    /// Next external texture id allocated by this canvas.
     next_texture_id: u32,
+    /// Dimensions of renderer-owned external textures.
     textures: HashMap<TextureId, TextureInfo>,
+    /// Scratch buffer used to batch glyph rectangles without reallocating.
     rect_batch: Vec<(Recti, Recti, Color)>,
 }
 
 #[derive(Clone, Copy)]
 /// Dimensions tracked for an uploaded external texture.
 struct TextureInfo {
+    /// Texture width in pixels.
     width: i32,
+    /// Texture height in pixels.
     height: i32,
 }
 
@@ -119,6 +133,8 @@ impl<R: Renderer> Canvas<R> {
         match dst_r.intersect(&clip_r) {
             Some(rect) if rect.width == dst_r.width && rect.height == dst_r.height => Some((dst_r, src_r)),
             Some(rect) if rect.width != 0 && rect.height != 0 => {
+                // Preserve texture mapping by projecting the clipped destination rectangle back
+                // into the original source rectangle.
                 let dx = dst_r.x as f32;
                 let dy = dst_r.y as f32;
                 let dw = dst_r.width as f32;
@@ -318,13 +334,21 @@ impl<R: Renderer> Canvas<R> {
 
 /// Per-scope drawing facade used while the renderer is mutably borrowed.
 pub(crate) struct CanvasFrame<'a, R: Renderer> {
+    /// Mutably borrowed renderer for the duration of the scope.
     renderer: &'a mut R,
+    /// Current viewport dimensions in pixels.
     current_dim: Dimensioni,
+    /// Atlas used by atlas-backed draw commands.
     atlas: &'a AtlasHandle,
+    /// Atlas texture dimensions used for UV normalization.
     atlas_dim: Dimensioni,
+    /// Rectangle of the solid white icon.
     white_icon_rect: Recti,
+    /// Shared active clip rectangle.
     clip: &'a mut Recti,
+    /// External texture dimensions visible to this frame.
     textures: &'a HashMap<TextureId, TextureInfo>,
+    /// Reusable glyph rectangle batch owned by the parent canvas.
     rect_batch: &'a mut Vec<(Recti, Recti, Color)>,
 }
 
