@@ -286,7 +286,7 @@ impl MeasurementContext {
 
     /// Builds the deterministic scope id for a nested retained scroll area.
     fn scroll_area_scope_id(&self, node_id: NodeId) -> Id {
-        crate::id::IdNamespace::PANEL_SCOPE.id([self.internal_id_seed.raw() as u64, node_id.raw() as u64])
+        crate::id::IdNamespace::SCROLL_AREA_SCOPE.id([self.internal_id_seed.raw() as u64, node_id.raw() as u64])
     }
 
     /// Measures one erased widget and advances the current layout flow.

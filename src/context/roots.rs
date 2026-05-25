@@ -60,14 +60,6 @@ impl<R: Renderer> Context<R> {
         ScrollAreaHandle::new(ScrollArea::new(name, self.canvas.get_atlas(), self.style.clone(), self.input.clone()))
     }
 
-    /// Creates a retained panel handle for use with [`crate::WidgetTreeBuilder::scroll_area`].
-    ///
-    /// This is a compatibility alias for [`Self::new_scroll_area`].
-    #[deprecated(since = "0.6.1", note = "use new_scroll_area")]
-    pub fn new_panel(&mut self, name: &str) -> ScrollAreaHandle {
-        self.new_scroll_area(name)
-    }
-
     /// Allocates the next stable root id.
     fn next_root_id(&mut self) -> RootId {
         let id = RootId::from_raw(self.next_root_id);

@@ -54,9 +54,9 @@ pub struct FileDialogState {
     /// Window handle controlling open/close state.
     win: WindowHandle,
     /// Scroll area containing folder rows.
-    folder_panel: ScrollAreaHandle,
+    folder_area: ScrollAreaHandle,
     /// Scroll area containing file rows.
-    file_panel: ScrollAreaHandle,
+    file_area: ScrollAreaHandle,
     /// Folder names currently displayed.
     folders: Vec<String>,
     /// File names currently displayed.
@@ -251,8 +251,8 @@ impl FileDialogState {
         };
 
         let tree = {
-            let folder_panel = &self.folder_panel;
-            let file_panel = &self.file_panel;
+            let folder_area = &self.folder_area;
+            let file_area = &self.file_area;
             let up_button = &self.up_button;
             let home_button = &self.home_button;
             let path_box = &self.path_box;
@@ -292,7 +292,7 @@ impl FileDialogState {
 
                 // Main pane: folders on the left, files on the right, both scrollable through scroll areas.
                 tree.row(&pane_widths, SizePolicy::Remainder(footer_reserved), |tree| {
-                    tree.scroll_area(folder_panel, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    tree.scroll_area(folder_area, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                         tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                             tree.widget(folders_label);
                             for item in folder_items {
@@ -304,7 +304,7 @@ impl FileDialogState {
                         });
                     });
 
-                    tree.scroll_area(file_panel, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    tree.scroll_area(file_area, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                         tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                             tree.widget(files_label);
                             for item in file_items {
@@ -404,7 +404,7 @@ impl FileDialogState {
     /// Applies folder-list selection and navigates when a folder is submitted.
     fn apply_folder_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
         let next_directory = self.folder_item_ids.iter().enumerate().find_map(|(index, node_id)| {
-            if results.state_of_retained(self.folder_panel.retained_id_for_node(*node_id)).is_submitted() {
+            if results.state_of_retained(self.folder_area.retained_id_for_node(*node_id)).is_submitted() {
                 self.folders.get(index).cloned()
             } else {
                 None
@@ -422,7 +422,7 @@ impl FileDialogState {
     /// Applies file-list selection into the temporary filename textbox.
     fn apply_file_actions(&mut self, results: FrameResultGeneration<'_>) {
         let selected_file = self.file_item_ids.iter().enumerate().find_map(|(index, node_id)| {
-            if results.state_of_retained(self.file_panel.retained_id_for_node(*node_id)).is_submitted() {
+            if results.state_of_retained(self.file_area.retained_id_for_node(*node_id)).is_submitted() {
                 self.files.get(index).cloned()
             } else {
                 None
@@ -481,8 +481,8 @@ impl FileDialogState {
             selected_folder: None,
             root,
             win: ctx.root_handle(root).expect("file dialog root window missing"),
-            folder_panel: ctx.new_scroll_area("folders"),
-            file_panel: ctx.new_scroll_area("files"),
+            folder_area: ctx.new_scroll_area("folders"),
+            file_area: ctx.new_scroll_area("files"),
             folders: Vec::new(),
             files: Vec::new(),
             folder_items: Vec::new(),

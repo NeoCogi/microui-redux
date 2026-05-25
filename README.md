@@ -136,7 +136,7 @@ if ctx.committed_results().state_of_retained(RetainedId::root_node(image_root, i
 - The builder provides `draw_rect`, `draw_box`, `draw_text`, `draw_icon`, `draw_image`, `draw_frame`, `draw_widget_frame`, `draw_control_text`, `stroke_line`, `fill_polygon`, and local clip helpers such as `with_clip`.
 - Filled shapes and strokes are tessellated into retained triangles and clipped in software before replay, so primitive rendering stays consistent across glow, Vulkan, and WGPU backends.
 - `examples/retained-custom-drawing` shows a retained custom widget drawing through `WidgetCtx::graphics(...)`, and `examples/demo-full` includes a larger graphics window.
-- Direct `ContainerViewMut` draw and clip methods are no longer public; retained widgets and `WidgetTreeBuilder::custom_render(...)` are the supported custom drawing paths.
+- Direct scroll-area/container draw and clip methods are no longer public; retained widgets and `WidgetTreeBuilder::custom_render(...)` are the supported custom drawing paths.
 
 ## Fonts and typography
 - Atlas building supports multiple baked fonts and sizes through `atlas::builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.
@@ -228,44 +228,45 @@ To export an atlas as Rust, enable `save-to-rust` (and `png_source` when seriali
 - `TextBlock` supports wrapped multi-line content while preserving outer padding without adding extra spacing between lines.
 - Custom rendering still goes through retained `custom_render` nodes, which receive layout, input, and clip information through `CustomRenderArgs`.
 
-### Version 0.6.x
-Version `0.6.0` introduced the retained-tree release line. Compared to `0.5.0`, `0.6.x` replaces the public immediate/closure authoring path with retained widget trees and committed interaction results.
+### Version 0.7.0
+Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`, it completes the retained migration by moving root lifetime, interaction identity, and frame traversal into the context instead of requiring applications to resubmit each root every frame.
 
-- [x] Replaced the v0.5 public immediate/closure authoring path with retained widget trees.
-    - [x] `Context` now owns registered roots and traverses them through `update_ui()`.
-    - [x] `WidgetTree` nodes cover widgets, embedded containers, headers/tree nodes, row/grid/column/stack groups, and custom render leaves.
-    - [x] The public immediate widget-helper surface and `tree.run(...)` escape hatch are gone from the supported API.
-- [x] Added a retained composition API with stable node identity and a smaller builder surface.
-    - [x] `WidgetTree` / `WidgetTreeBuilder` provide reusable retained widget/layout hierarchies with stable `NodeId`s.
-    - [x] `WidgetTreeBuilder` is centered on one `NodeOptions` value that carries optional keys and optional placement metadata.
-    - [x] The old `keyed_*` / `*_with_policy` builder matrix was collapsed into default insertion methods plus `tree.node(NodeOptions).<kind>(...)` for keyed or policy-heavy nodes.
-- [x] Reworked retained execution around explicit layout and interaction generations.
-    - [x] Retained traversal now runs a layout pass, a whole-tree `Widget::update` pass, then a whole-tree `Widget::paint` pass, reusing cached geometry instead of advancing layout while executing widgets.
-    - [x] The internal retained tree cache stores layout and interaction separately across previous/current generations.
-    - [x] The temporary runtime adapter tree was removed; retained traversal now walks `WidgetTreeNode` values directly.
-- [x] Tightened the widget/runtime contract compared to v0.5.
-    - [x] Widgets now implement `measure` + `update` + `paint`; the intermediate `reconcile` / frame-commit design was removed.
-    - [x] Persistent widget state stays inside the widget handle and mutates during `update`.
-    - [x] Retained focus/hover and retained result lookup use stable `NodeId` / `RetainedId` identity; pointer-derived widget IDs are not part of the public API.
-- [x] Added widget-local graphics primitives as a first-class paint path.
-    - [x] `WidgetCtx::graphics(...)` and `Graphics` expose rectangles, frames, text/icons/images, thick line strokes, polygon fills, and nested local clip scopes.
-    - [x] Primitives are tessellated into retained triangles and software-clipped before replay, keeping backend behavior consistent without fragmenting batches on clip changes.
-- [x] Added multi-font atlas support with semantic typography roles.
-    - [x] Runtime atlas building and offline/prebuilt atlas export now share the same multi-font config surface.
-    - [x] `Style` binds semantic roles (`body`, `small`, `title`, `heading`, `mono`) from atlas font names, and text-bearing widgets can override their font per instance through `FontChoice`.
-    - [x] Different text sizes are represented as separate baked font variants instead of runtime bitmap scaling.
-- [x] Made committed retained results the strict public business-logic contract.
-    - [x] Per-frame widget results are recorded internally by retained ID, then published as the previous frame's committed generation.
-    - [x] `Context::committed_results()` is the public app-facing results API, including `FrameResultGeneration::state_of_node` and `FrameResultGeneration::state_of_retained`.
-    - [x] Current-frame results stay internal; `FrameResults` and `current_results()` are no longer part of the public surface.
-- [x] Migrated shipped UI and supporting widgets to the retained-only model.
-    - [x] `examples/simple`, `examples/calculator`, `examples/demo-full`, and `FileDialogState` now build retained trees and react through committed results.
-    - [x] Retained display widgets such as `TextBlock` replaced callback-only display glue.
-    - [x] Demo/file-dialog lists now reuse persistent `ListItem` state instead of rebuilding transient labels every frame.
-- [x] Hardened retained interaction, layout, and renderer integration.
-    - [x] Mouse input delivered to widgets and custom render callbacks is localized to the widget rectangle.
-    - [x] Root windows and nested scroll areas now share the retained scrollbar/clip/resize ordering needed for correct scrolling and bottom-right resize behavior.
-    - [x] Weight-based sizing, directional stacks, wrapped text blocks, retained custom rendering, and the glow/vulkan/wgpu example backends were all kept aligned with the retained execution path.
+- [x] Moved retained root lifetime into `Context`.
+    - [x] Applications register windows, dialogs, and popups with `create_window`, `create_dialog`, and `create_popup`.
+    - [x] Registered roots are traversed by `update_ui`; visibility, replacement, and options are controlled with `set_root_visible`, `set_root_tree`, and `set_root_options`.
+    - [x] The old per-frame `Context::window`, `Context::dialog`, `Context::popup`, and `Context::frame` submission path was removed from the supported API.
+- [x] Replaced pointer-derived public interaction lookup with stable retained identity.
+    - [x] `WidgetTreeBuilder` returns stable `NodeId`s for result lookup and focus control.
+    - [x] `FrameResultGeneration::state_of_retained` and `state_of_node` supersede handle/address-based result lookup.
+    - [x] Root windows, scroll areas, and window chrome derive scoped retained IDs so focus, hover, resize, and close interactions survive tree replacement.
+- [x] Split retained widget execution into explicit `measure`, `update`, and `paint` phases.
+    - [x] Layout records geometry first; update records control state and frame results; paint records commands from updated widget state.
+    - [x] Custom-render nodes receive localized input, scroll, clip, and content payloads through `CustomRenderArgs`.
+    - [x] Built-in widgets, file dialog UI, and examples now follow the same committed-results path.
+- [x] Reworked retained layout, scroll areas, and root chrome.
+    - [x] `SizePolicy::Weight` now uses sibling share ratios, and `SizePolicy::Fraction` covers explicit proportional sizing.
+    - [x] `ScrollAreaHandle` is the retained nested-scroll API; old panel/container compatibility names were removed.
+    - [x] Root auto-size, popup placement/close behavior, dialog z-order, scrollbars, and bottom-right resize handling were aligned with retained traversal.
+- [x] Tightened drawing, texture, atlas, and backend behavior.
+    - [x] Canvas command replay batches ordinary draw commands while preserving custom render and retained scroll-area boundaries.
+    - [x] External texture uploads validate dimensions and byte counts, and texture clipping has a dedicated smoke example.
+    - [x] Atlas code is split into builder, runtime, image, source, and codegen modules; `atlas_export` now requires `png_source` when exporting PNG-backed atlas data.
+    - [x] Glow, Vulkan, and WGPU examples share retained root handling, and `examples/retained-custom-drawing` documents the custom graphics path.
+- [x] Reduced migration surface and documented internals.
+    - [x] Public imports are grouped around `prelude`, `retained`, `backend`, and `advanced`.
+    - [x] Direct container drawing is no longer part of the application authoring path.
+    - [x] Runtime modules, private structs, enums, and functions now have rustdoc or implementation comments, and the retained behavior is covered by focused tests.
+
+### Version 0.6.x
+Version `0.6.0` introduced retained `WidgetTree` authoring on top of the older per-frame root submission loop. Compared to `0.5.0`, `0.6.x` replaced immediate/closure widget authoring with reusable retained trees, widget handles, committed interaction results, custom graphics primitives, and multi-font atlas support.
+
+- [x] `Context::window`, `Context::dialog`, and `Context::popup` accepted retained trees instead of UI-building closures.
+- [x] `WidgetTreeBuilder` introduced reusable widget/layout hierarchies with widgets, panels, headers/tree nodes, row/grid/column/stack groups, and custom-render leaves.
+- [x] Widgets reported intrinsic sizes through `measure` and updated persistent state through the retained traversal.
+- [x] `Context::committed_results()` became the public business-logic view of the previous frame's interaction results.
+- [x] `WidgetCtx::graphics(...)` added rectangles, frames, text/icons/images, line strokes, polygon fills, and local clip scopes.
+- [x] Runtime atlas building and offline/prebuilt atlas export gained shared multi-font configuration.
+- [x] Version `0.6.1` switched demos to runtime atlas construction by default and made prebuilt atlas embedding opt-in.
 
 ### Version 0.5
 - [x] Widget identity moved fully to pointer-based IDs.

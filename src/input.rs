@@ -272,10 +272,6 @@ impl ScrollBehavior {
     }
 }
 
-/// Deprecated alias for the pre-rename scroll behavior type.
-#[deprecated(since = "0.6.1", note = "use ScrollBehavior")]
-pub type WidgetBehaviourOption = ScrollBehavior;
-
 #[derive(Copy, Clone, Default, Debug)]
 /// Captures the interaction state for a widget during the current frame.
 pub struct ControlState {

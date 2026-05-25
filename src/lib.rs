@@ -120,13 +120,11 @@ pub mod backend {
     pub use crate::render::{Renderer, RendererHandle};
 }
 
-/// Advanced compatibility and inspection types.
+/// Advanced inspection types.
 ///
-/// These are intentionally outside the default retained prelude because they expose migration
-/// aliases or low-level state views rather than the primary retained UI authoring model.
+/// These are intentionally outside the default retained prelude because they expose low-level state
+/// views rather than the primary retained UI authoring model.
 pub mod advanced {
-    #[allow(deprecated)]
-    pub use crate::container_handle::{ContainerHandle, ContainerView, ContainerViewMut};
     pub use crate::container_handle::{ScrollAreaView, ScrollAreaViewMut};
     pub use crate::graphics::Graphics;
     pub use crate::window::{WindowHandle, WindowState};
@@ -187,8 +185,6 @@ pub use input::{
     Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, InputSnapshot, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState,
     ScrollBehavior, WidgetFillOption, WidgetOption,
 };
-#[allow(deprecated)]
-pub use input::WidgetBehaviourOption;
 pub use layout::{SizePolicy, StackDirection};
 pub use render::{Renderer, RendererHandle};
 pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};

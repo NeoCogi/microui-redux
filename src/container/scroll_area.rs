@@ -197,6 +197,6 @@ impl DerefMut for ScrollArea {
 impl TraversalHost {
     /// Derives a stable child scroll-area scope id from the parent scope and retained node id.
     pub(crate) fn scroll_area_scope_id(&self, node_id: NodeId) -> Id {
-        IdNamespace::PANEL_SCOPE.id([self.internal_id_seed.raw() as u64, node_id.raw() as u64])
+        IdNamespace::SCROLL_AREA_SCOPE.id([self.internal_id_seed.raw() as u64, node_id.raw() as u64])
     }
 }
