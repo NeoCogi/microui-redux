@@ -173,12 +173,16 @@ pub type Real = f32;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 /// Handle referencing a renderer-owned texture.
 pub struct TextureId {
+    /// Backend-local texture identifier.
     raw: u32,
+    /// Texture width in pixels.
     width: i32,
+    /// Texture height in pixels.
     height: i32,
 }
 
 impl TextureId {
+    /// Creates a texture id with known dimensions.
     pub(crate) fn new(raw: u32, width: i32, height: i32) -> Self {
         Self { raw, width, height }
     }
@@ -244,6 +248,7 @@ pub enum ImageSource<'a> {
     },
 }
 
+/// Sentinel clip rectangle used when command recording starts without a root clip.
 pub(crate) static UNCLIPPED_RECT: Recti = Recti {
     x: 0,
     y: 0,

@@ -77,8 +77,11 @@ pub struct TextArea {
     pub wrap: TextWrap,
     /// Shared widget configuration.
     pub config: WidgetConfig,
+    /// Desired caret x position preserved while moving vertically.
     preferred_x: Option<i32>,
+    /// Whether the vertical scrollbar thumb is being dragged.
     dragging_y: bool,
+    /// Whether the horizontal scrollbar thumb is being dragged.
     dragging_x: bool,
 }
 
@@ -201,19 +204,33 @@ impl TextArea {
 
 /// Complete derived layout for one text-area frame.
 struct TextAreaLayout {
+    /// Outer text-area rectangle in screen coordinates.
     bounds: Recti,
+    /// Text body after padding and scrollbars.
     body: Recti,
+    /// Text body expressed in widget-local coordinates.
     body_local: Recti,
+    /// Wrapped display lines.
     lines: Vec<TextLine>,
+    /// Text content dimensions.
     content_size: Vec2i,
+    /// Maximum vertical scroll offset.
     maxscroll_y: i32,
+    /// Maximum horizontal scroll offset.
     maxscroll_x: i32,
+    /// Whether a vertical scrollbar is needed.
     needs_v: bool,
+    /// Whether a horizontal scrollbar is needed.
     needs_h: bool,
+    /// Vertical scrollbar track rectangle.
     vscroll_base: Recti,
+    /// Horizontal scrollbar track rectangle.
     hscroll_base: Recti,
+    /// Style padding used by this layout.
     padding: i32,
+    /// Scrollbar thumb size used by this layout.
     thumb_size: i32,
+    /// Font metrics used for line positioning and caret drawing.
     metrics: FontLineMetrics,
 }
 

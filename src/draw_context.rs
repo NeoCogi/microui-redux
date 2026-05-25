@@ -84,13 +84,19 @@ pub(crate) fn clip_relation(bounds: Recti, clip: Recti) -> Clip {
 
 /// Internal command emitter shared by container chrome, built-in widgets, and custom graphics.
 pub(crate) struct CommandEmitter<'a> {
+    /// Retained command list receiving high-level draw commands.
     commands: &'a mut Vec<Command>,
+    /// Shared vertex arena for retained triangle geometry.
     triangle_vertices: &'a mut Vec<Vertex>,
+    /// Active screen-space clip stack.
     clip_stack: &'a mut Vec<Recti>,
+    /// Style used to resolve widget colors and text metrics.
     style: &'a Style,
+    /// Atlas used for glyph/icon/slot metrics.
     atlas: &'a AtlasHandle,
 }
 
+/// Alias used by widgets and containers for command recording.
 pub(crate) type DrawCtx<'a> = CommandEmitter<'a>;
 
 impl<'a> CommandEmitter<'a> {
@@ -126,8 +132,10 @@ impl<'a> CommandEmitter<'a> {
         self.clip_stack.last().copied().unwrap_or(UNCLIPPED_RECT)
     }
 
-    // `Graphics` forwards widget-local clips onto the shared draw-context clip stack, so it needs
-    // to know how much of the stack existed before it started and to restore that depth on drop.
+    /// Returns the current clip stack depth.
+    ///
+    /// `Graphics` forwards widget-local clips onto the shared draw-context clip stack, so it needs
+    /// to know how much of the stack existed before it started and to restore that depth on drop.
     pub(crate) fn clip_depth(&self) -> usize {
         self.clip_stack.len()
     }
@@ -143,9 +151,10 @@ impl<'a> CommandEmitter<'a> {
         self.clip_stack.pop();
     }
 
-    // Replaces the current top-of-stack clip with an already-intersected rect. `Graphics`
-    // computes the monotonic intersection in widget-local terms and then overwrites the shared
-    // screen-space clip without growing the stack.
+    /// Replaces the current top-of-stack clip with an already-intersected rect.
+    ///
+    /// `Graphics` computes the monotonic intersection in widget-local terms and then overwrites the
+    /// shared screen-space clip without growing the stack.
     pub(crate) fn replace_current_clip_rect(&mut self, rect: Recti) {
         if let Some(top) = self.clip_stack.last_mut() {
             *top = rect;
@@ -154,8 +163,10 @@ impl<'a> CommandEmitter<'a> {
         }
     }
 
-    // Restores the clip stack to a previously recorded depth. This keeps temporary graphics
-    // builders from leaking their local clip scopes back into the outer container traversal.
+    /// Restores the clip stack to a previously recorded depth.
+    ///
+    /// This keeps temporary graphics builders from leaking their local clip scopes back into the
+    /// outer container traversal.
     pub(crate) fn pop_clip_rect_to(&mut self, depth: usize) {
         while self.clip_stack.len() > depth {
             self.clip_stack.pop();
@@ -167,9 +178,11 @@ impl<'a> CommandEmitter<'a> {
         self.commands.push(cmd);
     }
 
-    // Retained widget graphics append all triangle vertices into one container-owned arena, and
-    // individual commands store ranges into that arena instead of owning separate `Vec<Vertex>`
-    // allocations.
+    /// Returns the number of vertices currently stored in the retained triangle arena.
+    ///
+    /// Retained widget graphics append all triangle vertices into one container-owned arena, and
+    /// individual commands store ranges into that arena instead of owning separate `Vec<Vertex>`
+    /// allocations.
     pub(crate) fn triangle_vertex_count(&self) -> usize {
         self.triangle_vertices.len()
     }
@@ -191,8 +204,10 @@ impl<'a> CommandEmitter<'a> {
         self.push_command(Command::PopClip);
     }
 
-    // Reuses the same clip-state wrapper for text, icons, images, and slot redraws so both the
-    // legacy draw-context path and the graphics builder can emit those commands consistently.
+    /// Emits a command under the minimum replay clip required by `bounds`.
+    ///
+    /// This reuses the same clip-state wrapper for text, icons, images, and slot redraws so both
+    /// the legacy draw-context path and the graphics builder can emit those commands consistently.
     pub(crate) fn emit_clipped<F>(&mut self, bounds: Recti, clip: Recti, emit: F)
     where
         F: FnOnce(&mut Self),

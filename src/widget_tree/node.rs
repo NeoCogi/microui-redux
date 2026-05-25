@@ -91,25 +91,37 @@ pub(crate) struct TreeResourceId(usize);
 /// Tree nodes describe structure and stable IDs; this registry owns the state handles and callbacks
 /// needed to execute that structure.
 pub(crate) enum WidgetTreeResource {
+    /// Strongly typed widget state erased behind dynamic dispatch.
     Widget(Box<dyn WidgetStateHandleDyn>),
-    CustomRender { state: WidgetHandle<Custom>, render: TreeCustomRender },
+    /// Custom widget state plus the retained backend render callback.
+    CustomRender {
+        /// Widget state used for layout and interaction.
+        state: WidgetHandle<Custom>,
+        /// Backend render callback executed during command replay.
+        render: TreeCustomRender,
+    },
+    /// Nested retained scroll-area handle.
     ScrollArea(ScrollAreaHandle),
+    /// Expandable node/header widget state.
     Node(WidgetHandle<Node>),
 }
 
 #[derive(Default)]
 /// Registry for live resources referenced by retained tree nodes.
 pub(crate) struct WidgetTreeResources {
+    /// Live resources referenced by compact tree resource ids.
     entries: Vec<WidgetTreeResource>,
 }
 
 impl WidgetTreeResources {
+    /// Inserts a live resource and returns its compact id.
     pub(crate) fn push(&mut self, resource: WidgetTreeResource) -> TreeResourceId {
         let id = TreeResourceId(self.entries.len());
         self.entries.push(resource);
         id
     }
 
+    /// Returns an erased widget resource.
     pub(crate) fn widget(&self, id: TreeResourceId) -> &dyn WidgetStateHandleDyn {
         match &self.entries[id.0] {
             WidgetTreeResource::Widget(widget) => &**widget,
@@ -117,6 +129,7 @@ impl WidgetTreeResources {
         }
     }
 
+    /// Returns custom-render state and callback resources.
     pub(crate) fn custom_render(&self, id: TreeResourceId) -> (&WidgetHandle<Custom>, &TreeCustomRender) {
         match &self.entries[id.0] {
             WidgetTreeResource::CustomRender { state, render } => (state, render),
@@ -124,6 +137,7 @@ impl WidgetTreeResources {
         }
     }
 
+    /// Returns a scroll-area handle resource.
     pub(crate) fn scroll_area(&self, id: TreeResourceId) -> &ScrollAreaHandle {
         match &self.entries[id.0] {
             WidgetTreeResource::ScrollArea(handle) => handle,
@@ -131,6 +145,7 @@ impl WidgetTreeResources {
         }
     }
 
+    /// Returns an expandable node/header widget handle resource.
     pub(crate) fn node(&self, id: TreeResourceId) -> &WidgetHandle<Node> {
         match &self.entries[id.0] {
             WidgetTreeResource::Node(state) => state,
@@ -231,9 +246,13 @@ impl WidgetTreeNodeKind {
 
 /// A single node in a retained widget tree.
 pub struct WidgetTreeNode {
+    /// Stable retained node id.
     pub(super) id: NodeId,
+    /// Layout policy applied to this node.
     pub(super) policy: Policy,
+    /// Node kind and resource reference.
     pub(super) kind: WidgetTreeNodeKind,
+    /// Child nodes nested under this node.
     pub(super) children: Vec<WidgetTreeNode>,
 }
 
@@ -268,7 +287,9 @@ impl WidgetTreeNode {
 /// Completed retained widget tree.
 #[derive(Default)]
 pub struct WidgetTree {
+    /// Root nodes submitted to the context.
     pub(super) roots: Vec<WidgetTreeNode>,
+    /// Live resources referenced by nodes in this tree.
     pub(crate) resources: WidgetTreeResources,
 }
 
@@ -278,6 +299,7 @@ impl WidgetTree {
         &self.roots
     }
 
+    /// Returns the live resource registry backing this tree.
     pub(crate) fn resources(&self) -> &WidgetTreeResources {
         &self.resources
     }

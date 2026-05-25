@@ -96,7 +96,9 @@ fn inline_content_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, lab
 #[derive(Copy, Clone)]
 /// Resolved inline placement for an optional visual and text region.
 struct InlineContentLayout {
+    /// Optional visual/icon rectangle.
     visual: Option<Recti>,
+    /// Text rectangle.
     text: Recti,
 }
 

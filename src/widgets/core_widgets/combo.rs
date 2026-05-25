@@ -16,8 +16,11 @@ pub struct Combo {
     open: bool,
     /// Shared widget configuration.
     pub config: WidgetConfig,
+    /// Label text for the currently selected item.
     label: String,
+    /// Whether the selected index has been clamped for the current item count.
     clamped: bool,
+    /// Last button rectangle used to place the popup.
     last_anchor: Recti,
 }
 

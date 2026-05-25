@@ -91,6 +91,7 @@ pub trait Renderer {
 
 /// Thread-safe handle that shares ownership of a [`Renderer`].
 pub struct RendererHandle<R: Renderer> {
+    /// Shared lock protecting the renderer implementation.
     handle: Arc<RwLock<R>>,
 }
 

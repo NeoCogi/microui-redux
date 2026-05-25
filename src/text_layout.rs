@@ -59,8 +59,11 @@ use crate::{vec2, AtlasHandle, Dimensioni, FontId, Recti, Style, TextWrap, Vec2i
 #[derive(Clone, Copy)]
 /// Byte range and measured width for one display line.
 pub(crate) struct TextLine {
+    /// Start byte offset in the source text.
     pub start: usize,
+    /// Exclusive end byte offset in the source text.
     pub end: usize,
+    /// Measured line width in pixels.
     pub width: i32,
 }
 

@@ -73,20 +73,31 @@ pub enum WindowState {
 }
 
 #[derive(Clone, Copy, Debug)]
+/// Runtime root type for a window handle.
 pub(crate) enum Type {
+    /// Dialog root.
     Dialog,
+    /// Normal window root.
     Window,
+    /// Popup root.
     Popup,
 }
 
 /// Root window data shared through [`WindowHandle`].
 pub(crate) struct Window {
+    /// Runtime behavior class for this root.
     pub(crate) ty: Type,
+    /// Open/closed state for traversal and rendering.
     pub(crate) win_state: WindowState,
+    /// Stable root id assigned by the context.
     root_id: RootId,
+    /// Last frame in which this retained root was submitted.
     last_root_frame: Option<usize>,
+    /// Traversal host for the root body.
     pub(crate) main: TraversalHost,
+    /// Z-order used to sort roots for hit testing and rendering.
     zindex: i32,
+    /// Retained chrome controls for title/close/resize.
     chrome_tree: WindowChromeTree,
 }
 

@@ -135,7 +135,9 @@ impl RectTrait for Recti {
 /// `Packer` is the main structure in this crate. It holds packing context.
 #[derive(Clone)]
 pub struct Packer {
+    /// Padding and size configuration supplied by the caller.
     config: Config,
+    /// Inner skyline packer operating on the padding-adjusted region.
     packer: DensePacker,
 }
 
@@ -189,14 +191,19 @@ impl Packer {
 }
 
 #[derive(Clone)]
+/// One horizontal skyline segment in the dense packer.
 struct Skyline {
+    /// Left x coordinate of the skyline segment.
     pub left: i32,
+    /// Current y height at this skyline segment.
     pub y: i32,
+    /// Width of this skyline segment.
     pub width: i32,
 }
 
 impl Skyline {
     #[inline(always)]
+    /// Returns the exclusive right edge of the segment.
     pub fn right(&self) -> i32 {
         self.left + self.width
     }
@@ -205,10 +212,12 @@ impl Skyline {
 /// Similar to `Packer` but does not add any padding between rectangles.
 #[derive(Clone)]
 pub struct DensePacker {
+    /// Packer width in pixels.
     width: i32,
+    /// Packer height in pixels.
     height: i32,
 
-    // the skylines are sorted by their `x` position
+    /// Skyline segments sorted by their x position.
     skylines: Vec<Skyline>,
 }
 
@@ -272,7 +281,7 @@ impl DensePacker {
         self.find_skyline(width, height, allow_rotation).is_some()
     }
 
-    // return `rect` if rectangle (w, h) can fit the skyline started at `i`
+    /// Returns a placement if the rectangle can fit starting at skyline `i`.
     fn can_put(&self, mut i: usize, w: i32, h: i32) -> Option<Recti> {
         let mut rect = Rect::new(self.skylines[i].left, 0, w, h);
         let mut width_left = rect.width;
@@ -291,6 +300,7 @@ impl DensePacker {
         }
     }
 
+    /// Finds the lowest suitable skyline placement for the requested rectangle.
     fn find_skyline(&self, w: i32, h: i32, allow_rotation: bool) -> Option<(usize, Recti)> {
         let mut bottom = std::i32::MAX;
         let mut width = std::i32::MAX;
@@ -323,6 +333,7 @@ impl DensePacker {
         if let Some(index) = index { Some((index, rect)) } else { None }
     }
 
+    /// Splits skyline segments after placing `rect` at segment `i`.
     fn split(&mut self, i: usize, rect: &Recti) {
         let skyline = Skyline {
             left: rect.left(),
@@ -353,6 +364,7 @@ impl DensePacker {
         }
     }
 
+    /// Merges adjacent skyline segments with the same height.
     fn merge(&mut self) {
         let mut i = 1;
         while i < self.skylines.len() {

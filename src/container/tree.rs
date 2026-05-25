@@ -66,7 +66,9 @@
 
 use super::*;
 
+/// Command wrapper that lets retained custom render callbacks enter the backend command stream.
 struct RetainedCustomRenderCommand {
+    /// Shared retained callback invoked during renderer replay.
     render: TreeCustomRender,
 }
 
@@ -76,13 +78,18 @@ impl CustomRenderCommand for RetainedCustomRenderCommand {
     }
 }
 
+/// Retained traversal phase currently being executed.
 enum TreePass<'a> {
+    /// Geometry measurement pass using committed frame results.
     Layout(&'a FrameResults),
+    /// Interaction/update pass recording the next result generation.
     Update(&'a mut FrameResults),
+    /// Paint pass that records draw commands from updated state.
     Paint,
 }
 
 impl TraversalHost {
+    /// Formats a stable diagnostic label for duplicate-dispatch tracking.
     fn widget_dispatch_site(&self, node_id: NodeId, kind: &str) -> String {
         format!("container {:?}, tree node {:?} ({})", self.name, node_id, kind)
     }
@@ -175,12 +182,14 @@ impl TraversalHost {
         self.visit_tree_nodes(&mut pass, resources, nodes);
     }
 
+    /// Visits each sibling node under the active retained traversal pass.
     fn visit_tree_nodes(&mut self, pass: &mut TreePass<'_>, resources: &WidgetTreeResources, nodes: &[WidgetTreeNode]) {
         for node in nodes {
             self.visit_tree_node(pass, resources, node);
         }
     }
 
+    /// Dispatches one retained tree node by kind for the active traversal pass.
     fn visit_tree_node(&mut self, pass: &mut TreePass<'_>, resources: &WidgetTreeResources, node: &WidgetTreeNode) {
         let (node_id, kind, children) = node.parts();
         let policy = node.policy();
@@ -317,6 +326,7 @@ impl TraversalHost {
         stable_state
     }
 
+    /// Lays out a structural group and records either child bounds or scoped content size.
     fn layout_policy_group<F: FnOnce(&mut Self)>(&mut self, node_id: NodeId, policy: Policy, children: &[WidgetTreeNode], f: F) {
         if policy == Policy::auto() {
             f(self);
@@ -330,6 +340,7 @@ impl TraversalHost {
         self.record_tree_layout(node_id, NodeLayout::new(rect, rect, content_size));
     }
 
+    /// Lays out children for an expanded header/tree node.
     fn layout_tree_node_scope_children(
         &mut self,
         results: &FrameResults,
@@ -368,6 +379,7 @@ impl TraversalHost {
         stable_state
     }
 
+    /// Updates an expandable node and then its children when layout-time state was expanded.
     fn update_tree_node_scope_children(
         &mut self,
         results: &mut FrameResults,
@@ -389,6 +401,7 @@ impl TraversalHost {
         self.paint_node_dyn(node_id, &*widget, rect, None, &control);
     }
 
+    /// Paints an expandable node and any children that were present in the layout pass.
     fn paint_tree_node_scope_children(&mut self, resources: &WidgetTreeResources, node_id: NodeId, state: &WidgetHandle<Node>, children: &[WidgetTreeNode]) {
         self.paint_tree_node_scope(node_id, state);
         if self.tree_children_were_laid_out(children) {
@@ -396,14 +409,17 @@ impl TraversalHost {
         }
     }
 
+    /// Updates all child nodes for a structural row/grid/column/stack wrapper.
     fn update_structural_tree_node(&mut self, results: &mut FrameResults, resources: &WidgetTreeResources, children: &[WidgetTreeNode]) {
         self.update_tree_nodes(results, resources, children);
     }
 
+    /// Paints all child nodes for a structural row/grid/column/stack wrapper.
     fn paint_structural_tree_node(&mut self, resources: &WidgetTreeResources, children: &[WidgetTreeNode]) {
         self.paint_tree_nodes(resources, children);
     }
 
+    /// Runs the active pass for a regular widget node.
     fn visit_tree_widget(&mut self, pass: &mut TreePass<'_>, node_id: NodeId, policy: Policy, widget: &dyn WidgetStateHandleDyn) {
         match pass {
             TreePass::Layout(_) => self.layout_tree_widget(node_id, policy, widget),
@@ -412,6 +428,7 @@ impl TraversalHost {
         }
     }
 
+    /// Runs the active pass for a retained custom-render node.
     fn visit_tree_custom_render(&mut self, pass: &mut TreePass<'_>, node_id: NodeId, policy: Policy, state: &WidgetHandle<Custom>, render: &TreeCustomRender) {
         match pass {
             TreePass::Layout(_) => self.layout_tree_custom_render(node_id, policy, state),
@@ -420,6 +437,7 @@ impl TraversalHost {
         }
     }
 
+    /// Runs the active pass for a nested retained scroll area.
     fn visit_tree_scroll_area(
         &mut self,
         pass: &mut TreePass<'_>,
@@ -455,6 +473,7 @@ impl TraversalHost {
         }
     }
 
+    /// Runs the active pass for a header/tree disclosure scope.
     fn visit_tree_scope(
         &mut self,
         pass: &mut TreePass<'_>,
@@ -476,6 +495,7 @@ impl TraversalHost {
         }
     }
 
+    /// Runs the active pass for a row structural node.
     fn visit_tree_row(
         &mut self,
         pass: &mut TreePass<'_>,
@@ -500,6 +520,7 @@ impl TraversalHost {
         }
     }
 
+    /// Runs the active pass for a grid structural node.
     fn visit_tree_grid(
         &mut self,
         pass: &mut TreePass<'_>,
@@ -524,6 +545,7 @@ impl TraversalHost {
         }
     }
 
+    /// Runs the active pass for a column structural node.
     fn visit_tree_column(&mut self, pass: &mut TreePass<'_>, resources: &WidgetTreeResources, node_id: NodeId, policy: Policy, children: &[WidgetTreeNode]) {
         match pass {
             TreePass::Layout(results) => {
@@ -545,6 +567,7 @@ impl TraversalHost {
         }
     }
 
+    /// Runs the active pass for a stack structural node.
     fn visit_tree_stack(
         &mut self,
         pass: &mut TreePass<'_>,

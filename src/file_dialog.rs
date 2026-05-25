@@ -37,39 +37,73 @@ use crate::*;
 
 /// Simple modal dialog that lets the user browse and pick files.
 pub struct FileDialogState {
+    /// Directory currently shown by the dialog.
     current_working_directory: String,
+    /// Selected basename after the user accepts the dialog.
     file_name: Option<String>,
+    /// Selected resolved path after the user accepts the dialog.
     file_path: Option<String>,
+    /// Editable path textbox.
     path_box: WidgetHandle<Textbox>,
+    /// Editable filename textbox.
     tmp_file_name: WidgetHandle<Textbox>,
+    /// Folder selected from the folder list, if any.
     selected_folder: Option<String>,
+    /// Registered root id for the dialog window.
     root: RootId,
+    /// Window handle controlling open/close state.
     win: WindowHandle,
+    /// Scroll area containing folder rows.
     folder_panel: ScrollAreaHandle,
+    /// Scroll area containing file rows.
     file_panel: ScrollAreaHandle,
+    /// Folder names currently displayed.
     folders: Vec<String>,
+    /// File names currently displayed.
     files: Vec<String>,
+    /// Retained list-item handles for folder rows.
     folder_items: Vec<WidgetHandle<ListItem>>,
+    /// Retained list-item handles for file rows.
     file_items: Vec<WidgetHandle<ListItem>>,
+    /// Node ids corresponding to folder rows.
     folder_item_ids: Vec<NodeId>,
+    /// Node ids corresponding to file rows.
     file_item_ids: Vec<NodeId>,
+    /// Button that navigates to the parent directory.
     up_button: WidgetHandle<Button>,
+    /// Button that navigates to the home directory.
     home_button: WidgetHandle<Button>,
+    /// Button that applies the path textbox.
     go_button: WidgetHandle<Button>,
+    /// Button that accepts the current selection.
     ok_button: WidgetHandle<Button>,
+    /// Button that closes without selecting.
     cancel_button: WidgetHandle<Button>,
+    /// Node id for the parent-directory button.
     up_button_id: NodeId,
+    /// Node id for the home-directory button.
     home_button_id: NodeId,
+    /// Node id for the path textbox.
     path_box_id: NodeId,
+    /// Node id for the path-apply button.
     go_button_id: NodeId,
+    /// Node id for the accept button.
     ok_button_id: NodeId,
+    /// Node id for the cancel button.
     cancel_button_id: NodeId,
+    /// Static label above the folder list.
     folders_label: WidgetHandle<ListItem>,
+    /// Placeholder shown when no folders exist.
     no_folders_label: WidgetHandle<ListItem>,
+    /// Static label above the file list.
     files_label: WidgetHandle<ListItem>,
+    /// Placeholder shown when no files exist.
     no_files_label: WidgetHandle<ListItem>,
+    /// Static label for the filename textbox.
     file_name_label: WidgetHandle<ListItem>,
+    /// Spacer row used by the layout tree.
     spacer_label: WidgetHandle<ListItem>,
+    /// Retained widget tree submitted for the dialog.
     tree: WidgetTree,
 }
 

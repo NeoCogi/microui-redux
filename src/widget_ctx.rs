@@ -67,13 +67,21 @@ use crate::widget::RetainedId;
 
 /// Shared context passed to widget handlers.
 pub struct WidgetCtx<'a> {
+    /// Retained identity used for focus operations.
     interaction_id: RetainedId,
+    /// Widget rectangle in container/screen coordinates.
     rect: Recti,
+    /// Draw command recorder borrowed from the active container.
     draw: DrawCtx<'a>,
+    /// Focus slot owned by the active container.
     focus: &'a mut Option<RetainedId>,
+    /// Flag indicating whether focus was refreshed or changed this frame.
     updated_focus: &'a mut bool,
+    /// Whether this widget is inside the current hover root.
     in_hover_root: bool,
+    /// Optional widget-local input snapshot.
     input: Option<Rc<InputSnapshot>>,
+    /// Empty fallback snapshot for widgets that did not request input.
     default_input: InputSnapshot,
 }
 
@@ -201,15 +209,18 @@ impl<'a> WidgetCtx<'a> {
         Graphics::new(&mut self.draw, self.rect)
     }
 
-    // Internal widget paint helpers need local coordinates but must preserve the legacy draw
-    // semantics where borders may extend a pixel beyond the widget rect. Starting the graphics
-    // builder from the current container clip instead of the widget rect keeps that behavior while
-    // still routing paint through `Graphics`.
+    /// Starts a graphics builder for built-in widget paint helpers.
+    ///
+    /// Internal widget paint helpers need local coordinates but must preserve the legacy draw
+    /// semantics where borders may extend a pixel beyond the widget rect. Starting the graphics
+    /// builder from the current container clip instead of the widget rect keeps that behavior while
+    /// still routing paint through `Graphics`.
     fn begin_widget_paint(&mut self) -> Graphics<'_, 'a> {
         let clip_root = self.draw.current_clip_rect();
         Graphics::new_with_clip_root(&mut self.draw, self.rect, clip_root)
     }
 
+    /// Returns the current screen-space clip rectangle from the shared draw context.
     fn current_clip_rect(&self) -> Recti {
         self.draw.current_clip_rect()
     }

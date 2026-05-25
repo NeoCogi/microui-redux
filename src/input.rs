@@ -390,17 +390,29 @@ bitflags! {
 #[derive(Clone, Debug)]
 /// Aggregates raw input collected during the current frame.
 pub struct Input {
+    /// Current mouse position in screen coordinates.
     pub(crate) mouse_pos: Vec2i,
+    /// Mouse position recorded at the end of the previous frame.
     pub(crate) last_mouse_pos: Vec2i,
+    /// Mouse movement delta computed at frame start.
     pub(crate) mouse_delta: Vec2i,
+    /// Accumulated scroll wheel/trackpad delta for the frame.
     pub(crate) scroll_delta: Vec2i,
+    /// Mouse position relative to the currently focused container body.
     pub(crate) rel_mouse_pos: Vec2i,
+    /// Mouse buttons currently held.
     pub(crate) mouse_down: MouseButton,
+    /// Mouse buttons pressed during the current frame.
     pub(crate) mouse_pressed: MouseButton,
+    /// Modifier keys currently held.
     pub(crate) key_down: KeyMode,
+    /// Modifier keys pressed during the current frame.
     pub(crate) key_pressed: KeyMode,
+    /// Navigation keys currently held.
     pub(crate) key_code_down: KeyCode,
+    /// Navigation keys pressed during the current frame.
     pub(crate) key_code_pressed: KeyCode,
+    /// UTF-8 text accumulated during the current frame.
     pub(crate) input_text: String,
 }
 
@@ -500,11 +512,13 @@ impl Input {
         self.input_text.push_str(text);
     }
 
+    /// Computes per-frame derived input before UI traversal starts.
     pub(crate) fn prelude(&mut self) {
         self.mouse_delta.x = self.mouse_pos.x - self.last_mouse_pos.x;
         self.mouse_delta.y = self.mouse_pos.y - self.last_mouse_pos.y;
     }
 
+    /// Clears one-frame input fields after UI traversal finishes.
     pub(crate) fn epilogue(&mut self) {
         self.key_pressed = KeyMode::NONE;
         self.key_code_pressed = KeyCode::NONE;

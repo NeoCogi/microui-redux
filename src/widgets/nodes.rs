@@ -58,8 +58,11 @@ use crate::*;
 use super::WidgetConfig;
 
 #[derive(Clone, Copy)]
+/// Built-in expandable node visual mode.
 enum NodeKind {
+    /// Header node without tree indentation affordance.
     Header,
+    /// Tree node with nested-child affordance.
     Tree,
 }
 
@@ -99,6 +102,7 @@ pub struct Node {
     pub state: NodeStateValue,
     /// Shared widget configuration.
     pub config: WidgetConfig,
+    /// Visual/behavior mode for this expandable node.
     kind: NodeKind,
 }
 

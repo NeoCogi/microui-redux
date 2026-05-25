@@ -74,10 +74,12 @@ impl From<&ScrollAreaHandle> for ScrollAreaHandle {
 
 /// Read-only view into a retained scroll area borrowed from a handle.
 pub struct ScrollAreaView<'a> {
+    /// Borrowed scroll-area state exposed by the view.
     inner: &'a ScrollArea,
 }
 
 impl<'a> ScrollAreaView<'a> {
+    /// Creates a read-only view from a borrowed scroll area.
     fn new(inner: &'a ScrollArea) -> Self {
         Self { inner }
     }
@@ -105,10 +107,12 @@ impl<'a> ScrollAreaView<'a> {
 
 /// Mutable view into retained scroll-area state borrowed from a handle.
 pub struct ScrollAreaViewMut<'a> {
+    /// Mutably borrowed scroll-area state exposed by the view.
     inner: &'a mut ScrollArea,
 }
 
 impl<'a> ScrollAreaViewMut<'a> {
+    /// Creates a mutable view from a borrowed scroll area.
     fn new(inner: &'a mut ScrollArea) -> Self {
         Self { inner }
     }
@@ -155,10 +159,12 @@ impl<'a> ScrollAreaViewMut<'a> {
 }
 
 impl ScrollAreaHandle {
+    /// Wraps retained scroll-area state in shared interior mutability.
     pub(crate) fn new(scroll_area: ScrollArea) -> Self {
         Self(Rc::new(RefCell::new(scroll_area)))
     }
 
+    /// Replays this scroll area's recorded commands into `canvas`.
     pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
         self.0.borrow_mut().render(canvas)
     }
@@ -182,6 +188,7 @@ impl ScrollAreaHandle {
         f(&mut view)
     }
 
+    /// Executes `f` with direct mutable access for internal traversal code.
     pub(crate) fn with_inner_mut<R>(&self, f: impl FnOnce(&mut ScrollArea) -> R) -> R {
         let mut scroll_area = self.0.borrow_mut();
         f(&mut scroll_area)

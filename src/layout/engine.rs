@@ -11,29 +11,32 @@ use super::{
 };
 
 #[derive(Clone, Default)]
+/// Stateful layout engine that allocates rectangles from nested flow scopes.
 pub(crate) struct LayoutEngine {
-    // Style snapshot used by resolution rules (spacing/default widths/padding fallbacks).
+    /// Style snapshot used by resolution rules.
     pub style: Style,
-    // Last emitted absolute rectangle.
+    /// Last emitted absolute rectangle.
     pub last_rect: Recti,
-    // Default control height seeded by container setup.
+    /// Default control height seeded by container setup.
     default_cell_height: i32,
-    // Nested scope stack (window body, columns, etc.).
+    /// Nested scope stack used for window bodies, columns, and policy groups.
     stack: Vec<LayoutFrame>,
 }
 
 impl LayoutEngine {
-    // Pushes a scope with an explicit flow (used by reset/column).
+    /// Pushes a scope with an explicit flow.
     fn push_scope_with_flow(&mut self, body: Recti, scroll: Vec2i, flow: FlowState) {
         let mut frame = LayoutFrame::new(body, scroll);
         frame.flow = flow;
         self.stack.push(frame);
     }
 
+    /// Returns the active layout frame.
     fn top(&self) -> &LayoutFrame {
         self.stack.last().expect("Layout stack should never be empty when accessed")
     }
 
+    /// Returns the active layout frame mutably.
     fn top_mut(&mut self) -> &mut LayoutFrame {
         self.stack.last_mut().expect("Layout stack should never be empty when accessed")
     }
@@ -237,4 +240,5 @@ impl LayoutEngine {
     }
 }
 
+/// Compatibility alias for the internal layout engine.
 pub(crate) type LayoutManager = LayoutEngine;

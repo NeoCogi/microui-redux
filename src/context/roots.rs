@@ -5,8 +5,11 @@ use super::*;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 /// Runtime behavior class for a registered root.
 pub(super) enum RootKind {
+    /// Normal top-level window.
     Window,
+    /// Modal dialog root.
     Dialog,
+    /// Popup root that can auto-close when focus moves elsewhere.
     Popup,
 }
 

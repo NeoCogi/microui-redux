@@ -2,6 +2,7 @@
 
 use super::*;
 
+/// Builds the four clockwise vertices for a textured rectangle draw.
 pub(super) fn textured_quad_vertices(dst: Recti, src: Recti, texture_dim: Dimensioni, color: Color) -> [Vertex; 4] {
     let tex_width = texture_dim.width as f32;
     let tex_height = texture_dim.height as f32;

@@ -3,11 +3,17 @@
 use super::*;
 
 #[derive(Clone)]
+/// Snapshot of viewport state needed by layout-only measurement.
 struct MeasurementViewport {
+    /// Outer viewport rectangle assigned to the measured container.
     rect: Recti,
+    /// Inner body rectangle available to children after chrome/scrollbar gutters.
     body: Recti,
+    /// Content dimensions discovered by the latest layout pass.
     content_size: Dimensioni,
+    /// Scroll offset used while measuring scrolled child content.
     scroll: Vec2i,
+    /// Whether scrollbars and scroll clamping are enabled.
     scroll_enabled: bool,
 }
 
@@ -25,15 +31,22 @@ impl From<&TraversalHost> for MeasurementViewport {
 
 /// Layout-only context used for auto-size and nested scroll-area measurement.
 pub(crate) struct MeasurementContext {
+    /// Atlas used for widget intrinsic measurement.
     atlas: AtlasHandle,
+    /// Style snapshot used by layout policy resolution.
     style: Rc<Style>,
+    /// Scope seed for deterministic retained ids during measurement.
     internal_id_seed: Id,
+    /// Viewport snapshot being measured.
     viewport: MeasurementViewport,
+    /// Layout engine cloned from the live traversal host.
     layout: LayoutManager,
+    /// Per-measurement frame cache for retained node layouts.
     tree_cache: WidgetTreeCache,
 }
 
 impl MeasurementContext {
+    /// Creates a layout-only context from a live traversal host.
     pub(crate) fn from_host(host: &TraversalHost) -> Self {
         Self {
             atlas: host.atlas.clone(),
@@ -45,57 +58,71 @@ impl MeasurementContext {
         }
     }
 
+    /// Copies style and scope identity inherited from a parent measurement context.
     fn apply_parent_state(&mut self, parent: &Self, scope: Id) {
         self.internal_id_seed = scope;
         self.style = parent.style.clone();
     }
 
+    /// Clamps `x` into the inclusive range `[a, b]`.
     fn clamp(x: i32, a: i32, b: i32) -> i32 {
         min(max(x, a), b)
     }
 
+    /// Compares rectangle components without relying on external trait behavior.
     fn same_rect(a: Recti, b: Recti) -> bool {
         (a.x, a.y, a.width, a.height) == (b.x, b.y, b.width, b.height)
     }
 
+    /// Resets measured content and scroll state before a fresh auto-size pass.
     pub(crate) fn clear_content_and_scroll(&mut self) {
         self.viewport.content_size = Dimensioni::default();
         self.viewport.scroll = Vec2i::default();
     }
 
+    /// Sets the outer viewport rectangle.
     fn set_rect(&mut self, rect: Recti) {
         self.viewport.rect = rect;
     }
 
+    /// Returns the outer viewport rectangle.
     fn rect(&self) -> Recti {
         self.viewport.rect
     }
 
+    /// Returns the child body rectangle.
     fn body(&self) -> Recti {
         self.viewport.body
     }
 
+    /// Returns the last measured content size.
     fn content_size(&self) -> Dimensioni {
         self.viewport.content_size
     }
 
+    /// Stores the last measured content size.
     fn set_content_size(&mut self, content_size: Dimensioni) {
         self.viewport.content_size = content_size;
     }
 
+    /// Applies the retained scroll behavior to the measurement viewport.
     fn apply_scroll_behavior(&mut self, scroll_behavior: ScrollBehavior) {
         self.viewport.scroll_enabled = !scroll_behavior.is_no_scroll();
     }
 
+    /// Adds style padding to content size before evaluating scrollbar ranges.
     fn padded_scrollbar_content_size(mut content_size: Dimensioni, padding: i32) -> Dimensioni {
         content_size.width += padding * 2;
         content_size.height += padding * 2;
         content_size
     }
 
+    /// Resolves the body rectangle after vertical and horizontal scrollbar gutters are considered.
     fn resolved_scrollbar_body(body: Recti, content_size: Dimensioni, scrollbar_size: i32) -> Recti {
         let scrollbar_size = scrollbar_size.max(0);
         let mut resolved = body;
+        // A vertical bar can make a horizontal bar necessary and vice versa; a few passes converge
+        // because the body can only shrink along each axis.
         for _ in 0..3 {
             let needs_vertical = content_size.height > resolved.height && resolved.height > 0;
             let needs_horizontal = content_size.width > resolved.width && resolved.width > 0;
@@ -114,6 +141,7 @@ impl MeasurementContext {
         resolved
     }
 
+    /// Shrinks `body` for visible scrollbars and clamps the measurement scroll offset.
     fn resolve_scrollbars(&mut self, body: &mut Recti) {
         let (scrollbar_size, padding) = {
             let style = self.style.as_ref();
@@ -137,6 +165,7 @@ impl MeasurementContext {
         };
     }
 
+    /// Resolves child body dimensions for a content hint without mutating this context.
     fn resolved_body_for_content(&self, body: Recti, scroll_behavior: ScrollBehavior, content_size: Dimensioni) -> Recti {
         if scroll_behavior.is_no_scroll() {
             return body;
@@ -146,6 +175,7 @@ impl MeasurementContext {
         Self::resolved_scrollbar_body(body, content_size, style.scrollbar_size)
     }
 
+    /// Configures the active body layout scope and default cell metrics.
     pub(crate) fn configure_container_body(&mut self, body: Recti, scroll_behavior: ScrollBehavior) {
         let mut body = body;
         self.apply_scroll_behavior(scroll_behavior);
@@ -166,6 +196,7 @@ impl MeasurementContext {
         self.viewport.body = body;
     }
 
+    /// Commits current layout extents into the measurement viewport.
     fn commit_active_layout_content_size(&mut self) -> Dimensioni {
         let layout_body = self.layout.current_body();
         let content_size = self
@@ -177,6 +208,7 @@ impl MeasurementContext {
         content_size
     }
 
+    /// Finishes the active body layout scope and returns the resulting node layout.
     fn finish_body_layout_scope(&mut self) -> NodeLayout {
         self.commit_active_layout_content_size();
         let layout = NodeLayout::new(self.rect(), self.body(), self.content_size());
@@ -184,6 +216,7 @@ impl MeasurementContext {
         layout
     }
 
+    /// Measures a body until scrollbar-dependent body size stops changing.
     fn layout_body_until_scrollbars_stable(
         &mut self,
         results: &FrameResults,
@@ -195,6 +228,7 @@ impl MeasurementContext {
         self.layout_viewport_body_until_scrollbars_stable(results, resources, rect, rect, scroll_behavior, children)
     }
 
+    /// Measures an inner body within an outer viewport until scrollbar gutters stabilize.
     fn layout_viewport_body_until_scrollbars_stable(
         &mut self,
         results: &FrameResults,
@@ -206,6 +240,8 @@ impl MeasurementContext {
     ) -> NodeLayout {
         let mut content_hint = self.content_size();
         let mut layout = self.layout_body_with_content_hint(results, resources, viewport_rect, body_rect, scroll_behavior, content_hint, children);
+        // Re-run layout when a changed content size changes scrollbar visibility and therefore
+        // the child body dimensions.
         for _ in 0..3 {
             let resolved_body = self.resolved_body_for_content(body_rect, scroll_behavior, layout.content_size);
             if Self::same_rect(resolved_body, layout.body) {
@@ -217,6 +253,7 @@ impl MeasurementContext {
         layout
     }
 
+    /// Performs one layout pass using `content_hint` to seed scrollbar decisions.
     fn layout_body_with_content_hint(
         &mut self,
         results: &FrameResults,
@@ -235,6 +272,7 @@ impl MeasurementContext {
         self.finish_body_layout_scope()
     }
 
+    /// Measures all roots in a retained tree and returns their aggregate content size.
     pub(crate) fn measure_widget_tree_content(&mut self, results: &FrameResults, tree: &WidgetTree) -> Dimensioni {
         self.layout_tree_nodes(results, tree.resources(), tree.roots());
         match self.layout.current_max() {
@@ -246,10 +284,12 @@ impl MeasurementContext {
         }
     }
 
+    /// Builds the deterministic scope id for a nested retained scroll area.
     fn scroll_area_scope_id(&self, node_id: NodeId) -> Id {
         crate::id::IdNamespace::PANEL_SCOPE.id([self.internal_id_seed.raw() as u64, node_id.raw() as u64])
     }
 
+    /// Measures one erased widget and advances the current layout flow.
     fn measure_widget_rect_dyn_with_policy(&mut self, widget: &dyn WidgetStateHandleDyn, policy: Policy) -> Recti {
         let body = self.layout.current_body();
         let avail = Dimensioni::new(body.width.max(0), body.height.max(0));
@@ -257,10 +297,12 @@ impl MeasurementContext {
         self.layout.next_with_policies(preferred, policy.width, policy.height)
     }
 
+    /// Records a resolved node layout in the measurement cache.
     fn record_tree_layout(&mut self, node_id: NodeId, layout: NodeLayout) {
         self.tree_cache.record_layout(node_id, layout);
     }
 
+    /// Records a structural node layout from the bounds of its already-measured children.
     fn record_tree_group_from_children(&mut self, node_id: NodeId, children: &[WidgetTreeNode]) {
         let mut bounds: Option<Recti> = None;
         for child in children {
@@ -283,12 +325,14 @@ impl MeasurementContext {
         }
     }
 
+    /// Visits each sibling node in order using the active layout flow.
     fn layout_tree_nodes(&mut self, results: &FrameResults, resources: &WidgetTreeResources, nodes: &[WidgetTreeNode]) {
         for node in nodes {
             self.layout_tree_node(results, resources, node);
         }
     }
 
+    /// Dispatches measurement for one retained tree node kind.
     fn layout_tree_node(&mut self, results: &FrameResults, resources: &WidgetTreeResources, node: &WidgetTreeNode) {
         let (node_id, kind, children) = node.parts();
         let policy = node.policy();
@@ -320,17 +364,20 @@ impl MeasurementContext {
         }
     }
 
+    /// Measures a regular widget node.
     fn layout_tree_widget(&mut self, node_id: NodeId, policy: Policy, widget: &dyn WidgetStateHandleDyn) {
         let rect = self.measure_widget_rect_dyn_with_policy(widget, policy);
         self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Dimensioni::default()));
     }
 
+    /// Measures a custom-render node through its retained widget state.
     fn layout_tree_custom_render(&mut self, node_id: NodeId, policy: Policy, state: &WidgetHandle<Custom>) {
         let widget = erased_widget_state(state.clone());
         let rect = self.measure_widget_rect_dyn_with_policy(&*widget, policy);
         self.record_tree_layout(node_id, NodeLayout::new(rect, rect, Dimensioni::default()));
     }
 
+    /// Measures an expandable node header and returns its stable expanded/collapsed state.
     fn layout_tree_node_scope(&mut self, node_id: NodeId, policy: Policy, state: &WidgetHandle<Node>) -> NodeStateValue {
         self.layout.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto);
         let widget = erased_widget_state(state.clone());
@@ -340,6 +387,7 @@ impl MeasurementContext {
         stable_state
     }
 
+    /// Measures children for an expandable node when it is currently expanded.
     fn layout_tree_node_scope_children(
         &mut self,
         results: &FrameResults,
@@ -364,6 +412,7 @@ impl MeasurementContext {
         }
     }
 
+    /// Measures a structural policy group and records either child bounds or scoped content size.
     fn layout_policy_group<F: FnOnce(&mut Self)>(&mut self, node_id: NodeId, policy: Policy, children: &[WidgetTreeNode], f: F) {
         if policy == Policy::auto() {
             f(self);
@@ -377,6 +426,7 @@ impl MeasurementContext {
         self.record_tree_layout(node_id, NodeLayout::new(rect, rect, content_size));
     }
 
+    /// Measures a row node with explicit width tracks.
     fn visit_tree_row(
         &mut self,
         results: &FrameResults,
@@ -394,6 +444,7 @@ impl MeasurementContext {
         });
     }
 
+    /// Measures a grid node with explicit width and height tracks.
     fn visit_tree_grid(
         &mut self,
         results: &FrameResults,
@@ -411,6 +462,7 @@ impl MeasurementContext {
         });
     }
 
+    /// Measures a column node by temporarily entering column layout mode.
     fn visit_tree_column(&mut self, results: &FrameResults, resources: &WidgetTreeResources, node_id: NodeId, policy: Policy, children: &[WidgetTreeNode]) {
         if policy == Policy::auto() {
             self.column(|ctx| {
@@ -425,6 +477,7 @@ impl MeasurementContext {
         }
     }
 
+    /// Measures a stack node using the requested overlay/stack direction.
     fn visit_tree_stack(
         &mut self,
         results: &FrameResults,
@@ -443,6 +496,7 @@ impl MeasurementContext {
         });
     }
 
+    /// Runs child measurement under a temporary row flow.
     fn with_row<F: FnOnce(&mut Self)>(&mut self, widths: &[SizePolicy], height: SizePolicy, f: F) {
         let snapshot = self.layout.snapshot_flow_state();
         self.layout.row(widths, height);
@@ -450,6 +504,7 @@ impl MeasurementContext {
         self.layout.restore_flow_state(snapshot);
     }
 
+    /// Runs child measurement under a temporary grid flow.
     fn with_grid<F: FnOnce(&mut Self)>(&mut self, widths: &[SizePolicy], heights: &[SizePolicy], f: F) {
         let snapshot = self.layout.snapshot_flow_state();
         self.layout.grid(widths, heights);
@@ -457,6 +512,7 @@ impl MeasurementContext {
         self.layout.restore_flow_state(snapshot);
     }
 
+    /// Runs child measurement under a temporary stack flow.
     fn stack_with_width_direction<F: FnOnce(&mut Self)>(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: F) {
         let snapshot = self.layout.snapshot_flow_state();
         if direction == StackDirection::TopToBottom {
@@ -468,6 +524,7 @@ impl MeasurementContext {
         self.layout.restore_flow_state(snapshot);
     }
 
+    /// Runs child measurement inside a temporary column scope.
     fn column<F: FnOnce(&mut Self)>(&mut self, f: F) {
         self.layout.begin_column();
         f(self);
@@ -476,6 +533,7 @@ impl MeasurementContext {
 }
 
 impl ScrollArea {
+    /// Measures scroll-area children by creating a nested measurement context.
     pub(crate) fn measure_children(
         &self,
         parent: &mut MeasurementContext,

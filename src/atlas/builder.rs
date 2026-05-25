@@ -12,7 +12,9 @@ use std::{
 
 /// Incrementally constructs an atlas by packing fonts, icons, and slots.
 pub struct Builder {
+    /// Rectangle packer used to reserve atlas regions.
     packer: Packer,
+    /// Atlas storage being populated by the builder.
     atlas: Atlas,
 }
 
@@ -143,6 +145,7 @@ impl Builder {
         let mut entries = HashMap::new();
         let mut min_y = i32::MAX;
         let mut max_y = -i32::MAX;
+        // MicroUI text rendering only needs printable ASCII glyphs from the baked atlas.
         for i in 32..127 {
             let ch = i as u8 as char;
             let (metrics, bitmap) = font.rasterize(ch, size as f32);
@@ -216,6 +219,7 @@ impl Builder {
     }
 
     #[cfg(any(feature = "builder", feature = "png_source"))]
+    /// Loads an icon image from disk and normalizes it to RGBA pixels.
     fn load_icon(path: &str) -> Result<(usize, usize, Vec<Color4b>)> {
         let mut f = File::open(path)?;
         let mut bytes = Vec::new();
@@ -223,6 +227,7 @@ impl Builder {
         load_image_bytes(ImageSource::Png { bytes: bytes.as_slice() })
     }
 
+    /// Reserves an empty atlas slot for later runtime-owned content.
     fn add_slot(&mut self, slot: Dimensioni) -> Result<Recti> {
         let rect = self.packer.pack(slot.width, slot.height, false);
         match rect {
@@ -240,10 +245,13 @@ impl Builder {
         }
     }
 
+    /// Packs a populated bitmap into the atlas and copies its pixels into the texture buffer.
     fn add_tile(&mut self, width: usize, height: usize, pixels: &[Color4b]) -> Result<Recti> {
         let rect = self.packer.pack(width as _, height as _, false);
         match rect {
             Some(r) => {
+                // Atlas pixels are stored row-major; `r` converts the tile-local coordinate into
+                // the destination texture offset.
                 for y in 0..height {
                     for x in 0..width {
                         self.atlas.pixels[(r.x + x as i32 + (r.y + y as i32) * self.atlas.width as i32) as usize] = pixels[x + y * width];
@@ -262,6 +270,7 @@ impl Builder {
         }
     }
 
+    /// Loads and parses a font file using `fontdue`.
     fn load_font(path: &str) -> Result<fontdue::Font> {
         let mut data = Vec::new();
         File::open(path)
@@ -273,16 +282,19 @@ impl Builder {
         Ok(font)
     }
 
+    /// Returns the final path segment, preserving the original value when it is not valid UTF-8.
     fn strip_path_to_file(path: &str) -> String {
         let p = Path::new(path);
         p.file_name().and_then(|n| n.to_str()).unwrap_or(path).to_string()
     }
 
+    /// Removes a file extension from a path-like string.
     fn strip_extension(path: &str) -> String {
         let p = Path::new(path);
         p.with_extension("").to_str().unwrap_or(path).to_string()
     }
 
+    /// Converts an asset path into the stable atlas key used for generated sources.
     fn format_path(path: &str) -> String {
         Self::strip_extension(&Self::strip_path_to_file(path))
     }

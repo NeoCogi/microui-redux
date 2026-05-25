@@ -4,9 +4,13 @@ use super::*;
 use crate::{id::IdNamespace, widget::FrameResults, widget_tree::NodeLayout};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+/// Stable retained node ids used by window chrome controls.
 pub(crate) struct WindowChromeIds {
+    /// Titlebar drag node id.
     pub(crate) title: Id,
+    /// Close button node id.
     pub(crate) close: Id,
+    /// Resize handle node id.
     pub(crate) resize: Id,
 }
 
@@ -29,8 +33,11 @@ impl WindowChromeIds {
 #[derive(Copy, Clone)]
 /// Chrome id slot used by deterministic id hashing.
 enum ChromePart {
+    /// Titlebar id slot.
     Title,
+    /// Close-button id slot.
     Close,
+    /// Resize-handle id slot.
     Resize,
 }
 
@@ -59,16 +66,22 @@ fn chrome_result(control: &ControlState, submit_on_click: bool) -> ResourceState
 #[derive(Copy, Clone)]
 /// Type of chrome node being dispatched.
 enum WindowChromePart {
+    /// Titlebar drag region.
     Title,
+    /// Close button.
     Close,
+    /// Resize handle.
     Resize,
 }
 
 #[derive(Copy, Clone)]
 /// One concrete chrome control and its allocated rectangle.
 struct WindowChromeNode {
+    /// Retained node id used for interaction/results.
     id: Id,
+    /// Chrome role for this node.
     part: WindowChromePart,
+    /// Screen-space rectangle allocated to this chrome control.
     rect: Recti,
 }
 
@@ -81,9 +94,13 @@ impl WindowChromeNode {
 
 /// Small retained tree facade for title, close, and resize chrome controls.
 pub(super) struct WindowChromeTree {
+    /// Stable chrome ids for this root.
     pub(super) ids: WindowChromeIds,
+    /// Retained internal widget state for titlebar dragging.
     title_state: Internal,
+    /// Retained internal widget state for close button clicks.
     close_state: Internal,
+    /// Retained internal widget state for resize dragging.
     resize_state: Internal,
 }
 
@@ -141,6 +158,7 @@ impl WindowChromeTree {
         Some(WindowChromeNode::new(self.ids.resize, WindowChromePart::Resize, rect))
     }
 
+    /// Returns the minimum size enforced by the resize handle.
     fn resize_min_size() -> Dimensioni {
         Dimensioni::new(96, 64)
     }

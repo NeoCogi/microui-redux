@@ -22,11 +22,17 @@ pub(crate) struct ScrollbarLayout {
 /// Persistent state for one framework-owned scrollbar.
 #[derive(Clone)]
 pub(crate) struct Scrollbar {
+    /// Axis controlled by this scrollbar.
     axis: ScrollAxis,
+    /// Current scroll value.
     value: i32,
+    /// Maximum scroll value.
     max_value: i32,
+    /// Visible content length along the axis.
     view_len: i32,
+    /// Total content length along the axis.
     content_len: i32,
+    /// Internal widget configuration.
     config: WidgetConfig,
 }
 

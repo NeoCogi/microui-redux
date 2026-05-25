@@ -44,6 +44,7 @@ pub struct AtlasSource<'a> {
 }
 
 impl AtlasHandle {
+    /// Rehydrates atlas tables from serialized metadata and already-decoded pixels.
     fn from_parts<'a>(source: &AtlasSource<'a>, pixels: Vec<Color4b>) -> Self {
         let icons: Vec<(String, Icon)> = source.icons.iter().map(|(name, rect)| (name.to_string(), Icon { rect: *rect })).collect();
         let fonts: Vec<(String, Font)> = source

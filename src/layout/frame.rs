@@ -5,10 +5,11 @@ use crate::{rect, vec2, Recti, Vec2i};
 use super::flow::{FlowState, FlowTemplate, ScopeState};
 
 #[derive(Clone)]
+/// One nested layout scope and its active placement flow.
 pub(super) struct LayoutFrame {
-    // Coordinates/cursors for one nested layout scope.
+    /// Coordinates/cursors for one nested layout scope.
     pub(super) scope: ScopeState,
-    // Placement logic used for this scope.
+    /// Placement logic used for this scope.
     pub(super) flow: FlowState,
 }
 
@@ -29,8 +30,9 @@ impl LayoutFrame {
     }
 }
 
+/// Captured flow state used to restore temporary row/grid/stack overrides.
 pub(crate) struct FlowSnapshot {
-    // Captures active flow configuration for scoped overrides.
+    /// Active flow configuration captured before a scoped override.
     flow: FlowTemplate,
 }
 
