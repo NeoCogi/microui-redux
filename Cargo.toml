@@ -1,7 +1,7 @@
 [package]
 name = "microui-redux"
 authors = ["Raja Lehtihet", "Wael El Oraiby"]
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -9,6 +9,7 @@ description = "Retained Rust MicroUI-inspired GUI library"
 repository = "https://github.com/NeoCogi/microui-redux"
 autoexamples = false
 categories = ["gui", "rendering"]
+exclude = ["UNBLOAT-PLAN.md", "FIX-PLAN.md", "atlas.png", ".codex", ".codex/**"]
 
 [lib]
 name = "microui_redux"

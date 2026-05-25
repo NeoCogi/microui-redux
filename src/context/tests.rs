@@ -438,18 +438,17 @@ fn reshown_roots_drop_stale_scroll_area_handles_after_a_gap() {
     );
 }
 
-#[allow(deprecated)]
 #[test]
-fn legacy_panel_container_aliases_render_scroll_area_node() {
+fn scroll_area_handle_renders_scroll_area_node() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-    let panel: crate::advanced::ContainerHandle = ctx.new_panel("legacy panel");
+    let scroll_area = ctx.new_scroll_area("scroll area");
     let tree = WidgetTreeBuilder::build({
-        let panel = panel.clone();
+        let scroll_area = scroll_area.clone();
         move |tree| {
-            tree.scroll_area(panel.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                tree.text("legacy child");
+            tree.scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.text("scroll area child");
             });
         }
     });

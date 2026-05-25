@@ -199,13 +199,3 @@ impl ScrollAreaHandle {
         self.0.borrow().retained_id_for_node(node_id)
     }
 }
-
-/// Compatibility alias for code that still uses the old retained container name.
-#[deprecated(since = "0.6.1", note = "use ScrollAreaHandle")]
-pub type ContainerHandle = ScrollAreaHandle;
-/// Compatibility alias for the old read-only retained container view.
-#[deprecated(since = "0.6.1", note = "use ScrollAreaView")]
-pub type ContainerView<'a> = ScrollAreaView<'a>;
-/// Compatibility alias for the old mutable retained container view.
-#[deprecated(since = "0.6.1", note = "use ScrollAreaViewMut")]
-pub type ContainerViewMut<'a> = ScrollAreaViewMut<'a>;
