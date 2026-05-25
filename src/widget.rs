@@ -356,9 +356,6 @@ impl FrameResults {
     }
 }
 
-#[cfg(test)]
-mod tests;
-
 impl Widget for (WidgetOption, ScrollBehavior) {
     fn widget_opt(&self) -> &WidgetOption {
         &self.0

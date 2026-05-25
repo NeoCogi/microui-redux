@@ -102,6 +102,8 @@ mod scrollbar;
 mod style;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod tests;
 mod text_layout;
 mod widget;
 mod widget_ctx;
