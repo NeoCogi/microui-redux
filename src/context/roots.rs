@@ -45,6 +45,10 @@ pub(super) struct NodeRootEntry {
     scroll_behavior: ScrollBehavior,
     /// Whether this root is visible.
     visible: bool,
+    /// Behavior class for root routing and popup lifecycle.
+    kind: RootKind,
+    /// Popup guard used to avoid immediate close on the opening frame.
+    just_opened: bool,
     /// Root z-order used for rendering and pointer ownership.
     pub(super) z_index: i32,
     /// Node runtime compiled from the retained tree.
@@ -141,7 +145,27 @@ impl<R: Renderer> Context<R> {
             opt: ContainerOption::NONE,
             scroll_behavior: ScrollBehavior::NONE,
             visible: true,
+            kind: RootKind::Window,
+            just_opened: false,
             z_index,
+            runtime: UiRuntime::from_widget_tree(tree),
+        });
+        id
+    }
+
+    /// Registers a hidden experimental `UiNode` popup root.
+    pub fn create_node_popup(&mut self, name: &str, tree: WidgetTree) -> RootId {
+        let id = self.next_root_id();
+        self.node_roots.push(NodeRootEntry {
+            id,
+            name: name.to_string(),
+            rect: Recti::default(),
+            opt: Self::default_popup_options(),
+            scroll_behavior: ScrollBehavior::NO_SCROLL,
+            visible: false,
+            kind: RootKind::Popup,
+            just_opened: false,
+            z_index: -1,
             runtime: UiRuntime::from_widget_tree(tree),
         });
         id
@@ -157,6 +181,11 @@ impl<R: Renderer> Context<R> {
     /// Returns the rectangle used by an experimental `UiNode` root.
     pub fn node_root_rect(&self, root: RootId) -> Option<Recti> {
         self.node_roots.iter().find(|entry| entry.id == root).map(|entry| entry.rect)
+    }
+
+    /// Returns whether an experimental `UiNode` root is visible.
+    pub fn node_root_visible(&self, root: RootId) -> Option<bool> {
+        self.node_roots.iter().find(|entry| entry.id == root).map(|entry| entry.visible)
     }
 
     /// Updates the size of an experimental `UiNode` root without changing its origin.
@@ -228,10 +257,14 @@ impl<R: Renderer> Context<R> {
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) {
         let Some(index) = self.retained_roots.iter().position(|entry| entry.id == root) else {
             if let Some(entry) = self.node_roots.iter_mut().find(|entry| entry.id == root) {
+                let was_visible = entry.visible;
                 entry.visible = visible;
                 if visible {
                     self.last_zindex += 1;
                     entry.z_index = self.last_zindex;
+                    if entry.kind == RootKind::Popup && !was_visible {
+                        entry.just_opened = true;
+                    }
                 }
             }
             return;
@@ -435,6 +468,16 @@ impl<R: Renderer> Context<R> {
 
     /// Traverses and renders experimental `UiNode` roots.
     pub(super) fn render_node_roots(&mut self) {
+        for entry in &mut self.node_roots {
+            if entry.visible && entry.opt.intersects(ContainerOption::AUTO_SIZE) {
+                let size = entry
+                    .runtime
+                    .measure_auto_size(self.style.as_ref(), &self.canvas.get_atlas(), entry.opt, entry.rect.width);
+                entry.rect.width = size.width;
+                entry.rect.height = size.height;
+            }
+        }
+
         let (mouse_pos, mouse_pressed) = {
             let input = self.input.borrow();
             (input.mouse_pos, input.mouse_pressed)
@@ -455,6 +498,14 @@ impl<R: Renderer> Context<R> {
         roots.sort_by(|a, b| a.z_index.cmp(&b.z_index));
         for entry in &mut roots {
             if entry.visible {
+                if entry.kind == RootKind::Popup {
+                    if entry.just_opened {
+                        entry.just_opened = false;
+                    } else if !mouse_pressed.is_empty() && hover_root != Some(entry.id) && !entry.rect.contains(&mouse_pos) {
+                        entry.visible = false;
+                        continue;
+                    }
+                }
                 let input = self.input.borrow();
                 let hover_root_active = hover_root == Some(entry.id);
                 entry.runtime.render_frame(

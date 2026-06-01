@@ -1,15 +1,13 @@
 //! Combo-box retained state.
 //!
-//! The combo widget tracks selected item text and popup-open state; the container/window layer owns
-//! the actual popup traversal.
+//! The combo widget tracks selected item text and popup-open state; the context root layer owns the
+//! actual popup traversal.
 
 use super::*;
 
 /// Persistent state used by `combo_box` to track popup and selection.
 #[derive(Clone)]
 pub struct Combo {
-    /// Popup window backing the dropdown list.
-    popup: WindowHandle,
     /// Currently selected item index.
     selected: usize,
     /// Whether the combo popup should be open.
@@ -25,10 +23,9 @@ pub struct Combo {
 }
 
 impl Combo {
-    /// Creates a new combo state with the provided popup handle.
-    pub fn new(popup: WindowHandle) -> Self {
+    /// Creates a new combo state.
+    pub fn new() -> Self {
         Self {
-            popup,
             selected: 0,
             open: false,
             config: WidgetConfig::default(),
@@ -39,9 +36,8 @@ impl Combo {
     }
 
     /// Creates a new combo state with explicit widget options.
-    pub fn with_opt(popup: WindowHandle, opt: WidgetOption, scroll_behavior: ScrollBehavior) -> Self {
+    pub fn with_opt(opt: WidgetOption, scroll_behavior: ScrollBehavior) -> Self {
         Self {
-            popup,
             selected: 0,
             open: false,
             config: WidgetConfig::new(opt, scroll_behavior),
@@ -56,11 +52,6 @@ impl Combo {
         self.last_anchor
     }
 
-    /// Returns a clone of the popup window handle backing this combo.
-    pub fn popup(&self) -> WindowHandle {
-        self.popup.clone()
-    }
-
     /// Returns the currently selected item index.
     pub fn selected(&self) -> usize {
         self.selected
@@ -73,14 +64,11 @@ impl Combo {
 
     /// Opens the popup and marks the combo open.
     pub fn open_popup(&mut self) {
-        self.popup.open();
         self.open = true;
     }
 
-    /// Closes the popup and clears any popup-local focus state.
+    /// Closes the popup.
     pub fn close_popup(&mut self) {
-        self.popup.clear_focus();
-        self.popup.close();
         self.open = false;
     }
 
@@ -153,14 +141,11 @@ impl Combo {
             if !self.open {
                 self.close_popup();
             }
-        } else if !self.popup.is_open() {
-            // Keep the retained flag synchronized if the popup was closed externally.
-            self.open = false;
         }
         if control.clicked {
             res |= ResourceState::SUBMIT | ResourceState::ACTIVE;
         }
-        if self.open || self.popup.is_open() {
+        if self.open {
             res |= ResourceState::ACTIVE;
         }
         res

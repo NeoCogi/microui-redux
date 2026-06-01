@@ -10,8 +10,7 @@ use std::rc::Rc;
 
 use crate::{
     expand_rect, Canvas, ControlColor, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Id, Input, InputSnapshot, KeyCode, KeyMode, GridSpan,
-    MouseButton, MouseEvent, Node, Recti, Renderer, RetainedId, ScrollAreaHandle, StackDirection, Style, UNCLIPPED_RECT, Vec2i, Vertex, WidgetHandle,
-    WidgetTree,
+    MouseButton, MouseEvent, Node, Recti, Renderer, RetainedId, StackDirection, Style, UNCLIPPED_RECT, Vec2i, Vertex, WidgetHandle, WidgetTree,
 };
 use crate::container::{render_command_stream, Command};
 use crate::draw_context::DrawCtx;
@@ -207,8 +206,6 @@ impl Default for PopupData {
 
 /// Scroll-area container data.
 pub(crate) struct ScrollAreaData {
-    /// Legacy retained scroll-area handle kept while existing traversal remains active.
-    pub(crate) legacy_handle: Option<ScrollAreaHandle>,
     /// Current scroll offset.
     pub(crate) scroll_offset: Vec2i,
     /// Scroll behavior applied while traversing this node's children.
@@ -329,6 +326,32 @@ impl UiRuntime {
         }
     }
 
+    /// Measures the outer root size needed for `AUTO_SIZE` node roots.
+    pub(crate) fn measure_auto_size(&self, style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption, min_width: i32) -> Dimensioni {
+        let title_height = if opt.intersects(ContainerOption::NO_TITLE) {
+            0
+        } else {
+            root_titlebar_height(style, atlas)
+        };
+        let padding = style.padding.max(0);
+        let available = Dimensioni::new(10_000, 10_000);
+        let mut width: i32 = 0;
+        let mut height: i32 = 0;
+        for index in 0..self.roots.len() {
+            let Some(root) = self.root_at(index) else { continue };
+            let preferred = self.measure_node(root, style, atlas, available);
+            width = width.max(preferred.width);
+            height = height.saturating_add(preferred.height);
+            if index + 1 < self.roots.len() {
+                height = height.saturating_add(style.spacing);
+            }
+        }
+        Dimensioni::new(
+            width.saturating_add(padding * 2).max(min_width).max(1),
+            height.saturating_add(padding * 2).saturating_add(title_height).max(1),
+        )
+    }
+
     /// Returns a read-only node context.
     pub(crate) fn node_ctx(&mut self, id: UiNodeId) -> NodeCtx<'_> {
         NodeCtx { runtime: self, id }
@@ -401,15 +424,17 @@ impl UiRuntime {
                 let (widget, render) = resources.take_custom_render(resource);
                 UiNodeData::Widget { widget, custom_render: Some(render) }
             }
-            WidgetTreeNodeKind::ScrollArea { resource, opt, scroll_behavior } => UiNodeData::Container {
-                kind: ContainerKind::ScrollArea(ScrollAreaData {
-                    legacy_handle: Some(resources.take_scroll_area(resource)),
-                    scroll_offset: Vec2i::default(),
-                    scroll_behavior,
-                    opt,
-                }),
-                children: Vec::new(),
-            },
+            WidgetTreeNodeKind::ScrollArea { resource, opt, scroll_behavior } => {
+                resources.discard_scroll_area(resource);
+                UiNodeData::Container {
+                    kind: ContainerKind::ScrollArea(ScrollAreaData {
+                        scroll_offset: Vec2i::default(),
+                        scroll_behavior,
+                        opt,
+                    }),
+                    children: Vec::new(),
+                }
+            }
             WidgetTreeNodeKind::Header { resource } => UiNodeData::Container {
                 kind: ContainerKind::Header(DisclosureData {
                     state: resources.take_node(resource),
@@ -1614,10 +1639,10 @@ impl ResourceStore {
         }
     }
 
-    /// Takes a scroll-area resource.
-    fn take_scroll_area(&mut self, id: crate::widget_tree::TreeResourceId) -> ScrollAreaHandle {
+    /// Discards a legacy scroll-area resource while converting to native node data.
+    fn discard_scroll_area(&mut self, id: crate::widget_tree::TreeResourceId) {
         match self.take(id) {
-            WidgetTreeResource::ScrollArea(handle) => handle,
+            WidgetTreeResource::ScrollArea(_) => (),
             _ => panic!("tree resource {:?} is not a scroll-area resource", id),
         }
     }

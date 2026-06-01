@@ -1,8 +1,8 @@
 //! Tests for basic widget sizing and state behavior.
 
 use super::*;
-use crate::{test_support::test_atlas as make_test_atlas, Input};
-use std::{cell::RefCell, rc::Rc};
+use crate::test_support::test_atlas as make_test_atlas;
+use std::rc::Rc;
 
 #[test]
 fn image_widgets_measure_external_texture_dimensions() {
@@ -39,9 +39,7 @@ fn inline_image_layout_keeps_visual_and_text_rects_separate() {
 fn combo_run_toggles_open_state() {
     let atlas = make_test_atlas();
     let style = Rc::new(Style::default());
-    let input = Rc::new(RefCell::new(Input::default()));
-    let popup = WindowHandle::popup(RootId::from_raw(1), "combo", atlas.clone(), style.clone(), input);
-    let mut combo = Combo::new(popup);
+    let mut combo = Combo::new();
     let mut commands = Vec::new();
     let mut triangle_vertices = Vec::new();
     let mut clip_stack = Vec::new();
@@ -88,16 +86,11 @@ fn combo_run_toggles_open_state() {
     );
     combo.update(&mut ctx, &control);
     assert!(!combo.is_open());
-    assert!(!combo.popup().is_open());
 }
 
 #[test]
 fn combo_select_updates_label_and_closes_popup() {
-    let atlas = make_test_atlas();
-    let style = Rc::new(Style::default());
-    let input = Rc::new(RefCell::new(Input::default()));
-    let popup = WindowHandle::popup(RootId::from_raw(1), "combo", atlas, style, input);
-    let mut combo = Combo::new(popup);
+    let mut combo = Combo::new();
     let items = ["Apple", "Banana", "Cherry"];
 
     combo.open_popup();
@@ -106,5 +99,4 @@ fn combo_select_updates_label_and_closes_popup() {
     assert_eq!(selected.as_deref(), Some("Banana"));
     assert_eq!(combo.selected(), 1);
     assert!(!combo.is_open());
-    assert!(!combo.popup().is_open());
 }

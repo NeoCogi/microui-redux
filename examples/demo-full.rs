@@ -928,7 +928,7 @@ impl State {
         let demo_root = ctx.create_node_window("Demo Window", rect(40, 40, 300, 450), WidgetTree::default());
         let style_root = ctx.create_node_window("Style Editor", rect(350, 250, 300, 240), WidgetTree::default());
         let log_root = ctx.create_node_window("Log Window", rect(350, 40, 300, 200), WidgetTree::default());
-        let combo_popup_root = ctx.create_popup("Combo Box Popup", WidgetTree::default());
+        let combo_popup_root = ctx.create_node_popup("Combo Box Popup", WidgetTree::default());
         ctx.set_root_options(
             combo_popup_root,
             ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
@@ -948,7 +948,6 @@ impl State {
         let suzanne_root = ctx.create_node_window("Suzanne Window", rect(220, 220, 300, 300), WidgetTree::default());
         let stack_direction_root = ctx.create_node_window("Stack Direction Demo", rect(530, 40, 280, 220), WidgetTree::default());
         let weight_root = ctx.create_node_window("Weight Demo", rect(530, 270, 280, 260), WidgetTree::default());
-        let combo_popup = ctx.root_handle(combo_popup_root).expect("combo popup root missing");
         let mut state = Self {
             renderer,
             bg: [90.0, 95.0, 100.0],
@@ -959,7 +958,7 @@ impl State {
             logbuf_updated: false,
             submit_buf: widget_handle(submit_buf),
             text_area: widget_handle(text_area),
-            combo_state: widget_handle(Combo::new(combo_popup)),
+            combo_state: widget_handle(Combo::new()),
             combo_items: [
                 widget_handle(ListItem::new("Apple")),
                 widget_handle(ListItem::new("Banana")),
@@ -1833,14 +1832,6 @@ impl State {
             self.write_log(msg);
         }
 
-        let popup = self.combo_state.read(Combo::popup);
-        if self.combo_state.read(Combo::is_open) {
-            ctx.set_root_visible(self.combo_popup_root, true);
-            popup.set_rect(combo_anchor);
-        } else {
-            ctx.set_root_visible(self.combo_popup_root, false);
-        }
-
         let combo_log = {
             let results = ctx.committed_results();
             let mut selected_label = None;
@@ -1852,6 +1843,12 @@ impl State {
             }
             selected_label
         };
+        if self.combo_state.read(Combo::is_open) {
+            ctx.set_root_visible(self.combo_popup_root, true);
+            ctx.set_node_root_rect(self.combo_popup_root, combo_anchor);
+        } else {
+            ctx.set_root_visible(self.combo_popup_root, false);
+        }
         if let Some(label) = combo_log {
             let msg = format!("Selected: {label}");
             self.write_log(msg.as_str());

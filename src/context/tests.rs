@@ -1112,13 +1112,6 @@ fn run_combo_frame(
     let labels: Vec<String> = items.iter().map(|item| item.read(|item| item.label.clone())).collect();
     combo.update(|combo| combo.update_items(&labels));
     let combo_anchor = combo.read(Combo::anchor);
-    let popup = combo.read(Combo::popup);
-    if combo.read(Combo::is_open) {
-        ctx.set_root_visible(popup_root, true);
-        popup.set_rect(combo_anchor);
-    } else {
-        ctx.set_root_visible(popup_root, false);
-    }
 
     let mut selected_label = None;
     let results = ctx.committed_results();
@@ -1127,6 +1120,13 @@ fn run_combo_frame(
             selected_label = combo.update(|combo| combo.select(idx, &labels));
             break;
         }
+    }
+
+    if combo.read(Combo::is_open) {
+        ctx.set_root_visible(popup_root, true);
+        ctx.set_node_root_rect(popup_root, combo_anchor);
+    } else {
+        ctx.set_root_visible(popup_root, false);
     }
 
     ctx.update_ui();
@@ -1138,14 +1138,13 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
-    let popup_root = ctx.create_popup("combo popup", WidgetTree::default());
+    let popup_root = ctx.create_node_popup("combo popup", WidgetTree::default());
     ctx.set_root_options(
         popup_root,
         ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
         ScrollBehavior::NO_SCROLL,
     );
-    let popup = ctx.root_handle(popup_root).expect("popup root missing");
-    let combo = widget_handle(Combo::new(popup));
+    let combo = widget_handle(Combo::new());
     let items = [widget_handle(ListItem::new("Apple")), widget_handle(ListItem::new("Banana"))];
     let mut item_ids = [NodeId::default(); 2];
     let main_root = ctx.create_window(
@@ -1181,9 +1180,9 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     ctx.mouseup(10, 10, MouseButton::LEFT);
     run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
     assert!(combo.read(Combo::is_open));
-    assert!(ctx.root_handle(popup_root).unwrap().is_open());
+    assert_eq!(ctx.node_root_visible(popup_root), Some(true));
 
-    let popup_rect = ctx.root_handle(popup_root).unwrap().rect();
+    let popup_rect = ctx.node_root_rect(popup_root).unwrap();
     let item_x = popup_rect.x + 12;
     let item_y = popup_rect.y + 12;
     ctx.mousemove(item_x, item_y);
@@ -1195,9 +1194,9 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
 
     assert_eq!(selected.as_deref(), Some("Apple"));
     assert!(!combo.read(Combo::is_open));
-    assert!(!ctx.root_handle(popup_root).unwrap().is_open());
+    assert_eq!(ctx.node_root_visible(popup_root), Some(false));
 
     run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
     assert!(!combo.read(Combo::is_open));
-    assert!(!ctx.root_handle(popup_root).unwrap().is_open());
+    assert_eq!(ctx.node_root_visible(popup_root), Some(false));
 }
