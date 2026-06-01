@@ -41,7 +41,7 @@ mod node;
 mod retained;
 
 pub use builder::{NodeBuilder, NodeOptions, WidgetTreeBuilder};
-pub use node::{NodeId, Policy, WidgetTree, WidgetTreeNode};
+pub use node::{GridSpan, NodeId, Policy, WidgetTree, WidgetTreeNode};
 pub use retained::{widget_handle, WidgetHandle};
 
 pub(crate) use cache::{NodeLayout, WidgetTreeCache};

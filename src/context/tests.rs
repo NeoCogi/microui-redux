@@ -858,6 +858,46 @@ fn retained_root_hover_selection_uses_registered_root_z_order() {
 }
 
 #[test]
+fn node_root_hover_selection_uses_root_z_order() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let left_button = widget_handle(Button::new("left"));
+    let right_button = widget_handle(Button::new("right"));
+    let left = ctx.create_node_window(
+        "left",
+        rect(0, 0, 120, 80),
+        WidgetTreeBuilder::build(|tree| {
+            tree.widget(left_button.clone());
+        }),
+    );
+    let right = ctx.create_node_window(
+        "right",
+        rect(40, 0, 120, 80),
+        WidgetTreeBuilder::build(|tree| {
+            tree.widget(right_button.clone());
+        }),
+    );
+
+    ctx.mousemove(50, 30);
+    ctx.update_ui();
+
+    let left_entry = ctx.node_roots.iter().find(|entry| entry.id == left).unwrap();
+    let right_entry = ctx.node_roots.iter().find(|entry| entry.id == right).unwrap();
+    assert!(left_entry.runtime.hover_root.is_none());
+    assert!(right_entry.runtime.hover_root.is_some());
+
+    ctx.mousedown(20, 30, MouseButton::LEFT);
+    ctx.update_ui();
+
+    let left_entry = ctx.node_roots.iter().find(|entry| entry.id == left).unwrap();
+    let right_entry = ctx.node_roots.iter().find(|entry| entry.id == right).unwrap();
+    assert!(left_entry.runtime.hover_root.is_some());
+    assert!(right_entry.runtime.hover_root.is_none());
+    assert!(left_entry.z_index > right_entry.z_index);
+}
+
+#[test]
 fn retained_chrome_node_ids_are_root_derived_and_stable() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });

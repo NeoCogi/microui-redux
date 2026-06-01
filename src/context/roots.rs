@@ -45,8 +45,10 @@ pub(super) struct NodeRootEntry {
     scroll_behavior: ScrollBehavior,
     /// Whether this root is visible.
     visible: bool,
+    /// Root z-order used for rendering and pointer ownership.
+    pub(super) z_index: i32,
     /// Node runtime compiled from the retained tree.
-    runtime: UiRuntime,
+    pub(super) runtime: UiRuntime,
 }
 
 impl<R: Renderer> Context<R> {
@@ -130,6 +132,8 @@ impl<R: Renderer> Context<R> {
     /// passes are brought up.
     pub fn create_node_window(&mut self, name: &str, rect: Recti, tree: WidgetTree) -> RootId {
         let id = self.next_root_id();
+        self.last_zindex += 1;
+        let z_index = self.last_zindex;
         self.node_roots.push(NodeRootEntry {
             id,
             name: name.to_string(),
@@ -137,6 +141,7 @@ impl<R: Renderer> Context<R> {
             opt: ContainerOption::NONE,
             scroll_behavior: ScrollBehavior::NONE,
             visible: true,
+            z_index,
             runtime: UiRuntime::from_widget_tree(tree),
         });
         id
@@ -224,6 +229,10 @@ impl<R: Renderer> Context<R> {
         let Some(index) = self.retained_roots.iter().position(|entry| entry.id == root) else {
             if let Some(entry) = self.node_roots.iter_mut().find(|entry| entry.id == root) {
                 entry.visible = visible;
+                if visible {
+                    self.last_zindex += 1;
+                    entry.z_index = self.last_zindex;
+                }
             }
             return;
         };
@@ -239,6 +248,14 @@ impl<R: Renderer> Context<R> {
     pub fn bring_to_front(&mut self, window: &WindowHandle) {
         self.last_zindex += 1;
         window.set_zindex(self.last_zindex);
+    }
+
+    /// Bumps an experimental node root above other roots.
+    fn bring_node_root_to_front(&mut self, root: crate::RootId) {
+        if let Some(entry) = self.node_roots.iter_mut().find(|entry| entry.id == root) {
+            self.last_zindex += 1;
+            entry.z_index = self.last_zindex;
+        }
     }
 
     /// Applies visibility changes by index so callers can avoid a second root lookup.
@@ -418,10 +435,28 @@ impl<R: Renderer> Context<R> {
 
     /// Traverses and renders experimental `UiNode` roots.
     pub(super) fn render_node_roots(&mut self) {
+        let (mouse_pos, mouse_pressed) = {
+            let input = self.input.borrow();
+            (input.mouse_pos, input.mouse_pressed)
+        };
+        let hover_root = self
+            .node_roots
+            .iter()
+            .filter(|entry| entry.visible && entry.rect.contains(&mouse_pos))
+            .max_by_key(|entry| entry.z_index)
+            .map(|entry| entry.id);
+        if !mouse_pressed.is_empty() {
+            if let Some(root) = hover_root {
+                self.bring_node_root_to_front(root);
+            }
+        }
+
         let mut roots = std::mem::take(&mut self.node_roots);
+        roots.sort_by(|a, b| a.z_index.cmp(&b.z_index));
         for entry in &mut roots {
             if entry.visible {
                 let input = self.input.borrow();
+                let hover_root_active = hover_root == Some(entry.id);
                 entry.runtime.render_frame(
                     entry.id,
                     &mut self.canvas,
@@ -432,6 +467,7 @@ impl<R: Renderer> Context<R> {
                     &entry.name,
                     entry.opt,
                     entry.scroll_behavior,
+                    hover_root_active,
                 );
             }
         }

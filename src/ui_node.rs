@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::{
-    expand_rect, Canvas, ControlColor, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Id, Input, InputSnapshot, KeyCode, KeyMode,
+    expand_rect, Canvas, ControlColor, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Id, Input, InputSnapshot, KeyCode, KeyMode, GridSpan,
     MouseButton, MouseEvent, Node, Recti, Renderer, RetainedId, ScrollAreaHandle, StackDirection, Style, UNCLIPPED_RECT, Vec2i, Vertex, WidgetHandle,
     WidgetTree,
 };
@@ -58,13 +58,15 @@ pub(crate) struct UiNode {
     pub(crate) control: ControlState,
     /// Placement policy used by runtime layout passes.
     pub(crate) policy: crate::Policy,
+    /// Grid span used when this node is a child of a grid container.
+    pub(crate) grid_span: GridSpan,
     /// Node-specific payload.
     pub(crate) data: UiNodeData,
 }
 
 impl UiNode {
     /// Creates a node with default geometry and traversal state.
-    fn new(id: UiNodeId, parent: Option<UiNodeId>, policy: crate::Policy, data: UiNodeData) -> Self {
+    fn new(id: UiNodeId, parent: Option<UiNodeId>, policy: crate::Policy, grid_span: GridSpan, data: UiNodeData) -> Self {
         Self {
             id,
             parent,
@@ -76,6 +78,7 @@ impl UiNode {
             enabled: true,
             control: ControlState::default(),
             policy,
+            grid_span,
             data,
         }
     }
@@ -280,6 +283,8 @@ pub(crate) struct UiRuntime {
     pub(crate) capture: Option<UiNodeId>,
     /// Root currently owning hover routing.
     pub(crate) hover_root: Option<UiNodeId>,
+    /// Whether this runtime's current root owns pointer routing for the frame.
+    hover_root_active: bool,
     /// Deferred topology/data edits.
     pub(crate) deferred: Vec<TreeOp>,
     /// Commands recorded by the node paint path.
@@ -349,12 +354,15 @@ impl UiRuntime {
         name: &str,
         opt: ContainerOption,
         scroll_behavior: ScrollBehavior,
+        hover_root_active: bool,
     ) {
         self.commands.clear();
         self.triangle_vertices.clear();
         self.clip_stack.clear();
         self.clip_stack.push(UNCLIPPED_RECT);
         self.updated_focus = false;
+        self.hover_root_active = hover_root_active;
+        self.hover_root = hover_root_active.then(|| self.roots.first().copied()).flatten();
 
         let body = self.root_body_rect(rect, style, canvas.get_atlas(), name, opt, scroll_behavior);
         self.layout_roots(style, canvas.get_atlas(), body);
@@ -382,7 +390,7 @@ impl UiRuntime {
 
     /// Inserts one retained tree node and descendants.
     fn insert_tree_node(&mut self, parent: Option<UiNodeId>, node: WidgetTreeNode, resources: &mut ResourceStore) -> UiNodeId {
-        let (id, policy, kind, children) = node.into_parts();
+        let (id, policy, grid_span, kind, children) = node.into_parts();
         let mut child_nodes = Vec::new();
         let data = match kind {
             WidgetTreeNodeKind::Widget { resource } => UiNodeData::Widget {
@@ -434,7 +442,7 @@ impl UiRuntime {
             },
         };
 
-        let ui_node = UiNode::new(id, parent, policy, data);
+        let ui_node = UiNode::new(id, parent, policy, grid_span, data);
         self.nodes.insert(id, ui_node);
 
         for child in children {
@@ -668,7 +676,13 @@ impl UiRuntime {
         available: Dimensioni,
     ) -> Dimensioni {
         let cols = widths.len().max(1);
-        let rows = self.child_count(id).div_ceil(cols).max(heights.len()).max(1);
+        let rows = self
+            .grid_placements(id, cols)
+            .into_iter()
+            .map(|placement| placement.row + placement.row_span)
+            .max()
+            .unwrap_or(0);
+        let rows = rows.max(heights.len()).max(1);
         let default_height = default_cell_height(style, atlas);
         let width = available.width;
         let height = if heights.is_empty() {
@@ -862,29 +876,57 @@ impl UiRuntime {
         widths: &[SizePolicy],
         heights: &[SizePolicy],
     ) {
-        let count = self.child_count(id);
         let cols = widths.len().max(1);
-        let rows = count.div_ceil(cols).max(heights.len()).max(1);
+        let placements = self.grid_placements(id, cols);
+        let rows = placements
+            .iter()
+            .map(|placement| placement.row + placement.row_span)
+            .max()
+            .unwrap_or(0)
+            .max(heights.len())
+            .max(1);
         let available_width = rect.width.saturating_sub(style.spacing.saturating_mul(cols.saturating_sub(1) as i32));
         let available_height = rect.height.saturating_sub(style.spacing.saturating_mul(rows.saturating_sub(1) as i32));
         let preferred_widths = vec![default_cell_width(style); cols];
         let preferred_heights = vec![default_cell_height(style, atlas); rows];
         let col_widths = resolve_axis_tracks(&track_policies(widths, cols), &preferred_widths, available_width);
         let row_heights = resolve_axis_tracks(&track_policies(heights, rows), &preferred_heights, available_height);
-        for index in 0..count {
-            let Some(child) = self.child_at(id, index) else { continue };
-            let col = index % cols;
-            let row = index / cols;
-            let x = rect.x + col_widths.iter().take(col).sum::<i32>() + style.spacing.saturating_mul(col as i32);
-            let y = rect.y + row_heights.iter().take(row).sum::<i32>() + style.spacing.saturating_mul(row as i32);
-            let child_rect = Recti::new(
-                x,
-                y,
-                col_widths.get(col).copied().unwrap_or_default(),
-                row_heights.get(row).copied().unwrap_or_default(),
-            );
-            self.layout_node(child, style, atlas, child_rect, clip);
+        for placement in placements {
+            let x = rect.x + col_widths.iter().take(placement.col).sum::<i32>() + style.spacing.saturating_mul(placement.col as i32);
+            let y = rect.y + row_heights.iter().take(placement.row).sum::<i32>() + style.spacing.saturating_mul(placement.row as i32);
+            let width = span_size(&col_widths, placement.col, placement.col_span, style.spacing);
+            let height = span_size(&row_heights, placement.row, placement.row_span, style.spacing);
+            let child_rect = Recti::new(x, y, width, height);
+            self.layout_node(placement.child, style, atlas, child_rect, clip);
         }
+    }
+
+    /// Computes row-major child placements while honoring explicit grid spans.
+    fn grid_placements(&self, id: UiNodeId, cols: usize) -> Vec<GridPlacement> {
+        let cols = cols.max(1);
+        let mut occupied: Vec<Vec<bool>> = Vec::new();
+        let mut placements = Vec::with_capacity(self.child_count(id));
+        let mut search_row = 0;
+        let mut search_col = 0;
+
+        for index in 0..self.child_count(id) {
+            let Some(child) = self.child_at(id, index) else { continue };
+            let (row, col) = first_free_grid_cell(&mut occupied, cols, search_row, search_col);
+            let span = self.nodes.get(&child).map(|node| node.grid_span).unwrap_or(GridSpan::ONE);
+            let col_span = span.columns.max(1).min(cols.saturating_sub(col).max(1));
+            let row_span = span.rows.max(1);
+            mark_grid_occupied(&mut occupied, cols, row, col, row_span, col_span);
+            placements.push(GridPlacement { child, col, row, col_span, row_span });
+
+            search_row = row;
+            search_col = col.saturating_add(col_span);
+            while search_col >= cols {
+                search_col -= cols;
+                search_row += 1;
+            }
+        }
+
+        placements
     }
 
     /// Lays out stack children from the chosen vertical anchor.
@@ -1090,7 +1132,7 @@ impl UiRuntime {
             &atlas,
             &mut focus_slot,
             &mut focus_seen,
-            true,
+            self.hover_root_active,
             None,
         );
         let result = widget.update(&mut ctx, &control);
@@ -1145,7 +1187,7 @@ impl UiRuntime {
                     &atlas,
                     &mut focus_slot,
                     &mut focus_seen,
-                    true,
+                    self.hover_root_active,
                     input_snapshot.take(),
                 );
                 widget.update(&mut ctx, &control)
@@ -1176,7 +1218,8 @@ impl UiRuntime {
             return ControlState::default();
         }
 
-        let hovered = rect.contains(&input.mouse_pos);
+        let clip = self.nodes.get(&id).map(|node| node.clip).unwrap_or(UNCLIPPED_RECT);
+        let hovered = self.hover_root_active && rect.contains(&input.mouse_pos) && clip.contains(&input.mouse_pos);
         if hovered && input.mouse_down.is_empty() {
             self.hover = Some(id);
         }
@@ -1394,6 +1437,20 @@ struct DisclosureBehavior {
     state: WidgetHandle<Node>,
     /// Whether child layout should be indented when expanded.
     indent_children: bool,
+}
+
+/// Concrete row-major placement of one child inside a grid.
+struct GridPlacement {
+    /// Child node being placed.
+    child: UiNodeId,
+    /// Starting column.
+    col: usize,
+    /// Starting row.
+    row: usize,
+    /// Number of columns occupied.
+    col_span: usize,
+    /// Number of rows occupied.
+    row_span: usize,
 }
 
 /// Common internal behavior interface for child-owning nodes.
@@ -1620,6 +1677,42 @@ fn track_policies(policies: &[SizePolicy], count: usize) -> Vec<SizePolicy> {
     (0..count).map(|index| policies.get(index).copied().unwrap_or(SizePolicy::Auto)).collect()
 }
 
+/// Returns the first free cell in a row-major occupancy grid, extending rows as needed.
+fn first_free_grid_cell(occupied: &mut Vec<Vec<bool>>, cols: usize, mut row: usize, mut col: usize) -> (usize, usize) {
+    loop {
+        while occupied.len() <= row {
+            occupied.push(vec![false; cols]);
+        }
+        while col < cols {
+            if !occupied[row][col] {
+                return (row, col);
+            }
+            col += 1;
+        }
+        row += 1;
+        col = 0;
+    }
+}
+
+/// Marks a rectangular cell range as occupied, extending rows as needed.
+fn mark_grid_occupied(occupied: &mut Vec<Vec<bool>>, cols: usize, row: usize, col: usize, row_span: usize, col_span: usize) {
+    for y in row..row.saturating_add(row_span.max(1)) {
+        while occupied.len() <= y {
+            occupied.push(vec![false; cols]);
+        }
+        for x in col..col.saturating_add(col_span.max(1)).min(cols) {
+            occupied[y][x] = true;
+        }
+    }
+}
+
+/// Sums a track span, including the spacing between spanned tracks.
+fn span_size(tracks: &[i32], start: usize, span: usize, spacing: i32) -> i32 {
+    let span = span.max(1);
+    let size = tracks.iter().skip(start).take(span).copied().sum::<i32>();
+    size.saturating_add(spacing.saturating_mul(span.saturating_sub(1) as i32))
+}
+
 /// Resolves one size policy against a preferred size, available space, and optional weight context.
 fn resolve_size(policy: SizePolicy, preferred: i32, available: i32, reference: i32, total_weight: Option<f32>) -> i32 {
     let resolved = match policy {
@@ -1779,6 +1872,7 @@ mod tests {
             Id::new(1),
             None,
             crate::Policy::auto(),
+            GridSpan::ONE,
             UiNodeData::Container {
                 kind: ContainerKind::Column(ColumnData),
                 children: Vec::new(),
@@ -1788,6 +1882,7 @@ mod tests {
             Id::new(2),
             None,
             crate::Policy::auto(),
+            GridSpan::ONE,
             UiNodeData::Container {
                 kind: ContainerKind::Column(ColumnData),
                 children: Vec::new(),
@@ -1797,6 +1892,7 @@ mod tests {
             Id::new(3),
             Some(Id::new(1)),
             crate::Policy::auto(),
+            GridSpan::ONE,
             UiNodeData::Container {
                 kind: ContainerKind::Column(ColumnData),
                 children: Vec::new(),
@@ -1847,6 +1943,7 @@ mod tests {
             "simple",
             ContainerOption::NONE,
             ScrollBehavior::NONE,
+            true,
         );
 
         let button_node = runtime
@@ -1898,6 +1995,7 @@ mod tests {
             "calculator",
             ContainerOption::NO_TITLE | ContainerOption::NO_RESIZE,
             ScrollBehavior::NONE,
+            true,
         );
 
         let ids = button_ids.borrow();
@@ -1908,5 +2006,53 @@ mod tests {
         assert_eq!(first.y, fourth.y);
         assert!(fourth.x > first.x);
         assert!(fifth.y > first.y);
+    }
+
+    #[test]
+    fn node_grid_honors_explicit_child_spans() {
+        let first = widget_handle(Button::new("a"));
+        let second = widget_handle(Button::new("b"));
+        let third = widget_handle(Button::new("c"));
+        let mut first_id = Id::new(0);
+        let mut second_id = Id::new(0);
+        let mut third_id = Id::new(0);
+        let tree = WidgetTreeBuilder::build(|tree| {
+            let columns = [SizePolicy::Fixed(40), SizePolicy::Fixed(50), SizePolicy::Fixed(60)];
+            let rows = [SizePolicy::Fixed(20), SizePolicy::Fixed(20)];
+            tree.grid(&columns, &rows, |tree| {
+                first_id = tree.node(crate::NodeOptions::with_policy(Policy::fill()).grid_span(2, 1)).widget(first.clone());
+                second_id = tree.node(crate::NodeOptions::with_policy(Policy::fill())).widget(second.clone());
+                third_id = tree.node(crate::NodeOptions::with_policy(Policy::fill())).widget(third.clone());
+            });
+        });
+        let mut runtime = UiRuntime::from_widget_tree(tree);
+        let atlas = test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut canvas = Canvas::from(renderer, Dimensioni::new(220, 80));
+        let style = Style::default();
+        let mut results = FrameResults::default();
+        results.begin_frame();
+
+        runtime.render_frame(
+            crate::RootId::from_raw(1),
+            &mut canvas,
+            &style,
+            &Input::default(),
+            &mut results,
+            rect(0, 0, 220, 80),
+            "grid",
+            ContainerOption::NO_TITLE | ContainerOption::NO_RESIZE,
+            ScrollBehavior::NONE,
+            true,
+        );
+
+        let first_rect = runtime.nodes.get(&first_id).unwrap().rect;
+        let second_rect = runtime.nodes.get(&second_id).unwrap().rect;
+        let third_rect = runtime.nodes.get(&third_id).unwrap().rect;
+        assert_eq!(first_rect.width, 40 + style.spacing + 50);
+        assert_eq!(second_rect.width, 60);
+        assert!(second_rect.x > first_rect.x);
+        assert_eq!(third_rect.x, first_rect.x);
+        assert!(third_rect.y > first_rect.y);
     }
 }

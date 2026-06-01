@@ -41,6 +41,28 @@ use super::{TreeCustomRender, WidgetHandle, WidgetStateHandleDyn};
 /// Stable identifier assigned to a retained node.
 pub type NodeId = Id;
 
+/// Grid placement span for one retained node inside a grid container.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct GridSpan {
+    /// Number of grid columns occupied by the node.
+    pub columns: usize,
+    /// Number of grid rows occupied by the node.
+    pub rows: usize,
+}
+
+impl GridSpan {
+    /// Default one-cell grid placement.
+    pub const ONE: Self = Self { columns: 1, rows: 1 };
+
+    /// Creates a grid span, clamping zero-sized spans to one track.
+    pub const fn new(columns: usize, rows: usize) -> Self {
+        Self {
+            columns: if columns == 0 { 1 } else { columns },
+            rows: if rows == 0 { 1 } else { rows },
+        }
+    }
+}
+
 /// Placement policy metadata attached to a retained node.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Policy {
@@ -262,6 +284,8 @@ pub struct WidgetTreeNode {
     pub(super) id: NodeId,
     /// Layout policy applied to this node.
     pub(super) policy: Policy,
+    /// Grid span metadata used when the parent is a grid container.
+    pub(super) grid_span: GridSpan,
     /// Node kind and resource reference.
     pub(super) kind: WidgetTreeNodeKind,
     /// Child nodes nested under this node.
@@ -277,6 +301,11 @@ impl WidgetTreeNode {
     /// Returns the node's policy metadata.
     pub fn policy(&self) -> Policy {
         self.policy
+    }
+
+    /// Returns the node's grid span metadata.
+    pub fn grid_span(&self) -> GridSpan {
+        self.grid_span
     }
 
     /// Returns the node kind.
@@ -296,8 +325,8 @@ impl WidgetTreeNode {
     }
 
     /// Consumes this node into traversal-owned parts.
-    pub(crate) fn into_parts(self) -> (NodeId, Policy, WidgetTreeNodeKind, Vec<WidgetTreeNode>) {
-        (self.id, self.policy, self.kind, self.children)
+    pub(crate) fn into_parts(self) -> (NodeId, Policy, GridSpan, WidgetTreeNodeKind, Vec<WidgetTreeNode>) {
+        (self.id, self.policy, self.grid_span, self.kind, self.children)
     }
 }
 

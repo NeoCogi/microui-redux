@@ -43,8 +43,8 @@ use crate::{
 };
 
 use super::{
-    erased_widget_state, widget_handle, NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetTree, WidgetTreeNode, WidgetTreeNodeKind, WidgetTreeResource,
-    WidgetTreeResources,
+    erased_widget_state, widget_handle, GridSpan, NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetTree, WidgetTreeNode, WidgetTreeNodeKind,
+    WidgetTreeResource, WidgetTreeResources,
 };
 
 /// Stack frame used while the builder collects a group node's children.
@@ -85,6 +85,8 @@ impl BuilderFrame {
 pub struct NodeOptions {
     /// Layout policy applied to the inserted node.
     policy: Policy,
+    /// Grid span used when the inserted node is placed in a grid parent.
+    grid_span: GridSpan,
     /// Optional application-supplied identity key.
     key: Option<u64>,
 }
@@ -98,12 +100,20 @@ impl Default for NodeOptions {
 impl NodeOptions {
     /// Creates default options with automatic placement and no explicit key.
     pub const fn new() -> Self {
-        Self { policy: Policy::auto(), key: None }
+        Self {
+            policy: Policy::auto(),
+            grid_span: GridSpan::ONE,
+            key: None,
+        }
     }
 
     /// Creates options with an explicit placement policy.
     pub const fn with_policy(policy: Policy) -> Self {
-        Self { policy, key: None }
+        Self {
+            policy,
+            grid_span: GridSpan::ONE,
+            key: None,
+        }
     }
 
     /// Creates options keyed from the provided value.
@@ -114,6 +124,12 @@ impl NodeOptions {
     /// Replaces the placement policy.
     pub const fn policy(mut self, policy: Policy) -> Self {
         self.policy = policy;
+        self
+    }
+
+    /// Replaces the grid span used when this node is placed in a grid parent.
+    pub const fn grid_span(mut self, columns: usize, rows: usize) -> Self {
+        self.grid_span = GridSpan::new(columns, rows);
         self
     }
 
@@ -407,6 +423,7 @@ impl WidgetTreeBuilder {
         self.current_frame_mut().nodes.push(WidgetTreeNode {
             id,
             policy: options.policy,
+            grid_span: options.grid_span,
             kind,
             children: Vec::new(),
         });
@@ -424,6 +441,7 @@ impl WidgetTreeBuilder {
         self.current_frame_mut().nodes.push(WidgetTreeNode {
             id,
             policy: options.policy,
+            grid_span: options.grid_span,
             kind,
             children: frame.nodes,
         });

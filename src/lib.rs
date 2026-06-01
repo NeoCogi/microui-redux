@@ -140,7 +140,7 @@ pub mod retained {
     pub use crate::container::{CustomRenderArgs, CustomRenderCommand, ScrollAreaHandle, TextWrap};
     pub use crate::context::{Context, RootId};
     pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
-    pub use crate::widget_tree::{NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
+    pub use crate::widget_tree::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder};
 }
 
 /// Common imports for retained UI applications.
@@ -190,7 +190,7 @@ pub use layout::{SizePolicy, StackDirection};
 pub use render::{Renderer, RendererHandle};
 pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
 pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
-pub use widget_tree::{NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle};
+pub use widget_tree::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder};
 pub use widgets::{
     Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, Slider, TextArea, TextBlock, Textbox,
     WidgetConfig,
