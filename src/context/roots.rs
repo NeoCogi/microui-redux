@@ -31,6 +31,24 @@ pub(super) struct RootEntry {
     kind: RootKind,
 }
 
+/// Experimental `UiNode` root rendered by the new runtime path.
+pub(super) struct NodeRootEntry {
+    /// Stable application-facing identifier for this root.
+    pub(super) id: RootId,
+    /// Root display name.
+    name: String,
+    /// Root rectangle.
+    rect: Recti,
+    /// Root chrome/sizing options.
+    opt: ContainerOption,
+    /// Scroll behavior applied to the root body.
+    scroll_behavior: ScrollBehavior,
+    /// Whether this root is visible.
+    visible: bool,
+    /// Node runtime compiled from the retained tree.
+    runtime: UiRuntime,
+}
+
 impl<R: Renderer> Context<R> {
     /// Creates an open top-level window handle with a new root id.
     fn new_window(&mut self, name: &str, initial_rect: Recti) -> WindowHandle {
@@ -105,6 +123,52 @@ impl<R: Renderer> Context<R> {
         self.register_root(RootKind::Window, window, tree, ContainerOption::NONE, ScrollBehavior::NONE, true)
     }
 
+    /// Registers an experimental `UiNode`-runtime window.
+    ///
+    /// This is the first live path for the common-node runtime. It intentionally supports a
+    /// smaller surface than [`Self::create_window`] while the enum-based layout/update/paint
+    /// passes are brought up.
+    pub fn create_node_window(&mut self, name: &str, rect: Recti, tree: WidgetTree) -> RootId {
+        let id = self.next_root_id();
+        self.node_roots.push(NodeRootEntry {
+            id,
+            name: name.to_string(),
+            rect,
+            opt: ContainerOption::NONE,
+            scroll_behavior: ScrollBehavior::NONE,
+            visible: true,
+            runtime: UiRuntime::from_widget_tree(tree),
+        });
+        id
+    }
+
+    /// Replaces the rectangle used by an experimental `UiNode` root.
+    pub fn set_node_root_rect(&mut self, root: RootId, rect: Recti) {
+        if let Some(entry) = self.node_roots.iter_mut().find(|entry| entry.id == root) {
+            entry.rect = rect;
+        }
+    }
+
+    /// Returns the rectangle used by an experimental `UiNode` root.
+    pub fn node_root_rect(&self, root: RootId) -> Option<Recti> {
+        self.node_roots.iter().find(|entry| entry.id == root).map(|entry| entry.rect)
+    }
+
+    /// Updates the size of an experimental `UiNode` root without changing its origin.
+    pub fn set_node_root_size(&mut self, root: RootId, size: &Dimensioni) {
+        if let Some(entry) = self.node_roots.iter_mut().find(|entry| entry.id == root) {
+            entry.rect.width = size.width;
+            entry.rect.height = size.height;
+        }
+    }
+
+    /// Sets focus to a node inside an experimental `UiNode` root.
+    pub fn set_node_root_focus_node(&mut self, root: RootId, node_id: crate::NodeId) {
+        if let Some(entry) = self.node_roots.iter_mut().find(|entry| entry.id == root) {
+            entry.runtime.set_focus_node(node_id);
+        }
+    }
+
     /// Registers a retained dialog root.
     ///
     /// Dialogs start hidden; call [`Context::set_root_visible`] with `true` to open the dialog and
@@ -129,6 +193,10 @@ impl<R: Renderer> Context<R> {
     pub fn set_root_tree(&mut self, root: RootId, tree: WidgetTree) {
         if let Some(entry) = self.root_entry_mut(root) {
             entry.tree = tree;
+            return;
+        }
+        if let Some(entry) = self.node_roots.iter_mut().find(|entry| entry.id == root) {
+            entry.runtime.replace_widget_tree(tree);
         }
     }
 
@@ -140,6 +208,11 @@ impl<R: Renderer> Context<R> {
         if let Some(entry) = self.root_entry_mut(root) {
             entry.opt = opt;
             entry.scroll_behavior = scroll_behavior;
+            return;
+        }
+        if let Some(entry) = self.node_roots.iter_mut().find(|entry| entry.id == root) {
+            entry.opt = opt;
+            entry.scroll_behavior = scroll_behavior;
         }
     }
 
@@ -149,6 +222,9 @@ impl<R: Renderer> Context<R> {
     /// front.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) {
         let Some(index) = self.retained_roots.iter().position(|entry| entry.id == root) else {
+            if let Some(entry) = self.node_roots.iter_mut().find(|entry| entry.id == root) {
+                entry.visible = visible;
+            }
             return;
         };
         self.set_root_visible_at(index, visible);
@@ -338,6 +414,28 @@ impl<R: Renderer> Context<R> {
             self.render_retained_root(entry);
         }
         self.retained_roots = roots;
+    }
+
+    /// Traverses and renders experimental `UiNode` roots.
+    pub(super) fn render_node_roots(&mut self) {
+        let mut roots = std::mem::take(&mut self.node_roots);
+        for entry in &mut roots {
+            if entry.visible {
+                let input = self.input.borrow();
+                entry.runtime.render_frame(
+                    entry.id,
+                    &mut self.canvas,
+                    self.style.as_ref(),
+                    &input,
+                    &mut self.frame_results,
+                    entry.rect,
+                    &entry.name,
+                    entry.opt,
+                    entry.scroll_behavior,
+                );
+            }
+        }
+        self.node_roots = roots;
     }
 
     /// Returns the chrome options used by retained popups unless the app overrides them.

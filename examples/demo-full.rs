@@ -75,11 +75,7 @@ use common::vulkan_renderer::VulkanRenderer as BackendRenderer;
 use common::wgpu_renderer::WgpuRenderer as BackendRenderer;
 #[cfg(feature = "builder")]
 use microui_redux::atlas::builder;
-use microui_redux::{
-    advanced::{Graphics, WindowHandle},
-    backend::Vertex,
-    prelude::*,
-};
+use microui_redux::{advanced::Graphics, backend::Vertex, prelude::*};
 use rand::{RngExt, rng};
 use std::{
     cell::RefCell,
@@ -757,9 +753,6 @@ struct State {
     stack_direction_root: RootId,
     weight_root: RootId,
 
-    demo_window: WindowHandle,
-    log_window: WindowHandle,
-    popup_window: WindowHandle,
     log_output: Option<ScrollAreaHandle>,
     dialog_window: FileDialogState,
 
@@ -932,28 +925,29 @@ impl State {
         );
         typography_body.config.font = FontRole::Body.into();
         let style = Style::default().with_named_fonts(&ctx.canvas().get_atlas());
-        let demo_root = ctx.create_window("Demo Window", rect(40, 40, 300, 450), WidgetTree::default());
-        let style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), WidgetTree::default());
-        let log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), WidgetTree::default());
+        let demo_root = ctx.create_node_window("Demo Window", rect(40, 40, 300, 450), WidgetTree::default());
+        let style_root = ctx.create_node_window("Style Editor", rect(350, 250, 300, 240), WidgetTree::default());
+        let log_root = ctx.create_node_window("Log Window", rect(350, 40, 300, 200), WidgetTree::default());
         let combo_popup_root = ctx.create_popup("Combo Box Popup", WidgetTree::default());
         ctx.set_root_options(
             combo_popup_root,
             ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
             ScrollBehavior::NO_SCROLL,
         );
-        let popup_root = ctx.create_popup("Test Popup", WidgetTree::default());
+        let popup_root = ctx.create_node_window("Test Popup", rect(40, 40, 100, 1), WidgetTree::default());
         ctx.set_root_options(
             popup_root,
             ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
             ScrollBehavior::NO_SCROLL,
         );
-        let typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), WidgetTree::default());
-        let triangle_root = ctx.create_window("Triangle Window", rect(200, 100, 200, 200), WidgetTree::default());
-        let graphics_root = ctx.create_window("Graphics Window", rect(820, 40, 280, 240), WidgetTree::default());
-        let falloff_root = ctx.create_window("Brush Falloff", rect(820, 300, 320, 260), WidgetTree::default());
-        let suzanne_root = ctx.create_window("Suzanne Window", rect(220, 220, 300, 300), WidgetTree::default());
-        let stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), WidgetTree::default());
-        let weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), WidgetTree::default());
+        ctx.set_root_visible(popup_root, false);
+        let typography_root = ctx.create_node_window("Typography Demo", rect(40, 500, 300, 170), WidgetTree::default());
+        let triangle_root = ctx.create_node_window("Triangle Window", rect(200, 100, 200, 200), WidgetTree::default());
+        let graphics_root = ctx.create_node_window("Graphics Window", rect(820, 40, 280, 240), WidgetTree::default());
+        let falloff_root = ctx.create_node_window("Brush Falloff", rect(820, 300, 320, 260), WidgetTree::default());
+        let suzanne_root = ctx.create_node_window("Suzanne Window", rect(220, 220, 300, 300), WidgetTree::default());
+        let stack_direction_root = ctx.create_node_window("Stack Direction Demo", rect(530, 40, 280, 220), WidgetTree::default());
+        let weight_root = ctx.create_node_window("Weight Demo", rect(530, 270, 280, 260), WidgetTree::default());
         let combo_popup = ctx.root_handle(combo_popup_root).expect("combo popup root missing");
         let mut state = Self {
             renderer,
@@ -1020,9 +1014,6 @@ impl State {
             suzanne_root,
             stack_direction_root,
             weight_root,
-            demo_window: ctx.root_handle(demo_root).expect("demo root window missing"),
-            log_window: ctx.root_handle(log_root).expect("log root window missing"),
-            popup_window: ctx.root_handle(popup_root).expect("popup root window missing"),
             log_output: Some(ctx.new_scroll_area("Log Output")),
             dialog_window: FileDialogState::new(ctx),
             fps: 0.0,
@@ -1683,7 +1674,7 @@ impl State {
             let submit_buf_out = Self::root_submitted(results, self.log_root, self.submit_buf_id);
             let submit_btn_out = Self::root_submitted(results, self.log_root, self.submit_button_id);
             if submit_buf_out {
-                self.log_window.set_focus_node(self.submit_buf_id);
+                ctx.set_node_root_focus_node(self.log_root, self.submit_buf_id);
                 submitted = true;
             }
             if submit_btn_out {
@@ -1775,11 +1766,10 @@ impl State {
 
     fn test_window(&mut self, ctx: &mut Context<BackendRenderer>) {
         {
-            let window = &mut self.demo_window;
-            let mut win = window.rect();
+            let mut win = ctx.node_root_rect(self.demo_root).unwrap_or_else(|| rect(40, 40, 300, 450));
             win.width = win.width.max(240);
             win.height = win.height.max(300);
-            window.set_rect(win);
+            ctx.set_node_root_rect(self.demo_root, win);
 
             let [value_pos, value_size, value_fps] = self.window_info_values.clone();
             value_pos.update(|value| value.label = format!("{}, {}", win.x, win.y));
@@ -1869,8 +1859,9 @@ impl State {
 
         if self.open_popup {
             let popup_width = (self.style.default_cell_width + self.style.padding.max(0) * 2).max(80);
+            let popup_height = (self.style.title_height + self.style.padding.max(0) * 4 + self.style.spacing).max(56);
             ctx.set_root_visible(self.popup_root, true);
-            self.popup_window.set_size(&Dimensioni::new(popup_width, 1));
+            ctx.set_node_root_size(self.popup_root, &Dimensioni::new(popup_width, popup_height));
             self.open_popup = false;
         }
 

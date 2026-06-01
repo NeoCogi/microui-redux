@@ -69,6 +69,7 @@ pub(crate) use command::Command;
 
 mod dispatch;
 mod draw;
+pub(crate) use draw::render_command_stream;
 mod handle;
 pub use handle::{ScrollAreaHandle, ScrollAreaView, ScrollAreaViewMut};
 mod interaction;

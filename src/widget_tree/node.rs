@@ -86,6 +86,13 @@ impl Policy {
 /// Identifier for live state stored outside the retained node description.
 pub(crate) struct TreeResourceId(usize);
 
+impl TreeResourceId {
+    /// Returns the compact resource-table index.
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}
+
 /// Live state owned by a retained tree.
 ///
 /// Tree nodes describe structure and stable IDs; this registry owns the state handles and callbacks
@@ -151,6 +158,11 @@ impl WidgetTreeResources {
             WidgetTreeResource::Node(state) => state,
             _ => panic!("tree resource {:?} is not a node resource", id),
         }
+    }
+
+    /// Consumes the registry into owned live resources.
+    pub(crate) fn into_entries(self) -> Vec<WidgetTreeResource> {
+        self.entries
     }
 }
 
@@ -282,6 +294,11 @@ impl WidgetTreeNode {
     pub(crate) fn parts(&self) -> (NodeId, &WidgetTreeNodeKind, &[WidgetTreeNode]) {
         (self.id, &self.kind, &self.children)
     }
+
+    /// Consumes this node into traversal-owned parts.
+    pub(crate) fn into_parts(self) -> (NodeId, Policy, WidgetTreeNodeKind, Vec<WidgetTreeNode>) {
+        (self.id, self.policy, self.kind, self.children)
+    }
 }
 
 /// Completed retained widget tree.
@@ -302,5 +319,10 @@ impl WidgetTree {
     /// Returns the live resource registry backing this tree.
     pub(crate) fn resources(&self) -> &WidgetTreeResources {
         &self.resources
+    }
+
+    /// Consumes this tree into root nodes and live resources.
+    pub(crate) fn into_parts(self) -> (Vec<WidgetTreeNode>, WidgetTreeResources) {
+        (self.roots, self.resources)
     }
 }

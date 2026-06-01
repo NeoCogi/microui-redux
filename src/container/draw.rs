@@ -58,105 +58,111 @@ impl TraversalHost {
     #[inline(never)]
     /// Replays this container's command list into the renderer canvas.
     pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
-        let mut commands = std::mem::take(&mut self.draw.commands);
-        while !commands.is_empty() {
-            // Render ordinary drawing commands in batches, but stop before commands that need a
-            // separate renderer lock or recursive scroll-area render.
-            let special_index = commands
-                .iter()
-                .position(|command| matches!(command, Command::BackendCustomRender(_, _) | Command::RetainedScrollArea { .. }));
-            let batch_len = special_index.unwrap_or(commands.len());
-            if batch_len > 0 {
-                Self::render_batch(canvas, &self.draw.triangle_vertices, commands.drain(..batch_len));
-            }
-
-            if special_index.is_none() {
-                break;
-            }
-
-            match commands.drain(..1).next() {
-                Some(Command::BackendCustomRender(mut cra, mut f)) => {
-                    // Backend extension callbacks may use RendererHandle directly, so keep them
-                    // outside the batched renderer lock.
-                    canvas.flush();
-                    let prev_clip = canvas.current_clip_rect();
-                    let merged_clip = match prev_clip.intersect(&cra.view) {
-                        Some(rect) => rect,
-                        None => Recti::new(cra.content_area.x, cra.content_area.y, 0, 0),
-                    };
-                    canvas.set_clip_rect(merged_clip);
-                    cra.view = merged_clip;
-                    f.render(canvas.current_dimension(), &cra);
-                    canvas.flush();
-                    canvas.set_clip_rect(prev_clip);
-                }
-                Some(Command::RetainedScrollArea { handle }) => {
-                    canvas.flush();
-                    handle.render(canvas);
-                    canvas.flush();
-                }
-                _ => (),
-            }
-        }
-        self.draw.commands = commands;
-
+        render_command_stream(canvas, &mut self.draw.commands, &self.draw.triangle_vertices);
         self.draw.clear_triangle_vertices();
     }
+}
 
-    /// Replays a contiguous run of ordinary draw commands under one renderer lock.
-    fn render_batch<R, I>(canvas: &mut Canvas<R>, triangle_vertices: &[Vertex], commands: I)
-    where
-        R: Renderer,
-        I: IntoIterator<Item = Command>,
-    {
-        let base_clip = canvas.current_clip_rect();
-        canvas.render_scope(|canvas| {
-            let mut clip_stack = vec![base_clip];
-            canvas.set_clip_rect(base_clip);
-            for command in commands {
-                match command {
-                    Command::Text { text, pos, color, font } => {
-                        canvas.draw_chars(font, &text, pos, color);
-                    }
-                    Command::Recti { rect, color } => {
-                        canvas.draw_rect(rect, color);
-                    }
-                    Command::Icon { id, rect, color } => {
-                        canvas.draw_icon(id, rect, color);
-                    }
-                    Command::PushClip { rect } => {
-                        // Replay clips are monotonic: every push intersects with the active clip.
-                        let current = clip_stack.last().copied().unwrap_or(base_clip);
-                        let next = current.intersect(&rect).unwrap_or_default();
-                        clip_stack.push(next);
-                        canvas.set_clip_rect(next);
-                    }
-                    Command::PopClip => {
-                        // Keep the base clip installed even if an unmatched pop appears.
-                        if clip_stack.len() > 1 {
-                            clip_stack.pop();
-                        }
-                        let current = clip_stack.last().copied().unwrap_or(base_clip);
-                        canvas.set_clip_rect(current);
-                    }
-                    Command::Image { rect, image, color } => {
-                        canvas.draw_image(image, rect, color);
-                    }
-                    Command::SlotRedraw { rect, id, color, payload } => {
-                        canvas.draw_slot_with_function(id, rect, color, payload);
-                    }
-                    Command::Triangle { vertex_start, vertex_count } => {
-                        // Triangle commands reference the container-owned vertex arena by range.
-                        let end = vertex_start + vertex_count;
-                        canvas.draw_triangles(&triangle_vertices[vertex_start..end]);
-                    }
-                    Command::RetainedScrollArea { .. } | Command::BackendCustomRender(_, _) | Command::None => (),
-                }
+/// Replays a command list into the renderer canvas.
+pub(crate) fn render_command_stream<R: Renderer>(canvas: &mut Canvas<R>, commands: &mut Vec<Command>, triangle_vertices: &[Vertex]) {
+    let mut pending = std::mem::take(commands);
+    while !pending.is_empty() {
+        // Render ordinary drawing commands in batches, but stop before commands that need a
+        // separate renderer lock or recursive scroll-area render.
+        let special_index = pending
+            .iter()
+            .position(|command| matches!(command, Command::BackendCustomRender(_, _) | Command::RetainedScrollArea { .. }));
+        let batch_len = special_index.unwrap_or(pending.len());
+        if batch_len > 0 {
+            render_command_batch(canvas, triangle_vertices, pending.drain(..batch_len));
+        }
+
+        if special_index.is_none() {
+            break;
+        }
+
+        match pending.drain(..1).next() {
+            Some(Command::BackendCustomRender(mut cra, mut f)) => {
+                // Backend extension callbacks may use RendererHandle directly, so keep them
+                // outside the batched renderer lock.
+                canvas.flush();
+                let prev_clip = canvas.current_clip_rect();
+                let merged_clip = match prev_clip.intersect(&cra.view) {
+                    Some(rect) => rect,
+                    None => Recti::new(cra.content_area.x, cra.content_area.y, 0, 0),
+                };
+                canvas.set_clip_rect(merged_clip);
+                cra.view = merged_clip;
+                f.render(canvas.current_dimension(), &cra);
+                canvas.flush();
+                canvas.set_clip_rect(prev_clip);
             }
-            canvas.set_clip_rect(base_clip);
-        });
+            Some(Command::RetainedScrollArea { handle }) => {
+                canvas.flush();
+                handle.render(canvas);
+                canvas.flush();
+            }
+            _ => (),
+        }
     }
+    *commands = pending;
+}
 
+/// Replays a contiguous run of ordinary draw commands under one renderer lock.
+fn render_command_batch<R, I>(canvas: &mut Canvas<R>, triangle_vertices: &[Vertex], commands: I)
+where
+    R: Renderer,
+    I: IntoIterator<Item = Command>,
+{
+    let base_clip = canvas.current_clip_rect();
+    canvas.render_scope(|canvas| {
+        let mut clip_stack = vec![base_clip];
+        canvas.set_clip_rect(base_clip);
+        for command in commands {
+            match command {
+                Command::Text { text, pos, color, font } => {
+                    canvas.draw_chars(font, &text, pos, color);
+                }
+                Command::Recti { rect, color } => {
+                    canvas.draw_rect(rect, color);
+                }
+                Command::Icon { id, rect, color } => {
+                    canvas.draw_icon(id, rect, color);
+                }
+                Command::PushClip { rect } => {
+                    // Replay clips are monotonic: every push intersects with the active clip.
+                    let current = clip_stack.last().copied().unwrap_or(base_clip);
+                    let next = current.intersect(&rect).unwrap_or_default();
+                    clip_stack.push(next);
+                    canvas.set_clip_rect(next);
+                }
+                Command::PopClip => {
+                    // Keep the base clip installed even if an unmatched pop appears.
+                    if clip_stack.len() > 1 {
+                        clip_stack.pop();
+                    }
+                    let current = clip_stack.last().copied().unwrap_or(base_clip);
+                    canvas.set_clip_rect(current);
+                }
+                Command::Image { rect, image, color } => {
+                    canvas.draw_image(image, rect, color);
+                }
+                Command::SlotRedraw { rect, id, color, payload } => {
+                    canvas.draw_slot_with_function(id, rect, color, payload);
+                }
+                Command::Triangle { vertex_start, vertex_count } => {
+                    // Triangle commands reference the container-owned vertex arena by range.
+                    let end = vertex_start + vertex_count;
+                    canvas.draw_triangles(&triangle_vertices[vertex_start..end]);
+                }
+                Command::RetainedScrollArea { .. } | Command::BackendCustomRender(_, _) | Command::None => (),
+            }
+        }
+        canvas.set_clip_rect(base_clip);
+    });
+}
+
+impl TraversalHost {
     /// Creates a draw context over this container's buffers.
     fn draw_ctx(&mut self) -> DrawCtx<'_> {
         self.draw.ctx(self.style.as_ref(), &self.atlas)

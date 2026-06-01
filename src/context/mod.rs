@@ -64,9 +64,9 @@ use png::{ColorType, Decoder};
 
 use crate::{
     rect, Canvas, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Renderer,
-    RendererHandle, ScrollArea, ScrollAreaHandle, ScrollBehavior, Style, TextureId, WidgetTree, WindowHandle,
+    RendererHandle, ScrollArea, ScrollAreaHandle, ScrollBehavior, Style, TextureId, UiRuntime, WidgetTree, WindowHandle,
 };
-use roots::RootEntry;
+use roots::{NodeRootEntry, RootEntry};
 #[cfg(test)]
 use crate::window::WindowChromeIds;
 
@@ -112,6 +112,8 @@ pub struct Context<R: Renderer> {
     root_list: Vec<WindowHandle>,
     /// Registered retained roots that are replayed by [`Context::update_ui`].
     retained_roots: Vec<RootEntry>,
+    /// Experimental `UiNode` roots replayed by [`Context::update_ui`].
+    node_roots: Vec<NodeRootEntry>,
     /// Next root id counter.
     next_root_id: usize,
     /// Double-buffered retained widget result store.
@@ -137,6 +139,7 @@ impl<R: Renderer> Context<R> {
 
             root_list: Vec::default(),
             retained_roots: Vec::default(),
+            node_roots: Vec::default(),
             next_root_id: 1,
             frame_results: FrameResults::default(),
 
@@ -223,6 +226,7 @@ impl<R: Renderer> Context<R> {
     pub fn update_ui(&mut self) {
         self.frame_begin();
         self.render_registered_roots();
+        self.render_node_roots();
         self.frame_end();
     }
 

@@ -159,7 +159,7 @@ fn main() {
     let tree = WidgetTreeBuilder::build(move |tree| {
         tree.widget(&paint);
     });
-    ctx.create_window("retained custom drawing", rect(12, 12, 132, 84), tree);
+    ctx.create_node_window("retained custom drawing", rect(12, 12, 132, 84), tree);
 
     ctx.begin_render_frame(160, 100, color(18, 20, 22, 255));
     ctx.update_ui();

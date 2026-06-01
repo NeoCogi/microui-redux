@@ -105,6 +105,7 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 mod text_layout;
+mod ui_node;
 mod widget;
 mod widget_ctx;
 mod widget_tree;
@@ -210,6 +211,7 @@ pub(crate) use std::{
     rc::Rc,
 };
 pub(crate) use style::UNCLIPPED_RECT;
+pub(crate) use ui_node::UiRuntime;
 pub(crate) use widget::FrameResults;
 pub(crate) use widget_tree::WidgetTreeCache;
 pub(crate) use widgets::{Internal, Scrollbar, ScrollbarLayout};

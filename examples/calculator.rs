@@ -36,7 +36,7 @@ mod common;
 
 use application::Application;
 use common::{atlas_assets, *};
-use microui_redux::{advanced::WindowHandle, prelude::*};
+use microui_redux::prelude::*;
 
 const DISPLAY_MAX_LEN: usize = 24;
 const DISPLAY_HEIGHT_FRACTION: f32 = 0.20;
@@ -311,7 +311,6 @@ impl Calculator {
 
 struct State {
     _root: RootId,
-    window: WindowHandle,
     display: WidgetHandle<Textbox>,
     calculator: Calculator,
     buttons: [CalcButton; 20],
@@ -369,11 +368,10 @@ fn main() {
         for (button, node_id) in buttons.iter_mut().zip(button_node_ids) {
             button.node_id = node_id;
         }
-        let root = ctx.create_window("Calculator", rect(0, 0, 320, 420), tree);
+        let root = ctx.create_node_window("Calculator", rect(0, 0, 320, 420), tree);
         ctx.set_root_options(root, ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE, ScrollBehavior::NONE);
         State {
             _root: root,
-            window: ctx.root_handle(root).expect("calculator root window missing"),
             display,
             calculator: Calculator::new(),
             buttons,
@@ -383,7 +381,7 @@ fn main() {
 
     fw.event_loop(|ctx, state| {
         let dim = ctx.canvas().current_dimension();
-        state.window.set_size(&dim);
+        ctx.set_node_root_rect(state._root, rect(0, 0, dim.width, dim.height));
         state.display.update(|display| {
             display.set_text(state.calculator.display_text());
         });
