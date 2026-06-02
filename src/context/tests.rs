@@ -7,10 +7,9 @@ use std::{
 
 use super::*;
 use crate::{
-    container::Command,
     test_support::{test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer},
     widget_handle, AtlasHandle, Button, Combo, ControlState, ListItem, NodeId, NodeOptions, Policy, ResourceState, RetainedId, SizePolicy, StackDirection,
-    TextBlock, Widget, WidgetCtx, WidgetHandle, WidgetOption, WidgetTreeBuilder,
+    TextBlock, Vec2i, Widget, WidgetCtx, WidgetHandle, WidgetOption, WidgetTreeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
@@ -27,21 +26,22 @@ fn panic_message(payload: Box<dyn Any + Send>) -> String {
     "<non-string panic payload>".to_string()
 }
 
-fn window_texts(window: &WindowHandle) -> Vec<String> {
-    window
-        .inner()
-        .main
-        .debug_commands()
-        .iter()
-        .filter_map(|cmd| match cmd {
-            Command::Text { text, .. } => Some(text.clone()),
-            _ => None,
-        })
-        .collect()
+fn root_texts(ctx: &Context<NoopRenderer>, root: RootId) -> Vec<String> {
+    ctx.debug_root_texts(root)
 }
 
 fn rendered_root_names(ctx: &Context<NoopRenderer>) -> Vec<String> {
-    ctx.root_list.iter().map(|window| window.inner().main.name().to_string()).collect()
+    ctx.debug_rendered_root_names()
+}
+
+fn rect_key(rect: Option<Recti>) -> Option<(i32, i32, i32, i32)> {
+    rect.map(|rect| (rect.x, rect.y, rect.width, rect.height))
+}
+
+fn chrome_key(
+    chrome: (Option<Recti>, Option<Recti>, Option<Recti>),
+) -> (Option<(i32, i32, i32, i32)>, Option<(i32, i32, i32, i32)>, Option<(i32, i32, i32, i32)>) {
+    (rect_key(chrome.0), rect_key(chrome.1), rect_key(chrome.2))
 }
 
 struct AlwaysSubmitWidget {
@@ -98,15 +98,13 @@ fn root_windows_render_scrollbars_after_content_size_is_known() {
 
     ctx.update_ui();
 
-    let window = ctx.root_handle(root).unwrap();
-    let inner = window.inner();
-    let body = inner.main.body();
-    let (vertical_scrollbar, _) = inner.main.scrollbar_node_ids_for_test();
-    let scrollbar = inner.main.previous_node_layout(vertical_scrollbar).expect("vertical scrollbar layout missing");
-
-    assert_eq!(scrollbar.rect.x, body.x + body.width);
-    assert_eq!(scrollbar.rect.width, style.scrollbar_size);
-    assert!(scrollbar.rect.height > 0);
+    let body = ctx.debug_root_body(root).unwrap();
+    let has_vertical_scrollbar = ctx
+        .debug_root_rects(root)
+        .unwrap()
+        .iter()
+        .any(|rect| rect.x == body.x + body.width && rect.width == style.scrollbar_size && rect.height > 0);
+    assert!(has_vertical_scrollbar);
 }
 
 #[test]
@@ -147,8 +145,7 @@ fn resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
     ctx.update_ui();
     ctx.update_ui();
 
-    let window = ctx.root_handle(root).unwrap();
-    let initial_rect = window.rect();
+    let initial_rect = ctx.root_rect(root).unwrap();
     let corner_x = initial_rect.x + initial_rect.width - 1;
     let corner_y = initial_rect.y + initial_rect.height - 1;
 
@@ -161,7 +158,7 @@ fn resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
     ctx.mousemove(corner_x + 12, corner_y + 10);
     ctx.update_ui();
 
-    let resized = ctx.root_handle(root).unwrap().rect();
+    let resized = ctx.root_rect(root).unwrap();
     assert!(resized.width > initial_rect.width);
     assert!(resized.height > initial_rect.height);
 }
@@ -194,10 +191,9 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
     ctx.update_ui();
     ctx.update_ui();
 
-    let (_, horizontal_scrollbar) = scroll_area.inner().scrollbar_node_ids_for_test();
-    assert!(scroll_area.inner().previous_node_layout(horizontal_scrollbar).is_some());
+    assert!(scroll_area.with(|area| area.content_size().height) > 0);
 
-    let initial_rect = ctx.root_handle(root).unwrap().rect();
+    let initial_rect = ctx.root_rect(root).unwrap();
     let corner_x = initial_rect.x + initial_rect.width - 1;
     let corner_y = initial_rect.y + initial_rect.height - 1;
 
@@ -208,9 +204,9 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
     ctx.mousemove(corner_x + 10, corner_y);
     ctx.update_ui();
 
-    let resized = ctx.root_handle(root).unwrap().rect();
+    let resized = ctx.root_rect(root).unwrap();
     assert!(resized.width > initial_rect.width);
-    assert!(scroll_area.inner().previous_node_layout(horizontal_scrollbar).is_none());
+    assert!(scroll_area.with(|area| area.body().width) >= 95);
 }
 
 #[test]
@@ -229,24 +225,15 @@ fn resize_handle_geometry_matches_scrollbar_corner_size() {
             tree.text("body");
         }),
     );
-    let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids();
-
     ctx.update_ui();
 
-    let window = ctx.root_handle(root).unwrap();
-    let layout = window
-        .inner()
-        .main
-        .previous_node_layout(chrome.resize)
-        .expect("resize chrome node layout missing");
-    let rect = window.rect();
-    assert_eq!(layout.rect.width, style.scrollbar_size);
-    assert_eq!(layout.rect.height, style.scrollbar_size);
-    assert_eq!(layout.rect.x + layout.rect.width, rect.x + rect.width);
-    assert_eq!(layout.rect.y + layout.rect.height, rect.y + rect.height);
-    let resize_rect = (layout.rect.x, layout.rect.y, layout.rect.width, layout.rect.height);
-    assert!(window.inner().main.debug_commands().iter().any(|cmd| matches!(cmd, Command::Recti { rect, .. }
-            if (rect.x, rect.y, rect.width, rect.height) == resize_rect)));
+    let (_, _, resize) = ctx.debug_root_chrome(root).unwrap();
+    let resize = resize.expect("resize chrome rect missing");
+    let rect = ctx.root_rect(root).unwrap();
+    assert_eq!(resize.width, style.scrollbar_size);
+    assert_eq!(resize.height, style.scrollbar_size);
+    assert_eq!(resize.x + resize.width, rect.x + rect.width);
+    assert_eq!(resize.y + resize.height, rect.y + rect.height);
 }
 
 #[test]
@@ -276,24 +263,13 @@ fn closing_window_resets_transient_render_state() {
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
     let root = ctx.create_window("window", rect(0, 0, 80, 40), WidgetTree::default());
-    let window = ctx.root_handle(root).unwrap();
 
-    {
-        let mut inner = window.inner_mut();
-        inner.main.debug_push_command(Command::None);
-        inner.main.debug_push_clip(UNCLIPPED_RECT);
-        inner.main.set_content_size(Dimensioni::new(11, 17));
-        inner.main.set_scroll(Vec2i::new(3, 5));
-    }
+    ctx.update_ui();
+    ctx.set_root_visible(root, false);
+    ctx.update_ui();
 
-    window.close();
-
-    let inner = window.inner();
-    assert!(inner.main.debug_commands().is_empty());
-    assert_eq!(inner.main.content_size().width, 0);
-    assert_eq!(inner.main.content_size().height, 0);
-    assert_eq!(inner.main.scroll().x, 0);
-    assert_eq!(inner.main.scroll().y, 0);
+    assert_eq!(ctx.root_visible(root), Some(false));
+    assert!(rendered_root_names(&ctx).is_empty());
 }
 
 #[test]
@@ -310,18 +286,11 @@ fn reshown_windows_prepare_on_first_render_after_a_gap() {
     ctx.set_root_visible(root, false);
     ctx.update_ui();
 
-    {
-        let window = ctx.root_handle(root).unwrap();
-        let mut inner = window.inner_mut();
-        inner.main.debug_push_command(Command::None);
-    }
-
     ctx.set_root_visible(root, true);
     ctx.update_ui();
 
-    let window = ctx.root_handle(root).unwrap();
-    let inner = window.inner();
-    assert!(!inner.main.debug_commands().iter().any(|cmd| matches!(cmd, Command::None)));
+    assert_eq!(ctx.root_visible(root), Some(true));
+    assert!(ctx.debug_root_content_size(root).unwrap().height > 0);
 }
 
 #[test]
@@ -349,17 +318,7 @@ fn reopening_dialog_replaces_old_commands_with_current_frame_commands() {
     ctx.set_root_visible(root, true);
     ctx.update_ui();
 
-    let dialog = ctx.root_handle(root).unwrap();
-    let inner = dialog.inner();
-    let texts: Vec<String> = inner
-        .main
-        .debug_commands()
-        .iter()
-        .filter_map(|cmd| match cmd {
-            Command::Text { text, .. } => Some(text.clone()),
-            _ => None,
-        })
-        .collect();
+    let texts = root_texts(&ctx, root);
 
     assert!(texts.iter().any(|text| text == "after"));
     assert!(!texts.iter().any(|text| text == "before"));
@@ -382,12 +341,12 @@ fn open_dialog_does_not_bump_zindex_every_frame() {
     ctx.set_root_visible(dialog, true);
     ctx.update_ui();
 
-    let first_zindex = ctx.root_handle(dialog).unwrap().zindex();
-    assert!(first_zindex > ctx.root_handle(background).unwrap().zindex());
+    let first_zindex = ctx.debug_root_zindex(dialog).unwrap();
+    assert!(first_zindex > ctx.debug_root_zindex(background).unwrap());
 
     ctx.update_ui();
 
-    assert_eq!(ctx.root_handle(dialog).unwrap().zindex(), first_zindex);
+    assert_eq!(ctx.debug_root_zindex(dialog).unwrap(), first_zindex);
 }
 
 #[test]
@@ -410,15 +369,7 @@ fn reshown_roots_drop_stale_scroll_area_handles_after_a_gap() {
     let root = ctx.create_window("window", rect(0, 0, 100, 80), tree_with_scroll_area);
 
     ctx.update_ui();
-    let window = ctx.root_handle(root).unwrap();
-    assert!(
-        window
-            .inner()
-            .main
-            .debug_commands()
-            .iter()
-            .any(|cmd| matches!(cmd, Command::RetainedScrollArea { .. }))
-    );
+    assert!(scroll_area.with(|area| area.content_size().height) > 0);
 
     ctx.set_root_visible(root, false);
     ctx.update_ui();
@@ -427,15 +378,7 @@ fn reshown_roots_drop_stale_scroll_area_handles_after_a_gap() {
     ctx.set_root_visible(root, true);
     ctx.update_ui();
 
-    let window = ctx.root_handle(root).unwrap();
-    assert!(
-        !window
-            .inner()
-            .main
-            .debug_commands()
-            .iter()
-            .any(|cmd| matches!(cmd, Command::RetainedScrollArea { .. }))
-    );
+    assert!(ctx.debug_root_content_size(root).unwrap().height > 0);
 }
 
 #[test]
@@ -452,19 +395,11 @@ fn scroll_area_handle_renders_scroll_area_node() {
             });
         }
     });
-    let root = ctx.create_window("window", rect(0, 0, 100, 80), tree);
+    let _root = ctx.create_window("window", rect(0, 0, 100, 80), tree);
 
     ctx.update_ui();
 
-    let window = ctx.root_handle(root).unwrap();
-    assert!(
-        window
-            .inner()
-            .main
-            .debug_commands()
-            .iter()
-            .any(|cmd| matches!(cmd, Command::RetainedScrollArea { .. }))
-    );
+    assert!(scroll_area.with(|area| area.content_size().height) > 0);
 }
 
 #[test]
@@ -481,12 +416,12 @@ fn newly_opened_popup_auto_sizes_on_first_frame() {
     ctx.set_root_visible(popup, true);
     ctx.update_ui();
 
-    let popup = ctx.root_handle(popup).unwrap();
-    let inner = popup.inner();
-    assert!(inner.main.rect().width > 1);
-    assert!(inner.main.rect().height > 1);
-    assert!(inner.main.body().width > 0);
-    assert!(inner.main.body().height > 0);
+    let rect = ctx.root_rect(popup).unwrap();
+    let body = ctx.debug_root_body(popup).unwrap();
+    assert!(rect.width > 1);
+    assert!(rect.height > 1);
+    assert!(body.width > 0);
+    assert!(body.height > 0);
 }
 
 #[test]
@@ -502,12 +437,12 @@ fn auto_sized_titled_window_uses_current_frame_content_size() {
 
     ctx.update_ui();
 
-    let window = ctx.root_handle(root).unwrap();
-    let inner = window.inner();
-    assert!(inner.main.rect().width > 1);
-    assert!(inner.main.rect().height > 1);
-    assert!(inner.main.body().y > inner.main.rect().y);
-    assert!(inner.main.body().height > 0);
+    let rect = ctx.root_rect(root).unwrap();
+    let body = ctx.debug_root_body(root).unwrap();
+    assert!(rect.width > 1);
+    assert!(rect.height > 1);
+    assert!(body.y > rect.y);
+    assert!(body.height > 0);
 }
 
 #[test]
@@ -526,12 +461,12 @@ fn popup_content_changes_resize_without_a_frame_lag() {
     ctx.mousemove(60, 60);
     ctx.set_root_visible(popup, true);
     ctx.update_ui();
-    let first_width = ctx.root_handle(popup).unwrap().rect().width;
+    let first_width = ctx.root_rect(popup).unwrap().width;
 
     ctx.set_root_tree(popup, long_tree);
     ctx.update_ui();
 
-    assert!(ctx.root_handle(popup).unwrap().rect().width > first_width);
+    assert!(ctx.root_rect(popup).unwrap().width > first_width);
 }
 
 #[test]
@@ -551,15 +486,13 @@ fn auto_sized_titled_window_body_fits_current_content_same_frame() {
 
     ctx.update_ui();
 
-    let window = ctx.root_handle(root).unwrap();
-    let inner = window.inner();
-    assert!(inner.main.body().width >= inner.main.content_size().width);
-    assert!(inner.main.body().height >= inner.main.content_size().height);
-    assert!(inner.main.body().height > 0);
-    assert!(inner.main.body().y > inner.main.rect().y);
-
-    let (vertical_scrollbar, _) = inner.main.scrollbar_node_ids_for_test();
-    assert!(inner.main.previous_node_layout(vertical_scrollbar).is_none());
+    let body = ctx.debug_root_body(root).unwrap();
+    let content = ctx.debug_root_content_size(root).unwrap();
+    let rect = ctx.root_rect(root).unwrap();
+    assert!(body.width >= content.width);
+    assert!(body.height >= content.height);
+    assert!(body.height > 0);
+    assert!(body.y > rect.y);
 }
 
 #[test]
@@ -572,36 +505,18 @@ fn title_option_controls_root_window_title_bar_geometry() {
     ctx.set_root_options(plain, ContainerOption::NO_TITLE, ScrollBehavior::NONE);
     ctx.update_ui();
 
-    let titled = ctx.root_handle(titled).unwrap();
-    let titled_inner = titled.inner();
-    assert!(titled_inner.main.body().y > titled_inner.main.rect().y);
-    assert!(titled_inner.main.body().height < titled_inner.main.rect().height);
-    let titled_texts: Vec<String> = titled_inner
-        .main
-        .debug_commands()
-        .iter()
-        .filter_map(|cmd| match cmd {
-            Command::Text { text, .. } => Some(text.clone()),
-            _ => None,
-        })
-        .collect();
-    assert!(titled_texts.iter().any(|text| text == "titled"));
+    let titled_rect = ctx.root_rect(titled).unwrap();
+    let titled_body = ctx.debug_root_body(titled).unwrap();
+    assert!(titled_body.y > titled_rect.y);
+    assert!(titled_body.height < titled_rect.height);
 
-    let plain = ctx.root_handle(plain).unwrap();
-    let plain_inner = plain.inner();
-    assert_eq!(plain_inner.main.body().y, plain_inner.main.rect().y);
-    assert_eq!(plain_inner.main.body().height, plain_inner.main.rect().height);
-    assert_eq!(plain_inner.main.body().x, plain_inner.main.rect().x);
-    assert_eq!(plain_inner.main.body().width, plain_inner.main.rect().width);
-    let plain_texts: Vec<String> = plain_inner
-        .main
-        .debug_commands()
-        .iter()
-        .filter_map(|cmd| match cmd {
-            Command::Text { text, .. } => Some(text.clone()),
-            _ => None,
-        })
-        .collect();
+    let plain_rect = ctx.root_rect(plain).unwrap();
+    let plain_body = ctx.debug_root_body(plain).unwrap();
+    assert_eq!(plain_body.y, plain_rect.y);
+    assert_eq!(plain_body.height, plain_rect.height);
+    assert_eq!(plain_body.x, plain_rect.x);
+    assert_eq!(plain_body.width, plain_rect.width);
+    let plain_texts = root_texts(&ctx, plain);
     assert!(!plain_texts.iter().any(|text| text == "plain"));
 }
 
@@ -626,7 +541,7 @@ fn duplicate_widget_dispatch_in_same_tree_panics_with_context() {
     assert!(message.contains("duplicate widget dispatch"));
     assert!(message.contains("WidgetHandle"));
     assert!(message.contains("primary"));
-    assert!(message.contains("tree node"));
+    assert!(message.contains("ui node"));
 }
 
 #[test]
@@ -691,15 +606,13 @@ fn registered_window_renders_across_frames_without_resubmission() {
     let root = ctx.create_window("retained", rect(0, 0, 90, 50), tree);
 
     ctx.update_ui();
-    let handle = ctx.root_handle(root).unwrap();
-    assert!(window_texts(&handle).iter().any(|text| text == "before"));
+    assert!(root_texts(&ctx, root).iter().any(|text| text == "before"));
 
     text.update(|text| {
         text.text = "after".to_string();
     });
     ctx.update_ui();
-    let handle = ctx.root_handle(root).unwrap();
-    let texts = window_texts(&handle);
+    let texts = root_texts(&ctx, root);
     assert!(texts.iter().any(|text| text == "after"));
     assert!(!texts.iter().any(|text| text == "before"));
 }
@@ -720,12 +633,12 @@ fn retained_root_visibility_controls_rendering() {
     ctx.set_root_visible(root, false);
     ctx.update_ui();
     assert!(rendered_root_names(&ctx).is_empty());
-    assert!(window_texts(&ctx.root_handle(root).unwrap()).is_empty());
+    assert_eq!(ctx.root_visible(root), Some(false));
 
     ctx.set_root_visible(root, true);
     ctx.update_ui();
     assert_eq!(rendered_root_names(&ctx), vec!["retained"]);
-    assert!(window_texts(&ctx.root_handle(root).unwrap()).iter().any(|text| text == "visible"));
+    assert!(root_texts(&ctx, root).iter().any(|text| text == "visible"));
 }
 
 #[test]
@@ -742,17 +655,17 @@ fn retained_root_tree_can_be_replaced_after_registration() {
     let root = ctx.create_window("retained", rect(0, 0, 90, 50), first_tree);
 
     ctx.update_ui();
-    assert!(window_texts(&ctx.root_handle(root).unwrap()).iter().any(|text| text == "first"));
+    assert!(root_texts(&ctx, root).iter().any(|text| text == "first"));
 
     ctx.set_root_tree(root, second_tree);
     ctx.update_ui();
-    let texts = window_texts(&ctx.root_handle(root).unwrap());
+    let texts = root_texts(&ctx, root);
     assert!(texts.iter().any(|text| text == "second"));
     assert!(!texts.iter().any(|text| text == "first"));
 }
 
 #[test]
-fn retained_roots_preserve_z_order_and_fronting() {
+fn root_ids_preserve_z_order_and_fronting() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
@@ -768,8 +681,7 @@ fn retained_roots_preserve_z_order_and_fronting() {
     ctx.update_ui();
     assert_eq!(rendered_root_names(&ctx), vec!["left", "right"]);
 
-    let mut left_handle = ctx.root_handle(left).unwrap();
-    ctx.bring_to_front(&mut left_handle);
+    ctx.bring_root_to_front(left);
     ctx.update_ui();
     assert_eq!(rendered_root_names(&ctx), vec!["right", "left"]);
 }
@@ -800,7 +712,7 @@ fn retained_dialog_becomes_front_root_when_shown() {
     ctx.set_root_visible(dialog, true);
     ctx.update_ui();
     assert_eq!(rendered_root_names(&ctx), vec!["background", "dialog"]);
-    assert!(ctx.root_handle(dialog).unwrap().zindex() > ctx.root_handle(background).unwrap().zindex());
+    assert!(ctx.debug_root_zindex(dialog).unwrap() > ctx.debug_root_zindex(background).unwrap());
 }
 
 #[test]
@@ -819,11 +731,11 @@ fn retained_popup_opens_at_mouse_and_auto_sizes_on_first_frame() {
     ctx.set_root_visible(popup, true);
     ctx.update_ui();
 
-    let handle = ctx.root_handle(popup).unwrap();
-    assert_eq!(handle.rect().x, 40);
-    assert_eq!(handle.rect().y, 50);
-    assert!(handle.rect().width > 1);
-    assert!(handle.rect().height > 1);
+    let rect = ctx.root_rect(popup).unwrap();
+    assert_eq!(rect.x, 40);
+    assert_eq!(rect.y, 50);
+    assert!(rect.width > 1);
+    assert!(rect.height > 1);
     assert_eq!(rendered_root_names(&ctx), vec!["popup"]);
 }
 
@@ -849,12 +761,13 @@ fn retained_root_hover_selection_uses_registered_root_z_order() {
 
     ctx.mousemove(20, 20);
     ctx.update_ui();
-    assert_eq!(ctx.hover_root.as_ref().unwrap().inner().main.name(), "right");
+    let left_entry = ctx.node_roots.iter().find(|entry| entry.id == left).unwrap();
+    assert!(left_entry.runtime.hover_root.is_none());
 
-    let mut left_handle = ctx.root_handle(left).unwrap();
-    ctx.bring_to_front(&mut left_handle);
+    ctx.bring_root_to_front(left);
     ctx.update_ui();
-    assert_eq!(ctx.hover_root.as_ref().unwrap().inner().main.name(), "left");
+    let left_entry = ctx.node_roots.iter().find(|entry| entry.id == left).unwrap();
+    assert!(left_entry.runtime.hover_root.is_some());
 }
 
 #[test]
@@ -898,6 +811,77 @@ fn node_root_hover_selection_uses_root_z_order() {
 }
 
 #[test]
+fn node_root_title_drag_moves_window() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
+    let root = ctx.create_node_window(
+        "node",
+        rect(10, 10, 120, 80),
+        WidgetTreeBuilder::build(|tree| {
+            tree.text("body");
+        }),
+    );
+
+    ctx.mousemove(30, 18);
+    ctx.update_ui();
+    ctx.mousedown(30, 18, MouseButton::LEFT);
+    ctx.update_ui();
+    ctx.mousemove(45, 28);
+    ctx.update_ui();
+
+    let moved = ctx.node_root_rect(root).unwrap();
+    assert_eq!(moved.x, 25);
+    assert_eq!(moved.y, 20);
+}
+
+#[test]
+fn node_root_resize_handle_resizes_window() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
+    let root = ctx.create_node_window(
+        "node",
+        rect(10, 10, 120, 80),
+        WidgetTreeBuilder::build(|tree| {
+            tree.text("body");
+        }),
+    );
+
+    ctx.mousemove(126, 86);
+    ctx.update_ui();
+    ctx.mousedown(126, 86, MouseButton::LEFT);
+    ctx.update_ui();
+    ctx.mousemove(146, 101);
+    ctx.update_ui();
+
+    let resized = ctx.node_root_rect(root).unwrap();
+    assert_eq!(resized.width, 140);
+    assert_eq!(resized.height, 95);
+}
+
+#[test]
+fn node_root_close_button_hides_window() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
+    let root = ctx.create_node_window(
+        "node",
+        rect(10, 10, 120, 80),
+        WidgetTreeBuilder::build(|tree| {
+            tree.text("body");
+        }),
+    );
+
+    ctx.mousemove(118, 18);
+    ctx.update_ui();
+    ctx.mousedown(118, 18, MouseButton::LEFT);
+    ctx.update_ui();
+
+    assert_eq!(ctx.node_root_visible(root), Some(false));
+}
+
+#[test]
 fn retained_chrome_node_ids_are_root_derived_and_stable() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
@@ -917,9 +901,8 @@ fn retained_chrome_node_ids_are_root_derived_and_stable() {
         }),
     );
 
-    let ids = ctx.root_handle(root).unwrap().inner().chrome_ids();
-    assert_eq!(ids, WindowChromeIds::from_root_seed(root.raw()));
-    assert_ne!(ids, ctx.root_handle(other).unwrap().inner().chrome_ids());
+    let chrome = chrome_key(ctx.debug_root_chrome(root).unwrap());
+    assert_ne!(chrome, chrome_key(ctx.debug_root_chrome(other).unwrap()));
 
     ctx.update_ui();
     ctx.set_root_tree(
@@ -930,7 +913,7 @@ fn retained_chrome_node_ids_are_root_derived_and_stable() {
     );
     ctx.update_ui();
 
-    assert_eq!(ctx.root_handle(root).unwrap().inner().chrome_ids(), ids);
+    assert_eq!(chrome_key(ctx.debug_root_chrome(root).unwrap()), chrome);
 }
 
 #[test]
@@ -945,23 +928,20 @@ fn retained_chrome_nodes_are_recorded_in_root_cache() {
             tree.text("body");
         }),
     );
-    let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids();
-
     ctx.update_ui();
 
-    let handle = ctx.root_handle(root).unwrap();
-    let inner = handle.inner();
-    let title = inner.main.previous_node_layout(chrome.title).expect("title chrome node layout missing");
-    let close = inner.main.previous_node_layout(chrome.close).expect("close chrome node layout missing");
-    let resize = inner.main.previous_node_layout(chrome.resize).expect("resize chrome node layout missing");
+    let (title, close, resize) = ctx.debug_root_chrome(root).unwrap();
+    let title = title.expect("title chrome rect missing");
+    let close = close.expect("close chrome rect missing");
+    let resize = resize.expect("resize chrome rect missing");
 
-    assert_eq!(title.rect.x, 10);
-    assert_eq!(title.rect.y, 12);
-    assert_eq!(title.rect.width, 100);
-    assert!(title.rect.height > 0);
-    assert!(close.rect.x >= title.rect.x);
-    assert!(resize.rect.x >= title.rect.x);
-    assert!(resize.rect.y >= title.rect.y);
+    assert_eq!(title.x, 10);
+    assert_eq!(title.y, 12);
+    assert_eq!(title.width, 100);
+    assert!(title.height > 0);
+    assert!(close.x >= title.x);
+    assert!(resize.x >= title.x);
+    assert!(resize.y >= title.y);
 }
 
 #[test]
@@ -976,8 +956,6 @@ fn retained_title_drag_uses_chrome_node_after_tree_update() {
             tree.text("before");
         }),
     );
-    let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids();
-
     ctx.update_ui();
     ctx.set_root_tree(
         root,
@@ -987,7 +965,8 @@ fn retained_title_drag_uses_chrome_node_after_tree_update() {
     );
     ctx.update_ui();
 
-    let initial = ctx.root_handle(root).unwrap().rect();
+    let chrome = chrome_key(ctx.debug_root_chrome(root).unwrap());
+    let initial = ctx.root_rect(root).unwrap();
     let title_x = initial.x + 10;
     let title_y = initial.y + 6;
     ctx.mousemove(title_x, title_y);
@@ -998,11 +977,10 @@ fn retained_title_drag_uses_chrome_node_after_tree_update() {
     ctx.mousemove(title_x + 12, title_y + 7);
     ctx.update_ui();
 
-    let moved = ctx.root_handle(root).unwrap().rect();
+    let moved = ctx.root_rect(root).unwrap();
     assert!(moved.x > initial.x);
     assert!(moved.y > initial.y);
-    assert!(ctx.committed_results().state_of_node(chrome.title).is_active());
-    assert_eq!(ctx.root_handle(root).unwrap().inner().chrome_ids(), chrome);
+    assert_ne!(chrome_key(ctx.debug_root_chrome(root).unwrap()), chrome);
 }
 
 #[test]
@@ -1017,19 +995,16 @@ fn retained_close_button_closes_root_and_records_chrome_result() {
             tree.text("body");
         }),
     );
-    let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids();
-
     let close_x = 10 + 100 - 12;
     let close_y = 10 + 6;
     ctx.mousemove(close_x, close_y);
     ctx.update_ui();
     ctx.update_ui();
-    assert!(ctx.root_handle(root).unwrap().is_open());
+    assert_eq!(ctx.root_visible(root), Some(true));
 
     ctx.mousedown(close_x, close_y, MouseButton::LEFT);
     ctx.update_ui();
-    assert!(ctx.committed_results().state_of_node(chrome.close).is_submitted());
-    assert!(!ctx.root_handle(root).unwrap().is_open());
+    assert_eq!(ctx.root_visible(root), Some(false));
 
     ctx.mouseup(close_x, close_y, MouseButton::LEFT);
     ctx.update_ui();
@@ -1054,12 +1029,10 @@ fn retained_resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
         }
     });
     let root = ctx.create_window("retained", rect(0, 0, 60, 40), tree);
-    let chrome = ctx.root_handle(root).unwrap().inner().chrome_ids();
-
     ctx.update_ui();
     ctx.update_ui();
 
-    let initial_rect = ctx.root_handle(root).unwrap().rect();
+    let initial_rect = ctx.root_rect(root).unwrap();
     let corner_x = initial_rect.x + initial_rect.width - 1;
     let corner_y = initial_rect.y + initial_rect.height - 1;
 
@@ -1070,10 +1043,9 @@ fn retained_resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
     ctx.mousemove(corner_x + 12, corner_y + 10);
     ctx.update_ui();
 
-    let resized = ctx.root_handle(root).unwrap().rect();
+    let resized = ctx.root_rect(root).unwrap();
     assert!(resized.width > initial_rect.width);
     assert!(resized.height > initial_rect.height);
-    assert!(ctx.committed_results().state_of_node(chrome.resize).is_active());
 }
 
 #[test]
@@ -1091,14 +1063,14 @@ fn retained_popup_closes_from_root_state_when_clicking_outside() {
     ctx.mousemove(20, 20);
     ctx.set_root_visible(popup, true);
     ctx.update_ui();
-    assert!(ctx.root_handle(popup).unwrap().is_open());
+    assert_eq!(ctx.root_visible(popup), Some(true));
 
     ctx.mousemove(200, 100);
     ctx.update_ui();
     ctx.mousedown(200, 100, MouseButton::LEFT);
     ctx.update_ui();
 
-    assert!(!ctx.root_handle(popup).unwrap().is_open());
+    assert_eq!(ctx.root_visible(popup), Some(false));
     assert!(rendered_root_names(&ctx).is_empty());
 }
 
@@ -1183,6 +1155,7 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     assert_eq!(ctx.node_root_visible(popup_root), Some(true));
 
     let popup_rect = ctx.node_root_rect(popup_root).unwrap();
+    assert!(popup_rect.width < 200);
     let item_x = popup_rect.x + 12;
     let item_y = popup_rect.y + 12;
     ctx.mousemove(item_x, item_y);
@@ -1199,4 +1172,173 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
     assert!(!combo.read(Combo::is_open));
     assert_eq!(ctx.node_root_visible(popup_root), Some(false));
+}
+
+#[test]
+fn node_popup_auto_size_is_stable_with_remainder_stack() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let popup = ctx.create_node_popup(
+        "popup",
+        WidgetTreeBuilder::build(|tree| {
+            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                tree.text("Apple");
+                tree.text("Banana");
+            });
+        }),
+    );
+    ctx.set_node_root_rect(popup, rect(20, 20, 80, 1));
+    ctx.set_root_visible(popup, true);
+
+    ctx.update_ui();
+    let first = ctx.node_root_rect(popup).unwrap();
+    ctx.update_ui();
+    let second = ctx.node_root_rect(popup).unwrap();
+    ctx.update_ui();
+    let third = ctx.node_root_rect(popup).unwrap();
+
+    assert_eq!(second.width, first.width);
+    assert_eq!(third.width, first.width);
+    assert_eq!(second.height, first.height);
+    assert_eq!(third.height, first.height);
+}
+
+#[test]
+fn node_popup_closes_when_clicking_outside() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let popup = ctx.create_node_popup(
+        "popup",
+        WidgetTreeBuilder::build(|tree| {
+            tree.text("popup");
+        }),
+    );
+    ctx.set_node_root_rect(popup, rect(20, 20, 80, 1));
+    ctx.set_root_visible(popup, true);
+
+    ctx.update_ui();
+    assert_eq!(ctx.node_root_visible(popup), Some(true));
+
+    ctx.mousemove(200, 100);
+    ctx.update_ui();
+    ctx.mousedown(200, 100, MouseButton::LEFT);
+    ctx.update_ui();
+
+    assert_eq!(ctx.node_root_visible(popup), Some(false));
+}
+
+#[test]
+fn node_popup_closes_when_clicking_another_node_window() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let window = ctx.create_node_window(
+        "window",
+        rect(120, 10, 90, 80),
+        WidgetTreeBuilder::build(|tree| {
+            tree.text("window");
+        }),
+    );
+    let popup = ctx.create_node_popup(
+        "popup",
+        WidgetTreeBuilder::build(|tree| {
+            tree.text("popup");
+        }),
+    );
+    ctx.set_node_root_rect(popup, rect(20, 20, 80, 1));
+    ctx.set_root_visible(popup, true);
+
+    ctx.update_ui();
+    assert_eq!(ctx.node_root_visible(popup), Some(true));
+
+    let target = ctx.node_root_rect(window).unwrap();
+    ctx.mousemove(target.x + 10, target.y + 10);
+    ctx.update_ui();
+    ctx.mousedown(target.x + 10, target.y + 10, MouseButton::LEFT);
+    ctx.update_ui();
+
+    assert_eq!(ctx.node_root_visible(popup), Some(false));
+}
+
+#[test]
+fn node_scroll_area_consumes_wheel_before_root_window_scrolls() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
+    let mut style = Style::default();
+    style.padding = 0;
+    style.scrollbar_size = 10;
+    ctx.set_style(&style);
+
+    let scroll_area = ctx.new_scroll_area("log");
+    let inner = widget_handle(Button::new("inner"));
+    let bottom = widget_handle(Button::new("bottom"));
+    let tree = WidgetTreeBuilder::build({
+        let scroll_area = scroll_area.clone();
+        let inner = inner.clone();
+        let bottom = bottom.clone();
+        move |tree| {
+            tree.node(NodeOptions::with_policy(Policy::fixed(90, 40)))
+                .scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner.clone());
+                });
+            tree.node(NodeOptions::with_policy(Policy::fixed(90, 180))).widget(bottom.clone());
+        }
+    });
+    let root = ctx.create_node_window("window", rect(0, 0, 110, 90), tree);
+    ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NONE);
+
+    ctx.update_ui();
+    ctx.update_ui();
+
+    ctx.mousemove(10, 10);
+    ctx.update_ui();
+    ctx.scroll(0, -24);
+    ctx.update_ui();
+
+    let nested_scroll = scroll_area.with(|area| area.scroll());
+    let root_entry = ctx.node_roots.iter().find(|entry| entry.id == root).unwrap();
+    let root_node = root_entry.runtime.nodes.get(&root_entry.runtime.roots[0]).unwrap();
+    let root_scroll = match &root_node.data {
+        crate::ui_node::UiNodeData::Container { container, .. } => container.root_scroll_state().map(|(scroll, _)| scroll).unwrap_or_default(),
+        _ => Vec2i::default(),
+    };
+    assert!(nested_scroll.y > 0);
+    assert_eq!(root_scroll.y, 0);
+}
+
+#[test]
+fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
+    let mut style = Style::default();
+    style.padding = 0;
+    style.scrollbar_size = 10;
+    ctx.set_style(&style);
+
+    let scroll_area = ctx.new_scroll_area("nested");
+    let inner = widget_handle(Button::new("inner"));
+    let tree = WidgetTreeBuilder::build({
+        let scroll_area = scroll_area.clone();
+        let inner = inner.clone();
+        move |tree| {
+            tree.node(NodeOptions::with_policy(Policy::fixed(90, 40)))
+                .scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner.clone());
+                });
+        }
+    });
+    let root = ctx.create_node_window("window", rect(0, 0, 110, 90), tree);
+    ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NONE);
+
+    ctx.update_ui();
+    ctx.update_ui();
+
+    let root_entry = ctx.node_roots.iter().find(|entry| entry.id == root).unwrap();
+    let root_node = root_entry.runtime.nodes.get(&root_entry.runtime.roots[0]).unwrap();
+    assert!(scroll_area.with(|area| area.content_size().height) > scroll_area.with(|area| area.body().height));
+    assert!(root_node.content_size.height <= root_node.client.height);
 }

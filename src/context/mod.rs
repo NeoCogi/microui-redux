@@ -64,15 +64,9 @@ use png::{ColorType, Decoder};
 
 use crate::{
     rect, Canvas, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Renderer,
-    RendererHandle, ScrollArea, ScrollAreaHandle, ScrollBehavior, Style, TextureId, UiRuntime, WidgetTree, WindowHandle,
+    RendererHandle, ScrollArea, ScrollAreaHandle, ScrollBehavior, Style, TextureId, UiRuntime, WidgetTree,
 };
-use roots::{NodeRootEntry, RootEntry};
-#[cfg(test)]
-use crate::window::WindowChromeIds;
-
-#[cfg(test)]
-use crate::{UNCLIPPED_RECT, Vec2i};
-
+use roots::NodeRootEntry;
 mod input_api;
 mod roots;
 
@@ -103,15 +97,6 @@ pub struct Context<R: Renderer> {
     last_zindex: i32,
     /// Monotonic frame counter used for root freshness bookkeeping.
     frame: usize,
-    /// Root that owned hover routing during the current frame.
-    hover_root: Option<WindowHandle>,
-    /// Root selected to own hover routing in the next frame.
-    next_hover_root: Option<WindowHandle>,
-
-    /// Roots submitted for the current frame in render order.
-    root_list: Vec<WindowHandle>,
-    /// Registered retained roots that are replayed by [`Context::update_ui`].
-    retained_roots: Vec<RootEntry>,
     /// Experimental `UiNode` roots replayed by [`Context::update_ui`].
     node_roots: Vec<NodeRootEntry>,
     /// Next root id counter.
@@ -134,11 +119,6 @@ impl<R: Renderer> Context<R> {
             style: Rc::new(style),
             last_zindex: 0,
             frame: 0,
-            hover_root: None,
-            next_hover_root: None,
-
-            root_list: Vec::default(),
-            retained_roots: Vec::default(),
             node_roots: Vec::default(),
             next_root_id: 1,
             frame_results: FrameResults::default(),
@@ -163,9 +143,6 @@ impl<R: Renderer> Context<R> {
 
     /// Flushes recorded root commands to the renderer and ends the draw pass.
     pub fn end_render_frame(&mut self) {
-        for r in &mut self.root_list {
-            r.render(&mut self.canvas);
-        }
         self.canvas.end()
     }
 
@@ -180,42 +157,13 @@ impl<R: Renderer> Context<R> {
         self.frame_results.begin_frame();
         self.input.borrow_mut().prelude();
         self.frame += 1;
-        self.root_list.clear();
     }
 
     #[inline(never)]
     /// Finishes root traversal, publishes results, and prepares hover/z-order for the next frame.
     fn frame_end(&mut self) {
-        for r in &mut self.root_list {
-            r.finish();
-        }
         self.frame_results.finish_frame();
-
-        let mouse_pressed = self.input.borrow().mouse_pressed;
-        let next_front = match (mouse_pressed.is_empty(), &self.next_hover_root) {
-            (false, Some(next_hover_root)) if next_hover_root.zindex() < self.last_zindex && next_hover_root.zindex() >= 0 => Some(next_hover_root.clone()),
-            _ => None,
-        };
-        if let Some(next_hover_root) = next_front {
-            // Clicking a window brings it forward after all roots have had a chance to report hover.
-            self.bring_to_front(&next_hover_root);
-        }
-
         self.input.borrow_mut().epilogue();
-
-        // Promote the next hover root after input epilogue so current-frame routing stays stable.
-        self.hover_root = self.next_hover_root.clone();
-        self.next_hover_root = None;
-        for r in &mut self.root_list {
-            r.set_root_hover_active(false);
-        }
-        match &mut self.hover_root {
-            Some(window) => window.set_root_hover_active(true),
-            _ => (),
-        }
-
-        // Sort all windows by z-index so render order matches interaction order.
-        self.root_list.sort_by(|a, b| a.zindex().cmp(&b.zindex()));
     }
 
     /// Runs one UI frame using only roots previously registered with this context.
@@ -225,7 +173,6 @@ impl<R: Renderer> Context<R> {
     /// time, and call this method each frame without re-submitting root trees.
     pub fn update_ui(&mut self) {
         self.frame_begin();
-        self.render_registered_roots();
         self.render_node_roots();
         self.frame_end();
     }

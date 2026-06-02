@@ -52,13 +52,8 @@
 //
 //! Shared handles for retained scroll-area nodes.
 
-use std::{
-    cell::{Ref, RefCell},
-    rc::Rc,
-};
+use std::{cell::RefCell, rc::Rc};
 
-use crate::canvas::Canvas;
-use crate::render::Renderer;
 use crate::{Dimensioni, NodeId, Recti, RetainedId, Vec2i};
 use super::ScrollArea;
 
@@ -162,16 +157,6 @@ impl ScrollAreaHandle {
     /// Wraps retained scroll-area state in shared interior mutability.
     pub(crate) fn new(scroll_area: ScrollArea) -> Self {
         Self(Rc::new(RefCell::new(scroll_area)))
-    }
-
-    /// Replays this scroll area's recorded commands into `canvas`.
-    pub(crate) fn render<R: Renderer>(&self, canvas: &mut Canvas<R>) {
-        self.0.borrow_mut().render(canvas)
-    }
-
-    /// Returns an immutable borrow of the underlying scroll area.
-    pub(crate) fn inner<'a>(&'a self) -> Ref<'a, ScrollArea> {
-        self.0.borrow()
     }
 
     /// Executes `f` with a read-only view into the scroll area.

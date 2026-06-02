@@ -1,7 +1,6 @@
 //! Tests for retained widget-tree building and identity behavior.
 
-use crate::{test_support::test_atlas, Button, Input, ScrollArea, ScrollAreaHandle, SizePolicy, Style};
-use std::{cell::RefCell, rc::Rc};
+use crate::{Button, ScrollArea, ScrollAreaHandle, SizePolicy};
 
 use super::*;
 
@@ -128,9 +127,7 @@ fn row_nodes_capture_children_and_track_policy() {
 
 #[test]
 fn scroll_area_nodes_store_handle_and_children() {
-    let atlas = test_atlas();
-    let input = Rc::new(RefCell::new(Input::default()));
-    let handle = ScrollAreaHandle::new(ScrollArea::new("scroll area", atlas, Rc::new(Style::default()), input));
+    let handle = ScrollAreaHandle::new(ScrollArea::new("scroll area"));
     let leaf = widget_handle((crate::WidgetOption::NONE, crate::ScrollBehavior::NONE));
 
     let tree = WidgetTreeBuilder::build(|builder| {

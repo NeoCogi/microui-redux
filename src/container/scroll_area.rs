@@ -50,153 +50,83 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Retained scroll-area state and lifecycle.
-//!
-//! A `ScrollArea` owns the persistent state needed by a nested scrollable subtree: viewport
-//! geometry, measured content size, scroll offset and scrollbar widgets, child focus/hover routing,
-//! a retained tree cache, and the child draw command stream. It does not own root/window concerns
-//! such as z-order, popup lifecycle, chrome, root registration, or global frame orchestration.
+//! Retained scroll-area viewport state used by node-runtime scroll containers.
 
-use std::{
-    cell::RefCell,
-    ops::{Deref, DerefMut},
-    rc::Rc,
-};
-
-use super::*;
-use crate::id::IdNamespace;
+use crate::{Dimensioni, Id, NodeId, Recti, RetainedId, Vec2i};
+use crate::widget_tree::NodeLayout;
 
 /// Retained state for one scrollable child subtree.
 pub struct ScrollArea {
-    /// Traversal state owned by this nested scrollable region.
-    host: TraversalHost,
+    rect: Recti,
+    body: Recti,
+    content_size: Dimensioni,
+    scroll: Vec2i,
+    focus: Option<NodeId>,
+    retained_scope: Id,
 }
 
 impl ScrollArea {
-    /// Creates a retained scroll area with shared renderer/style/input handles.
-    pub(crate) fn new(name: &str, atlas: AtlasHandle, style: Rc<Style>, input: Rc<RefCell<Input>>) -> Self {
+    /// Creates retained scroll-area state.
+    pub(crate) fn new(name: &str) -> Self {
         Self {
-            host: TraversalHost::new(name, atlas, style, input),
+            rect: Recti::default(),
+            body: Recti::default(),
+            content_size: Dimensioni::default(),
+            scroll: Vec2i::default(),
+            focus: None,
+            retained_scope: Id::new(crate::id::hash_id_key(name)),
         }
     }
 
-    /// Replays this scroll area's command list into the renderer canvas.
-    pub(crate) fn render<R: Renderer>(&mut self, canvas: &mut Canvas<R>) {
-        self.host.render(canvas);
+    /// Returns the scroll area outer rectangle.
+    pub fn rect(&self) -> Recti {
+        self.rect
     }
 
-    /// Publishes this scroll area's frame-local interaction and retained tree cache.
-    fn finish_frame(&mut self) {
-        self.host.finish();
+    /// Updates the scroll area outer rectangle.
+    pub fn set_rect(&mut self, rect: Recti) {
+        self.rect = rect;
     }
 
-    /// Returns the immutable traversal host backing this scroll area.
-    pub(crate) fn host(&self) -> &TraversalHost {
-        &self.host
+    /// Returns the visible body rectangle.
+    pub fn body(&self) -> Recti {
+        self.body
     }
 
-    /// Applies parent-driven state that must stay synchronized on every scroll-area pass.
-    fn apply_base_state(host: &mut TraversalHost, parent: &TraversalHost, scope: Id) {
-        host.set_internal_id_seed(scope);
-        host.style = parent.style.clone();
+    /// Returns the measured content size.
+    pub fn content_size(&self) -> Dimensioni {
+        self.content_size
     }
 
-    /// Allocates a viewport rect in the parent.
-    fn allocate_layout_rect(parent: &mut TraversalHost, host: &mut TraversalHost, policy: Policy) -> Recti {
-        let rect = parent.layout.next_with_policies(Dimensioni::default(), policy.width, policy.height);
-        host.set_rect(rect);
-        rect
+    /// Returns the current scroll offset.
+    pub fn scroll(&self) -> Vec2i {
+        self.scroll
     }
 
-    /// Runs the layout pass for this scroll area's child subtree.
-    pub(crate) fn layout_children(
-        &mut self,
-        parent: &mut TraversalHost,
-        results: &FrameResults,
-        resources: &WidgetTreeResources,
-        node_id: NodeId,
-        policy: Policy,
-        scroll_behavior: ScrollBehavior,
-        children: &[WidgetTreeNode],
-    ) -> NodeLayout {
-        let scope = parent.scroll_area_scope_id(node_id);
-        Self::apply_base_state(&mut self.host, parent, scope);
-        self.host.prepare();
-        let rect = Self::allocate_layout_rect(parent, &mut self.host, policy);
-        self.host
-            .layout_body_until_scrollbars_stable(results, resources, rect, scroll_behavior, children)
+    /// Updates the current scroll offset.
+    pub fn set_scroll(&mut self, scroll: Vec2i) {
+        self.scroll = scroll;
     }
 
-    /// Runs the update pass for this scroll area's child subtree.
-    pub(crate) fn update_children(
-        &mut self,
-        parent: &mut TraversalHost,
-        results: &mut FrameResults,
-        resources: &WidgetTreeResources,
-        node_id: NodeId,
-        layout: NodeLayout,
-        scroll_behavior: ScrollBehavior,
-        children: &[WidgetTreeNode],
-    ) {
-        let area_id = parent.retained_id_for_node(node_id);
-        let scope = parent.scroll_area_scope_id(node_id);
-        if parent.hit_test_rect(layout.rect, parent.interaction.in_hover_root) {
-            parent.interaction.set_next_hover_root_child(area_id, layout.rect);
-        }
-
-        self.host.interaction.in_hover_root = parent.interaction.in_hover_root && parent.interaction.hover_root_child == Some(area_id);
-        if parent.interaction.pending_scroll.is_some() && self.host.interaction.in_hover_root {
-            self.host.interaction.seed_pending_scroll(parent.interaction.take_pending_scroll());
-        }
-
-        Self::apply_base_state(&mut self.host, parent, scope);
-        self.host.update_body_tree(results, resources, layout, scroll_behavior, children);
-        let pending = self.host.interaction.take_pending_scroll();
-        if parent.interaction.pending_scroll.is_none() {
-            parent.interaction.seed_pending_scroll(pending);
-        }
+    /// Applies the latest node-runtime viewport layout.
+    pub(crate) fn apply_viewport_layout(&mut self, layout: NodeLayout) {
+        self.rect = layout.rect;
+        self.body = layout.body;
+        self.content_size = layout.content_size;
     }
 
-    /// Runs the paint pass for this scroll area's child subtree.
-    pub(crate) fn paint_children(
-        &mut self,
-        parent: &mut TraversalHost,
-        resources: &WidgetTreeResources,
-        node_id: NodeId,
-        layout: NodeLayout,
-        opt: ContainerOption,
-        scroll_behavior: ScrollBehavior,
-        children: &[WidgetTreeNode],
-    ) {
-        let scope = parent.scroll_area_scope_id(node_id);
-        Self::apply_base_state(&mut self.host, parent, scope);
-
-        if !opt.intersects(ContainerOption::NO_FRAME) {
-            parent.draw_frame(layout.rect, ControlColor::PanelBG);
-        }
-
-        self.host.paint_body_tree(resources, layout, scroll_behavior, children);
-        self.finish_frame();
+    /// Sets focus to a retained node in this scroll area.
+    pub fn set_focus_node(&mut self, node_id: NodeId) {
+        self.focus = Some(node_id);
     }
-}
 
-impl Deref for ScrollArea {
-    type Target = TraversalHost;
-
-    fn deref(&self) -> &Self::Target {
-        &self.host
+    /// Clears focus in this scroll area.
+    pub fn clear_focus(&mut self) {
+        self.focus = None;
     }
-}
 
-impl DerefMut for ScrollArea {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.host
-    }
-}
-
-impl TraversalHost {
-    /// Derives a stable child scroll-area scope id from the parent scope and retained node id.
-    pub(crate) fn scroll_area_scope_id(&self, node_id: NodeId) -> Id {
-        IdNamespace::SCROLL_AREA_SCOPE.id([self.internal_id_seed.raw() as u64, node_id.raw() as u64])
+    /// Returns the retained interaction identity for a node inside this scroll area.
+    pub fn retained_id_for_node(&self, node_id: NodeId) -> RetainedId {
+        RetainedId::scoped_node(self.retained_scope, node_id)
     }
 }

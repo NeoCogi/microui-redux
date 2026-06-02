@@ -51,8 +51,8 @@ pub struct FileDialogState {
     selected_folder: Option<String>,
     /// Registered root id for the dialog window.
     root: RootId,
-    /// Window handle controlling open/close state.
-    win: WindowHandle,
+    /// Cached open state mirrored from the registered root.
+    open: bool,
     /// Scroll area containing folder rows.
     folder_area: ScrollAreaHandle,
     /// Scroll area containing file rows.
@@ -120,7 +120,7 @@ impl FileDialogState {
 
     /// Returns `true` if the dialog window is currently open.
     pub fn is_open(&self) -> bool {
-        self.win.is_open()
+        self.open
     }
 
     /// Resolves a typed file name into a path relative to the current directory when needed.
@@ -228,7 +228,7 @@ impl FileDialogState {
     }
 
     /// Rebuilds the retained widget tree and records the node ids used for result lookup.
-    fn rebuild_tree(&mut self) {
+    fn rebuild_tree(&mut self, control_height: i32, spacing: i32) {
         let mut folder_item_ids = Vec::with_capacity(self.folder_items.len());
         let mut file_item_ids = Vec::with_capacity(self.file_items.len());
         let mut up_button_id = NodeId::default();
@@ -237,19 +237,6 @@ impl FileDialogState {
         let mut go_button_id = NodeId::default();
         let mut cancel_button_id = NodeId::default();
         let mut ok_button_id = NodeId::default();
-        let (control_height, spacing) = {
-            // Size the footer reservation from the active root style/atlas so scroll areas get the
-            // remaining body height without hard-coding font metrics.
-            let win = self.win.inner();
-            let container = &win.main;
-            let style = container.style();
-            let padding = style.padding.max(0);
-            let font_height = container.atlas().get_font_height(style.font) as i32;
-            let vertical_pad = std::cmp::max(1, padding / 2);
-            let icon_height = container.atlas().get_icon_size(EXPAND_DOWN_ICON).height;
-            (std::cmp::max(font_height + vertical_pad * 2, icon_height), style.spacing.max(0))
-        };
-
         let tree = {
             let folder_area = &self.folder_area;
             let file_area = &self.file_area;
@@ -342,13 +329,13 @@ impl FileDialogState {
     }
 
     /// Synchronizes text boxes and tree structure with the current dialog state.
-    fn sync_retained_view(&mut self) {
+    fn sync_retained_view(&mut self, control_height: i32, spacing: i32) {
         if self.path_box.read(|path_box| path_box.text() != self.current_working_directory) {
             self.path_box.update(|path_box| {
                 path_box.set_text(self.current_working_directory.clone());
             });
         }
-        self.rebuild_tree();
+        self.rebuild_tree(control_height, spacing);
     }
 
     /// Changes the working directory and resets folder selection.
@@ -361,13 +348,18 @@ impl FileDialogState {
         self.path_box.update(|path_box| {
             path_box.set_text(self.current_working_directory.clone());
         });
+        self.tmp_file_name.update(|tmp_file_name| {
+            tmp_file_name.set_text("");
+        });
         true
     }
 
     /// Pushes the current retained tree/options into the registered context root.
     fn sync_retained_root<R: Renderer>(&mut self, ctx: &mut Context<R>) {
-        self.sync_retained_view();
+        let (control_height, spacing) = ctx.root_control_metrics();
+        self.sync_retained_view(control_height, spacing);
         ctx.set_root_tree(self.root, std::mem::take(&mut self.tree));
+        self.open = ctx.root_visible(self.root).unwrap_or(false);
     }
 
     /// Checks whether a node inside the root dialog submitted in the committed results.
@@ -404,7 +396,7 @@ impl FileDialogState {
     /// Applies folder-list selection and navigates when a folder is submitted.
     fn apply_folder_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
         let next_directory = self.folder_item_ids.iter().enumerate().find_map(|(index, node_id)| {
-            if results.state_of_retained(self.folder_area.retained_id_for_node(*node_id)).is_submitted() {
+            if self.root_submitted(results, *node_id) {
                 self.folders.get(index).cloned()
             } else {
                 None
@@ -422,7 +414,7 @@ impl FileDialogState {
     /// Applies file-list selection into the temporary filename textbox.
     fn apply_file_actions(&mut self, results: FrameResultGeneration<'_>) {
         let selected_file = self.file_item_ids.iter().enumerate().find_map(|(index, node_id)| {
-            if results.state_of_retained(self.file_area.retained_id_for_node(*node_id)).is_submitted() {
+            if self.root_submitted(results, *node_id) {
                 self.files.get(index).cloned()
             } else {
                 None
@@ -437,11 +429,13 @@ impl FileDialogState {
     }
 
     /// Applies OK/Cancel actions and stores the selected file result.
-    fn apply_completion_actions(&mut self, results: FrameResultGeneration<'_>) {
+    fn apply_completion_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
+        let mut close = false;
         if self.root_submitted(results, self.cancel_button_id) {
             self.file_name = None;
             self.file_path = None;
-            self.win.close();
+            self.open = false;
+            close = true;
         }
 
         if self.root_submitted(results, self.ok_button_id) {
@@ -460,8 +454,10 @@ impl FileDialogState {
                 self.file_name = Some(selected_name);
                 self.file_path = Some(selected_path);
             }
-            self.win.close();
+            self.open = false;
+            close = true;
         }
+        close
     }
 
     /// Creates a new dialog window and associated scroll areas.
@@ -480,7 +476,7 @@ impl FileDialogState {
             tmp_file_name: widget_handle(Textbox::new("")),
             selected_folder: None,
             root,
-            win: ctx.root_handle(root).expect("file dialog root window missing"),
+            open: ctx.root_visible(root).unwrap_or(false),
             folder_area: ctx.new_scroll_area("folders"),
             file_area: ctx.new_scroll_area("files"),
             folders: Vec::new(),
@@ -519,6 +515,7 @@ impl FileDialogState {
     /// Marks the dialog as open for the next frame.
     pub fn open<R: Renderer>(&mut self, ctx: &mut Context<R>) {
         ctx.set_root_visible(self.root, true);
+        self.open = true;
     }
 
     /// Renders the dialog and updates the selected file when confirmed.
@@ -526,7 +523,10 @@ impl FileDialogState {
         let results = ctx.committed_results();
         let needs_refresh = self.apply_navigation_actions(results) || self.apply_folder_actions(results);
         self.apply_file_actions(results);
-        self.apply_completion_actions(results);
+        let close = self.apply_completion_actions(results);
+        if close {
+            ctx.set_root_visible(self.root, false);
+        }
 
         if needs_refresh {
             // Defer the rebuild until the dialog callback is done so all borrows
@@ -534,5 +534,112 @@ impl FileDialogState {
             self.refresh_entries();
         }
         self.sync_retained_root(ctx);
+        self.open = ctx.root_visible(self.root).unwrap_or(false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{test_atlas, NoopRenderer};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn unique_temp_dir(name: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir().join(format!("microui-redux-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    fn click_node(ctx: &mut Context<NoopRenderer>, root: RootId, node: NodeId) {
+        let rect = ctx.debug_root_node_rect(root, node).expect("node rect should be laid out");
+        let x = rect.x + rect.width / 2;
+        let y = rect.y + rect.height / 2;
+        ctx.mousemove(x, y);
+        ctx.update_ui();
+        ctx.mousedown(x, y, MouseButton::LEFT);
+        ctx.update_ui();
+    }
+
+    fn click_node_without_hover_frame(ctx: &mut Context<NoopRenderer>, root: RootId, node: NodeId) {
+        let rect = ctx.debug_root_node_rect(root, node).expect("node rect should be laid out");
+        let x = rect.x + rect.width / 2;
+        let y = rect.y + rect.height / 2;
+        ctx.mousemove(x, y);
+        ctx.mousedown(x, y, MouseButton::LEFT);
+        ctx.update_ui();
+    }
+
+    #[test]
+    fn selecting_file_row_then_open_returns_selected_path() {
+        let dir = unique_temp_dir("file-dialog-select");
+        fs::create_dir_all(&dir).unwrap();
+        let file_path = dir.join("picked.txt");
+        fs::write(&file_path, b"picked").unwrap();
+
+        let atlas = test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(800, 600));
+        let mut dialog = FileDialogState::new(&mut ctx);
+        dialog.current_working_directory = dir.to_string_lossy().to_string();
+        dialog.refresh_entries();
+        dialog.open(&mut ctx);
+        dialog.eval(&mut ctx);
+        ctx.update_ui();
+
+        let file_node = dialog.file_item_ids[0];
+        click_node(&mut ctx, dialog.root, file_node);
+        dialog.eval(&mut ctx);
+
+        assert_eq!(dialog.tmp_file_name.read(|tmp| tmp.text().to_string()), "picked.txt");
+
+        ctx.mouseup(0, 0, MouseButton::LEFT);
+        ctx.update_ui();
+        let ok_node = dialog.ok_button_id;
+        click_node(&mut ctx, dialog.root, ok_node);
+        dialog.eval(&mut ctx);
+
+        assert_eq!(dialog.file_name().as_deref(), Some("picked.txt"));
+        assert_eq!(dialog.file_path().as_deref(), Some(file_path.to_string_lossy().as_ref()));
+
+        let _ = fs::remove_file(file_path);
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn file_dialog_clicks_work_without_prior_hover_frame() {
+        let dir = unique_temp_dir("file-dialog-batched-click");
+        fs::create_dir_all(&dir).unwrap();
+        let file_path = dir.join("batched.txt");
+        fs::write(&file_path, b"picked").unwrap();
+
+        let atlas = test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(renderer, Dimensioni::new(800, 600));
+        let mut dialog = FileDialogState::new(&mut ctx);
+        dialog.current_working_directory = dir.to_string_lossy().to_string();
+        dialog.refresh_entries();
+        dialog.open(&mut ctx);
+        dialog.eval(&mut ctx);
+        ctx.update_ui();
+
+        let file_node = dialog.file_item_ids[0];
+        click_node_without_hover_frame(&mut ctx, dialog.root, file_node);
+        dialog.eval(&mut ctx);
+
+        assert_eq!(dialog.tmp_file_name.read(|tmp| tmp.text().to_string()), "batched.txt");
+
+        ctx.mouseup(0, 0, MouseButton::LEFT);
+        ctx.update_ui();
+        let ok_node = dialog.ok_button_id;
+        click_node_without_hover_frame(&mut ctx, dialog.root, ok_node);
+        dialog.eval(&mut ctx);
+
+        assert_eq!(dialog.file_name().as_deref(), Some("batched.txt"));
+        assert_eq!(dialog.file_path().as_deref(), Some(file_path.to_string_lossy().as_ref()));
+
+        let _ = fs::remove_file(file_path);
+        let _ = fs::remove_dir(dir);
     }
 }

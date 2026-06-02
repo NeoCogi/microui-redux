@@ -893,7 +893,7 @@ impl State {
             )),
         ];
         let external_image_button = image_texture.map(|texture| {
-            widget_handle(Button::with_image(
+            widget_handle(Button::with_scaled_image(
                 "External Image",
                 Some(Image::Texture(texture)),
                 WidgetOption::NONE,
@@ -925,29 +925,29 @@ impl State {
         );
         typography_body.config.font = FontRole::Body.into();
         let style = Style::default().with_named_fonts(&ctx.canvas().get_atlas());
-        let demo_root = ctx.create_node_window("Demo Window", rect(40, 40, 300, 450), WidgetTree::default());
-        let style_root = ctx.create_node_window("Style Editor", rect(350, 250, 300, 240), WidgetTree::default());
-        let log_root = ctx.create_node_window("Log Window", rect(350, 40, 300, 200), WidgetTree::default());
+        let demo_root = ctx.create_window("Demo Window", rect(40, 40, 300, 450), WidgetTree::default());
+        let style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), WidgetTree::default());
+        let log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), WidgetTree::default());
         let combo_popup_root = ctx.create_node_popup("Combo Box Popup", WidgetTree::default());
         ctx.set_root_options(
             combo_popup_root,
             ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
             ScrollBehavior::NO_SCROLL,
         );
-        let popup_root = ctx.create_node_window("Test Popup", rect(40, 40, 100, 1), WidgetTree::default());
+        let popup_root = ctx.create_node_popup("Test Popup", WidgetTree::default());
         ctx.set_root_options(
             popup_root,
             ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
             ScrollBehavior::NO_SCROLL,
         );
         ctx.set_root_visible(popup_root, false);
-        let typography_root = ctx.create_node_window("Typography Demo", rect(40, 500, 300, 170), WidgetTree::default());
-        let triangle_root = ctx.create_node_window("Triangle Window", rect(200, 100, 200, 200), WidgetTree::default());
-        let graphics_root = ctx.create_node_window("Graphics Window", rect(820, 40, 280, 240), WidgetTree::default());
-        let falloff_root = ctx.create_node_window("Brush Falloff", rect(820, 300, 320, 260), WidgetTree::default());
-        let suzanne_root = ctx.create_node_window("Suzanne Window", rect(220, 220, 300, 300), WidgetTree::default());
-        let stack_direction_root = ctx.create_node_window("Stack Direction Demo", rect(530, 40, 280, 220), WidgetTree::default());
-        let weight_root = ctx.create_node_window("Weight Demo", rect(530, 270, 280, 260), WidgetTree::default());
+        let typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), WidgetTree::default());
+        let triangle_root = ctx.create_window("Triangle Window", rect(200, 100, 200, 200), WidgetTree::default());
+        let graphics_root = ctx.create_window("Graphics Window", rect(820, 40, 280, 240), WidgetTree::default());
+        let falloff_root = ctx.create_window("Brush Falloff", rect(820, 300, 320, 260), WidgetTree::default());
+        let suzanne_root = ctx.create_window("Suzanne Window", rect(220, 220, 300, 300), WidgetTree::default());
+        let stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), WidgetTree::default());
+        let weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), WidgetTree::default());
         let mut state = Self {
             renderer,
             bg: [90.0, 95.0, 100.0],
@@ -1615,17 +1615,15 @@ impl State {
             });
 
             Self::section(tree, &slot_header, |tree| {
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(67), StackDirection::TopToBottom, |tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                     tree.widget(&slot0);
                     tree.widget(&slot1);
                     tree.widget(&slot2);
                     if let Some(button) = &external_image_button {
-                        tree.stack(SizePolicy::Fixed(256), SizePolicy::Fixed(256), StackDirection::TopToBottom, |tree| {
-                            tree.widget(button);
-                        });
+                        tree.node(NodeOptions::with_policy(Policy::fixed_width(256))).widget(button);
                     }
                 });
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(67), StackDirection::TopToBottom, |tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                     tree.widget(&slot3);
                 });
             });

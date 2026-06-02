@@ -192,6 +192,8 @@ impl IdNamespace {
     pub(crate) const INTERNAL_CONTROL: Self = Self::new(0x696e_7465_726e_616c);
     /// Namespace used for auto-generated retained tree nodes.
     pub(crate) const WIDGET_TREE_BUILDER: Self = Self::new(0x7769_6467_6574_7472);
+    /// Namespace used for synthetic runtime root container nodes.
+    pub(crate) const UINODE_ROOT: Self = Self::new(0x7569_6e6f_6465_726f);
 
     /// Creates a namespace from a caller-provided salt.
     const fn new(salt: u64) -> Self {

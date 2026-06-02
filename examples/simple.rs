@@ -78,7 +78,7 @@ fn main() {
             }
         });
         State {
-            _root: ctx.create_node_window("Hello Window", rect(40, 40, 300, 450), tree),
+            _root: ctx.create_window("Hello Window", rect(40, 40, 300, 450), tree),
         }
     })
     .unwrap();

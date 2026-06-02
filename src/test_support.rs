@@ -2,7 +2,17 @@
 
 use crate::{AtlasHandle, AtlasSource, CharEntry, Color, FontEntry, Recti, Renderer, SourceFormat, TextureId, Vec2i, Vertex};
 
-const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
+const ICON_NAMES: [&str; 9] = [
+    "white",
+    "close",
+    "expand",
+    "collapse",
+    "check",
+    "expand_down",
+    "open_folder",
+    "closed_folder",
+    "file",
+];
 
 pub(crate) fn test_atlas() -> AtlasHandle {
     test_atlas_with_font_sizes(&[("default", 10)])

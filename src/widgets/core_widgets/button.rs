@@ -22,6 +22,13 @@ pub enum ButtonContent {
         /// Optional image rendered on the button.
         image: Option<Image>,
     },
+    /// An optional image scaled to the allocated button width while preserving aspect ratio.
+    ScaledImage {
+        /// Text displayed on the button.
+        label: String,
+        /// Optional image rendered on the button.
+        image: Option<Image>,
+    },
     /// A text label and a slot refreshed via a paint callback.
     Slot {
         /// Text displayed on the button.
@@ -72,6 +79,15 @@ impl Button {
         }
     }
 
+    /// Creates an image button that scales its image to the allocated width and preserves aspect ratio.
+    pub fn with_scaled_image(label: impl Into<String>, image: Option<Image>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
+        Self {
+            content: ButtonContent::ScaledImage { label: label.into(), image },
+            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
+            fill,
+        }
+    }
+
     /// Creates a slot button that repaints via the provided callback.
     pub fn with_slot(label: impl Into<String>, slot: SlotId, paint: Rc<dyn Fn(usize, usize) -> Color4b>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
@@ -91,6 +107,14 @@ impl Button {
             ButtonContent::Image { label, image } => {
                 let visual = image.map(|image| image.size(atlas));
                 inline_content_size(style, atlas, self.config.font, label, visual)
+            }
+            ButtonContent::ScaledImage { label, image } => {
+                let visual = image.map(|image| image.size(atlas));
+                if visual.is_some() && _avail.width > 0 {
+                    scaled_visual_content_size(_avail, visual)
+                } else {
+                    inline_content_size(style, atlas, self.config.font, label, visual)
+                }
             }
             ButtonContent::Slot { label, slot, .. } => {
                 let visual = Some(atlas.get_slot_size(*slot));
@@ -130,6 +154,21 @@ impl Button {
                 // External textures and atlas slots both report dimensions through `Image::size`.
                 let visual_size = image.map(|image| image.size(ctx.atlas()));
                 let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
+                if !label.is_empty() {
+                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.config.opt);
+                }
+                if let (Some(image), Some(visual)) = (*image, layout.visual) {
+                    let color = ctx.style().colors[ControlColor::Text as usize];
+                    ctx.push_image(image, visual, color);
+                }
+            }
+            ButtonContent::ScaledImage { label, image } => {
+                let visual_size = image.map(|image| image.size(ctx.atlas()));
+                let layout = if visual_size.is_some() {
+                    layout_scaled_visual_content(rect, visual_size)
+                } else {
+                    layout_inline_content(rect, ctx.style(), label, visual_size)
+                };
                 if !label.is_empty() {
                     ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.config.opt);
                 }

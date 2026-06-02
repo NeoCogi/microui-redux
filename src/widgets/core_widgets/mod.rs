@@ -93,6 +93,18 @@ fn inline_content_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, lab
     Dimensioni::new(width.max(0), height)
 }
 
+/// Computes preferred size for an image-like button that scales its visual to the available width.
+fn scaled_visual_content_size(available: Dimensioni, visual_size: Option<Dimensioni>) -> Dimensioni {
+    let visual_size = visual_size.unwrap_or_default();
+    if visual_size.width <= 0 || visual_size.height <= 0 {
+        return Dimensioni::default();
+    }
+
+    let width = if available.width > 0 { available.width } else { visual_size.width };
+    let height = ((width.max(0) as i64 * visual_size.height as i64) / visual_size.width as i64) as i32;
+    Dimensioni::new(width.max(0), height.max(0))
+}
+
 #[derive(Copy, Clone)]
 /// Resolved inline placement for an optional visual and text region.
 struct InlineContentLayout {
@@ -134,6 +146,29 @@ fn layout_inline_content(bounds: Recti, style: &Style, label: &str, visual_size:
     let right = bounds.x + bounds.width;
     let text = rect(text_x, bounds.y, (right - text_x).max(0), bounds.height);
     InlineContentLayout { visual: Some(visual), text }
+}
+
+/// Places an image-like visual by fitting it to the button bounds while preserving aspect ratio.
+fn layout_scaled_visual_content(bounds: Recti, visual_size: Option<Dimensioni>) -> InlineContentLayout {
+    let visual_size = visual_size.unwrap_or_default();
+    if visual_size.width <= 0 || visual_size.height <= 0 || bounds.width <= 0 || bounds.height <= 0 {
+        return InlineContentLayout { visual: None, text: bounds };
+    }
+
+    let mut width = bounds.width;
+    let mut height = ((width as i64 * visual_size.height as i64) / visual_size.width as i64) as i32;
+    if height > bounds.height {
+        height = bounds.height;
+        width = ((height as i64 * visual_size.width as i64) / visual_size.height as i64) as i32;
+    }
+
+    let visual = rect(
+        bounds.x + (bounds.width - width).max(0) / 2,
+        bounds.y + (bounds.height - height).max(0) / 2,
+        width.max(0),
+        height.max(0),
+    );
+    InlineContentLayout { visual: Some(visual), text: bounds }
 }
 
 /// Selects which control color should be painted for a widget's fill policy and state.

@@ -368,7 +368,7 @@ fn main() {
         for (button, node_id) in buttons.iter_mut().zip(button_node_ids) {
             button.node_id = node_id;
         }
-        let root = ctx.create_node_window("Calculator", rect(0, 0, 320, 420), tree);
+        let root = ctx.create_window("Calculator", rect(0, 0, 320, 420), tree);
         ctx.set_root_options(root, ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE, ScrollBehavior::NONE);
         State {
             _root: root,

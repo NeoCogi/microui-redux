@@ -44,7 +44,7 @@ pub use builder::{NodeBuilder, NodeOptions, WidgetTreeBuilder};
 pub use node::{GridSpan, NodeId, Policy, WidgetTree, WidgetTreeNode};
 pub use retained::{widget_handle, WidgetHandle};
 
-pub(crate) use cache::{NodeLayout, WidgetTreeCache};
+pub(crate) use cache::NodeLayout;
 pub(crate) use node::{TreeResourceId, WidgetTreeNodeKind, WidgetTreeResource, WidgetTreeResources};
 pub(crate) use retained::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
 
