@@ -78,8 +78,8 @@
 //! allocator- and platform-agnostic.
 //! Built-in widget placement is driven by each widget's `measure` result, so auto-sized rows can use
 //! per-widget intrinsic text/icon metrics instead of a single shared control size.
-//! Layout internals are flow-based: row tracks and vertical stack flows both run through the same
-//! engine so scope/scroll/content bookkeeping stays consistent.
+//! Retained layout is resolved from context-owned UI nodes, container sizing policies, and widget
+//! measurement results.
 //! Per-frame interaction results are collected internally and published as a committed
 //! generation through [`Context::committed_results`].
 //! Retained application/business logic reacts through
@@ -95,10 +95,10 @@ mod file_dialog;
 mod graphics;
 mod id;
 mod input;
-mod layout;
 mod rect_packer;
 mod render;
 mod scrollbar;
+mod sizing;
 mod style;
 #[cfg(test)]
 mod test_support;
@@ -154,7 +154,7 @@ pub mod prelude {
         Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, InputSnapshot, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState,
         ScrollBehavior, WidgetFillOption, WidgetOption,
     };
-    pub use crate::layout::{SizePolicy, StackDirection};
+    pub use crate::sizing::{SizePolicy, StackDirection};
     pub use crate::render::{Renderer, RendererHandle};
     pub use crate::retained::{
         Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeBuilder, NodeId, NodeOptions, Policy, RetainedId, RootId,
@@ -183,8 +183,8 @@ pub use input::{
     Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, InputSnapshot, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState,
     ScrollBehavior, WidgetFillOption, WidgetOption,
 };
-pub use layout::{SizePolicy, StackDirection};
 pub use render::{Renderer, RendererHandle};
+pub use sizing::{SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
 pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
 pub use widgets::{

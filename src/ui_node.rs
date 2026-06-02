@@ -16,7 +16,7 @@ use crate::container::{render_command_stream, Command, ScrollAreaHandle};
 use crate::draw_context::DrawCtx;
 use crate::id::IdNamespace;
 use crate::input::{ContainerOption, ControlState, ResourceState, ScrollBehavior, WidgetOption};
-use crate::layout::SizePolicy;
+use crate::sizing::SizePolicy;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::widget::FocusPolicy;
 use crate::widget_ctx::WidgetCtx;

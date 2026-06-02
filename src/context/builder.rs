@@ -37,7 +37,7 @@ use rs_math3d::{Dimensioni, Vec2i};
 use crate::{
     id::{hash_id_key, IdNamespace},
     input::{ContainerOption, ScrollBehavior},
-    layout::{SizePolicy, StackDirection},
+    sizing::{SizePolicy, StackDirection},
     ui_node::{Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData, UiNodeId},
     widget::Widget,
     Custom, CustomRenderArgs, Node, ScrollAreaHandle, TextBlock, TextWrap,
