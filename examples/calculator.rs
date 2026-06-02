@@ -29,7 +29,7 @@
 //
 //! Calculator retained-mode example.
 //!
-//! This example builds a small calculator UI with the retained widget tree API and the Glow/SDL
+//! This example builds a small calculator UI with the retained UI node set API and the Glow/SDL
 //! backend from `examples/common`.
 #[path = "./common/mod.rs"]
 mod common;
@@ -344,7 +344,7 @@ fn main() {
             CalcButton::new("=", Action::Equals),
         ];
         let mut button_node_ids = [NodeId::default(); 20];
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION), |tree| {
                 tree.widget(&display);
             });

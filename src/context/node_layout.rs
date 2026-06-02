@@ -27,23 +27,25 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
-//! Retained widget tree module.
-//!
-//! The retained widget tree owns the long-lived UI structure. Composite nodes such as headers,
-//! tree nodes, and scroll areas store their child lists here and keep stable `NodeId`s
-//! across frames. Each frame the container uses the previous-frame cache for committed
-//! geometry/results, then traverses the retained nodes directly through the normal layout and
-//! widget paths.
+// -----------------------------------------------------------------------------
+//! Layout snapshot shared by context-owned UI node traversal.
 
-mod builder;
-mod cache;
-mod retained;
+use rs_math3d::{Dimensioni, Recti};
 
-pub use builder::{GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetTree, WidgetTreeBuilder};
-pub use retained::{widget_handle, WidgetHandle};
+/// Geometry resolved for a retained node in one frame.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct NodeLayout {
+    /// Outer rectangle assigned to the node.
+    pub rect: Recti,
+    /// Inner body rectangle, when the node exposes one.
+    pub body: Recti,
+    /// Content size produced while traversing the node's children.
+    pub content_size: Dimensioni,
+}
 
-pub(crate) use cache::NodeLayout;
-pub(crate) use retained::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
-
-#[cfg(test)]
-mod tests;
+impl NodeLayout {
+    /// Creates a layout snapshot for one node.
+    pub const fn new(rect: Recti, body: Recti, content_size: Dimensioni) -> Self {
+        Self { rect, body, content_size }
+    }
+}

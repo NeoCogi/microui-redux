@@ -77,7 +77,7 @@ impl<R: Renderer> Context<R> {
         kind: RootKind,
         name: &str,
         rect: Recti,
-        tree: WidgetTree,
+        tree: UiNodeSet,
         opt: ContainerOption,
         scroll_behavior: ScrollBehavior,
         visible: bool,
@@ -100,12 +100,12 @@ impl<R: Renderer> Context<R> {
             just_opened: false,
             active_chrome: None,
             z_index,
-            runtime: UiRuntime::from_widget_tree(tree),
+            runtime: UiRuntime::from_ui_nodes(tree),
         });
         id
     }
 
-    /// Creates a retained scroll-area handle for use with [`crate::WidgetTreeBuilder::scroll_area`].
+    /// Creates a retained scroll-area handle for use with [`crate::UiNodeBuilder::scroll_area`].
     pub fn new_scroll_area(&mut self, name: &str) -> ScrollAreaHandle {
         ScrollAreaHandle::new(ScrollArea::new(name))
     }
@@ -117,17 +117,17 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Registers an open retained window and returns its stable root identifier.
-    pub fn create_window(&mut self, name: &str, rect: Recti, tree: WidgetTree) -> RootId {
+    pub fn create_window(&mut self, name: &str, rect: Recti, tree: UiNodeSet) -> RootId {
         self.register_node_root(RootKind::Window, name, rect, tree, ContainerOption::NONE, ScrollBehavior::NONE, true)
     }
 
     /// Compatibility alias for the old transitional node-root constructor.
-    pub fn create_node_window(&mut self, name: &str, rect: Recti, tree: WidgetTree) -> RootId {
+    pub fn create_node_window(&mut self, name: &str, rect: Recti, tree: UiNodeSet) -> RootId {
         self.create_window(name, rect, tree)
     }
 
     /// Compatibility alias for the old transitional node-popup constructor.
-    pub fn create_node_popup(&mut self, name: &str, tree: WidgetTree) -> RootId {
+    pub fn create_node_popup(&mut self, name: &str, tree: UiNodeSet) -> RootId {
         self.create_popup(name, tree)
     }
 
@@ -192,12 +192,12 @@ impl<R: Renderer> Context<R> {
     }
 
     /// Registers a hidden dialog root.
-    pub fn create_dialog(&mut self, name: &str, rect: Recti, tree: WidgetTree) -> RootId {
+    pub fn create_dialog(&mut self, name: &str, rect: Recti, tree: UiNodeSet) -> RootId {
         self.register_node_root(RootKind::Dialog, name, rect, tree, ContainerOption::NONE, ScrollBehavior::NONE, false)
     }
 
     /// Registers a hidden popup root.
-    pub fn create_popup(&mut self, name: &str, tree: WidgetTree) -> RootId {
+    pub fn create_popup(&mut self, name: &str, tree: UiNodeSet) -> RootId {
         self.register_node_root(
             RootKind::Popup,
             name,
@@ -209,10 +209,10 @@ impl<R: Renderer> Context<R> {
         )
     }
 
-    /// Replaces the retained widget tree for a registered root.
-    pub fn set_root_tree(&mut self, root: RootId, tree: WidgetTree) {
+    /// Replaces the retained UI node set for a registered root.
+    pub fn set_root_nodes(&mut self, root: RootId, tree: UiNodeSet) {
         if let Some(entry) = self.node_roots.iter_mut().find(|entry| entry.id == root) {
-            entry.runtime.replace_widget_tree(tree);
+            entry.runtime.replace_ui_nodes(tree);
         }
     }
 

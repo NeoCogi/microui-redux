@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Stable numeric identifiers shared across windows, widgets, and retained trees.
+//! Stable numeric identifiers shared across windows, widgets, and retained nodes.
 
 use std::hash::{Hash, Hasher};
 
@@ -190,8 +190,8 @@ impl IdNamespace {
     pub(crate) const SCROLL_AREA_SCOPE: Self = Self::new(0x7061_6e65_6c5f_7363);
     /// Namespace used for internal widgets inside composite controls.
     pub(crate) const INTERNAL_CONTROL: Self = Self::new(0x696e_7465_726e_616c);
-    /// Namespace used for auto-generated retained tree nodes.
-    pub(crate) const WIDGET_TREE_BUILDER: Self = Self::new(0x7769_6467_6574_7472);
+    /// Namespace used for auto-generated UI nodes.
+    pub(crate) const UINODE_BUILDER: Self = Self::new(0x7769_6467_6574_7472);
     /// Namespace used for synthetic runtime root container nodes.
     pub(crate) const UINODE_ROOT: Self = Self::new(0x7569_6e6f_6465_726f);
 

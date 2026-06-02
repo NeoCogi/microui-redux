@@ -71,9 +71,9 @@
     clippy::wildcard_imports
 )]
 //! `microui-redux` provides a GUI toolkit inspired by [rxi/microui](https://github.com/rxi/microui).
-//! The crate uses retained [`WidgetTree`] values as the public UI authoring model while keeping Microui's
+//! The crate uses retained [`UiNodeSet`] values as the public UI authoring input while keeping Microui's
 //! compact frame-driven execution and renderer integration.
-//! It exposes the core context, retained widget tree builders, widget state types, renderer traits,
+//! It exposes the core context, retained node builders, widget state types, renderer traits,
 //! styles, and image APIs needed to embed a UI inside custom render backends while remaining
 //! allocator- and platform-agnostic.
 //! Built-in widget placement is driven by each widget's `measure` result, so auto-sized rows can use
@@ -108,12 +108,11 @@ mod text_layout;
 mod ui_node;
 mod widget;
 mod widget_ctx;
-mod widget_tree;
 pub mod widgets;
 
 /// Low-level renderer integration types.
 ///
-/// Most applications should use [`Context`] plus retained [`WidgetTree`] values. Backend authors
+/// Most applications should use [`Context`] plus retained [`UiNodeSet`] values. Backend authors
 /// and renderer smoke tests can use these types when they need direct access to the command canvas
 /// or the exact vertex payload delivered to [`Renderer`].
 pub mod backend {
@@ -138,7 +137,7 @@ pub mod retained {
     pub use crate::container::{CustomRenderArgs, CustomRenderCommand, ScrollAreaHandle, TextWrap};
     pub use crate::context::{Context, RootId};
     pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
-    pub use crate::widget_tree::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder};
+    pub use crate::context::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, UiNodeSet, UiNodeBuilder};
 }
 
 /// Common imports for retained UI applications.
@@ -159,7 +158,7 @@ pub mod prelude {
     pub use crate::render::{Renderer, RendererHandle};
     pub use crate::retained::{
         Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeBuilder, NodeId, NodeOptions, Policy, RetainedId, RootId,
-        ScrollAreaHandle, TextWrap, Widget, WidgetCtx, WidgetHandle, WidgetTree, WidgetTreeBuilder, widget_handle,
+        ScrollAreaHandle, TextWrap, Widget, WidgetCtx, WidgetHandle, UiNodeSet, UiNodeBuilder, widget_handle,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
@@ -177,7 +176,7 @@ pub use atlas::{
     FontId, IconId, OPEN_FOLDER_16_ICON, SlotId, SourceFormat, WHITE_ICON, load_image_bytes,
 };
 pub use container::{CustomRenderArgs, CustomRenderCommand, ScrollAreaHandle, TextWrap};
-pub use context::{Context, RootId};
+pub use context::{widget_handle, Context, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, RootId, WidgetHandle, UiNodeSet, UiNodeBuilder};
 pub use file_dialog::FileDialogState;
 pub use id::Id;
 pub use input::{
@@ -188,7 +187,6 @@ pub use layout::{SizePolicy, StackDirection};
 pub use render::{Renderer, RendererHandle};
 pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
 pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
-pub use widget_tree::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, WidgetTree, WidgetTreeBuilder};
 pub use widgets::{
     Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, Slider, TextArea, TextBlock, Textbox,
     WidgetConfig,

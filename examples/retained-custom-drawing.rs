@@ -156,7 +156,7 @@ fn main() {
     let renderer = RendererHandle::new(NoopRenderer { atlas: make_atlas() });
     let mut ctx = Context::new(renderer, Dimensioni::new(160, 100));
     let paint = widget_handle(RetainedPaint::new());
-    let tree = WidgetTreeBuilder::build(move |tree| {
+    let tree = UiNodeBuilder::build(move |tree| {
         tree.widget(&paint);
     });
     ctx.create_window("retained custom drawing", rect(12, 12, 132, 84), tree);

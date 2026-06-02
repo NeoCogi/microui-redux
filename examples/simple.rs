@@ -52,7 +52,7 @@
 //
 //! Minimal retained-mode application example.
 //!
-//! This example wires the common application runner to a small retained widget tree.
+//! This example wires the common application runner to a small retained UI node set.
 #[path = "./common/mod.rs"]
 mod common;
 
@@ -69,7 +69,7 @@ fn main() {
     let atlas = atlas_assets::load_atlas(&slots);
     let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
         let hello_button = widget_handle(Button::with_opt("Hello World!", WidgetOption::ALIGN_CENTER));
-        let tree = WidgetTreeBuilder::build({
+        let tree = UiNodeBuilder::build({
             let hello_button = hello_button.clone();
             move |tree| {
                 tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {

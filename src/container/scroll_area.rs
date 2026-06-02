@@ -53,7 +53,7 @@
 //! Retained scroll-area viewport state used by node-runtime scroll containers.
 
 use crate::{Dimensioni, Id, NodeId, Recti, RetainedId, Vec2i};
-use crate::widget_tree::NodeLayout;
+use crate::context::NodeLayout;
 
 /// Retained state for one scrollable child subtree.
 pub struct ScrollArea {

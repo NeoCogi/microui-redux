@@ -802,18 +802,18 @@ struct State {
     falloff_widget: WidgetHandle<FalloffEditor>,
     suzanne_widget: WidgetHandle<Custom>,
     background_swatch: WidgetHandle<ColorSwatch>,
-    style_tree: WidgetTree,
-    log_tree: WidgetTree,
-    typography_tree: WidgetTree,
-    triangle_tree: WidgetTree,
-    graphics_tree: WidgetTree,
-    falloff_tree: WidgetTree,
-    suzanne_tree: WidgetTree,
-    stack_direction_tree: WidgetTree,
-    weight_tree: WidgetTree,
-    demo_tree: WidgetTree,
-    combo_tree: WidgetTree,
-    popup_tree: WidgetTree,
+    style_tree: UiNodeSet,
+    log_tree: UiNodeSet,
+    typography_tree: UiNodeSet,
+    triangle_tree: UiNodeSet,
+    graphics_tree: UiNodeSet,
+    falloff_tree: UiNodeSet,
+    suzanne_tree: UiNodeSet,
+    stack_direction_tree: UiNodeSet,
+    weight_tree: UiNodeSet,
+    demo_tree: UiNodeSet,
+    combo_tree: UiNodeSet,
+    popup_tree: UiNodeSet,
 }
 
 impl State {
@@ -925,29 +925,29 @@ impl State {
         );
         typography_body.config.font = FontRole::Body.into();
         let style = Style::default().with_named_fonts(&ctx.canvas().get_atlas());
-        let demo_root = ctx.create_window("Demo Window", rect(40, 40, 300, 450), WidgetTree::default());
-        let style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), WidgetTree::default());
-        let log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), WidgetTree::default());
-        let combo_popup_root = ctx.create_node_popup("Combo Box Popup", WidgetTree::default());
+        let demo_root = ctx.create_window("Demo Window", rect(40, 40, 300, 450), UiNodeSet::default());
+        let style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), UiNodeSet::default());
+        let log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), UiNodeSet::default());
+        let combo_popup_root = ctx.create_node_popup("Combo Box Popup", UiNodeSet::default());
         ctx.set_root_options(
             combo_popup_root,
             ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
             ScrollBehavior::NO_SCROLL,
         );
-        let popup_root = ctx.create_node_popup("Test Popup", WidgetTree::default());
+        let popup_root = ctx.create_node_popup("Test Popup", UiNodeSet::default());
         ctx.set_root_options(
             popup_root,
             ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
             ScrollBehavior::NO_SCROLL,
         );
         ctx.set_root_visible(popup_root, false);
-        let typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), WidgetTree::default());
-        let triangle_root = ctx.create_window("Triangle Window", rect(200, 100, 200, 200), WidgetTree::default());
-        let graphics_root = ctx.create_window("Graphics Window", rect(820, 40, 280, 240), WidgetTree::default());
-        let falloff_root = ctx.create_window("Brush Falloff", rect(820, 300, 320, 260), WidgetTree::default());
-        let suzanne_root = ctx.create_window("Suzanne Window", rect(220, 220, 300, 300), WidgetTree::default());
-        let stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), WidgetTree::default());
-        let weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), WidgetTree::default());
+        let typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), UiNodeSet::default());
+        let triangle_root = ctx.create_window("Triangle Window", rect(200, 100, 200, 200), UiNodeSet::default());
+        let graphics_root = ctx.create_window("Graphics Window", rect(820, 40, 280, 240), UiNodeSet::default());
+        let falloff_root = ctx.create_window("Brush Falloff", rect(820, 300, 320, 260), UiNodeSet::default());
+        let suzanne_root = ctx.create_window("Suzanne Window", rect(220, 220, 300, 300), UiNodeSet::default());
+        let stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), UiNodeSet::default());
+        let weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), UiNodeSet::default());
         let mut state = Self {
             renderer,
             bg: [90.0, 95.0, 100.0],
@@ -1098,23 +1098,23 @@ impl State {
             falloff_widget: widget_handle(FalloffEditor::new()),
             suzanne_widget: widget_handle(Custom::with_opt("Suzanne", WidgetOption::HOLD_FOCUS, ScrollBehavior::GRAB_SCROLL)),
             background_swatch: widget_handle(ColorSwatch::new(color(90, 95, 100, 0xFF))),
-            style_tree: WidgetTree::default(),
-            log_tree: WidgetTree::default(),
-            typography_tree: WidgetTree::default(),
-            triangle_tree: WidgetTree::default(),
-            graphics_tree: WidgetTree::default(),
-            falloff_tree: WidgetTree::default(),
-            suzanne_tree: WidgetTree::default(),
-            stack_direction_tree: WidgetTree::default(),
-            weight_tree: WidgetTree::default(),
-            demo_tree: WidgetTree::default(),
-            combo_tree: WidgetTree::default(),
-            popup_tree: WidgetTree::default(),
+            style_tree: UiNodeSet::default(),
+            log_tree: UiNodeSet::default(),
+            typography_tree: UiNodeSet::default(),
+            triangle_tree: UiNodeSet::default(),
+            graphics_tree: UiNodeSet::default(),
+            falloff_tree: UiNodeSet::default(),
+            suzanne_tree: UiNodeSet::default(),
+            stack_direction_tree: UiNodeSet::default(),
+            weight_tree: UiNodeSet::default(),
+            demo_tree: UiNodeSet::default(),
+            combo_tree: UiNodeSet::default(),
+            popup_tree: UiNodeSet::default(),
         };
         state.sync_background_controls_from_bg();
         state.sync_style_controls_from_style();
         state.rebuild_trees();
-        state.install_root_trees(ctx);
+        state.install_root_nodes(ctx);
         state
     }
 
@@ -1148,19 +1148,19 @@ impl State {
         self.style_value_sliders[4].update(|slider| slider.set_value(self.style.scrollbar_size as Real));
     }
 
-    fn install_root_trees(&mut self, ctx: &mut Context<BackendRenderer>) {
-        ctx.set_root_tree(self.style_root, mem::take(&mut self.style_tree));
-        ctx.set_root_tree(self.log_root, mem::take(&mut self.log_tree));
-        ctx.set_root_tree(self.typography_root, mem::take(&mut self.typography_tree));
-        ctx.set_root_tree(self.triangle_root, mem::take(&mut self.triangle_tree));
-        ctx.set_root_tree(self.graphics_root, mem::take(&mut self.graphics_tree));
-        ctx.set_root_tree(self.falloff_root, mem::take(&mut self.falloff_tree));
-        ctx.set_root_tree(self.suzanne_root, mem::take(&mut self.suzanne_tree));
-        ctx.set_root_tree(self.stack_direction_root, mem::take(&mut self.stack_direction_tree));
-        ctx.set_root_tree(self.weight_root, mem::take(&mut self.weight_tree));
-        ctx.set_root_tree(self.demo_root, mem::take(&mut self.demo_tree));
-        ctx.set_root_tree(self.combo_popup_root, mem::take(&mut self.combo_tree));
-        ctx.set_root_tree(self.popup_root, mem::take(&mut self.popup_tree));
+    fn install_root_nodes(&mut self, ctx: &mut Context<BackendRenderer>) {
+        ctx.set_root_nodes(self.style_root, mem::take(&mut self.style_tree));
+        ctx.set_root_nodes(self.log_root, mem::take(&mut self.log_tree));
+        ctx.set_root_nodes(self.typography_root, mem::take(&mut self.typography_tree));
+        ctx.set_root_nodes(self.triangle_root, mem::take(&mut self.triangle_tree));
+        ctx.set_root_nodes(self.graphics_root, mem::take(&mut self.graphics_tree));
+        ctx.set_root_nodes(self.falloff_root, mem::take(&mut self.falloff_tree));
+        ctx.set_root_nodes(self.suzanne_root, mem::take(&mut self.suzanne_tree));
+        ctx.set_root_nodes(self.stack_direction_root, mem::take(&mut self.stack_direction_tree));
+        ctx.set_root_nodes(self.weight_root, mem::take(&mut self.weight_tree));
+        ctx.set_root_nodes(self.demo_root, mem::take(&mut self.demo_tree));
+        ctx.set_root_nodes(self.combo_popup_root, mem::take(&mut self.combo_tree));
+        ctx.set_root_nodes(self.popup_root, mem::take(&mut self.popup_tree));
     }
 
     fn write_log(&mut self, text: &str) {
@@ -1174,7 +1174,7 @@ impl State {
         self.logbuf_updated = true;
     }
 
-    fn section(tree: &mut WidgetTreeBuilder, node: &WidgetHandle<Node>, f: impl FnOnce(&mut WidgetTreeBuilder)) {
+    fn section(tree: &mut UiNodeBuilder, node: &WidgetHandle<Node>, f: impl FnOnce(&mut UiNodeBuilder)) {
         tree.header(node, f);
     }
 
@@ -1182,7 +1182,7 @@ impl State {
         results.state_of_retained(RetainedId::root_node(root, node_id)).is_submitted()
     }
 
-    fn remember_widget<W: Widget + 'static>(tree: &mut WidgetTreeBuilder, slot: &mut NodeId, handle: &WidgetHandle<W>) {
+    fn remember_widget<W: Widget + 'static>(tree: &mut UiNodeBuilder, slot: &mut NodeId, handle: &WidgetHandle<W>) {
         *slot = tree.widget(handle);
     }
 
@@ -1192,7 +1192,7 @@ impl State {
         let style_color_swatches = self.style_color_swatches.clone();
         let style_metric_labels = self.style_metric_labels.clone();
         let style_value_sliders = self.style_value_sliders.clone();
-        self.style_tree = WidgetTreeBuilder::build(move |tree| {
+        self.style_tree = UiNodeBuilder::build(move |tree| {
             let color_row = [
                 SizePolicy::Fixed(80),
                 SizePolicy::Weight(1.0),
@@ -1232,7 +1232,7 @@ impl State {
         let submit_button = self.submit_button.clone();
         let mut submit_buf_id = NodeId::default();
         let mut submit_button_id = NodeId::default();
-        self.log_tree = WidgetTreeBuilder::build(|tree| {
+        self.log_tree = UiNodeBuilder::build(|tree| {
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
                 tree.scroll_area(&log_output, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
@@ -1250,7 +1250,7 @@ impl State {
         let typography_heading = self.typography_heading.clone();
         let typography_body = self.typography_body.clone();
         let typography_button = self.typography_button.clone();
-        self.typography_tree = WidgetTreeBuilder::build(move |tree| {
+        self.typography_tree = UiNodeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                 tree.widget(&typography_heading);
                 tree.widget(&typography_body);
@@ -1262,7 +1262,7 @@ impl State {
         let triangle_data = self.triangle_data.clone();
         let renderer = self.renderer.clone();
         let white_uv = self.white_uv;
-        self.triangle_tree = WidgetTreeBuilder::build(move |tree| {
+        self.triangle_tree = UiNodeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
                 let triangle_data = triangle_data.clone();
                 let renderer = renderer.clone();
@@ -1287,7 +1287,7 @@ impl State {
         let suzanne_widget = self.suzanne_widget.clone();
         let suzanne_data = self.suzanne_data.clone();
         let renderer = self.renderer.clone();
-        self.suzanne_tree = WidgetTreeBuilder::build(move |tree| {
+        self.suzanne_tree = UiNodeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
                 let suzanne_data = suzanne_data.clone();
                 let renderer = renderer.clone();
@@ -1353,14 +1353,14 @@ impl State {
         });
 
         let graphics_widget = self.graphics_widget.clone();
-        self.graphics_tree = WidgetTreeBuilder::build(move |tree| {
+        self.graphics_tree = UiNodeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
                 tree.widget(&graphics_widget);
             });
         });
 
         let falloff_widget = self.falloff_widget.clone();
-        self.falloff_tree = WidgetTreeBuilder::build(move |tree| {
+        self.falloff_tree = UiNodeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
                 tree.widget(&falloff_widget);
             });
@@ -1369,7 +1369,7 @@ impl State {
         let stack_direction_labels = self.stack_direction_labels.clone();
         let stack_direction_buttons = self.stack_direction_buttons.clone();
         let mut stack_direction_button_ids = [NodeId::default(); 6];
-        self.stack_direction_tree = WidgetTreeBuilder::build(|tree| {
+        self.stack_direction_tree = UiNodeBuilder::build(|tree| {
             let columns = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
             let [label_top, label_bottom] = stack_direction_labels.clone();
             let [button_top_0, button_top_1, button_top_2, button_bottom_0, button_bottom_1, button_bottom_2] = stack_direction_buttons.clone();
@@ -1399,7 +1399,7 @@ impl State {
         let weight_labels = self.weight_labels.clone();
         let weight_buttons = self.weight_buttons.clone();
         let mut weight_button_ids = [NodeId::default(); 9];
-        self.weight_tree = WidgetTreeBuilder::build(|tree| {
+        self.weight_tree = UiNodeBuilder::build(|tree| {
             let [row_weight_label, grid_weight_label] = weight_labels.clone();
             let [
                 button_row_0,
@@ -1443,7 +1443,7 @@ impl State {
 
         let combo_items = self.combo_items.clone();
         let mut combo_item_ids = [NodeId::default(); 4];
-        self.combo_tree = WidgetTreeBuilder::build(|tree| {
+        self.combo_tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                 for (index, item) in combo_items.iter().enumerate() {
                     Self::remember_widget(tree, &mut combo_item_ids[index], item);
@@ -1454,7 +1454,7 @@ impl State {
 
         let popup_buttons = self.popup_buttons.clone();
         let mut popup_button_ids = [NodeId::default(); 2];
-        self.popup_tree = WidgetTreeBuilder::build(|tree| {
+        self.popup_tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                 for (index, button) in popup_buttons.iter().enumerate() {
                     Self::remember_widget(tree, &mut popup_button_ids[index], button);
@@ -1491,7 +1491,7 @@ impl State {
         let external_image_button = self.external_image_button.clone();
         let mut test_button_ids = [NodeId::default(); 6];
         let mut tree_button_ids = [NodeId::default(); 6];
-        self.demo_tree = WidgetTreeBuilder::build(|tree| {
+        self.demo_tree = UiNodeBuilder::build(|tree| {
             let window_info_row = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
             let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
             let tree_widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];

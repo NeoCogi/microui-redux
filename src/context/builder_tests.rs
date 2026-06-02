@@ -1,4 +1,4 @@
-//! Tests for retained widget-tree building and identity behavior.
+//! Tests for retained UI node building and identity behavior.
 
 use crate::{Button, ScrollArea, ScrollAreaHandle, SizePolicy};
 use crate::ui_node::UiNodeData;
@@ -10,12 +10,12 @@ fn unkeyed_widget_ids_are_stable_for_same_shape() {
     let button_a = widget_handle(Button::new("A"));
     let button_b = widget_handle(Button::new("B"));
 
-    let tree_a = WidgetTreeBuilder::build(|builder| {
+    let tree_a = UiNodeBuilder::build(|builder| {
         builder.widget(button_a.clone());
         builder.widget(button_b.clone());
     });
     let tree_a_ids: Vec<NodeId> = tree_a.roots().to_vec();
-    let tree_b = WidgetTreeBuilder::build(|builder| {
+    let tree_b = UiNodeBuilder::build(|builder| {
         builder.widget(button_a.clone());
         builder.widget(button_b.clone());
     });
@@ -30,12 +30,12 @@ fn keyed_widgets_keep_ids_across_reorder() {
     let button_a = widget_handle(Button::new("A"));
     let button_b = widget_handle(Button::new("B"));
 
-    let tree_a = WidgetTreeBuilder::build(|builder| {
+    let tree_a = UiNodeBuilder::build(|builder| {
         builder.node(NodeOptions::keyed("a")).widget(button_a.clone());
         builder.node(NodeOptions::keyed("b")).widget(button_b.clone());
     });
     let ids_a: Vec<NodeId> = tree_a.roots().to_vec();
-    let tree_b = WidgetTreeBuilder::build(|builder| {
+    let tree_b = UiNodeBuilder::build(|builder| {
         builder.node(NodeOptions::keyed("b")).widget(button_b.clone());
         builder.node(NodeOptions::keyed("a")).widget(button_a.clone());
     });
@@ -51,13 +51,13 @@ fn inserting_keyed_widget_does_not_shift_later_unkeyed_ids() {
     let button_b = widget_handle(Button::new("B"));
     let keyed = widget_handle(Button::new("keyed"));
 
-    let tree_a = WidgetTreeBuilder::build(|builder| {
+    let tree_a = UiNodeBuilder::build(|builder| {
         builder.widget(button_a.clone());
         builder.widget(button_b.clone());
     });
     let ids_a: Vec<NodeId> = tree_a.roots().to_vec();
 
-    let tree_b = WidgetTreeBuilder::build(|builder| {
+    let tree_b = UiNodeBuilder::build(|builder| {
         builder.widget(button_a.clone());
         builder.node(NodeOptions::keyed("inserted")).widget(keyed.clone());
         builder.widget(button_b.clone());
@@ -74,7 +74,7 @@ fn duplicate_keyed_sibling_ids_are_rejected_at_build_time() {
     let button_a = widget_handle(Button::new("A"));
     let button_b = widget_handle(Button::new("B"));
 
-    WidgetTreeBuilder::build(|builder| {
+    UiNodeBuilder::build(|builder| {
         builder.node(NodeOptions::keyed("same")).widget(&button_a);
         builder.node(NodeOptions::keyed("same")).widget(&button_b);
     });
@@ -87,7 +87,7 @@ fn matching_child_keys_in_different_scopes_remain_distinct() {
     let mut first_child = NodeId::default();
     let mut second_child = NodeId::default();
 
-    WidgetTreeBuilder::build(|builder| {
+    UiNodeBuilder::build(|builder| {
         builder.row(&[SizePolicy::Auto], SizePolicy::Auto, |builder| {
             first_child = builder.node(NodeOptions::keyed("same")).widget(&button_a);
         });
@@ -104,7 +104,7 @@ fn row_nodes_capture_children_and_track_policy() {
     let button_a = widget_handle(Button::new("A"));
     let button_b = widget_handle(Button::new("B"));
 
-    let tree = WidgetTreeBuilder::build(|builder| {
+    let tree = UiNodeBuilder::build(|builder| {
         builder
             .node(NodeOptions::with_policy(Policy::fill()))
             .row(&[SizePolicy::Fixed(40), SizePolicy::Remainder(0)], SizePolicy::Fixed(24), |builder| {
@@ -125,7 +125,7 @@ fn scroll_area_nodes_store_handle_and_children() {
     let handle = ScrollAreaHandle::new(ScrollArea::new("scroll area"));
     let leaf = widget_handle((crate::WidgetOption::NONE, crate::ScrollBehavior::NONE));
 
-    let tree = WidgetTreeBuilder::build(|builder| {
+    let tree = UiNodeBuilder::build(|builder| {
         builder.node(NodeOptions::with_policy(Policy::fill())).scroll_area(
             handle.clone(),
             crate::ContainerOption::NONE,
@@ -143,7 +143,7 @@ fn scroll_area_nodes_store_handle_and_children() {
 
 #[test]
 fn text_nodes_are_recorded_as_widgets() {
-    let tree = WidgetTreeBuilder::build(|builder| {
+    let tree = UiNodeBuilder::build(|builder| {
         builder.text("hello");
     });
 

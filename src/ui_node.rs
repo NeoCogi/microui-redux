@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use crate::{
     expand_rect, Canvas, ControlColor, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Id, Input, InputSnapshot, KeyCode, KeyMode, GridSpan,
-    MouseButton, MouseEvent, Node, Recti, Renderer, RetainedId, StackDirection, Style, UNCLIPPED_RECT, Vec2i, Vertex, WidgetHandle, WidgetTree,
+    MouseButton, MouseEvent, Node, Recti, Renderer, RetainedId, StackDirection, Style, UNCLIPPED_RECT, Vec2i, Vertex, WidgetHandle, UiNodeSet,
 };
 use crate::container::{render_command_stream, Command, ScrollAreaHandle};
 use crate::draw_context::DrawCtx;
@@ -20,7 +20,7 @@ use crate::layout::SizePolicy;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::widget::FocusPolicy;
 use crate::widget_ctx::WidgetCtx;
-use crate::widget_tree::{erased_widget_state, NodeLayout, TreeCustomRender, WidgetStateHandleDyn};
+use crate::context::{erased_widget_state, NodeLayout, TreeCustomRender, WidgetStateHandleDyn};
 
 /// Command wrapper that lets node-runtime custom render callbacks enter the backend stream.
 struct NodeCustomRenderCommand {
@@ -265,8 +265,8 @@ impl UiRuntime {
         Self::default()
     }
 
-    /// Builds runtime nodes by consuming a retained widget tree.
-    pub(crate) fn from_widget_tree(tree: WidgetTree) -> Self {
+    /// Builds runtime nodes by consuming a retained UI node set.
+    pub(crate) fn from_ui_nodes(tree: UiNodeSet) -> Self {
         let (roots, nodes) = tree.into_parts();
         let mut runtime = Self::new();
         let root_window = runtime_root_id();
@@ -299,9 +299,9 @@ impl UiRuntime {
         runtime
     }
 
-    /// Replaces all runtime nodes by consuming a fresh retained tree.
-    pub(crate) fn replace_widget_tree(&mut self, tree: WidgetTree) {
-        *self = Self::from_widget_tree(tree);
+    /// Replaces all runtime nodes by consuming a fresh retained nodes.
+    pub(crate) fn replace_ui_nodes(&mut self, tree: UiNodeSet) {
+        *self = Self::from_ui_nodes(tree);
     }
 
     /// Moves focus to a node in this runtime.
@@ -2422,20 +2422,20 @@ mod tests {
 
     use crate::{
         color4b, rect, AtlasHandle, AtlasSource, Button, Canvas, CharEntry, Custom, FontEntry, Image, Input, ListItem, Policy, RendererHandle,
-        ScrollArea as LegacyScrollArea, ScrollAreaHandle, SourceFormat, Textbox, WidgetFillOption, WidgetTreeBuilder, widget_handle,
+        ScrollArea as LegacyScrollArea, ScrollAreaHandle, SourceFormat, Textbox, WidgetFillOption, UiNodeBuilder, widget_handle,
     };
     use crate::test_support::{test_atlas, NoopRenderer};
 
     #[test]
-    fn widget_tree_conversion_keeps_container_children_off_leaf_widgets() {
+    fn ui_node_set_conversion_keeps_container_children_off_leaf_widgets() {
         let button = widget_handle(Button::new("child"));
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             tree.node(crate::NodeOptions::with_policy(Policy::fixed(10, 20))).column(|tree| {
                 tree.widget(button.clone());
             });
         });
 
-        let runtime = UiRuntime::from_widget_tree(tree);
+        let runtime = UiRuntime::from_ui_nodes(tree);
         let root = runtime.roots[0];
         let root_node = runtime.nodes.get(&root).expect("root node missing");
         let column = root_node.children()[0];
@@ -2503,12 +2503,12 @@ mod tests {
     #[test]
     fn node_window_chrome_offsets_layout_body() {
         let button = widget_handle(Button::new("bbbb"));
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
                 tree.widget(button.clone());
             });
         });
-        let mut runtime = UiRuntime::from_widget_tree(tree);
+        let mut runtime = UiRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(400, 500));
@@ -2543,7 +2543,7 @@ mod tests {
         let display = widget_handle(Textbox::with_opt("0", WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT));
         let buttons: Vec<_> = (0..20).map(|_| widget_handle(Button::new("b"))).collect();
         let button_ids = std::cell::RefCell::new(Vec::new());
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Fraction(0.20), |tree| {
                 tree.widget(&display);
             });
@@ -2559,7 +2559,7 @@ mod tests {
                 });
             });
         });
-        let mut runtime = UiRuntime::from_widget_tree(tree);
+        let mut runtime = UiRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(320, 420));
@@ -2596,7 +2596,7 @@ mod tests {
         let right = widget_handle(Button::with_opt("Popup", WidgetOption::ALIGN_CENTER));
         let mut middle_id = Id::new(0);
         let mut right_id = Id::new(0);
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             let widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
             tree.row(&widths, SizePolicy::Auto, |tree| {
                 tree.widget(&label);
@@ -2604,7 +2604,7 @@ mod tests {
                 right_id = tree.widget(&right);
             });
         });
-        let mut runtime = UiRuntime::from_widget_tree(tree);
+        let mut runtime = UiRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(320, 120));
@@ -2635,7 +2635,7 @@ mod tests {
     fn node_content_size_includes_nested_stack_overflow() {
         let small = widget_handle(Button::new("slot"));
         let image = widget_handle(Button::new("image"));
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(67), StackDirection::TopToBottom, |tree| {
                 tree.widget(&small);
                 tree.stack(SizePolicy::Fixed(256), SizePolicy::Fixed(256), StackDirection::TopToBottom, |tree| {
@@ -2643,7 +2643,7 @@ mod tests {
                 });
             });
         });
-        let mut runtime = UiRuntime::from_widget_tree(tree);
+        let mut runtime = UiRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(320, 160));
@@ -2676,7 +2676,7 @@ mod tests {
         let first = widget_handle(Button::new("first"));
         let rest: Vec<_> = (0..5).map(|_| widget_handle(Button::new("row"))).collect();
         let mut first_id = Id::new(0);
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             tree.node(crate::NodeOptions::with_policy(Policy::fixed(120, 48)))
                 .scroll_area(&scroll_area, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(24), StackDirection::TopToBottom, |tree| {
@@ -2688,7 +2688,7 @@ mod tests {
                 });
         });
         scroll_area.with_mut(|area| area.set_scroll(Vec2i::new(0, 36)));
-        let mut runtime = UiRuntime::from_widget_tree(tree);
+        let mut runtime = UiRuntime::from_ui_nodes(tree);
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(180, 100));
         let mut results = FrameResults::default();
@@ -2718,14 +2718,14 @@ mod tests {
     #[test]
     fn node_root_scrollbar_view_is_stable_for_identical_size() {
         let buttons: Vec<_> = (0..6).map(|_| widget_handle(Button::new("wide row"))).collect();
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Fixed(150), SizePolicy::Fixed(24), StackDirection::TopToBottom, |tree| {
                 for button in &buttons {
                     tree.widget(button);
                 }
             });
         });
-        let mut runtime = UiRuntime::from_widget_tree(tree);
+        let mut runtime = UiRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(220, 160));
@@ -2774,12 +2774,12 @@ mod tests {
     fn node_root_full_viewport_custom_render_does_not_overflow_from_padding() {
         let custom = widget_handle(Custom::new("viewport"));
         let mut custom_id = Id::new(0);
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
                 custom_id = tree.custom_render(&custom, |_dim, _args| {});
             });
         });
-        let mut runtime = UiRuntime::from_widget_tree(tree);
+        let mut runtime = UiRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(220, 160));
@@ -2858,11 +2858,11 @@ mod tests {
         ));
         let filler = widget_handle(Button::new("filler"));
         let mut slot_id = Id::new(0);
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 180))).widget(filler.clone());
             slot_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 40))).widget(slot_button.clone());
         });
-        let mut runtime = UiRuntime::from_widget_tree(tree);
+        let mut runtime = UiRuntime::from_ui_nodes(tree);
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(140, 80));
         let mut style = Style::default();
@@ -2948,12 +2948,12 @@ mod tests {
             WidgetFillOption::ALL,
         ));
         let mut button_id = Id::new(0);
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                 button_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed_width(48))).widget(&button);
             });
         });
-        let mut runtime = UiRuntime::from_widget_tree(tree);
+        let mut runtime = UiRuntime::from_ui_nodes(tree);
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(200, 140));
         let style = Style::default();
@@ -3011,12 +3011,12 @@ mod tests {
         let slot = atlas.clone_slot_table()[0];
         let button = widget_handle(Button::with_image("image", Some(Image::Slot(slot)), WidgetOption::NONE, WidgetFillOption::ALL));
         let mut button_id = Id::new(0);
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                 button_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed_width(256))).widget(&button);
             });
         });
-        let mut runtime = UiRuntime::from_widget_tree(tree);
+        let mut runtime = UiRuntime::from_ui_nodes(tree);
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(300, 160));
         let style = Style::default();
@@ -3048,7 +3048,7 @@ mod tests {
         let mut first_id = Id::new(0);
         let mut second_id = Id::new(0);
         let mut third_id = Id::new(0);
-        let tree = WidgetTreeBuilder::build(|tree| {
+        let tree = UiNodeBuilder::build(|tree| {
             let columns = [SizePolicy::Fixed(40), SizePolicy::Fixed(50), SizePolicy::Fixed(60)];
             let rows = [SizePolicy::Fixed(20), SizePolicy::Fixed(20)];
             tree.grid(&columns, &rows, |tree| {
@@ -3057,7 +3057,7 @@ mod tests {
                 third_id = tree.node(crate::NodeOptions::with_policy(Policy::fill())).widget(third.clone());
             });
         });
-        let mut runtime = UiRuntime::from_widget_tree(tree);
+        let mut runtime = UiRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(220, 80));

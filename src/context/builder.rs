@@ -28,7 +28,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 // -----------------------------------------------------------------------------
-//! Builder APIs for assembling retained widget trees with stable IDs.
+//! Builder APIs for assembling retained UI node sets with stable IDs.
 
 use std::{cell::RefCell, collections::HashMap, hash::Hash, rc::Rc};
 
@@ -111,17 +111,17 @@ impl Policy {
     }
 }
 
-/// Completed retained widget tree.
+/// Completed retained UI node set.
 #[derive(Default)]
-pub struct WidgetTree {
+pub struct UiNodeSet {
     /// Root node ids submitted to the context.
     roots: Vec<UiNodeId>,
-    /// Runtime nodes owned by the retained tree.
+    /// Runtime nodes owned by the retained nodes.
     nodes: HashMap<UiNodeId, UiNode>,
 }
 
-impl WidgetTree {
-    /// Returns the root ids of the tree.
+impl UiNodeSet {
+    /// Returns the root ids in this set.
     pub fn roots(&self) -> &[UiNodeId] {
         &self.roots
     }
@@ -250,15 +250,15 @@ fn hash_builder_key<K: Hash>(key: K) -> u64 {
     hash_id_key(key)
 }
 
-/// Builder that creates a retained widget tree.
+/// Builder that creates a retained UI node set.
 ///
 /// Unkeyed methods derive IDs from the order of other unkeyed siblings and
 /// remain stable only while that unkeyed structure stays in the same order.
 /// Keyed nodes use a separate identity path and do not advance the unkeyed
 /// sibling counter, so inserting a keyed node does not shift later unkeyed IDs.
-/// Use [`WidgetTreeBuilder::node`] together with [`NodeOptions::keyed`] for dynamic or
+/// Use [`UiNodeBuilder::node`] together with [`NodeOptions::keyed`] for dynamic or
 /// reorderable children.
-pub struct WidgetTreeBuilder {
+pub struct UiNodeBuilder {
     /// Stack of open builder scopes.
     frames: Vec<BuilderFrame>,
     /// Nodes emitted by the builder, keyed by stable id.
@@ -268,7 +268,7 @@ pub struct WidgetTreeBuilder {
 /// Builder adapter that applies one [`NodeOptions`] value to the next inserted node.
 pub struct NodeBuilder<'a> {
     /// Builder receiving the next node.
-    builder: &'a mut WidgetTreeBuilder,
+    builder: &'a mut UiNodeBuilder,
     /// Options consumed by the next insertion.
     options: NodeOptions,
 }
@@ -293,50 +293,50 @@ impl<'a> NodeBuilder<'a> {
         handle: impl Into<ScrollAreaHandle>,
         opt: ContainerOption,
         scroll_behavior: ScrollBehavior,
-        f: impl FnOnce(&mut WidgetTreeBuilder),
+        f: impl FnOnce(&mut UiNodeBuilder),
     ) -> NodeId {
         self.builder.insert_scroll_area(self.options, handle, opt, scroll_behavior, f)
     }
 
     /// Adds a collapsible header node.
-    pub fn header(self, state: impl Into<WidgetHandle<Node>>, f: impl FnOnce(&mut WidgetTreeBuilder)) -> NodeId {
+    pub fn header(self, state: impl Into<WidgetHandle<Node>>, f: impl FnOnce(&mut UiNodeBuilder)) -> NodeId {
         self.builder.insert_header(self.options, state, f)
     }
 
     /// Adds a tree node that indents its children while expanded.
-    pub fn tree_node(self, state: impl Into<WidgetHandle<Node>>, f: impl FnOnce(&mut WidgetTreeBuilder)) -> NodeId {
+    pub fn tree_node(self, state: impl Into<WidgetHandle<Node>>, f: impl FnOnce(&mut UiNodeBuilder)) -> NodeId {
         self.builder.insert_tree_node(self.options, state, f)
     }
 
     /// Adds a row flow group.
-    pub fn row(self, widths: &[SizePolicy], height: SizePolicy, f: impl FnOnce(&mut WidgetTreeBuilder)) -> NodeId {
+    pub fn row(self, widths: &[SizePolicy], height: SizePolicy, f: impl FnOnce(&mut UiNodeBuilder)) -> NodeId {
         self.builder.insert_row(self.options, widths, height, f)
     }
 
     /// Adds a grid flow group.
-    pub fn grid(self, widths: &[SizePolicy], heights: &[SizePolicy], f: impl FnOnce(&mut WidgetTreeBuilder)) -> NodeId {
+    pub fn grid(self, widths: &[SizePolicy], heights: &[SizePolicy], f: impl FnOnce(&mut UiNodeBuilder)) -> NodeId {
         self.builder.insert_grid(self.options, widths, heights, f)
     }
 
     /// Adds a nested column scope.
-    pub fn column(self, f: impl FnOnce(&mut WidgetTreeBuilder)) -> NodeId {
+    pub fn column(self, f: impl FnOnce(&mut UiNodeBuilder)) -> NodeId {
         self.builder.insert_column(self.options, f)
     }
 
     /// Adds a stack scope.
-    pub fn stack(self, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: impl FnOnce(&mut WidgetTreeBuilder)) -> NodeId {
+    pub fn stack(self, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: impl FnOnce(&mut UiNodeBuilder)) -> NodeId {
         self.builder.insert_stack(self.options, width, height, direction, f)
     }
 }
 
-impl Default for WidgetTreeBuilder {
+impl Default for UiNodeBuilder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl WidgetTreeBuilder {
-    /// Default root seed used by [`WidgetTreeBuilder::new`].
+impl UiNodeBuilder {
+    /// Default root seed used by [`UiNodeBuilder::new`].
     pub const DEFAULT_ROOT_SEED: u64 = 0x9e37_79b9_7f4a_7c15;
 
     /// Creates an empty builder with a root scope.
@@ -352,26 +352,26 @@ impl WidgetTreeBuilder {
         }
     }
 
-    /// Builds a retained tree by executing `f` within a fresh builder.
-    pub fn build(f: impl FnOnce(&mut Self)) -> WidgetTree {
+    /// Builds retained nodes by executing `f` within a fresh builder.
+    pub fn build(f: impl FnOnce(&mut Self)) -> UiNodeSet {
         let mut builder = Self::new();
         f(&mut builder);
         builder.finish()
     }
 
-    /// Builds a retained tree whose root IDs are derived from `seed`.
-    pub fn build_with_seed(seed: u64, f: impl FnOnce(&mut Self)) -> WidgetTree {
+    /// Builds a retained nodes whose root IDs are derived from `seed`.
+    pub fn build_with_seed(seed: u64, f: impl FnOnce(&mut Self)) -> UiNodeSet {
         let mut builder = Self::with_seed(seed);
         f(&mut builder);
         builder.finish()
     }
 
-    /// Finishes the builder and returns the resulting tree.
-    pub fn finish(mut self) -> WidgetTree {
-        debug_assert_eq!(self.frames.len(), 1, "widget tree builder scopes must be balanced");
+    /// Finishes the builder and returns the resulting node set.
+    pub fn finish(mut self) -> UiNodeSet {
+        debug_assert_eq!(self.frames.len(), 1, "ui node builder scopes must be balanced");
         let frame = self.frames.pop().expect("root frame missing");
         Self::validate_unique_node_ids(&frame.nodes);
-        WidgetTree { roots: frame.nodes, nodes: self.nodes }
+        UiNodeSet { roots: frame.nodes, nodes: self.nodes }
     }
 
     /// Applies `options` to the next inserted node.
@@ -594,7 +594,7 @@ impl WidgetTreeBuilder {
         // Leaf nodes have no child frame; they become siblings in the current frame directly.
         if self.nodes.contains_key(&id) {
             panic!(
-                "duplicate retained node id {:?} in WidgetTreeBuilder output. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
+                "duplicate retained node id {:?} in UiNodeBuilder output. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
                 id
             );
         }
@@ -618,7 +618,7 @@ impl WidgetTreeBuilder {
         let node = UiNode::new(id, parent, options.policy, options.grid_span, data);
         if self.nodes.contains_key(&id) {
             panic!(
-                "duplicate retained node id {:?} in WidgetTreeBuilder output. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
+                "duplicate retained node id {:?} in UiNodeBuilder output. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
                 id
             );
         }
@@ -647,17 +647,17 @@ impl WidgetTreeBuilder {
             }
             None => (0, ordinal.expect("unkeyed ordinal missing")),
         };
-        IdNamespace::WIDGET_TREE_BUILDER.id([frame.scope_seed, tag as u64, key_kind, key_value])
+        IdNamespace::UINODE_BUILDER.id([frame.scope_seed, tag as u64, key_kind, key_value])
     }
 
     /// Returns the frame currently receiving new nodes.
     fn current_frame_mut(&mut self) -> &mut BuilderFrame {
-        self.frames.last_mut().expect("widget tree builder frame missing")
+        self.frames.last_mut().expect("ui node builder frame missing")
     }
 
     /// Returns the frame currently receiving new nodes.
     fn current_frame(&self) -> &BuilderFrame {
-        self.frames.last().expect("widget tree builder frame missing")
+        self.frames.last().expect("ui node builder frame missing")
     }
 
     /// Rejects duplicate retained IDs before a tree can enter runtime traversal.
@@ -672,7 +672,7 @@ impl WidgetTreeBuilder {
             let path = format!("{parent_path}/{index}:{}", node_id.raw());
             if let Some(first_path) = seen.insert(*node_id, path.clone()) {
                 panic!(
-                    "duplicate retained node id {:?} in WidgetTreeBuilder output; first node: {}; duplicate node: {}. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
+                    "duplicate retained node id {:?} in UiNodeBuilder output; first node: {}; duplicate node: {}. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
                     node_id, first_path, path
                 );
             }

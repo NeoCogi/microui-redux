@@ -137,7 +137,7 @@ pub trait Widget {
 /// Retained interaction identity used by focus, hover, and frame results.
 ///
 /// Normal retained traversal uses `Node` identities. `Root` is available for root-level results
-/// and future framework controls that do not naturally belong to a widget-tree node.
+/// and future framework controls that do not naturally belong to a plain widget node.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RetainedId {
     /// Stable root-window, dialog, or popup identity.

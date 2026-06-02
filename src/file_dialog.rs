@@ -27,7 +27,7 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
-//! Retained file picker dialog state and widget tree construction.
+//! Retained file picker dialog state and UI node set construction.
 //!
 //! The dialog owns reusable widget handles for folder/file lists, navigation buttons, path entry,
 //! and selection state so applications can open it repeatedly without rebuilding runtime state.
@@ -103,8 +103,8 @@ pub struct FileDialogState {
     file_name_label: WidgetHandle<ListItem>,
     /// Spacer row used by the layout tree.
     spacer_label: WidgetHandle<ListItem>,
-    /// Retained widget tree submitted for the dialog.
-    tree: WidgetTree,
+    /// Retained UI node set submitted for the dialog.
+    tree: UiNodeSet,
 }
 
 impl FileDialogState {
@@ -227,7 +227,7 @@ impl FileDialogState {
         }
     }
 
-    /// Rebuilds the retained widget tree and records the node ids used for result lookup.
+    /// Rebuilds the retained UI node set and records the node ids used for result lookup.
     fn rebuild_tree(&mut self, control_height: i32, spacing: i32) {
         let mut folder_item_ids = Vec::with_capacity(self.folder_items.len());
         let mut file_item_ids = Vec::with_capacity(self.file_items.len());
@@ -258,7 +258,7 @@ impl FileDialogState {
             let no_folder_items = folder_items.is_empty();
             let no_file_items = file_items.is_empty();
 
-            WidgetTreeBuilder::build(|tree| {
+            UiNodeBuilder::build(|tree| {
                 let toolbar_widths = [
                     SizePolicy::Fixed(56),
                     SizePolicy::Fixed(56),
@@ -354,11 +354,11 @@ impl FileDialogState {
         true
     }
 
-    /// Pushes the current retained tree/options into the registered context root.
+    /// Pushes the current retained nodes/options into the registered context root.
     fn sync_retained_root<R: Renderer>(&mut self, ctx: &mut Context<R>) {
         let (control_height, spacing) = ctx.root_control_metrics();
         self.sync_retained_view(control_height, spacing);
-        ctx.set_root_tree(self.root, std::mem::take(&mut self.tree));
+        ctx.set_root_nodes(self.root, std::mem::take(&mut self.tree));
         self.open = ctx.root_visible(self.root).unwrap_or(false);
     }
 
@@ -466,7 +466,7 @@ impl FileDialogState {
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .to_string_lossy()
             .to_string();
-        let root = ctx.create_dialog("Open File", Recti::new(50, 50, 720, 520), WidgetTree::default());
+        let root = ctx.create_dialog("Open File", Recti::new(50, 50, 720, 520), UiNodeSet::default());
         ctx.set_root_options(root, ContainerOption::NONE, ScrollBehavior::NO_SCROLL);
         let mut dialog = Self {
             current_working_directory,
@@ -502,7 +502,7 @@ impl FileDialogState {
             no_files_label: widget_handle(ListItem::with_opt("No Files", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),
             file_name_label: widget_handle(ListItem::with_opt("File name:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),
             spacer_label: widget_handle(ListItem::with_opt("", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),
-            tree: WidgetTree::default(),
+            tree: UiNodeSet::default(),
         };
         dialog.path_box.update(|path_box| {
             path_box.set_text(dialog.current_working_directory.clone());
