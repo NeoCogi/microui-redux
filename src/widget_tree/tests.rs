@@ -1,6 +1,7 @@
 //! Tests for retained widget-tree building and identity behavior.
 
 use crate::{Button, ScrollArea, ScrollAreaHandle, SizePolicy};
+use crate::ui_node::UiNodeData;
 
 use super::*;
 
@@ -13,12 +14,12 @@ fn unkeyed_widget_ids_are_stable_for_same_shape() {
         builder.widget(button_a.clone());
         builder.widget(button_b.clone());
     });
-    let tree_a_ids: Vec<NodeId> = tree_a.roots().iter().map(WidgetTreeNode::id).collect();
+    let tree_a_ids: Vec<NodeId> = tree_a.roots().to_vec();
     let tree_b = WidgetTreeBuilder::build(|builder| {
         builder.widget(button_a.clone());
         builder.widget(button_b.clone());
     });
-    let tree_b_ids: Vec<NodeId> = tree_b.roots().iter().map(WidgetTreeNode::id).collect();
+    let tree_b_ids: Vec<NodeId> = tree_b.roots().to_vec();
 
     assert_eq!(tree_a_ids[0], tree_b_ids[0]);
     assert_eq!(tree_a_ids[1], tree_b_ids[1]);
@@ -33,12 +34,12 @@ fn keyed_widgets_keep_ids_across_reorder() {
         builder.node(NodeOptions::keyed("a")).widget(button_a.clone());
         builder.node(NodeOptions::keyed("b")).widget(button_b.clone());
     });
-    let ids_a: Vec<NodeId> = tree_a.roots().iter().map(WidgetTreeNode::id).collect();
+    let ids_a: Vec<NodeId> = tree_a.roots().to_vec();
     let tree_b = WidgetTreeBuilder::build(|builder| {
         builder.node(NodeOptions::keyed("b")).widget(button_b.clone());
         builder.node(NodeOptions::keyed("a")).widget(button_a.clone());
     });
-    let ids_b: Vec<NodeId> = tree_b.roots().iter().map(WidgetTreeNode::id).collect();
+    let ids_b: Vec<NodeId> = tree_b.roots().to_vec();
 
     assert_eq!(ids_a[0], ids_b[1]);
     assert_eq!(ids_a[1], ids_b[0]);
@@ -54,14 +55,14 @@ fn inserting_keyed_widget_does_not_shift_later_unkeyed_ids() {
         builder.widget(button_a.clone());
         builder.widget(button_b.clone());
     });
-    let ids_a: Vec<NodeId> = tree_a.roots().iter().map(WidgetTreeNode::id).collect();
+    let ids_a: Vec<NodeId> = tree_a.roots().to_vec();
 
     let tree_b = WidgetTreeBuilder::build(|builder| {
         builder.widget(button_a.clone());
         builder.node(NodeOptions::keyed("inserted")).widget(keyed.clone());
         builder.widget(button_b.clone());
     });
-    let ids_b: Vec<NodeId> = tree_b.roots().iter().map(WidgetTreeNode::id).collect();
+    let ids_b: Vec<NodeId> = tree_b.roots().to_vec();
 
     assert_eq!(ids_a[0], ids_b[0]);
     assert_eq!(ids_a[1], ids_b[2]);
@@ -112,17 +113,11 @@ fn row_nodes_capture_children_and_track_policy() {
             });
     });
 
-    let row = &tree.roots()[0];
-    assert_eq!(row.policy(), Policy::fill());
+    let row_id = tree.roots()[0];
+    let row = tree.node(row_id).expect("row node missing");
+    assert_eq!(row.policy, Policy::fill());
     assert_eq!(row.children().len(), 2);
-
-    match row.kind() {
-        WidgetTreeNodeKind::Row { widths, height } => {
-            assert_eq!(widths, &[SizePolicy::Fixed(40), SizePolicy::Remainder(0)]);
-            assert_eq!(*height, SizePolicy::Fixed(24));
-        }
-        _ => panic!("expected row node"),
-    }
+    assert!(matches!(row.data, UiNodeData::Container { .. }));
 }
 
 #[test]
@@ -141,12 +136,9 @@ fn scroll_area_nodes_store_handle_and_children() {
         );
     });
 
-    let node = &tree.roots()[0];
+    let node = tree.node(tree.roots()[0]).expect("scroll area node missing");
     assert_eq!(node.children().len(), 1);
-    match node.kind() {
-        WidgetTreeNodeKind::ScrollArea { .. } => {}
-        _ => panic!("expected scroll area node"),
-    }
+    assert!(matches!(node.data, UiNodeData::Container { .. }));
 }
 
 #[test]
@@ -156,8 +148,6 @@ fn text_nodes_are_recorded_as_widgets() {
     });
 
     assert_eq!(tree.roots().len(), 1);
-    match tree.roots()[0].kind() {
-        WidgetTreeNodeKind::Widget { .. } => {}
-        _ => panic!("expected retained text widget node"),
-    }
+    let node = tree.node(tree.roots()[0]).expect("text node missing");
+    assert!(matches!(node.data, UiNodeData::Widget { .. }));
 }

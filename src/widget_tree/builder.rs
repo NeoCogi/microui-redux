@@ -32,29 +32,132 @@
 
 use std::{cell::RefCell, collections::HashMap, hash::Hash, rc::Rc};
 
-use rs_math3d::Dimensioni;
+use rs_math3d::{Dimensioni, Vec2i};
 
 use crate::{
     id::{hash_id_key, IdNamespace},
     input::{ContainerOption, ScrollBehavior},
     layout::{SizePolicy, StackDirection},
+    ui_node::{Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData, UiNodeId},
     widget::Widget,
     Custom, CustomRenderArgs, Node, ScrollAreaHandle, TextBlock, TextWrap,
 };
 
-use super::{
-    erased_widget_state, widget_handle, GridSpan, NodeId, Policy, TreeCustomRender, WidgetHandle, WidgetTree, WidgetTreeNode, WidgetTreeNodeKind,
-    WidgetTreeResource, WidgetTreeResources,
-};
+use super::{erased_widget_state, widget_handle, TreeCustomRender, WidgetHandle};
+
+/// Stable identifier assigned to a retained node.
+pub type NodeId = crate::Id;
+
+/// Grid placement span for one retained node inside a grid container.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct GridSpan {
+    /// Number of grid columns occupied by the node.
+    pub columns: usize,
+    /// Number of grid rows occupied by the node.
+    pub rows: usize,
+}
+
+impl GridSpan {
+    /// Default one-cell grid placement.
+    pub const ONE: Self = Self { columns: 1, rows: 1 };
+
+    /// Creates a grid span, clamping zero-sized spans to one track.
+    pub const fn new(columns: usize, rows: usize) -> Self {
+        Self {
+            columns: if columns == 0 { 1 } else { columns },
+            rows: if rows == 0 { 1 } else { rows },
+        }
+    }
+}
+
+/// Placement policy metadata attached to a retained node.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Policy {
+    /// Width policy associated with the node.
+    pub width: SizePolicy,
+    /// Height policy associated with the node.
+    pub height: SizePolicy,
+}
+
+impl Policy {
+    /// Creates a policy from explicit width and height rules.
+    pub const fn new(width: SizePolicy, height: SizePolicy) -> Self {
+        Self { width, height }
+    }
+
+    /// Uses automatic sizing on both axes.
+    pub const fn auto() -> Self {
+        Self::new(SizePolicy::Auto, SizePolicy::Auto)
+    }
+
+    /// Uses fixed sizing on both axes.
+    pub const fn fixed(width: i32, height: i32) -> Self {
+        Self::new(SizePolicy::Fixed(width), SizePolicy::Fixed(height))
+    }
+
+    /// Uses a fixed width and automatic height.
+    pub const fn fixed_width(width: i32) -> Self {
+        Self::new(SizePolicy::Fixed(width), SizePolicy::Auto)
+    }
+
+    /// Uses a fixed height and automatic width.
+    pub const fn fixed_height(height: i32) -> Self {
+        Self::new(SizePolicy::Auto, SizePolicy::Fixed(height))
+    }
+
+    /// Uses remainder sizing on both axes.
+    pub const fn fill() -> Self {
+        Self::new(SizePolicy::Remainder(0), SizePolicy::Remainder(0))
+    }
+}
+
+/// Completed retained widget tree.
+#[derive(Default)]
+pub struct WidgetTree {
+    /// Root node ids submitted to the context.
+    roots: Vec<UiNodeId>,
+    /// Runtime nodes owned by the retained tree.
+    nodes: HashMap<UiNodeId, UiNode>,
+}
+
+impl WidgetTree {
+    /// Returns the root ids of the tree.
+    pub fn roots(&self) -> &[UiNodeId] {
+        &self.roots
+    }
+
+    /// Returns a retained node by id.
+    #[cfg(test)]
+    pub(crate) fn node(&self, id: UiNodeId) -> Option<&UiNode> {
+        self.nodes.get(&id)
+    }
+
+    /// Consumes this tree into root ids and runtime nodes.
+    pub(crate) fn into_parts(self) -> (Vec<UiNodeId>, HashMap<UiNodeId, UiNode>) {
+        (self.roots, self.nodes)
+    }
+}
+
+const TAG_WIDGET: u8 = 1;
+const TAG_CUSTOM_RENDER: u8 = 2;
+const TAG_SCROLL_AREA: u8 = 3;
+const TAG_HEADER: u8 = 4;
+const TAG_TREE: u8 = 5;
+const TAG_ROW: u8 = 6;
+const TAG_GRID: u8 = 7;
+const TAG_COLUMN: u8 = 8;
+const TAG_STACK: u8 = 9;
 
 /// Stack frame used while the builder collects a group node's children.
 struct BuilderFrame {
+    /// Parent node for children collected in this frame.
+    parent: Option<UiNodeId>,
     /// Seed mixed into automatic child ids for this scope.
     scope_seed: u64,
     /// Next ordinal for unkeyed automatic children.
     next_auto: u64,
-    /// Nodes collected inside this frame.
-    nodes: Vec<WidgetTreeNode>,
+    /// Child node ids collected inside this frame.
+    nodes: Vec<UiNodeId>,
 }
 
 impl BuilderFrame {
@@ -62,14 +165,16 @@ impl BuilderFrame {
     fn root(seed: u64) -> Self {
         Self {
             scope_seed: seed,
+            parent: None,
             next_auto: 0,
             nodes: Vec::new(),
         }
     }
 
     /// Creates a child frame whose automatic ids are scoped by its parent node id.
-    fn child(seed: u64) -> Self {
+    fn child(parent: UiNodeId, seed: u64) -> Self {
         Self {
+            parent: Some(parent),
             scope_seed: seed,
             next_auto: 0,
             nodes: Vec::new(),
@@ -156,8 +261,8 @@ fn hash_builder_key<K: Hash>(key: K) -> u64 {
 pub struct WidgetTreeBuilder {
     /// Stack of open builder scopes.
     frames: Vec<BuilderFrame>,
-    /// Resource registry populated while nodes are inserted.
-    resources: WidgetTreeResources,
+    /// Nodes emitted by the builder, keyed by stable id.
+    nodes: HashMap<UiNodeId, UiNode>,
 }
 
 /// Builder adapter that applies one [`NodeOptions`] value to the next inserted node.
@@ -243,7 +348,7 @@ impl WidgetTreeBuilder {
     pub fn with_seed(seed: u64) -> Self {
         Self {
             frames: vec![BuilderFrame::root(seed)],
-            resources: WidgetTreeResources::default(),
+            nodes: HashMap::new(),
         }
     }
 
@@ -266,10 +371,7 @@ impl WidgetTreeBuilder {
         debug_assert_eq!(self.frames.len(), 1, "widget tree builder scopes must be balanced");
         let frame = self.frames.pop().expect("root frame missing");
         Self::validate_unique_node_ids(&frame.nodes);
-        WidgetTree {
-            roots: frame.nodes,
-            resources: self.resources,
-        }
+        WidgetTree { roots: frame.nodes, nodes: self.nodes }
     }
 
     /// Applies `options` to the next inserted node.
@@ -285,8 +387,14 @@ impl WidgetTreeBuilder {
     /// Adds a widget leaf node with optional identity and placement metadata.
     fn insert_widget<W: Widget + 'static>(&mut self, options: NodeOptions, widget: impl Into<WidgetHandle<W>>) -> NodeId {
         let widget = widget.into();
-        let resource = self.resources.push(WidgetTreeResource::Widget(erased_widget_state(widget)));
-        self.push_leaf(options, WidgetTreeNodeKind::Widget { resource })
+        self.push_leaf(
+            options,
+            TAG_WIDGET,
+            UiNodeData::Widget {
+                widget: erased_widget_state(widget),
+                custom_render: None,
+            },
+        )
     }
 
     /// Adds a text block without wrapping.
@@ -316,8 +424,14 @@ impl WidgetTreeBuilder {
     {
         let state = state.into();
         let render: TreeCustomRender = Rc::new(RefCell::new(Box::new(f)));
-        let resource = self.resources.push(WidgetTreeResource::CustomRender { state, render });
-        self.push_leaf(options, WidgetTreeNodeKind::CustomRender { resource })
+        self.push_leaf(
+            options,
+            TAG_CUSTOM_RENDER,
+            UiNodeData::Widget {
+                widget: erased_widget_state(state),
+                custom_render: Some(render),
+            },
+        )
     }
 
     /// Adds an unkeyed scroll area node.
@@ -341,8 +455,22 @@ impl WidgetTreeBuilder {
         f: impl FnOnce(&mut Self),
     ) -> NodeId {
         let handle = handle.into();
-        let resource = self.resources.push(WidgetTreeResource::ScrollArea(handle));
-        self.push_group(options, WidgetTreeNodeKind::ScrollArea { resource, opt, scroll_behavior }, f)
+        self.push_group(
+            options,
+            TAG_SCROLL_AREA,
+            UiNodeData::Container {
+                container: Box::new(UiScrollArea {
+                    handle,
+                    content_size: Dimensioni::default(),
+                    scroll_offset: Vec2i::default(),
+                    scroll_drag: None,
+                    scroll_behavior,
+                    opt,
+                }),
+                children: Vec::new(),
+            },
+            f,
+        )
     }
 
     /// Adds an unkeyed collapsible header node.
@@ -353,8 +481,15 @@ impl WidgetTreeBuilder {
     /// Adds a collapsible header node with optional identity and placement metadata.
     fn insert_header(&mut self, options: NodeOptions, state: impl Into<WidgetHandle<Node>>, f: impl FnOnce(&mut Self)) -> NodeId {
         let state = state.into();
-        let resource = self.resources.push(WidgetTreeResource::Node(state));
-        self.push_group(options, WidgetTreeNodeKind::Header { resource }, f)
+        self.push_group(
+            options,
+            TAG_HEADER,
+            UiNodeData::Container {
+                container: Box::new(Disclosure { state, indent_children: false }),
+                children: Vec::new(),
+            },
+            f,
+        )
     }
 
     /// Adds an unkeyed tree node that indents its children while expanded.
@@ -365,8 +500,15 @@ impl WidgetTreeBuilder {
     /// Adds a tree node with optional identity and placement metadata.
     fn insert_tree_node(&mut self, options: NodeOptions, state: impl Into<WidgetHandle<Node>>, f: impl FnOnce(&mut Self)) -> NodeId {
         let state = state.into();
-        let resource = self.resources.push(WidgetTreeResource::Node(state));
-        self.push_group(options, WidgetTreeNodeKind::Tree { resource }, f)
+        self.push_group(
+            options,
+            TAG_TREE,
+            UiNodeData::Container {
+                container: Box::new(Disclosure { state, indent_children: true }),
+                children: Vec::new(),
+            },
+            f,
+        )
     }
 
     /// Adds an unkeyed row flow group.
@@ -376,7 +518,15 @@ impl WidgetTreeBuilder {
 
     /// Adds a row flow group with optional identity and placement metadata.
     fn insert_row(&mut self, options: NodeOptions, widths: &[SizePolicy], height: SizePolicy, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(options, WidgetTreeNodeKind::Row { widths: widths.to_vec(), height }, f)
+        self.push_group(
+            options,
+            TAG_ROW,
+            UiNodeData::Container {
+                container: Box::new(Row { widths: widths.to_vec(), height }),
+                children: Vec::new(),
+            },
+            f,
+        )
     }
 
     /// Adds an unkeyed grid flow group.
@@ -388,9 +538,13 @@ impl WidgetTreeBuilder {
     fn insert_grid(&mut self, options: NodeOptions, widths: &[SizePolicy], heights: &[SizePolicy], f: impl FnOnce(&mut Self)) -> NodeId {
         self.push_group(
             options,
-            WidgetTreeNodeKind::Grid {
-                widths: widths.to_vec(),
-                heights: heights.to_vec(),
+            TAG_GRID,
+            UiNodeData::Container {
+                container: Box::new(Grid {
+                    widths: widths.to_vec(),
+                    heights: heights.to_vec(),
+                }),
+                children: Vec::new(),
             },
             f,
         )
@@ -403,7 +557,15 @@ impl WidgetTreeBuilder {
 
     /// Adds a nested column scope with optional identity and placement metadata.
     fn insert_column(&mut self, options: NodeOptions, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(options, WidgetTreeNodeKind::Column, f)
+        self.push_group(
+            options,
+            TAG_COLUMN,
+            UiNodeData::Container {
+                container: Box::new(Column),
+                children: Vec::new(),
+            },
+            f,
+        )
     }
 
     /// Adds an unkeyed stack scope.
@@ -413,38 +575,55 @@ impl WidgetTreeBuilder {
 
     /// Adds a stack scope with optional identity and placement metadata.
     fn insert_stack(&mut self, options: NodeOptions, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(options, WidgetTreeNodeKind::Stack { width, height, direction }, f)
+        self.push_group(
+            options,
+            TAG_STACK,
+            UiNodeData::Container {
+                container: Box::new(Stack { width, height, direction }),
+                children: Vec::new(),
+            },
+            f,
+        )
     }
 
     /// Pushes a leaf node into the current builder frame.
-    fn push_leaf(&mut self, options: NodeOptions, kind: WidgetTreeNodeKind) -> NodeId {
-        let id = self.alloc_id(kind.tag(), options.key);
+    fn push_leaf(&mut self, options: NodeOptions, tag: u8, data: UiNodeData) -> NodeId {
+        let id = self.alloc_id(tag, options.key);
+        let parent = self.current_frame().parent;
+        let node = UiNode::new(id, parent, options.policy, options.grid_span, data);
         // Leaf nodes have no child frame; they become siblings in the current frame directly.
-        self.current_frame_mut().nodes.push(WidgetTreeNode {
-            id,
-            policy: options.policy,
-            grid_span: options.grid_span,
-            kind,
-            children: Vec::new(),
-        });
+        if self.nodes.contains_key(&id) {
+            panic!(
+                "duplicate retained node id {:?} in WidgetTreeBuilder output. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
+                id
+            );
+        }
+        self.nodes.insert(id, node);
+        self.current_frame_mut().nodes.push(id);
         id
     }
 
     /// Pushes a group node after collecting children in a nested builder frame.
-    fn push_group(&mut self, options: NodeOptions, kind: WidgetTreeNodeKind, f: impl FnOnce(&mut Self)) -> NodeId {
-        let id = self.alloc_id(kind.tag(), options.key);
+    fn push_group(&mut self, options: NodeOptions, tag: u8, mut data: UiNodeData, f: impl FnOnce(&mut Self)) -> NodeId {
+        let id = self.alloc_id(tag, options.key);
+        let parent = self.current_frame().parent;
         // Child auto-ids are scoped by the group id, so sibling insertion outside the group does
         // not affect descendants.
-        self.frames.push(BuilderFrame::child(id.raw() as u64));
+        self.frames.push(BuilderFrame::child(id, id.raw() as u64));
         f(self);
         let frame = self.frames.pop().expect("child frame missing");
-        self.current_frame_mut().nodes.push(WidgetTreeNode {
-            id,
-            policy: options.policy,
-            grid_span: options.grid_span,
-            kind,
-            children: frame.nodes,
-        });
+        if let UiNodeData::Container { children, .. } = &mut data {
+            *children = frame.nodes;
+        }
+        let node = UiNode::new(id, parent, options.policy, options.grid_span, data);
+        if self.nodes.contains_key(&id) {
+            panic!(
+                "duplicate retained node id {:?} in WidgetTreeBuilder output. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
+                id
+            );
+        }
+        self.nodes.insert(id, node);
+        self.current_frame_mut().nodes.push(id);
         id
     }
 
@@ -476,24 +655,27 @@ impl WidgetTreeBuilder {
         self.frames.last_mut().expect("widget tree builder frame missing")
     }
 
+    /// Returns the frame currently receiving new nodes.
+    fn current_frame(&self) -> &BuilderFrame {
+        self.frames.last().expect("widget tree builder frame missing")
+    }
+
     /// Rejects duplicate retained IDs before a tree can enter runtime traversal.
-    fn validate_unique_node_ids(nodes: &[WidgetTreeNode]) {
+    fn validate_unique_node_ids(nodes: &[UiNodeId]) {
         let mut seen = HashMap::new();
         Self::collect_node_ids(nodes, "root", &mut seen);
     }
 
     /// Recursively collects node ids and panics if the same id appears twice.
-    fn collect_node_ids(nodes: &[WidgetTreeNode], parent_path: &str, seen: &mut HashMap<NodeId, String>) {
-        for (index, node) in nodes.iter().enumerate() {
-            let (node_id, kind, children) = node.parts();
-            let path = format!("{parent_path}/{index}:{}", kind.name());
-            if let Some(first_path) = seen.insert(node_id, path.clone()) {
+    fn collect_node_ids(nodes: &[UiNodeId], parent_path: &str, seen: &mut HashMap<NodeId, String>) {
+        for (index, node_id) in nodes.iter().enumerate() {
+            let path = format!("{parent_path}/{index}:{}", node_id.raw());
+            if let Some(first_path) = seen.insert(*node_id, path.clone()) {
                 panic!(
                     "duplicate retained node id {:?} in WidgetTreeBuilder output; first node: {}; duplicate node: {}. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
                     node_id, first_path, path
                 );
             }
-            Self::collect_node_ids(children, &path, seen);
         }
     }
 }

@@ -20,9 +20,7 @@ use crate::layout::SizePolicy;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::widget::FocusPolicy;
 use crate::widget_ctx::WidgetCtx;
-use crate::widget_tree::{
-    erased_widget_state, NodeLayout, TreeCustomRender, WidgetStateHandleDyn, WidgetTreeNode, WidgetTreeNodeKind, WidgetTreeResource, WidgetTreeResources,
-};
+use crate::widget_tree::{erased_widget_state, NodeLayout, TreeCustomRender, WidgetStateHandleDyn};
 
 /// Command wrapper that lets node-runtime custom render callbacks enter the backend stream.
 struct NodeCustomRenderCommand {
@@ -74,7 +72,7 @@ pub(crate) struct UiNode {
 
 impl UiNode {
     /// Creates a node with default geometry and traversal state.
-    fn new(id: UiNodeId, parent: Option<UiNodeId>, policy: crate::Policy, grid_span: GridSpan, data: UiNodeData) -> Self {
+    pub(crate) fn new(id: UiNodeId, parent: Option<UiNodeId>, policy: crate::Policy, grid_span: GridSpan, data: UiNodeData) -> Self {
         Self {
             id,
             parent,
@@ -100,7 +98,7 @@ impl UiNode {
     }
 
     /// Returns the node's mutable container children when it is a container.
-    fn children_mut(&mut self) -> Option<&mut Vec<UiNodeId>> {
+    pub(crate) fn children_mut(&mut self) -> Option<&mut Vec<UiNodeId>> {
         match &mut self.data {
             UiNodeData::Widget { .. } => None,
             UiNodeData::Container { children, .. } => Some(children),
@@ -269,8 +267,7 @@ impl UiRuntime {
 
     /// Builds runtime nodes by consuming a retained widget tree.
     pub(crate) fn from_widget_tree(tree: WidgetTree) -> Self {
-        let (roots, resources) = tree.into_parts();
-        let mut resources = ResourceStore::new(resources);
+        let (roots, nodes) = tree.into_parts();
         let mut runtime = Self::new();
         let root_window = runtime_root_id();
         runtime.nodes.insert(
@@ -286,9 +283,13 @@ impl UiRuntime {
                 },
             ),
         );
+        runtime.nodes.extend(nodes);
         let mut root_children = Vec::new();
         for root in roots {
-            root_children.push(runtime.insert_tree_node(Some(root_window), root, &mut resources));
+            if let Some(node) = runtime.nodes.get_mut(&root) {
+                node.parent = Some(root_window);
+            }
+            root_children.push(root);
         }
         if let Some(children) = runtime.nodes.get_mut(&root_window).and_then(UiNode::children_mut) {
             *children = root_children;
@@ -443,80 +444,6 @@ impl UiRuntime {
     #[cfg(test)]
     pub(crate) fn debug_node_rect(&self, id: UiNodeId) -> Option<Recti> {
         self.nodes.get(&id).map(|node| node.rect)
-    }
-
-    /// Inserts one retained tree node and descendants.
-    fn insert_tree_node(&mut self, parent: Option<UiNodeId>, node: WidgetTreeNode, resources: &mut ResourceStore) -> UiNodeId {
-        let (id, policy, grid_span, kind, children) = node.into_parts();
-        let mut child_nodes = Vec::new();
-        let data = match kind {
-            WidgetTreeNodeKind::Widget { resource } => UiNodeData::Widget {
-                widget: resources.take_widget(resource),
-                custom_render: None,
-            },
-            WidgetTreeNodeKind::CustomRender { resource } => {
-                let (widget, render) = resources.take_custom_render(resource);
-                UiNodeData::Widget { widget, custom_render: Some(render) }
-            }
-            WidgetTreeNodeKind::ScrollArea { resource, opt, scroll_behavior } => {
-                let handle = resources.take_scroll_area(resource);
-                UiNodeData::Container {
-                    container: Box::new(ScrollArea {
-                        handle,
-                        content_size: Dimensioni::default(),
-                        scroll_offset: Vec2i::default(),
-                        scroll_drag: None,
-                        scroll_behavior,
-                        opt,
-                    }),
-                    children: Vec::new(),
-                }
-            }
-            WidgetTreeNodeKind::Header { resource } => UiNodeData::Container {
-                container: Box::new(Disclosure {
-                    state: resources.take_node(resource),
-                    indent_children: false,
-                }),
-                children: Vec::new(),
-            },
-            WidgetTreeNodeKind::Tree { resource } => UiNodeData::Container {
-                container: Box::new(Disclosure {
-                    state: resources.take_node(resource),
-                    indent_children: true,
-                }),
-                children: Vec::new(),
-            },
-            WidgetTreeNodeKind::Row { widths, height } => UiNodeData::Container {
-                container: Box::new(Row { widths, height }),
-                children: Vec::new(),
-            },
-            WidgetTreeNodeKind::Grid { widths, heights } => UiNodeData::Container {
-                container: Box::new(Grid { widths, heights }),
-                children: Vec::new(),
-            },
-            WidgetTreeNodeKind::Column => UiNodeData::Container {
-                container: Box::new(Column),
-                children: Vec::new(),
-            },
-            WidgetTreeNodeKind::Stack { width, height, direction } => UiNodeData::Container {
-                container: Box::new(Stack { width, height, direction }),
-                children: Vec::new(),
-            },
-        };
-
-        let ui_node = UiNode::new(id, parent, policy, grid_span, data);
-        self.nodes.insert(id, ui_node);
-
-        for child in children {
-            child_nodes.push(self.insert_tree_node(Some(id), child, resources));
-        }
-
-        if let Some(node) = self.nodes.get_mut(&id) {
-            if let Some(children) = node.children_mut() {
-                *children = child_nodes;
-            }
-        }
-        id
     }
 
     /// Applies one deferred tree operation.
@@ -2240,61 +2167,6 @@ impl<'a> NodeCtx<'a> {
     /// Defers a topology/data operation until traversal completes.
     pub(crate) fn defer(&mut self, op: TreeOp) {
         self.runtime.deferred.push(op);
-    }
-}
-
-/// Owned resource table used while consuming a `WidgetTree`.
-struct ResourceStore {
-    /// Optional resources so conversion can move each entry exactly once.
-    entries: Vec<Option<WidgetTreeResource>>,
-}
-
-impl ResourceStore {
-    /// Creates a movable resource store.
-    fn new(resources: WidgetTreeResources) -> Self {
-        Self {
-            entries: resources.into_entries().into_iter().map(Some).collect(),
-        }
-    }
-
-    /// Takes a widget resource.
-    fn take_widget(&mut self, id: crate::widget_tree::TreeResourceId) -> Box<dyn WidgetStateHandleDyn> {
-        match self.take(id) {
-            WidgetTreeResource::Widget(widget) => widget,
-            _ => panic!("tree resource {:?} is not a widget", id),
-        }
-    }
-
-    /// Takes a custom-render resource.
-    fn take_custom_render(&mut self, id: crate::widget_tree::TreeResourceId) -> (Box<dyn WidgetStateHandleDyn>, TreeCustomRender) {
-        match self.take(id) {
-            WidgetTreeResource::CustomRender { state, render } => (crate::widget_tree::erased_widget_state(state), render),
-            _ => panic!("tree resource {:?} is not a custom-render resource", id),
-        }
-    }
-
-    /// Takes a scroll-area resource.
-    fn take_scroll_area(&mut self, id: crate::widget_tree::TreeResourceId) -> ScrollAreaHandle {
-        match self.take(id) {
-            WidgetTreeResource::ScrollArea(handle) => handle,
-            _ => panic!("tree resource {:?} is not a scroll-area resource", id),
-        }
-    }
-
-    /// Takes a disclosure node resource.
-    fn take_node(&mut self, id: crate::widget_tree::TreeResourceId) -> WidgetHandle<Node> {
-        match self.take(id) {
-            WidgetTreeResource::Node(state) => state,
-            _ => panic!("tree resource {:?} is not a node resource", id),
-        }
-    }
-
-    /// Takes a raw resource.
-    fn take(&mut self, id: crate::widget_tree::TreeResourceId) -> WidgetTreeResource {
-        self.entries
-            .get_mut(id.index())
-            .and_then(Option::take)
-            .unwrap_or_else(|| panic!("tree resource {:?} was missing or already consumed", id))
     }
 }
 
