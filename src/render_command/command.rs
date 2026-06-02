@@ -50,11 +50,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Command definitions and callback payloads recorded during container traversal.
+//! Command definitions and callback payloads recorded during node traversal.
 //!
-//! Containers record these commands as a backend-neutral intermediate representation. The layout
-//! and widget passes only describe *what* should be drawn or invoked; the final canvas/backend
-//! consumes this list later when the container flushes its command list.
+//! The layout and widget passes record what should be drawn or invoked; the final canvas/backend
+//! consumes this list later when the command stream is replayed.
 
 use super::*;
 

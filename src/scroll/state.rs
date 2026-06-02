@@ -56,7 +56,7 @@ use crate::{Dimensioni, Id, NodeId, Recti, RetainedId, Vec2i};
 use crate::context::NodeLayout;
 
 /// Retained state for one scrollable child subtree.
-pub struct ScrollArea {
+pub(crate) struct ScrollAreaState {
     rect: Recti,
     body: Recti,
     content_size: Dimensioni,
@@ -65,7 +65,7 @@ pub struct ScrollArea {
     retained_scope: Id,
 }
 
-impl ScrollArea {
+impl ScrollAreaState {
     /// Creates retained scroll-area state.
     pub(crate) fn new(name: &str) -> Self {
         Self {

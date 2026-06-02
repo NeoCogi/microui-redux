@@ -43,7 +43,7 @@
 //! vertices live in the container-owned arena held by `DrawCtx`, so individual widgets do not
 //! allocate their own per-batch vertex vectors.
 
-use crate::container::Command;
+use crate::render_command::Command;
 use crate::draw_context::{intersect_clip_rect, DrawCtx};
 use crate::text_layout::control_text_position_with_font;
 use crate::*;

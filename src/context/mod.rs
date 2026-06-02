@@ -64,7 +64,7 @@ use png::{ColorType, Decoder};
 
 use crate::{
     rect, Canvas, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Renderer,
-    RendererHandle, ScrollArea, ScrollAreaHandle, ScrollBehavior, Style, TextureId, UiRuntime,
+    RendererHandle, ScrollAreaHandle, ScrollAreaState, ScrollBehavior, Style, TextureId, UiRuntime,
 };
 use roots::NodeRootEntry;
 mod builder;

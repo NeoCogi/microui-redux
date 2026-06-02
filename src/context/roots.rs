@@ -107,7 +107,7 @@ impl<R: Renderer> Context<R> {
 
     /// Creates a retained scroll-area handle for use with [`crate::UiNodeBuilder::scroll_area`].
     pub fn new_scroll_area(&mut self, name: &str) -> ScrollAreaHandle {
-        ScrollAreaHandle::new(ScrollArea::new(name))
+        ScrollAreaHandle::new(ScrollAreaState::new(name))
     }
 
     fn next_root_id(&mut self) -> RootId {

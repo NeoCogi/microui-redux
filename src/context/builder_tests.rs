@@ -1,6 +1,6 @@
 //! Tests for retained UI node building and identity behavior.
 
-use crate::{Button, ScrollArea, ScrollAreaHandle, SizePolicy};
+use crate::{Button, ScrollAreaHandle, ScrollAreaState, SizePolicy};
 use crate::ui_node::UiNodeData;
 
 use super::*;
@@ -122,7 +122,7 @@ fn row_nodes_capture_children_and_track_policy() {
 
 #[test]
 fn scroll_area_nodes_store_handle_and_children() {
-    let handle = ScrollAreaHandle::new(ScrollArea::new("scroll area"));
+    let handle = ScrollAreaHandle::new(ScrollAreaState::new("scroll area"));
     let leaf = widget_handle((crate::WidgetOption::NONE, crate::ScrollBehavior::NONE));
 
     let tree = UiNodeBuilder::build(|builder| {

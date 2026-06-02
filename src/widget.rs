@@ -332,6 +332,7 @@ impl FrameResults {
     }
 
     /// Records an internal retained node result without a legacy widget identity.
+    #[cfg(test)]
     pub(crate) fn record_node_with_context(&mut self, retained_id: RetainedId, node_id: Id, state: ResourceState, dispatch_site: impl Into<String>) {
         self.current.record_node_index(node_id, retained_id);
         self.record_retained_id_with_context(retained_id, state, dispatch_site);

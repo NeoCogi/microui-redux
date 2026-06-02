@@ -55,11 +55,11 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{Dimensioni, NodeId, Recti, RetainedId, Vec2i};
-use super::ScrollArea;
+use super::ScrollAreaState;
 
 #[derive(Clone)]
 /// Shared handle to a retained scroll area.
-pub struct ScrollAreaHandle(pub(crate) Rc<RefCell<ScrollArea>>);
+pub struct ScrollAreaHandle(pub(crate) Rc<RefCell<ScrollAreaState>>);
 
 impl From<&ScrollAreaHandle> for ScrollAreaHandle {
     fn from(handle: &ScrollAreaHandle) -> Self {
@@ -70,12 +70,12 @@ impl From<&ScrollAreaHandle> for ScrollAreaHandle {
 /// Read-only view into a retained scroll area borrowed from a handle.
 pub struct ScrollAreaView<'a> {
     /// Borrowed scroll-area state exposed by the view.
-    inner: &'a ScrollArea,
+    inner: &'a ScrollAreaState,
 }
 
 impl<'a> ScrollAreaView<'a> {
     /// Creates a read-only view from a borrowed scroll area.
-    fn new(inner: &'a ScrollArea) -> Self {
+    fn new(inner: &'a ScrollAreaState) -> Self {
         Self { inner }
     }
 
@@ -103,12 +103,12 @@ impl<'a> ScrollAreaView<'a> {
 /// Mutable view into retained scroll-area state borrowed from a handle.
 pub struct ScrollAreaViewMut<'a> {
     /// Mutably borrowed scroll-area state exposed by the view.
-    inner: &'a mut ScrollArea,
+    inner: &'a mut ScrollAreaState,
 }
 
 impl<'a> ScrollAreaViewMut<'a> {
     /// Creates a mutable view from a borrowed scroll area.
-    fn new(inner: &'a mut ScrollArea) -> Self {
+    fn new(inner: &'a mut ScrollAreaState) -> Self {
         Self { inner }
     }
 
@@ -155,7 +155,7 @@ impl<'a> ScrollAreaViewMut<'a> {
 
 impl ScrollAreaHandle {
     /// Wraps retained scroll-area state in shared interior mutability.
-    pub(crate) fn new(scroll_area: ScrollArea) -> Self {
+    pub(crate) fn new(scroll_area: ScrollAreaState) -> Self {
         Self(Rc::new(RefCell::new(scroll_area)))
     }
 
@@ -174,7 +174,7 @@ impl ScrollAreaHandle {
     }
 
     /// Executes `f` with direct mutable access for internal traversal code.
-    pub(crate) fn with_inner_mut<R>(&self, f: impl FnOnce(&mut ScrollArea) -> R) -> R {
+    pub(crate) fn with_inner_mut<R>(&self, f: impl FnOnce(&mut ScrollAreaState) -> R) -> R {
         let mut scroll_area = self.0.borrow_mut();
         f(&mut scroll_area)
     }

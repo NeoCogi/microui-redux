@@ -184,12 +184,6 @@ pub(crate) struct IdNamespace {
 }
 
 impl IdNamespace {
-    /// Namespace used for window chrome controls.
-    pub(crate) const WINDOW_CHROME: Self = Self::new(0x726f_6f74);
-    /// Namespace used for nested scroll-area scopes.
-    pub(crate) const SCROLL_AREA_SCOPE: Self = Self::new(0x7061_6e65_6c5f_7363);
-    /// Namespace used for internal widgets inside composite controls.
-    pub(crate) const INTERNAL_CONTROL: Self = Self::new(0x696e_7465_726e_616c);
     /// Namespace used for auto-generated UI nodes.
     pub(crate) const UINODE_BUILDER: Self = Self::new(0x7769_6467_6574_7472);
     /// Namespace used for synthetic runtime root container nodes.

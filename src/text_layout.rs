@@ -171,11 +171,6 @@ pub(crate) fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32)
     (baseline_center - baseline).clamp(min_top, max_top)
 }
 
-/// Returns a compact vertical padding value for text editing surfaces.
-pub(crate) fn vertical_text_padding(padding: i32) -> i32 {
-    (padding / 2).max(1)
-}
-
 /// Computes the bounding size for a block of measured lines.
 pub(crate) fn text_block_size(lines: &[TextLine], line_height: i32) -> Dimensioni {
     let width = lines.iter().map(|line| line.width).max().unwrap_or(0).max(0);

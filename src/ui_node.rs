@@ -12,7 +12,8 @@ use crate::{
     expand_rect, Canvas, ControlColor, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Id, Input, InputSnapshot, KeyCode, KeyMode, GridSpan,
     MouseButton, MouseEvent, Node, Recti, Renderer, RetainedId, StackDirection, Style, UNCLIPPED_RECT, Vec2i, Vertex, WidgetHandle, UiNodeSet,
 };
-use crate::container::{render_command_stream, Command, ScrollAreaHandle};
+use crate::render_command::{render_command_stream, Command};
+use crate::scroll::ScrollAreaHandle;
 use crate::draw_context::DrawCtx;
 use crate::id::IdNamespace;
 use crate::input::{ContainerOption, ControlState, ResourceState, ScrollBehavior, WidgetOption};
@@ -2422,7 +2423,7 @@ mod tests {
 
     use crate::{
         color4b, rect, AtlasHandle, AtlasSource, Button, Canvas, CharEntry, Custom, FontEntry, Image, Input, ListItem, Policy, RendererHandle,
-        ScrollArea as LegacyScrollArea, ScrollAreaHandle, SourceFormat, Textbox, WidgetFillOption, UiNodeBuilder, widget_handle,
+        ScrollAreaHandle, ScrollAreaState, SourceFormat, Textbox, WidgetFillOption, UiNodeBuilder, widget_handle,
     };
     use crate::test_support::{test_atlas, NoopRenderer};
 
@@ -2672,7 +2673,7 @@ mod tests {
     fn node_scroll_area_keeps_handle_content_and_scroll_state() {
         let atlas = test_atlas();
         let style = Rc::new(Style::default());
-        let scroll_area = ScrollAreaHandle::new(LegacyScrollArea::new("node scroll"));
+        let scroll_area = ScrollAreaHandle::new(ScrollAreaState::new("node scroll"));
         let first = widget_handle(Button::new("first"));
         let rest: Vec<_> = (0..5).map(|_| widget_handle(Button::new("row"))).collect();
         let mut first_id = Id::new(0);

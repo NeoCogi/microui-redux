@@ -54,9 +54,8 @@
 //!
 //! This file owns clip-stack mutation and conversion from high-level widget drawing requests into
 //! retained [`Command`] values. It deliberately does not talk to a renderer; that happens later
-//! when container draw commands are replayed through [`crate::Canvas`].
-use crate::container::Command;
-use crate::text_layout::control_text_position_with_font;
+//! when draw commands are replayed through [`crate::Canvas`].
+use crate::render_command::Command;
 use crate::*;
 
 /// Returns the intersection of `rect` with `limit`, defaulting to an empty rect when disjoint.
@@ -243,29 +242,6 @@ impl<'a> CommandEmitter<'a> {
         self.draw_rect(rect(r.x + r.width - 1, r.y, 1, r.height), color);
     }
 
-    /// Records a text command, wrapping it in a replay clip when only partly visible.
-    pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
-        let size = self.atlas.get_text_size(font, text);
-        let bounds = rect(pos.x, pos.y, size.width, size.height);
-        let clip = self.current_clip_rect();
-        self.emit_clipped(bounds, clip, |draw| {
-            draw.push_command(Command::Text {
-                text: String::from(text),
-                pos,
-                color,
-                font,
-            });
-        });
-    }
-
-    /// Records an icon command, wrapping it in a replay clip when only partly visible.
-    pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
-        let clip = self.current_clip_rect();
-        self.emit_clipped(rect, clip, |draw| {
-            draw.push_command(Command::Icon { id, rect, color });
-        });
-    }
-
     /// Draws a filled control background and optional one-pixel border for the color role.
     pub(crate) fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
         let color = self.style.colors[colorid as usize];
@@ -273,16 +249,5 @@ impl<'a> CommandEmitter<'a> {
         if let Some(border_color) = self.style.frame_border_color(colorid) {
             self.draw_box(expand_rect(rect, 1), border_color);
         }
-    }
-
-    /// Records clipped control text using the widget option's alignment flags.
-    pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let color = self.style.colors[colorid as usize];
-        let pos = control_text_position_with_font(self.style, self.atlas, font, text, rect, opt);
-
-        // Text uses a scoped clip so glyph quads cannot bleed outside the control rectangle.
-        self.push_clip_rect(rect);
-        self.draw_text(font, text, pos, color);
-        self.pop_clip_rect();
     }
 }

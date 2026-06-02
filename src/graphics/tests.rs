@@ -1,7 +1,7 @@
 //! Tests for widget-local graphics translation, clipping, and batching.
 
 use super::*;
-use crate::container::Command;
+use crate::render_command::Command;
 use crate::draw_context::clip_relation;
 
 fn assert_rect_eq(actual: Recti, expected: Recti) {
