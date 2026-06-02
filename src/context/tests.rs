@@ -245,16 +245,16 @@ fn context_result_accessors_expose_committed_and_current_generations() {
     let current_id = NodeId::new(2);
 
     ctx.frame_results
-        .record_node_with_context(RetainedId::node(committed_id), committed_id, ResourceState::SUBMIT, "committed");
+        .record_node_with_context(RetainedId::node(committed_id), ResourceState::SUBMIT, "committed");
     ctx.frame_results.finish_frame();
     ctx.frame_results.begin_frame();
     ctx.frame_results
-        .record_node_with_context(RetainedId::node(current_id), current_id, ResourceState::CHANGE, "current");
+        .record_node_with_context(RetainedId::node(current_id), ResourceState::CHANGE, "current");
 
-    assert!(ctx.committed_results().state_of_node(committed_id).is_submitted());
-    assert!(ctx.committed_results().state_of_node(current_id).is_none());
-    assert!(ctx.current_results().state_of_node(committed_id).is_none());
-    assert!(ctx.current_results().state_of_node(current_id).is_changed());
+    assert!(ctx.committed_results().state_of_retained(RetainedId::node(committed_id)).is_submitted());
+    assert!(ctx.committed_results().state_of_retained(RetainedId::node(current_id)).is_none());
+    assert!(ctx.current_results().state_of_retained(RetainedId::node(committed_id)).is_none());
+    assert!(ctx.current_results().state_of_retained(RetainedId::node(current_id)).is_changed());
 }
 
 #[test]
@@ -761,30 +761,30 @@ fn retained_root_hover_selection_uses_registered_root_z_order() {
 
     ctx.mousemove(20, 20);
     ctx.update_ui();
-    let left_entry = ctx.node_roots.iter().find(|entry| entry.id == left).unwrap();
+    let left_entry = ctx.roots.iter().find(|entry| entry.id == left).unwrap();
     assert!(left_entry.runtime.hover_root.is_none());
 
     ctx.bring_root_to_front(left);
     ctx.update_ui();
-    let left_entry = ctx.node_roots.iter().find(|entry| entry.id == left).unwrap();
+    let left_entry = ctx.roots.iter().find(|entry| entry.id == left).unwrap();
     assert!(left_entry.runtime.hover_root.is_some());
 }
 
 #[test]
-fn node_root_hover_selection_uses_root_z_order() {
+fn root_hover_selection_uses_root_z_order() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
     let left_button = widget_handle(Button::new("left"));
     let right_button = widget_handle(Button::new("right"));
-    let left = ctx.create_node_window(
+    let left = ctx.create_window(
         "left",
         rect(0, 0, 120, 80),
         UiNodeBuilder::build(|tree| {
             tree.widget(left_button.clone());
         }),
     );
-    let right = ctx.create_node_window(
+    let right = ctx.create_window(
         "right",
         rect(40, 0, 120, 80),
         UiNodeBuilder::build(|tree| {
@@ -795,27 +795,27 @@ fn node_root_hover_selection_uses_root_z_order() {
     ctx.mousemove(50, 30);
     ctx.update_ui();
 
-    let left_entry = ctx.node_roots.iter().find(|entry| entry.id == left).unwrap();
-    let right_entry = ctx.node_roots.iter().find(|entry| entry.id == right).unwrap();
+    let left_entry = ctx.roots.iter().find(|entry| entry.id == left).unwrap();
+    let right_entry = ctx.roots.iter().find(|entry| entry.id == right).unwrap();
     assert!(left_entry.runtime.hover_root.is_none());
     assert!(right_entry.runtime.hover_root.is_some());
 
     ctx.mousedown(20, 30, MouseButton::LEFT);
     ctx.update_ui();
 
-    let left_entry = ctx.node_roots.iter().find(|entry| entry.id == left).unwrap();
-    let right_entry = ctx.node_roots.iter().find(|entry| entry.id == right).unwrap();
+    let left_entry = ctx.roots.iter().find(|entry| entry.id == left).unwrap();
+    let right_entry = ctx.roots.iter().find(|entry| entry.id == right).unwrap();
     assert!(left_entry.runtime.hover_root.is_some());
     assert!(right_entry.runtime.hover_root.is_none());
     assert!(left_entry.z_index > right_entry.z_index);
 }
 
 #[test]
-fn node_root_title_drag_moves_window() {
+fn root_title_drag_moves_window() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
-    let root = ctx.create_node_window(
+    let root = ctx.create_window(
         "node",
         rect(10, 10, 120, 80),
         UiNodeBuilder::build(|tree| {
@@ -830,17 +830,17 @@ fn node_root_title_drag_moves_window() {
     ctx.mousemove(45, 28);
     ctx.update_ui();
 
-    let moved = ctx.node_root_rect(root).unwrap();
+    let moved = ctx.root_rect(root).unwrap();
     assert_eq!(moved.x, 25);
     assert_eq!(moved.y, 20);
 }
 
 #[test]
-fn node_root_resize_handle_resizes_window() {
+fn root_resize_handle_resizes_window() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
-    let root = ctx.create_node_window(
+    let root = ctx.create_window(
         "node",
         rect(10, 10, 120, 80),
         UiNodeBuilder::build(|tree| {
@@ -855,17 +855,17 @@ fn node_root_resize_handle_resizes_window() {
     ctx.mousemove(146, 101);
     ctx.update_ui();
 
-    let resized = ctx.node_root_rect(root).unwrap();
+    let resized = ctx.root_rect(root).unwrap();
     assert_eq!(resized.width, 140);
     assert_eq!(resized.height, 95);
 }
 
 #[test]
-fn node_root_close_button_hides_window() {
+fn root_close_button_hides_window() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
-    let root = ctx.create_node_window(
+    let root = ctx.create_window(
         "node",
         rect(10, 10, 120, 80),
         UiNodeBuilder::build(|tree| {
@@ -878,7 +878,7 @@ fn node_root_close_button_hides_window() {
     ctx.mousedown(118, 18, MouseButton::LEFT);
     ctx.update_ui();
 
-    assert_eq!(ctx.node_root_visible(root), Some(false));
+    assert_eq!(ctx.root_visible(root), Some(false));
 }
 
 #[test]
@@ -1096,7 +1096,7 @@ fn run_combo_frame(
 
     if combo.read(Combo::is_open) {
         ctx.set_root_visible(popup_root, true);
-        ctx.set_node_root_rect(popup_root, combo_anchor);
+        ctx.set_root_rect(popup_root, combo_anchor);
     } else {
         ctx.set_root_visible(popup_root, false);
     }
@@ -1110,7 +1110,7 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
-    let popup_root = ctx.create_node_popup("combo popup", UiNodeSet::default());
+    let popup_root = ctx.create_popup("combo popup", UiNodeSet::default());
     ctx.set_root_options(
         popup_root,
         ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
@@ -1152,9 +1152,9 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     ctx.mouseup(10, 10, MouseButton::LEFT);
     run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
     assert!(combo.read(Combo::is_open));
-    assert_eq!(ctx.node_root_visible(popup_root), Some(true));
+    assert_eq!(ctx.root_visible(popup_root), Some(true));
 
-    let popup_rect = ctx.node_root_rect(popup_root).unwrap();
+    let popup_rect = ctx.root_rect(popup_root).unwrap();
     assert!(popup_rect.width < 200);
     let item_x = popup_rect.x + 12;
     let item_y = popup_rect.y + 12;
@@ -1167,11 +1167,11 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
 
     assert_eq!(selected.as_deref(), Some("Apple"));
     assert!(!combo.read(Combo::is_open));
-    assert_eq!(ctx.node_root_visible(popup_root), Some(false));
+    assert_eq!(ctx.root_visible(popup_root), Some(false));
 
     run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
     assert!(!combo.read(Combo::is_open));
-    assert_eq!(ctx.node_root_visible(popup_root), Some(false));
+    assert_eq!(ctx.root_visible(popup_root), Some(false));
 }
 
 #[test]
@@ -1179,7 +1179,7 @@ fn node_popup_auto_size_is_stable_with_remainder_stack() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
-    let popup = ctx.create_node_popup(
+    let popup = ctx.create_popup(
         "popup",
         UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
@@ -1188,15 +1188,15 @@ fn node_popup_auto_size_is_stable_with_remainder_stack() {
             });
         }),
     );
-    ctx.set_node_root_rect(popup, rect(20, 20, 80, 1));
+    ctx.set_root_rect(popup, rect(20, 20, 80, 1));
     ctx.set_root_visible(popup, true);
 
     ctx.update_ui();
-    let first = ctx.node_root_rect(popup).unwrap();
+    let first = ctx.root_rect(popup).unwrap();
     ctx.update_ui();
-    let second = ctx.node_root_rect(popup).unwrap();
+    let second = ctx.root_rect(popup).unwrap();
     ctx.update_ui();
-    let third = ctx.node_root_rect(popup).unwrap();
+    let third = ctx.root_rect(popup).unwrap();
 
     assert_eq!(second.width, first.width);
     assert_eq!(third.width, first.width);
@@ -1209,24 +1209,24 @@ fn node_popup_closes_when_clicking_outside() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
-    let popup = ctx.create_node_popup(
+    let popup = ctx.create_popup(
         "popup",
         UiNodeBuilder::build(|tree| {
             tree.text("popup");
         }),
     );
-    ctx.set_node_root_rect(popup, rect(20, 20, 80, 1));
+    ctx.set_root_rect(popup, rect(20, 20, 80, 1));
     ctx.set_root_visible(popup, true);
 
     ctx.update_ui();
-    assert_eq!(ctx.node_root_visible(popup), Some(true));
+    assert_eq!(ctx.root_visible(popup), Some(true));
 
     ctx.mousemove(200, 100);
     ctx.update_ui();
     ctx.mousedown(200, 100, MouseButton::LEFT);
     ctx.update_ui();
 
-    assert_eq!(ctx.node_root_visible(popup), Some(false));
+    assert_eq!(ctx.root_visible(popup), Some(false));
 }
 
 #[test]
@@ -1234,32 +1234,32 @@ fn node_popup_closes_when_clicking_another_node_window() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
-    let window = ctx.create_node_window(
+    let window = ctx.create_window(
         "window",
         rect(120, 10, 90, 80),
         UiNodeBuilder::build(|tree| {
             tree.text("window");
         }),
     );
-    let popup = ctx.create_node_popup(
+    let popup = ctx.create_popup(
         "popup",
         UiNodeBuilder::build(|tree| {
             tree.text("popup");
         }),
     );
-    ctx.set_node_root_rect(popup, rect(20, 20, 80, 1));
+    ctx.set_root_rect(popup, rect(20, 20, 80, 1));
     ctx.set_root_visible(popup, true);
 
     ctx.update_ui();
-    assert_eq!(ctx.node_root_visible(popup), Some(true));
+    assert_eq!(ctx.root_visible(popup), Some(true));
 
-    let target = ctx.node_root_rect(window).unwrap();
+    let target = ctx.root_rect(window).unwrap();
     ctx.mousemove(target.x + 10, target.y + 10);
     ctx.update_ui();
     ctx.mousedown(target.x + 10, target.y + 10, MouseButton::LEFT);
     ctx.update_ui();
 
-    assert_eq!(ctx.node_root_visible(popup), Some(false));
+    assert_eq!(ctx.root_visible(popup), Some(false));
 }
 
 #[test]
@@ -1287,7 +1287,7 @@ fn node_scroll_area_consumes_wheel_before_root_window_scrolls() {
             tree.node(NodeOptions::with_policy(Policy::fixed(90, 180))).widget(bottom.clone());
         }
     });
-    let root = ctx.create_node_window("window", rect(0, 0, 110, 90), tree);
+    let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
     ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NONE);
 
     ctx.update_ui();
@@ -1299,7 +1299,7 @@ fn node_scroll_area_consumes_wheel_before_root_window_scrolls() {
     ctx.update_ui();
 
     let nested_scroll = scroll_area.with(|area| area.scroll());
-    let root_entry = ctx.node_roots.iter().find(|entry| entry.id == root).unwrap();
+    let root_entry = ctx.roots.iter().find(|entry| entry.id == root).unwrap();
     let root_node = root_entry.runtime.nodes.get(&root_entry.runtime.roots[0]).unwrap();
     let root_scroll = match &root_node.data {
         crate::ui_node::UiNodeData::Container { container, .. } => container.root_scroll_state().map(|(scroll, _)| scroll).unwrap_or_default(),
@@ -1331,13 +1331,13 @@ fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
                 });
         }
     });
-    let root = ctx.create_node_window("window", rect(0, 0, 110, 90), tree);
+    let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
     ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NONE);
 
     ctx.update_ui();
     ctx.update_ui();
 
-    let root_entry = ctx.node_roots.iter().find(|entry| entry.id == root).unwrap();
+    let root_entry = ctx.roots.iter().find(|entry| entry.id == root).unwrap();
     let root_node = root_entry.runtime.nodes.get(&root_entry.runtime.roots[0]).unwrap();
     assert!(scroll_area.with(|area| area.content_size().height) > scroll_area.with(|area| area.body().height));
     assert!(root_node.content_size.height <= root_node.client.height);

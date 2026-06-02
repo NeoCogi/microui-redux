@@ -54,8 +54,8 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{Dimensioni, NodeId, Recti, RetainedId, Vec2i};
 use super::ScrollAreaState;
+use crate::{Dimensioni, Recti, Vec2i};
 
 #[derive(Clone)]
 /// Shared handle to a retained scroll area.
@@ -141,16 +141,6 @@ impl<'a> ScrollAreaViewMut<'a> {
     pub fn content_size(&self) -> Dimensioni {
         self.inner.content_size()
     }
-
-    /// Sets focus to a retained node in this scroll area.
-    pub fn set_focus_node(&mut self, node_id: NodeId) {
-        self.inner.set_focus_node(node_id);
-    }
-
-    /// Clears focus in this scroll area.
-    pub fn clear_focus(&mut self) {
-        self.inner.clear_focus();
-    }
 }
 
 impl ScrollAreaHandle {
@@ -177,10 +167,5 @@ impl ScrollAreaHandle {
     pub(crate) fn with_inner_mut<R>(&self, f: impl FnOnce(&mut ScrollAreaState) -> R) -> R {
         let mut scroll_area = self.0.borrow_mut();
         f(&mut scroll_area)
-    }
-
-    /// Returns the retained interaction identity for a node inside this scroll area.
-    pub fn retained_id_for_node(&self, node_id: NodeId) -> RetainedId {
-        self.0.borrow().retained_id_for_node(node_id)
     }
 }

@@ -381,7 +381,7 @@ fn main() {
 
     fw.event_loop(|ctx, state| {
         let dim = ctx.canvas().current_dimension();
-        ctx.set_node_root_rect(state._root, rect(0, 0, dim.width, dim.height));
+        ctx.set_root_rect(state._root, rect(0, 0, dim.width, dim.height));
         state.display.update(|display| {
             display.set_text(state.calculator.display_text());
         });

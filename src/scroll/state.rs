@@ -52,8 +52,8 @@
 //
 //! Retained scroll-area viewport state used by node-runtime scroll containers.
 
-use crate::{Dimensioni, Id, NodeId, Recti, RetainedId, Vec2i};
 use crate::context::NodeLayout;
+use crate::{Dimensioni, Recti, Vec2i};
 
 /// Retained state for one scrollable child subtree.
 pub(crate) struct ScrollAreaState {
@@ -61,20 +61,16 @@ pub(crate) struct ScrollAreaState {
     body: Recti,
     content_size: Dimensioni,
     scroll: Vec2i,
-    focus: Option<NodeId>,
-    retained_scope: Id,
 }
 
 impl ScrollAreaState {
     /// Creates retained scroll-area state.
-    pub(crate) fn new(name: &str) -> Self {
+    pub(crate) fn new(_name: &str) -> Self {
         Self {
             rect: Recti::default(),
             body: Recti::default(),
             content_size: Dimensioni::default(),
             scroll: Vec2i::default(),
-            focus: None,
-            retained_scope: Id::new(crate::id::hash_id_key(name)),
         }
     }
 
@@ -113,20 +109,5 @@ impl ScrollAreaState {
         self.rect = layout.rect;
         self.body = layout.body;
         self.content_size = layout.content_size;
-    }
-
-    /// Sets focus to a retained node in this scroll area.
-    pub fn set_focus_node(&mut self, node_id: NodeId) {
-        self.focus = Some(node_id);
-    }
-
-    /// Clears focus in this scroll area.
-    pub fn clear_focus(&mut self) {
-        self.focus = None;
-    }
-
-    /// Returns the retained interaction identity for a node inside this scroll area.
-    pub fn retained_id_for_node(&self, node_id: NodeId) -> RetainedId {
-        RetainedId::scoped_node(self.retained_scope, node_id)
     }
 }

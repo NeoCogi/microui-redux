@@ -928,13 +928,13 @@ impl State {
         let demo_root = ctx.create_window("Demo Window", rect(40, 40, 300, 450), UiNodeSet::default());
         let style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), UiNodeSet::default());
         let log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), UiNodeSet::default());
-        let combo_popup_root = ctx.create_node_popup("Combo Box Popup", UiNodeSet::default());
+        let combo_popup_root = ctx.create_popup("Combo Box Popup", UiNodeSet::default());
         ctx.set_root_options(
             combo_popup_root,
             ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
             ScrollBehavior::NO_SCROLL,
         );
-        let popup_root = ctx.create_node_popup("Test Popup", UiNodeSet::default());
+        let popup_root = ctx.create_popup("Test Popup", UiNodeSet::default());
         ctx.set_root_options(
             popup_root,
             ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
@@ -1671,7 +1671,7 @@ impl State {
             let submit_buf_out = Self::root_submitted(results, self.log_root, self.submit_buf_id);
             let submit_btn_out = Self::root_submitted(results, self.log_root, self.submit_button_id);
             if submit_buf_out {
-                ctx.set_node_root_focus_node(self.log_root, self.submit_buf_id);
+                ctx.set_root_focus_node(self.log_root, self.submit_buf_id);
                 submitted = true;
             }
             if submit_btn_out {
@@ -1763,10 +1763,10 @@ impl State {
 
     fn test_window(&mut self, ctx: &mut Context<BackendRenderer>) {
         {
-            let mut win = ctx.node_root_rect(self.demo_root).unwrap_or_else(|| rect(40, 40, 300, 450));
+            let mut win = ctx.root_rect(self.demo_root).unwrap_or_else(|| rect(40, 40, 300, 450));
             win.width = win.width.max(240);
             win.height = win.height.max(300);
-            ctx.set_node_root_rect(self.demo_root, win);
+            ctx.set_root_rect(self.demo_root, win);
 
             let [value_pos, value_size, value_fps] = self.window_info_values.clone();
             value_pos.update(|value| value.label = format!("{}, {}", win.x, win.y));
@@ -1843,7 +1843,7 @@ impl State {
         };
         if self.combo_state.read(Combo::is_open) {
             ctx.set_root_visible(self.combo_popup_root, true);
-            ctx.set_node_root_rect(self.combo_popup_root, combo_anchor);
+            ctx.set_root_rect(self.combo_popup_root, combo_anchor);
         } else {
             ctx.set_root_visible(self.combo_popup_root, false);
         }
@@ -1856,7 +1856,7 @@ impl State {
             let popup_width = (self.style.default_cell_width + self.style.padding.max(0) * 2).max(80);
             let popup_height = (self.style.title_height + self.style.padding.max(0) * 4 + self.style.spacing).max(56);
             ctx.set_root_visible(self.popup_root, true);
-            ctx.set_node_root_size(self.popup_root, &Dimensioni::new(popup_width, popup_height));
+            ctx.set_root_size(self.popup_root, &Dimensioni::new(popup_width, popup_height));
             self.open_popup = false;
         }
 

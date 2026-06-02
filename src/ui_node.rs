@@ -302,7 +302,9 @@ impl UiRuntime {
 
     /// Replaces all runtime nodes by consuming a fresh retained nodes.
     pub(crate) fn replace_ui_nodes(&mut self, tree: UiNodeSet) {
-        *self = Self::from_ui_nodes(tree);
+        let mut next = Self::from_ui_nodes(tree);
+        next.transfer_runtime_state_from(self);
+        *self = next;
     }
 
     /// Moves focus to a node in this runtime.
@@ -557,12 +559,69 @@ impl UiRuntime {
 
     /// Removes a node and all descendants.
     fn remove_subtree(&mut self, node: UiNodeId) {
-        while let Some(child) = self.nodes.get_mut(&node).and_then(UiNode::children_mut).and_then(Vec::pop) {
-            self.remove_subtree(child);
+        let mut removed = Vec::new();
+        self.collect_subtree_nodes(node, &mut removed);
+        self.clear_removed_transient_state(&removed);
+        for removed_node in &removed {
+            self.roots.retain(|root| *root != *removed_node);
+            self.z_order.retain(|root| *root != *removed_node);
+            self.nodes.remove(removed_node);
         }
-        self.roots.retain(|root| *root != node);
-        self.z_order.retain(|root| *root != node);
-        self.nodes.remove(&node);
+    }
+
+    /// Collects a node and all descendants in removal order.
+    fn collect_subtree_nodes(&self, node: UiNodeId, removed: &mut Vec<UiNodeId>) {
+        removed.push(node);
+        if let Some(node) = self.nodes.get(&node) {
+            for child in node.children() {
+                self.collect_subtree_nodes(*child, removed);
+            }
+        }
+    }
+
+    /// Clears transient runtime pointers that point into a removed subtree.
+    fn clear_removed_transient_state(&mut self, removed: &[UiNodeId]) {
+        if self.focus.is_some_and(|id| removed.contains(&id)) {
+            self.focus = None;
+            self.updated_focus = true;
+        }
+        if self.hover.is_some_and(|id| removed.contains(&id)) {
+            self.hover = None;
+        }
+        if self.capture.is_some_and(|id| removed.contains(&id)) {
+            self.capture = None;
+        }
+        if self.hover_root.is_some_and(|id| removed.contains(&id)) {
+            self.hover_root = None;
+        }
+    }
+
+    /// Carries live runtime-only state into a newly submitted projection.
+    fn transfer_runtime_state_from(&mut self, previous: &UiRuntime) {
+        for (id, node) in &mut self.nodes {
+            let Some(previous_node) = previous.nodes.get(id) else {
+                continue;
+            };
+            node.rect = previous_node.rect;
+            node.client = previous_node.client;
+            node.clip = previous_node.clip;
+            node.content_size = previous_node.content_size;
+            node.visible = previous_node.visible;
+            node.enabled = previous_node.enabled;
+            node.control = previous_node.control;
+            if let (UiNodeData::Container { container, .. }, UiNodeData::Container { container: previous_container, .. }) =
+                (&mut node.data, &previous_node.data)
+            {
+                container.transfer_runtime_state_from(previous_container.as_ref());
+            }
+        }
+
+        self.focus = previous.focus.filter(|id| self.nodes.contains_key(id));
+        self.hover = previous.hover.filter(|id| self.nodes.contains_key(id));
+        self.capture = previous.capture.filter(|id| self.nodes.contains_key(id));
+        self.hover_root = previous.hover_root.filter(|id| self.nodes.contains_key(id));
+        self.hover_root_active = previous.hover_root_active;
+        self.updated_focus = previous.updated_focus && self.focus.is_some();
     }
 
     /// Updates the synthetic root-window container behavior for this frame.
@@ -1424,7 +1483,6 @@ impl UiRuntime {
 
         results.record_retained_with_context(
             RetainedId::root_node(root_id, id),
-            id,
             disclosure.state.id(),
             result,
             format!("ui node disclosure {:?}", id),
@@ -1495,7 +1553,6 @@ impl UiRuntime {
         };
         results.record_retained_with_context(
             RetainedId::root_node(root_id, id),
-            id,
             widget_handle_id,
             result,
             format!("root {root_name:?} ui node {:?}", id),
@@ -1965,6 +2022,24 @@ pub(crate) trait ContainerTrait: ContainerClone {
 
     /// Stores root-window scroll state.
     fn set_root_scroll_state(&mut self, _offset: Vec2i, _drag: Option<ScrollAxis>) {}
+
+    /// Current scroll-area runtime state, if this is a scroll-area container.
+    fn scroll_area_runtime_state(&self) -> Option<(Dimensioni, Vec2i, Option<ScrollAxis>)> {
+        None
+    }
+
+    /// Stores scroll-area runtime state.
+    fn set_scroll_area_runtime_state(&mut self, _content_size: Dimensioni, _offset: Vec2i, _drag: Option<ScrollAxis>) {}
+
+    /// Carries runtime-only state from a previous container with the same node id.
+    fn transfer_runtime_state_from(&mut self, previous: &dyn ContainerTrait) {
+        if let Some((offset, drag)) = previous.root_scroll_state() {
+            self.set_root_scroll_state(offset, drag);
+        }
+        if let Some((content_size, offset, drag)) = previous.scroll_area_runtime_state() {
+            self.set_scroll_area_runtime_state(content_size, offset, drag);
+        }
+    }
 }
 
 impl ContainerTrait for RootWindow {
@@ -2011,6 +2086,16 @@ impl ContainerTrait for ScrollArea {
 
     fn is_scroll_area(&self) -> bool {
         true
+    }
+
+    fn scroll_area_runtime_state(&self) -> Option<(Dimensioni, Vec2i, Option<ScrollAxis>)> {
+        Some((self.content_size, self.scroll_offset, self.scroll_drag))
+    }
+
+    fn set_scroll_area_runtime_state(&mut self, content_size: Dimensioni, offset: Vec2i, drag: Option<ScrollAxis>) {
+        self.content_size = content_size;
+        self.scroll_offset = offset;
+        self.scroll_drag = drag;
     }
 
     fn paint_before_children(&mut self, runtime: &mut UiRuntime, id: UiNodeId, style: &Style, atlas: crate::AtlasHandle) -> bool {
@@ -2168,6 +2253,19 @@ impl<'a> NodeCtx<'a> {
     /// Defers a topology/data operation until traversal completes.
     pub(crate) fn defer(&mut self, op: TreeOp) {
         self.runtime.deferred.push(op);
+    }
+
+    /// Defers removal of a direct child container/widget node.
+    pub(crate) fn remove_child(&mut self, child: UiNodeId) {
+        let is_child = self.runtime.nodes.get(&child).and_then(|node| node.parent) == Some(self.id);
+        if is_child {
+            self.defer(TreeOp::RemoveNode { node: child });
+        }
+    }
+
+    /// Defers removal of the current node.
+    pub(crate) fn remove_self(&mut self) {
+        self.defer(TreeOp::RemoveNode { node: self.id });
     }
 }
 
@@ -2502,6 +2600,88 @@ mod tests {
     }
 
     #[test]
+    fn deferred_remove_deletes_subtree_and_clears_transient_refs() {
+        let parent = UiNode::new(
+            Id::new(1),
+            None,
+            crate::Policy::auto(),
+            GridSpan::ONE,
+            UiNodeData::Container {
+                container: Box::new(Column),
+                children: vec![Id::new(2)],
+            },
+        );
+        let child = UiNode::new(
+            Id::new(2),
+            Some(Id::new(1)),
+            crate::Policy::auto(),
+            GridSpan::ONE,
+            UiNodeData::Container {
+                container: Box::new(Column),
+                children: vec![Id::new(3)],
+            },
+        );
+        let grandchild = UiNode::new(
+            Id::new(3),
+            Some(Id::new(2)),
+            crate::Policy::auto(),
+            GridSpan::ONE,
+            UiNodeData::Container {
+                container: Box::new(Column),
+                children: Vec::new(),
+            },
+        );
+
+        let mut runtime = UiRuntime::new();
+        runtime.nodes.insert(parent.id, parent);
+        runtime.nodes.insert(child.id, child);
+        runtime.nodes.insert(grandchild.id, grandchild);
+        runtime.roots.push(Id::new(1));
+        runtime.z_order.push(Id::new(1));
+        runtime.focus = Some(Id::new(3));
+        runtime.hover = Some(Id::new(2));
+        runtime.capture = Some(Id::new(3));
+        runtime.hover_root = Some(Id::new(2));
+        runtime.deferred.push(TreeOp::RemoveNode { node: Id::new(2) });
+
+        runtime.apply_deferred();
+
+        assert_eq!(runtime.nodes.get(&Id::new(1)).unwrap().children(), &[]);
+        assert!(!runtime.nodes.contains_key(&Id::new(2)));
+        assert!(!runtime.nodes.contains_key(&Id::new(3)));
+        assert_eq!(runtime.focus, None);
+        assert_eq!(runtime.hover, None);
+        assert_eq!(runtime.capture, None);
+        assert_eq!(runtime.hover_root, None);
+    }
+
+    #[test]
+    fn replacing_projection_preserves_root_state_and_drops_absent_nodes() {
+        let button = widget_handle(Button::new("removed"));
+        let mut removed_id = Id::default();
+        let first = UiNodeBuilder::build(|tree| {
+            removed_id = tree.widget(button.clone());
+        });
+        let mut runtime = UiRuntime::from_ui_nodes(first);
+        let root = runtime.roots[0];
+        if let Some(UiNodeData::Container { container, .. }) = runtime.nodes.get_mut(&root).map(|node| &mut node.data) {
+            container.set_root_scroll_state(Vec2i::new(17, 23), Some(ScrollAxis::Vertical));
+        }
+        runtime.focus = Some(removed_id);
+        runtime.hover = Some(removed_id);
+        runtime.capture = Some(removed_id);
+
+        runtime.replace_ui_nodes(UiNodeBuilder::build(|_| {}));
+
+        let scroll = runtime.root_window_scroll_offset();
+        assert_eq!((scroll.x, scroll.y), (17, 23));
+        assert!(!runtime.nodes.contains_key(&removed_id));
+        assert_eq!(runtime.focus, None);
+        assert_eq!(runtime.hover, None);
+        assert_eq!(runtime.capture, None);
+    }
+
+    #[test]
     fn node_window_chrome_offsets_layout_body() {
         let button = widget_handle(Button::new("bbbb"));
         let tree = UiNodeBuilder::build(|tree| {
@@ -2717,7 +2897,7 @@ mod tests {
     }
 
     #[test]
-    fn node_root_scrollbar_view_is_stable_for_identical_size() {
+    fn root_scrollbar_view_is_stable_for_identical_size() {
         let buttons: Vec<_> = (0..6).map(|_| widget_handle(Button::new("wide row"))).collect();
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Fixed(150), SizePolicy::Fixed(24), StackDirection::TopToBottom, |tree| {
@@ -2772,7 +2952,7 @@ mod tests {
     }
 
     #[test]
-    fn node_root_full_viewport_custom_render_does_not_overflow_from_padding() {
+    fn root_full_viewport_custom_render_does_not_overflow_from_padding() {
         let custom = widget_handle(Custom::new("viewport"));
         let mut custom_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
@@ -2814,7 +2994,7 @@ mod tests {
     }
 
     #[test]
-    fn node_root_paints_slot_button_after_scrolling_to_slot_section() {
+    fn root_paints_slot_button_after_scrolling_to_slot_section() {
         let pixels = [255, 255, 255, 255];
         let chars = [(
             'a',

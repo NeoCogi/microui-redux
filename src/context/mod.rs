@@ -66,7 +66,7 @@ use crate::{
     rect, Canvas, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Renderer,
     RendererHandle, ScrollAreaHandle, ScrollAreaState, ScrollBehavior, Style, TextureId, UiRuntime,
 };
-use roots::NodeRootEntry;
+use roots::RootEntry;
 mod builder;
 mod input_api;
 mod node_layout;
@@ -105,8 +105,8 @@ pub struct Context<R: Renderer> {
     last_zindex: i32,
     /// Monotonic frame counter used for root freshness bookkeeping.
     frame: usize,
-    /// Experimental `UiNode` roots replayed by [`Context::update_ui`].
-    node_roots: Vec<NodeRootEntry>,
+    /// Registered roots replayed by [`Context::update_ui`].
+    roots: Vec<RootEntry>,
     /// Next root id counter.
     next_root_id: usize,
     /// Double-buffered retained widget result store.
@@ -127,7 +127,7 @@ impl<R: Renderer> Context<R> {
             style: Rc::new(style),
             last_zindex: 0,
             frame: 0,
-            node_roots: Vec::default(),
+            roots: Vec::default(),
             next_root_id: 1,
             frame_results: FrameResults::default(),
 
@@ -183,7 +183,7 @@ impl<R: Renderer> Context<R> {
     /// time, and call this method each frame without re-submitting root trees.
     pub fn update_ui(&mut self) {
         self.frame_begin();
-        self.render_node_roots();
+        self.render_roots();
         self.frame_end();
     }
 

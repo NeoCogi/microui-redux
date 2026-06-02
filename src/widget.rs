@@ -201,20 +201,12 @@ pub(crate) struct FrameResults {
 struct FrameResultStore {
     /// Primary public result storage keyed by fully scoped retained identity.
     entries: HashMap<RetainedId, ResourceState>,
-    /// Compatibility index for node-id lookup APIs that do not include a root/scroll-area scope.
-    node_index: HashMap<Id, RetainedId>,
 }
 
 impl FrameResultStore {
-    /// Clears retained results and compatibility indexes.
+    /// Clears retained results.
     fn clear(&mut self) {
         self.entries.clear();
-        self.node_index.clear();
-    }
-
-    /// Records a compatibility mapping from raw node id to scoped retained id.
-    fn record_node_index(&mut self, node_id: Id, retained_id: RetainedId) {
-        self.node_index.entry(node_id).or_insert(retained_id);
     }
 
     /// Records the state produced by one retained widget dispatch.
@@ -225,7 +217,7 @@ impl FrameResultStore {
 
     /// Returns a read-only view over this generation.
     fn generation(&self) -> FrameResultGeneration<'_> {
-        FrameResultGeneration::new(&self.entries, &self.node_index)
+        FrameResultGeneration::new(&self.entries)
     }
 }
 
@@ -275,28 +267,17 @@ impl FrameDispatchTracker {
 pub struct FrameResultGeneration<'a> {
     /// Retained result map for this generation.
     entries: &'a HashMap<RetainedId, ResourceState>,
-    /// Compatibility index from raw node ids to scoped retained ids.
-    node_ids: &'a HashMap<Id, RetainedId>,
 }
 
 impl<'a> FrameResultGeneration<'a> {
     /// Creates a read-only view over a specific result generation.
-    fn new(entries: &'a HashMap<RetainedId, ResourceState>, node_ids: &'a HashMap<Id, RetainedId>) -> Self {
-        Self { entries, node_ids }
+    fn new(entries: &'a HashMap<RetainedId, ResourceState>) -> Self {
+        Self { entries }
     }
 
     /// Returns the state for a retained interaction ID in this generation.
     pub fn state_of_retained(&self, retained_id: RetainedId) -> ResourceState {
         self.entries.get(&retained_id).copied().unwrap_or(ResourceState::NONE)
-    }
-
-    /// Returns the state for a retained tree node in this generation.
-    pub fn state_of_node(&self, node_id: Id) -> ResourceState {
-        self.node_ids
-            .get(&node_id)
-            .copied()
-            .map(|retained_id| self.state_of_retained(retained_id))
-            .unwrap_or_else(|| self.state_of_retained(RetainedId::node(node_id)))
     }
 }
 
@@ -320,21 +301,18 @@ impl FrameResults {
     pub(crate) fn record_retained_with_context(
         &mut self,
         retained_id: RetainedId,
-        node_id: Id,
         widget_handle_id: Id,
         state: ResourceState,
         dispatch_site: impl Into<String>,
     ) {
         let dispatch_site = dispatch_site.into();
         self.current_dispatch.record_widget(widget_handle_id, &dispatch_site);
-        self.current.record_node_index(node_id, retained_id);
         self.record_retained_id_with_context(retained_id, state, dispatch_site);
     }
 
     /// Records an internal retained node result without a legacy widget identity.
     #[cfg(test)]
-    pub(crate) fn record_node_with_context(&mut self, retained_id: RetainedId, node_id: Id, state: ResourceState, dispatch_site: impl Into<String>) {
-        self.current.record_node_index(node_id, retained_id);
+    pub(crate) fn record_node_with_context(&mut self, retained_id: RetainedId, state: ResourceState, dispatch_site: impl Into<String>) {
         self.record_retained_id_with_context(retained_id, state, dispatch_site);
     }
 
