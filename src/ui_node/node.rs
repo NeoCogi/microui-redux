@@ -1,11 +1,45 @@
 use crate::context::{TreeCustomRender, WidgetStateHandleDyn};
-use crate::{Dimensioni, GridSpan, Id, Recti};
+use crate::{Dimensioni, GridSpan, Id, Recti, Vec2i};
 use crate::input::ControlState;
 
 use super::ContainerTrait;
 
 /// Stable runtime node identifier.
 pub(crate) type UiNodeId = Id;
+
+/// Container/widget child viewport state.
+///
+/// `visible_rect` and `virtual_clip` are both screen-space rectangles. The effective clip used for
+/// children is the intersection of the parent clip and `virtual_clip`; `translation` maps virtual
+/// content into the visible rect for scrolling containers.
+#[derive(Copy, Clone, Debug, Default)]
+pub(crate) struct ClientArea {
+    /// Real visible viewport available to child content.
+    pub(crate) visible_rect: Recti,
+    /// Virtual content extent represented by this client area.
+    pub(crate) virtual_size: Dimensioni,
+    /// Real-space clip contributed by this client area before ancestor clipping.
+    pub(crate) virtual_clip: Recti,
+    /// Virtual-to-real translation, usually negative scroll offset.
+    pub(crate) translation: Vec2i,
+}
+
+impl ClientArea {
+    /// Builds a non-scrolled client area whose virtual size matches its visible rect.
+    pub(crate) fn from_rect(rect: Recti) -> Self {
+        Self {
+            visible_rect: rect,
+            virtual_size: Dimensioni::new(rect.width.max(0), rect.height.max(0)),
+            virtual_clip: rect,
+            translation: Vec2i::default(),
+        }
+    }
+
+    /// Returns the clip that should be applied after ancestor clipping.
+    pub(crate) fn effective_clip(&self, parent_clip: Recti) -> Recti {
+        parent_clip.intersect(&self.virtual_clip).unwrap_or_default()
+    }
+}
 
 /// Common runtime node state shared by widgets and containers.
 pub(crate) struct UiNode {
@@ -19,6 +53,8 @@ pub(crate) struct UiNode {
     pub(crate) client: Recti,
     /// Effective visible clip after ancestor clips.
     pub(crate) clip: Recti,
+    /// Explicit client viewport state used by composable containers.
+    pub(crate) client_area: ClientArea,
     /// Measured child/content size.
     pub(crate) content_size: Dimensioni,
     /// Whether this node participates in traversal.
@@ -44,6 +80,7 @@ impl UiNode {
             rect: Recti::default(),
             client: Recti::default(),
             clip: Recti::default(),
+            client_area: ClientArea::default(),
             content_size: Dimensioni::default(),
             visible: true,
             enabled: true,

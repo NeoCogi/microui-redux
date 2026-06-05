@@ -753,6 +753,7 @@ struct State {
     stack_direction_root: RootId,
     weight_root: RootId,
 
+    demo_scroll: ScrollAreaHandle,
     log_output: Option<ScrollAreaHandle>,
     dialog_window: FileDialogState,
 
@@ -1013,6 +1014,7 @@ impl State {
             suzanne_root,
             stack_direction_root,
             weight_root,
+            demo_scroll: ctx.new_scroll_area("Demo Window Body"),
             log_output: Some(ctx.new_scroll_area("Log Output")),
             dialog_window: FileDialogState::new(ctx),
             fps: 0.0,
@@ -1489,6 +1491,7 @@ impl State {
         let background_swatch = self.background_swatch.clone();
         let slot_buttons = self.slot_buttons.clone();
         let external_image_button = self.external_image_button.clone();
+        let demo_scroll = self.demo_scroll.clone();
         let mut test_button_ids = [NodeId::default(); 6];
         let mut tree_button_ids = [NodeId::default(); 6];
         self.demo_tree = UiNodeBuilder::build(|tree| {
@@ -1509,124 +1512,127 @@ impl State {
             let [label_red, label_green, label_blue] = background_labels.clone();
             let [slot0, slot1, slot2, slot3] = slot_buttons.clone();
 
-            Self::section(tree, &window_header, |tree| {
-                tree.row(&window_info_row, SizePolicy::Auto, |tree| {
-                    tree.widget(&label_pos);
-                    tree.widget(&value_pos);
-                });
-                tree.row(&window_info_row, SizePolicy::Auto, |tree| {
-                    tree.widget(&label_size);
-                    tree.widget(&value_size);
-                });
-                tree.row(&window_info_row, SizePolicy::Auto, |tree| {
-                    tree.widget(&label_fps);
-                    tree.widget(&value_fps);
-                });
-            });
-
-            Self::section(tree, &test_buttons_header, |tree| {
-                tree.row(&button_widths, SizePolicy::Auto, |tree| {
-                    tree.widget(&test_label0);
-                    Self::remember_widget(tree, &mut test_button_ids[0], &button0);
-                    Self::remember_widget(tree, &mut test_button_ids[1], &button1);
-                });
-                tree.row(&button_widths, SizePolicy::Auto, |tree| {
-                    tree.widget(&test_label1);
-                    Self::remember_widget(tree, &mut test_button_ids[2], &button2);
-                    Self::remember_widget(tree, &mut test_button_ids[3], &button3);
-                });
-                tree.row(&button_widths, SizePolicy::Auto, |tree| {
-                    tree.widget(&test_label2);
-                    Self::remember_widget(tree, &mut test_button_ids[4], &button4);
-                    Self::remember_widget(tree, &mut test_button_ids[5], &button5);
-                });
-            });
-
-            Self::section(tree, &combo_header, |tree| {
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                    tree.widget(&combo_state);
-                });
-            });
-
-            Self::section(tree, &tree_and_text_header, |tree| {
-                tree.row(&tree_widths, SizePolicy::Auto, |tree| {
-                    tree.column(|tree| {
-                        tree.tree_node(&test1_tn, |tree| {
-                            tree.tree_node(&test1a_tn, |tree| {
-                                tree.widget(&tree_label_hello);
-                                tree.widget(&tree_label_world);
-                            });
-                            tree.tree_node(&test1b_tn, |tree| {
-                                Self::remember_widget(tree, &mut tree_button_ids[0], &tree_button0);
-                                Self::remember_widget(tree, &mut tree_button_ids[1], &tree_button1);
-                            });
-                        });
-                        tree.tree_node(&test2_tn, |tree| {
-                            tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
-                                Self::remember_widget(tree, &mut tree_button_ids[2], &tree_button2);
-                                Self::remember_widget(tree, &mut tree_button_ids[3], &tree_button3);
-                            });
-                            tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
-                                Self::remember_widget(tree, &mut tree_button_ids[4], &tree_button4);
-                                Self::remember_widget(tree, &mut tree_button_ids[5], &tree_button5);
-                            });
-                        });
-                        tree.tree_node(&test3_tn, |tree| {
-                            tree.widget(&checkbox0);
-                            tree.widget(&checkbox1);
-                            tree.widget(&checkbox2);
-                        });
+            tree.node(NodeOptions::with_policy(Policy::fill()))
+                .scroll_area(&demo_scroll, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                Self::section(tree, &window_header, |tree| {
+                    tree.row(&window_info_row, SizePolicy::Auto, |tree| {
+                        tree.widget(&label_pos);
+                        tree.widget(&value_pos);
                     });
-                    tree.column(|tree| {
-                        tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                            tree.text_with_wrap(
-                                "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.",
-                                TextWrap::Word,
-                            );
-                        });
+                    tree.row(&window_info_row, SizePolicy::Auto, |tree| {
+                        tree.widget(&label_size);
+                        tree.widget(&value_size);
+                    });
+                    tree.row(&window_info_row, SizePolicy::Auto, |tree| {
+                        tree.widget(&label_fps);
+                        tree.widget(&value_fps);
                     });
                 });
-            });
 
-            Self::section(tree, &text_area_header, |tree| {
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(120), StackDirection::TopToBottom, |tree| {
-                    tree.widget(&text_area);
+                Self::section(tree, &test_buttons_header, |tree| {
+                    tree.row(&button_widths, SizePolicy::Auto, |tree| {
+                        tree.widget(&test_label0);
+                        Self::remember_widget(tree, &mut test_button_ids[0], &button0);
+                        Self::remember_widget(tree, &mut test_button_ids[1], &button1);
+                    });
+                    tree.row(&button_widths, SizePolicy::Auto, |tree| {
+                        tree.widget(&test_label1);
+                        Self::remember_widget(tree, &mut test_button_ids[2], &button2);
+                        Self::remember_widget(tree, &mut test_button_ids[3], &button3);
+                    });
+                    tree.row(&button_widths, SizePolicy::Auto, |tree| {
+                        tree.widget(&test_label2);
+                        Self::remember_widget(tree, &mut test_button_ids[4], &button4);
+                        Self::remember_widget(tree, &mut test_button_ids[5], &button5);
+                    });
                 });
-            });
 
-            Self::section(tree, &background_header, |tree| {
-                tree.row(&background_widths, SizePolicy::Fixed(74), |tree| {
-                    tree.column(|tree| {
-                        tree.row(&slider_row, SizePolicy::Auto, |tree| {
-                            tree.widget(&label_red);
-                            tree.widget(&slider_red);
+                Self::section(tree, &combo_header, |tree| {
+                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                        tree.widget(&combo_state);
+                    });
+                });
+
+                Self::section(tree, &tree_and_text_header, |tree| {
+                    tree.row(&tree_widths, SizePolicy::Auto, |tree| {
+                        tree.column(|tree| {
+                            tree.tree_node(&test1_tn, |tree| {
+                                tree.tree_node(&test1a_tn, |tree| {
+                                    tree.widget(&tree_label_hello);
+                                    tree.widget(&tree_label_world);
+                                });
+                                tree.tree_node(&test1b_tn, |tree| {
+                                    Self::remember_widget(tree, &mut tree_button_ids[0], &tree_button0);
+                                    Self::remember_widget(tree, &mut tree_button_ids[1], &tree_button1);
+                                });
+                            });
+                            tree.tree_node(&test2_tn, |tree| {
+                                tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
+                                    Self::remember_widget(tree, &mut tree_button_ids[2], &tree_button2);
+                                    Self::remember_widget(tree, &mut tree_button_ids[3], &tree_button3);
+                                });
+                                tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
+                                    Self::remember_widget(tree, &mut tree_button_ids[4], &tree_button4);
+                                    Self::remember_widget(tree, &mut tree_button_ids[5], &tree_button5);
+                                });
+                            });
+                            tree.tree_node(&test3_tn, |tree| {
+                                tree.widget(&checkbox0);
+                                tree.widget(&checkbox1);
+                                tree.widget(&checkbox2);
+                            });
                         });
-                        tree.row(&slider_row, SizePolicy::Auto, |tree| {
-                            tree.widget(&label_green);
-                            tree.widget(&slider_green);
-                        });
-                        tree.row(&slider_row, SizePolicy::Auto, |tree| {
-                            tree.widget(&label_blue);
-                            tree.widget(&slider_blue);
+                        tree.column(|tree| {
+                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                                tree.text_with_wrap(
+                                    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.",
+                                    TextWrap::Word,
+                                );
+                            });
                         });
                     });
-                    tree.widget(&background_swatch);
                 });
-            });
 
-            Self::section(tree, &slot_header, |tree| {
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                    tree.widget(&slot0);
-                    tree.widget(&slot1);
-                    tree.widget(&slot2);
-                    if let Some(button) = &external_image_button {
-                        tree.node(NodeOptions::with_policy(Policy::fixed_width(256))).widget(button);
-                    }
+                Self::section(tree, &text_area_header, |tree| {
+                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(120), StackDirection::TopToBottom, |tree| {
+                        tree.widget(&text_area);
+                    });
                 });
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                    tree.widget(&slot3);
+
+                Self::section(tree, &background_header, |tree| {
+                    tree.row(&background_widths, SizePolicy::Fixed(74), |tree| {
+                        tree.column(|tree| {
+                            tree.row(&slider_row, SizePolicy::Auto, |tree| {
+                                tree.widget(&label_red);
+                                tree.widget(&slider_red);
+                            });
+                            tree.row(&slider_row, SizePolicy::Auto, |tree| {
+                                tree.widget(&label_green);
+                                tree.widget(&slider_green);
+                            });
+                            tree.row(&slider_row, SizePolicy::Auto, |tree| {
+                                tree.widget(&label_blue);
+                                tree.widget(&slider_blue);
+                            });
+                        });
+                        tree.widget(&background_swatch);
+                    });
                 });
-            });
+
+                Self::section(tree, &slot_header, |tree| {
+                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                        tree.widget(&slot0);
+                        tree.widget(&slot1);
+                        tree.widget(&slot2);
+                        if let Some(button) = &external_image_button {
+                            tree.node(NodeOptions::with_policy(Policy::fixed_width(256))).widget(button);
+                        }
+                    });
+                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                        tree.widget(&slot3);
+                    });
+                });
+                });
         });
         self.test_button_ids = test_button_ids;
         self.tree_button_ids = tree_button_ids;

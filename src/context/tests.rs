@@ -9,7 +9,7 @@ use super::*;
 use crate::{
     test_support::{test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer},
     widget_handle, AtlasHandle, Button, Combo, ControlState, ListItem, NodeId, NodeOptions, Policy, ResourceState, RetainedId, SizePolicy, StackDirection,
-    TextBlock, Vec2i, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
+    TextBlock, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
@@ -81,7 +81,7 @@ impl Widget for AlwaysSubmitWidget {
 }
 
 #[test]
-fn root_windows_render_scrollbars_after_content_size_is_known() {
+fn root_windows_do_not_render_scrollbars_for_overflow_content() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
@@ -104,7 +104,7 @@ fn root_windows_render_scrollbars_after_content_size_is_known() {
         .unwrap()
         .iter()
         .any(|rect| rect.x == body.x + body.width && rect.width == style.scrollbar_size && rect.height > 0);
-    assert!(has_vertical_scrollbar);
+    assert!(!has_vertical_scrollbar);
 }
 
 #[test]
@@ -1263,7 +1263,7 @@ fn node_popup_closes_when_clicking_another_node_window() {
 }
 
 #[test]
-fn node_scroll_area_consumes_wheel_before_root_window_scrolls() {
+fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
@@ -1299,14 +1299,7 @@ fn node_scroll_area_consumes_wheel_before_root_window_scrolls() {
     ctx.update_ui();
 
     let nested_scroll = scroll_area.with(|area| area.scroll());
-    let root_entry = ctx.roots.iter().find(|entry| entry.id == root).unwrap();
-    let root_node = root_entry.runtime.nodes.get(&root_entry.runtime.roots[0]).unwrap();
-    let root_scroll = match &root_node.data {
-        crate::ui_node::UiNodeData::Container { container, .. } => container.root_scroll_state().map(|(scroll, _)| scroll).unwrap_or_default(),
-        _ => Vec2i::default(),
-    };
     assert!(nested_scroll.y > 0);
-    assert_eq!(root_scroll.y, 0);
 }
 
 #[test]

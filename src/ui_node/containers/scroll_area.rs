@@ -3,7 +3,7 @@ use crate::scroll::ScrollAreaHandle;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::{ControlColor, Dimensioni, Recti, Style, Vec2i};
 
-use super::{Column, ContainerTrait, LayoutCtx, MeasureCtx, PaintCtx, ScrollDispatchCtx};
+use super::{ClientArea, Column, ContainerTrait, LayoutCtx, MeasureCtx, PaintCtx, ScrollDispatchCtx};
 use crate::context::NodeLayout;
 use crate::ui_node::UiNodeId;
 
@@ -123,12 +123,19 @@ fn layout_scroll_area_once(
         scroll.x.clamp(0, scrollbar_max_scroll(padded_hint.width, body.width)),
         scroll.y.clamp(0, scrollbar_max_scroll(padded_hint.height, body.height)),
     );
-    let child_clip = clip.intersect(&body).unwrap_or_default();
     let mut child_rect = crate::expand_rect(body, -ctx.style.padding);
     child_rect.x = child_rect.x.saturating_sub(scroll.x);
     child_rect.y = child_rect.y.saturating_sub(scroll.y);
 
-    ctx.set_geometry(id, rect, body, child_clip);
+    let padded_virtual_size = super::super::add_padding(content_hint, ctx.style.padding.max(0));
+    let client_area = ClientArea {
+        visible_rect: body,
+        virtual_size: padded_virtual_size,
+        virtual_clip: body,
+        translation: Vec2i::new(-scroll.x, -scroll.y),
+    };
+    let child_clip = client_area.effective_clip(clip);
+    ctx.set_client_area_geometry(id, rect, client_area, clip);
 
     content.layout(ctx, id, child_rect, child_clip);
     let content_size = ctx

@@ -1,10 +1,9 @@
-use crate::input::ScrollBehavior;
 use crate::scrollbar::ScrollAxis;
 use crate::sizing::SizePolicy;
 use crate::context::erased_widget_state;
 use crate::{Dimensioni, FrameResults, Input, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
 
-use super::{retained_focus_to_node, UiNode, UiNodeId, UiRuntime, WidgetCtx};
+use super::{retained_focus_to_node, ClientArea, UiNode, UiNodeId, UiRuntime, WidgetCtx};
 
 mod column;
 mod disclosure;
@@ -52,11 +51,7 @@ pub(crate) trait ContainerTrait: ContainerClone {
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, id: UiNodeId, rect: Recti, clip: Recti);
 
     /// Updates the container's own retained widget, if any, and returns whether children should be traversed.
-    fn update(
-        &mut self,
-        _ctx: &mut UpdateCtx<'_>,
-        _id: UiNodeId,
-    ) -> bool {
+    fn update(&mut self, _ctx: &mut UpdateCtx<'_>, _id: UiNodeId) -> bool {
         true
     }
 
@@ -88,17 +83,6 @@ pub(crate) trait ContainerTrait: ContainerClone {
         false
     }
 
-    /// Current root-window scroll state, if this is a root-window container.
-    fn root_scroll_state(&self) -> Option<(Vec2i, Option<ScrollAxis>)> {
-        None
-    }
-
-    /// Configures root-window scrolling for this frame.
-    fn configure_root_scroll(&mut self, _scroll_behavior: ScrollBehavior) {}
-
-    /// Stores root-window scroll state.
-    fn set_root_scroll_state(&mut self, _offset: Vec2i, _drag: Option<ScrollAxis>) {}
-
     /// Current scroll-area runtime state, if this is a scroll-area container.
     fn scroll_area_runtime_state(&self) -> Option<(Dimensioni, Vec2i, Option<ScrollAxis>)> {
         None
@@ -109,9 +93,6 @@ pub(crate) trait ContainerTrait: ContainerClone {
 
     /// Carries runtime-only state from a previous container with the same node id.
     fn transfer_runtime_state_from(&mut self, previous: &dyn ContainerTrait) {
-        if let Some((offset, drag)) = previous.root_scroll_state() {
-            self.set_root_scroll_state(offset, drag);
-        }
         if let Some((content_size, offset, drag)) = previous.scroll_area_runtime_state() {
             self.set_scroll_area_runtime_state(content_size, offset, drag);
         }
@@ -182,6 +163,7 @@ impl LayoutCtx<'_> {
     pub(crate) fn set_client(&mut self, id: UiNodeId, client: Recti) {
         if let Some(node) = self.runtime.nodes.get_mut(&id) {
             node.client = client;
+            node.client_area.visible_rect = client;
         }
     }
 
@@ -196,11 +178,20 @@ impl LayoutCtx<'_> {
             node.rect = rect;
             node.client = client;
             node.clip = clip;
+            node.client_area.visible_rect = client;
+            node.client_area.virtual_clip = client;
+            node.client_area.virtual_size = Dimensioni::new(client.width.max(0), client.height.max(0));
+            node.client_area.translation = Vec2i::default();
         }
     }
 
-    pub(crate) fn root_window_scroll_offset(&self) -> Vec2i {
-        self.runtime.root_window_scroll_offset()
+    pub(crate) fn set_client_area_geometry(&mut self, id: UiNodeId, rect: Recti, client_area: ClientArea, parent_clip: Recti) {
+        if let Some(node) = self.runtime.nodes.get_mut(&id) {
+            node.rect = rect;
+            node.client = client_area.visible_rect;
+            node.clip = client_area.effective_clip(parent_clip);
+            node.client_area = client_area;
+        }
     }
 
     pub(crate) fn grid_span(&self, id: UiNodeId) -> crate::GridSpan {
@@ -285,6 +276,10 @@ impl ScrollDispatchCtx<'_> {
     pub(crate) fn node_clip_and_client(&self, id: UiNodeId) -> Option<(Recti, Recti)> {
         self.runtime.nodes.get(&id).map(|node| (node.clip, node.client))
     }
+
+    pub(crate) fn node_client_area(&self, id: UiNodeId) -> Option<ClientArea> {
+        self.runtime.nodes.get(&id).map(|node| node.client_area)
+    }
 }
 
 /// Services available while a container paints its own surface.
@@ -303,6 +298,10 @@ impl PaintCtx<'_> {
 
     pub(crate) fn node_client(&self, id: UiNodeId) -> Option<Recti> {
         self.runtime.nodes.get(&id).map(|node| node.client)
+    }
+
+    pub(crate) fn node_client_area(&self, id: UiNodeId) -> Option<ClientArea> {
+        self.runtime.nodes.get(&id).map(|node| node.client_area)
     }
 
     pub(crate) fn node_control(&self, id: UiNodeId) -> crate::input::ControlState {

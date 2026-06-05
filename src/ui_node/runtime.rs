@@ -148,14 +148,12 @@ impl UiRuntime {
         self.updated_focus = false;
         self.hover_root_active = hover_root_active;
         self.hover_root = hover_root_active.then(|| self.roots.first().copied()).flatten();
-        self.configure_root_window(scroll_behavior);
+        let _ = scroll_behavior;
+        let body_view = root_window_body_view(body, style);
 
-        self.layout_roots_until_scrollbars_stable(style, canvas.get_atlas(), body, scroll_behavior);
-        let scroll_consumed = self.dispatch_scroll_input(style, input);
-        if !scroll_consumed {
-            self.update_root_window_scroll(body, style, input, scroll_behavior);
-        }
-        self.layout_roots_until_scrollbars_stable(style, canvas.get_atlas(), body, scroll_behavior);
+        self.layout_roots_in_view(style, canvas.get_atlas(), body_view);
+        self.dispatch_scroll_input(style, input);
+        self.layout_roots_in_view(style, canvas.get_atlas(), body_view);
 
         let mut root_index = 0;
         while let Some(root) = self.root_at(root_index) {
@@ -163,14 +161,13 @@ impl UiRuntime {
             root_index += 1;
         }
 
-        self.layout_roots_until_scrollbars_stable(style, canvas.get_atlas(), body, scroll_behavior);
+        self.layout_roots_in_view(style, canvas.get_atlas(), body_view);
 
         let mut root_index = 0;
         while let Some(root) = self.root_at(root_index) {
             self.paint_node(root, style, canvas.get_atlas(), input);
             root_index += 1;
         }
-        self.paint_root_window_scrollbars(body, style, &canvas.get_atlas(), scroll_behavior);
 
         if !self.updated_focus {
             self.focus = None;
@@ -294,34 +291,6 @@ impl UiRuntime {
         true
     }
 
-    /// Paints root scrollbars when node content exceeds the root client area.
-    pub(super) fn paint_root_window_scrollbars(&mut self, body: Recti, style: &Style, atlas: &crate::AtlasHandle, scroll_behavior: ScrollBehavior) {
-        if scroll_behavior.is_no_scroll() {
-            return;
-        }
-        let view = self.root_window_view_for_content(body, style, scroll_behavior, self.root_window_content_size());
-        let content = self.root_window_content_size();
-        let scroll_offset = self.root_window_scroll_offset();
-        let scrollbar_size = style.scrollbar_size.max(0);
-        if scrollbar_size <= 0 {
-            return;
-        }
-
-        let mut draw = DrawCtx::new(&mut self.commands, &mut self.triangle_vertices, &mut self.clip_stack, style, atlas);
-        if content.height > view.height {
-            let base = scrollbar_base(ScrollAxis::Vertical, view, scrollbar_size);
-            let thumb = scrollbar_thumb(ScrollAxis::Vertical, base, view.height, content.height, scroll_offset.y, scrollbar_size);
-            draw.draw_frame(base, ControlColor::Base);
-            draw.draw_frame(thumb, ControlColor::Button);
-        }
-        if content.width > view.width {
-            let base = scrollbar_base(ScrollAxis::Horizontal, view, scrollbar_size);
-            let thumb = scrollbar_thumb(ScrollAxis::Horizontal, base, view.width, content.width, scroll_offset.x, scrollbar_size);
-            draw.draw_frame(base, ControlColor::Base);
-            draw.draw_frame(thumb, ControlColor::Button);
-        }
-    }
-
     /// Removes a node from its parent child list.
     pub(super) fn detach_from_parent(&mut self, node: UiNodeId) {
         let parent = self.nodes.get(&node).and_then(|node| node.parent);
@@ -383,6 +352,7 @@ impl UiRuntime {
             node.rect = previous_node.rect;
             node.client = previous_node.client;
             node.clip = previous_node.clip;
+            node.client_area = previous_node.client_area;
             node.content_size = previous_node.content_size;
             node.visible = previous_node.visible;
             node.enabled = previous_node.enabled;
@@ -402,78 +372,13 @@ impl UiRuntime {
         self.updated_focus = previous.updated_focus && self.focus.is_some();
     }
 
-    /// Updates the synthetic root-window container behavior for this frame.
-    pub(super) fn configure_root_window(&mut self, scroll_behavior: ScrollBehavior) {
-        if let Some(root) = self.roots.first().copied() {
-            if let Some(mut container) = self.container_clone(root) {
-                container.configure_root_scroll(scroll_behavior);
-                self.set_container(root, container);
-            }
-        }
-    }
-
-    /// Returns the synthetic root-window scroll offset.
-    pub(super) fn root_window_scroll_offset(&self) -> Vec2i {
-        self.roots
-            .first()
-            .and_then(|root| self.nodes.get(root))
-            .and_then(|node| match &node.data {
-                UiNodeData::Container { container, .. } => container.root_scroll_state().map(|(offset, _)| offset),
-                _ => None,
-            })
-            .unwrap_or_default()
-    }
-
-    /// Returns the synthetic root-window active scrollbar drag axis.
-    pub(super) fn root_window_scroll_drag(&self) -> Option<ScrollAxis> {
-        self.roots.first().and_then(|root| self.nodes.get(root)).and_then(|node| match &node.data {
-            UiNodeData::Container { container, .. } => container.root_scroll_state().and_then(|(_, drag)| drag),
-            _ => None,
-        })
-    }
-
-    /// Stores synthetic root-window scroll interaction state.
-    pub(super) fn set_root_window_scroll_state(&mut self, offset: Vec2i, drag: Option<ScrollAxis>) {
-        if let Some(root) = self.roots.first().copied() {
-            if let Some(mut container) = self.container_clone(root) {
-                container.set_root_scroll_state(offset, drag);
-                self.set_container(root, container);
-            }
-        }
-    }
-
-    /// Lays out root nodes, repeating until current-frame content and scrollbar gutters agree.
-    pub(super) fn layout_roots_until_scrollbars_stable(&mut self, style: &Style, atlas: crate::AtlasHandle, body: Recti, scroll_behavior: ScrollBehavior) {
-        let mut content_hint = self.root_window_content_size();
-        let mut layout_content = Dimensioni::default();
-        for _ in 0..3 {
-            let client = self.root_window_view_for_content(body, style, scroll_behavior, content_hint);
-            layout_content = self.layout_roots_in_view(style, atlas.clone(), client);
-            let next_client = self.root_window_view_for_content(body, style, scroll_behavior, layout_content);
-            if same_rect(client, next_client) {
-                break;
-            }
-            content_hint = layout_content;
-        }
-
-        let client = self.root_window_view_for_content(body, style, scroll_behavior, layout_content);
-        let content = layout_content;
-        let mut scroll = self.root_window_scroll_offset();
-        scroll.x = scroll.x.clamp(0, scrollbar_max_scroll(content.width, client.width));
-        scroll.y = scroll.y.clamp(0, scrollbar_max_scroll(content.height, client.height));
-        self.set_root_window_scroll_state(scroll, self.root_window_scroll_drag());
-        self.layout_roots_in_view(style, atlas, client);
-    }
-
     /// Lays out root nodes inside an already resolved root client area.
     pub(super) fn layout_roots_in_view(&mut self, style: &Style, atlas: crate::AtlasHandle, client: Recti) -> Dimensioni {
-        let scroll_offset = self.root_window_scroll_offset();
-        let mut y = client.y.saturating_sub(scroll_offset.y);
+        let mut y = client.y;
         let mut content_bounds = None;
         for index in 0..self.roots.len() {
             let Some(root) = self.root_at(index) else { continue };
-            let content_y = y.saturating_add(scroll_offset.y);
-            let remaining_height = (client.y + client.height - content_y).max(0);
+            let remaining_height = (client.y + client.height - y).max(0);
             let preferred = self.measure_node(root, style, &atlas, Dimensioni::new(client.width, remaining_height));
             let height = if index + 1 == self.roots.len() {
                 remaining_height
@@ -484,25 +389,16 @@ impl UiRuntime {
             let rect = if is_root_window {
                 Recti::new(client.x, client.y, client.width, client.height)
             } else {
-                Recti::new(client.x.saturating_sub(scroll_offset.x), y, client.width, height)
+                Recti::new(client.x, y, client.width, height)
             };
             self.layout_node(root, style, &atlas, rect, client);
             if let Some(node) = self.nodes.get(&root) {
-                let unscrolled = if is_root_window {
-                    Recti::new(
-                        node.rect.x,
-                        node.rect.y,
-                        node.rect.width.max(node.content_size.width),
-                        node.rect.height.max(node.content_size.height),
-                    )
-                } else {
-                    Recti::new(
-                        node.rect.x.saturating_add(scroll_offset.x),
-                        node.rect.y.saturating_add(scroll_offset.y),
-                        node.rect.width.max(node.content_size.width),
-                        node.rect.height.max(node.content_size.height),
-                    )
-                };
+                let unscrolled = Recti::new(
+                    node.rect.x,
+                    node.rect.y,
+                    node.rect.width.max(node.content_size.width),
+                    node.rect.height.max(node.content_size.height),
+                );
                 content_bounds = Some(match content_bounds {
                     Some(bounds) => union_rect(bounds, unscrolled),
                     None => unscrolled,
@@ -522,57 +418,6 @@ impl UiRuntime {
         content_size
     }
 
-    /// Applies wheel scrolling to the root viewport and clamps it to current content.
-    pub(super) fn update_root_window_scroll(&mut self, body: Recti, style: &Style, input: &Input, scroll_behavior: ScrollBehavior) {
-        if scroll_behavior.is_no_scroll() {
-            self.set_root_window_scroll_state(Vec2i::default(), None);
-            return;
-        }
-
-        let view = self.root_window_view_for_content(body, style, scroll_behavior, self.root_window_content_size());
-        let content = self.root_window_content_size();
-        let max_x = (content.width - view.width).max(0);
-        let max_y = (content.height - view.height).max(0);
-        let scrollbar_size = style.scrollbar_size.max(0);
-        let mut scroll_offset = self.root_window_scroll_offset();
-        let mut scroll_drag = self.root_window_scroll_drag();
-        if input.mouse_down.is_empty() {
-            scroll_drag = None;
-        } else if self.hover_root_active && input.mouse_pressed.intersects(MouseButton::LEFT) && scrollbar_size > 0 {
-            let vertical = scrollbar_base(ScrollAxis::Vertical, view, scrollbar_size);
-            let horizontal = scrollbar_base(ScrollAxis::Horizontal, view, scrollbar_size);
-            if max_y > 0 && vertical.contains(&input.mouse_pos) {
-                scroll_drag = Some(ScrollAxis::Vertical);
-            } else if max_x > 0 && horizontal.contains(&input.mouse_pos) {
-                scroll_drag = Some(ScrollAxis::Horizontal);
-            }
-        }
-
-        match scroll_drag {
-            Some(ScrollAxis::Vertical) if max_y > 0 => {
-                let base = scrollbar_base(ScrollAxis::Vertical, view, scrollbar_size);
-                scroll_offset.y = scroll_offset
-                    .y
-                    .saturating_add(scrollbar_drag_delta(ScrollAxis::Vertical, input.mouse_delta, content.height, base));
-            }
-            Some(ScrollAxis::Horizontal) if max_x > 0 => {
-                let base = scrollbar_base(ScrollAxis::Horizontal, view, scrollbar_size);
-                scroll_offset.x = scroll_offset
-                    .x
-                    .saturating_add(scrollbar_drag_delta(ScrollAxis::Horizontal, input.mouse_delta, content.width, base));
-            }
-            _ => {}
-        }
-
-        if self.hover_root_active {
-            scroll_offset.x = scroll_offset.x.saturating_sub(input.scroll_delta.x);
-            scroll_offset.y = scroll_offset.y.saturating_sub(input.scroll_delta.y);
-        }
-        scroll_offset.x = scroll_offset.x.clamp(0, max_x);
-        scroll_offset.y = scroll_offset.y.clamp(0, max_y);
-        self.set_root_window_scroll_state(scroll_offset, scroll_drag);
-    }
-
     /// Returns the first root content size in the root-window client coordinate space.
     pub(super) fn root_window_content_size(&self) -> Dimensioni {
         self.roots
@@ -580,35 +425,6 @@ impl UiRuntime {
             .and_then(|root| self.nodes.get(root))
             .map(|node| node.content_size)
             .unwrap_or_default()
-    }
-
-    /// Returns the root content viewport with scrollbar gutters reserved inside the root.
-    pub(super) fn root_window_view_for_content(&self, body: Recti, style: &Style, scroll_behavior: ScrollBehavior, content: Dimensioni) -> Recti {
-        let mut view = expand_rect(body, -style.padding);
-        if scroll_behavior.is_no_scroll() {
-            return view;
-        }
-        let scrollbar_size = style.scrollbar_size.max(0);
-        if scrollbar_size <= 0 {
-            return view;
-        }
-        let base = view;
-        for _ in 0..3 {
-            let needs_vertical = content.height > view.height && view.height > 0;
-            let needs_horizontal = content.width > view.width && view.width > 0;
-            let mut next = base;
-            if needs_vertical {
-                next.width = next.width.saturating_sub(scrollbar_size);
-            }
-            if needs_horizontal {
-                next.height = next.height.saturating_sub(scrollbar_size);
-            }
-            if same_rect(next, view) {
-                break;
-            }
-            view = next;
-        }
-        view
     }
 
     /// Measures one node's preferred size in the box-tree layout path.
@@ -675,9 +491,11 @@ impl UiRuntime {
         );
         let size = Dimensioni::new(rect.width, rect.height);
         if let Some(node) = self.nodes.get_mut(&id) {
+            let client_area = ClientArea::from_rect(rect);
             node.rect = rect;
-            node.client = node.rect;
-            node.clip = clip.intersect(&node.rect).unwrap_or_default();
+            node.client = client_area.visible_rect;
+            node.clip = client_area.effective_clip(clip);
+            node.client_area = client_area;
             node.content_size = size;
         }
         size
@@ -685,11 +503,13 @@ impl UiRuntime {
 
     /// Lays out a container and descendants.
     pub(super) fn layout_container(&mut self, id: UiNodeId, style: &Style, atlas: &crate::AtlasHandle, rect: Recti, clip: Recti) -> Dimensioni {
-        let node_clip = clip.intersect(&rect).unwrap_or_default();
+        let client_area = ClientArea::from_rect(rect);
+        let node_clip = client_area.effective_clip(clip);
         if let Some(node) = self.nodes.get_mut(&id) {
             node.rect = rect;
-            node.client = rect;
+            node.client = client_area.visible_rect;
             node.clip = node_clip;
+            node.client_area = client_area;
         }
 
         self.layout_container_children(id, style, atlas, rect, node_clip);
@@ -996,11 +816,7 @@ impl UiRuntime {
                     }
                 }
                 if let Some(container) = container.as_mut() {
-                    let mut ctx = PaintCtx {
-                        runtime: self,
-                        style,
-                        atlas,
-                    };
+                    let mut ctx = PaintCtx { runtime: self, style, atlas };
                     container.paint_after_children(&mut ctx, id);
                 }
                 if let Some(container) = container {
@@ -1094,7 +910,11 @@ impl UiRuntime {
         }
         self.commands.push(Command::PopClip);
     }
+}
 
+/// Returns the root content viewport. Root/window layout clips to this rect but never scrolls it.
+fn root_window_body_view(body: Recti, style: &Style) -> Recti {
+    expand_rect(body, -style.padding)
 }
 
 /// Coarse node kind used to route passes without holding a node borrow.

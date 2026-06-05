@@ -11,25 +11,25 @@
 #![allow(dead_code)]
 
 use crate::{
-    expand_rect, Canvas, ControlColor, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, InputSnapshot, KeyCode, KeyMode, GridSpan,
-    MouseButton, MouseEvent, Recti, Renderer, RetainedId, Style, UiNodeSet, Vec2i, Vertex, UNCLIPPED_RECT,
+    expand_rect, Canvas, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, InputSnapshot, KeyCode, KeyMode, GridSpan, MouseButton,
+    MouseEvent, Recti, Renderer, RetainedId, Style, UiNodeSet, Vec2i, Vertex, UNCLIPPED_RECT,
 };
 use crate::render_command::{render_command_stream, Command};
-use crate::draw_context::DrawCtx;
 use crate::id::IdNamespace;
 use crate::input::{ContainerOption, ControlState, ResourceState, ScrollBehavior, WidgetOption};
 use crate::sizing::SizePolicy;
-use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::widget::FocusPolicy;
 use crate::widget_ctx::WidgetCtx;
 use crate::context::TreeCustomRender;
 
 mod node;
-pub(crate) use node::{UiNode, UiNodeData, UiNodeId};
+pub(crate) use node::{ClientArea, UiNode, UiNodeData, UiNodeId};
 mod runtime;
 pub(crate) use runtime::UiRuntime;
 mod containers;
-pub(crate) use containers::{Column, ContainerTrait, Disclosure, Grid, LayoutCtx, MeasureCtx, PaintCtx, RootWindow, Row, ScrollArea, ScrollDispatchCtx, Stack, UpdateCtx};
+pub(crate) use containers::{
+    Column, ContainerTrait, Disclosure, Grid, LayoutCtx, MeasureCtx, PaintCtx, RootWindow, Row, ScrollArea, ScrollDispatchCtx, Stack, UpdateCtx,
+};
 
 /// Command wrapper that lets node-runtime custom render callbacks enter the backend stream.
 struct NodeCustomRenderCommand {
@@ -86,6 +86,11 @@ impl<'a> NodeCtx<'a> {
         self.runtime.nodes.get(&self.id).map(|node| node.client).unwrap_or_default()
     }
 
+    /// Returns the current node client area.
+    pub(crate) fn client_area(&self) -> ClientArea {
+        self.runtime.nodes.get(&self.id).map(|node| node.client_area).unwrap_or_default()
+    }
+
     /// Returns the current effective clip rect.
     pub(crate) fn clip(&self) -> Recti {
         self.runtime.nodes.get(&self.id).map(|node| node.clip).unwrap_or_default()
@@ -102,6 +107,7 @@ impl<'a> NodeCtx<'a> {
     pub(crate) fn set_client(&mut self, value: Recti) {
         if let Some(node) = self.runtime.nodes.get_mut(&self.id) {
             node.client = value;
+            node.client_area.visible_rect = value;
         }
     }
 
@@ -118,7 +124,6 @@ impl<'a> NodeCtx<'a> {
             node.content_size = value;
         }
     }
-
 }
 
 /// Computes titlebar height from style minimums and current title font metrics.
@@ -517,25 +522,19 @@ mod tests {
     }
 
     #[test]
-    fn replacing_projection_preserves_root_state_and_drops_absent_nodes() {
+    fn replacing_projection_drops_absent_nodes_and_transient_state() {
         let button = widget_handle(Button::new("removed"));
         let mut removed_id = Id::default();
         let first = UiNodeBuilder::build(|tree| {
             removed_id = tree.widget(button.clone());
         });
         let mut runtime = UiRuntime::from_ui_nodes(first);
-        let root = runtime.roots[0];
-        if let Some(UiNodeData::Container { container, .. }) = runtime.nodes.get_mut(&root).map(|node| &mut node.data) {
-            container.set_root_scroll_state(Vec2i::new(17, 23), Some(ScrollAxis::Vertical));
-        }
         runtime.focus = Some(removed_id);
         runtime.hover = Some(removed_id);
         runtime.capture = Some(removed_id);
 
         runtime.replace_ui_nodes(UiNodeBuilder::build(|_| {}));
 
-        let scroll = runtime.root_window_scroll_offset();
-        assert_eq!((scroll.x, scroll.y), (17, 23));
         assert!(!runtime.nodes.contains_key(&removed_id));
         assert_eq!(runtime.focus, None);
         assert_eq!(runtime.hover, None);
@@ -758,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn root_scrollbar_view_is_stable_for_identical_size() {
+    fn root_body_view_is_stable_for_identical_size_without_root_scrollbars() {
         let buttons: Vec<_> = (0..6).map(|_| widget_handle(Button::new("wide row"))).collect();
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Fixed(150), SizePolicy::Fixed(24), StackDirection::TopToBottom, |tree| {
@@ -806,8 +805,10 @@ mod tests {
         let second_client = runtime.nodes.get(&runtime.roots[0]).unwrap().client;
         let second_content = runtime.nodes.get(&runtime.roots[0]).unwrap().content_size;
 
-        assert!(first_content.width > first_client.width || first_content.height > first_client.height);
         assert!(same_rect(first_client, second_client));
+        assert_eq!(first_client.width, body.width - style.padding * 2);
+        assert_eq!(first_client.height, body.height - style.padding * 2);
+        assert!(first_content.width > first_client.width || first_content.height > first_client.height);
         assert_eq!(first_content.width, second_content.width);
         assert_eq!(first_content.height, second_content.height);
     }
@@ -855,7 +856,7 @@ mod tests {
     }
 
     #[test]
-    fn root_paints_slot_button_after_scrolling_to_slot_section() {
+    fn scroll_area_paints_slot_button_after_scrolling_to_slot_section() {
         let pixels = [255, 255, 255, 255];
         let chars = [(
             'a',
@@ -899,10 +900,14 @@ mod tests {
             WidgetFillOption::ALL,
         ));
         let filler = widget_handle(Button::new("filler"));
+        let scroll_area = ScrollAreaHandle::new(ScrollAreaState::new("slot scroll"));
         let mut slot_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
-            tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 180))).widget(filler.clone());
-            slot_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 40))).widget(slot_button.clone());
+            tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 70)))
+                .scroll_area(&scroll_area, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 180))).widget(filler.clone());
+                    slot_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 40))).widget(slot_button.clone());
+                });
         });
         let mut runtime = UiRuntime::from_ui_nodes(tree);
         let renderer = RendererHandle::new(NoopRenderer { atlas });
@@ -926,7 +931,7 @@ mod tests {
         );
         assert_eq!(paint_count.get(), 0);
 
-        runtime.set_root_window_scroll_state(Vec2i::new(0, 160), None);
+        scroll_area.with_mut(|area| area.set_scroll(Vec2i::new(0, 160)));
         results.begin_frame();
         runtime.render_frame(
             crate::RootId::from_raw(1),
@@ -941,11 +946,15 @@ mod tests {
         );
         let root = runtime.nodes.get(&runtime.roots[0]).unwrap();
         let slot_node = runtime.nodes.get(&slot_id).unwrap();
+        let body = scroll_area.with(|area| area.body());
+        let scroll = scroll_area.with(|area| area.scroll());
         assert!(
             paint_count.get() > 0,
-            "slot not painted; root client {:?} content {:?} slot rect {:?} clip {:?}",
+            "slot not painted; root client {:?} content {:?} scroll body {:?} scroll {:?} slot rect {:?} clip {:?}",
             root.client,
             root.content_size,
+            body,
+            scroll,
             slot_node.rect,
             slot_node.clip
         );
