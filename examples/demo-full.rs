@@ -754,6 +754,7 @@ struct State {
     weight_root: RootId,
 
     demo_scroll: ScrollAreaHandle,
+    style_scroll: ScrollAreaHandle,
     log_output: Option<ScrollAreaHandle>,
     dialog_window: FileDialogState,
 
@@ -1015,6 +1016,7 @@ impl State {
             stack_direction_root,
             weight_root,
             demo_scroll: ctx.new_scroll_area("Demo Window Body"),
+            style_scroll: ctx.new_scroll_area("Style Editor Body"),
             log_output: Some(ctx.new_scroll_area("Log Output")),
             dialog_window: FileDialogState::new(ctx),
             fps: 0.0,
@@ -1194,6 +1196,7 @@ impl State {
         let style_color_swatches = self.style_color_swatches.clone();
         let style_metric_labels = self.style_metric_labels.clone();
         let style_value_sliders = self.style_value_sliders.clone();
+        let style_scroll = self.style_scroll.clone();
         self.style_tree = UiNodeBuilder::build(move |tree| {
             let color_row = [
                 SizePolicy::Fixed(80),
@@ -1205,27 +1208,30 @@ impl State {
             ];
             let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Remainder(0)];
 
-            for ((label, sliders), swatch) in style_color_labels
-                .iter()
-                .zip(style_color_sliders.chunks_exact(4))
-                .zip(style_color_swatches.iter())
-            {
-                tree.row(&color_row, SizePolicy::Auto, |tree| {
-                    tree.widget(label);
-                    tree.widget(&sliders[0]);
-                    tree.widget(&sliders[1]);
-                    tree.widget(&sliders[2]);
-                    tree.widget(&sliders[3]);
-                    tree.widget(swatch);
-                });
-            }
+            tree.node(NodeOptions::with_policy(Policy::fill()))
+                .scroll_area(&style_scroll, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    for ((label, sliders), swatch) in style_color_labels
+                        .iter()
+                        .zip(style_color_sliders.chunks_exact(4))
+                        .zip(style_color_swatches.iter())
+                    {
+                        tree.row(&color_row, SizePolicy::Auto, |tree| {
+                            tree.widget(label);
+                            tree.widget(&sliders[0]);
+                            tree.widget(&sliders[1]);
+                            tree.widget(&sliders[2]);
+                            tree.widget(&sliders[3]);
+                            tree.widget(swatch);
+                        });
+                    }
 
-            for (label, slider) in style_metric_labels.iter().zip(style_value_sliders.iter()) {
-                tree.row(&metrics_row, SizePolicy::Auto, |tree| {
-                    tree.widget(label);
-                    tree.widget(slider);
+                    for (label, slider) in style_metric_labels.iter().zip(style_value_sliders.iter()) {
+                        tree.row(&metrics_row, SizePolicy::Auto, |tree| {
+                            tree.widget(label);
+                            tree.widget(slider);
+                        });
+                    }
                 });
-            }
         });
 
         let log_output = self.log_output.clone().expect("log output scroll area missing");
