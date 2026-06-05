@@ -295,7 +295,11 @@ impl<R: Renderer> Context<R> {
     fn paint_root_chrome(&mut self, entry: &RootEntry, chrome: RootChrome) {
         if let Some(title) = chrome.title {
             self.draw_root_frame(title, ControlColor::TitleBG);
-            self.draw_root_title_text(title, &entry.name);
+            let mut text = title;
+            if let Some(close) = chrome.close {
+                text.width = (close.x.max(title.x) - title.x).max(0);
+            }
+            self.draw_root_title_text(text, &entry.name);
 
             if let Some(close) = chrome.close {
                 let color = self.style.colors[ControlColor::TitleText as usize];
@@ -319,11 +323,18 @@ impl<R: Renderer> Context<R> {
     }
 
     fn draw_root_title_text(&mut self, rect: Recti, title: &str) {
+        if rect.width <= 0 || rect.height <= 0 {
+            return;
+        }
         let atlas = self.canvas.get_atlas();
         let color = self.style.colors[ControlColor::TitleText as usize];
         let pos =
             crate::text_layout::control_text_position_with_font(self.style.as_ref(), &atlas, self.style.title_font, title, rect, crate::WidgetOption::NONE);
+        let old_clip = self.canvas.current_clip_rect();
+        let text_clip = old_clip.intersect(&rect).unwrap_or_default();
+        self.canvas.set_clip_rect(text_clip);
         self.canvas.draw_chars(self.style.title_font, title, pos, color);
+        self.canvas.set_clip_rect(old_clip);
     }
 
     fn update_root_window_manager_chrome(
@@ -334,16 +345,17 @@ impl<R: Renderer> Context<R> {
         mouse_down: MouseButton,
         mouse_delta: crate::Vec2i,
     ) {
-        if mouse_down.is_empty() {
-            for entry in &mut self.roots {
-                entry.active_chrome = None;
-            }
-            return;
-        }
-
         let atlas = self.canvas.get_atlas();
         for entry in &mut self.roots {
             if !entry.visible {
+                entry.active_chrome = None;
+                continue;
+            }
+            let min_size = root_min_size(self.style.as_ref(), &atlas, entry.opt, &entry.name);
+            entry.rect.width = entry.rect.width.max(min_size.width);
+            entry.rect.height = entry.rect.height.max(min_size.height);
+
+            if mouse_down.is_empty() {
                 entry.active_chrome = None;
                 continue;
             }
@@ -373,8 +385,8 @@ impl<R: Renderer> Context<R> {
                     entry.rect.y = entry.rect.y.saturating_add(mouse_delta.y);
                 }
                 Some(RootChromePart::Resize) => {
-                    entry.rect.width = entry.rect.width.saturating_add(mouse_delta.x).max(96);
-                    entry.rect.height = entry.rect.height.saturating_add(mouse_delta.y).max(64);
+                    entry.rect.width = entry.rect.width.saturating_add(mouse_delta.x).max(min_size.width);
+                    entry.rect.height = entry.rect.height.saturating_add(mouse_delta.y).max(min_size.height);
                 }
                 Some(RootChromePart::Close) | None => {}
             }
@@ -454,6 +466,20 @@ fn root_titlebar_height(style: &Style, atlas: &crate::AtlasHandle) -> i32 {
     let padding = style.padding.max(0);
     let min_title_h = font_height + (padding / 2).max(1) * 2;
     style.title_height.max(min_title_h)
+}
+
+fn root_min_size(style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption, title: &str) -> Dimensioni {
+    let mut width: i32 = 96;
+    let mut height: i32 = 64;
+    if !opt.intersects(ContainerOption::NO_TITLE) {
+        let title_height = root_titlebar_height(style, atlas);
+        let title_width = atlas.get_text_size(style.title_font, title).width;
+        let close_width = if opt.intersects(ContainerOption::NO_CLOSE) { 0 } else { title_height };
+        let padding = style.padding.max(0);
+        width = width.max(title_width.saturating_add(close_width).saturating_add(padding.saturating_mul(2)));
+        height = height.max(title_height.saturating_add(padding.saturating_mul(2)));
+    }
+    Dimensioni::new(width, height)
 }
 
 fn draw_canvas_box<R: Renderer>(canvas: &mut Canvas<R>, r: Recti, color: Color) {

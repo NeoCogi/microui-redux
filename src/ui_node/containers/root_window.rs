@@ -31,11 +31,13 @@ impl ContainerTrait for RootWindow {
     }
 
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, id: UiNodeId, rect: Recti, clip: Recti) {
-        self.body.layout(ctx, id, rect, clip);
+        let client = crate::expand_rect(rect, -ctx.style.padding);
+        ctx.set_client(id, client);
+        self.body.layout(ctx, id, client, clip);
 
         let content_size = ctx
             .child_content_bounds(id)
-            .map(|bounds| Dimensioni::new((bounds.x + bounds.width - rect.x).max(0), (bounds.y + bounds.height - rect.y).max(0)))
+            .map(|bounds| Dimensioni::new((bounds.x + bounds.width - client.x).max(0), (bounds.y + bounds.height - client.y).max(0)))
             .unwrap_or_default();
         ctx.set_content_size(id, content_size);
     }

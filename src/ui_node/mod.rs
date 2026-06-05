@@ -86,11 +86,6 @@ impl<'a> NodeCtx<'a> {
         self.runtime.nodes.get(&self.id).map(|node| node.client).unwrap_or_default()
     }
 
-    /// Returns the current node client area.
-    pub(crate) fn client_area(&self) -> ClientArea {
-        self.runtime.nodes.get(&self.id).map(|node| node.client_area).unwrap_or_default()
-    }
-
     /// Returns the current effective clip rect.
     pub(crate) fn clip(&self) -> Recti {
         self.runtime.nodes.get(&self.id).map(|node| node.clip).unwrap_or_default()

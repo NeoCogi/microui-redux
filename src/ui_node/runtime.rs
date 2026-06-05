@@ -151,9 +151,9 @@ impl UiRuntime {
         let _ = scroll_behavior;
         let body_view = root_window_body_view(body, style);
 
-        self.layout_roots_in_view(style, canvas.get_atlas(), body_view);
+        self.layout_roots_in_view(style, canvas.get_atlas(), body_view, body);
         self.dispatch_scroll_input(style, input);
-        self.layout_roots_in_view(style, canvas.get_atlas(), body_view);
+        self.layout_roots_in_view(style, canvas.get_atlas(), body_view, body);
 
         let mut root_index = 0;
         while let Some(root) = self.root_at(root_index) {
@@ -161,7 +161,7 @@ impl UiRuntime {
             root_index += 1;
         }
 
-        self.layout_roots_in_view(style, canvas.get_atlas(), body_view);
+        self.layout_roots_in_view(style, canvas.get_atlas(), body_view, body);
 
         let mut root_index = 0;
         while let Some(root) = self.root_at(root_index) {
@@ -373,7 +373,7 @@ impl UiRuntime {
     }
 
     /// Lays out root nodes inside an already resolved root client area.
-    pub(super) fn layout_roots_in_view(&mut self, style: &Style, atlas: crate::AtlasHandle, client: Recti) -> Dimensioni {
+    pub(super) fn layout_roots_in_view(&mut self, style: &Style, atlas: crate::AtlasHandle, client: Recti, clip: Recti) -> Dimensioni {
         let mut y = client.y;
         let mut content_bounds = None;
         for index in 0..self.roots.len() {
@@ -387,18 +387,14 @@ impl UiRuntime {
             };
             let is_root_window = self.container_clone(root).map(|container| container.is_root_window()).unwrap_or(false);
             let rect = if is_root_window {
-                Recti::new(client.x, client.y, client.width, client.height)
+                clip
             } else {
                 Recti::new(client.x, y, client.width, height)
             };
-            self.layout_node(root, style, &atlas, rect, client);
+            self.layout_node(root, style, &atlas, rect, clip);
             if let Some(node) = self.nodes.get(&root) {
-                let unscrolled = Recti::new(
-                    node.rect.x,
-                    node.rect.y,
-                    node.rect.width.max(node.content_size.width),
-                    node.rect.height.max(node.content_size.height),
-                );
+                let base = if is_root_window { node.client } else { node.rect };
+                let unscrolled = Recti::new(base.x, base.y, base.width.max(node.content_size.width), base.height.max(node.content_size.height));
                 content_bounds = Some(match content_bounds {
                     Some(bounds) => union_rect(bounds, unscrolled),
                     None => unscrolled,

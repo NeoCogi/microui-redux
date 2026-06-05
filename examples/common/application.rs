@@ -166,7 +166,7 @@ impl<S> Application<S> {
                     Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
                     Event::Window { win_event: WindowEvent::Close, .. } => break 'running,
                     Event::MouseMotion { x, y, .. } => self.ctx.mousemove(x, y),
-                    Event::MouseWheel { y, .. } => self.ctx.scroll(0, y * -30),
+                    Event::MouseWheel { x, y, .. } => self.ctx.scroll(x * -30, y * -30),
                     Event::MouseButtonDown { x, y, mouse_btn, .. } => {
                         let mb = map_mouse_button(mouse_btn);
                         self.ctx.mousedown(x, y, mb);

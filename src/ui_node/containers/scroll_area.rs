@@ -202,8 +202,10 @@ fn dispatch_scroll_area_input(ctx: &mut ScrollDispatchCtx<'_>, id: UiNodeId, scr
     let hovered_body = body.contains(&ctx.input.mouse_pos) && clip.contains(&ctx.input.mouse_pos);
     let hovered_vertical = max_y > 0 && vertical.contains(&ctx.input.mouse_pos);
     let hovered_horizontal = max_x > 0 && horizontal.contains(&ctx.input.mouse_pos);
-    let wheel_input = ctx.input.scroll_delta.x != 0 || ctx.input.scroll_delta.y != 0;
-    let mut owns_event = hovered_body && wheel_input;
+    let wheel_x = ctx.input.scroll_delta.x != 0;
+    let wheel_y = ctx.input.scroll_delta.y != 0;
+    let mut owns_event =
+        (hovered_body && (wheel_x || wheel_y)) || (hovered_vertical && wheel_y) || (hovered_horizontal && wheel_x);
     let mut scroll = handle.with(|area| area.scroll());
     if ctx.input.mouse_down.is_empty() {
         scroll_drag = None;
@@ -233,7 +235,11 @@ fn dispatch_scroll_area_input(ctx: &mut ScrollDispatchCtx<'_>, id: UiNodeId, scr
         _ => {}
     }
 
-    if hovered_body {
+    if hovered_horizontal {
+        scroll.x = scroll.x.saturating_sub(ctx.input.scroll_delta.x);
+    } else if hovered_vertical {
+        scroll.y = scroll.y.saturating_sub(ctx.input.scroll_delta.y);
+    } else if hovered_body {
         scroll.x = scroll.x.saturating_sub(ctx.input.scroll_delta.x);
         scroll.y = scroll.y.saturating_sub(ctx.input.scroll_delta.y);
     }

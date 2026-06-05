@@ -276,10 +276,6 @@ impl ScrollDispatchCtx<'_> {
     pub(crate) fn node_clip_and_client(&self, id: UiNodeId) -> Option<(Recti, Recti)> {
         self.runtime.nodes.get(&id).map(|node| (node.clip, node.client))
     }
-
-    pub(crate) fn node_client_area(&self, id: UiNodeId) -> Option<ClientArea> {
-        self.runtime.nodes.get(&id).map(|node| node.client_area)
-    }
 }
 
 /// Services available while a container paints its own surface.
@@ -298,10 +294,6 @@ impl PaintCtx<'_> {
 
     pub(crate) fn node_client(&self, id: UiNodeId) -> Option<Recti> {
         self.runtime.nodes.get(&id).map(|node| node.client)
-    }
-
-    pub(crate) fn node_client_area(&self, id: UiNodeId) -> Option<ClientArea> {
-        self.runtime.nodes.get(&id).map(|node| node.client_area)
     }
 
     pub(crate) fn node_control(&self, id: UiNodeId) -> crate::input::ControlState {

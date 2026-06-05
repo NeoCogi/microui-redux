@@ -922,8 +922,8 @@ fn retained_chrome_nodes_are_recorded_in_root_cache() {
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
     let root = ctx.create_window(
-        "retained",
-        rect(10, 12, 100, 70),
+        "Typography Demo Window Title",
+        rect(10, 12, 20, 40),
         UiNodeBuilder::build(|tree| {
             tree.text("body");
         }),
@@ -934,12 +934,15 @@ fn retained_chrome_nodes_are_recorded_in_root_cache() {
     let title = title.expect("title chrome rect missing");
     let close = close.expect("close chrome rect missing");
     let resize = resize.expect("resize chrome rect missing");
+    let root_rect = ctx.root_rect(root).unwrap();
 
     assert_eq!(title.x, 10);
     assert_eq!(title.y, 12);
-    assert_eq!(title.width, 100);
+    assert_eq!(title.width, root_rect.width);
+    assert!(title.width > 96);
     assert!(title.height > 0);
     assert!(close.x >= title.x);
+    assert!(close.x > title.x + title.width / 2);
     assert!(resize.x >= title.x);
     assert!(resize.y >= title.y);
 }
@@ -1282,7 +1285,7 @@ fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
         move |tree| {
             tree.node(NodeOptions::with_policy(Policy::fixed(90, 40)))
                 .scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                    tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner.clone());
+                    tree.node(NodeOptions::with_policy(Policy::fixed(180, 140))).widget(inner.clone());
                 });
             tree.node(NodeOptions::with_policy(Policy::fixed(90, 180))).widget(bottom.clone());
         }
@@ -1300,6 +1303,15 @@ fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
 
     let nested_scroll = scroll_area.with(|area| area.scroll());
     assert!(nested_scroll.y > 0);
+    let body = scroll_area.with(|area| area.body());
+    ctx.mousemove(body.x + 2, body.y + body.height + 2);
+    ctx.update_ui();
+    ctx.scroll(-24, 0);
+    ctx.update_ui();
+
+    let scroll = scroll_area.with(|area| area.scroll());
+    assert!(scroll.x > 0);
+    assert!(scroll.y > 0);
 }
 
 #[test]
