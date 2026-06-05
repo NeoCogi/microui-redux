@@ -460,6 +460,7 @@ impl UiNodeBuilder {
             TAG_SCROLL_AREA,
             UiNodeData::Container {
                 container: Box::new(UiScrollArea {
+                    content: Column,
                     handle,
                     content_size: Dimensioni::default(),
                     scroll_offset: Vec2i::default(),
@@ -485,7 +486,11 @@ impl UiNodeBuilder {
             options,
             TAG_HEADER,
             UiNodeData::Container {
-                container: Box::new(Disclosure { state, indent_children: false }),
+                container: Box::new(Disclosure {
+                    state,
+                    indent_children: false,
+                    children: Column,
+                }),
                 children: Vec::new(),
             },
             f,
@@ -504,7 +509,11 @@ impl UiNodeBuilder {
             options,
             TAG_TREE,
             UiNodeData::Container {
-                container: Box::new(Disclosure { state, indent_children: true }),
+                container: Box::new(Disclosure {
+                    state,
+                    indent_children: true,
+                    children: Column,
+                }),
                 children: Vec::new(),
             },
             f,
