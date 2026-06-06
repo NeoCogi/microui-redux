@@ -142,10 +142,6 @@ impl Widget for GraphicsDemo {
         Dimensioni::new(240, 200)
     }
 
-    fn needs_input_snapshot(&self) -> bool {
-        true
-    }
-
     fn update(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
         let bounds = ctx.local_rect();
         let local_width = bounds.width.max(0) as f32;
@@ -172,9 +168,8 @@ impl Widget for GraphicsDemo {
             local_height * 0.5 + self.phase.sin() * (local_height * 0.12),
         );
         let star_center = if control.hovered {
-            ctx.input()
-                .map(|input| Vec2f::new(input.mouse_pos.x as f32, input.mouse_pos.y as f32))
-                .unwrap_or(animated_center)
+            let mouse_pos = ctx.mouse_pos();
+            Vec2f::new(mouse_pos.x as f32, mouse_pos.y as f32)
         } else {
             animated_center
         };
@@ -534,10 +529,6 @@ impl Widget for FalloffEditor {
         Dimensioni::new(300, 220)
     }
 
-    fn needs_input_snapshot(&self) -> bool {
-        true
-    }
-
     fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
         let bounds = ctx.local_rect();
         let graph = Self::graph_rect(bounds);
@@ -546,36 +537,32 @@ impl Widget for FalloffEditor {
         }
 
         let mut changed = false;
-        let input = ctx.input();
 
         if !control.focused && !control.active {
             self.active = None;
         }
 
-        if let Some(input) = input {
-            let mouse_local = Vec2f::new(input.mouse_pos.x as f32, input.mouse_pos.y as f32);
-            self.hovered = if control.hovered { self.pick_target(graph, mouse_local) } else { None };
+        let mouse_pos = ctx.mouse_pos();
+        let mouse_local = Vec2f::new(mouse_pos.x as f32, mouse_pos.y as f32);
+        self.hovered = if control.hovered { self.pick_target(graph, mouse_local) } else { None };
 
-            if control.clicked {
-                self.active = if graph.contains(&Vec2i::new(mouse_local.x as i32, mouse_local.y as i32)) {
-                    self.pick_target(graph, mouse_local)
-                } else {
-                    None
-                };
-            } else if !control.active {
-                self.active = None;
-            }
-
-            if control.active && (input.mouse_delta.x != 0 || input.mouse_delta.y != 0) {
-                if let Some(target) = self.active {
-                    let point = Self::local_to_graph(graph, mouse_local);
-                    self.drag_target(target, point);
-                    changed = true;
-                }
-            }
-        } else {
-            self.hovered = None;
+        if control.clicked {
+            self.active = if graph.contains(&Vec2i::new(mouse_local.x as i32, mouse_local.y as i32)) {
+                self.pick_target(graph, mouse_local)
+            } else {
+                None
+            };
+        } else if !control.active {
             self.active = None;
+        }
+
+        let mouse_delta = ctx.mouse_delta();
+        if control.active && (mouse_delta.x != 0 || mouse_delta.y != 0) {
+            if let Some(target) = self.active {
+                let point = Self::local_to_graph(graph, mouse_local);
+                self.drag_target(target, point);
+                changed = true;
+            }
         }
 
         if self.active.is_some() {

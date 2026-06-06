@@ -8,6 +8,10 @@ use crate::ui_node::UiNodeId;
 pub(crate) struct Column;
 
 impl NodeBehavior for Column {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         measure_column(ctx, id, available)
     }

@@ -394,6 +394,7 @@ impl UiNodeBuilder {
                 behavior: Box::new(WidgetNode {
                     widget: erased_widget_state(widget),
                     custom_render: None,
+                    pending_events: Vec::new(),
                 }),
             },
         )
@@ -433,6 +434,7 @@ impl UiNodeBuilder {
                 behavior: Box::new(WidgetNode {
                     widget: erased_widget_state(state),
                     custom_render: Some(render),
+                    pending_events: Vec::new(),
                 }),
             },
         )

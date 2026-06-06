@@ -391,7 +391,12 @@ impl UiRuntime {
             self.layout_node(root, style, &atlas, rect, clip);
             if let Some(node) = self.nodes.get(&root) {
                 let base = if is_root_window { node.client } else { node.rect };
-                let unscrolled = Recti::new(base.x, base.y, base.width.max(node.content_size.width), base.height.max(node.content_size.height));
+                let unscrolled = Recti::new(
+                    base.x,
+                    base.y,
+                    base.width.max(node.content_size.width),
+                    base.height.max(node.content_size.height),
+                );
                 content_bounds = Some(match content_bounds {
                     Some(bounds) => union_rect(bounds, unscrolled),
                     None => unscrolled,
@@ -423,7 +428,9 @@ impl UiRuntime {
     /// Measures one node's preferred size in the box-tree layout path.
     pub(super) fn measure_node(&self, id: UiNodeId, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
         let ctx = MeasureCtx { runtime: self, style, atlas };
-        self.behavior_clone(id).map(|behavior| behavior.measure(&ctx, id, available)).unwrap_or_default()
+        self.behavior_clone(id)
+            .map(|behavior| behavior.measure(&ctx, id, available))
+            .unwrap_or_default()
     }
 
     /// Lays out one node through its behavior.
@@ -443,7 +450,10 @@ impl UiRuntime {
         let mut behavior = self.behavior_clone(id);
         if let Some(behavior) = behavior.as_mut() {
             let node_clip = if is_branch {
-                self.nodes.get(&id).map(|node| node.clip).unwrap_or_else(|| clip.intersect(&rect).unwrap_or_default())
+                self.nodes
+                    .get(&id)
+                    .map(|node| node.clip)
+                    .unwrap_or_else(|| clip.intersect(&rect).unwrap_or_default())
             } else {
                 clip
             };
@@ -603,47 +613,143 @@ impl UiRuntime {
 
     /// Routes pre-update input events to the deepest eligible owner below the root.
     pub(super) fn route_input_events(&mut self, style: &Style, input: &Input) -> bool {
-        if !self.hover_root_active {
-            return false;
-        }
-
         let mut consumed = false;
-        let event = UiInputEvent::Pointer {
-            pos: input.mouse_pos,
-            delta: input.mouse_delta,
-        };
-        consumed |= self.route_input_event(style, input, event);
-        if input.scroll_delta.x != 0 || input.scroll_delta.y != 0 {
-            let event = UiInputEvent::Scroll {
-                pos: input.mouse_pos,
-                delta: input.scroll_delta,
-            };
-            consumed |= self.route_input_event(style, input, event);
+        if self.hover_root_active || self.capture.is_some() {
+            if !input.mouse_pressed.is_empty() {
+                let event = UiInputEvent::MouseDown {
+                    pos: input.mouse_pos,
+                    button: input.mouse_pressed,
+                };
+                consumed |= self.route_input_event(style, input, &event);
+            }
+            if !input.mouse_released.is_empty() {
+                let event = UiInputEvent::MouseUp {
+                    pos: input.mouse_pos,
+                    button: input.mouse_released,
+                };
+                consumed |= self.route_input_event(style, input, &event);
+            }
+            if input.mouse_delta.x != 0 || input.mouse_delta.y != 0 {
+                let event = if input.mouse_down.is_empty() {
+                    UiInputEvent::MouseMove {
+                        pos: input.mouse_pos,
+                        delta: input.mouse_delta,
+                    }
+                } else {
+                    UiInputEvent::MouseDrag {
+                        pos: input.mouse_pos,
+                        delta: input.mouse_delta,
+                        buttons: input.mouse_down,
+                    }
+                };
+                consumed |= self.route_input_event(style, input, &event);
+            }
+            if input.scroll_delta.x != 0 || input.scroll_delta.y != 0 {
+                let event = UiInputEvent::Scroll {
+                    pos: input.mouse_pos,
+                    delta: input.scroll_delta,
+                };
+                consumed |= self.route_input_event(style, input, &event);
+            }
+        }
+        if !input.key_pressed.is_empty() {
+            let event = UiInputEvent::KeyDown { key: input.key_pressed };
+            consumed |= self.route_input_event(style, input, &event);
+        }
+        if !input.key_released.is_empty() {
+            let event = UiInputEvent::KeyUp { key: input.key_released };
+            consumed |= self.route_input_event(style, input, &event);
+        }
+        if !input.key_code_pressed.is_empty() {
+            let event = UiInputEvent::KeyCodeDown { code: input.key_code_pressed };
+            consumed |= self.route_input_event(style, input, &event);
+        }
+        if !input.key_code_released.is_empty() {
+            let event = UiInputEvent::KeyCodeUp { code: input.key_code_released };
+            consumed |= self.route_input_event(style, input, &event);
+        }
+        if !input.input_text.is_empty() {
+            let event = UiInputEvent::Text { text: input.input_text.clone() };
+            consumed |= self.route_input_event(style, input, &event);
         }
         consumed
     }
 
     /// Routes one input event through roots in z-order.
-    pub(super) fn route_input_event(&mut self, style: &Style, input: &Input, event: UiInputEvent) -> bool {
+    pub(super) fn route_input_event(&mut self, style: &Style, input: &Input, event: &UiInputEvent) -> bool {
+        if event.is_focus_input() {
+            return self.route_focus_input_event(style, input, event);
+        }
+        if event.is_pointer() {
+            return self.route_pointer_input_event(style, input, event);
+        }
+        self.route_hit_input_event(style, input, event).is_some()
+    }
+
+    /// Routes keyboard/text input to the focused node only.
+    fn route_focus_input_event(&mut self, style: &Style, input: &Input, event: &UiInputEvent) -> bool {
+        let Some(focus) = self.focus.filter(|id| self.nodes.contains_key(id)) else {
+            return false;
+        };
+        self.route_input_event_to_node_only(focus, style, input, event).is_consumed()
+    }
+
+    /// Routes pointer input through capture first, then through normal hit traversal.
+    fn route_pointer_input_event(&mut self, style: &Style, input: &Input, event: &UiInputEvent) -> bool {
+        if let Some(capture) = self.capture.filter(|id| self.nodes.contains_key(id)) {
+            let result = self.route_input_event_to_node_only(capture, style, input, event);
+            self.update_pointer_capture(capture, result, event, input);
+            return result.is_consumed();
+        }
+
+        if !self.hover_root_active {
+            return false;
+        }
+
+        let Some((owner, result)) = self.route_hit_input_event(style, input, event) else {
+            return false;
+        };
+        self.update_pointer_capture(owner, result, event, input);
+        result.is_consumed()
+    }
+
+    /// Applies runtime pointer-capture ownership from one routed event result.
+    fn update_pointer_capture(&mut self, owner: UiNodeId, result: InputResult, event: &UiInputEvent, input: &Input) {
+        if event.is_pointer_release() && input.mouse_down.is_empty() {
+            self.capture = None;
+        } else if result == InputResult::Captured {
+            self.capture = Some(owner);
+        } else if self.capture == Some(owner) && input.mouse_down.is_empty() {
+            self.capture = None;
+        }
+    }
+
+    /// Routes an event through roots in z-order and returns the consumed owner.
+    fn route_hit_input_event(&mut self, style: &Style, input: &Input, event: &UiInputEvent) -> Option<(UiNodeId, InputResult)> {
         for index in (0..self.roots.len()).rev() {
             let Some(root) = self.root_at(index) else { continue };
-            if self.route_input_event_to_node(root, style, input, event).is_consumed() {
-                return true;
+            if let Some(result) = self.route_input_event_to_node(root, style, input, event) {
+                return Some(result);
             }
         }
-        false
+        None
     }
 
     /// Walks children first so nested owners beat ancestors.
-    pub(super) fn route_input_event_to_node(&mut self, id: UiNodeId, style: &Style, input: &Input, event: UiInputEvent) -> InputResult {
+    pub(super) fn route_input_event_to_node(&mut self, id: UiNodeId, style: &Style, input: &Input, event: &UiInputEvent) -> Option<(UiNodeId, InputResult)> {
         for index in (0..self.child_count(id)).rev() {
             let Some(child) = self.child_at(id, index) else { continue };
-            let result = self.route_input_event_to_node(child, style, input, event);
-            if result.is_consumed() {
-                return result;
+            if let Some(result) = self.route_input_event_to_node(child, style, input, event) {
+                return Some(result);
             }
         }
 
+        let result = self.route_input_event_to_node_only(id, style, input, event);
+        result.is_consumed().then_some((id, result))
+    }
+
+    /// Routes an event to exactly one node behavior without traversing descendants.
+    fn route_input_event_to_node_only(&mut self, id: UiNodeId, style: &Style, input: &Input, event: &UiInputEvent) -> InputResult {
         let Some(mut behavior) = self.behavior_clone(id) else {
             return InputResult::Ignored;
         };

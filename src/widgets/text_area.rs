@@ -322,14 +322,23 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     }
     let mut cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
 
-    let input = ctx.input_or_default();
     let mut ensure_visible = false;
     let mut reset_preferred = false;
     let mut vertical_moved = false;
     let mut preferred_x = state.preferred_x;
 
     if control.focused {
-        let edit = apply_text_input(&mut state.buf, cursor_pos, input, true, ReturnBehavior::Newline { submit_on_ctrl: true });
+        let text_input = ctx.text_input();
+        let edit = apply_text_input(
+            &mut state.buf,
+            cursor_pos,
+            text_input.as_str(),
+            ctx.key_mods(),
+            ctx.key_pressed(),
+            ctx.key_code_pressed(),
+            true,
+            ReturnBehavior::Newline { submit_on_ctrl: true },
+        );
         cursor_pos = edit.cursor;
         if edit.changed {
             res |= ResourceState::CHANGE;
@@ -357,7 +366,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         }
     }
 
-    if !input.mouse_down.intersects(MouseButton::LEFT) {
+    if !ctx.mouse_down().intersects(MouseButton::LEFT) {
         state.dragging_y = false;
         state.dragging_x = false;
     }
@@ -371,13 +380,13 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
             layout.vscroll_base.width,
             layout.vscroll_base.height,
         );
-        if input.mouse_pressed.intersects(MouseButton::LEFT) && vscroll_base_local.contains(&input.mouse_pos) {
+        if ctx.mouse_pressed().intersects(MouseButton::LEFT) && vscroll_base_local.contains(&ctx.mouse_pos()) {
             // Track scrollbar drag separately so text clicks do not also move the caret.
             state.dragging_y = true;
             clicked_scrollbar = true;
         }
         if state.dragging_y {
-            state.scroll.y += scrollbar_drag_delta(ScrollAxis::Vertical, input.mouse_delta, layout.content_size.y, layout.vscroll_base);
+            state.scroll.y += scrollbar_drag_delta(ScrollAxis::Vertical, ctx.mouse_delta(), layout.content_size.y, layout.vscroll_base);
         }
     }
 
@@ -388,12 +397,12 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
             layout.hscroll_base.width,
             layout.hscroll_base.height,
         );
-        if input.mouse_pressed.intersects(MouseButton::LEFT) && hscroll_base_local.contains(&input.mouse_pos) {
+        if ctx.mouse_pressed().intersects(MouseButton::LEFT) && hscroll_base_local.contains(&ctx.mouse_pos()) {
             state.dragging_x = true;
             clicked_scrollbar = true;
         }
         if state.dragging_x {
-            state.scroll.x += scrollbar_drag_delta(ScrollAxis::Horizontal, input.mouse_delta, layout.content_size.x, layout.hscroll_base);
+            state.scroll.x += scrollbar_drag_delta(ScrollAxis::Horizontal, ctx.mouse_delta(), layout.content_size.x, layout.hscroll_base);
         }
     }
 
@@ -401,14 +410,14 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     let mut caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
     if control.focused {
-        if input.key_code_pressed.intersects(KeyCode::END) {
+        if ctx.key_code_pressed().intersects(KeyCode::END) {
             cursor_pos = layout.lines[cursor_line].end;
             caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
             ensure_visible = true;
             reset_preferred = true;
         }
 
-        if input.key_code_pressed.intersects(KeyCode::UP) {
+        if ctx.key_code_pressed().intersects(KeyCode::UP) {
             // Vertical movement preserves preferred x so repeated Up/Down follows a visual column.
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line > 0 {
@@ -420,7 +429,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
             vertical_moved = true;
         }
 
-        if input.key_code_pressed.intersects(KeyCode::DOWN) {
+        if ctx.key_code_pressed().intersects(KeyCode::DOWN) {
             // Vertical movement preserves preferred x so repeated Up/Down follows a visual column.
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line + 1 < layout.lines.len() {
@@ -433,10 +442,11 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         }
     }
 
-    if control.focused && input.mouse_pressed.intersects(MouseButton::LEFT) && ctx.mouse_over(layout.bounds) && !clicked_scrollbar {
+    if control.focused && ctx.mouse_pressed().intersects(MouseButton::LEFT) && ctx.mouse_over(layout.bounds) && !clicked_scrollbar {
         // Convert a widget-local click to content-local coordinates before resolving cursor.
-        let local_x = input.mouse_pos.x - (layout.body_local.x + layout.padding) + state.scroll.x;
-        let local_y = input.mouse_pos.y - (layout.body_local.y + layout.padding) + state.scroll.y;
+        let mouse_pos = ctx.mouse_pos();
+        let local_x = mouse_pos.x - (layout.body_local.x + layout.padding) + state.scroll.x;
+        let local_y = mouse_pos.y - (layout.body_local.y + layout.padding) + state.scroll.y;
         let line_idx = (local_y / layout.metrics.line_height).clamp(0, layout.lines.len().saturating_sub(1) as i32) as usize;
         cursor_pos = cursor_from_x(&layout.lines[line_idx], state.buf.as_str(), local_x, font, ctx.atlas());
         ensure_visible = true;
@@ -585,9 +595,5 @@ impl Widget for TextArea {
 
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::HoldUntilBlur
-    }
-
-    fn needs_input_snapshot(&self) -> bool {
-        true
     }
 }

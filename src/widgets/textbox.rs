@@ -175,9 +175,17 @@ pub(crate) fn textbox_update(
     let mut cursor_pos = clamp_cursor_boundary(buf, *cursor);
 
     let (mouse_pressed, mouse_pos, end_pressed, edit) = {
-        let input = ctx.input_or_default();
         let edit = if control.focused {
-            apply_text_input(buf, cursor_pos, input, false, ReturnBehavior::Submit)
+            apply_text_input(
+                buf,
+                cursor_pos,
+                ctx.text_input().as_str(),
+                ctx.key_mods(),
+                ctx.key_pressed(),
+                ctx.key_code_pressed(),
+                false,
+                ReturnBehavior::Submit,
+            )
         } else {
             // Without focus, the textbox ignores key/text input but keeps a consistent outcome.
             super::text_edit::TextEditOutcome {
@@ -187,7 +195,7 @@ pub(crate) fn textbox_update(
                 submit: false,
             }
         };
-        (input.mouse_pressed, input.mouse_pos, input.key_code_pressed.intersects(KeyCode::END), edit)
+        (ctx.mouse_pressed(), ctx.mouse_pos(), ctx.key_code_pressed().intersects(KeyCode::END), edit)
     };
     if control.focused {
         cursor_pos = edit.cursor;
@@ -288,9 +296,5 @@ impl Widget for Textbox {
 
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::HoldUntilBlur
-    }
-
-    fn needs_input_snapshot(&self) -> bool {
-        true
     }
 }

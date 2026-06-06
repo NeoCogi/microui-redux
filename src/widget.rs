@@ -128,10 +128,6 @@ pub trait Widget {
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::from_widget_options(self.effective_widget_opt())
     }
-    /// Returns whether this widget needs per-frame input snapshots.
-    fn needs_input_snapshot(&self) -> bool {
-        false
-    }
 }
 
 /// Retained interaction identity used by focus, hover, and frame results.

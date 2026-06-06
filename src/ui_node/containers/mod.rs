@@ -1,14 +1,12 @@
-use crate::scrollbar::ScrollAxis;
+use std::any::Any;
+
 use crate::sizing::SizePolicy;
 use crate::context::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
-use crate::{
-    CustomRenderArgs, Dimensioni, FrameResults, Input, KeyCode, KeyMode, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle,
-    UNCLIPPED_RECT,
-};
+use crate::{CustomRenderArgs, Dimensioni, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle, UNCLIPPED_RECT};
 
 use super::{
-    input_to_mouse_event, measure_axis_available, resolve_allocated_size, resolve_size, retained_focus_to_node, snapshot_from_input, ClientArea,
-    NodeCustomRenderCommand, UiNode, UiNodeId, UiRuntime, WidgetCtx,
+    events_key_codes, events_key_mods, events_text, frame_events_from_input, input_to_mouse_event, measure_axis_available, resolve_allocated_size,
+    resolve_size, retained_focus_to_node, ClientArea, NodeCustomRenderCommand, UiNode, UiNodeId, UiRuntime, WidgetCtx,
 };
 use crate::render_command::Command;
 
@@ -50,7 +48,7 @@ impl Clone for Box<dyn NodeBehavior> {
 }
 
 /// Common internal behavior interface for retained nodes.
-pub(crate) trait NodeBehavior: NodeBehaviorClone {
+pub(crate) trait NodeBehavior: NodeBehaviorClone + Any {
     /// Measures the preferred size for a node.
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni;
 
@@ -68,7 +66,7 @@ pub(crate) trait NodeBehavior: NodeBehaviorClone {
     }
 
     /// Updates this node in response to one routed input event.
-    fn update_on(&mut self, _ctx: &mut InputCtx<'_>, _id: UiNodeId, _event: UiInputEvent) -> InputResult {
+    fn update_on(&mut self, _ctx: &mut InputCtx<'_>, _id: UiNodeId, _event: &UiInputEvent) -> InputResult {
         InputResult::Ignored
     }
 
@@ -87,20 +85,11 @@ pub(crate) trait NodeBehavior: NodeBehaviorClone {
         false
     }
 
-    /// Current scroll-area runtime state, if this is a scroll-area container.
-    fn scroll_area_runtime_state(&self) -> Option<(Dimensioni, Vec2i, Option<ScrollAxis>)> {
-        None
-    }
+    /// Returns this behavior as [`Any`] for localized behavior-to-behavior state transfer.
+    fn as_any(&self) -> &dyn Any;
 
-    /// Stores scroll-area runtime state.
-    fn set_scroll_area_runtime_state(&mut self, _content_size: Dimensioni, _offset: Vec2i, _drag: Option<ScrollAxis>) {}
-
-    /// Carries runtime-only state from a previous container with the same node id.
-    fn transfer_runtime_state_from(&mut self, previous: &dyn NodeBehavior) {
-        if let Some((content_size, offset, drag)) = previous.scroll_area_runtime_state() {
-            self.set_scroll_area_runtime_state(content_size, offset, drag);
-        }
-    }
+    /// Carries runtime-only state from a previous behavior with the same node id.
+    fn transfer_runtime_state_from(&mut self, _previous: &dyn NodeBehavior) {}
 }
 
 /// Retained widget adapter behind the internal node behavior interface.
@@ -109,6 +98,8 @@ pub(crate) struct WidgetNode {
     pub(crate) widget: Box<dyn WidgetStateHandleDyn>,
     /// Optional custom backend render callback for custom-render leaves.
     pub(crate) custom_render: Option<TreeCustomRender>,
+    /// Focus-owned one-frame input events routed to this widget.
+    pub(crate) pending_events: Vec<UiInputEvent>,
 }
 
 impl Clone for WidgetNode {
@@ -116,11 +107,16 @@ impl Clone for WidgetNode {
         Self {
             widget: self.widget.clone_box(),
             custom_render: self.custom_render.clone(),
+            pending_events: self.pending_events.clone(),
         }
     }
 }
 
 impl NodeBehavior for WidgetNode {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         let policy = ctx.runtime.nodes.get(&id).map(|node| node.policy).unwrap_or_else(crate::Policy::auto);
         let measure_available = Dimensioni::new(
@@ -174,7 +170,8 @@ impl NodeBehavior for WidgetNode {
 
         let mut focus_slot = ctx.runtime.focus.map(RetainedId::node);
         let mut focus_seen = ctx.runtime.updated_focus;
-        let mut input_snapshot = self.widget.needs_input_snapshot().then(|| std::rc::Rc::new(snapshot_from_input(ctx.input)));
+        let mut events = frame_events_from_input(ctx.input);
+        events.extend(self.pending_events.iter().cloned());
         let mut widget_ctx = WidgetCtx::new_with_interaction(
             RetainedId::node(id),
             rect,
@@ -186,9 +183,10 @@ impl NodeBehavior for WidgetNode {
             &mut focus_slot,
             &mut focus_seen,
             ctx.runtime.hover_root_active,
-            input_snapshot.take(),
+            events,
         );
         let result = self.widget.update(&mut widget_ctx, &control);
+        self.pending_events.clear();
         ctx.runtime.focus = retained_focus_to_node(focus_slot);
         ctx.runtime.updated_focus = focus_seen;
 
@@ -206,7 +204,7 @@ impl NodeBehavior for WidgetNode {
         let control = ctx.runtime.nodes.get(&id).map(|node| node.control).unwrap_or_default();
         let mut focus_slot = ctx.runtime.focus.map(RetainedId::node);
         let mut focus_seen = ctx.runtime.updated_focus;
-        let mut input_snapshot = self.widget.needs_input_snapshot().then(|| std::rc::Rc::new(snapshot_from_input(ctx.input)));
+        let events = frame_events_from_input(ctx.input);
         let node_clip = ctx.runtime.nodes.get(&id).map(|node| node.clip).unwrap_or(UNCLIPPED_RECT);
         ctx.runtime.push_node_clip(id);
         let mut widget_ctx = WidgetCtx::new_with_interaction(
@@ -220,7 +218,7 @@ impl NodeBehavior for WidgetNode {
             &mut focus_slot,
             &mut focus_seen,
             true,
-            input_snapshot.take(),
+            events,
         );
         self.widget.paint(&mut widget_ctx, &control);
         ctx.runtime.pop_node_clip();
@@ -228,19 +226,19 @@ impl NodeBehavior for WidgetNode {
         ctx.runtime.updated_focus = focus_seen;
 
         if let Some(render) = self.custom_render.clone() {
-            let snapshot = snapshot_from_input(ctx.input);
+            let events = frame_events_from_input(ctx.input);
             let active = control.focused;
             let view = node_clip.intersect(&rect).unwrap_or_else(|| Recti::new(rect.x, rect.y, 0, 0));
             let cra = CustomRenderArgs {
                 content_area: rect,
                 view,
-                mouse_event: input_to_mouse_event(&control, &snapshot, rect),
+                mouse_event: input_to_mouse_event(&control, &events, rect),
                 scroll_delta: control.scroll_delta,
                 widget_opt: self.widget.effective_widget_opt(),
                 scroll_behavior: self.widget.effective_scroll_behavior(),
-                key_mods: if active { snapshot.key_mods } else { KeyMode::NONE },
-                key_codes: if active { snapshot.key_codes } else { KeyCode::NONE },
-                text_input: if active { snapshot.text_input } else { String::new() },
+                key_mods: if active { events_key_mods(&events) } else { KeyMode::NONE },
+                key_codes: if active { events_key_codes(&events) } else { KeyCode::NONE },
+                text_input: if active { events_text(&events) } else { String::new() },
             };
             ctx.runtime
                 .commands
@@ -249,17 +247,18 @@ impl NodeBehavior for WidgetNode {
         false
     }
 
-    fn update_on(&mut self, ctx: &mut InputCtx<'_>, id: UiNodeId, event: UiInputEvent) -> InputResult {
-        if !matches!(event, UiInputEvent::Scroll { .. }) {
-            return InputResult::Ignored;
+    fn update_on(&mut self, ctx: &mut InputCtx<'_>, id: UiNodeId, event: &UiInputEvent) -> InputResult {
+        if event.is_focus_input() {
+            self.pending_events.push(event.clone());
+            return InputResult::Consumed;
         }
+        let UiInputEvent::Scroll { pos, delta } = event else {
+            return InputResult::Ignored;
+        };
         let rect = ctx.runtime.nodes.get(&id).map(|node| node.rect).unwrap_or_default();
         let clip = ctx.runtime.nodes.get(&id).map(|node| node.clip).unwrap_or_default();
-        let hovered = rect.contains(&ctx.input.mouse_pos) && clip.contains(&ctx.input.mouse_pos);
-        if hovered
-            && self.widget.effective_scroll_behavior().is_grab_scroll()
-            && (ctx.input.scroll_delta.x != 0 || ctx.input.scroll_delta.y != 0)
-        {
+        let hovered = rect.contains(&pos) && clip.contains(&pos);
+        if hovered && self.widget.effective_scroll_behavior().is_grab_scroll() && (delta.x != 0 || delta.y != 0) {
             InputResult::Consumed
         } else {
             InputResult::Ignored
@@ -268,14 +267,37 @@ impl NodeBehavior for WidgetNode {
 }
 
 /// Input event routed to retained node behavior.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum UiInputEvent {
-    /// Pointer state changed or an active pointer drag is in progress.
-    Pointer {
+    /// Pointer moved without any mouse button held.
+    MouseMove {
         /// Current pointer position in screen coordinates.
         pos: Vec2i,
         /// Pointer movement since the previous frame.
         delta: Vec2i,
+    },
+    /// Pointer moved while one or more mouse buttons are held.
+    MouseDrag {
+        /// Current pointer position in screen coordinates.
+        pos: Vec2i,
+        /// Pointer movement since the previous frame.
+        delta: Vec2i,
+        /// Mouse buttons held during the drag.
+        buttons: MouseButton,
+    },
+    /// One or more mouse buttons were pressed.
+    MouseDown {
+        /// Current pointer position in screen coordinates.
+        pos: Vec2i,
+        /// Buttons pressed during this frame.
+        button: MouseButton,
+    },
+    /// One or more mouse buttons were released.
+    MouseUp {
+        /// Current pointer position in screen coordinates.
+        pos: Vec2i,
+        /// Buttons released during this frame.
+        button: MouseButton,
     },
     /// Scroll wheel or equivalent high-level scroll input.
     Scroll {
@@ -284,6 +306,64 @@ pub(crate) enum UiInputEvent {
         /// Requested scroll delta.
         delta: Vec2i,
     },
+    /// Modifier/control key state was pressed.
+    KeyDown {
+        /// Modifier/control key bits pressed during this frame.
+        key: KeyMode,
+    },
+    /// Current modifier/control key state for this frame.
+    KeyState {
+        /// Modifier/control keys currently held.
+        keys: KeyMode,
+    },
+    /// Modifier/control key state was released.
+    KeyUp {
+        /// Modifier/control key bits released during this frame.
+        key: KeyMode,
+    },
+    /// Navigation key state was pressed.
+    KeyCodeDown {
+        /// Navigation key bits pressed during this frame.
+        code: KeyCode,
+    },
+    /// Current navigation key state for this frame.
+    KeyCodeState {
+        /// Navigation keys currently held.
+        codes: KeyCode,
+    },
+    /// Navigation key state was released.
+    KeyCodeUp {
+        /// Navigation key bits released during this frame.
+        code: KeyCode,
+    },
+    /// UTF-8 text input collected during this frame.
+    Text {
+        /// Entered text.
+        text: String,
+    },
+}
+
+impl UiInputEvent {
+    /// Returns whether this event belongs to pointer routing.
+    pub(crate) fn is_pointer(&self) -> bool {
+        matches!(
+            self,
+            Self::MouseMove { .. } | Self::MouseDrag { .. } | Self::MouseDown { .. } | Self::MouseUp { .. } | Self::Scroll { .. }
+        )
+    }
+
+    /// Returns whether this event should be delivered to the focused node.
+    pub(crate) fn is_focus_input(&self) -> bool {
+        matches!(
+            self,
+            Self::KeyDown { .. } | Self::KeyUp { .. } | Self::KeyCodeDown { .. } | Self::KeyCodeUp { .. } | Self::Text { .. }
+        )
+    }
+
+    /// Returns whether this event ends an active pointer capture when no buttons remain held.
+    pub(crate) fn is_pointer_release(&self) -> bool {
+        matches!(self, Self::MouseUp { .. })
+    }
 }
 
 /// Result of routing one input event to a node behavior.
@@ -457,7 +537,7 @@ impl UpdateCtx<'_> {
             &mut focus_slot,
             &mut focus_seen,
             self.runtime.hover_root_active,
-            None,
+            frame_events_from_input(self.input),
         );
         let result = widget.update(&mut ctx, &control);
         self.runtime.focus = retained_focus_to_node(focus_slot);
@@ -543,7 +623,7 @@ impl PaintCtx<'_> {
             &mut focus_slot,
             &mut focus_seen,
             true,
-            None,
+            frame_events_from_input(self.input),
         );
         widget.paint(&mut ctx, &control);
         self.pop_node_clip();

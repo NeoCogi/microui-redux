@@ -64,7 +64,7 @@ fn combo_run_toggles_open_state() {
         &mut focus,
         &mut updated_focus,
         true,
-        None,
+        Vec::new(),
     );
 
     combo.update(&mut ctx, &control);
@@ -82,7 +82,7 @@ fn combo_run_toggles_open_state() {
         &mut focus,
         &mut updated_focus,
         true,
-        None,
+        Vec::new(),
     );
     combo.update(&mut ctx, &control);
     assert!(!combo.is_open());

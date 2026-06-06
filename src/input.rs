@@ -287,45 +287,6 @@ pub struct ControlState {
     pub scroll_delta: Option<Vec2i>,
 }
 
-#[derive(Clone, Debug)]
-/// Snapshot of the per-frame input state for widgets that need it.
-pub struct InputSnapshot {
-    /// Mouse position relative to the current widget rectangle.
-    pub mouse_pos: Vec2i,
-    /// Mouse movement delta since the previous frame, expressed in widget-local space.
-    pub mouse_delta: Vec2i,
-    /// Currently held mouse buttons.
-    pub mouse_down: MouseButton,
-    /// Mouse buttons pressed this frame.
-    pub mouse_pressed: MouseButton,
-    /// Active modifier keys.
-    pub key_mods: KeyMode,
-    /// Modifier keys pressed this frame.
-    pub key_pressed: KeyMode,
-    /// Active navigation keys.
-    pub key_codes: KeyCode,
-    /// Navigation keys pressed this frame.
-    pub key_code_pressed: KeyCode,
-    /// UTF-8 text input collected this frame.
-    pub text_input: String,
-}
-
-impl Default for InputSnapshot {
-    fn default() -> Self {
-        Self {
-            mouse_pos: Vec2i::default(),
-            mouse_delta: Vec2i::default(),
-            mouse_down: MouseButton::NONE,
-            mouse_pressed: MouseButton::NONE,
-            key_mods: KeyMode::NONE,
-            key_pressed: KeyMode::NONE,
-            key_codes: KeyCode::NONE,
-            key_code_pressed: KeyCode::NONE,
-            text_input: String::new(),
-        }
-    }
-}
-
 bitflags! {
     #[derive(Copy, Clone, Debug)]
     /// Mouse button state as reported by the input system.
@@ -400,14 +361,20 @@ pub struct Input {
     pub(crate) mouse_down: MouseButton,
     /// Mouse buttons pressed during the current frame.
     pub(crate) mouse_pressed: MouseButton,
+    /// Mouse buttons released during the current frame.
+    pub(crate) mouse_released: MouseButton,
     /// Modifier keys currently held.
     pub(crate) key_down: KeyMode,
     /// Modifier keys pressed during the current frame.
     pub(crate) key_pressed: KeyMode,
+    /// Modifier keys released during the current frame.
+    pub(crate) key_released: KeyMode,
     /// Navigation keys currently held.
     pub(crate) key_code_down: KeyCode,
     /// Navigation keys pressed during the current frame.
     pub(crate) key_code_pressed: KeyCode,
+    /// Navigation keys released during the current frame.
+    pub(crate) key_code_released: KeyCode,
     /// UTF-8 text accumulated during the current frame.
     pub(crate) input_text: String,
 }
@@ -422,10 +389,13 @@ impl Default for Input {
             scroll_delta: Vec2i::default(),
             mouse_down: MouseButton::NONE,
             mouse_pressed: MouseButton::NONE,
+            mouse_released: MouseButton::NONE,
             key_down: KeyMode::NONE,
             key_pressed: KeyMode::NONE,
+            key_released: KeyMode::NONE,
             key_code_down: KeyCode::NONE,
             key_code_pressed: KeyCode::NONE,
+            key_code_released: KeyCode::NONE,
             input_text: String::default(),
         }
     }
@@ -473,6 +443,7 @@ impl Input {
     pub fn mouseup(&mut self, x: i32, y: i32, btn: MouseButton) {
         self.mousemove(x, y);
         self.mouse_down &= !btn;
+        self.mouse_released |= btn;
     }
 
     /// Accumulates scroll wheel movement.
@@ -490,6 +461,7 @@ impl Input {
     /// Records that a modifier key was released.
     pub fn keyup(&mut self, key: KeyMode) {
         self.key_down &= !key;
+        self.key_released |= key;
     }
 
     /// Records that a navigation key was pressed.
@@ -501,6 +473,7 @@ impl Input {
     /// Records that a navigation key was released.
     pub fn keyup_code(&mut self, code: KeyCode) {
         self.key_code_down &= !code;
+        self.key_code_released |= code;
     }
 
     /// Appends UTF-8 text to the input buffer.
@@ -517,9 +490,12 @@ impl Input {
     /// Clears one-frame input fields after UI traversal finishes.
     pub(crate) fn epilogue(&mut self) {
         self.key_pressed = KeyMode::NONE;
+        self.key_released = KeyMode::NONE;
         self.key_code_pressed = KeyCode::NONE;
+        self.key_code_released = KeyCode::NONE;
         self.input_text.clear();
         self.mouse_pressed = MouseButton::NONE;
+        self.mouse_released = MouseButton::NONE;
         self.scroll_delta = Vec2i::new(0, 0);
         self.last_mouse_pos = self.mouse_pos;
     }

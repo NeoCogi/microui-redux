@@ -15,6 +15,10 @@ pub(crate) struct Disclosure {
 }
 
 impl NodeBehavior for Disclosure {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         let widget = crate::context::erased_widget_state(self.state.clone());
         let header_size = widget.measure(ctx.style, ctx.atlas, available);
@@ -23,7 +27,9 @@ impl NodeBehavior for Disclosure {
         }
 
         let child_available = Dimensioni::new(
-            available.width.saturating_sub(super::super::disclosure_child_indent(self.indent_children, ctx.style)),
+            available
+                .width
+                .saturating_sub(super::super::disclosure_child_indent(self.indent_children, ctx.style)),
             available.height.saturating_sub(header_size.height),
         );
         let child_size = self.children.measure(ctx, id, child_available);

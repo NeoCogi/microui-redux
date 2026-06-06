@@ -16,6 +16,10 @@ pub(crate) struct Stack {
 }
 
 impl NodeBehavior for Stack {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         let mut width = 0;
         let mut height: i32 = 0;
@@ -23,7 +27,13 @@ impl NodeBehavior for Stack {
             let Some(child) = ctx.child_at(id, index) else { continue };
             let child_size = ctx.measure_node(child, available);
             width = width.max(super::super::resolve_size(self.width, child_size.width, available.width, available.width, None));
-            height = height.saturating_add(super::super::resolve_size(self.height, child_size.height, available.height, available.height, None));
+            height = height.saturating_add(super::super::resolve_size(
+                self.height,
+                child_size.height,
+                available.height,
+                available.height,
+                None,
+            ));
             if index + 1 < ctx.child_count(id) {
                 height = height.saturating_add(ctx.style.spacing);
             }

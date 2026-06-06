@@ -11,8 +11,8 @@
 #![allow(dead_code)]
 
 use crate::{
-    expand_rect, Canvas, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, InputSnapshot, GridSpan, MouseButton, MouseEvent,
-    Recti, Renderer, RetainedId, Style, UiNodeSet, Vec2i, Vertex, UNCLIPPED_RECT,
+    expand_rect, Canvas, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, GridSpan, KeyCode, KeyMode, MouseButton, MouseEvent, Recti,
+    Renderer, RetainedId, Style, UiNodeSet, Vec2i, Vertex, UNCLIPPED_RECT,
 };
 use crate::render_command::{render_command_stream, Command};
 use crate::id::IdNamespace;
@@ -326,19 +326,48 @@ fn child_content_rect(node: &UiNode) -> Recti {
     )
 }
 
-/// Captures immutable input state for widgets that request full input.
-fn snapshot_from_input(input: &Input) -> InputSnapshot {
-    InputSnapshot {
-        mouse_pos: input.mouse_pos,
-        mouse_delta: input.mouse_delta,
-        mouse_down: input.mouse_down,
-        mouse_pressed: input.mouse_pressed,
-        key_mods: input.key_down,
-        key_pressed: input.key_pressed,
-        key_codes: input.key_code_down,
-        key_code_pressed: input.key_code_pressed,
-        text_input: input.input_text.clone(),
+/// Builds routed state events for the current frame.
+pub(super) fn frame_events_from_input(input: &Input) -> Vec<UiInputEvent> {
+    let mut events = Vec::new();
+    if !input.mouse_pressed.is_empty() {
+        events.push(UiInputEvent::MouseDown {
+            pos: input.mouse_pos,
+            button: input.mouse_pressed,
+        });
     }
+    if !input.mouse_released.is_empty() {
+        events.push(UiInputEvent::MouseUp {
+            pos: input.mouse_pos,
+            button: input.mouse_released,
+        });
+    }
+    if input.mouse_delta.x != 0 || input.mouse_delta.y != 0 {
+        if input.mouse_down.is_empty() {
+            events.push(UiInputEvent::MouseMove {
+                pos: input.mouse_pos,
+                delta: input.mouse_delta,
+            });
+        } else {
+            events.push(UiInputEvent::MouseDrag {
+                pos: input.mouse_pos,
+                delta: input.mouse_delta,
+                buttons: input.mouse_down,
+            });
+        }
+    }
+    if input.scroll_delta.x != 0 || input.scroll_delta.y != 0 {
+        events.push(UiInputEvent::Scroll {
+            pos: input.mouse_pos,
+            delta: input.scroll_delta,
+        });
+    }
+    if !input.key_down.is_empty() {
+        events.push(UiInputEvent::KeyState { keys: input.key_down });
+    }
+    if !input.key_code_down.is_empty() {
+        events.push(UiInputEvent::KeyCodeState { codes: input.key_code_down });
+    }
+    events
 }
 
 /// Converts the retained focus slot used by `WidgetCtx` back to a node id.
@@ -350,15 +379,19 @@ fn retained_focus_to_node(focus: Option<RetainedId>) -> Option<UiNodeId> {
 }
 
 /// Converts a global input snapshot into widget-local mouse event semantics.
-fn input_to_mouse_event(control: &ControlState, input: &InputSnapshot, rect: Recti) -> MouseEvent {
+pub(super) fn input_to_mouse_event(control: &ControlState, events: &[UiInputEvent], rect: Recti) -> MouseEvent {
     let origin = Vec2i::new(rect.x, rect.y);
-    let prev_pos = input.mouse_pos - input.mouse_delta - origin;
-    let curr_pos = input.mouse_pos - origin;
+    let mouse_pos = events_mouse_pos(events);
+    let mouse_delta = events_mouse_delta(events);
+    let mouse_down = events_mouse_down(events);
+    let mouse_pressed = events_mouse_pressed(events);
+    let prev_pos = mouse_pos - mouse_delta - origin;
+    let curr_pos = mouse_pos - origin;
 
-    if control.focused && input.mouse_down.intersects(MouseButton::LEFT) {
+    if control.focused && mouse_down.intersects(MouseButton::LEFT) {
         return MouseEvent::Drag { prev_pos, curr_pos };
     }
-    if control.hovered && input.mouse_pressed.intersects(MouseButton::LEFT) {
+    if control.hovered && mouse_pressed.intersects(MouseButton::LEFT) {
         return MouseEvent::Click(curr_pos);
     }
     if control.hovered {
@@ -367,16 +400,153 @@ fn input_to_mouse_event(control: &ControlState, input: &InputSnapshot, rect: Rec
     MouseEvent::None
 }
 
+fn events_mouse_pos(events: &[UiInputEvent]) -> Vec2i {
+    events
+        .iter()
+        .rev()
+        .find_map(|event| match event {
+            UiInputEvent::MouseMove { pos, .. }
+            | UiInputEvent::MouseDrag { pos, .. }
+            | UiInputEvent::MouseDown { pos, .. }
+            | UiInputEvent::MouseUp { pos, .. }
+            | UiInputEvent::Scroll { pos, .. } => Some(*pos),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+fn events_mouse_delta(events: &[UiInputEvent]) -> Vec2i {
+    events.iter().fold(Vec2i::default(), |mut delta, event| {
+        match event {
+            UiInputEvent::MouseMove { delta: event_delta, .. } | UiInputEvent::MouseDrag { delta: event_delta, .. } => {
+                delta.x += event_delta.x;
+                delta.y += event_delta.y;
+            }
+            _ => {}
+        }
+        delta
+    })
+}
+
+fn events_mouse_down(events: &[UiInputEvent]) -> MouseButton {
+    events.iter().fold(MouseButton::NONE, |buttons, event| match event {
+        UiInputEvent::MouseDrag { buttons: held, .. } => buttons | *held,
+        _ => buttons,
+    })
+}
+
+fn events_mouse_pressed(events: &[UiInputEvent]) -> MouseButton {
+    events.iter().fold(MouseButton::NONE, |buttons, event| match event {
+        UiInputEvent::MouseDown { button, .. } => buttons | *button,
+        _ => buttons,
+    })
+}
+
+pub(super) fn events_key_mods(events: &[UiInputEvent]) -> KeyMode {
+    events.iter().fold(KeyMode::NONE, |keys, event| match event {
+        UiInputEvent::KeyState { keys: state } => keys | *state,
+        _ => keys,
+    })
+}
+
+pub(super) fn events_key_codes(events: &[UiInputEvent]) -> KeyCode {
+    events.iter().fold(KeyCode::NONE, |keys, event| match event {
+        UiInputEvent::KeyCodeState { codes } => keys | *codes,
+        _ => keys,
+    })
+}
+
+pub(super) fn events_text(events: &[UiInputEvent]) -> String {
+    let mut text = String::new();
+    for event in events {
+        if let UiInputEvent::Text { text: event_text } = event {
+            text.push_str(event_text);
+        }
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::rc::Rc;
+    use std::{cell::RefCell, rc::Rc};
 
     use crate::{
-        color4b, rect, AtlasHandle, AtlasSource, Button, Canvas, CharEntry, Custom, FontEntry, Id, Image, Input, ListItem, Policy, RendererHandle,
-        ScrollAreaHandle, ScrollAreaState, SourceFormat, StackDirection, Textbox, WidgetFillOption, UiNodeBuilder, widget_handle,
+        color4b, rect, AtlasHandle, AtlasSource, Button, Canvas, CharEntry, Custom, FontEntry, Id, Image, Input, KeyMode, ListItem, Policy, RendererHandle,
+        ResourceState, ScrollAreaHandle, ScrollAreaState, SourceFormat, StackDirection, Textbox, WidgetFillOption, WidgetOption, UiNodeBuilder, widget_handle,
     };
     use crate::test_support::{test_atlas, NoopRenderer};
+
+    #[derive(Clone)]
+    struct RecordingBehavior {
+        log: Rc<RefCell<Vec<(UiNodeId, &'static str)>>>,
+        result: InputResult,
+    }
+
+    impl RecordingBehavior {
+        fn new(log: Rc<RefCell<Vec<(UiNodeId, &'static str)>>>, result: InputResult) -> Self {
+            Self { log, result }
+        }
+    }
+
+    impl NodeBehavior for RecordingBehavior {
+        fn measure(&self, _ctx: &MeasureCtx<'_>, _id: UiNodeId, _available: Dimensioni) -> Dimensioni {
+            Dimensioni::default()
+        }
+
+        fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _id: UiNodeId, _rect: Recti, _clip: Recti) {}
+
+        fn update_on(&mut self, _ctx: &mut InputCtx<'_>, id: UiNodeId, event: &UiInputEvent) -> InputResult {
+            let name = match event {
+                UiInputEvent::MouseMove { .. } => "mouse_move",
+                UiInputEvent::MouseDrag { .. } => "mouse_drag",
+                UiInputEvent::MouseDown { .. } => "mouse_down",
+                UiInputEvent::MouseUp { .. } => "mouse_up",
+                UiInputEvent::Scroll { .. } => "scroll",
+                UiInputEvent::KeyDown { .. } => "key_down",
+                UiInputEvent::KeyState { .. } => "key_state",
+                UiInputEvent::KeyUp { .. } => "key_up",
+                UiInputEvent::KeyCodeDown { .. } => "key_code_down",
+                UiInputEvent::KeyCodeState { .. } => "key_code_state",
+                UiInputEvent::KeyCodeUp { .. } => "key_code_up",
+                UiInputEvent::Text { .. } => "text",
+            };
+            self.log.borrow_mut().push((id, name));
+            self.result
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    struct EventRecorder {
+        seen: Rc<RefCell<Vec<Vec<UiInputEvent>>>>,
+        opt: WidgetOption,
+    }
+
+    impl EventRecorder {
+        fn new(seen: Rc<RefCell<Vec<Vec<UiInputEvent>>>>) -> Self {
+            Self { seen, opt: WidgetOption::NONE }
+        }
+    }
+
+    impl crate::Widget for EventRecorder {
+        fn widget_opt(&self) -> &WidgetOption {
+            &self.opt
+        }
+
+        fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+            Dimensioni::new(10, 10)
+        }
+
+        fn update(&mut self, ctx: &mut WidgetCtx<'_>, _control: &crate::ControlState) -> ResourceState {
+            self.seen.borrow_mut().push(ctx.input_events().to_vec());
+            ResourceState::NONE
+        }
+
+        fn paint(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &crate::ControlState) {}
+    }
 
     #[test]
     fn ui_node_set_conversion_keeps_container_children_off_leaf_widgets() {
@@ -461,6 +631,166 @@ mod tests {
         assert_eq!(runtime.insert_child_immediate(Id::new(1), child, 0), Some(Id::new(2)));
         assert_eq!(runtime.nodes.get(&Id::new(1)).unwrap().children(), &[Id::new(2)]);
         assert_eq!(runtime.nodes.get(&Id::new(2)).unwrap().parent, Some(Id::new(1)));
+    }
+
+    #[test]
+    fn key_text_input_routes_only_to_focused_node() {
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let mut runtime = UiRuntime::new();
+        runtime.nodes.insert(
+            Id::new(1),
+            UiNode::new(
+                Id::new(1),
+                None,
+                crate::Policy::auto(),
+                GridSpan::ONE,
+                UiNodeData::Leaf {
+                    behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed)),
+                },
+            ),
+        );
+        runtime.nodes.insert(
+            Id::new(2),
+            UiNode::new(
+                Id::new(2),
+                None,
+                crate::Policy::auto(),
+                GridSpan::ONE,
+                UiNodeData::Leaf {
+                    behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed)),
+                },
+            ),
+        );
+        runtime.focus = Some(Id::new(2));
+
+        let mut input = Input::default();
+        input.text("x");
+        input.keydown(KeyMode::CTRL);
+        assert!(runtime.route_input_events(&Style::default(), &input));
+
+        assert_eq!(&*log.borrow(), &[(Id::new(2), "key_down"), (Id::new(2), "text")]);
+    }
+
+    #[test]
+    fn retained_widget_key_text_comes_from_focused_routed_event() {
+        let focused_seen = Rc::new(RefCell::new(Vec::new()));
+        let unfocused_seen = Rc::new(RefCell::new(Vec::new()));
+        let focused_widget = widget_handle(EventRecorder::new(focused_seen.clone()));
+        let unfocused_widget = widget_handle(EventRecorder::new(unfocused_seen.clone()));
+        let mut focused_id = Id::new(0);
+        let tree = UiNodeBuilder::build(|tree| {
+            tree.column(|tree| {
+                tree.widget(&unfocused_widget);
+                focused_id = tree.widget(&focused_widget);
+            });
+        });
+        let mut runtime = UiRuntime::from_ui_nodes(tree);
+        runtime.focus = Some(focused_id);
+        let atlas = test_atlas();
+        let renderer = RendererHandle::new(NoopRenderer { atlas });
+        let mut canvas = Canvas::from(renderer, Dimensioni::new(120, 80));
+        let style = Style::default();
+        let mut results = FrameResults::default();
+        results.begin_frame();
+        let mut input = Input::default();
+        input.text("x");
+        input.keydown(KeyMode::CTRL);
+
+        runtime.render_frame(
+            crate::RootId::from_raw(1),
+            "test",
+            &mut canvas,
+            &style,
+            &input,
+            &mut results,
+            rect(0, 0, 120, 80),
+            ScrollBehavior::NONE,
+            true,
+        );
+
+        let focused = focused_seen.borrow();
+        assert!(focused[0].iter().any(|event| matches!(event, UiInputEvent::Text { text } if text == "x")));
+        assert!(
+            focused[0]
+                .iter()
+                .any(|event| matches!(event, UiInputEvent::KeyDown { key } if key.intersects(KeyMode::CTRL)))
+        );
+
+        let unfocused = unfocused_seen.borrow();
+        assert!(!unfocused[0].iter().any(UiInputEvent::is_focus_input));
+    }
+
+    #[test]
+    fn pointer_capture_routes_without_hover_and_clears_on_release() {
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let mut runtime = UiRuntime::new();
+        runtime.nodes.insert(
+            Id::new(1),
+            UiNode::new(
+                Id::new(1),
+                None,
+                crate::Policy::auto(),
+                GridSpan::ONE,
+                UiNodeData::Branch {
+                    behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Ignored)),
+                    children: vec![Id::new(2), Id::new(3)],
+                },
+            ),
+        );
+        runtime.nodes.insert(
+            Id::new(2),
+            UiNode::new(
+                Id::new(2),
+                Some(Id::new(1)),
+                crate::Policy::auto(),
+                GridSpan::ONE,
+                UiNodeData::Leaf {
+                    behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Captured)),
+                },
+            ),
+        );
+        runtime.nodes.insert(
+            Id::new(3),
+            UiNode::new(
+                Id::new(3),
+                Some(Id::new(1)),
+                crate::Policy::auto(),
+                GridSpan::ONE,
+                UiNodeData::Leaf {
+                    behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Ignored)),
+                },
+            ),
+        );
+        runtime.roots.push(Id::new(1));
+        runtime.z_order.push(Id::new(1));
+        runtime.hover_root_active = true;
+
+        let mut input = Input::default();
+        input.mousedown(10, 10, MouseButton::LEFT);
+        assert!(runtime.route_input_events(&Style::default(), &input));
+        assert_eq!(runtime.capture, Some(Id::new(2)));
+        input.epilogue();
+
+        runtime.hover_root_active = false;
+        input.mousemove(20, 10);
+        input.prelude();
+        assert!(runtime.route_input_events(&Style::default(), &input));
+        assert_eq!(runtime.capture, Some(Id::new(2)));
+        input.epilogue();
+
+        input.mouseup(20, 10, MouseButton::LEFT);
+        assert!(runtime.route_input_events(&Style::default(), &input));
+        assert_eq!(runtime.capture, None);
+
+        assert_eq!(
+            &*log.borrow(),
+            &[
+                (Id::new(3), "mouse_down"),
+                (Id::new(2), "mouse_down"),
+                (Id::new(2), "mouse_drag"),
+                (Id::new(2), "mouse_up"),
+            ]
+        );
     }
 
     #[test]

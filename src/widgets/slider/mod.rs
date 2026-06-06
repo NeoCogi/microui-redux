@@ -199,11 +199,10 @@ impl Slider {
                 }
             }
         }
-        let input = ctx.input_or_default();
         let range = self.high - self.low;
-        if control.focused && (!input.mouse_down.is_empty() || input.mouse_pressed.intersects(MouseButton::LEFT)) && base.width > 0 && range != 0.0 {
+        if control.focused && (!ctx.mouse_down().is_empty() || ctx.mouse_pressed().intersects(MouseButton::LEFT)) && base.width > 0 && range != 0.0 {
             // Mouse x maps linearly across the slider track.
-            v = self.low + input.mouse_pos.x as Real * range / base.width as Real;
+            v = self.low + ctx.mouse_pos().x as Real * range / base.width as Real;
             if self.step != 0. {
                 v = snap_slider_value(v, self.low, self.step);
             }
@@ -274,10 +273,7 @@ fn number_textbox_update(
     font: FontId,
     value: &mut Real,
 ) -> ResourceState {
-    let shift_click = {
-        let input = ctx.input_or_default();
-        input.mouse_pressed.intersects(MouseButton::LEFT) && input.key_mods.intersects(KeyMode::SHIFT) && control.hovered
-    };
+    let shift_click = { ctx.mouse_pressed().intersects(MouseButton::LEFT) && ctx.key_mods().intersects(KeyMode::SHIFT) && control.hovered };
 
     if shift_click {
         // Enter edit mode by seeding the textbox with the current formatted value.
@@ -340,10 +336,6 @@ impl Widget for Slider {
 
     fn focus_policy(&self) -> FocusPolicy {
         number_focus_policy(self.edit.editing)
-    }
-
-    fn needs_input_snapshot(&self) -> bool {
-        true
     }
 }
 
@@ -426,9 +418,8 @@ impl Number {
             self.set_value(self.value);
             return res;
         }
-        let input = ctx.input_or_default();
-        if control.focused && input.mouse_down.intersects(MouseButton::LEFT) {
-            self.set_value(self.value + input.mouse_delta.x as Real * self.step);
+        if control.focused && ctx.mouse_down().intersects(MouseButton::LEFT) {
+            self.set_value(self.value + ctx.mouse_delta().x as Real * self.step);
         } else {
             self.set_value(self.value);
         }
@@ -485,10 +476,6 @@ impl Widget for Number {
 
     fn focus_policy(&self) -> FocusPolicy {
         number_focus_policy(self.edit.editing)
-    }
-
-    fn needs_input_snapshot(&self) -> bool {
-        true
     }
 }
 

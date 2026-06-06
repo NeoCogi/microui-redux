@@ -26,6 +26,10 @@ impl Default for RootWindow {
 }
 
 impl NodeBehavior for RootWindow {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         self.body.measure(ctx, id, available)
     }

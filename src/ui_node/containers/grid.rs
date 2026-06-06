@@ -14,6 +14,10 @@ pub(crate) struct Grid {
 }
 
 impl NodeBehavior for Grid {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         let cols = self.widths.len().max(1);
         let rows = grid_placements(ctx, id, cols)

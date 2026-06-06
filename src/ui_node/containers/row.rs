@@ -14,6 +14,10 @@ pub(crate) struct Row {
 }
 
 impl NodeBehavior for Row {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         let mut preferred_heights = Vec::new();
         let mut preferred_widths = Vec::new();
@@ -25,7 +29,11 @@ impl NodeBehavior for Row {
         }
         let height = super::super::resolve_size(
             self.height,
-            preferred_heights.iter().copied().max().unwrap_or_else(|| super::super::default_cell_height(ctx.style, ctx.atlas)),
+            preferred_heights
+                .iter()
+                .copied()
+                .max()
+                .unwrap_or_else(|| super::super::default_cell_height(ctx.style, ctx.atlas)),
             available.height,
             available.height,
             None,

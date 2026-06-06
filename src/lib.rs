@@ -153,8 +153,8 @@ pub mod prelude {
     };
     pub use crate::file_dialog::FileDialogState;
     pub use crate::input::{
-        Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, InputSnapshot, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState,
-        ScrollBehavior, WidgetFillOption, WidgetOption,
+        Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState, ScrollBehavior,
+        WidgetFillOption, WidgetOption,
     };
     pub use crate::sizing::{SizePolicy, StackDirection};
     pub use crate::render::{Renderer, RendererHandle};
@@ -181,8 +181,8 @@ pub use context::{widget_handle, Context, GridSpan, NodeBuilder, NodeId, NodeOpt
 pub use file_dialog::FileDialogState;
 pub use id::Id;
 pub use input::{
-    Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, InputSnapshot, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState,
-    ScrollBehavior, WidgetFillOption, WidgetOption,
+    Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState, ScrollBehavior,
+    WidgetFillOption, WidgetOption,
 };
 pub use render_command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
 pub use render::{Renderer, RendererHandle};

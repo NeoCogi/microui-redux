@@ -149,8 +149,6 @@ pub(crate) trait WidgetStateHandleDyn {
     fn focus_policy(&self) -> FocusPolicy;
     /// Measures the widget without mutating it.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
-    /// Returns whether update/paint need a captured input snapshot.
-    fn needs_input_snapshot(&self) -> bool;
     /// Updates the widget through interior mutability.
     fn update(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
     /// Paints the widget through interior mutability.
@@ -188,10 +186,6 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         self.handle.read(|widget| widget.measure(style, atlas, avail))
-    }
-
-    fn needs_input_snapshot(&self) -> bool {
-        self.handle.read(Widget::needs_input_snapshot)
     }
 
     fn update(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {

@@ -55,7 +55,7 @@
 //! The helpers in this file keep cursor indices on valid byte boundaries, apply keyboard/text
 //! input, and translate pointer positions into cursor locations.
 use crate::text_layout::TextLine;
-use crate::{rect, AtlasHandle, FontId, InputSnapshot, KeyCode, KeyMode, Recti};
+use crate::{rect, AtlasHandle, FontId, KeyCode, KeyMode, Recti};
 
 /// Determines what pressing return means for the active editor.
 pub(crate) enum ReturnBehavior {
@@ -208,7 +208,10 @@ fn move_right(buf: &str, cursor: usize) -> usize {
 pub(crate) fn apply_text_input(
     buf: &mut String,
     cursor: usize,
-    input: &InputSnapshot,
+    text_input: &str,
+    key_mods: KeyMode,
+    key_pressed: KeyMode,
+    key_code_pressed: KeyCode,
     allow_leading_newline: bool,
     return_behavior: ReturnBehavior,
 ) -> TextEditOutcome {
@@ -217,37 +220,37 @@ pub(crate) fn apply_text_input(
     let mut moved = false;
     let mut submit = false;
 
-    if insert_text(buf, &mut cursor_pos, input.text_input.as_str()) {
+    if insert_text(buf, &mut cursor_pos, text_input) {
         changed = true;
     }
 
-    if input.key_pressed.intersects(KeyMode::BACKSPACE) && delete_prev(buf, &mut cursor_pos, allow_leading_newline) {
+    if key_pressed.intersects(KeyMode::BACKSPACE) && delete_prev(buf, &mut cursor_pos, allow_leading_newline) {
         changed = true;
     }
 
-    let delete_pressed = input.key_pressed.intersects(KeyMode::DELETE) || input.key_code_pressed.intersects(KeyCode::DELETE);
+    let delete_pressed = key_pressed.intersects(KeyMode::DELETE) || key_code_pressed.intersects(KeyCode::DELETE);
     if delete_pressed && delete_next(buf, cursor_pos) {
         changed = true;
     }
 
-    if input.key_code_pressed.intersects(KeyCode::LEFT) && cursor_pos > 0 {
+    if key_code_pressed.intersects(KeyCode::LEFT) && cursor_pos > 0 {
         cursor_pos = move_left(buf.as_str(), cursor_pos);
         moved = true;
     }
 
-    if input.key_code_pressed.intersects(KeyCode::RIGHT) && cursor_pos < buf.len() {
+    if key_code_pressed.intersects(KeyCode::RIGHT) && cursor_pos < buf.len() {
         cursor_pos = move_right(buf.as_str(), cursor_pos);
         moved = true;
     }
 
-    if input.key_pressed.intersects(KeyMode::RETURN) {
+    if key_pressed.intersects(KeyMode::RETURN) {
         match return_behavior {
             ReturnBehavior::Submit => {
                 submit = true;
             }
             ReturnBehavior::Newline { submit_on_ctrl } => {
                 // Text areas can use Ctrl+Enter for submit while plain Enter inserts a newline.
-                if submit_on_ctrl && input.key_mods.intersects(KeyMode::CTRL) {
+                if submit_on_ctrl && key_mods.intersects(KeyMode::CTRL) {
                     submit = true;
                 } else if insert_text(buf, &mut cursor_pos, "\n") {
                     changed = true;
