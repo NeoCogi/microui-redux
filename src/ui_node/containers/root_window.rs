@@ -26,10 +26,6 @@ impl Default for RootWindow {
 }
 
 impl NodeBehavior for RootWindow {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         self.body.measure(ctx, id, available)
     }
@@ -44,9 +40,5 @@ impl NodeBehavior for RootWindow {
             .map(|bounds| Dimensioni::new((bounds.x + bounds.width - client.x).max(0), (bounds.y + bounds.height - client.y).max(0)))
             .unwrap_or_default();
         ctx.set_content_size(id, content_size);
-    }
-
-    fn is_root_window(&self) -> bool {
-        true
     }
 }

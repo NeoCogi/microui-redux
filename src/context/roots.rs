@@ -105,11 +105,6 @@ impl<R: Renderer> Context<R> {
         id
     }
 
-    /// Creates a retained scroll-area handle for use with [`crate::UiNodeBuilder::scroll_area`].
-    pub fn new_scroll_area(&mut self, name: &str) -> ScrollAreaHandle {
-        ScrollAreaHandle::new(ScrollAreaState::new(name))
-    }
-
     fn next_root_id(&mut self) -> RootId {
         let id = RootId::from_raw(self.next_root_id);
         self.next_root_id = self.next_root_id.checked_add(1).expect("retained root id counter overflowed");
@@ -151,6 +146,41 @@ impl<R: Renderer> Context<R> {
         if let Some(entry) = self.roots.iter_mut().find(|entry| entry.id == root) {
             entry.runtime.set_focus_node(node_id);
         }
+    }
+
+    /// Returns the current scroll offset for a scroll-area node in a registered root.
+    pub fn scroll_area_scroll(&self, root: RootId, node_id: crate::NodeId) -> Option<Vec2i> {
+        self.roots
+            .iter()
+            .find(|entry| entry.id == root)
+            .and_then(|entry| entry.runtime.scroll_area_state(node_id))
+            .map(|state| state.scroll)
+    }
+
+    /// Returns the current viewport body for a scroll-area node in a registered root.
+    pub fn scroll_area_body(&self, root: RootId, node_id: crate::NodeId) -> Option<Recti> {
+        self.roots
+            .iter()
+            .find(|entry| entry.id == root)
+            .and_then(|entry| entry.runtime.scroll_area_state(node_id))
+            .map(|state| state.body)
+    }
+
+    /// Returns the measured child content size for a scroll-area node in a registered root.
+    pub fn scroll_area_content_size(&self, root: RootId, node_id: crate::NodeId) -> Option<Dimensioni> {
+        self.roots
+            .iter()
+            .find(|entry| entry.id == root)
+            .and_then(|entry| entry.runtime.scroll_area_state(node_id))
+            .map(|state| state.content_size)
+    }
+
+    /// Sets the scroll offset for a scroll-area node in a registered root.
+    pub fn set_scroll_area_scroll(&mut self, root: RootId, node_id: crate::NodeId, scroll: Vec2i) -> bool {
+        self.roots
+            .iter_mut()
+            .find(|entry| entry.id == root)
+            .is_some_and(|entry| entry.runtime.set_scroll_area_scroll(node_id, scroll))
     }
 
     pub(crate) fn root_control_metrics(&self) -> (i32, i32) {

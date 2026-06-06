@@ -32,15 +32,17 @@
 
 use std::{cell::RefCell, collections::HashMap, hash::Hash, rc::Rc};
 
-use rs_math3d::{Dimensioni, Vec2i};
+use rs_math3d::Dimensioni;
 
 use crate::{
     id::{hash_id_key, IdNamespace},
     input::{ContainerOption, ScrollBehavior},
     sizing::{SizePolicy, StackDirection},
-    ui_node::{Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData, UiNodeId, WidgetNode},
+    ui_node::{
+        scroll_viewport_node, scrollbar_nodes, Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData, UiNodeId, WidgetNode,
+    },
     widget::Widget,
-    Custom, CustomRenderArgs, Node, ScrollAreaHandle, TextBlock, TextWrap,
+    Custom, CustomRenderArgs, Node, TextBlock, TextWrap,
 };
 
 use super::{erased_widget_state, widget_handle, TreeCustomRender, WidgetHandle};
@@ -288,14 +290,8 @@ impl<'a> NodeBuilder<'a> {
     }
 
     /// Adds a scroll area node.
-    pub fn scroll_area(
-        self,
-        handle: impl Into<ScrollAreaHandle>,
-        opt: ContainerOption,
-        scroll_behavior: ScrollBehavior,
-        f: impl FnOnce(&mut UiNodeBuilder),
-    ) -> NodeId {
-        self.builder.insert_scroll_area(self.options, handle, opt, scroll_behavior, f)
+    pub fn scroll_area(self, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut UiNodeBuilder)) -> NodeId {
+        self.builder.insert_scroll_area(self.options, opt, scroll_behavior, f)
     }
 
     /// Adds a collapsible header node.
@@ -441,43 +437,58 @@ impl UiNodeBuilder {
     }
 
     /// Adds an unkeyed scroll area node.
-    pub fn scroll_area(
-        &mut self,
-        handle: impl Into<ScrollAreaHandle>,
-        opt: ContainerOption,
-        scroll_behavior: ScrollBehavior,
-        f: impl FnOnce(&mut Self),
-    ) -> NodeId {
-        self.insert_scroll_area(NodeOptions::new(), handle, opt, scroll_behavior, f)
+    pub fn scroll_area(&mut self, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut Self)) -> NodeId {
+        self.insert_scroll_area(NodeOptions::new(), opt, scroll_behavior, f)
     }
 
     /// Adds a scroll area node with optional identity and placement metadata.
-    fn insert_scroll_area(
-        &mut self,
-        options: NodeOptions,
-        handle: impl Into<ScrollAreaHandle>,
-        opt: ContainerOption,
-        scroll_behavior: ScrollBehavior,
-        f: impl FnOnce(&mut Self),
-    ) -> NodeId {
-        let handle = handle.into();
-        self.push_group(
-            options,
-            TAG_SCROLL_AREA,
+    fn insert_scroll_area(&mut self, options: NodeOptions, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut Self)) -> NodeId {
+        let id = self.alloc_id(TAG_SCROLL_AREA, options.key);
+        let parent = self.current_frame().parent;
+        let viewport = scroll_viewport_node(id, scroll_behavior, Vec::new());
+        let viewport_id = viewport.id;
+
+        self.frames.push(BuilderFrame {
+            parent: Some(viewport_id),
+            scope_seed: id.raw() as u64,
+            next_auto: 0,
+            nodes: Vec::new(),
+        });
+        f(self);
+        let frame = self.frames.pop().expect("scroll viewport frame missing");
+
+        let mut viewport = scroll_viewport_node(id, scroll_behavior, frame.nodes);
+        viewport.parent = Some(id);
+
+        let mut internal_children = Vec::new();
+        internal_children.push(viewport_id);
+        let scrollbars = scrollbar_nodes(id, scroll_behavior);
+        internal_children.extend(scrollbars.iter().map(|node| node.id));
+
+        let node = UiNode::new(
+            id,
+            parent,
+            options.policy,
+            options.grid_span,
             UiNodeData::Branch {
-                behavior: Box::new(UiScrollArea {
-                    content: Column,
-                    handle,
-                    content_size: Dimensioni::default(),
-                    scroll_offset: Vec2i::default(),
-                    scroll_drag: None,
-                    scroll_behavior,
-                    opt,
-                }),
+                behavior: Box::new(UiScrollArea::new(scroll_behavior, opt)),
                 children: Vec::new(),
+                internal_children,
             },
-            f,
-        )
+        );
+        if self.nodes.contains_key(&id) || self.nodes.contains_key(&viewport_id) || scrollbars.iter().any(|node| self.nodes.contains_key(&node.id)) {
+            panic!(
+                "duplicate retained node id {:?} in UiNodeBuilder output. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
+                id
+            );
+        }
+        self.nodes.insert(id, node);
+        self.nodes.insert(viewport_id, viewport);
+        for scrollbar in scrollbars {
+            self.nodes.insert(scrollbar.id, scrollbar);
+        }
+        self.current_frame_mut().nodes.push(id);
+        id
     }
 
     /// Adds an unkeyed collapsible header node.
@@ -495,9 +506,10 @@ impl UiNodeBuilder {
                 behavior: Box::new(Disclosure {
                     state,
                     indent_children: false,
-                    children: Column,
+                    content_layout: Column,
                 }),
                 children: Vec::new(),
+                internal_children: Vec::new(),
             },
             f,
         )
@@ -518,9 +530,10 @@ impl UiNodeBuilder {
                 behavior: Box::new(Disclosure {
                     state,
                     indent_children: true,
-                    children: Column,
+                    content_layout: Column,
                 }),
                 children: Vec::new(),
+                internal_children: Vec::new(),
             },
             f,
         )
@@ -533,15 +546,20 @@ impl UiNodeBuilder {
 
     /// Adds a row flow group with optional identity and placement metadata.
     fn insert_row(&mut self, options: NodeOptions, widths: &[SizePolicy], height: SizePolicy, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(
+        let id = self.push_group(
             options,
             TAG_ROW,
             UiNodeData::Branch {
                 behavior: Box::new(Row { widths: widths.to_vec(), height }),
                 children: Vec::new(),
+                internal_children: Vec::new(),
             },
             f,
-        )
+        );
+        if let Some(node) = self.nodes.get_mut(&id) {
+            node.metadata.vertical_child_policy = Some(height);
+        }
+        id
     }
 
     /// Adds an unkeyed grid flow group.
@@ -560,6 +578,7 @@ impl UiNodeBuilder {
                     heights: heights.to_vec(),
                 }),
                 children: Vec::new(),
+                internal_children: Vec::new(),
             },
             f,
         )
@@ -578,6 +597,7 @@ impl UiNodeBuilder {
             UiNodeData::Branch {
                 behavior: Box::new(Column),
                 children: Vec::new(),
+                internal_children: Vec::new(),
             },
             f,
         )
@@ -596,6 +616,7 @@ impl UiNodeBuilder {
             UiNodeData::Branch {
                 behavior: Box::new(Stack { width, height, direction }),
                 children: Vec::new(),
+                internal_children: Vec::new(),
             },
             f,
         )

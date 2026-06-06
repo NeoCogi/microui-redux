@@ -53,10 +53,6 @@ pub struct FileDialogState {
     root: RootId,
     /// Cached open state mirrored from the registered root.
     open: bool,
-    /// Scroll area containing folder rows.
-    folder_area: ScrollAreaHandle,
-    /// Scroll area containing file rows.
-    file_area: ScrollAreaHandle,
     /// Folder names currently displayed.
     folders: Vec<String>,
     /// File names currently displayed.
@@ -238,8 +234,6 @@ impl FileDialogState {
         let mut cancel_button_id = NodeId::default();
         let mut ok_button_id = NodeId::default();
         let tree = {
-            let folder_area = &self.folder_area;
-            let file_area = &self.file_area;
             let up_button = &self.up_button;
             let home_button = &self.home_button;
             let path_box = &self.path_box;
@@ -279,7 +273,7 @@ impl FileDialogState {
 
                 // Main pane: folders on the left, files on the right, both scrollable through scroll areas.
                 tree.row(&pane_widths, SizePolicy::Remainder(footer_reserved), |tree| {
-                    tree.scroll_area(folder_area, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                         tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                             tree.widget(folders_label);
                             for item in folder_items {
@@ -291,7 +285,7 @@ impl FileDialogState {
                         });
                     });
 
-                    tree.scroll_area(file_area, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                         tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                             tree.widget(files_label);
                             for item in file_items {
@@ -477,8 +471,6 @@ impl FileDialogState {
             selected_folder: None,
             root,
             open: ctx.root_visible(root).unwrap_or(false),
-            folder_area: ctx.new_scroll_area("folders"),
-            file_area: ctx.new_scroll_area("files"),
             folders: Vec::new(),
             files: Vec::new(),
             folder_items: Vec::new(),

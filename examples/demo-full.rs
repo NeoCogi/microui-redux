@@ -115,6 +115,7 @@ struct TriangleState {
 #[derive(Clone)]
 struct GraphicsDemo {
     phase: f32,
+    star_center: Option<Vec2f>,
     opt: WidgetOption,
     scroll_behavior: ScrollBehavior,
 }
@@ -123,6 +124,7 @@ impl GraphicsDemo {
     fn new() -> Self {
         Self {
             phase: 0.0,
+            star_center: None,
             opt: WidgetOption::NONE,
             scroll_behavior: ScrollBehavior::NONE,
         }
@@ -151,6 +153,22 @@ impl Widget for GraphicsDemo {
         }
 
         self.phase = (self.phase + 0.025) % (PI * 2.0);
+        if ctx.hovered() {
+            for event in ctx.input_events() {
+                match event {
+                    UiInputEvent::MouseMove { pos, .. }
+                    | UiInputEvent::MouseDrag { pos, .. }
+                    | UiInputEvent::MouseDown { pos, .. }
+                    | UiInputEvent::MouseUp { pos, .. }
+                    | UiInputEvent::Scroll { pos, .. } => {
+                        self.star_center = Some(Vec2f::new(pos.x as f32, pos.y as f32));
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            self.star_center = None;
+        }
         ResourceState::NONE
     }
 
@@ -168,8 +186,7 @@ impl Widget for GraphicsDemo {
             local_height * 0.5 + self.phase.sin() * (local_height * 0.12),
         );
         let star_center = if ctx.hovered() {
-            let mouse_pos = ctx.mouse_pos();
-            Vec2f::new(mouse_pos.x as f32, mouse_pos.y as f32)
+            self.star_center.unwrap_or(animated_center)
         } else {
             animated_center
         };
@@ -740,9 +757,7 @@ struct State {
     stack_direction_root: RootId,
     weight_root: RootId,
 
-    demo_scroll: ScrollAreaHandle,
-    style_scroll: ScrollAreaHandle,
-    log_output: Option<ScrollAreaHandle>,
+    log_output: Option<NodeId>,
     dialog_window: FileDialogState,
 
     fps: f32,
@@ -1002,9 +1017,7 @@ impl State {
             suzanne_root,
             stack_direction_root,
             weight_root,
-            demo_scroll: ctx.new_scroll_area("Demo Window Body"),
-            style_scroll: ctx.new_scroll_area("Style Editor Body"),
-            log_output: Some(ctx.new_scroll_area("Log Output")),
+            log_output: None,
             dialog_window: FileDialogState::new(ctx),
             fps: 0.0,
             last_frame: Instant::now(),
@@ -1183,7 +1196,6 @@ impl State {
         let style_color_swatches = self.style_color_swatches.clone();
         let style_metric_labels = self.style_metric_labels.clone();
         let style_value_sliders = self.style_value_sliders.clone();
-        let style_scroll = self.style_scroll.clone();
         self.style_tree = UiNodeBuilder::build(move |tree| {
             let color_row = [
                 SizePolicy::Fixed(80),
@@ -1196,7 +1208,7 @@ impl State {
             let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Remainder(0)];
 
             tree.node(NodeOptions::with_policy(Policy::fill()))
-                .scroll_area(&style_scroll, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                     for ((label, sliders), swatch) in style_color_labels
                         .iter()
                         .zip(style_color_sliders.chunks_exact(4))
@@ -1221,16 +1233,16 @@ impl State {
                 });
         });
 
-        let log_output = self.log_output.clone().expect("log output scroll area missing");
         let log_text = self.log_text.clone();
         let submit_buf = self.submit_buf.clone();
         let submit_button = self.submit_button.clone();
+        let mut log_output_id = NodeId::default();
         let mut submit_buf_id = NodeId::default();
         let mut submit_button_id = NodeId::default();
         self.log_tree = UiNodeBuilder::build(|tree| {
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
-                tree.scroll_area(&log_output, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                log_output_id = tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                     tree.widget(&log_text);
                 });
             });
@@ -1239,6 +1251,7 @@ impl State {
                 Self::remember_widget(tree, &mut submit_button_id, &submit_button);
             });
         });
+        self.log_output = Some(log_output_id);
         self.submit_buf_id = submit_buf_id;
         self.submit_button_id = submit_button_id;
 
@@ -1493,7 +1506,6 @@ impl State {
         let background_swatch = self.background_swatch.clone();
         let slot_buttons = self.slot_buttons.clone();
         let external_image_button = self.external_image_button.clone();
-        let demo_scroll = self.demo_scroll.clone();
         let mut test_button_ids = [NodeId::default(); 6];
         let mut tree_button_ids = [NodeId::default(); 6];
         self.demo_tree = UiNodeBuilder::build(|tree| {
@@ -1515,7 +1527,7 @@ impl State {
             let [slot0, slot1, slot2, slot3] = slot_buttons.clone();
 
             tree.node(NodeOptions::with_policy(Policy::fill()))
-                .scroll_area(&demo_scroll, ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                 Self::section(tree, &window_header, |tree| {
                     tree.row(&window_info_row, SizePolicy::Auto, |tree| {
                         tree.widget(&label_pos);
@@ -1664,12 +1676,13 @@ impl State {
         });
 
         if self.logbuf_updated {
-            let log_output = self.log_output.as_mut().unwrap().clone();
-            log_output.with_mut(|scroll_area| {
-                let mut scroll = scroll_area.scroll();
-                scroll.y = scroll_area.content_size().height;
-                scroll_area.set_scroll(scroll);
-            });
+            if let Some(log_output) = self.log_output {
+                if let Some(content_size) = ctx.scroll_area_content_size(self.log_root, log_output) {
+                    let mut scroll = ctx.scroll_area_scroll(self.log_root, log_output).unwrap_or_default();
+                    scroll.y = content_size.height;
+                    ctx.set_scroll_area_scroll(self.log_root, log_output, scroll);
+                }
+            }
             self.logbuf_updated = false;
         }
 

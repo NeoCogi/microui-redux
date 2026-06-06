@@ -81,6 +81,35 @@ pub(crate) fn scrollbar_base(axis: ScrollAxis, body: Recti, scrollbar_size: i32)
     base
 }
 
+/// Returns the viewport body left after scrollbar track occupancy is reserved.
+pub(crate) fn scrollbar_viewport_body(rect: Recti, content_size: crate::Dimensioni, padding: i32, scrollbar_size: i32) -> Recti {
+    if scrollbar_size <= 0 {
+        return rect;
+    }
+    let padding = padding.max(0);
+    let content = crate::Dimensioni::new(
+        content_size.width.saturating_add(padding.saturating_mul(2)),
+        content_size.height.saturating_add(padding.saturating_mul(2)),
+    );
+    let mut body = rect;
+    for _ in 0..3 {
+        let needs_vertical = content.height > body.height && body.height > 0;
+        let needs_horizontal = content.width > body.width && body.width > 0;
+        let mut next = rect;
+        if needs_vertical {
+            next.width = next.width.saturating_sub(scrollbar_size);
+        }
+        if needs_horizontal {
+            next.height = next.height.saturating_sub(scrollbar_size);
+        }
+        if next.x == body.x && next.y == body.y && next.width == body.width && next.height == body.height {
+            break;
+        }
+        body = next;
+    }
+    body
+}
+
 /// Returns the largest scroll offset needed to reveal all content.
 pub(crate) fn scrollbar_max_scroll(content_len: i32, view_len: i32) -> i32 {
     (content_len - view_len).max(0)

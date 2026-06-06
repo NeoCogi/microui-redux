@@ -64,18 +64,16 @@ use png::{ColorType, Decoder};
 
 use crate::{
     rect, Canvas, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Renderer,
-    RendererHandle, ScrollAreaHandle, ScrollAreaState, ScrollBehavior, Style, TextureId, UiRuntime,
+    RendererHandle, ScrollBehavior, Style, TextureId, UiRuntime, Vec2i,
 };
 use roots::RootEntry;
 mod builder;
 mod input_api;
-mod node_layout;
 mod retained;
 mod roots;
 
 pub use builder::{GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, UiNodeSet, UiNodeBuilder};
 pub use retained::{widget_handle, WidgetHandle};
-pub(crate) use node_layout::NodeLayout;
 pub(crate) use retained::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
 
 /// Opaque identifier for a root window, dialog, or popup registered with [`Context`].

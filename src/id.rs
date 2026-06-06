@@ -188,6 +188,8 @@ impl IdNamespace {
     pub(crate) const UINODE_BUILDER: Self = Self::new(0x7769_6467_6574_7472);
     /// Namespace used for synthetic runtime root container nodes.
     pub(crate) const UINODE_ROOT: Self = Self::new(0x7569_6e6f_6465_726f);
+    /// Namespace used for behavior-owned runtime child nodes.
+    pub(crate) const UINODE_INTERNAL: Self = Self::new(0x7569_6e6f_6465_696e);
 
     /// Creates a namespace from a caller-provided salt.
     const fn new(salt: u64) -> Self {

@@ -16,10 +16,6 @@ pub(crate) struct Stack {
 }
 
 impl NodeBehavior for Stack {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         let mut width = 0;
         let mut height: i32 = 0;

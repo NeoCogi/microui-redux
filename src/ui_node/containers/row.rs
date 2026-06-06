@@ -14,10 +14,6 @@ pub(crate) struct Row {
 }
 
 impl NodeBehavior for Row {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         let mut preferred_heights = Vec::new();
         let mut preferred_widths = Vec::new();
@@ -64,9 +60,5 @@ impl NodeBehavior for Row {
             ctx.layout_node(child, child_rect, clip);
             x = x.saturating_add(width).saturating_add(ctx.style.spacing);
         }
-    }
-
-    fn vertical_child_policy(&self) -> Option<SizePolicy> {
-        Some(self.height)
     }
 }

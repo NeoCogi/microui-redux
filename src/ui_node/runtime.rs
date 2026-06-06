@@ -46,19 +46,19 @@ impl UiRuntime {
         let (roots, nodes) = tree.into_parts();
         let mut runtime = Self::new();
         let root_window = runtime_root_id();
-        runtime.nodes.insert(
+        let mut root_node = UiNode::new(
             root_window,
-            UiNode::new(
-                root_window,
-                None,
-                crate::Policy::auto(),
-                GridSpan::ONE,
-                UiNodeData::Branch {
-                    behavior: Box::new(RootWindow::default()),
-                    children: Vec::new(),
-                },
-            ),
+            None,
+            crate::Policy::auto(),
+            GridSpan::ONE,
+            UiNodeData::Branch {
+                behavior: Box::new(RootWindow::default()),
+                children: Vec::new(),
+                internal_children: Vec::new(),
+            },
         );
+        root_node.metadata.kind = UiNodeKind::RootWindow;
+        runtime.nodes.insert(root_window, root_node);
         runtime.nodes.extend(nodes);
         let mut root_children = Vec::new();
         for root in roots {
@@ -88,6 +88,24 @@ impl UiRuntime {
             self.focus = Some(node);
             self.updated_focus = true;
         }
+    }
+
+    /// Returns runtime-owned scroll state for a scroll-area node.
+    pub(crate) fn scroll_area_state(&self, scroll_area: UiNodeId) -> Option<UiNodeScrollState> {
+        self.nodes.get(&scroll_viewport_id(scroll_area)).and_then(|node| node.scroll)
+    }
+
+    /// Replaces the current scroll offset for a scroll-area node.
+    pub(crate) fn set_scroll_area_scroll(&mut self, scroll_area: UiNodeId, scroll: Vec2i) -> bool {
+        let Some(node) = self.nodes.get_mut(&scroll_viewport_id(scroll_area)) else {
+            return false;
+        };
+        let Some(mut state) = node.scroll else {
+            return false;
+        };
+        state.scroll = scroll;
+        node.scroll = Some(state);
+        true
     }
 
     /// Measures the outer root size needed for `AUTO_SIZE` node roots.
@@ -155,7 +173,16 @@ impl UiRuntime {
 
         let mut root_index = 0;
         while let Some(root) = self.root_at(root_index) {
-            self.update_node(root_id, root_name, root, style, canvas.get_atlas(), input, results);
+            self.update_node(
+                root_id,
+                root_name,
+                root,
+                TraversalState::root(UNCLIPPED_RECT),
+                style,
+                canvas.get_atlas(),
+                input,
+                results,
+            );
             root_index += 1;
         }
 
@@ -163,7 +190,7 @@ impl UiRuntime {
 
         let mut root_index = 0;
         while let Some(root) = self.root_at(root_index) {
-            self.paint_node(root, style, canvas.get_atlas(), input);
+            self.paint_node(root, TraversalState::root(UNCLIPPED_RECT), style, canvas.get_atlas(), input);
             root_index += 1;
         }
 
@@ -215,7 +242,7 @@ impl UiRuntime {
     /// Returns the current full rectangle for a retained node.
     #[cfg(test)]
     pub(crate) fn debug_node_rect(&self, id: UiNodeId) -> Option<Recti> {
-        self.nodes.get(&id).map(|node| node.rect)
+        self.nodes.get(&id).map(|node| self.traversal_state_for_node(id).screen_frame(node.layout))
     }
 
     /// Returns a root id by traversal index.
@@ -231,6 +258,16 @@ impl UiRuntime {
     /// Returns a child id by traversal index.
     pub(super) fn child_at(&self, node: UiNodeId, index: usize) -> Option<UiNodeId> {
         self.nodes.get(&node).and_then(|node| node.children().get(index).copied())
+    }
+
+    /// Returns the number of user and behavior-owned children on a container node.
+    pub(super) fn traversal_child_count(&self, node: UiNodeId) -> usize {
+        self.nodes.get(&node).map(UiNode::traversal_child_count).unwrap_or(0)
+    }
+
+    /// Returns a user or behavior-owned child id by traversal index.
+    pub(super) fn traversal_child_at(&self, node: UiNodeId, index: usize) -> Option<UiNodeId> {
+        self.nodes.get(&node).and_then(|node| node.traversal_child(index))
     }
 
     /// Returns a cloned node behavior object for traversal without holding a node borrow.
@@ -319,8 +356,10 @@ impl UiRuntime {
     pub(super) fn collect_subtree_nodes(&self, node: UiNodeId, removed: &mut Vec<UiNodeId>) {
         removed.push(node);
         if let Some(node) = self.nodes.get(&node) {
-            for child in node.children() {
-                self.collect_subtree_nodes(*child, removed);
+            for index in 0..node.traversal_child_count() {
+                if let Some(child) = node.traversal_child(index) {
+                    self.collect_subtree_nodes(child, removed);
+                }
             }
         }
     }
@@ -349,10 +388,7 @@ impl UiRuntime {
                 continue;
             };
             node.rect = previous_node.rect;
-            node.client = previous_node.client;
-            node.clip = previous_node.clip;
-            node.client_area = previous_node.client_area;
-            node.content_size = previous_node.content_size;
+            node.layout = previous_node.layout;
             node.visible = previous_node.visible;
             node.enabled = previous_node.enabled;
             node.hovered = previous_node.hovered;
@@ -360,9 +396,7 @@ impl UiRuntime {
             node.clicked = previous_node.clicked;
             node.active = previous_node.active;
             node.scroll_delta = previous_node.scroll_delta;
-            let (UiNodeData::Leaf { behavior } | UiNodeData::Branch { behavior, .. }) = &mut node.data;
-            let (UiNodeData::Leaf { behavior: previous_behavior } | UiNodeData::Branch { behavior: previous_behavior, .. }) = &previous_node.data;
-            behavior.transfer_runtime_state_from(previous_behavior.as_ref());
+            node.scroll = previous_node.scroll;
         }
 
         self.focus = previous.focus.filter(|id| self.nodes.contains_key(id));
@@ -386,7 +420,7 @@ impl UiRuntime {
             } else {
                 preferred.height.max(0)
             };
-            let is_root_window = self.behavior_clone(root).map(|container| container.is_root_window()).unwrap_or(false);
+            let is_root_window = self.nodes.get(&root).is_some_and(|node| node.metadata.kind == UiNodeKind::RootWindow);
             let rect = if is_root_window {
                 clip
             } else {
@@ -394,18 +428,15 @@ impl UiRuntime {
             };
             self.layout_node(root, style, &atlas, rect, clip);
             if let Some(node) = self.nodes.get(&root) {
-                let base = if is_root_window { node.client } else { node.rect };
-                let unscrolled = Recti::new(
-                    base.x,
-                    base.y,
-                    base.width.max(node.content_size.width),
-                    base.height.max(node.content_size.height),
-                );
+                let frame = node.layout.frame;
+                let base = if is_root_window { node.layout.control } else { frame };
+                let content_size = node.layout.content_size;
+                let unscrolled = Recti::new(base.x, base.y, base.width.max(content_size.width), base.height.max(content_size.height));
                 content_bounds = Some(match content_bounds {
                     Some(bounds) => union_rect(bounds, unscrolled),
                     None => unscrolled,
                 });
-                y = node.rect.y + node.rect.height + style.spacing;
+                y = frame.y + frame.height + style.spacing;
             }
         }
 
@@ -414,7 +445,7 @@ impl UiRuntime {
             .unwrap_or_default();
         for index in 0..self.roots.len() {
             if let Some(root) = self.root_at(index).and_then(|root| self.nodes.get_mut(&root)) {
-                root.content_size = content_size;
+                root.set_layout(root.layout.with_content_size(content_size));
             }
         }
         content_size
@@ -425,7 +456,7 @@ impl UiRuntime {
         self.roots
             .first()
             .and_then(|root| self.nodes.get(root))
-            .map(|node| node.content_size)
+            .map(|node| node.layout.content_size)
             .unwrap_or_default()
     }
 
@@ -441,13 +472,8 @@ impl UiRuntime {
     pub(super) fn layout_node(&mut self, id: UiNodeId, style: &Style, atlas: &crate::AtlasHandle, rect: Recti, clip: Recti) -> Dimensioni {
         let is_branch = self.nodes.get(&id).is_some_and(|node| matches!(node.data, UiNodeData::Branch { .. }));
         if is_branch {
-            let client_area = ClientArea::from_rect(rect);
-            let node_clip = client_area.effective_clip(clip);
             if let Some(node) = self.nodes.get_mut(&id) {
-                node.rect = rect;
-                node.client = client_area.visible_rect;
-                node.clip = node_clip;
-                node.client_area = client_area;
+                node.set_layout(NodeLayout::from_rect(rect, clip, node.layout.content_size));
             }
         }
 
@@ -456,7 +482,7 @@ impl UiRuntime {
             let node_clip = if is_branch {
                 self.nodes
                     .get(&id)
-                    .map(|node| node.clip)
+                    .map(|node| node.layout.content.viewport)
                     .unwrap_or_else(|| clip.intersect(&rect).unwrap_or_default())
             } else {
                 clip
@@ -464,24 +490,20 @@ impl UiRuntime {
             let mut ctx = LayoutCtx { runtime: self, style, atlas };
             behavior.layout(&mut ctx, id, rect, node_clip);
         }
-        let is_scroll_area = behavior.as_ref().is_some_and(|behavior| behavior.is_scroll_area());
-        let is_root_window = behavior.as_ref().is_some_and(|behavior| behavior.is_root_window());
+        let kind = self.nodes.get(&id).map(|node| node.metadata.kind).unwrap_or(UiNodeKind::Normal);
         if let Some(behavior) = behavior {
             self.set_behavior(id, behavior);
         }
 
-        if is_scroll_area {
-            if let Some(node) = self.nodes.get_mut(&id) {
-                node.content_size = Dimensioni::new(rect.width.max(0), rect.height.max(0));
-            }
-        } else if is_branch && !is_root_window {
+        let propagate_child_overflow = self.nodes.get(&id).map(|node| node.layout.propagate_child_overflow).unwrap_or(true);
+        if is_branch && kind != UiNodeKind::RootWindow && propagate_child_overflow {
             let content_rect = self.child_content_bounds(id).unwrap_or(rect);
             let content_size = Dimensioni::new(
                 (content_rect.x + content_rect.width - rect.x).max(0),
                 (content_rect.y + content_rect.height - rect.y).max(0),
             );
             if let Some(node) = self.nodes.get_mut(&id) {
-                node.content_size = content_size;
+                node.set_layout(node.layout.with_content_size(content_size));
             }
         }
         Dimensioni::new(rect.width, rect.height)
@@ -506,8 +528,9 @@ impl UiRuntime {
         if policy != SizePolicy::Auto {
             return policy;
         }
-        self.behavior_clone(child)
-            .and_then(|container| container.vertical_child_policy())
+        self.nodes
+            .get(&child)
+            .and_then(|node| node.metadata.vertical_child_policy)
             .unwrap_or(SizePolicy::Auto)
     }
 
@@ -523,11 +546,13 @@ impl UiRuntime {
         root_id: crate::RootId,
         root_name: &str,
         id: UiNodeId,
+        parent_traversal: TraversalState,
         style: &Style,
         atlas: crate::AtlasHandle,
         input: &Input,
         results: &mut FrameResults,
     ) {
+        let traversal = self.node_traversal_state(id, parent_traversal);
         let mut behavior = self.behavior_clone(id);
         let traverse_children = behavior
             .as_mut()
@@ -540,15 +565,18 @@ impl UiRuntime {
                     atlas: atlas.clone(),
                     input,
                     results,
+                    traversal,
                 };
                 behavior.update(&mut ctx, id)
             })
             .unwrap_or(true);
         if traverse_children {
-            let children: Vec<_> = (0..self.child_count(id)).filter_map(|index| self.child_at(id, index)).collect();
+            let children: Vec<_> = (0..self.traversal_child_count(id))
+                .filter_map(|index| self.traversal_child_at(id, index))
+                .collect();
             for child in children {
                 if self.nodes.get(&child).and_then(|node| node.parent) == Some(id) {
-                    self.update_node(root_id, root_name, child, style, atlas.clone(), input, results);
+                    self.update_node(root_id, root_name, child, traversal, style, atlas.clone(), input, results);
                 }
             }
         }
@@ -562,6 +590,7 @@ impl UiRuntime {
         &mut self,
         id: UiNodeId,
         rect: Recti,
+        clip: Recti,
         input: &Input,
         opt: WidgetOption,
         scroll_behavior: ScrollBehavior,
@@ -571,7 +600,6 @@ impl UiRuntime {
             return (false, false, false, false, None);
         }
 
-        let clip = self.nodes.get(&id).map(|node| node.clip).unwrap_or(UNCLIPPED_RECT);
         let hovered = self.hover_root_active && rect.contains(&input.mouse_pos) && clip.contains(&input.mouse_pos);
         if hovered {
             self.hover = Some(id);
@@ -639,13 +667,15 @@ impl UiRuntime {
         let Some(focus) = self.focus.filter(|id| self.nodes.contains_key(id)) else {
             return false;
         };
-        self.route_input_event_to_node_only(focus, style, input, event).is_consumed()
+        let traversal = self.traversal_state_for_node(focus);
+        self.route_input_event_to_node_only(focus, traversal, style, input, event).is_consumed()
     }
 
     /// Routes pointer input through capture first, then through normal hit traversal.
     fn route_pointer_input_event(&mut self, style: &Style, input: &Input, event: &UiInputEvent) -> bool {
         if let Some(capture) = self.capture.filter(|id| self.nodes.contains_key(id)) {
-            let result = self.route_input_event_to_node_only(capture, style, input, event);
+            let traversal = self.traversal_state_for_node(capture);
+            let result = self.route_input_event_to_node_only(capture, traversal, style, input, event);
             self.update_pointer_capture(capture, result, event, input);
             return result.is_consumed();
         }
@@ -676,7 +706,7 @@ impl UiRuntime {
     fn route_hit_input_event(&mut self, style: &Style, input: &Input, event: &UiInputEvent) -> Option<(UiNodeId, InputResult)> {
         for index in (0..self.roots.len()).rev() {
             let Some(root) = self.root_at(index) else { continue };
-            if let Some(result) = self.route_input_event_to_node(root, style, input, event) {
+            if let Some(result) = self.route_input_event_to_node(root, TraversalState::root(UNCLIPPED_RECT), style, input, event) {
                 return Some(result);
             }
         }
@@ -684,31 +714,40 @@ impl UiRuntime {
     }
 
     /// Walks children first so nested owners beat ancestors.
-    pub(super) fn route_input_event_to_node(&mut self, id: UiNodeId, style: &Style, input: &Input, event: &UiInputEvent) -> Option<(UiNodeId, InputResult)> {
-        for index in (0..self.child_count(id)).rev() {
-            let Some(child) = self.child_at(id, index) else { continue };
-            if let Some(result) = self.route_input_event_to_node(child, style, input, event) {
+    pub(super) fn route_input_event_to_node(
+        &mut self,
+        id: UiNodeId,
+        parent_traversal: TraversalState,
+        style: &Style,
+        input: &Input,
+        event: &UiInputEvent,
+    ) -> Option<(UiNodeId, InputResult)> {
+        let traversal = self.node_traversal_state(id, parent_traversal);
+        for index in (0..self.traversal_child_count(id)).rev() {
+            let Some(child) = self.traversal_child_at(id, index) else { continue };
+            if let Some(result) = self.route_input_event_to_node(child, traversal, style, input, event) {
                 return Some(result);
             }
         }
 
-        let result = self.route_input_event_to_node_only(id, style, input, event);
+        let result = self.route_input_event_to_node_only(id, traversal, style, input, event);
         result.is_consumed().then_some((id, result))
     }
 
     /// Routes an event to exactly one node behavior without traversing descendants.
-    fn route_input_event_to_node_only(&mut self, id: UiNodeId, style: &Style, input: &Input, event: &UiInputEvent) -> InputResult {
+    fn route_input_event_to_node_only(&mut self, id: UiNodeId, traversal: TraversalState, style: &Style, input: &Input, event: &UiInputEvent) -> InputResult {
         let Some(mut behavior) = self.behavior_clone(id) else {
             return InputResult::Ignored;
         };
-        let mut ctx = InputCtx { runtime: self, style, input };
+        let mut ctx = InputCtx { runtime: self, style, input, traversal };
         let result = behavior.update_on(&mut ctx, id, event);
         self.set_behavior(id, behavior);
         result
     }
 
     /// Paints one node and descendants.
-    pub(super) fn paint_node(&mut self, id: UiNodeId, style: &Style, atlas: crate::AtlasHandle, input: &Input) {
+    pub(super) fn paint_node(&mut self, id: UiNodeId, parent_traversal: TraversalState, style: &Style, atlas: crate::AtlasHandle, input: &Input) {
+        let traversal = self.node_traversal_state(id, parent_traversal);
         let mut behavior = self.behavior_clone(id);
         let traverse_children = behavior
             .as_mut()
@@ -718,14 +757,15 @@ impl UiRuntime {
                     style,
                     atlas: atlas.clone(),
                     input,
+                    traversal,
                 };
                 behavior.paint(&mut ctx, id)
             })
             .unwrap_or(true);
         if traverse_children {
-            for index in 0..self.child_count(id) {
-                let Some(child) = self.child_at(id, index) else { continue };
-                self.paint_node(child, style, atlas.clone(), input);
+            for index in 0..self.traversal_child_count(id) {
+                let Some(child) = self.traversal_child_at(id, index) else { continue };
+                self.paint_node(child, traversal, style, atlas.clone(), input);
             }
         }
         if let Some(behavior) = behavior {
@@ -733,21 +773,36 @@ impl UiRuntime {
         }
     }
 
+    /// Derives this node's traversal state from its parent traversal state.
+    pub(super) fn node_traversal_state(&self, id: UiNodeId, parent: TraversalState) -> TraversalState {
+        self.nodes.get(&id).map(|node| parent.enter(node.layout)).unwrap_or(parent)
+    }
+
+    /// Derives traversal state for one node by walking parent links on the call stack.
+    pub(super) fn traversal_state_for_node(&self, id: UiNodeId) -> TraversalState {
+        let parent_state = self
+            .nodes
+            .get(&id)
+            .and_then(|node| node.parent)
+            .map(|parent| self.traversal_state_for_node(parent))
+            .unwrap_or_else(|| TraversalState::root(UNCLIPPED_RECT));
+        self.node_traversal_state(id, parent_state)
+    }
+
     /// Returns the current effective clip rectangle.
     pub(super) fn current_clip_rect(&self) -> Recti {
         self.clip_stack.last().copied().unwrap_or(UNCLIPPED_RECT)
     }
 
-    /// Pushes a node's effective clip for widget drawing.
-    pub(super) fn push_node_clip(&mut self, id: UiNodeId) {
-        let clip = self.nodes.get(&id).map(|node| node.clip).unwrap_or(UNCLIPPED_RECT);
+    /// Pushes the traversal-derived clip for a node.
+    pub(super) fn push_node_clip_for_traversal(&mut self, _id: UiNodeId, traversal: TraversalState) {
         let current = self.current_clip_rect();
-        let effective = current.intersect(&clip).unwrap_or_default();
+        let effective = current.intersect(&traversal.screen_clip).unwrap_or_default();
         self.clip_stack.push(effective);
         self.commands.push(Command::PushClip { rect: effective });
     }
 
-    /// Pops a node clip pushed by [`Self::push_node_clip`].
+    /// Pops a node clip pushed by [`Self::push_node_clip_for_traversal`].
     pub(super) fn pop_node_clip(&mut self) {
         if self.clip_stack.len() > 1 {
             self.clip_stack.pop();

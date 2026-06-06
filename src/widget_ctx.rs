@@ -171,6 +171,26 @@ impl<'a> WidgetCtx<'a> {
         self.rect
     }
 
+    /// Converts a screen-space point into this widget's local coordinate space.
+    pub fn screen_to_local_pos(&self, pos: Vec2i) -> Vec2i {
+        self.local_pos_for(pos)
+    }
+
+    /// Converts a widget-local point into screen space.
+    pub fn local_to_screen_pos(&self, pos: Vec2i) -> Vec2i {
+        pos + Vec2i::new(self.rect.x, self.rect.y)
+    }
+
+    /// Converts a screen-space rectangle into this widget's local coordinate space.
+    pub fn screen_to_local_rect(&self, rect: Recti) -> Recti {
+        self.local_rect_for(rect)
+    }
+
+    /// Converts a widget-local rectangle into screen space.
+    pub fn local_to_screen_rect(&self, rect: Recti) -> Recti {
+        Recti::new(rect.x + self.rect.x, rect.y + self.rect.y, rect.width, rect.height)
+    }
+
     /// Returns the widget-local rectangle for this context.
     ///
     /// This is kept as the short geometry accessor for custom widgets. Code that needs absolute
@@ -180,8 +200,7 @@ impl<'a> WidgetCtx<'a> {
     }
 
     /// Returns routed input events in widget-local coordinates.
-    #[cfg(test)]
-    pub(crate) fn input_events(&self) -> &[UiInputEvent] {
+    pub fn input_events(&self) -> &[UiInputEvent] {
         &self.events
     }
 
@@ -201,7 +220,7 @@ impl<'a> WidgetCtx<'a> {
         })
     }
 
-    /// Returns the last routed mouse position.
+    /// Returns the last routed mouse position, or `(0, 0)` if this frame has no routed pointer event.
     pub fn mouse_pos(&self) -> Vec2i {
         self.events
             .iter()

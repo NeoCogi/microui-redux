@@ -97,7 +97,6 @@ mod input;
 mod rect_packer;
 mod render;
 mod render_command;
-mod scroll;
 mod scrollbar;
 mod sizing;
 mod style;
@@ -126,7 +125,6 @@ pub mod backend {
 /// These are intentionally outside the default retained prelude because they expose low-level state
 /// views rather than the primary retained UI authoring model.
 pub mod advanced {
-    pub use crate::scroll::{ScrollAreaView, ScrollAreaViewMut};
     pub use crate::graphics::Graphics;
 }
 
@@ -137,7 +135,6 @@ pub mod advanced {
 pub mod retained {
     pub use crate::context::{Context, RootId};
     pub use crate::render_command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
-    pub use crate::scroll::ScrollAreaHandle;
     pub use crate::ui_node::UiInputEvent;
     pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
     pub use crate::context::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, UiNodeSet, UiNodeBuilder};
@@ -160,7 +157,7 @@ pub mod prelude {
     pub use crate::render::{Renderer, RendererHandle};
     pub use crate::retained::{
         Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeBuilder, NodeId, NodeOptions, Policy, RetainedId, RootId,
-        ScrollAreaHandle, TextWrap, UiInputEvent, Widget, WidgetCtx, WidgetHandle, UiNodeSet, UiNodeBuilder, widget_handle,
+        TextWrap, UiInputEvent, Widget, WidgetCtx, WidgetHandle, UiNodeSet, UiNodeBuilder, widget_handle,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
@@ -183,7 +180,6 @@ pub use id::Id;
 pub use input::{Clip, ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption};
 pub use render_command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
 pub use render::{Renderer, RendererHandle};
-pub use scroll::ScrollAreaHandle;
 pub use sizing::{SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
 pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
@@ -194,7 +190,6 @@ pub use widgets::{
 };
 
 pub(crate) use canvas::{Canvas, Vertex};
-pub(crate) use scroll::ScrollAreaState;
 #[allow(unused_imports)]
 pub(crate) use rs_math3d::{
     Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3, color4b,

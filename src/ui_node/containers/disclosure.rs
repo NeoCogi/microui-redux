@@ -11,14 +11,10 @@ pub(crate) struct Disclosure {
     /// Whether child layout should be indented when expanded.
     pub(crate) indent_children: bool,
     /// Child content layout used when expanded.
-    pub(crate) children: Column,
+    pub(crate) content_layout: Column,
 }
 
 impl NodeBehavior for Disclosure {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         let widget = crate::context::erased_widget_state(self.state.clone());
         let header_size = widget.measure(ctx.style, ctx.atlas, available);
@@ -32,7 +28,7 @@ impl NodeBehavior for Disclosure {
                 .saturating_sub(super::super::disclosure_child_indent(self.indent_children, ctx.style)),
             available.height.saturating_sub(header_size.height),
         );
-        let child_size = self.children.measure(ctx, id, child_available);
+        let child_size = self.content_layout.measure(ctx, id, child_available);
         Dimensioni::new(
             available
                 .width
@@ -63,7 +59,7 @@ impl NodeBehavior for Disclosure {
             rect.width.saturating_sub(indent),
             rect.height.saturating_sub(header_height).saturating_sub(ctx.style.spacing),
         );
-        self.children.layout(ctx, id, child_rect, clip);
+        self.content_layout.layout(ctx, id, child_rect, clip);
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, id: UiNodeId) -> bool {

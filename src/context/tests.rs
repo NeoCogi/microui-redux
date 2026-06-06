@@ -8,8 +8,8 @@ use std::{
 use super::*;
 use crate::{
     test_support::{test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer},
-    widget_handle, AtlasHandle, Button, Combo, ListItem, NodeId, NodeOptions, Policy, ResourceState, RetainedId, SizePolicy, StackDirection, TextBlock, Widget,
-    WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
+    widget_handle, AtlasHandle, Button, Combo, ListItem, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId, SizePolicy,
+    StackDirection, TextBlock, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
@@ -173,17 +173,14 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
     style.scrollbar_size = 10;
     ctx.set_style(&style);
 
-    let scroll_area = ctx.new_scroll_area("scroll area");
+    let mut scroll_area = NodeId::default();
     let child = widget_handle(Button::new("child"));
-    let tree = UiNodeBuilder::build({
-        let scroll_area = scroll_area.clone();
-        let child = child.clone();
-        move |tree| {
-            tree.node(NodeOptions::with_policy(Policy::fill()))
-                .scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                    tree.node(NodeOptions::with_policy(Policy::fixed(95, 200))).widget(child.clone());
-                });
-        }
+    let tree = UiNodeBuilder::build(|tree| {
+        scroll_area = tree
+            .node(NodeOptions::with_policy(Policy::fill()))
+            .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.node(NodeOptions::with_policy(Policy::fixed(95, 200))).widget(child.clone());
+            });
     });
     let root = ctx.create_window("window", rect(0, 0, 100, 100), tree);
     ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NO_SCROLL);
@@ -191,7 +188,7 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
     ctx.update_ui();
     ctx.update_ui();
 
-    assert!(scroll_area.with(|area| area.content_size().height) > 0);
+    assert!(ctx.scroll_area_content_size(root, scroll_area).unwrap().height > 0);
 
     let initial_rect = ctx.root_rect(root).unwrap();
     let corner_x = initial_rect.x + initial_rect.width - 1;
@@ -206,7 +203,7 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
 
     let resized = ctx.root_rect(root).unwrap();
     assert!(resized.width > initial_rect.width);
-    assert!(scroll_area.with(|area| area.body().width) >= 95);
+    assert!(ctx.scroll_area_body(root, scroll_area).unwrap().width >= 95);
 }
 
 #[test]
@@ -219,24 +216,21 @@ fn title_drag_does_not_route_pointer_to_scroll_area() {
     style.scrollbar_size = 10;
     ctx.set_style(&style);
 
-    let scroll_area = ctx.new_scroll_area("scroll area");
+    let mut scroll_area = NodeId::default();
     let child = widget_handle(Button::new("child"));
-    let tree = UiNodeBuilder::build({
-        let scroll_area = scroll_area.clone();
-        let child = child.clone();
-        move |tree| {
-            tree.node(NodeOptions::with_policy(Policy::fill()))
-                .scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                    tree.node(NodeOptions::with_policy(Policy::fixed(95, 220))).widget(child.clone());
-                });
-        }
+    let tree = UiNodeBuilder::build(|tree| {
+        scroll_area = tree
+            .node(NodeOptions::with_policy(Policy::fill()))
+            .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.node(NodeOptions::with_policy(Policy::fixed(95, 220))).widget(child.clone());
+            });
     });
     let root = ctx.create_window("window", rect(20, 20, 120, 100), tree);
 
     ctx.update_ui();
     ctx.update_ui();
 
-    let body = scroll_area.with(|area| area.body());
+    let body = ctx.scroll_area_body(root, scroll_area).unwrap();
     let scrollbar_x = body.x + body.width + 1;
     let scrollbar_y = body.y + 6;
     ctx.mousemove(scrollbar_x, scrollbar_y);
@@ -248,7 +242,7 @@ fn title_drag_does_not_route_pointer_to_scroll_area() {
     ctx.mouseup(scrollbar_x, scrollbar_y + 10, MouseButton::LEFT);
     ctx.update_ui();
 
-    let scroll_after_scrollbar_drag = scroll_area.with(|area| area.scroll());
+    let scroll_after_scrollbar_drag = ctx.scroll_area_scroll(root, scroll_area).unwrap();
     assert!(scroll_after_scrollbar_drag.y > 0);
 
     let title_x = ctx.root_rect(root).unwrap().x + 10;
@@ -260,7 +254,7 @@ fn title_drag_does_not_route_pointer_to_scroll_area() {
     ctx.mousemove(title_x + 18, title_y + 12);
     ctx.update_ui();
 
-    assert_eq!(scroll_area.with(|area| area.scroll()).y, scroll_after_scrollbar_drag.y);
+    assert_eq!(ctx.scroll_area_scroll(root, scroll_area).unwrap().y, scroll_after_scrollbar_drag.y);
     assert!(ctx.root_rect(root).unwrap().x > 20);
 }
 
@@ -405,18 +399,15 @@ fn open_dialog_does_not_bump_zindex_every_frame() {
 }
 
 #[test]
-fn reshown_roots_drop_stale_scroll_area_handles_after_a_gap() {
+fn reshown_roots_drop_stale_scroll_area_state_after_a_gap() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-    let scroll_area = ctx.new_scroll_area("scroll area");
-    let tree_with_scroll_area = UiNodeBuilder::build({
-        let scroll_area = scroll_area.clone();
-        move |tree| {
-            tree.scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                tree.text("scroll area child");
-            });
-        }
+    let mut scroll_area = NodeId::default();
+    let tree_with_scroll_area = UiNodeBuilder::build(|tree| {
+        scroll_area = tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            tree.text("scroll area child");
+        });
     });
     let tree_without_scroll_area = UiNodeBuilder::build(|tree| {
         tree.text("root only");
@@ -424,7 +415,7 @@ fn reshown_roots_drop_stale_scroll_area_handles_after_a_gap() {
     let root = ctx.create_window("window", rect(0, 0, 100, 80), tree_with_scroll_area);
 
     ctx.update_ui();
-    assert!(scroll_area.with(|area| area.content_size().height) > 0);
+    assert!(ctx.scroll_area_content_size(root, scroll_area).unwrap().height > 0);
 
     ctx.set_root_visible(root, false);
     ctx.update_ui();
@@ -437,24 +428,48 @@ fn reshown_roots_drop_stale_scroll_area_handles_after_a_gap() {
 }
 
 #[test]
-fn scroll_area_handle_renders_scroll_area_node() {
+fn scroll_area_node_renders_scroll_area_node() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
-    let scroll_area = ctx.new_scroll_area("scroll area");
-    let tree = UiNodeBuilder::build({
-        let scroll_area = scroll_area.clone();
-        move |tree| {
-            tree.scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                tree.text("scroll area child");
-            });
-        }
+    let mut scroll_area = NodeId::default();
+    let tree = UiNodeBuilder::build(|tree| {
+        scroll_area = tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            tree.text("scroll area child");
+        });
     });
-    let _root = ctx.create_window("window", rect(0, 0, 100, 80), tree);
+    let root = ctx.create_window("window", rect(0, 0, 100, 80), tree);
 
     ctx.update_ui();
 
-    assert!(scroll_area.with(|area| area.content_size().height) > 0);
+    assert!(ctx.scroll_area_content_size(root, scroll_area).unwrap().height > 0);
+}
+
+#[test]
+fn scroll_area_paints_disclosure_headers_in_screen_space() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
+    let header = widget_handle(Node::header("Visible Header", NodeStateValue::Expanded));
+    let tree_node = widget_handle(Node::tree("Visible Tree", NodeStateValue::Expanded));
+    let tree = UiNodeBuilder::build(|tree| {
+        tree.node(NodeOptions::with_policy(Policy::fixed(180, 100)))
+            .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.header(&header, |tree| {
+                    tree.tree_node(&tree_node, |tree| {
+                        tree.text("Visible Child");
+                    });
+                });
+            });
+    });
+    let root = ctx.create_window("window", rect(0, 0, 200, 130), tree);
+    ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NO_SCROLL);
+
+    ctx.update_ui();
+
+    let texts = root_texts(&ctx, root);
+    assert!(texts.iter().any(|text| text == "Visible Header"), "{texts:?}");
+    assert!(texts.iter().any(|text| text == "Visible Tree"), "{texts:?}");
 }
 
 #[test]
@@ -1360,20 +1375,16 @@ fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
     style.scrollbar_size = 10;
     ctx.set_style(&style);
 
-    let scroll_area = ctx.new_scroll_area("log");
+    let mut scroll_area = NodeId::default();
     let inner = widget_handle(Button::new("inner"));
     let bottom = widget_handle(Button::new("bottom"));
-    let tree = UiNodeBuilder::build({
-        let scroll_area = scroll_area.clone();
-        let inner = inner.clone();
-        let bottom = bottom.clone();
-        move |tree| {
-            tree.node(NodeOptions::with_policy(Policy::fixed(90, 40)))
-                .scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                    tree.node(NodeOptions::with_policy(Policy::fixed(180, 140))).widget(inner.clone());
-                });
-            tree.node(NodeOptions::with_policy(Policy::fixed(90, 180))).widget(bottom.clone());
-        }
+    let tree = UiNodeBuilder::build(|tree| {
+        scroll_area = tree
+            .node(NodeOptions::with_policy(Policy::fixed(90, 40)))
+            .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.node(NodeOptions::with_policy(Policy::fixed(180, 140))).widget(inner.clone());
+            });
+        tree.node(NodeOptions::with_policy(Policy::fixed(90, 180))).widget(bottom.clone());
     });
     let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
     ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NONE);
@@ -1386,15 +1397,15 @@ fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
     ctx.scroll(0, -24);
     ctx.update_ui();
 
-    let nested_scroll = scroll_area.with(|area| area.scroll());
+    let nested_scroll = ctx.scroll_area_scroll(root, scroll_area).unwrap();
     assert!(nested_scroll.y > 0);
-    let body = scroll_area.with(|area| area.body());
+    let body = ctx.scroll_area_body(root, scroll_area).unwrap();
     ctx.mousemove(body.x + 2, body.y + body.height + 2);
     ctx.update_ui();
     ctx.scroll(-24, 0);
     ctx.update_ui();
 
-    let scroll = scroll_area.with(|area| area.scroll());
+    let scroll = ctx.scroll_area_scroll(root, scroll_area).unwrap();
     assert!(scroll.x > 0);
     assert!(scroll.y > 0);
 }
@@ -1409,17 +1420,14 @@ fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
     style.scrollbar_size = 10;
     ctx.set_style(&style);
 
-    let scroll_area = ctx.new_scroll_area("nested");
+    let mut scroll_area = NodeId::default();
     let inner = widget_handle(Button::new("inner"));
-    let tree = UiNodeBuilder::build({
-        let scroll_area = scroll_area.clone();
-        let inner = inner.clone();
-        move |tree| {
-            tree.node(NodeOptions::with_policy(Policy::fixed(90, 40)))
-                .scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
-                    tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner.clone());
-                });
-        }
+    let tree = UiNodeBuilder::build(|tree| {
+        scroll_area = tree
+            .node(NodeOptions::with_policy(Policy::fixed(90, 40)))
+            .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner.clone());
+            });
     });
     let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
     ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NONE);
@@ -1429,6 +1437,6 @@ fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
 
     let root_entry = ctx.roots.iter().find(|entry| entry.id == root).unwrap();
     let root_node = root_entry.runtime.nodes.get(&root_entry.runtime.roots[0]).unwrap();
-    assert!(scroll_area.with(|area| area.content_size().height) > scroll_area.with(|area| area.body().height));
-    assert!(root_node.content_size.height <= root_node.client.height);
+    assert!(ctx.scroll_area_content_size(root, scroll_area).unwrap().height > ctx.scroll_area_body(root, scroll_area).unwrap().height);
+    assert!(root_node.layout.content_size.height <= root_node.layout.control.height);
 }
