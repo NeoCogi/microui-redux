@@ -137,6 +137,8 @@ pub(crate) type TreeCustomRender = Rc<RefCell<Box<dyn CustomRenderCommand + 'sta
 
 /// Type-erased adapter for retained widget state handles.
 pub(crate) trait WidgetStateHandleDyn {
+    /// Clones this erased widget handle.
+    fn clone_box(&self) -> Box<dyn WidgetStateHandleDyn>;
     /// Returns the stable id of the wrapped widget handle.
     fn widget_handle_id(&self) -> Id;
     /// Returns the widget options after applying widget-specific effective-state overrides.
@@ -162,6 +164,12 @@ struct WidgetStateHandle<W: Widget + 'static> {
 }
 
 impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
+    fn clone_box(&self) -> Box<dyn WidgetStateHandleDyn> {
+        Box::new(Self {
+            handle: self.handle.clone(),
+        })
+    }
+
     fn widget_handle_id(&self) -> Id {
         widget_handle_id(&self.handle)
     }

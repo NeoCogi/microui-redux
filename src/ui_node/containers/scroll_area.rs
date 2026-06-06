@@ -3,7 +3,7 @@ use crate::scroll::ScrollAreaHandle;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::{ControlColor, Dimensioni, Recti, Style, Vec2i};
 
-use super::{ClientArea, Column, ContainerTrait, LayoutCtx, MeasureCtx, PaintCtx, ScrollDispatchCtx};
+use super::{ClientArea, Column, InputCtx, InputResult, LayoutCtx, MeasureCtx, NodeBehavior, PaintCtx, UiInputEvent};
 use crate::context::NodeLayout;
 use crate::ui_node::UiNodeId;
 
@@ -26,7 +26,7 @@ pub(crate) struct ScrollArea {
     pub(crate) opt: ContainerOption,
 }
 
-impl ContainerTrait for ScrollArea {
+impl NodeBehavior for ScrollArea {
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         self.content.measure(ctx, id, available)
     }
@@ -37,8 +37,8 @@ impl ContainerTrait for ScrollArea {
         self.scroll_offset = layout.scroll;
     }
 
-    fn dispatch_scroll(&mut self, ctx: &mut ScrollDispatchCtx<'_>, id: UiNodeId) -> bool {
-        dispatch_scroll_area_input(ctx, id, self)
+    fn update_on(&mut self, ctx: &mut InputCtx<'_>, id: UiNodeId, event: UiInputEvent) -> InputResult {
+        update_scroll_area_on_input(ctx, id, self, event)
     }
 
     fn is_scroll_area(&self) -> bool {
@@ -55,15 +55,10 @@ impl ContainerTrait for ScrollArea {
         self.scroll_drag = drag;
     }
 
-    fn paint_before_children(&mut self, ctx: &mut PaintCtx<'_>, id: UiNodeId) -> bool {
+    fn paint(&mut self, ctx: &mut PaintCtx<'_>, id: UiNodeId) -> bool {
         paint_scroll_area_panel(ctx, id, self.opt);
-        ctx.push_node_clip(id);
-        true
-    }
-
-    fn paint_after_children(&mut self, ctx: &mut PaintCtx<'_>, id: UiNodeId) {
-        ctx.pop_node_clip();
         paint_scroll_area_scrollbars(ctx, id, self);
+        true
     }
 }
 
@@ -181,16 +176,16 @@ fn scroll_area_body_for_content(rect: Recti, style: &Style, scroll_behavior: Scr
     body
 }
 
-fn dispatch_scroll_area_input(ctx: &mut ScrollDispatchCtx<'_>, id: UiNodeId, scroll_area: &mut ScrollArea) -> bool {
+fn update_scroll_area_on_input(ctx: &mut InputCtx<'_>, id: UiNodeId, scroll_area: &mut ScrollArea, event: UiInputEvent) -> InputResult {
     let Some((clip, body)) = ctx.node_clip_and_client(id) else {
-        return false;
+        return InputResult::Ignored;
     };
     let content_size = scroll_area.content_size;
     let handle = scroll_area.handle.clone();
     let scroll_behavior = scroll_area.scroll_behavior;
     let mut scroll_drag = scroll_area.scroll_drag;
     if scroll_behavior.is_no_scroll() {
-        return false;
+        return InputResult::Ignored;
     }
 
     let content = super::super::add_padding(content_size, ctx.style.padding.max(0));
@@ -202,8 +197,12 @@ fn dispatch_scroll_area_input(ctx: &mut ScrollDispatchCtx<'_>, id: UiNodeId, scr
     let hovered_body = body.contains(&ctx.input.mouse_pos) && clip.contains(&ctx.input.mouse_pos);
     let hovered_vertical = max_y > 0 && vertical.contains(&ctx.input.mouse_pos);
     let hovered_horizontal = max_x > 0 && horizontal.contains(&ctx.input.mouse_pos);
-    let wheel_x = ctx.input.scroll_delta.x != 0;
-    let wheel_y = ctx.input.scroll_delta.y != 0;
+    let scroll_delta = match event {
+        UiInputEvent::Scroll { delta, .. } => delta,
+        UiInputEvent::Pointer { .. } => Vec2i::default(),
+    };
+    let wheel_x = scroll_delta.x != 0;
+    let wheel_y = scroll_delta.y != 0;
     let mut owns_event =
         (hovered_body && (wheel_x || wheel_y)) || (hovered_vertical && wheel_y) || (hovered_horizontal && wheel_x);
     let mut scroll = handle.with(|area| area.scroll());
@@ -236,12 +235,12 @@ fn dispatch_scroll_area_input(ctx: &mut ScrollDispatchCtx<'_>, id: UiNodeId, scr
     }
 
     if hovered_horizontal {
-        scroll.x = scroll.x.saturating_sub(ctx.input.scroll_delta.x);
+        scroll.x = scroll.x.saturating_sub(scroll_delta.x);
     } else if hovered_vertical {
-        scroll.y = scroll.y.saturating_sub(ctx.input.scroll_delta.y);
+        scroll.y = scroll.y.saturating_sub(scroll_delta.y);
     } else if hovered_body {
-        scroll.x = scroll.x.saturating_sub(ctx.input.scroll_delta.x);
-        scroll.y = scroll.y.saturating_sub(ctx.input.scroll_delta.y);
+        scroll.x = scroll.x.saturating_sub(scroll_delta.x);
+        scroll.y = scroll.y.saturating_sub(scroll_delta.y);
     }
     scroll.x = scroll.x.clamp(0, max_x);
     scroll.y = scroll.y.clamp(0, max_y);
@@ -249,7 +248,13 @@ fn dispatch_scroll_area_input(ctx: &mut ScrollDispatchCtx<'_>, id: UiNodeId, scr
     handle.with_inner_mut(|area| area.set_scroll(scroll));
     scroll_area.scroll_offset = scroll;
     scroll_area.scroll_drag = scroll_drag;
-    owns_event || scroll_drag.is_some()
+    if scroll_drag.is_some() {
+        InputResult::Captured
+    } else if owns_event {
+        InputResult::Consumed
+    } else {
+        InputResult::Ignored
+    }
 }
 
 fn paint_scroll_area_panel(ctx: &mut PaintCtx<'_>, id: UiNodeId, opt: ContainerOption) {

@@ -1,13 +1,13 @@
 use crate::{Dimensioni, Recti};
 
-use super::{ContainerTrait, LayoutCtx, MeasureCtx};
+use super::{NodeBehavior, LayoutCtx, MeasureCtx};
 use crate::ui_node::UiNodeId;
 
 /// Column container.
 #[derive(Clone, Default)]
 pub(crate) struct Column;
 
-impl ContainerTrait for Column {
+impl NodeBehavior for Column {
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         measure_column(ctx, id, available)
     }

@@ -1,6 +1,6 @@
 use crate::{Dimensioni, Node, Recti, WidgetHandle};
 
-use super::{Column, ContainerTrait, LayoutCtx, MeasureCtx, PaintCtx, UpdateCtx};
+use super::{Column, NodeBehavior, LayoutCtx, MeasureCtx, PaintCtx, UpdateCtx};
 use crate::ui_node::UiNodeId;
 
 /// Header/tree disclosure container.
@@ -14,7 +14,7 @@ pub(crate) struct Disclosure {
     pub(crate) children: Column,
 }
 
-impl ContainerTrait for Disclosure {
+impl NodeBehavior for Disclosure {
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         let widget = crate::context::erased_widget_state(self.state.clone());
         let header_size = widget.measure(ctx.style, ctx.atlas, available);
@@ -65,7 +65,7 @@ impl ContainerTrait for Disclosure {
         self.state.read(|state| state.state).is_expanded()
     }
 
-    fn paint_before_children(&mut self, ctx: &mut PaintCtx<'_>, id: UiNodeId) -> bool {
+    fn paint(&mut self, ctx: &mut PaintCtx<'_>, id: UiNodeId) -> bool {
         ctx.paint_container_widget(id, self.state.clone());
         self.state.read(|state| state.state).is_expanded()
     }

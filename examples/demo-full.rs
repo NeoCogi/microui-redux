@@ -1866,9 +1866,8 @@ impl State {
 
         if self.open_popup {
             let popup_width = (self.style.default_cell_width + self.style.padding.max(0) * 2).max(80);
-            let popup_height = (self.style.title_height + self.style.padding.max(0) * 4 + self.style.spacing).max(56);
             ctx.set_root_visible(self.popup_root, true);
-            ctx.set_root_size(self.popup_root, &Dimensioni::new(popup_width, popup_height));
+            ctx.set_root_size(self.popup_root, &Dimensioni::new(popup_width, 1));
             self.open_popup = false;
         }
 

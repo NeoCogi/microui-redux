@@ -264,7 +264,8 @@ impl<R: Renderer> Context<R> {
                         continue;
                     }
                 }
-                let hover_root_active = hover_root == Some(entry.id);
+                let chrome_capturing_pointer = matches!(entry.active_chrome, Some(RootChromePart::Title | RootChromePart::Resize));
+                let hover_root_active = hover_root == Some(entry.id) && !chrome_capturing_pointer;
                 let chrome = RootChrome::new(entry.rect, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt);
                 self.paint_root_frame(entry);
                 let input = self.input.borrow();
@@ -469,15 +470,21 @@ fn root_titlebar_height(style: &Style, atlas: &crate::AtlasHandle) -> i32 {
 }
 
 fn root_min_size(style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption, title: &str) -> Dimensioni {
-    let mut width: i32 = 96;
-    let mut height: i32 = 64;
+    let auto_size = opt.intersects(ContainerOption::AUTO_SIZE);
+    let mut width: i32 = if auto_size { 1 } else { 96 };
+    let mut height: i32 = if auto_size { 1 } else { 64 };
     if !opt.intersects(ContainerOption::NO_TITLE) {
         let title_height = root_titlebar_height(style, atlas);
         let title_width = atlas.get_text_size(style.title_font, title).width;
         let close_width = if opt.intersects(ContainerOption::NO_CLOSE) { 0 } else { title_height };
         let padding = style.padding.max(0);
         width = width.max(title_width.saturating_add(close_width).saturating_add(padding.saturating_mul(2)));
-        height = height.max(title_height.saturating_add(padding.saturating_mul(2)));
+        let title_min_height = if auto_size {
+            title_height
+        } else {
+            title_height.saturating_add(padding.saturating_mul(2))
+        };
+        height = height.max(title_min_height);
     }
     Dimensioni::new(width, height)
 }

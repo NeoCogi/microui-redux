@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::rc::Rc;
-
 use super::*;
 
 #[derive(Default)]
@@ -55,8 +53,8 @@ impl UiRuntime {
                 None,
                 crate::Policy::auto(),
                 GridSpan::ONE,
-                UiNodeData::Container {
-                    container: Box::new(RootWindow::default()),
+                UiNodeData::Branch {
+                    behavior: Box::new(RootWindow::default()),
                     children: Vec::new(),
                 },
             ),
@@ -152,7 +150,7 @@ impl UiRuntime {
         let body_view = root_window_body_view(body, style);
 
         self.layout_roots_in_view(style, canvas.get_atlas(), body_view, body);
-        self.dispatch_scroll_input(style, input);
+        self.route_input_events(style, input);
         self.layout_roots_in_view(style, canvas.get_atlas(), body_view, body);
 
         let mut root_index = 0;
@@ -235,18 +233,19 @@ impl UiRuntime {
         self.nodes.get(&node).and_then(|node| node.children().get(index).copied())
     }
 
-    /// Returns a cloned container trait object for traversal without holding a node borrow.
-    pub(super) fn container_clone(&self, node: UiNodeId) -> Option<Box<dyn ContainerTrait>> {
+    /// Returns a cloned node behavior object for traversal without holding a node borrow.
+    pub(super) fn behavior_clone(&self, node: UiNodeId) -> Option<Box<dyn NodeBehavior>> {
         self.nodes.get(&node).and_then(|node| match &node.data {
-            UiNodeData::Container { container, .. } => Some(container.clone()),
-            _ => None,
+            UiNodeData::Leaf { behavior } | UiNodeData::Branch { behavior, .. } => Some(behavior.clone()),
         })
     }
 
-    /// Replaces a container trait object after behavior mutates its own state.
-    pub(super) fn set_container(&mut self, node: UiNodeId, replacement: Box<dyn ContainerTrait>) {
-        if let Some(UiNodeData::Container { container, .. }) = self.nodes.get_mut(&node).map(|node| &mut node.data) {
-            *container = replacement;
+    /// Replaces a node behavior object after it mutates its own state.
+    pub(super) fn set_behavior(&mut self, node: UiNodeId, replacement: Box<dyn NodeBehavior>) {
+        if let Some(data) = self.nodes.get_mut(&node).map(|node| &mut node.data) {
+            match data {
+                UiNodeData::Leaf { behavior } | UiNodeData::Branch { behavior, .. } => *behavior = replacement,
+            }
         }
     }
 
@@ -262,7 +261,7 @@ impl UiRuntime {
         }
         let child_id = child.id;
         let children_len = self.nodes.get(&parent).and_then(|node| match &node.data {
-            UiNodeData::Container { children, .. } => Some(children.len()),
+            UiNodeData::Branch { children, .. } => Some(children.len()),
             _ => None,
         })?;
 
@@ -357,11 +356,9 @@ impl UiRuntime {
             node.visible = previous_node.visible;
             node.enabled = previous_node.enabled;
             node.control = previous_node.control;
-            if let (UiNodeData::Container { container, .. }, UiNodeData::Container { container: previous_container, .. }) =
-                (&mut node.data, &previous_node.data)
-            {
-                container.transfer_runtime_state_from(previous_container.as_ref());
-            }
+            let (UiNodeData::Leaf { behavior } | UiNodeData::Branch { behavior, .. }) = &mut node.data;
+            let (UiNodeData::Leaf { behavior: previous_behavior } | UiNodeData::Branch { behavior: previous_behavior, .. }) = &previous_node.data;
+            behavior.transfer_runtime_state_from(previous_behavior.as_ref());
         }
 
         self.focus = previous.focus.filter(|id| self.nodes.contains_key(id));
@@ -385,7 +382,7 @@ impl UiRuntime {
             } else {
                 preferred.height.max(0)
             };
-            let is_root_window = self.container_clone(root).map(|container| container.is_root_window()).unwrap_or(false);
+            let is_root_window = self.behavior_clone(root).map(|container| container.is_root_window()).unwrap_or(false);
             let rect = if is_root_window {
                 clip
             } else {
@@ -425,119 +422,55 @@ impl UiRuntime {
 
     /// Measures one node's preferred size in the box-tree layout path.
     pub(super) fn measure_node(&self, id: UiNodeId, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
-        match self.nodes.get(&id).map(|node| &node.data) {
-            Some(UiNodeData::Widget { widget, .. }) => {
-                let policy = self.nodes.get(&id).map(|node| node.policy).unwrap_or_else(crate::Policy::auto);
-                let measure_available = Dimensioni::new(
-                    measure_axis_available(policy.width, available.width),
-                    measure_axis_available(policy.height, available.height),
-                );
-                let preferred = widget.measure(style, atlas, measure_available);
-                Dimensioni::new(
-                    resolve_size(policy.width, preferred.width, available.width, available.width, None),
-                    resolve_size(policy.height, preferred.height, available.height, available.height, None),
-                )
-            }
-            Some(UiNodeData::Container { .. }) => self.measure_container(id, style, atlas, available),
-            None => Dimensioni::default(),
-        }
-    }
-
-    /// Measures a container node by delegating to its concrete container trait implementation.
-    pub(super) fn measure_container(&self, id: UiNodeId, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
         let ctx = MeasureCtx { runtime: self, style, atlas };
-        self.container_clone(id)
-            .map(|container| container.measure(&ctx, id, available))
-            .unwrap_or_default()
+        self.behavior_clone(id).map(|behavior| behavior.measure(&ctx, id, available)).unwrap_or_default()
     }
 
-    /// Lays out one node using the enum-based runtime path.
+    /// Lays out one node through its behavior.
     pub(super) fn layout_node(&mut self, id: UiNodeId, style: &Style, atlas: &crate::AtlasHandle, rect: Recti, clip: Recti) -> Dimensioni {
-        let kind = self.node_kind_tag(id);
-        match kind {
-            RuntimeNodeKind::Widget => self.layout_widget(id, style, atlas, rect, clip),
-            RuntimeNodeKind::Container => self.layout_container(id, style, atlas, rect, clip),
-        }
-    }
-
-    /// Returns whether a node is a widget or container without holding a borrow.
-    pub(super) fn node_kind_tag(&self, id: UiNodeId) -> RuntimeNodeKind {
-        match self.nodes.get(&id).map(|node| &node.data) {
-            Some(UiNodeData::Widget { .. }) => RuntimeNodeKind::Widget,
-            _ => RuntimeNodeKind::Container,
-        }
-    }
-
-    /// Lays out a widget leaf.
-    pub(super) fn layout_widget(&mut self, id: UiNodeId, style: &Style, atlas: &crate::AtlasHandle, rect: Recti, clip: Recti) -> Dimensioni {
-        let policy = self.nodes.get(&id).map(|node| node.policy).unwrap_or_else(crate::Policy::auto);
-        let measure_available = Dimensioni::new(
-            measure_axis_available(policy.width, rect.width),
-            measure_axis_available(policy.height, rect.height),
-        );
-        let preferred = match self.nodes.get(&id).map(|node| &node.data) {
-            Some(UiNodeData::Widget { widget, .. }) => widget.measure(style, atlas, measure_available),
-            _ => Dimensioni::default(),
-        };
-        let rect = Recti::new(
-            rect.x,
-            rect.y,
-            resolve_allocated_size(policy.width, preferred.width, rect.width, rect.width, None),
-            resolve_allocated_size(policy.height, preferred.height, rect.height, rect.height, None),
-        );
-        let size = Dimensioni::new(rect.width, rect.height);
-        if let Some(node) = self.nodes.get_mut(&id) {
+        let is_branch = self.nodes.get(&id).is_some_and(|node| matches!(node.data, UiNodeData::Branch { .. }));
+        if is_branch {
             let client_area = ClientArea::from_rect(rect);
-            node.rect = rect;
-            node.client = client_area.visible_rect;
-            node.clip = client_area.effective_clip(clip);
-            node.client_area = client_area;
-            node.content_size = size;
-        }
-        size
-    }
-
-    /// Lays out a container and descendants.
-    pub(super) fn layout_container(&mut self, id: UiNodeId, style: &Style, atlas: &crate::AtlasHandle, rect: Recti, clip: Recti) -> Dimensioni {
-        let client_area = ClientArea::from_rect(rect);
-        let node_clip = client_area.effective_clip(clip);
-        if let Some(node) = self.nodes.get_mut(&id) {
-            node.rect = rect;
-            node.client = client_area.visible_rect;
-            node.clip = node_clip;
-            node.client_area = client_area;
+            let node_clip = client_area.effective_clip(clip);
+            if let Some(node) = self.nodes.get_mut(&id) {
+                node.rect = rect;
+                node.client = client_area.visible_rect;
+                node.clip = node_clip;
+                node.client_area = client_area;
+            }
         }
 
-        self.layout_container_children(id, style, atlas, rect, node_clip);
+        let mut behavior = self.behavior_clone(id);
+        if let Some(behavior) = behavior.as_mut() {
+            let node_clip = if is_branch {
+                self.nodes.get(&id).map(|node| node.clip).unwrap_or_else(|| clip.intersect(&rect).unwrap_or_default())
+            } else {
+                clip
+            };
+            let mut ctx = LayoutCtx { runtime: self, style, atlas };
+            behavior.layout(&mut ctx, id, rect, node_clip);
+        }
+        let is_scroll_area = behavior.as_ref().is_some_and(|behavior| behavior.is_scroll_area());
+        let is_root_window = behavior.as_ref().is_some_and(|behavior| behavior.is_root_window());
+        if let Some(behavior) = behavior {
+            self.set_behavior(id, behavior);
+        }
 
-        if self.container_clone(id).map(|container| container.is_scroll_area()).unwrap_or(false) {
+        if is_scroll_area {
             if let Some(node) = self.nodes.get_mut(&id) {
                 node.content_size = Dimensioni::new(rect.width.max(0), rect.height.max(0));
             }
-            return Dimensioni::new(rect.width, rect.height);
-        }
-        if self.container_clone(id).map(|container| container.is_root_window()).unwrap_or(false) {
-            return Dimensioni::new(rect.width, rect.height);
-        }
-
-        let content_rect = self.child_content_bounds(id).unwrap_or(rect);
-        let content_size = Dimensioni::new(
-            (content_rect.x + content_rect.width - rect.x).max(0),
-            (content_rect.y + content_rect.height - rect.y).max(0),
-        );
-        if let Some(node) = self.nodes.get_mut(&id) {
-            node.content_size = content_size;
+        } else if is_branch && !is_root_window {
+            let content_rect = self.child_content_bounds(id).unwrap_or(rect);
+            let content_size = Dimensioni::new(
+                (content_rect.x + content_rect.width - rect.x).max(0),
+                (content_rect.y + content_rect.height - rect.y).max(0),
+            );
+            if let Some(node) = self.nodes.get_mut(&id) {
+                node.content_size = content_size;
+            }
         }
         Dimensioni::new(rect.width, rect.height)
-    }
-
-    /// Lays out a container node by delegating to its concrete container trait implementation.
-    pub(super) fn layout_container_children(&mut self, id: UiNodeId, style: &Style, atlas: &crate::AtlasHandle, rect: Recti, clip: Recti) {
-        if let Some(mut container) = self.container_clone(id) {
-            let mut ctx = LayoutCtx { runtime: self, style, atlas };
-            container.layout(&mut ctx, id, rect, clip);
-            self.set_container(id, container);
-        }
     }
 
     /// Returns the union of child rectangles, including each child's measured content overflow.
@@ -559,7 +492,7 @@ impl UiRuntime {
         if policy != SizePolicy::Auto {
             return policy;
         }
-        self.container_clone(child)
+        self.behavior_clone(child)
             .and_then(|container| container.vertical_child_policy())
             .unwrap_or(SizePolicy::Auto)
     }
@@ -581,108 +514,33 @@ impl UiRuntime {
         input: &Input,
         results: &mut FrameResults,
     ) {
-        let kind = self.node_kind_tag(id);
-        match kind {
-            RuntimeNodeKind::Widget => self.update_widget(root_id, root_name, id, style, atlas, input, results),
-            RuntimeNodeKind::Container => {
-                let mut container = self.container_clone(id);
-                let traverse_children = container
-                    .as_mut()
-                    .map(|container| {
-                        let mut ctx = UpdateCtx {
-                            runtime: self,
-                            root_id,
-                            style,
-                            atlas: atlas.clone(),
-                            input,
-                            results,
-                        };
-                        container.update(&mut ctx, id)
-                    })
-                    .unwrap_or(true);
-                if traverse_children {
-                    let children: Vec<_> = (0..self.child_count(id)).filter_map(|index| self.child_at(id, index)).collect();
-                    for child in children {
-                        if self.nodes.get(&child).and_then(|node| node.parent) == Some(id) {
-                            self.update_node(root_id, root_name, child, style, atlas.clone(), input, results);
-                        }
-                    }
-                }
-                if let Some(container) = container {
-                    self.set_container(id, container);
-                }
-            }
-        }
-    }
-
-    /// Updates a widget leaf.
-    pub(super) fn update_widget(
-        &mut self,
-        root_id: crate::RootId,
-        root_name: &str,
-        id: UiNodeId,
-        style: &Style,
-        atlas: crate::AtlasHandle,
-        input: &Input,
-        results: &mut FrameResults,
-    ) {
-        let rect = self.nodes.get(&id).map(|node| node.rect).unwrap_or_default();
-        let opt = match self.nodes.get(&id).map(|node| &node.data) {
-            Some(UiNodeData::Widget { widget, .. }) => widget.effective_widget_opt(),
-            _ => WidgetOption::NONE,
-        };
-        let scroll_behavior = match self.nodes.get(&id).map(|node| &node.data) {
-            Some(UiNodeData::Widget { widget, .. }) => widget.effective_scroll_behavior(),
-            _ => ScrollBehavior::NONE,
-        };
-        let focus_policy = match self.nodes.get(&id).map(|node| &node.data) {
-            Some(UiNodeData::Widget { widget, .. }) => widget.focus_policy(),
-            _ => FocusPolicy::Momentary,
-        };
-        let needs_input = match self.nodes.get(&id).map(|node| &node.data) {
-            Some(UiNodeData::Widget { widget, .. }) => widget.needs_input_snapshot(),
-            _ => false,
-        };
-        let control = self.control_for(id, rect, input, opt, scroll_behavior, focus_policy);
-        if let Some(node) = self.nodes.get_mut(&id) {
-            node.control = control;
-        }
-
-        let mut focus_slot = self.focus.map(RetainedId::node);
-        let mut focus_seen = self.updated_focus;
-        let mut input_snapshot = needs_input.then(|| Rc::new(snapshot_from_input(input)));
-        let result = match self.nodes.get(&id).map(|node| &node.data) {
-            Some(UiNodeData::Widget { widget, .. }) => {
-                let mut ctx = WidgetCtx::new_with_interaction(
-                    RetainedId::node(id),
-                    rect,
-                    &mut self.commands,
-                    &mut self.triangle_vertices,
-                    &mut self.clip_stack,
+        let mut behavior = self.behavior_clone(id);
+        let traverse_children = behavior
+            .as_mut()
+            .map(|behavior| {
+                let mut ctx = UpdateCtx {
+                    runtime: self,
+                    root_id,
+                    root_name,
                     style,
-                    &atlas,
-                    &mut focus_slot,
-                    &mut focus_seen,
-                    self.hover_root_active,
-                    input_snapshot.take(),
-                );
-                widget.update(&mut ctx, &control)
+                    atlas: atlas.clone(),
+                    input,
+                    results,
+                };
+                behavior.update(&mut ctx, id)
+            })
+            .unwrap_or(true);
+        if traverse_children {
+            let children: Vec<_> = (0..self.child_count(id)).filter_map(|index| self.child_at(id, index)).collect();
+            for child in children {
+                if self.nodes.get(&child).and_then(|node| node.parent) == Some(id) {
+                    self.update_node(root_id, root_name, child, style, atlas.clone(), input, results);
+                }
             }
-            _ => ResourceState::NONE,
-        };
-        self.focus = retained_focus_to_node(focus_slot);
-        self.updated_focus = focus_seen;
-
-        let widget_handle_id = match self.nodes.get(&id).map(|node| &node.data) {
-            Some(UiNodeData::Widget { widget, .. }) => widget.widget_handle_id(),
-            _ => id,
-        };
-        results.record_retained_with_context(
-            RetainedId::root_node(root_id, id),
-            widget_handle_id,
-            result,
-            format!("root {root_name:?} ui node {:?}", id),
-        );
+        }
+        if let Some(behavior) = behavior {
+            self.set_behavior(id, behavior);
+        }
     }
 
     /// Computes control state from node geometry and shared input.
@@ -743,145 +601,81 @@ impl UiRuntime {
         }
     }
 
-    /// Dispatches scroll input to the deepest eligible owner below the root.
-    pub(super) fn dispatch_scroll_input(&mut self, style: &Style, input: &Input) -> bool {
-        if !self.hover_root_active || (input.scroll_delta.x == 0 && input.scroll_delta.y == 0 && input.mouse_down.is_empty() && input.mouse_pressed.is_empty())
-        {
+    /// Routes pre-update input events to the deepest eligible owner below the root.
+    pub(super) fn route_input_events(&mut self, style: &Style, input: &Input) -> bool {
+        if !self.hover_root_active {
             return false;
         }
+
+        let mut consumed = false;
+        let event = UiInputEvent::Pointer {
+            pos: input.mouse_pos,
+            delta: input.mouse_delta,
+        };
+        consumed |= self.route_input_event(style, input, event);
+        if input.scroll_delta.x != 0 || input.scroll_delta.y != 0 {
+            let event = UiInputEvent::Scroll {
+                pos: input.mouse_pos,
+                delta: input.scroll_delta,
+            };
+            consumed |= self.route_input_event(style, input, event);
+        }
+        consumed
+    }
+
+    /// Routes one input event through roots in z-order.
+    pub(super) fn route_input_event(&mut self, style: &Style, input: &Input, event: UiInputEvent) -> bool {
         for index in (0..self.roots.len()).rev() {
             let Some(root) = self.root_at(index) else { continue };
-            if self.dispatch_scroll_input_to_node(root, style, input) {
+            if self.route_input_event_to_node(root, style, input, event).is_consumed() {
                 return true;
             }
         }
         false
     }
 
-    /// Walks children first so nested scroll areas and scroll-grabbing widgets beat ancestors.
-    pub(super) fn dispatch_scroll_input_to_node(&mut self, id: UiNodeId, style: &Style, input: &Input) -> bool {
+    /// Walks children first so nested owners beat ancestors.
+    pub(super) fn route_input_event_to_node(&mut self, id: UiNodeId, style: &Style, input: &Input, event: UiInputEvent) -> InputResult {
         for index in (0..self.child_count(id)).rev() {
             let Some(child) = self.child_at(id, index) else { continue };
-            if self.dispatch_scroll_input_to_node(child, style, input) {
-                return true;
+            let result = self.route_input_event_to_node(child, style, input, event);
+            if result.is_consumed() {
+                return result;
             }
         }
 
-        match self.nodes.get(&id).map(|node| &node.data) {
-            Some(UiNodeData::Widget { widget, .. }) => {
-                let rect = self.nodes.get(&id).map(|node| node.rect).unwrap_or_default();
-                let clip = self.nodes.get(&id).map(|node| node.clip).unwrap_or_default();
-                let hovered = rect.contains(&input.mouse_pos) && clip.contains(&input.mouse_pos);
-                hovered && widget.effective_scroll_behavior().is_grab_scroll() && (input.scroll_delta.x != 0 || input.scroll_delta.y != 0)
-            }
-            Some(UiNodeData::Container { .. }) => {
-                let Some(mut container) = self.container_clone(id) else {
-                    return false;
-                };
-                let mut ctx = ScrollDispatchCtx { runtime: self, style, input };
-                let consumed = container.dispatch_scroll(&mut ctx, id);
-                self.set_container(id, container);
-                consumed
-            }
-            _ => false,
-        }
+        let Some(mut behavior) = self.behavior_clone(id) else {
+            return InputResult::Ignored;
+        };
+        let mut ctx = InputCtx { runtime: self, style, input };
+        let result = behavior.update_on(&mut ctx, id, event);
+        self.set_behavior(id, behavior);
+        result
     }
 
     /// Paints one node and descendants.
     pub(super) fn paint_node(&mut self, id: UiNodeId, style: &Style, atlas: crate::AtlasHandle, input: &Input) {
-        let kind = self.node_kind_tag(id);
-        match kind {
-            RuntimeNodeKind::Widget => self.paint_widget(id, style, atlas, input),
-            RuntimeNodeKind::Container => {
-                let mut container = self.container_clone(id);
-                let traverse_children = container
-                    .as_mut()
-                    .map(|container| {
-                        let mut ctx = PaintCtx {
-                            runtime: self,
-                            style,
-                            atlas: atlas.clone(),
-                        };
-                        container.paint_before_children(&mut ctx, id)
-                    })
-                    .unwrap_or(true);
-                if traverse_children {
-                    for index in 0..self.child_count(id) {
-                        let Some(child) = self.child_at(id, index) else { continue };
-                        self.paint_node(child, style, atlas.clone(), input);
-                    }
-                }
-                if let Some(container) = container.as_mut() {
-                    let mut ctx = PaintCtx { runtime: self, style, atlas };
-                    container.paint_after_children(&mut ctx, id);
-                }
-                if let Some(container) = container {
-                    self.set_container(id, container);
-                }
+        let mut behavior = self.behavior_clone(id);
+        let traverse_children = behavior
+            .as_mut()
+            .map(|behavior| {
+                let mut ctx = PaintCtx {
+                    runtime: self,
+                    style,
+                    atlas: atlas.clone(),
+                    input,
+                };
+                behavior.paint(&mut ctx, id)
+            })
+            .unwrap_or(true);
+        if traverse_children {
+            for index in 0..self.child_count(id) {
+                let Some(child) = self.child_at(id, index) else { continue };
+                self.paint_node(child, style, atlas.clone(), input);
             }
         }
-    }
-
-    /// Paints a widget leaf.
-    pub(super) fn paint_widget(&mut self, id: UiNodeId, style: &Style, atlas: crate::AtlasHandle, input: &Input) {
-        let rect = self.nodes.get(&id).map(|node| node.rect).unwrap_or_default();
-        let control = self.nodes.get(&id).map(|node| node.control).unwrap_or_default();
-        let needs_input = match self.nodes.get(&id).map(|node| &node.data) {
-            Some(UiNodeData::Widget { widget, .. }) => widget.needs_input_snapshot(),
-            _ => false,
-        };
-        let mut focus_slot = self.focus.map(RetainedId::node);
-        let mut focus_seen = self.updated_focus;
-        let mut input_snapshot = needs_input.then(|| Rc::new(snapshot_from_input(input)));
-        let custom_render = match self.nodes.get(&id).map(|node| &node.data) {
-            Some(UiNodeData::Widget { custom_render, .. }) => custom_render.clone(),
-            _ => None,
-        };
-        let node_clip = self.nodes.get(&id).map(|node| node.clip).unwrap_or(UNCLIPPED_RECT);
-        self.push_node_clip(id);
-        if let Some(UiNodeData::Widget { widget, .. }) = self.nodes.get(&id).map(|node| &node.data) {
-            let mut ctx = WidgetCtx::new_with_interaction(
-                RetainedId::node(id),
-                rect,
-                &mut self.commands,
-                &mut self.triangle_vertices,
-                &mut self.clip_stack,
-                style,
-                &atlas,
-                &mut focus_slot,
-                &mut focus_seen,
-                true,
-                input_snapshot.take(),
-            );
-            widget.paint(&mut ctx, &control);
-        }
-        self.pop_node_clip();
-        self.focus = retained_focus_to_node(focus_slot);
-        self.updated_focus = focus_seen;
-
-        if let Some(render) = custom_render {
-            let snapshot = snapshot_from_input(input);
-            let active = control.focused;
-            let view = node_clip.intersect(&rect).unwrap_or_else(|| Recti::new(rect.x, rect.y, 0, 0));
-            let cra = CustomRenderArgs {
-                content_area: rect,
-                view,
-                mouse_event: input_to_mouse_event(&control, &snapshot, rect),
-                scroll_delta: control.scroll_delta,
-                widget_opt: match self.nodes.get(&id).map(|node| &node.data) {
-                    Some(UiNodeData::Widget { widget, .. }) => widget.effective_widget_opt(),
-                    _ => WidgetOption::NONE,
-                },
-                scroll_behavior: match self.nodes.get(&id).map(|node| &node.data) {
-                    Some(UiNodeData::Widget { widget, .. }) => widget.effective_scroll_behavior(),
-                    _ => ScrollBehavior::NONE,
-                },
-                key_mods: if active { snapshot.key_mods } else { KeyMode::NONE },
-                key_codes: if active { snapshot.key_codes } else { KeyCode::NONE },
-                text_input: if active { snapshot.text_input } else { String::new() },
-            };
-            self.commands
-                .push(Command::BackendCustomRender(cra, Box::new(NodeCustomRenderCommand { render })));
+        if let Some(behavior) = behavior {
+            self.set_behavior(id, behavior);
         }
     }
 
@@ -911,13 +705,4 @@ impl UiRuntime {
 /// Returns the root content viewport. Root/window layout clips to this rect but never scrolls it.
 fn root_window_body_view(body: Recti, style: &Style) -> Recti {
     expand_rect(body, -style.padding)
-}
-
-/// Coarse node kind used to route passes without holding a node borrow.
-#[derive(Copy, Clone)]
-pub(super) enum RuntimeNodeKind {
-    /// Leaf widget.
-    Widget,
-    /// Container node.
-    Container,
 }

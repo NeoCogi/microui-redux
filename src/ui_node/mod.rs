@@ -11,12 +11,12 @@
 #![allow(dead_code)]
 
 use crate::{
-    expand_rect, Canvas, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, InputSnapshot, KeyCode, KeyMode, GridSpan, MouseButton,
-    MouseEvent, Recti, Renderer, RetainedId, Style, UiNodeSet, Vec2i, Vertex, UNCLIPPED_RECT,
+    expand_rect, Canvas, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, InputSnapshot, GridSpan, MouseButton, MouseEvent,
+    Recti, Renderer, RetainedId, Style, UiNodeSet, Vec2i, Vertex, UNCLIPPED_RECT,
 };
 use crate::render_command::{render_command_stream, Command};
 use crate::id::IdNamespace;
-use crate::input::{ContainerOption, ControlState, ResourceState, ScrollBehavior, WidgetOption};
+use crate::input::{ContainerOption, ControlState, ScrollBehavior, WidgetOption};
 use crate::sizing::SizePolicy;
 use crate::widget::FocusPolicy;
 use crate::widget_ctx::WidgetCtx;
@@ -28,7 +28,8 @@ mod runtime;
 pub(crate) use runtime::UiRuntime;
 mod containers;
 pub(crate) use containers::{
-    Column, ContainerTrait, Disclosure, Grid, LayoutCtx, MeasureCtx, PaintCtx, RootWindow, Row, ScrollArea, ScrollDispatchCtx, Stack, UpdateCtx,
+    Column, Disclosure, Grid, InputCtx, InputResult, LayoutCtx, MeasureCtx, NodeBehavior, PaintCtx, RootWindow, Row, ScrollArea, Stack, UiInputEvent,
+    UpdateCtx, WidgetNode,
 };
 
 /// Command wrapper that lets node-runtime custom render callbacks enter the backend stream.
@@ -244,7 +245,7 @@ fn measure_axis_available(policy: SizePolicy, available: i32) -> i32 {
 /// Resolves a node inside an already allocated parent slot.
 fn resolve_allocated_size(policy: SizePolicy, preferred: i32, allocated: i32, reference: i32, total_weight: Option<f32>) -> i32 {
     match policy {
-        SizePolicy::Auto => allocated.max(preferred).max(0),
+        SizePolicy::Auto => allocated.max(0),
         _ => resolve_size(policy, preferred, allocated, reference, total_weight),
     }
 }
@@ -394,9 +395,9 @@ mod tests {
         let child = column_node.children()[0];
         let child_node = runtime.nodes.get(&child).expect("child node missing");
 
-        assert!(matches!(root_node.data, UiNodeData::Container { .. }));
-        assert!(matches!(column_node.data, UiNodeData::Container { .. }));
-        assert!(matches!(child_node.data, UiNodeData::Widget { .. }));
+        assert!(matches!(root_node.data, UiNodeData::Branch { .. }));
+        assert!(matches!(column_node.data, UiNodeData::Branch { .. }));
+        assert!(matches!(child_node.data, UiNodeData::Leaf { .. }));
         assert!(child_node.children().is_empty());
     }
 
@@ -407,8 +408,8 @@ mod tests {
             None,
             crate::Policy::auto(),
             GridSpan::ONE,
-            UiNodeData::Container {
-                container: Box::new(Column),
+            UiNodeData::Branch {
+                behavior: Box::new(Column),
                 children: Vec::new(),
             },
         );
@@ -417,8 +418,8 @@ mod tests {
             Some(Id::new(99)),
             crate::Policy::auto(),
             GridSpan::ONE,
-            UiNodeData::Container {
-                container: Box::new(Column),
+            UiNodeData::Branch {
+                behavior: Box::new(Column),
                 children: Vec::new(),
             },
         );
@@ -438,8 +439,8 @@ mod tests {
             None,
             crate::Policy::auto(),
             GridSpan::ONE,
-            UiNodeData::Container {
-                container: Box::new(Column),
+            UiNodeData::Branch {
+                behavior: Box::new(Column),
                 children: Vec::new(),
             },
         );
@@ -448,8 +449,8 @@ mod tests {
             None,
             crate::Policy::auto(),
             GridSpan::ONE,
-            UiNodeData::Container {
-                container: Box::new(Column),
+            UiNodeData::Branch {
+                behavior: Box::new(Column),
                 children: Vec::new(),
             },
         );
@@ -469,8 +470,8 @@ mod tests {
             None,
             crate::Policy::auto(),
             GridSpan::ONE,
-            UiNodeData::Container {
-                container: Box::new(Column),
+            UiNodeData::Branch {
+                behavior: Box::new(Column),
                 children: vec![Id::new(2)],
             },
         );
@@ -479,8 +480,8 @@ mod tests {
             Some(Id::new(1)),
             crate::Policy::auto(),
             GridSpan::ONE,
-            UiNodeData::Container {
-                container: Box::new(Column),
+            UiNodeData::Branch {
+                behavior: Box::new(Column),
                 children: vec![Id::new(3)],
             },
         );
@@ -489,8 +490,8 @@ mod tests {
             Some(Id::new(2)),
             crate::Policy::auto(),
             GridSpan::ONE,
-            UiNodeData::Container {
-                container: Box::new(Column),
+            UiNodeData::Branch {
+                behavior: Box::new(Column),
                 children: Vec::new(),
             },
         );
@@ -567,7 +568,7 @@ mod tests {
         let button_node = runtime
             .nodes
             .values()
-            .find(|node| matches!(node.data, UiNodeData::Widget { .. }))
+            .find(|node| matches!(node.data, UiNodeData::Leaf { .. }))
             .expect("button node missing");
         assert!(button_node.rect.y > 40 + style.title_height);
         assert_eq!(button_node.rect.x, 40 + style.padding);
@@ -655,7 +656,7 @@ mod tests {
             &style,
             &Input::default(),
             &mut results,
-            rect(0, 0, 300, 100),
+            rect(0, 0, 235, 100),
             ScrollBehavior::NONE,
             true,
         );
@@ -664,7 +665,7 @@ mod tests {
         let right_rect = runtime.nodes.get(&right_id).unwrap().rect;
         assert!(middle_rect.width > 0);
         assert!(right_rect.width > middle_rect.width);
-        assert!(right_rect.x > middle_rect.x + middle_rect.width);
+        assert!(right_rect.x >= middle_rect.x + middle_rect.width + style.spacing);
     }
 
     #[test]

@@ -210,6 +210,61 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
 }
 
 #[test]
+fn title_drag_does_not_route_pointer_to_scroll_area() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(260, 240));
+    let mut style = Style::default();
+    style.padding = 0;
+    style.scrollbar_size = 10;
+    ctx.set_style(&style);
+
+    let scroll_area = ctx.new_scroll_area("scroll area");
+    let child = widget_handle(Button::new("child"));
+    let tree = UiNodeBuilder::build({
+        let scroll_area = scroll_area.clone();
+        let child = child.clone();
+        move |tree| {
+            tree.node(NodeOptions::with_policy(Policy::fill()))
+                .scroll_area(scroll_area.clone(), ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    tree.node(NodeOptions::with_policy(Policy::fixed(95, 220))).widget(child.clone());
+                });
+        }
+    });
+    let root = ctx.create_window("window", rect(20, 20, 120, 100), tree);
+
+    ctx.update_ui();
+    ctx.update_ui();
+
+    let body = scroll_area.with(|area| area.body());
+    let scrollbar_x = body.x + body.width + 1;
+    let scrollbar_y = body.y + 6;
+    ctx.mousemove(scrollbar_x, scrollbar_y);
+    ctx.update_ui();
+    ctx.mousedown(scrollbar_x, scrollbar_y, MouseButton::LEFT);
+    ctx.update_ui();
+    ctx.mousemove(scrollbar_x, scrollbar_y + 10);
+    ctx.update_ui();
+    ctx.mouseup(scrollbar_x, scrollbar_y + 10, MouseButton::LEFT);
+    ctx.update_ui();
+
+    let scroll_after_scrollbar_drag = scroll_area.with(|area| area.scroll());
+    assert!(scroll_after_scrollbar_drag.y > 0);
+
+    let title_x = ctx.root_rect(root).unwrap().x + 10;
+    let title_y = ctx.root_rect(root).unwrap().y + 6;
+    ctx.mousemove(title_x, title_y);
+    ctx.update_ui();
+    ctx.mousedown(title_x, title_y, MouseButton::LEFT);
+    ctx.update_ui();
+    ctx.mousemove(title_x + 18, title_y + 12);
+    ctx.update_ui();
+
+    assert_eq!(scroll_area.with(|area| area.scroll()).y, scroll_after_scrollbar_drag.y);
+    assert!(ctx.root_rect(root).unwrap().x > 20);
+}
+
+#[test]
 fn resize_handle_geometry_matches_scrollbar_corner_size() {
     let atlas = make_test_atlas();
     let renderer = RendererHandle::new(NoopRenderer { atlas });
@@ -1205,6 +1260,36 @@ fn node_popup_auto_size_is_stable_with_remainder_stack() {
     assert_eq!(third.width, first.width);
     assert_eq!(second.height, first.height);
     assert_eq!(third.height, first.height);
+}
+
+#[test]
+fn node_popup_auto_size_fits_stacked_buttons() {
+    let atlas = make_test_atlas();
+    let renderer = RendererHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let hello = widget_handle(Button::with_opt("Hello", WidgetOption::ALIGN_CENTER));
+    let world = widget_handle(Button::with_opt("World", WidgetOption::ALIGN_CENTER));
+    let mut hello_id = NodeId::default();
+    let mut world_id = NodeId::default();
+    let popup = ctx.create_popup(
+        "popup",
+        UiNodeBuilder::build(|tree| {
+            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                hello_id = tree.widget(hello.clone());
+                world_id = tree.widget(world.clone());
+            });
+        }),
+    );
+    ctx.set_root_rect(popup, rect(20, 20, 80, 1));
+    ctx.set_root_visible(popup, true);
+
+    ctx.update_ui();
+
+    let body = ctx.debug_root_body(popup).unwrap();
+    let hello_rect = ctx.debug_root_node_rect(popup, hello_id).unwrap();
+    let world_rect = ctx.debug_root_node_rect(popup, world_id).unwrap();
+    assert_eq!(body.y + body.height, world_rect.y + world_rect.height + ctx.style.padding);
+    assert_eq!(hello_rect.y + hello_rect.height + ctx.style.spacing, world_rect.y);
 }
 
 #[test]

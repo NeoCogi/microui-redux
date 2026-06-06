@@ -1,9 +1,16 @@
 use crate::scrollbar::ScrollAxis;
 use crate::sizing::SizePolicy;
-use crate::context::erased_widget_state;
-use crate::{Dimensioni, FrameResults, Input, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
+use crate::context::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
+use crate::{
+    CustomRenderArgs, Dimensioni, FrameResults, Input, KeyCode, KeyMode, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle,
+    UNCLIPPED_RECT,
+};
 
-use super::{retained_focus_to_node, ClientArea, UiNode, UiNodeId, UiRuntime, WidgetCtx};
+use super::{
+    input_to_mouse_event, measure_axis_available, resolve_allocated_size, resolve_size, retained_focus_to_node, snapshot_from_input, ClientArea,
+    NodeCustomRenderCommand, UiNode, UiNodeId, UiRuntime, WidgetCtx,
+};
+use crate::render_command::Command;
 
 mod column;
 mod disclosure;
@@ -21,54 +28,51 @@ pub(crate) use row::Row;
 pub(crate) use scroll_area::ScrollArea;
 pub(crate) use stack::Stack;
 
-/// Clone support for boxed container behavior objects.
-pub(crate) trait ContainerClone {
-    /// Clones this container into a boxed trait object.
-    fn clone_box(&self) -> Box<dyn ContainerTrait>;
+/// Clone support for boxed node behavior objects.
+pub(crate) trait NodeBehaviorClone {
+    /// Clones this behavior into a boxed trait object.
+    fn clone_box(&self) -> Box<dyn NodeBehavior>;
 }
 
-impl<T> ContainerClone for T
+impl<T> NodeBehaviorClone for T
 where
-    T: ContainerTrait + Clone + 'static,
+    T: NodeBehavior + Clone + 'static,
 {
-    fn clone_box(&self) -> Box<dyn ContainerTrait> {
+    fn clone_box(&self) -> Box<dyn NodeBehavior> {
         Box::new(self.clone())
     }
 }
 
-impl Clone for Box<dyn ContainerTrait> {
+impl Clone for Box<dyn NodeBehavior> {
     fn clone(&self) -> Self {
         self.clone_box()
     }
 }
 
-/// Common internal behavior interface for child-owning nodes.
-pub(crate) trait ContainerTrait: ContainerClone {
-    /// Measures the preferred size for a container node.
+/// Common internal behavior interface for retained nodes.
+pub(crate) trait NodeBehavior: NodeBehaviorClone {
+    /// Measures the preferred size for a node.
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni;
 
-    /// Assigns rectangles to children and recursively lays them out.
+    /// Assigns rectangles to the node and, for containers, its children.
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, id: UiNodeId, rect: Recti, clip: Recti);
 
-    /// Updates the container's own retained widget, if any, and returns whether children should be traversed.
+    /// Updates this node and returns whether children should be traversed.
     fn update(&mut self, _ctx: &mut UpdateCtx<'_>, _id: UiNodeId) -> bool {
         true
     }
 
-    /// Paints any container-owned widget/background before children and returns whether children should be painted.
-    fn paint_before_children(&mut self, _ctx: &mut PaintCtx<'_>, _id: UiNodeId) -> bool {
+    /// Paints this node and returns whether children should be painted.
+    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _id: UiNodeId) -> bool {
         true
     }
 
-    /// Paints any container-owned overlay after children.
-    fn paint_after_children(&mut self, _ctx: &mut PaintCtx<'_>, _id: UiNodeId) {}
-
-    /// Dispatches scroll input owned by this container.
-    fn dispatch_scroll(&mut self, _ctx: &mut ScrollDispatchCtx<'_>, _id: UiNodeId) -> bool {
-        false
+    /// Updates this node in response to one routed input event.
+    fn update_on(&mut self, _ctx: &mut InputCtx<'_>, _id: UiNodeId, _event: UiInputEvent) -> InputResult {
+        InputResult::Ignored
     }
 
-    /// Returns an implicit vertical child policy this container contributes when it is a child.
+    /// Returns an implicit vertical child policy this behavior contributes when it is a child.
     fn vertical_child_policy(&self) -> Option<SizePolicy> {
         None
     }
@@ -92,10 +96,211 @@ pub(crate) trait ContainerTrait: ContainerClone {
     fn set_scroll_area_runtime_state(&mut self, _content_size: Dimensioni, _offset: Vec2i, _drag: Option<ScrollAxis>) {}
 
     /// Carries runtime-only state from a previous container with the same node id.
-    fn transfer_runtime_state_from(&mut self, previous: &dyn ContainerTrait) {
+    fn transfer_runtime_state_from(&mut self, previous: &dyn NodeBehavior) {
         if let Some((content_size, offset, drag)) = previous.scroll_area_runtime_state() {
             self.set_scroll_area_runtime_state(content_size, offset, drag);
         }
+    }
+}
+
+/// Retained widget adapter behind the internal node behavior interface.
+pub(crate) struct WidgetNode {
+    /// Type-erased retained widget state.
+    pub(crate) widget: Box<dyn WidgetStateHandleDyn>,
+    /// Optional custom backend render callback for custom-render leaves.
+    pub(crate) custom_render: Option<TreeCustomRender>,
+}
+
+impl Clone for WidgetNode {
+    fn clone(&self) -> Self {
+        Self {
+            widget: self.widget.clone_box(),
+            custom_render: self.custom_render.clone(),
+        }
+    }
+}
+
+impl NodeBehavior for WidgetNode {
+    fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
+        let policy = ctx.runtime.nodes.get(&id).map(|node| node.policy).unwrap_or_else(crate::Policy::auto);
+        let measure_available = Dimensioni::new(
+            measure_axis_available(policy.width, available.width),
+            measure_axis_available(policy.height, available.height),
+        );
+        let preferred = self.widget.measure(ctx.style, ctx.atlas, measure_available);
+        Dimensioni::new(
+            resolve_size(policy.width, preferred.width, available.width, available.width, None),
+            resolve_size(policy.height, preferred.height, available.height, available.height, None),
+        )
+    }
+
+    fn layout(&mut self, ctx: &mut LayoutCtx<'_>, id: UiNodeId, rect: Recti, clip: Recti) {
+        let policy = ctx.runtime.nodes.get(&id).map(|node| node.policy).unwrap_or_else(crate::Policy::auto);
+        let measure_available = Dimensioni::new(
+            measure_axis_available(policy.width, rect.width),
+            measure_axis_available(policy.height, rect.height),
+        );
+        let preferred = self.widget.measure(ctx.style, ctx.atlas, measure_available);
+        let rect = Recti::new(
+            rect.x,
+            rect.y,
+            resolve_allocated_size(policy.width, preferred.width, rect.width, rect.width, None),
+            resolve_allocated_size(policy.height, preferred.height, rect.height, rect.height, None),
+        );
+        let content_size = Dimensioni::new(rect.width.max(preferred.width), rect.height.max(preferred.height));
+        if let Some(node) = ctx.runtime.nodes.get_mut(&id) {
+            let client_area = ClientArea::from_rect(rect);
+            node.rect = rect;
+            node.client = client_area.visible_rect;
+            node.clip = client_area.effective_clip(clip);
+            node.client_area = client_area;
+            node.content_size = content_size;
+        }
+    }
+
+    fn update(&mut self, ctx: &mut UpdateCtx<'_>, id: UiNodeId) -> bool {
+        let rect = ctx.runtime.nodes.get(&id).map(|node| node.rect).unwrap_or_default();
+        let control = ctx.runtime.control_for(
+            id,
+            rect,
+            ctx.input,
+            self.widget.effective_widget_opt(),
+            self.widget.effective_scroll_behavior(),
+            self.widget.focus_policy(),
+        );
+        if let Some(node) = ctx.runtime.nodes.get_mut(&id) {
+            node.control = control;
+        }
+
+        let mut focus_slot = ctx.runtime.focus.map(RetainedId::node);
+        let mut focus_seen = ctx.runtime.updated_focus;
+        let mut input_snapshot = self.widget.needs_input_snapshot().then(|| std::rc::Rc::new(snapshot_from_input(ctx.input)));
+        let mut widget_ctx = WidgetCtx::new_with_interaction(
+            RetainedId::node(id),
+            rect,
+            &mut ctx.runtime.commands,
+            &mut ctx.runtime.triangle_vertices,
+            &mut ctx.runtime.clip_stack,
+            ctx.style,
+            &ctx.atlas,
+            &mut focus_slot,
+            &mut focus_seen,
+            ctx.runtime.hover_root_active,
+            input_snapshot.take(),
+        );
+        let result = self.widget.update(&mut widget_ctx, &control);
+        ctx.runtime.focus = retained_focus_to_node(focus_slot);
+        ctx.runtime.updated_focus = focus_seen;
+
+        ctx.results.record_retained_with_context(
+            RetainedId::root_node(ctx.root_id, id),
+            self.widget.widget_handle_id(),
+            result,
+            format!("root {:?} ui node {:?}", ctx.root_name, id),
+        );
+        false
+    }
+
+    fn paint(&mut self, ctx: &mut PaintCtx<'_>, id: UiNodeId) -> bool {
+        let rect = ctx.runtime.nodes.get(&id).map(|node| node.rect).unwrap_or_default();
+        let control = ctx.runtime.nodes.get(&id).map(|node| node.control).unwrap_or_default();
+        let mut focus_slot = ctx.runtime.focus.map(RetainedId::node);
+        let mut focus_seen = ctx.runtime.updated_focus;
+        let mut input_snapshot = self.widget.needs_input_snapshot().then(|| std::rc::Rc::new(snapshot_from_input(ctx.input)));
+        let node_clip = ctx.runtime.nodes.get(&id).map(|node| node.clip).unwrap_or(UNCLIPPED_RECT);
+        ctx.runtime.push_node_clip(id);
+        let mut widget_ctx = WidgetCtx::new_with_interaction(
+            RetainedId::node(id),
+            rect,
+            &mut ctx.runtime.commands,
+            &mut ctx.runtime.triangle_vertices,
+            &mut ctx.runtime.clip_stack,
+            ctx.style,
+            &ctx.atlas,
+            &mut focus_slot,
+            &mut focus_seen,
+            true,
+            input_snapshot.take(),
+        );
+        self.widget.paint(&mut widget_ctx, &control);
+        ctx.runtime.pop_node_clip();
+        ctx.runtime.focus = retained_focus_to_node(focus_slot);
+        ctx.runtime.updated_focus = focus_seen;
+
+        if let Some(render) = self.custom_render.clone() {
+            let snapshot = snapshot_from_input(ctx.input);
+            let active = control.focused;
+            let view = node_clip.intersect(&rect).unwrap_or_else(|| Recti::new(rect.x, rect.y, 0, 0));
+            let cra = CustomRenderArgs {
+                content_area: rect,
+                view,
+                mouse_event: input_to_mouse_event(&control, &snapshot, rect),
+                scroll_delta: control.scroll_delta,
+                widget_opt: self.widget.effective_widget_opt(),
+                scroll_behavior: self.widget.effective_scroll_behavior(),
+                key_mods: if active { snapshot.key_mods } else { KeyMode::NONE },
+                key_codes: if active { snapshot.key_codes } else { KeyCode::NONE },
+                text_input: if active { snapshot.text_input } else { String::new() },
+            };
+            ctx.runtime
+                .commands
+                .push(Command::BackendCustomRender(cra, Box::new(NodeCustomRenderCommand { render })));
+        }
+        false
+    }
+
+    fn update_on(&mut self, ctx: &mut InputCtx<'_>, id: UiNodeId, event: UiInputEvent) -> InputResult {
+        if !matches!(event, UiInputEvent::Scroll { .. }) {
+            return InputResult::Ignored;
+        }
+        let rect = ctx.runtime.nodes.get(&id).map(|node| node.rect).unwrap_or_default();
+        let clip = ctx.runtime.nodes.get(&id).map(|node| node.clip).unwrap_or_default();
+        let hovered = rect.contains(&ctx.input.mouse_pos) && clip.contains(&ctx.input.mouse_pos);
+        if hovered
+            && self.widget.effective_scroll_behavior().is_grab_scroll()
+            && (ctx.input.scroll_delta.x != 0 || ctx.input.scroll_delta.y != 0)
+        {
+            InputResult::Consumed
+        } else {
+            InputResult::Ignored
+        }
+    }
+}
+
+/// Input event routed to retained node behavior.
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum UiInputEvent {
+    /// Pointer state changed or an active pointer drag is in progress.
+    Pointer {
+        /// Current pointer position in screen coordinates.
+        pos: Vec2i,
+        /// Pointer movement since the previous frame.
+        delta: Vec2i,
+    },
+    /// Scroll wheel or equivalent high-level scroll input.
+    Scroll {
+        /// Pointer position used for hit routing.
+        pos: Vec2i,
+        /// Requested scroll delta.
+        delta: Vec2i,
+    },
+}
+
+/// Result of routing one input event to a node behavior.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) enum InputResult {
+    /// The node ignored the event.
+    Ignored,
+    /// The node consumed the event.
+    Consumed,
+    /// The node consumed the event and should keep receiving related pointer input.
+    Captured,
+}
+
+impl InputResult {
+    /// Returns whether event traversal should stop.
+    pub(crate) fn is_consumed(self) -> bool {
+        matches!(self, Self::Consumed | Self::Captured)
     }
 }
 
@@ -207,6 +412,7 @@ impl LayoutCtx<'_> {
 pub(crate) struct UpdateCtx<'a> {
     pub(crate) runtime: &'a mut UiRuntime,
     pub(crate) root_id: crate::RootId,
+    pub(crate) root_name: &'a str,
     pub(crate) style: &'a Style,
     pub(crate) atlas: crate::AtlasHandle,
     pub(crate) input: &'a Input,
@@ -262,17 +468,16 @@ impl UpdateCtx<'_> {
     }
 }
 
-/// Services available while a container handles scroll dispatch.
+/// Services available while a node handles a routed input event.
 ///
-/// Scroll dispatch may mutate scroll state on the receiving container, but child topology is
-/// read-only.
-pub(crate) struct ScrollDispatchCtx<'a> {
+/// Input routing may mutate node behavior state, but child topology is read-only.
+pub(crate) struct InputCtx<'a> {
     pub(crate) runtime: &'a mut UiRuntime,
     pub(crate) style: &'a Style,
     pub(crate) input: &'a Input,
 }
 
-impl ScrollDispatchCtx<'_> {
+impl InputCtx<'_> {
     pub(crate) fn node_clip_and_client(&self, id: UiNodeId) -> Option<(Recti, Recti)> {
         self.runtime.nodes.get(&id).map(|node| (node.clip, node.client))
     }
@@ -285,6 +490,7 @@ pub(crate) struct PaintCtx<'a> {
     pub(crate) runtime: &'a mut UiRuntime,
     pub(crate) style: &'a Style,
     pub(crate) atlas: crate::AtlasHandle,
+    pub(crate) input: &'a Input,
 }
 
 impl PaintCtx<'_> {

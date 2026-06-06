@@ -1,7 +1,7 @@
 use crate::input::ContainerOption;
 use crate::{Dimensioni, Recti};
 
-use super::{Column, ContainerTrait, LayoutCtx, MeasureCtx};
+use super::{Column, NodeBehavior, LayoutCtx, MeasureCtx};
 use crate::ui_node::UiNodeId;
 
 /// Top-level window root container.
@@ -25,7 +25,7 @@ impl Default for RootWindow {
     }
 }
 
-impl ContainerTrait for RootWindow {
+impl NodeBehavior for RootWindow {
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
         self.body.measure(ctx, id, available)
     }

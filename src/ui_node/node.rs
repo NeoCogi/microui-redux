@@ -1,8 +1,7 @@
-use crate::context::{TreeCustomRender, WidgetStateHandleDyn};
 use crate::{Dimensioni, GridSpan, Id, Recti, Vec2i};
 use crate::input::ControlState;
 
-use super::ContainerTrait;
+use super::NodeBehavior;
 
 /// Stable runtime node identifier.
 pub(crate) type UiNodeId = Id;
@@ -91,19 +90,19 @@ impl UiNode {
         }
     }
 
-    /// Returns the node's container children when it is a container.
+    /// Returns the node's children when it accepts children.
     pub(crate) fn children(&self) -> &[UiNodeId] {
         match &self.data {
-            UiNodeData::Widget { .. } => &[],
-            UiNodeData::Container { children, .. } => children,
+            UiNodeData::Leaf { .. } => &[],
+            UiNodeData::Branch { children, .. } => children,
         }
     }
 
-    /// Returns the node's mutable container children when it is a container.
+    /// Returns the node's mutable children when it accepts children.
     pub(crate) fn children_mut(&mut self) -> Option<&mut Vec<UiNodeId>> {
         match &mut self.data {
-            UiNodeData::Widget { .. } => None,
-            UiNodeData::Container { children, .. } => Some(children),
+            UiNodeData::Leaf { .. } => None,
+            UiNodeData::Branch { children, .. } => Some(children),
         }
     }
 }
@@ -114,18 +113,16 @@ impl UiNode {
 /// born under one parent and may be removed with their subtree, but the retained node runtime does
 /// not support reparenting. This keeps the single-parent invariant local to the runtime graph APIs.
 pub(crate) enum UiNodeData {
-    /// Leaf widget node.
-    Widget {
-        /// Type-erased retained widget state.
-        widget: Box<dyn WidgetStateHandleDyn>,
-        /// Optional custom backend render callback for custom-render leaves.
-        custom_render: Option<TreeCustomRender>,
+    /// Node behavior without child membership.
+    Leaf {
+        /// Concrete retained node behavior.
+        behavior: Box<dyn NodeBehavior>,
     },
-    /// Framework-owned container node.
-    Container {
-        /// Concrete child-owning container object.
-        container: Box<dyn ContainerTrait>,
-        /// Child membership. Leaf widgets do not carry this allocation.
+    /// Node behavior with child membership.
+    Branch {
+        /// Concrete retained node behavior.
+        behavior: Box<dyn NodeBehavior>,
+        /// Child membership.
         children: Vec<UiNodeId>,
     },
 }

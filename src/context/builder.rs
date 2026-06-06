@@ -38,7 +38,7 @@ use crate::{
     id::{hash_id_key, IdNamespace},
     input::{ContainerOption, ScrollBehavior},
     sizing::{SizePolicy, StackDirection},
-    ui_node::{Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData, UiNodeId},
+    ui_node::{Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData, UiNodeId, WidgetNode},
     widget::Widget,
     Custom, CustomRenderArgs, Node, ScrollAreaHandle, TextBlock, TextWrap,
 };
@@ -390,9 +390,11 @@ impl UiNodeBuilder {
         self.push_leaf(
             options,
             TAG_WIDGET,
-            UiNodeData::Widget {
-                widget: erased_widget_state(widget),
-                custom_render: None,
+            UiNodeData::Leaf {
+                behavior: Box::new(WidgetNode {
+                    widget: erased_widget_state(widget),
+                    custom_render: None,
+                }),
             },
         )
     }
@@ -427,9 +429,11 @@ impl UiNodeBuilder {
         self.push_leaf(
             options,
             TAG_CUSTOM_RENDER,
-            UiNodeData::Widget {
-                widget: erased_widget_state(state),
-                custom_render: Some(render),
+            UiNodeData::Leaf {
+                behavior: Box::new(WidgetNode {
+                    widget: erased_widget_state(state),
+                    custom_render: Some(render),
+                }),
             },
         )
     }
@@ -458,8 +462,8 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_SCROLL_AREA,
-            UiNodeData::Container {
-                container: Box::new(UiScrollArea {
+            UiNodeData::Branch {
+                behavior: Box::new(UiScrollArea {
                     content: Column,
                     handle,
                     content_size: Dimensioni::default(),
@@ -485,8 +489,8 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_HEADER,
-            UiNodeData::Container {
-                container: Box::new(Disclosure {
+            UiNodeData::Branch {
+                behavior: Box::new(Disclosure {
                     state,
                     indent_children: false,
                     children: Column,
@@ -508,8 +512,8 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_TREE,
-            UiNodeData::Container {
-                container: Box::new(Disclosure {
+            UiNodeData::Branch {
+                behavior: Box::new(Disclosure {
                     state,
                     indent_children: true,
                     children: Column,
@@ -530,8 +534,8 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_ROW,
-            UiNodeData::Container {
-                container: Box::new(Row { widths: widths.to_vec(), height }),
+            UiNodeData::Branch {
+                behavior: Box::new(Row { widths: widths.to_vec(), height }),
                 children: Vec::new(),
             },
             f,
@@ -548,8 +552,8 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_GRID,
-            UiNodeData::Container {
-                container: Box::new(Grid {
+            UiNodeData::Branch {
+                behavior: Box::new(Grid {
                     widths: widths.to_vec(),
                     heights: heights.to_vec(),
                 }),
@@ -569,8 +573,8 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_COLUMN,
-            UiNodeData::Container {
-                container: Box::new(Column),
+            UiNodeData::Branch {
+                behavior: Box::new(Column),
                 children: Vec::new(),
             },
             f,
@@ -587,8 +591,8 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_STACK,
-            UiNodeData::Container {
-                container: Box::new(Stack { width, height, direction }),
+            UiNodeData::Branch {
+                behavior: Box::new(Stack { width, height, direction }),
                 children: Vec::new(),
             },
             f,
@@ -621,7 +625,7 @@ impl UiNodeBuilder {
         self.frames.push(BuilderFrame::child(id, id.raw() as u64));
         f(self);
         let frame = self.frames.pop().expect("child frame missing");
-        if let UiNodeData::Container { children, .. } = &mut data {
+        if let UiNodeData::Branch { children, .. } = &mut data {
             *children = frame.nodes;
         }
         let node = UiNode::new(id, parent, options.policy, options.grid_span, data);
