@@ -172,12 +172,12 @@ fn layout_scaled_visual_content(bounds: Recti, visual_size: Option<Dimensioni>) 
 }
 
 /// Selects which control color should be painted for a widget's fill policy and state.
-fn widget_fill_color(control: &ControlState, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
-    if control.focused && fill.intersects(WidgetFillOption::CLICK) {
+fn widget_fill_color(ctx: &WidgetCtx<'_>, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
+    if ctx.focused() && fill.intersects(WidgetFillOption::CLICK) {
         let mut color = base;
         color.focus();
         Some(color)
-    } else if control.hovered && fill.intersects(WidgetFillOption::HOVER) {
+    } else if ctx.hovered() && fill.intersects(WidgetFillOption::HOVER) {
         let mut color = base;
         color.hover();
         Some(color)
@@ -189,8 +189,8 @@ fn widget_fill_color(control: &ControlState, base: ControlColor, fill: WidgetFil
 }
 
 /// Converts a click state into the standard submit result.
-fn submit_on_click(control: &ControlState) -> ResourceState {
-    if control.clicked { ResourceState::SUBMIT } else { ResourceState::NONE }
+fn submit_on_click(ctx: &WidgetCtx<'_>) -> ResourceState {
+    if ctx.clicked() { ResourceState::SUBMIT } else { ResourceState::NONE }
 }
 
 mod button;

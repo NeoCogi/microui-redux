@@ -45,12 +45,12 @@ impl Custom {
     }
 
     /// Custom render state itself does not update; the retained command callback owns drawing.
-    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>) -> ResourceState {
         ResourceState::NONE
     }
 
     /// Custom widgets do not paint through the normal widget state path.
-    fn paint_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) {}
+    fn paint_widget(&mut self, _ctx: &mut WidgetCtx<'_>) {}
 }
 
 implement_widget!(Custom, update_widget, paint_widget, preferred_size_widget);

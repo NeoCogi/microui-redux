@@ -145,37 +145,30 @@ impl Textbox {
     }
 
     /// Applies input and cursor movement for this textbox.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         let font = ctx.style().resolve_font_choice(self.config.font);
-        textbox_update(ctx, control, &mut self.buf, &mut self.cursor, self.config.opt, font)
+        textbox_update(ctx, &mut self.buf, &mut self.cursor, self.config.opt, font)
     }
 
     /// Paints the textbox frame, text, and caret.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
         let font = ctx.style().resolve_font_choice(self.config.font);
-        textbox_paint(ctx, control, self.buf.as_str(), self.cursor, self.config.opt, font);
+        textbox_paint(ctx, self.buf.as_str(), self.cursor, self.config.opt, font);
     }
 }
 
 /// Shared single-line text editing update used by textbox and numeric inline editors.
-pub(crate) fn textbox_update(
-    ctx: &mut WidgetCtx<'_>,
-    control: &ControlState,
-    buf: &mut String,
-    cursor: &mut usize,
-    _opt: WidgetOption,
-    font: FontId,
-) -> ResourceState {
+pub(crate) fn textbox_update(ctx: &mut WidgetCtx<'_>, buf: &mut String, cursor: &mut usize, _opt: WidgetOption, font: FontId) -> ResourceState {
     let mut res = ResourceState::NONE;
     let r = ctx.screen_rect();
-    if !control.focused {
+    if !ctx.focused() {
         // Reset to end when blurred so refocusing starts from a predictable position.
         *cursor = buf.len();
     }
     let mut cursor_pos = clamp_cursor_boundary(buf, *cursor);
 
     let (mouse_pressed, mouse_pos, end_pressed, edit) = {
-        let edit = if control.focused {
+        let edit = if ctx.focused() {
             apply_text_input(
                 buf,
                 cursor_pos,
@@ -197,7 +190,7 @@ pub(crate) fn textbox_update(
         };
         (ctx.mouse_pressed(), ctx.mouse_pos(), ctx.key_code_pressed().intersects(KeyCode::END), edit)
     };
-    if control.focused {
+    if ctx.focused() {
         cursor_pos = edit.cursor;
         if edit.changed {
             res |= ResourceState::CHANGE;
@@ -219,7 +212,7 @@ pub(crate) fn textbox_update(
     let ofx = r.width - padding - text_metrics.width - 1;
     let textx = r.x + if ofx < padding { ofx } else { padding };
 
-    if control.focused && mouse_pressed.intersects(MouseButton::LEFT) && ctx.mouse_over(r) {
+    if ctx.focused() && mouse_pressed.intersects(MouseButton::LEFT) && ctx.mouse_over(r) {
         // Convert local click x into a UTF-8 boundary cursor position.
         let click_x = mouse_pos.x - (textx - r.x);
         cursor_pos = cursor_from_text_x(buf, click_x, font, ctx.atlas());
@@ -231,9 +224,9 @@ pub(crate) fn textbox_update(
 }
 
 /// Shared single-line textbox painting used by textbox and numeric inline editors.
-pub(crate) fn textbox_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, buf: &str, cursor: usize, opt: WidgetOption, font: FontId) {
+pub(crate) fn textbox_paint(ctx: &mut WidgetCtx<'_>, buf: &str, cursor: usize, opt: WidgetOption, font: FontId) {
     let r = ctx.screen_rect();
-    ctx.draw_widget_frame(control, r, ControlColor::Base, opt);
+    ctx.draw_widget_frame(r, ControlColor::Base, opt);
 
     let metrics = font_line_metrics(font, ctx.atlas());
     let texty = centered_line_top(r, metrics.line_height);
@@ -250,7 +243,7 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, buf
         ctx.atlas().get_text_size(font, &buf[..cursor_pos]).width
     };
 
-    if control.focused {
+    if ctx.focused() {
         // Focused editing path clips text/caret to the textbox bounds.
         let color = ctx.style().colors[ControlColor::Text as usize];
         ctx.push_clip_rect(r);
@@ -275,19 +268,19 @@ impl Widget for Textbox {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         let old_buf = self.buf.clone();
         let old_cursor = self.cursor;
-        let mut res = self.update_widget(ctx, control);
+        let mut res = self.update_widget(ctx);
         let changed = self.buf != old_buf || self.cursor != old_cursor;
-        if control.focused || changed {
+        if ctx.focused() || changed {
             res |= ResourceState::ACTIVE;
         }
         res
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        self.paint_widget(ctx, control);
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+        self.paint_widget(ctx);
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {

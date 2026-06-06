@@ -138,6 +138,7 @@ pub mod retained {
     pub use crate::context::{Context, RootId};
     pub use crate::render_command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
     pub use crate::scroll::ScrollAreaHandle;
+    pub use crate::ui_node::UiInputEvent;
     pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
     pub use crate::context::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, UiNodeSet, UiNodeBuilder};
 }
@@ -153,14 +154,13 @@ pub mod prelude {
     };
     pub use crate::file_dialog::FileDialogState;
     pub use crate::input::{
-        Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState, ScrollBehavior,
-        WidgetFillOption, WidgetOption,
+        Clip, ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption,
     };
     pub use crate::sizing::{SizePolicy, StackDirection};
     pub use crate::render::{Renderer, RendererHandle};
     pub use crate::retained::{
         Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeBuilder, NodeId, NodeOptions, Policy, RetainedId, RootId,
-        ScrollAreaHandle, TextWrap, Widget, WidgetCtx, WidgetHandle, UiNodeSet, UiNodeBuilder, widget_handle,
+        ScrollAreaHandle, TextWrap, UiInputEvent, Widget, WidgetCtx, WidgetHandle, UiNodeSet, UiNodeBuilder, widget_handle,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
@@ -180,16 +180,14 @@ pub use atlas::{
 pub use context::{widget_handle, Context, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, RootId, WidgetHandle, UiNodeSet, UiNodeBuilder};
 pub use file_dialog::FileDialogState;
 pub use id::Id;
-pub use input::{
-    Clip, ContainerOption, ControlColor, ControlState, Input, InputButtonState, KeyCode, KeyMode, MouseButton, MouseEvent, ResourceState, ScrollBehavior,
-    WidgetFillOption, WidgetOption,
-};
+pub use input::{Clip, ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption};
 pub use render_command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
 pub use render::{Renderer, RendererHandle};
 pub use scroll::ScrollAreaHandle;
 pub use sizing::{SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
 pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
+pub use ui_node::UiInputEvent;
 pub use widgets::{
     Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, Slider, TextArea, TextBlock, Textbox,
     WidgetConfig,

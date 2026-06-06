@@ -46,13 +46,6 @@ fn combo_run_toggles_open_state() {
     let mut focus = None;
     let mut updated_focus = false;
     let rect = rect(0, 0, 100, 20);
-    let control = ControlState {
-        hovered: true,
-        focused: true,
-        clicked: true,
-        active: true,
-        scroll_delta: None,
-    };
     let mut ctx = WidgetCtx::new_with_interaction(
         RetainedId::node(Id::new(1)),
         rect,
@@ -64,10 +57,15 @@ fn combo_run_toggles_open_state() {
         &mut focus,
         &mut updated_focus,
         true,
+        true,
+        true,
+        true,
+        true,
+        None,
         Vec::new(),
     );
 
-    combo.update(&mut ctx, &control);
+    combo.update(&mut ctx);
     assert!(combo.is_open());
 
     combo.open_popup();
@@ -82,9 +80,14 @@ fn combo_run_toggles_open_state() {
         &mut focus,
         &mut updated_focus,
         true,
+        true,
+        true,
+        true,
+        true,
+        None,
         Vec::new(),
     );
-    combo.update(&mut ctx, &control);
+    combo.update(&mut ctx);
     assert!(!combo.is_open());
 }
 

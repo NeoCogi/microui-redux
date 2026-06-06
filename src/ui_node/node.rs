@@ -1,5 +1,4 @@
 use crate::{Dimensioni, GridSpan, Id, Recti, Vec2i};
-use crate::input::ControlState;
 
 use super::NodeBehavior;
 
@@ -60,8 +59,16 @@ pub(crate) struct UiNode {
     pub(crate) visible: bool,
     /// Whether this node can interact.
     pub(crate) enabled: bool,
-    /// Last control state produced for this node.
-    pub(crate) control: ControlState,
+    /// Cursor is hovering this node.
+    pub(crate) hovered: bool,
+    /// This node currently owns focus.
+    pub(crate) focused: bool,
+    /// Mouse was pressed on this node during the current frame.
+    pub(crate) clicked: bool,
+    /// Mouse is held down while this node owns focus.
+    pub(crate) active: bool,
+    /// Scroll delta consumed by this node during the current frame.
+    pub(crate) scroll_delta: Option<Vec2i>,
     /// Placement policy used by runtime layout passes.
     pub(crate) policy: crate::Policy,
     /// Grid span used when this node is a child of a grid container.
@@ -83,7 +90,11 @@ impl UiNode {
             content_size: Dimensioni::default(),
             visible: true,
             enabled: true,
-            control: ControlState::default(),
+            hovered: false,
+            focused: false,
+            clicked: false,
+            active: false,
+            scroll_delta: None,
             policy,
             grid_span,
             data,

@@ -48,9 +48,9 @@ impl Checkbox {
     }
 
     /// Toggles the persistent value on click.
-    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         let mut res = ResourceState::NONE;
-        if control.clicked {
+        if ctx.clicked() {
             // The checkbox itself owns the boolean state, so change reporting is local.
             self.value = !self.value;
             res |= ResourceState::CHANGE;
@@ -59,10 +59,10 @@ impl Checkbox {
     }
 
     /// Paints the checkbox square, check mark, and label.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
         let bounds = ctx.screen_rect();
         let box_rect = rect(bounds.x, bounds.y, bounds.height, bounds.height);
-        ctx.draw_widget_frame(control, box_rect, ControlColor::Base, self.config.opt);
+        ctx.draw_widget_frame(box_rect, ControlColor::Base, self.config.opt);
         if self.value {
             let color = ctx.style().colors[ControlColor::Text as usize];
             ctx.draw_icon(CHECK_ICON, box_rect, color);
@@ -88,11 +88,11 @@ impl Widget for Checkbox {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        self.update_widget(ctx, control)
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+        self.update_widget(ctx)
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        self.paint_widget(ctx, control);
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+        self.paint_widget(ctx);
     }
 }

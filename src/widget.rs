@@ -60,7 +60,7 @@ use rs_math3d::Dimensioni;
 use crate::atlas::{AtlasHandle, EXPAND_DOWN_ICON};
 use crate::context::RootId;
 use crate::id::Id;
-use crate::input::{ControlState, ResourceState, ScrollBehavior, WidgetOption};
+use crate::input::{ResourceState, ScrollBehavior, WidgetOption};
 use crate::style::Style;
 pub use crate::widget_ctx::WidgetCtx;
 
@@ -111,9 +111,9 @@ pub trait Widget {
     /// Values less than or equal to zero are treated as "use layout defaults" for that axis.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     /// Updates retained widget state for the current frame and returns its interaction result.
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState;
     /// Records paint commands for the current frame.
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState);
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>);
     /// Returns the effective widget options used by generic dispatch.
     ///
     /// Widgets can override this to apply dynamic option adjustments.
@@ -352,9 +352,9 @@ impl Widget for (WidgetOption, ScrollBehavior) {
         Dimensioni::new(width, height)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetCtx<'_>) -> ResourceState {
         ResourceState::NONE
     }
 
-    fn paint(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) {}
+    fn paint(&mut self, _ctx: &mut WidgetCtx<'_>) {}
 }

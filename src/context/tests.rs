@@ -8,8 +8,8 @@ use std::{
 use super::*;
 use crate::{
     test_support::{test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer},
-    widget_handle, AtlasHandle, Button, Combo, ControlState, ListItem, NodeId, NodeOptions, Policy, ResourceState, RetainedId, SizePolicy, StackDirection,
-    TextBlock, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
+    widget_handle, AtlasHandle, Button, Combo, ListItem, NodeId, NodeOptions, Policy, ResourceState, RetainedId, SizePolicy, StackDirection, TextBlock, Widget,
+    WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
@@ -73,11 +73,11 @@ impl Widget for AlwaysSubmitWidget {
         Dimensioni::new((self.label.len() as i32 * 8).max(8), 12)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetCtx<'_>) -> ResourceState {
         ResourceState::SUBMIT
     }
 
-    fn paint(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) {}
+    fn paint(&mut self, _ctx: &mut WidgetCtx<'_>) {}
 }
 
 #[test]

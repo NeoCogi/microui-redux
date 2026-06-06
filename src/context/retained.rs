@@ -59,7 +59,7 @@ use rs_math3d::Dimensioni;
 use crate::{
     atlas::AtlasHandle,
     id::Id,
-    input::{ControlState, ResourceState, ScrollBehavior, WidgetOption},
+    input::{ResourceState, ScrollBehavior, WidgetOption},
     style::Style,
     widget::{FocusPolicy, Widget},
     widget_ctx::WidgetCtx,
@@ -150,9 +150,9 @@ pub(crate) trait WidgetStateHandleDyn {
     /// Measures the widget without mutating it.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     /// Updates the widget through interior mutability.
-    fn update(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState;
+    fn update(&self, ctx: &mut WidgetCtx<'_>) -> ResourceState;
     /// Paints the widget through interior mutability.
-    fn paint(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState);
+    fn paint(&self, ctx: &mut WidgetCtx<'_>);
 }
 
 /// Concrete erased adapter around a strongly typed widget handle.
@@ -163,9 +163,7 @@ struct WidgetStateHandle<W: Widget + 'static> {
 
 impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
     fn clone_box(&self) -> Box<dyn WidgetStateHandleDyn> {
-        Box::new(Self {
-            handle: self.handle.clone(),
-        })
+        Box::new(Self { handle: self.handle.clone() })
     }
 
     fn widget_handle_id(&self) -> Id {
@@ -188,14 +186,14 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
         self.handle.read(|widget| widget.measure(style, atlas, avail))
     }
 
-    fn update(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         // Borrow only for the duration of dispatch so later result recording cannot hold state.
-        self.handle.update(|widget| widget.update(ctx, control))
+        self.handle.update(|widget| widget.update(ctx))
     }
 
-    fn paint(&self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+    fn paint(&self, ctx: &mut WidgetCtx<'_>) {
         // Paint may mutate retained widget state for caches such as text layout.
-        self.handle.update(|widget| widget.paint(ctx, control));
+        self.handle.update(|widget| widget.paint(ctx));
     }
 }
 

@@ -355,7 +355,11 @@ impl UiRuntime {
             node.content_size = previous_node.content_size;
             node.visible = previous_node.visible;
             node.enabled = previous_node.enabled;
-            node.control = previous_node.control;
+            node.hovered = previous_node.hovered;
+            node.focused = previous_node.focused;
+            node.clicked = previous_node.clicked;
+            node.active = previous_node.active;
+            node.scroll_delta = previous_node.scroll_delta;
             let (UiNodeData::Leaf { behavior } | UiNodeData::Branch { behavior, .. }) = &mut node.data;
             let (UiNodeData::Leaf { behavior: previous_behavior } | UiNodeData::Branch { behavior: previous_behavior, .. }) = &previous_node.data;
             behavior.transfer_runtime_state_from(previous_behavior.as_ref());
@@ -553,8 +557,8 @@ impl UiRuntime {
         }
     }
 
-    /// Computes control state from node geometry and shared input.
-    pub(super) fn control_for(
+    /// Computes interaction state from node geometry and shared input.
+    pub(super) fn interaction_for(
         &mut self,
         id: UiNodeId,
         rect: Recti,
@@ -562,9 +566,9 @@ impl UiRuntime {
         opt: WidgetOption,
         scroll_behavior: ScrollBehavior,
         focus_policy: FocusPolicy,
-    ) -> ControlState {
+    ) -> (bool, bool, bool, bool, Option<Vec2i>) {
         if opt.intersects(WidgetOption::NO_INTERACT) {
-            return ControlState::default();
+            return (false, false, false, false, None);
         }
 
         let clip = self.nodes.get(&id).map(|node| node.clip).unwrap_or(UNCLIPPED_RECT);
@@ -602,74 +606,18 @@ impl UiRuntime {
         } else {
             None
         };
-        ControlState {
-            hovered,
-            focused,
-            clicked,
-            active,
-            scroll_delta,
-        }
+        (hovered, focused, clicked, active, scroll_delta)
     }
 
     /// Routes pre-update input events to the deepest eligible owner below the root.
     pub(super) fn route_input_events(&mut self, style: &Style, input: &Input) -> bool {
         let mut consumed = false;
         if self.hover_root_active || self.capture.is_some() {
-            if !input.mouse_pressed.is_empty() {
-                let event = UiInputEvent::MouseDown {
-                    pos: input.mouse_pos,
-                    button: input.mouse_pressed,
-                };
-                consumed |= self.route_input_event(style, input, &event);
-            }
-            if !input.mouse_released.is_empty() {
-                let event = UiInputEvent::MouseUp {
-                    pos: input.mouse_pos,
-                    button: input.mouse_released,
-                };
-                consumed |= self.route_input_event(style, input, &event);
-            }
-            if input.mouse_delta.x != 0 || input.mouse_delta.y != 0 {
-                let event = if input.mouse_down.is_empty() {
-                    UiInputEvent::MouseMove {
-                        pos: input.mouse_pos,
-                        delta: input.mouse_delta,
-                    }
-                } else {
-                    UiInputEvent::MouseDrag {
-                        pos: input.mouse_pos,
-                        delta: input.mouse_delta,
-                        buttons: input.mouse_down,
-                    }
-                };
-                consumed |= self.route_input_event(style, input, &event);
-            }
-            if input.scroll_delta.x != 0 || input.scroll_delta.y != 0 {
-                let event = UiInputEvent::Scroll {
-                    pos: input.mouse_pos,
-                    delta: input.scroll_delta,
-                };
+            for event in pointer_events_from_input(input) {
                 consumed |= self.route_input_event(style, input, &event);
             }
         }
-        if !input.key_pressed.is_empty() {
-            let event = UiInputEvent::KeyDown { key: input.key_pressed };
-            consumed |= self.route_input_event(style, input, &event);
-        }
-        if !input.key_released.is_empty() {
-            let event = UiInputEvent::KeyUp { key: input.key_released };
-            consumed |= self.route_input_event(style, input, &event);
-        }
-        if !input.key_code_pressed.is_empty() {
-            let event = UiInputEvent::KeyCodeDown { code: input.key_code_pressed };
-            consumed |= self.route_input_event(style, input, &event);
-        }
-        if !input.key_code_released.is_empty() {
-            let event = UiInputEvent::KeyCodeUp { code: input.key_code_released };
-            consumed |= self.route_input_event(style, input, &event);
-        }
-        if !input.input_text.is_empty() {
-            let event = UiInputEvent::Text { text: input.input_text.clone() };
+        for event in focus_events_from_input(input) {
             consumed |= self.route_input_event(style, input, &event);
         }
         consumed

@@ -61,7 +61,7 @@ use crate::canvas::Vertex;
 use crate::render_command::Command;
 use crate::draw_context::DrawCtx;
 use crate::graphics::Graphics;
-use crate::input::{ControlColor, ControlState, KeyCode, KeyMode, MouseButton, WidgetOption};
+use crate::input::{ControlColor, KeyCode, KeyMode, MouseButton, WidgetOption};
 use crate::ui_node::UiInputEvent;
 use crate::style::{Color, Image, Style};
 use crate::widget::RetainedId;
@@ -80,13 +80,23 @@ pub struct WidgetCtx<'a> {
     updated_focus: &'a mut bool,
     /// Whether this widget is inside the current hover root.
     in_hover_root: bool,
+    /// Whether the routed pointer is currently over this widget.
+    hovered: bool,
+    /// Whether this widget currently owns focus.
+    focused: bool,
+    /// Whether this widget received the current click transition.
+    clicked: bool,
+    /// Whether this widget is in an active pointer interaction.
+    active: bool,
+    /// Scroll delta routed to this widget for this frame.
+    scroll_delta: Option<Vec2i>,
     /// Ranged input events delivered by retained node routing.
     events: Vec<UiInputEvent>,
 }
 
 impl<'a> WidgetCtx<'a> {
     /// Converts routed events from container coordinates into widget-local coordinates.
-    fn localize_events(rect: Recti, events: Vec<UiInputEvent>) -> Vec<UiInputEvent> {
+    pub(crate) fn localize_events(rect: Recti, events: Vec<UiInputEvent>) -> Vec<UiInputEvent> {
         let origin = Vec2i::new(rect.x, rect.y);
         events
             .into_iter()
@@ -123,6 +133,11 @@ impl<'a> WidgetCtx<'a> {
         focus: &'a mut Option<RetainedId>,
         updated_focus: &'a mut bool,
         in_hover_root: bool,
+        hovered: bool,
+        focused: bool,
+        clicked: bool,
+        active: bool,
+        scroll_delta: Option<Vec2i>,
         events: Vec<UiInputEvent>,
     ) -> Self {
         Self {
@@ -132,6 +147,11 @@ impl<'a> WidgetCtx<'a> {
             focus,
             updated_focus,
             in_hover_root,
+            hovered,
+            focused,
+            clicked,
+            active,
+            scroll_delta,
             events: Self::localize_events(rect, events),
         }
     }
@@ -244,6 +264,31 @@ impl<'a> WidgetCtx<'a> {
             }
         }
         text
+    }
+
+    /// Returns whether the pointer is currently over this widget.
+    pub fn hovered(&self) -> bool {
+        self.hovered
+    }
+
+    /// Returns whether this widget currently owns focus.
+    pub fn focused(&self) -> bool {
+        self.focused
+    }
+
+    /// Returns whether this widget received the current click transition.
+    pub fn clicked(&self) -> bool {
+        self.clicked
+    }
+
+    /// Returns whether this widget is in an active pointer interaction.
+    pub fn active(&self) -> bool {
+        self.active
+    }
+
+    /// Returns scroll delta routed to this widget for this frame.
+    pub fn scroll_delta(&self) -> Option<Vec2i> {
+        self.scroll_delta
     }
 
     /// Sets focus to this widget for the current frame.
@@ -366,10 +411,12 @@ impl<'a> WidgetCtx<'a> {
     }
 
     /// Draws a control frame with hover/focus color adjustment.
-    pub(crate) fn draw_widget_frame(&mut self, control: &ControlState, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+    pub(crate) fn draw_widget_frame(&mut self, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let rect = self.local_rect_for(rect);
+        let focused = self.focused;
+        let hovered = self.hovered;
         let mut graphics = self.begin_widget_paint();
-        graphics.draw_widget_frame(control.focused, control.hovered, rect, colorid, opt);
+        graphics.draw_widget_frame(focused, hovered, rect, colorid, opt);
     }
 
     /// Draws aligned control text with an explicit font.

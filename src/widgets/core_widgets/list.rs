@@ -71,17 +71,17 @@ impl ListItem {
     }
 
     /// List items submit on click and otherwise keep no local transient state.
-    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        submit_on_click(control)
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+        submit_on_click(ctx)
     }
 
     /// Paints row highlight, optional icon, and label.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
         let bounds = ctx.screen_rect();
 
-        if control.focused || control.hovered {
+        if ctx.focused() || ctx.hovered() {
             let mut color = ControlColor::Button;
-            if control.focused {
+            if ctx.focused() {
                 color.focus();
             } else {
                 color.hover();
@@ -151,15 +151,15 @@ impl ListBox {
     }
 
     /// List boxes submit on click and otherwise keep no local transient state.
-    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        submit_on_click(control)
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+        submit_on_click(ctx)
     }
 
     /// Paints list-box frame, label, and optional image.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
         let rect = ctx.screen_rect();
         if !self.config.opt.intersects(WidgetOption::NO_FRAME) {
-            if let Some(colorid) = widget_fill_color(control, ControlColor::Button, WidgetFillOption::HOVER | WidgetFillOption::CLICK) {
+            if let Some(colorid) = widget_fill_color(ctx, ControlColor::Button, WidgetFillOption::HOVER | WidgetFillOption::CLICK) {
                 ctx.draw_frame(rect, colorid);
             }
         }

@@ -128,21 +128,21 @@ impl Combo {
     }
 
     /// Updates popup open state and reports submit/active transitions.
-    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         let mut res = ResourceState::NONE;
         if self.clamped {
             res |= ResourceState::CHANGE;
             self.clamped = false;
         }
 
-        if control.clicked {
+        if ctx.clicked() {
             // Clicking the header toggles the popup; closing clears popup-local focus.
             self.open = !self.open;
             if !self.open {
                 self.close_popup();
             }
         }
-        if control.clicked {
+        if ctx.clicked() {
             res |= ResourceState::SUBMIT | ResourceState::ACTIVE;
         }
         if self.open {
@@ -152,10 +152,10 @@ impl Combo {
     }
 
     /// Paints the combo header and records the popup anchor below it.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
         let header = ctx.screen_rect();
         self.last_anchor = rect(header.x, header.y + header.height, header.width, 1);
-        ctx.draw_widget_frame(control, header, ControlColor::Button, self.config.opt);
+        ctx.draw_widget_frame(header, ControlColor::Button, self.config.opt);
 
         let indicator_size = ctx.atlas().get_icon_size(EXPAND_DOWN_ICON);
         let indicator_x = header.x + header.width - indicator_size.width;
@@ -168,7 +168,7 @@ impl Combo {
         let font = ctx.style().resolve_font_choice(self.config.font);
         ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, ControlColor::Text, self.config.opt);
 
-        ctx.draw_widget_frame(control, indicator, ControlColor::Button, self.config.opt);
+        ctx.draw_widget_frame(indicator, ControlColor::Button, self.config.opt);
         let icon_color = ctx.style().colors[ControlColor::Text as usize];
         ctx.draw_icon(EXPAND_DOWN_ICON, indicator, icon_color);
     }
@@ -187,11 +187,11 @@ impl Widget for Combo {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        self.update_widget(ctx, control)
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+        self.update_widget(ctx)
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        self.paint_widget(ctx, control);
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+        self.paint_widget(ctx);
     }
 }

@@ -76,13 +76,18 @@ impl View3D {
         norm_pos
     }
 
-    pub fn update(&mut self, event: MouseEvent) -> UpdateResult {
+    fn refresh_projection(&mut self) {
         // TODO: do proper computation of the far plane
         let far_plane = self.bounds.extent().length() * 100.0;
         self.camera = self.camera.with_far_plane(far_plane);
+        self.pvm = self.camera.projection_matrix().clone() * self.camera.view_matrix().clone();
+    }
 
-        let handled = match (&self.nav_mode, event) {
-            (NavigationMode::Orbit, MouseEvent::Drag { prev_pos: prev, curr_pos: curr }) => {
+    pub fn update_drag(&mut self, prev: Vec2i, curr: Vec2i) -> UpdateResult {
+        self.refresh_projection();
+
+        let handled = match self.nav_mode {
+            NavigationMode::Orbit => {
                 let p = self.normalize_pointer_pos(&prev);
                 let c = self.normalize_pointer_pos(&curr);
 
@@ -90,14 +95,12 @@ impl View3D {
                 UpdateResult::Handled
             }
 
-            (NavigationMode::Pan, MouseEvent::Drag { prev_pos: prev, curr_pos: curr }) => {
+            NavigationMode::Pan => {
                 let p = Vec2f::new(prev.x as _, prev.y as _);
                 let c = Vec2f::new(curr.x as _, curr.y as _);
                 self.camera = self.camera.pan(self.dimension, &p, &c);
                 UpdateResult::Handled
             }
-
-            _ => UpdateResult::Unhandled,
         };
 
         self.pvm = self.camera.projection_matrix().clone() * self.camera.view_matrix().clone();
@@ -126,7 +129,7 @@ impl View3D {
         self.dimension = dimension;
         let aspect = (self.dimension.width as f32) / (self.dimension.height as f32);
         self.camera = self.camera.with_aspect(aspect);
-        self.update(MouseEvent::None);
+        self.refresh_projection();
     }
 
     pub fn get_navigation_mode(&self) -> NavigationMode {
@@ -135,7 +138,7 @@ impl View3D {
     pub fn set_navigation_mode(&mut self, nav_mode: NavigationMode) {
         if nav_mode != self.nav_mode {
             self.nav_mode = nav_mode;
-            self.update(MouseEvent::None); // idem potent in this case
+            self.refresh_projection();
         }
     }
 

@@ -4,7 +4,15 @@ use super::*;
 use crate::test_support::test_atlas as make_test_atlas;
 use crate::ui_node::UiInputEvent;
 
-fn run_slider_once(slider: &mut Slider, rect: Recti, events: Vec<UiInputEvent>, control: ControlState) -> ResourceState {
+fn run_slider_once(
+    slider: &mut Slider,
+    rect: Recti,
+    events: Vec<UiInputEvent>,
+    hovered: bool,
+    focused: bool,
+    active: bool,
+    scroll_delta: Option<Vec2i>,
+) -> ResourceState {
     let atlas = make_test_atlas();
     let style = Style::default();
     let mut commands = Vec::new();
@@ -23,9 +31,14 @@ fn run_slider_once(slider: &mut Slider, rect: Recti, events: Vec<UiInputEvent>, 
         &mut focus,
         &mut updated_focus,
         true,
+        hovered,
+        focused,
+        false,
+        active,
+        scroll_delta,
         events,
     );
-    slider.update(&mut ctx, &control)
+    slider.update(&mut ctx)
 }
 
 fn assert_real_close(actual: Real, expected: Real) {
@@ -60,17 +73,15 @@ fn slider_zero_range_keeps_value() {
         &mut focus,
         &mut updated_focus,
         true,
+        true,
+        true,
+        false,
+        true,
+        None,
         input,
     );
-    let control = ControlState {
-        hovered: true,
-        focused: true,
-        clicked: false,
-        active: true,
-        scroll_delta: None,
-    };
 
-    let res = slider.update(&mut ctx, &control);
+    let res = slider.update(&mut ctx);
 
     assert!(res.is_active());
     assert!(slider.value.is_finite());
@@ -81,15 +92,7 @@ fn slider_zero_range_keeps_value() {
 #[test]
 fn slider_wheel_snaps_fractional_step_from_lower_bound() {
     let mut slider = Slider::with_opt(1.15, 1.0, 2.0, 0.2, 2, WidgetOption::NONE);
-    let control = ControlState {
-        hovered: true,
-        focused: false,
-        clicked: false,
-        active: false,
-        scroll_delta: Some(vec2(0, 1)),
-    };
-
-    let res = run_slider_once(&mut slider, rect(0, 0, 100, 20), Vec::new(), control);
+    let res = run_slider_once(&mut slider, rect(0, 0, 100, 20), Vec::new(), true, false, false, Some(vec2(0, 1)));
 
     assert!(res.is_changed());
     assert_real_close(slider.value, 1.4);
@@ -103,15 +106,7 @@ fn slider_drag_snaps_fractional_step_from_lower_bound() {
         delta: Vec2i::default(),
         buttons: MouseButton::LEFT,
     }];
-    let control = ControlState {
-        hovered: true,
-        focused: true,
-        clicked: false,
-        active: true,
-        scroll_delta: None,
-    };
-
-    let res = run_slider_once(&mut slider, rect(0, 0, 100, 20), input, control);
+    let res = run_slider_once(&mut slider, rect(0, 0, 100, 20), input, true, true, true, None);
 
     assert!(res.is_changed());
     assert_real_close(slider.value, 13.25);
@@ -145,17 +140,15 @@ fn slider_uses_widget_local_mouse_position() {
         &mut focus,
         &mut updated_focus,
         true,
+        true,
+        true,
+        false,
+        true,
+        None,
         input,
     );
-    let control = ControlState {
-        hovered: true,
-        focused: true,
-        clicked: false,
-        active: true,
-        scroll_delta: None,
-    };
 
-    let res = slider.update(&mut ctx, &control);
+    let res = slider.update(&mut ctx);
 
     assert!(!res.is_none());
     assert_eq!(slider.value, 50.0);

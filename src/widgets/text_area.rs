@@ -190,15 +190,15 @@ impl TextArea {
     }
 
     /// Applies multiline editing, scrolling, and scrollbar dragging.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         let font = ctx.style().resolve_font_choice(self.config.font);
-        textarea_update(ctx, control, self, font)
+        textarea_update(ctx, self, font)
     }
 
     /// Paints the multiline editor and scrollbars.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
         let font = ctx.style().resolve_font_choice(self.config.font);
-        textarea_paint(ctx, control, self, font);
+        textarea_paint(ctx, self, font);
     }
 }
 
@@ -313,9 +313,9 @@ fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextA
 }
 
 /// Updates text-area buffer, cursor, scroll position, and scrollbar drag state.
-fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea, font: FontId) -> ResourceState {
+fn textarea_update(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) -> ResourceState {
     let mut res = ResourceState::NONE;
-    if !control.focused {
+    if !ctx.focused() {
         // Blurred text areas park the cursor at the end and forget vertical cursor preference.
         state.cursor = state.buf.len();
         state.preferred_x = None;
@@ -327,7 +327,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     let mut vertical_moved = false;
     let mut preferred_x = state.preferred_x;
 
-    if control.focused {
+    if ctx.focused() {
         let text_input = ctx.text_input();
         let edit = apply_text_input(
             &mut state.buf,
@@ -356,7 +356,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
 
     let layout = textarea_layout(ctx, state, font);
 
-    if let Some(delta) = control.scroll_delta {
+    if let Some(delta) = ctx.scroll_delta() {
         // Wheel/trackpad scrolling only affects axes that actually overflow.
         if layout.maxscroll_y > 0 {
             state.scroll.y += delta.y;
@@ -409,7 +409,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
     let mut cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
     let mut caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
-    if control.focused {
+    if ctx.focused() {
         if ctx.key_code_pressed().intersects(KeyCode::END) {
             cursor_pos = layout.lines[cursor_line].end;
             caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
@@ -442,7 +442,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
         }
     }
 
-    if control.focused && ctx.mouse_pressed().intersects(MouseButton::LEFT) && ctx.mouse_over(layout.bounds) && !clicked_scrollbar {
+    if ctx.focused() && ctx.mouse_pressed().intersects(MouseButton::LEFT) && ctx.mouse_over(layout.bounds) && !clicked_scrollbar {
         // Convert a widget-local click to content-local coordinates before resolving cursor.
         let mouse_pos = ctx.mouse_pos();
         let local_x = mouse_pos.x - (layout.body_local.x + layout.padding) + state.scroll.x;
@@ -493,13 +493,13 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut 
 }
 
 /// Paints text-area frame, visible text lines, caret, and scrollbars.
-fn textarea_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut TextArea, font: FontId) {
+fn textarea_paint(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) {
     let layout = textarea_layout(ctx, state, font);
     let cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
     let cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
     let caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
-    ctx.draw_widget_frame(control, layout.bounds, ControlColor::Base, state.config.opt);
+    ctx.draw_widget_frame(layout.bounds, ControlColor::Base, state.config.opt);
 
     let text_origin = vec2(layout.body.x + layout.padding - state.scroll.x, layout.body.y + layout.padding - state.scroll.y);
     let color = ctx.style().colors[ControlColor::Text as usize];
@@ -517,7 +517,7 @@ fn textarea_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, state: &mut T
         }
     }
 
-    if control.focused {
+    if ctx.focused() {
         let caret_line_top = text_origin.y + cursor_line as i32 * layout.metrics.line_height;
         let baseline_y = caret_line_top + layout.metrics.baseline;
         ctx.draw_rect(caret_rect(text_origin.x + caret_x, baseline_y, layout.metrics, layout.body), color);
@@ -564,14 +564,14 @@ impl Widget for TextArea {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         let old_buf = self.buf.clone();
         let old_cursor = self.cursor;
         let old_scroll = self.scroll;
         let old_preferred_x = self.preferred_x;
         let old_dragging_y = self.dragging_y;
         let old_dragging_x = self.dragging_x;
-        let mut res = self.update_widget(ctx, control);
+        let mut res = self.update_widget(ctx);
         let scroll_changed = self.scroll.x != old_scroll.x || self.scroll.y != old_scroll.y;
         let changed = self.buf != old_buf
             || self.cursor != old_cursor
@@ -579,14 +579,14 @@ impl Widget for TextArea {
             || self.preferred_x != old_preferred_x
             || self.dragging_y != old_dragging_y
             || self.dragging_x != old_dragging_x;
-        if control.focused || changed {
+        if ctx.focused() || changed {
             res |= ResourceState::ACTIVE;
         }
         res
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        self.paint_widget(ctx, control);
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+        self.paint_widget(ctx);
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {

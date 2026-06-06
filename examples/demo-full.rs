@@ -142,7 +142,7 @@ impl Widget for GraphicsDemo {
         Dimensioni::new(240, 200)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         let bounds = ctx.local_rect();
         let local_width = bounds.width.max(0) as f32;
         let local_height = bounds.height.max(0) as f32;
@@ -154,7 +154,7 @@ impl Widget for GraphicsDemo {
         ResourceState::NONE
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
         let bounds = ctx.local_rect();
         let local_width = bounds.width.max(0) as f32;
         let local_height = bounds.height.max(0) as f32;
@@ -167,7 +167,7 @@ impl Widget for GraphicsDemo {
             local_width * 0.5 + self.phase.cos() * (local_width * 0.16),
             local_height * 0.5 + self.phase.sin() * (local_height * 0.12),
         );
-        let star_center = if control.hovered {
+        let star_center = if ctx.hovered() {
             let mouse_pos = ctx.mouse_pos();
             Vec2f::new(mouse_pos.x as f32, mouse_pos.y as f32)
         } else {
@@ -529,7 +529,7 @@ impl Widget for FalloffEditor {
         Dimensioni::new(300, 220)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         let bounds = ctx.local_rect();
         let graph = Self::graph_rect(bounds);
         if graph.width <= 0 || graph.height <= 0 {
@@ -538,26 +538,26 @@ impl Widget for FalloffEditor {
 
         let mut changed = false;
 
-        if !control.focused && !control.active {
+        if !ctx.focused() && !ctx.active() {
             self.active = None;
         }
 
         let mouse_pos = ctx.mouse_pos();
         let mouse_local = Vec2f::new(mouse_pos.x as f32, mouse_pos.y as f32);
-        self.hovered = if control.hovered { self.pick_target(graph, mouse_local) } else { None };
+        self.hovered = if ctx.hovered() { self.pick_target(graph, mouse_local) } else { None };
 
-        if control.clicked {
+        if ctx.clicked() {
             self.active = if graph.contains(&Vec2i::new(mouse_local.x as i32, mouse_local.y as i32)) {
                 self.pick_target(graph, mouse_local)
             } else {
                 None
             };
-        } else if !control.active {
+        } else if !ctx.active() {
             self.active = None;
         }
 
         let mouse_delta = ctx.mouse_delta();
-        if control.active && (mouse_delta.x != 0 || mouse_delta.y != 0) {
+        if ctx.active() && (mouse_delta.x != 0 || mouse_delta.y != 0) {
             if let Some(target) = self.active {
                 let point = Self::local_to_graph(graph, mouse_local);
                 self.drag_target(target, point);
@@ -578,7 +578,7 @@ impl Widget for FalloffEditor {
         }
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) {
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
         let bounds = ctx.local_rect();
         let graph = Self::graph_rect(bounds);
         if graph.width <= 0 || graph.height <= 0 {
@@ -1292,14 +1292,23 @@ impl State {
                     }
                     if let Ok(mut suzanne) = suzanne_data.write() {
                         suzanne.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
-                        let _ = suzanne.view_3d.update(cra.mouse_event);
+                        let mut handled_drag = false;
+                        for event in &cra.input_events {
+                            if let UiInputEvent::MouseDrag { pos, delta, buttons } = event {
+                                if buttons.intersects(MouseButton::LEFT) {
+                                    let prev = Vec2i::new(pos.x - delta.x, pos.y - delta.y);
+                                    let _ = suzanne.view_3d.update_drag(prev, *pos);
+                                    handled_drag = true;
+                                }
+                            }
+                        }
                         if let Some(delta) = cra.scroll_delta {
                             let axis = if delta.y != 0 { delta.y } else { delta.x };
                             if axis != 0 {
                                 suzanne.view_3d.apply_scroll(axis as f32);
                             }
                         }
-                        if !matches!(cra.mouse_event, MouseEvent::Drag { .. }) && cra.scroll_delta.is_none() {
+                        if !handled_drag && cra.scroll_delta.is_none() {
                             let step = 20;
                             let mut delta = Vec2i::new(0, 0);
                             if cra.key_codes.intersects(KeyCode::LEFT) {
@@ -1317,7 +1326,7 @@ impl State {
                             if delta.x != 0 || delta.y != 0 {
                                 let center = Vec2i::new(cra.content_area.width / 2, cra.content_area.height / 2);
                                 let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
-                                suzanne.view_3d.update(MouseEvent::Drag { prev_pos: center, curr_pos: curr });
+                                suzanne.view_3d.update_drag(center, curr);
                             }
                             for ch in cra.text_input.chars() {
                                 match ch {

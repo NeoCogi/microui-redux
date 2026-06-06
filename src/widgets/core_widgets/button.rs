@@ -124,15 +124,15 @@ impl Button {
     }
 
     /// Buttons submit on click and do not keep extra transient state.
-    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
-        submit_on_click(control)
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+        submit_on_click(ctx)
     }
 
     /// Paints the button frame, text, and optional visual payload.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
         let rect = ctx.screen_rect();
         if !self.config.opt.intersects(WidgetOption::NO_FRAME) {
-            if let Some(colorid) = widget_fill_color(control, ControlColor::Button, self.fill) {
+            if let Some(colorid) = widget_fill_color(ctx, ControlColor::Button, self.fill) {
                 ctx.draw_frame(rect, colorid);
             }
         }

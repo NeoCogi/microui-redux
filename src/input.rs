@@ -50,41 +50,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Input snapshots, control flags, and option bitfields shared across widgets.
+//! Raw input state, routed pointer events, and option bitfields shared across widgets.
 
 use bitflags::bitflags;
 use rs_math3d::Vec2i;
-
-/// Tracks input button transitions seen since the previous frame.
-#[derive(Debug, Copy, Clone)]
-pub enum InputButtonState {
-    /// No interaction was registered.
-    None,
-    /// The button was pressed this frame, storing the press timestamp.
-    Pressed(f32),
-    /// The button was released this frame.
-    Released,
-    /// The scroll wheel moved by the given amount.
-    Scroll(f32),
-}
-
-#[derive(Debug, Copy, Clone)]
-/// Records the latest pointer interaction that occurred over a widget.
-pub enum MouseEvent {
-    /// No pointer activity occurred.
-    None,
-    /// The pointer clicked at the given pixel position.
-    Click(Vec2i),
-    /// The pointer is being dragged between two positions.
-    Drag {
-        /// Position where the drag originated.
-        prev_pos: Vec2i,
-        /// Current drag position.
-        curr_pos: Vec2i,
-    },
-    /// The pointer moved to a new coordinate without interacting.
-    Move(Vec2i),
-}
 
 #[derive(PartialEq, Copy, Clone)]
 #[repr(u32)]
@@ -272,21 +241,6 @@ impl ScrollBehavior {
     }
 }
 
-#[derive(Copy, Clone, Default, Debug)]
-/// Captures the interaction state for a widget during the current frame.
-pub struct ControlState {
-    /// Cursor is hovering the widget.
-    pub hovered: bool,
-    /// Widget currently owns focus.
-    pub focused: bool,
-    /// Mouse was pressed on the widget this frame.
-    pub clicked: bool,
-    /// Mouse is held down while the widget is focused.
-    pub active: bool,
-    /// Scroll delta consumed by this widget, if any.
-    pub scroll_delta: Option<Vec2i>,
-}
-
 bitflags! {
     #[derive(Copy, Clone, Debug)]
     /// Mouse button state as reported by the input system.
@@ -355,8 +309,6 @@ pub struct Input {
     pub(crate) mouse_delta: Vec2i,
     /// Accumulated scroll wheel/trackpad delta for the frame.
     pub(crate) scroll_delta: Vec2i,
-    /// Mouse position relative to the currently focused container body.
-    pub(crate) rel_mouse_pos: Vec2i,
     /// Mouse buttons currently held.
     pub(crate) mouse_down: MouseButton,
     /// Mouse buttons pressed during the current frame.
@@ -385,7 +337,6 @@ impl Default for Input {
             mouse_pos: Vec2i::default(),
             last_mouse_pos: Vec2i::default(),
             mouse_delta: Vec2i::default(),
-            rel_mouse_pos: Vec2i::default(),
             scroll_delta: Vec2i::default(),
             mouse_down: MouseButton::NONE,
             mouse_pressed: MouseButton::NONE,
@@ -402,11 +353,6 @@ impl Default for Input {
 }
 
 impl Input {
-    /// Returns the mouse position relative to the container that currently owns focus.
-    pub fn rel_mouse_pos(&self) -> Vec2i {
-        self.rel_mouse_pos
-    }
-
     /// Returns the state of all modifier keys.
     pub fn key_state(&self) -> KeyMode {
         self.key_down

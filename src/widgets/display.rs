@@ -103,12 +103,12 @@ impl TextBlock {
     }
 
     /// Display text is non-interactive.
-    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>) -> ResourceState {
         ResourceState::NONE
     }
 
     /// Paints each measured display line with baseline alignment.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) {
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
         if self.text.is_empty() {
             return;
         }
@@ -172,12 +172,12 @@ impl ColorSwatch {
     }
 
     /// Color swatches are non-interactive.
-    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>) -> ResourceState {
         ResourceState::NONE
     }
 
     /// Paints the swatch fill, border, and optional label.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, _control: &ControlState) {
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
         let rect = ctx.screen_rect();
         ctx.draw_rect(rect, self.fill);
         let border = ctx.style().colors[ControlColor::Border as usize];

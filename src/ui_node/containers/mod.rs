@@ -5,7 +5,7 @@ use crate::context::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn
 use crate::{CustomRenderArgs, Dimensioni, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle, UNCLIPPED_RECT};
 
 use super::{
-    events_key_codes, events_key_mods, events_text, frame_events_from_input, input_to_mouse_event, measure_axis_available, resolve_allocated_size,
+    custom_render_events_from_input, events_key_codes, events_key_mods, events_text, frame_events_from_input, measure_axis_available, resolve_allocated_size,
     resolve_size, retained_focus_to_node, ClientArea, NodeCustomRenderCommand, UiNode, UiNodeId, UiRuntime, WidgetCtx,
 };
 use crate::render_command::Command;
@@ -156,7 +156,7 @@ impl NodeBehavior for WidgetNode {
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, id: UiNodeId) -> bool {
         let rect = ctx.runtime.nodes.get(&id).map(|node| node.rect).unwrap_or_default();
-        let control = ctx.runtime.control_for(
+        let (hovered, focused, clicked, active, scroll_delta) = ctx.runtime.interaction_for(
             id,
             rect,
             ctx.input,
@@ -165,7 +165,11 @@ impl NodeBehavior for WidgetNode {
             self.widget.focus_policy(),
         );
         if let Some(node) = ctx.runtime.nodes.get_mut(&id) {
-            node.control = control;
+            node.hovered = hovered;
+            node.focused = focused;
+            node.clicked = clicked;
+            node.active = active;
+            node.scroll_delta = scroll_delta;
         }
 
         let mut focus_slot = ctx.runtime.focus.map(RetainedId::node);
@@ -183,9 +187,14 @@ impl NodeBehavior for WidgetNode {
             &mut focus_slot,
             &mut focus_seen,
             ctx.runtime.hover_root_active,
+            hovered,
+            focused,
+            clicked,
+            active,
+            scroll_delta,
             events,
         );
-        let result = self.widget.update(&mut widget_ctx, &control);
+        let result = self.widget.update(&mut widget_ctx);
         self.pending_events.clear();
         ctx.runtime.focus = retained_focus_to_node(focus_slot);
         ctx.runtime.updated_focus = focus_seen;
@@ -201,7 +210,12 @@ impl NodeBehavior for WidgetNode {
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, id: UiNodeId) -> bool {
         let rect = ctx.runtime.nodes.get(&id).map(|node| node.rect).unwrap_or_default();
-        let control = ctx.runtime.nodes.get(&id).map(|node| node.control).unwrap_or_default();
+        let (hovered, focused, clicked, active, scroll_delta) = ctx
+            .runtime
+            .nodes
+            .get(&id)
+            .map(|node| (node.hovered, node.focused, node.clicked, node.active, node.scroll_delta))
+            .unwrap_or((false, false, false, false, None));
         let mut focus_slot = ctx.runtime.focus.map(RetainedId::node);
         let mut focus_seen = ctx.runtime.updated_focus;
         let events = frame_events_from_input(ctx.input);
@@ -218,27 +232,32 @@ impl NodeBehavior for WidgetNode {
             &mut focus_slot,
             &mut focus_seen,
             true,
+            hovered,
+            focused,
+            clicked,
+            active,
+            scroll_delta,
             events,
         );
-        self.widget.paint(&mut widget_ctx, &control);
+        self.widget.paint(&mut widget_ctx);
         ctx.runtime.pop_node_clip();
         ctx.runtime.focus = retained_focus_to_node(focus_slot);
         ctx.runtime.updated_focus = focus_seen;
 
         if let Some(render) = self.custom_render.clone() {
-            let events = frame_events_from_input(ctx.input);
-            let active = control.focused;
+            let events = custom_render_events_from_input(ctx.input, focused);
+            let input_events = WidgetCtx::localize_events(rect, events.clone());
             let view = node_clip.intersect(&rect).unwrap_or_else(|| Recti::new(rect.x, rect.y, 0, 0));
             let cra = CustomRenderArgs {
                 content_area: rect,
                 view,
-                mouse_event: input_to_mouse_event(&control, &events, rect),
-                scroll_delta: control.scroll_delta,
+                input_events,
+                scroll_delta,
                 widget_opt: self.widget.effective_widget_opt(),
                 scroll_behavior: self.widget.effective_scroll_behavior(),
-                key_mods: if active { events_key_mods(&events) } else { KeyMode::NONE },
-                key_codes: if active { events_key_codes(&events) } else { KeyCode::NONE },
-                text_input: if active { events_text(&events) } else { String::new() },
+                key_mods: if focused { events_key_mods(&events) } else { KeyMode::NONE },
+                key_codes: if focused { events_key_codes(&events) } else { KeyCode::NONE },
+                text_input: if focused { events_text(&events) } else { String::new() },
             };
             ctx.runtime
                 .commands
@@ -268,7 +287,7 @@ impl NodeBehavior for WidgetNode {
 
 /// Input event routed to retained node behavior.
 #[derive(Clone, Debug)]
-pub(crate) enum UiInputEvent {
+pub enum UiInputEvent {
     /// Pointer moved without any mouse button held.
     MouseMove {
         /// Current pointer position in screen coordinates.
@@ -519,9 +538,13 @@ impl UpdateCtx<'_> {
         let opt = widget.effective_widget_opt();
         let scroll_behavior = widget.effective_scroll_behavior();
         let focus_policy = widget.focus_policy();
-        let control = self.runtime.control_for(id, rect, self.input, opt, scroll_behavior, focus_policy);
+        let (hovered, focused, clicked, active, scroll_delta) = self.runtime.interaction_for(id, rect, self.input, opt, scroll_behavior, focus_policy);
         if let Some(node) = self.runtime.nodes.get_mut(&id) {
-            node.control = control;
+            node.hovered = hovered;
+            node.focused = focused;
+            node.clicked = clicked;
+            node.active = active;
+            node.scroll_delta = scroll_delta;
         }
 
         let mut focus_slot = self.runtime.focus.map(RetainedId::node);
@@ -537,9 +560,14 @@ impl UpdateCtx<'_> {
             &mut focus_slot,
             &mut focus_seen,
             self.runtime.hover_root_active,
+            hovered,
+            focused,
+            clicked,
+            active,
+            scroll_delta,
             frame_events_from_input(self.input),
         );
-        let result = widget.update(&mut ctx, &control);
+        let result = widget.update(&mut ctx);
         self.runtime.focus = retained_focus_to_node(focus_slot);
         self.runtime.updated_focus = focus_seen;
 
@@ -582,10 +610,6 @@ impl PaintCtx<'_> {
         self.runtime.nodes.get(&id).map(|node| node.client)
     }
 
-    pub(crate) fn node_control(&self, id: UiNodeId) -> crate::input::ControlState {
-        self.runtime.nodes.get(&id).map(|node| node.control).unwrap_or_default()
-    }
-
     pub(crate) fn push_node_clip(&mut self, id: UiNodeId) {
         self.runtime.push_node_clip(id);
     }
@@ -607,7 +631,12 @@ impl PaintCtx<'_> {
 
     pub(crate) fn paint_container_widget(&mut self, id: UiNodeId, handle: WidgetHandle<Node>) {
         let rect = self.node_client(id).unwrap_or_default();
-        let control = self.node_control(id);
+        let (hovered, focused, clicked, active, scroll_delta) = self
+            .runtime
+            .nodes
+            .get(&id)
+            .map(|node| (node.hovered, node.focused, node.clicked, node.active, node.scroll_delta))
+            .unwrap_or((false, false, false, false, None));
         let widget = erased_widget_state(handle);
         let mut focus_slot = self.runtime.focus.map(RetainedId::node);
         let mut focus_seen = self.runtime.updated_focus;
@@ -623,9 +652,14 @@ impl PaintCtx<'_> {
             &mut focus_slot,
             &mut focus_seen,
             true,
+            hovered,
+            focused,
+            clicked,
+            active,
+            scroll_delta,
             frame_events_from_input(self.input),
         );
-        widget.paint(&mut ctx, &control);
+        widget.paint(&mut ctx);
         self.pop_node_clip();
         self.runtime.focus = retained_focus_to_node(focus_slot);
         self.runtime.updated_focus = focus_seen;

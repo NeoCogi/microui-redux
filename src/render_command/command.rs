@@ -63,8 +63,8 @@ pub struct CustomRenderArgs {
     pub content_area: Rect<i32>,
     /// Final clipped region that is visible.
     pub view: Rect<i32>,
-    /// Latest mouse interaction affecting the widget.
-    pub mouse_event: MouseEvent,
+    /// Routed input events affecting the custom render node, in content-local coordinates.
+    pub input_events: Vec<UiInputEvent>,
     /// Scroll delta consumed for this widget, if any.
     pub scroll_delta: Option<Vec2i>,
     /// Options provided when the widget was created.

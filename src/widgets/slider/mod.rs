@@ -89,8 +89,8 @@ fn number_preferred_size(
 }
 
 /// Keeps numeric widgets active while dragging, editing, or after local state changes.
-fn number_active_result(control: &ControlState, editing: bool, changed: bool) -> ResourceState {
-    if control.active || editing || changed {
+fn number_active_result(ctx: &WidgetCtx<'_>, editing: bool, changed: bool) -> ResourceState {
+    if ctx.active() || editing || changed {
         ResourceState::ACTIVE
     } else {
         ResourceState::NONE
@@ -175,17 +175,17 @@ impl Slider {
     }
 
     /// Updates slider value from shift-click text entry, scroll, or pointer drag.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         let mut res = ResourceState::NONE;
         let base = ctx.screen_rect();
         let last = self.value;
         let mut v = last;
         let font = ctx.style().resolve_font_choice(self.config.font);
-        if !number_textbox_update(ctx, control, &mut self.edit, self.precision, font, &mut v).is_none() {
+        if !number_textbox_update(ctx, &mut self.edit, self.precision, font, &mut v).is_none() {
             // While the text editor is active it owns state changes for this frame.
             return res;
         }
-        if let Some(delta) = control.scroll_delta {
+        if let Some(delta) = ctx.scroll_delta() {
             let range = self.high - self.low;
             if range != 0.0 {
                 let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
@@ -200,7 +200,7 @@ impl Slider {
             }
         }
         let range = self.high - self.low;
-        if control.focused && (!ctx.mouse_down().is_empty() || ctx.mouse_pressed().intersects(MouseButton::LEFT)) && base.width > 0 && range != 0.0 {
+        if ctx.focused() && (!ctx.mouse_down().is_empty() || ctx.mouse_pressed().intersects(MouseButton::LEFT)) && base.width > 0 && range != 0.0 {
             // Mouse x maps linearly across the slider track.
             v = self.low + ctx.mouse_pos().x as Real * range / base.width as Real;
             if self.step != 0. {
@@ -219,16 +219,16 @@ impl Slider {
     }
 
     /// Paints either the inline numeric editor or the slider track/thumb/value label.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
         let font = ctx.style().resolve_font_choice(self.config.font);
         if self.edit.editing {
-            number_textbox_paint(ctx, control, &self.edit, font);
+            number_textbox_paint(ctx, &self.edit, font);
             return;
         }
 
         let base = ctx.screen_rect();
         let range = self.high - self.low;
-        ctx.draw_widget_frame(control, base, ControlColor::Base, self.config.opt);
+        ctx.draw_widget_frame(base, ControlColor::Base, self.config.opt);
         let w = ctx.style().thumb_size;
         let available = (base.width - w).max(0);
         let x = if range != 0.0 && available > 0 {
@@ -237,7 +237,7 @@ impl Slider {
             0
         };
         let thumb = rect(base.x + x, base.y, w, base.height);
-        ctx.draw_widget_frame(control, thumb, ControlColor::Button, self.config.opt);
+        ctx.draw_widget_frame(thumb, ControlColor::Button, self.config.opt);
         let label = number_label(self.value, self.precision);
         ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.config.opt);
     }
@@ -265,15 +265,8 @@ fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
 }
 
 /// Runs the shared textbox editor for shift-click numeric input.
-fn number_textbox_update(
-    ctx: &mut WidgetCtx<'_>,
-    control: &ControlState,
-    edit: &mut NumberEditState,
-    precision: usize,
-    font: FontId,
-    value: &mut Real,
-) -> ResourceState {
-    let shift_click = { ctx.mouse_pressed().intersects(MouseButton::LEFT) && ctx.key_mods().intersects(KeyMode::SHIFT) && control.hovered };
+fn number_textbox_update(ctx: &mut WidgetCtx<'_>, edit: &mut NumberEditState, precision: usize, font: FontId, value: &mut Real) -> ResourceState {
+    let shift_click = { ctx.mouse_pressed().intersects(MouseButton::LEFT) && ctx.key_mods().intersects(KeyMode::SHIFT) && ctx.hovered() };
 
     if shift_click {
         // Enter edit mode by seeding the textbox with the current formatted value.
@@ -284,8 +277,8 @@ fn number_textbox_update(
     }
 
     if edit.editing {
-        let res = textbox_update(ctx, control, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE, font);
-        if res.is_submitted() || !control.focused {
+        let res = textbox_update(ctx, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE, font);
+        if res.is_submitted() || !ctx.focused() {
             if let Ok(v) = edit.buf.parse::<f32>() {
                 *value = v as Real;
             }
@@ -300,8 +293,8 @@ fn number_textbox_update(
 }
 
 /// Paints the shared textbox editor for a numeric widget.
-fn number_textbox_paint(ctx: &mut WidgetCtx<'_>, control: &ControlState, edit: &NumberEditState, font: FontId) {
-    textbox_paint(ctx, control, edit.buf.as_str(), edit.cursor, WidgetOption::NONE, font);
+fn number_textbox_paint(ctx: &mut WidgetCtx<'_>, edit: &NumberEditState, font: FontId) {
+    textbox_paint(ctx, edit.buf.as_str(), edit.cursor, WidgetOption::NONE, font);
 }
 
 impl Widget for Slider {
@@ -317,17 +310,17 @@ impl Widget for Slider {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         let old_value = self.value;
         let old_edit = self.edit.clone();
-        let mut res = self.update_widget(ctx, control);
+        let mut res = self.update_widget(ctx);
         let changed = self.value != old_value || self.edit != old_edit;
-        res |= number_active_result(control, self.edit.editing, changed);
+        res |= number_active_result(ctx, self.edit.editing, changed);
         res
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        self.paint_widget(ctx, control);
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+        self.paint_widget(ctx);
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
@@ -409,16 +402,16 @@ impl Number {
     }
 
     /// Updates number value from shift-click text entry or horizontal drag.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         let mut res = ResourceState::NONE;
         let last = self.value;
         let font = ctx.style().resolve_font_choice(self.config.font);
-        if !number_textbox_update(ctx, control, &mut self.edit, self.precision, font, &mut self.value).is_none() {
+        if !number_textbox_update(ctx, &mut self.edit, self.precision, font, &mut self.value).is_none() {
             // Text editing suppresses drag updates while active.
             self.set_value(self.value);
             return res;
         }
-        if control.focused && ctx.mouse_down().intersects(MouseButton::LEFT) {
+        if ctx.focused() && ctx.mouse_down().intersects(MouseButton::LEFT) {
             self.set_value(self.value + ctx.mouse_delta().x as Real * self.step);
         } else {
             self.set_value(self.value);
@@ -430,15 +423,15 @@ impl Number {
     }
 
     /// Paints either the inline numeric editor or the formatted value.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
+    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
         let font = ctx.style().resolve_font_choice(self.config.font);
         if self.edit.editing {
-            number_textbox_paint(ctx, control, &self.edit, font);
+            number_textbox_paint(ctx, &self.edit, font);
             return;
         }
 
         let base = ctx.screen_rect();
-        ctx.draw_widget_frame(control, base, ControlColor::Base, self.config.opt);
+        ctx.draw_widget_frame(base, ControlColor::Base, self.config.opt);
         let label = number_label(self.value, self.precision);
         ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.config.opt);
     }
@@ -457,17 +450,17 @@ impl Widget for Number {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
         let old_value = self.value;
         let old_edit = self.edit.clone();
-        let mut res = self.update_widget(ctx, control);
+        let mut res = self.update_widget(ctx);
         let changed = self.value != old_value || self.edit != old_edit;
-        res |= number_active_result(control, self.edit.editing, changed);
+        res |= number_active_result(ctx, self.edit.editing, changed);
         res
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>, control: &ControlState) {
-        self.paint_widget(ctx, control);
+    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+        self.paint_widget(ctx);
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {

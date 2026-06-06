@@ -11,12 +11,12 @@
 #![allow(dead_code)]
 
 use crate::{
-    expand_rect, Canvas, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, GridSpan, KeyCode, KeyMode, MouseButton, MouseEvent, Recti,
-    Renderer, RetainedId, Style, UiNodeSet, Vec2i, Vertex, UNCLIPPED_RECT,
+    expand_rect, Canvas, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, GridSpan, KeyCode, KeyMode, MouseButton, Recti, Renderer,
+    RetainedId, Style, UiNodeSet, Vec2i, Vertex, UNCLIPPED_RECT,
 };
 use crate::render_command::{render_command_stream, Command};
 use crate::id::IdNamespace;
-use crate::input::{ContainerOption, ControlState, ScrollBehavior, WidgetOption};
+use crate::input::{ContainerOption, ScrollBehavior, WidgetOption};
 use crate::sizing::SizePolicy;
 use crate::widget::FocusPolicy;
 use crate::widget_ctx::WidgetCtx;
@@ -28,9 +28,9 @@ mod runtime;
 pub(crate) use runtime::UiRuntime;
 mod containers;
 pub(crate) use containers::{
-    Column, Disclosure, Grid, InputCtx, InputResult, LayoutCtx, MeasureCtx, NodeBehavior, PaintCtx, RootWindow, Row, ScrollArea, Stack, UiInputEvent,
-    UpdateCtx, WidgetNode,
+    Column, Disclosure, Grid, InputCtx, InputResult, LayoutCtx, MeasureCtx, NodeBehavior, PaintCtx, RootWindow, Row, ScrollArea, Stack, UpdateCtx, WidgetNode,
 };
+pub use containers::UiInputEvent;
 
 /// Command wrapper that lets node-runtime custom render callbacks enter the backend stream.
 struct NodeCustomRenderCommand {
@@ -326,8 +326,8 @@ fn child_content_rect(node: &UiNode) -> Recti {
     )
 }
 
-/// Builds routed state events for the current frame.
-pub(super) fn frame_events_from_input(input: &Input) -> Vec<UiInputEvent> {
+/// Builds pointer events from raw frame input.
+pub(super) fn pointer_events_from_input(input: &Input) -> Vec<UiInputEvent> {
     let mut events = Vec::new();
     if !input.mouse_pressed.is_empty() {
         events.push(UiInputEvent::MouseDown {
@@ -361,11 +361,54 @@ pub(super) fn frame_events_from_input(input: &Input) -> Vec<UiInputEvent> {
             delta: input.scroll_delta,
         });
     }
+    events
+}
+
+/// Builds focus transition events from raw frame input.
+pub(super) fn focus_events_from_input(input: &Input) -> Vec<UiInputEvent> {
+    let mut events = Vec::new();
+    if !input.key_pressed.is_empty() {
+        events.push(UiInputEvent::KeyDown { key: input.key_pressed });
+    }
+    if !input.key_released.is_empty() {
+        events.push(UiInputEvent::KeyUp { key: input.key_released });
+    }
+    if !input.key_code_pressed.is_empty() {
+        events.push(UiInputEvent::KeyCodeDown { code: input.key_code_pressed });
+    }
+    if !input.key_code_released.is_empty() {
+        events.push(UiInputEvent::KeyCodeUp { code: input.key_code_released });
+    }
+    if !input.input_text.is_empty() {
+        events.push(UiInputEvent::Text { text: input.input_text.clone() });
+    }
+    events
+}
+
+/// Builds held input state events for the current frame.
+pub(super) fn held_events_from_input(input: &Input) -> Vec<UiInputEvent> {
+    let mut events = Vec::new();
     if !input.key_down.is_empty() {
         events.push(UiInputEvent::KeyState { keys: input.key_down });
     }
     if !input.key_code_down.is_empty() {
         events.push(UiInputEvent::KeyCodeState { codes: input.key_code_down });
+    }
+    events
+}
+
+/// Builds widget-visible frame events from raw input.
+pub(super) fn frame_events_from_input(input: &Input) -> Vec<UiInputEvent> {
+    let mut events = pointer_events_from_input(input);
+    events.extend(held_events_from_input(input));
+    events
+}
+
+/// Builds all events relevant to a focused custom render node.
+pub(super) fn custom_render_events_from_input(input: &Input, focused: bool) -> Vec<UiInputEvent> {
+    let mut events = frame_events_from_input(input);
+    if focused {
+        events.extend(focus_events_from_input(input));
     }
     events
 }
@@ -376,70 +419,6 @@ fn retained_focus_to_node(focus: Option<RetainedId>) -> Option<UiNodeId> {
         Some(RetainedId::Node(id)) => Some(id),
         _ => None,
     }
-}
-
-/// Converts a global input snapshot into widget-local mouse event semantics.
-pub(super) fn input_to_mouse_event(control: &ControlState, events: &[UiInputEvent], rect: Recti) -> MouseEvent {
-    let origin = Vec2i::new(rect.x, rect.y);
-    let mouse_pos = events_mouse_pos(events);
-    let mouse_delta = events_mouse_delta(events);
-    let mouse_down = events_mouse_down(events);
-    let mouse_pressed = events_mouse_pressed(events);
-    let prev_pos = mouse_pos - mouse_delta - origin;
-    let curr_pos = mouse_pos - origin;
-
-    if control.focused && mouse_down.intersects(MouseButton::LEFT) {
-        return MouseEvent::Drag { prev_pos, curr_pos };
-    }
-    if control.hovered && mouse_pressed.intersects(MouseButton::LEFT) {
-        return MouseEvent::Click(curr_pos);
-    }
-    if control.hovered {
-        return MouseEvent::Move(curr_pos);
-    }
-    MouseEvent::None
-}
-
-fn events_mouse_pos(events: &[UiInputEvent]) -> Vec2i {
-    events
-        .iter()
-        .rev()
-        .find_map(|event| match event {
-            UiInputEvent::MouseMove { pos, .. }
-            | UiInputEvent::MouseDrag { pos, .. }
-            | UiInputEvent::MouseDown { pos, .. }
-            | UiInputEvent::MouseUp { pos, .. }
-            | UiInputEvent::Scroll { pos, .. } => Some(*pos),
-            _ => None,
-        })
-        .unwrap_or_default()
-}
-
-fn events_mouse_delta(events: &[UiInputEvent]) -> Vec2i {
-    events.iter().fold(Vec2i::default(), |mut delta, event| {
-        match event {
-            UiInputEvent::MouseMove { delta: event_delta, .. } | UiInputEvent::MouseDrag { delta: event_delta, .. } => {
-                delta.x += event_delta.x;
-                delta.y += event_delta.y;
-            }
-            _ => {}
-        }
-        delta
-    })
-}
-
-fn events_mouse_down(events: &[UiInputEvent]) -> MouseButton {
-    events.iter().fold(MouseButton::NONE, |buttons, event| match event {
-        UiInputEvent::MouseDrag { buttons: held, .. } => buttons | *held,
-        _ => buttons,
-    })
-}
-
-fn events_mouse_pressed(events: &[UiInputEvent]) -> MouseButton {
-    events.iter().fold(MouseButton::NONE, |buttons, event| match event {
-        UiInputEvent::MouseDown { button, .. } => buttons | *button,
-        _ => buttons,
-    })
 }
 
 pub(super) fn events_key_mods(events: &[UiInputEvent]) -> KeyMode {
@@ -540,12 +519,12 @@ mod tests {
             Dimensioni::new(10, 10)
         }
 
-        fn update(&mut self, ctx: &mut WidgetCtx<'_>, _control: &crate::ControlState) -> ResourceState {
+        fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
             self.seen.borrow_mut().push(ctx.input_events().to_vec());
             ResourceState::NONE
         }
 
-        fn paint(&mut self, _ctx: &mut WidgetCtx<'_>, _control: &crate::ControlState) {}
+        fn paint(&mut self, _ctx: &mut WidgetCtx<'_>) {}
     }
 
     #[test]
