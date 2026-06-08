@@ -20,17 +20,19 @@ use crate::input::{ContainerOption, ScrollBehavior, WidgetOption};
 use crate::sizing::SizePolicy;
 use crate::widget::FocusPolicy;
 use crate::widget_ctx::WidgetCtx;
-use crate::context::TreeCustomRender;
+use crate::window_manager::TreeCustomRender;
 
 mod node;
-pub(crate) use node::{ContentSpace, NodeLayout, TraversalState, UiNode, UiNodeData, UiNodeId, UiNodeKind, UiNodeScrollState};
+pub(crate) use node::{ContentSpace, NodeLayout, TraversalState, UiNode, UiNodeData, UiNodeId, UiNodeKind};
 mod runtime;
 pub(crate) use runtime::UiRuntime;
 mod containers;
 pub(crate) use containers::{
-    scroll_viewport_id, scroll_viewport_node, scrollbar_nodes, Column, Disclosure, Grid, InputCtx, InputResult, LayoutCtx, MeasureCtx, NodeBehavior, PaintCtx,
-    RootWindow, Row, ScrollArea, Stack, UpdateCtx, WidgetNode,
+    scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Disclosure, Grid, InputCtx, InputResult, LayoutCtx, MeasureCtx, NodeBehavior,
+    PaintCtx, RootWindow, Row, ScrollArea, Stack, UpdateCtx, WidgetNode,
 };
+#[cfg(test)]
+pub(crate) use containers::ScrollAreaState;
 pub use containers::UiInputEvent;
 
 /// Command wrapper that lets node-runtime custom render callbacks enter the backend stream.
@@ -557,7 +559,6 @@ mod tests {
             UiNodeData::Branch {
                 behavior: Box::new(Column),
                 children: Vec::new(),
-                internal_children: Vec::new(),
             },
         );
         let child = UiNode::new(
@@ -568,7 +569,6 @@ mod tests {
             UiNodeData::Branch {
                 behavior: Box::new(Column),
                 children: Vec::new(),
-                internal_children: Vec::new(),
             },
         );
 
@@ -590,7 +590,6 @@ mod tests {
             UiNodeData::Branch {
                 behavior: Box::new(Column),
                 children: Vec::new(),
-                internal_children: Vec::new(),
             },
         );
         let child = UiNode::new(
@@ -601,7 +600,6 @@ mod tests {
             UiNodeData::Branch {
                 behavior: Box::new(Column),
                 children: Vec::new(),
-                internal_children: Vec::new(),
             },
         );
 
@@ -684,7 +682,6 @@ mod tests {
             &input,
             &mut results,
             rect(0, 0, 120, 80),
-            ScrollBehavior::NONE,
             true,
         );
 
@@ -714,7 +711,6 @@ mod tests {
                 UiNodeData::Branch {
                     behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Ignored)),
                     children: vec![Id::new(2), Id::new(3)],
-                    internal_children: Vec::new(),
                 },
             ),
         );
@@ -784,7 +780,6 @@ mod tests {
             UiNodeData::Branch {
                 behavior: Box::new(Column),
                 children: vec![Id::new(2)],
-                internal_children: Vec::new(),
             },
         );
         let child = UiNode::new(
@@ -795,7 +790,6 @@ mod tests {
             UiNodeData::Branch {
                 behavior: Box::new(Column),
                 children: vec![Id::new(3)],
-                internal_children: Vec::new(),
             },
         );
         let grandchild = UiNode::new(
@@ -806,7 +800,6 @@ mod tests {
             UiNodeData::Branch {
                 behavior: Box::new(Column),
                 children: Vec::new(),
-                internal_children: Vec::new(),
             },
         );
 
@@ -875,7 +868,6 @@ mod tests {
             &Input::default(),
             &mut results,
             rect(40, 40 + style.title_height, 300, 450 - style.title_height),
-            ScrollBehavior::NONE,
             true,
         );
 
@@ -926,7 +918,6 @@ mod tests {
             &Input::default(),
             &mut results,
             rect(0, 0, 320, 420),
-            ScrollBehavior::NONE,
             true,
         );
 
@@ -971,7 +962,6 @@ mod tests {
             &Input::default(),
             &mut results,
             rect(0, 0, 235, 100),
-            ScrollBehavior::NONE,
             true,
         );
 
@@ -1010,7 +1000,6 @@ mod tests {
             &Input::default(),
             &mut results,
             rect(0, 0, 300, 120),
-            ScrollBehavior::NONE,
             true,
         );
 
@@ -1054,7 +1043,6 @@ mod tests {
             &Input::default(),
             &mut results,
             rect(0, 0, 160, 80),
-            ScrollBehavior::NONE,
             true,
         );
 
@@ -1070,11 +1058,9 @@ mod tests {
         assert!(first_rect.y >= 0);
         assert!(first_screen_rect.y < body.y);
         let scroll_node = runtime.nodes.get(&scroll_area_id).unwrap();
-        assert_eq!(scroll_node.children().len(), 0);
-        assert_eq!(scroll_node.internal_children().len(), 4);
-        let viewport_node = runtime.nodes.get(&scroll_node.internal_children()[0]).unwrap();
+        assert_eq!(scroll_node.children().len(), 4);
+        let viewport_node = runtime.nodes.get(&scroll_node.children()[0]).unwrap();
         assert_eq!(viewport_node.children().len(), 1);
-        assert_eq!(viewport_node.internal_children().len(), 0);
     }
 
     #[test]
@@ -1105,7 +1091,6 @@ mod tests {
             &Input::default(),
             &mut results,
             body,
-            ScrollBehavior::NONE,
             true,
         );
         let first_client = runtime.nodes.get(&runtime.roots[0]).unwrap().layout.control;
@@ -1120,7 +1105,6 @@ mod tests {
             &Input::default(),
             &mut results,
             body,
-            ScrollBehavior::NONE,
             true,
         );
         let second_client = runtime.nodes.get(&runtime.roots[0]).unwrap().layout.control;
@@ -1162,7 +1146,6 @@ mod tests {
             &Input::default(),
             &mut results,
             body,
-            ScrollBehavior::NONE,
             true,
         );
 
@@ -1248,7 +1231,6 @@ mod tests {
             &Input::default(),
             &mut results,
             rect(0, 0, 120, 70),
-            ScrollBehavior::NONE,
             true,
         );
         assert_eq!(paint_count.get(), 0);
@@ -1263,7 +1245,6 @@ mod tests {
             &Input::default(),
             &mut results,
             rect(0, 0, 120, 70),
-            ScrollBehavior::NONE,
             true,
         );
         let root = runtime.nodes.get(&runtime.roots[0]).unwrap();
@@ -1342,7 +1323,6 @@ mod tests {
             &Input::default(),
             &mut results,
             rect(0, 0, 160, 120),
-            ScrollBehavior::NONE,
             true,
         );
 
@@ -1405,7 +1385,6 @@ mod tests {
             &Input::default(),
             &mut results,
             rect(0, 0, 280, 140),
-            ScrollBehavior::NONE,
             true,
         );
 
@@ -1447,7 +1426,6 @@ mod tests {
             &Input::default(),
             &mut results,
             rect(0, 0, 220, 80),
-            ScrollBehavior::NONE,
             true,
         );
 

@@ -9,7 +9,7 @@ use super::*;
 use crate::{
     test_support::{test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer},
     widget_handle, AtlasHandle, Button, Combo, ListItem, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId, SizePolicy,
-    StackDirection, TextBlock, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
+    ScrollBehavior, StackDirection, TextBlock, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
@@ -183,7 +183,7 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
             });
     });
     let root = ctx.create_window("window", rect(0, 0, 100, 100), tree);
-    ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NO_SCROLL);
+    ctx.set_root_options(root, ContainerOption::NO_TITLE);
 
     ctx.update_ui();
     ctx.update_ui();
@@ -355,7 +355,7 @@ fn reopening_dialog_replaces_old_commands_with_current_frame_commands() {
     });
     let opt = ContainerOption::NO_TITLE | ContainerOption::NO_CLOSE | ContainerOption::NO_RESIZE;
     let root = ctx.create_dialog("dialog", rect(10, 10, 80, 40), first_tree);
-    ctx.set_root_options(root, opt, ScrollBehavior::NONE);
+    ctx.set_root_options(root, opt);
 
     ctx.set_root_visible(root, true);
     ctx.update_ui();
@@ -463,7 +463,7 @@ fn scroll_area_paints_disclosure_headers_in_screen_space() {
             });
     });
     let root = ctx.create_window("window", rect(0, 0, 200, 130), tree);
-    ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NO_SCROLL);
+    ctx.set_root_options(root, ContainerOption::NO_TITLE);
 
     ctx.update_ui();
 
@@ -503,7 +503,7 @@ fn auto_sized_titled_window_uses_current_frame_content_size() {
         tree.text("hello\nhello\nhello");
     });
     let root = ctx.create_window("window", rect(0, 0, 1, 1), tree);
-    ctx.set_root_options(root, ContainerOption::AUTO_SIZE, ScrollBehavior::NONE);
+    ctx.set_root_options(root, ContainerOption::AUTO_SIZE);
 
     ctx.update_ui();
 
@@ -552,7 +552,7 @@ fn auto_sized_titled_window_body_fits_current_content_same_frame() {
         tree.text("hello\nhello\nhello\nhello");
     });
     let root = ctx.create_window("window", rect(0, 0, 1, 1), tree);
-    ctx.set_root_options(root, ContainerOption::AUTO_SIZE, ScrollBehavior::NONE);
+    ctx.set_root_options(root, ContainerOption::AUTO_SIZE);
 
     ctx.update_ui();
 
@@ -572,7 +572,7 @@ fn title_option_controls_root_window_title_bar_geometry() {
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
     let titled = ctx.create_window("titled", rect(0, 0, 80, 40), UiNodeBuilder::build(|_tree| {}));
     let plain = ctx.create_window("plain", rect(100, 0, 80, 40), UiNodeBuilder::build(|_tree| {}));
-    ctx.set_root_options(plain, ContainerOption::NO_TITLE, ScrollBehavior::NONE);
+    ctx.set_root_options(plain, ContainerOption::NO_TITLE);
     ctx.update_ui();
 
     let titled_rect = ctx.root_rect(titled).unwrap();
@@ -1187,7 +1187,6 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     ctx.set_root_options(
         popup_root,
         ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
-        ScrollBehavior::NO_SCROLL,
     );
     let combo = widget_handle(Combo::new());
     let items = [widget_handle(ListItem::new("Apple")), widget_handle(ListItem::new("Banana"))];
@@ -1204,7 +1203,7 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
             }
         }),
     );
-    ctx.set_root_options(main_root, ContainerOption::NO_TITLE | ContainerOption::NO_RESIZE, ScrollBehavior::NONE);
+    ctx.set_root_options(main_root, ContainerOption::NO_TITLE | ContainerOption::NO_RESIZE);
     let popup_items = items.clone();
     ctx.set_root_nodes(
         popup_root,
@@ -1387,7 +1386,7 @@ fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
         tree.node(NodeOptions::with_policy(Policy::fixed(90, 180))).widget(bottom.clone());
     });
     let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
-    ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NONE);
+    ctx.set_root_options(root, ContainerOption::NO_TITLE);
 
     ctx.update_ui();
     ctx.update_ui();
@@ -1430,7 +1429,7 @@ fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
             });
     });
     let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
-    ctx.set_root_options(root, ContainerOption::NO_TITLE, ScrollBehavior::NONE);
+    ctx.set_root_options(root, ContainerOption::NO_TITLE);
 
     ctx.update_ui();
     ctx.update_ui();

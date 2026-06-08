@@ -91,7 +91,7 @@ For retained focus, keep the `NodeId` returned by `WidgetTreeBuilder` and use `s
 my_window.set_focus_node(textbox_node_id);
 ```
 
-Registered roots can be configured with `Context::set_root_options(...)` to control container options and root scroll behavior. Use `ScrollBehavior::NO_SCROLL` for popups that should not scroll, `ScrollBehavior::GRAB_SCROLL` for widgets that want to consume scroll, and `ScrollBehavior::NONE` for default behavior. Custom widgets receive consumed scroll in `CustomRenderArgs::scroll_delta`.
+Registered roots can be configured with `Context::set_root_options(...)` to control chrome/container options. Root overflow does not scroll implicitly; wrap overflowing retained content in `WidgetTreeBuilder::scroll_area(...)`. Custom widgets can still use widget-level `ScrollBehavior` and receive consumed scroll in `CustomRenderArgs::scroll_delta`.
 
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).

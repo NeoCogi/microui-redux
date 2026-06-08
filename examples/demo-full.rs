@@ -727,7 +727,6 @@ struct State {
     style_color_sliders: [WidgetHandle<Slider>; 60],
     style_value_sliders: [WidgetHandle<Slider>; 5],
     logbuf: Rc<RefCell<String>>,
-    logbuf_updated: bool,
     submit_buf: WidgetHandle<Textbox>,
     text_area: WidgetHandle<TextArea>,
     combo_state: WidgetHandle<Combo>,
@@ -757,7 +756,6 @@ struct State {
     stack_direction_root: RootId,
     weight_root: RootId,
 
-    log_output: Option<NodeId>,
     dialog_window: FileDialogState,
 
     fps: f32,
@@ -936,13 +934,11 @@ impl State {
         ctx.set_root_options(
             combo_popup_root,
             ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
-            ScrollBehavior::NO_SCROLL,
         );
         let popup_root = ctx.create_popup("Test Popup", UiNodeSet::default());
         ctx.set_root_options(
             popup_root,
             ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
-            ScrollBehavior::NO_SCROLL,
         );
         ctx.set_root_visible(popup_root, false);
         let typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), UiNodeSet::default());
@@ -959,7 +955,6 @@ impl State {
             style_color_sliders,
             style_value_sliders,
             logbuf: Rc::new(RefCell::new(String::new())),
-            logbuf_updated: false,
             submit_buf: widget_handle(submit_buf),
             text_area: widget_handle(text_area),
             combo_state: widget_handle(Combo::new()),
@@ -1017,7 +1012,6 @@ impl State {
             suzanne_root,
             stack_direction_root,
             weight_root,
-            log_output: None,
             dialog_window: FileDialogState::new(ctx),
             fps: 0.0,
             last_frame: Instant::now(),
@@ -1175,7 +1169,6 @@ impl State {
         for c in text.chars() {
             logbuf.push(c);
         }
-        self.logbuf_updated = true;
     }
 
     fn section(tree: &mut UiNodeBuilder, node: &WidgetHandle<Node>, f: impl FnOnce(&mut UiNodeBuilder)) {
@@ -1236,13 +1229,12 @@ impl State {
         let log_text = self.log_text.clone();
         let submit_buf = self.submit_buf.clone();
         let submit_button = self.submit_button.clone();
-        let mut log_output_id = NodeId::default();
         let mut submit_buf_id = NodeId::default();
         let mut submit_button_id = NodeId::default();
         self.log_tree = UiNodeBuilder::build(|tree| {
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
-                log_output_id = tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                     tree.widget(&log_text);
                 });
             });
@@ -1251,7 +1243,6 @@ impl State {
                 Self::remember_widget(tree, &mut submit_button_id, &submit_button);
             });
         });
-        self.log_output = Some(log_output_id);
         self.submit_buf_id = submit_buf_id;
         self.submit_button_id = submit_button_id;
 
@@ -1674,17 +1665,6 @@ impl State {
         self.log_text.update(|log_text| {
             log_text.text = self.logbuf.borrow().clone();
         });
-
-        if self.logbuf_updated {
-            if let Some(log_output) = self.log_output {
-                if let Some(content_size) = ctx.scroll_area_content_size(self.log_root, log_output) {
-                    let mut scroll = ctx.scroll_area_scroll(self.log_root, log_output).unwrap_or_default();
-                    scroll.y = content_size.height;
-                    ctx.set_scroll_area_scroll(self.log_root, log_output, scroll);
-                }
-            }
-            self.logbuf_updated = false;
-        }
 
         let mut submitted = false;
         {

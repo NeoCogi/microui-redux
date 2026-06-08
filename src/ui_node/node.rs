@@ -29,19 +29,6 @@ pub(crate) struct UiNodeMetadata {
     pub(crate) vertical_child_policy: Option<SizePolicy>,
 }
 
-/// Runtime-owned scroll state for a scroll viewport node.
-#[derive(Copy, Clone, Debug, Default)]
-pub(crate) struct UiNodeScrollState {
-    /// Scroll-area allocation/control rect.
-    pub(crate) rect: Recti,
-    /// Viewport body visible to child content.
-    pub(crate) body: Recti,
-    /// Preferred child content size before viewport padding.
-    pub(crate) content_size: Dimensioni,
-    /// Current scroll offset in padded viewport content coordinates.
-    pub(crate) scroll: Vec2i,
-}
-
 impl Default for UiNodeMetadata {
     fn default() -> Self {
         Self {
@@ -214,8 +201,6 @@ pub(crate) struct UiNode {
     pub(crate) active: bool,
     /// Scroll delta consumed by this node during the current frame.
     pub(crate) scroll_delta: Option<Vec2i>,
-    /// Runtime-owned scroll state for scroll viewport nodes.
-    pub(crate) scroll: Option<UiNodeScrollState>,
     /// Placement policy used by runtime layout passes.
     pub(crate) policy: crate::Policy,
     /// Grid span used when this node is a child of a grid container.
@@ -241,7 +226,6 @@ impl UiNode {
             clicked: false,
             active: false,
             scroll_delta: None,
-            scroll: None,
             policy,
             grid_span,
             metadata: UiNodeMetadata::default(),
@@ -268,28 +252,6 @@ impl UiNode {
         }
     }
 
-    /// Returns behavior-owned internal children when this node accepts them.
-    pub(crate) fn internal_children(&self) -> &[UiNodeId] {
-        match &self.data {
-            UiNodeData::Leaf { .. } => &[],
-            UiNodeData::Branch { internal_children, .. } => internal_children,
-        }
-    }
-
-    /// Returns all children that participate in runtime traversal.
-    pub(crate) fn traversal_child(&self, index: usize) -> Option<UiNodeId> {
-        let children = self.children();
-        if index < children.len() {
-            return children.get(index).copied();
-        }
-        self.internal_children().get(index - children.len()).copied()
-    }
-
-    /// Returns the total number of runtime-traversed children.
-    pub(crate) fn traversal_child_count(&self) -> usize {
-        self.children().len() + self.internal_children().len()
-    }
-
     /// Returns the node's mutable children when it accepts children.
     pub(crate) fn children_mut(&mut self) -> Option<&mut Vec<UiNodeId>> {
         match &mut self.data {
@@ -298,13 +260,6 @@ impl UiNode {
         }
     }
 
-    /// Returns mutable behavior-owned internal children when this node accepts them.
-    pub(crate) fn internal_children_mut(&mut self) -> Option<&mut Vec<UiNodeId>> {
-        match &mut self.data {
-            UiNodeData::Leaf { .. } => None,
-            UiNodeData::Branch { internal_children, .. } => Some(internal_children),
-        }
-    }
 }
 
 /// Runtime payload for a common UI node.
@@ -322,9 +277,7 @@ pub(crate) enum UiNodeData {
     Branch {
         /// Concrete retained node behavior.
         behavior: Box<dyn NodeBehavior>,
-        /// User-authored child membership.
+        /// Child membership.
         children: Vec<UiNodeId>,
-        /// Behavior-owned child membership.
-        internal_children: Vec<UiNodeId>,
     },
 }

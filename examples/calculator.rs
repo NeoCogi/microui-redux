@@ -369,7 +369,7 @@ fn main() {
             button.node_id = node_id;
         }
         let root = ctx.create_window("Calculator", rect(0, 0, 320, 420), tree);
-        ctx.set_root_options(root, ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE, ScrollBehavior::NONE);
+        ctx.set_root_options(root, ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE);
         State {
             _root: root,
             display,

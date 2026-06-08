@@ -16,7 +16,7 @@ pub(crate) struct Disclosure {
 
 impl NodeBehavior for Disclosure {
     fn measure(&self, ctx: &MeasureCtx<'_>, id: UiNodeId, available: Dimensioni) -> Dimensioni {
-        let widget = crate::context::erased_widget_state(self.state.clone());
+        let widget = crate::window_manager::erased_widget_state(self.state.clone());
         let header_size = widget.measure(ctx.style, ctx.atlas, available);
         if !self.state.read(|state| state.state).is_expanded() {
             return Dimensioni::new(available.width.max(header_size.width), header_size.height);
@@ -39,7 +39,7 @@ impl NodeBehavior for Disclosure {
     }
 
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, id: UiNodeId, rect: Recti, clip: Recti) {
-        let widget = crate::context::erased_widget_state(self.state.clone());
+        let widget = crate::window_manager::erased_widget_state(self.state.clone());
         let header_preferred = widget.measure(ctx.style, ctx.atlas, Dimensioni::new(rect.width, rect.height));
         let header_height = header_preferred
             .height

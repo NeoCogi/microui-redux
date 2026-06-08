@@ -88,7 +88,7 @@
 
 pub mod atlas;
 mod canvas;
-mod context;
+mod window_manager;
 mod draw_context;
 mod file_dialog;
 mod graphics;
@@ -133,11 +133,11 @@ pub mod advanced {
 /// This module groups the stable retained concepts used by application code without exposing
 /// low-level renderer/canvas details or manual container drawing helpers through default imports.
 pub mod retained {
-    pub use crate::context::{Context, RootId};
+    pub use crate::window_manager::{Context, RootId};
     pub use crate::render_command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
     pub use crate::ui_node::UiInputEvent;
     pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
-    pub use crate::context::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, UiNodeSet, UiNodeBuilder};
+    pub use crate::window_manager::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, UiNodeSet, UiNodeBuilder};
 }
 
 /// Common imports for retained UI applications.
@@ -174,7 +174,7 @@ pub use atlas::{
     AtlasHandle, AtlasSource, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry,
     FontId, IconId, OPEN_FOLDER_16_ICON, SlotId, SourceFormat, WHITE_ICON, load_image_bytes,
 };
-pub use context::{widget_handle, Context, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, RootId, WidgetHandle, UiNodeSet, UiNodeBuilder};
+pub use window_manager::{widget_handle, Context, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, RootId, WidgetHandle, UiNodeSet, UiNodeBuilder};
 pub use file_dialog::FileDialogState;
 pub use id::Id;
 pub use input::{Clip, ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption};

@@ -1,4 +1,4 @@
-use crate::context::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
+use crate::window_manager::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
 use crate::sizing::SizePolicy;
 use crate::{CustomRenderArgs, Dimensioni, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
 
@@ -21,7 +21,9 @@ pub(crate) use disclosure::Disclosure;
 pub(crate) use grid::Grid;
 pub(crate) use root_window::RootWindow;
 pub(crate) use row::Row;
-pub(crate) use scroll_area::{scroll_viewport_id, scroll_viewport_node, scrollbar_nodes, ScrollArea};
+pub(crate) use scroll_area::{scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, ScrollArea};
+#[cfg(test)]
+pub(crate) use scroll_area::ScrollAreaState;
 pub(crate) use stack::Stack;
 
 /// Clone support for boxed node behavior objects.
@@ -66,6 +68,18 @@ pub(crate) trait NodeBehavior: NodeBehaviorClone {
     /// Updates this node in response to one routed input event.
     fn update_on(&mut self, _ctx: &mut InputCtx<'_>, _id: UiNodeId, _event: &UiInputEvent) -> InputResult {
         InputResult::Ignored
+    }
+
+    /// Returns scroll-area state for tests when this behavior owns it.
+    #[cfg(test)]
+    fn debug_scroll_area_state(&self) -> Option<ScrollAreaState> {
+        None
+    }
+
+    /// Replaces scroll-area offset for tests when this behavior owns it.
+    #[cfg(test)]
+    fn debug_set_scroll_area_scroll(&mut self, _scroll: Vec2i) -> bool {
+        false
     }
 }
 

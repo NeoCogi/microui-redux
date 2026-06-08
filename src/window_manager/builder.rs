@@ -38,9 +38,10 @@ use crate::{
     id::{hash_id_key, IdNamespace},
     input::{ContainerOption, ScrollBehavior},
     sizing::{SizePolicy, StackDirection},
-    ui_node::{
-        scroll_viewport_node, scrollbar_nodes, Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData, UiNodeId, WidgetNode,
-    },
+	    ui_node::{
+	        scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData,
+	        UiNodeId, WidgetNode,
+	    },
     widget::Widget,
     Custom, CustomRenderArgs, Node, TextBlock, TextWrap,
 };
@@ -445,7 +446,8 @@ impl UiNodeBuilder {
     fn insert_scroll_area(&mut self, options: NodeOptions, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut Self)) -> NodeId {
         let id = self.alloc_id(TAG_SCROLL_AREA, options.key);
         let parent = self.current_frame().parent;
-        let viewport = scroll_viewport_node(id, scroll_behavior, Vec::new());
+        let state = shared_scroll_area_state();
+        let viewport = scroll_viewport_node(id, state.clone(), scroll_behavior, Vec::new());
         let viewport_id = viewport.id;
 
         self.frames.push(BuilderFrame {
@@ -457,13 +459,13 @@ impl UiNodeBuilder {
         f(self);
         let frame = self.frames.pop().expect("scroll viewport frame missing");
 
-        let mut viewport = scroll_viewport_node(id, scroll_behavior, frame.nodes);
+        let mut viewport = scroll_viewport_node(id, state.clone(), scroll_behavior, frame.nodes);
         viewport.parent = Some(id);
 
-        let mut internal_children = Vec::new();
-        internal_children.push(viewport_id);
-        let scrollbars = scrollbar_nodes(id, scroll_behavior);
-        internal_children.extend(scrollbars.iter().map(|node| node.id));
+        let scrollbars = scrollbar_nodes(id, state.clone(), scroll_behavior);
+        let mut children = Vec::with_capacity(1 + scrollbars.len());
+        children.push(viewport_id);
+        children.extend(scrollbars.iter().map(|node| node.id));
 
         let node = UiNode::new(
             id,
@@ -471,9 +473,8 @@ impl UiNodeBuilder {
             options.policy,
             options.grid_span,
             UiNodeData::Branch {
-                behavior: Box::new(UiScrollArea::new(scroll_behavior, opt)),
-                children: Vec::new(),
-                internal_children,
+                behavior: Box::new(UiScrollArea::new(state, scroll_behavior, opt)),
+                children,
             },
         );
         if self.nodes.contains_key(&id) || self.nodes.contains_key(&viewport_id) || scrollbars.iter().any(|node| self.nodes.contains_key(&node.id)) {
@@ -509,7 +510,6 @@ impl UiNodeBuilder {
                     content_layout: Column,
                 }),
                 children: Vec::new(),
-                internal_children: Vec::new(),
             },
             f,
         )
@@ -533,7 +533,6 @@ impl UiNodeBuilder {
                     content_layout: Column,
                 }),
                 children: Vec::new(),
-                internal_children: Vec::new(),
             },
             f,
         )
@@ -552,7 +551,6 @@ impl UiNodeBuilder {
             UiNodeData::Branch {
                 behavior: Box::new(Row { widths: widths.to_vec(), height }),
                 children: Vec::new(),
-                internal_children: Vec::new(),
             },
             f,
         );
@@ -578,7 +576,6 @@ impl UiNodeBuilder {
                     heights: heights.to_vec(),
                 }),
                 children: Vec::new(),
-                internal_children: Vec::new(),
             },
             f,
         )
@@ -597,7 +594,6 @@ impl UiNodeBuilder {
             UiNodeData::Branch {
                 behavior: Box::new(Column),
                 children: Vec::new(),
-                internal_children: Vec::new(),
             },
             f,
         )
@@ -616,7 +612,6 @@ impl UiNodeBuilder {
             UiNodeData::Branch {
                 behavior: Box::new(Stack { width, height, direction }),
                 children: Vec::new(),
-                internal_children: Vec::new(),
             },
             f,
         )

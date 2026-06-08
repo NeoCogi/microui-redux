@@ -52,8 +52,8 @@
 //
 //! Top-level retained UI context.
 //!
-//! `Context` owns renderer-facing canvas state, global input, root windows/dialogs/popups, and the
-//! published frame results that application code reads after each retained update.
+//! `Context` owns renderer-facing canvas state, global input, window-manager state, and the published
+//! frame results that application code reads after each retained update.
 use std::{cell::RefCell, rc::Rc};
 
 #[cfg(any(feature = "builder", feature = "png_source"))]
@@ -64,13 +64,13 @@ use png::{ColorType, Decoder};
 
 use crate::{
     rect, Canvas, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Renderer,
-    RendererHandle, ScrollBehavior, Style, TextureId, UiRuntime, Vec2i,
+    RendererHandle, Style, TextureId, UiRuntime,
 };
-use roots::RootEntry;
+use window_manager::WindowEntry;
 mod builder;
 mod input_api;
 mod retained;
-mod roots;
+mod window_manager;
 
 pub use builder::{GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, UiNodeSet, UiNodeBuilder};
 pub use retained::{widget_handle, WidgetHandle};
@@ -99,12 +99,12 @@ pub struct Context<R: Renderer> {
     /// Shared style used by all roots and scroll areas.
     style: Rc<Style>,
 
-    /// Highest z-index allocated to an open root.
+    /// Highest z-index allocated to an open window-manager root.
     last_zindex: i32,
     /// Monotonic frame counter used for root freshness bookkeeping.
     frame: usize,
-    /// Registered roots replayed by [`Context::update_ui`].
-    roots: Vec<RootEntry>,
+    /// Registered window-manager roots replayed by [`Context::update_ui`].
+    roots: Vec<WindowEntry>,
     /// Next root id counter.
     next_root_id: usize,
     /// Double-buffered retained widget result store.
@@ -181,7 +181,7 @@ impl<R: Renderer> Context<R> {
     /// time, and call this method each frame without re-submitting root trees.
     pub fn update_ui(&mut self) {
         self.frame_begin();
-        self.render_roots();
+        self.render_window_manager();
         self.frame_end();
     }
 

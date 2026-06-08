@@ -461,7 +461,7 @@ impl FileDialogState {
             .to_string_lossy()
             .to_string();
         let root = ctx.create_dialog("Open File", Recti::new(50, 50, 720, 520), UiNodeSet::default());
-        ctx.set_root_options(root, ContainerOption::NONE, ScrollBehavior::NO_SCROLL);
+        ctx.set_root_options(root, ContainerOption::NONE);
         let mut dialog = Self {
             current_working_directory,
             file_name: None,

@@ -54,7 +54,6 @@ impl UiRuntime {
             UiNodeData::Branch {
                 behavior: Box::new(RootWindow::default()),
                 children: Vec::new(),
-                internal_children: Vec::new(),
             },
         );
         root_node.metadata.kind = UiNodeKind::RootWindow;
@@ -90,22 +89,22 @@ impl UiRuntime {
         }
     }
 
-    /// Returns runtime-owned scroll state for a scroll-area node.
-    pub(crate) fn scroll_area_state(&self, scroll_area: UiNodeId) -> Option<UiNodeScrollState> {
-        self.nodes.get(&scroll_viewport_id(scroll_area)).and_then(|node| node.scroll)
+    /// Returns scroll-area state for tests without exposing it in release runtime APIs.
+    #[cfg(test)]
+    pub(crate) fn scroll_area_state(&self, scroll_area: UiNodeId) -> Option<ScrollAreaState> {
+        self.nodes.get(&scroll_area).and_then(|node| match &node.data {
+            UiNodeData::Leaf { behavior } | UiNodeData::Branch { behavior, .. } => behavior.debug_scroll_area_state(),
+        })
     }
 
-    /// Replaces the current scroll offset for a scroll-area node.
+    /// Replaces scroll-area offset for tests without exposing it in release runtime APIs.
+    #[cfg(test)]
     pub(crate) fn set_scroll_area_scroll(&mut self, scroll_area: UiNodeId, scroll: Vec2i) -> bool {
-        let Some(node) = self.nodes.get_mut(&scroll_viewport_id(scroll_area)) else {
-            return false;
-        };
-        let Some(mut state) = node.scroll else {
-            return false;
-        };
-        state.scroll = scroll;
-        node.scroll = Some(state);
-        true
+        self.nodes
+            .get_mut(&scroll_area)
+            .is_some_and(|node| match &mut node.data {
+                UiNodeData::Leaf { behavior } | UiNodeData::Branch { behavior, .. } => behavior.debug_set_scroll_area_scroll(scroll),
+            })
     }
 
     /// Measures the outer root size needed for `AUTO_SIZE` node roots.
@@ -154,7 +153,6 @@ impl UiRuntime {
         input: &Input,
         results: &mut FrameResults,
         body: Recti,
-        scroll_behavior: ScrollBehavior,
         hover_root_active: bool,
     ) {
         self.commands.clear();
@@ -164,7 +162,6 @@ impl UiRuntime {
         self.updated_focus = false;
         self.hover_root_active = hover_root_active;
         self.hover_root = hover_root_active.then(|| self.roots.first().copied()).flatten();
-        let _ = scroll_behavior;
         let body_view = root_window_body_view(body, style);
 
         self.layout_roots_in_view(style, canvas.get_atlas(), body_view, body);
@@ -260,16 +257,6 @@ impl UiRuntime {
         self.nodes.get(&node).and_then(|node| node.children().get(index).copied())
     }
 
-    /// Returns the number of user and behavior-owned children on a container node.
-    pub(super) fn traversal_child_count(&self, node: UiNodeId) -> usize {
-        self.nodes.get(&node).map(UiNode::traversal_child_count).unwrap_or(0)
-    }
-
-    /// Returns a user or behavior-owned child id by traversal index.
-    pub(super) fn traversal_child_at(&self, node: UiNodeId, index: usize) -> Option<UiNodeId> {
-        self.nodes.get(&node).and_then(|node| node.traversal_child(index))
-    }
-
     /// Returns a cloned node behavior object for traversal without holding a node borrow.
     pub(super) fn behavior_clone(&self, node: UiNodeId) -> Option<Box<dyn NodeBehavior>> {
         self.nodes.get(&node).and_then(|node| match &node.data {
@@ -356,10 +343,8 @@ impl UiRuntime {
     pub(super) fn collect_subtree_nodes(&self, node: UiNodeId, removed: &mut Vec<UiNodeId>) {
         removed.push(node);
         if let Some(node) = self.nodes.get(&node) {
-            for index in 0..node.traversal_child_count() {
-                if let Some(child) = node.traversal_child(index) {
-                    self.collect_subtree_nodes(child, removed);
-                }
+            for &child in node.children() {
+                self.collect_subtree_nodes(child, removed);
             }
         }
     }
@@ -396,7 +381,6 @@ impl UiRuntime {
             node.clicked = previous_node.clicked;
             node.active = previous_node.active;
             node.scroll_delta = previous_node.scroll_delta;
-            node.scroll = previous_node.scroll;
         }
 
         self.focus = previous.focus.filter(|id| self.nodes.contains_key(id));
@@ -571,8 +555,8 @@ impl UiRuntime {
             })
             .unwrap_or(true);
         if traverse_children {
-            let children: Vec<_> = (0..self.traversal_child_count(id))
-                .filter_map(|index| self.traversal_child_at(id, index))
+            let children: Vec<_> = (0..self.child_count(id))
+                .filter_map(|index| self.child_at(id, index))
                 .collect();
             for child in children {
                 if self.nodes.get(&child).and_then(|node| node.parent) == Some(id) {
@@ -723,8 +707,8 @@ impl UiRuntime {
         event: &UiInputEvent,
     ) -> Option<(UiNodeId, InputResult)> {
         let traversal = self.node_traversal_state(id, parent_traversal);
-        for index in (0..self.traversal_child_count(id)).rev() {
-            let Some(child) = self.traversal_child_at(id, index) else { continue };
+        for index in (0..self.child_count(id)).rev() {
+            let Some(child) = self.child_at(id, index) else { continue };
             if let Some(result) = self.route_input_event_to_node(child, traversal, style, input, event) {
                 return Some(result);
             }
@@ -763,8 +747,8 @@ impl UiRuntime {
             })
             .unwrap_or(true);
         if traverse_children {
-            for index in 0..self.traversal_child_count(id) {
-                let Some(child) = self.traversal_child_at(id, index) else { continue };
+            for index in 0..self.child_count(id) {
+                let Some(child) = self.child_at(id, index) else { continue };
                 self.paint_node(child, traversal, style, atlas.clone(), input);
             }
         }

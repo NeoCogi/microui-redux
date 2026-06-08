@@ -121,7 +121,7 @@ fn row_nodes_capture_children_and_track_policy() {
 }
 
 #[test]
-fn scroll_area_nodes_store_internal_viewport_and_children() {
+fn scroll_area_nodes_store_viewport_and_chrome_children() {
     let leaf = widget_handle((crate::WidgetOption::NONE, crate::ScrollBehavior::NONE));
 
     let tree = UiNodeBuilder::build(|builder| {
@@ -133,9 +133,8 @@ fn scroll_area_nodes_store_internal_viewport_and_children() {
     });
 
     let node = tree.node(tree.roots()[0]).expect("scroll area node missing");
-    assert_eq!(node.children().len(), 0);
-    assert_eq!(node.internal_children().len(), 4);
-    let viewport = tree.node(node.internal_children()[0]).expect("scroll viewport node missing");
+    assert_eq!(node.children().len(), 4);
+    let viewport = tree.node(node.children()[0]).expect("scroll viewport node missing");
     assert_eq!(viewport.children().len(), 1);
     assert!(matches!(node.data, UiNodeData::Branch { .. }));
 }

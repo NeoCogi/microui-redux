@@ -1,46 +1,45 @@
-//! Root registry, visibility policy, and root traversal.
+//! Window manager root registry, visibility policy, chrome handling, and traversal.
 
 use super::*;
 use crate::ControlColor;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(super) enum RootKind {
+pub(super) enum WindowKind {
     Window,
     Dialog,
     Popup,
 }
 
-/// `UiRuntime` root rendered by the retained node path.
-pub(super) struct RootEntry {
+/// Window-manager entry that owns one retained `UiRuntime` root.
+pub(super) struct WindowEntry {
     pub(super) id: RootId,
     name: String,
     rect: Recti,
     opt: ContainerOption,
-    scroll_behavior: ScrollBehavior,
     visible: bool,
-    kind: RootKind,
+    kind: WindowKind,
     just_opened: bool,
-    active_chrome: Option<RootChromePart>,
+    active_chrome: Option<WindowChromePart>,
     pub(super) z_index: i32,
     pub(super) runtime: UiRuntime,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum RootChromePart {
+enum WindowChromePart {
     Title,
     Close,
     Resize,
 }
 
 #[derive(Copy, Clone, Debug)]
-struct RootChrome {
+struct WindowChrome {
     body: Recti,
     title: Option<Recti>,
     close: Option<Recti>,
     resize: Option<Recti>,
 }
 
-impl RootChrome {
+impl WindowChrome {
     fn new(rect: Recti, style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption) -> Self {
         let title = (!opt.intersects(ContainerOption::NO_TITLE)).then(|| Recti::new(rect.x, rect.y, rect.width, root_titlebar_height(style, atlas)));
         let close = title.and_then(|title| {
@@ -58,13 +57,13 @@ impl RootChrome {
         Self { body, title, close, resize }
     }
 
-    fn hit_test(&self, point: crate::Vec2i) -> Option<RootChromePart> {
+    fn hit_test(&self, point: crate::Vec2i) -> Option<WindowChromePart> {
         if self.close.is_some_and(|rect| rect.contains(&point)) {
-            Some(RootChromePart::Close)
+            Some(WindowChromePart::Close)
         } else if self.resize.is_some_and(|rect| rect.contains(&point)) {
-            Some(RootChromePart::Resize)
+            Some(WindowChromePart::Resize)
         } else if self.title.is_some_and(|rect| rect.contains(&point)) {
-            Some(RootChromePart::Title)
+            Some(WindowChromePart::Title)
         } else {
             None
         }
@@ -74,12 +73,11 @@ impl RootChrome {
 impl<R: Renderer> Context<R> {
     fn register_root(
         &mut self,
-        kind: RootKind,
+        kind: WindowKind,
         name: &str,
         rect: Recti,
         tree: UiNodeSet,
         opt: ContainerOption,
-        scroll_behavior: ScrollBehavior,
         visible: bool,
     ) -> RootId {
         let id = self.next_root_id();
@@ -89,12 +87,11 @@ impl<R: Renderer> Context<R> {
         } else {
             -1
         };
-        self.roots.push(RootEntry {
+        self.roots.push(WindowEntry {
             id,
             name: name.to_string(),
             rect,
             opt,
-            scroll_behavior,
             visible,
             kind,
             just_opened: false,
@@ -113,7 +110,7 @@ impl<R: Renderer> Context<R> {
 
     /// Registers an open retained window and returns its stable root identifier.
     pub fn create_window(&mut self, name: &str, rect: Recti, tree: UiNodeSet) -> RootId {
-        self.register_root(RootKind::Window, name, rect, tree, ContainerOption::NONE, ScrollBehavior::NONE, true)
+        self.register_root(WindowKind::Window, name, rect, tree, ContainerOption::NONE, true)
     }
 
     /// Returns whether a registered root is currently visible.
@@ -148,8 +145,8 @@ impl<R: Renderer> Context<R> {
         }
     }
 
-    /// Returns the current scroll offset for a scroll-area node in a registered root.
-    pub fn scroll_area_scroll(&self, root: RootId, node_id: crate::NodeId) -> Option<Vec2i> {
+    #[cfg(test)]
+    pub(crate) fn scroll_area_scroll(&self, root: RootId, node_id: crate::NodeId) -> Option<crate::Vec2i> {
         self.roots
             .iter()
             .find(|entry| entry.id == root)
@@ -157,8 +154,8 @@ impl<R: Renderer> Context<R> {
             .map(|state| state.scroll)
     }
 
-    /// Returns the current viewport body for a scroll-area node in a registered root.
-    pub fn scroll_area_body(&self, root: RootId, node_id: crate::NodeId) -> Option<Recti> {
+    #[cfg(test)]
+    pub(crate) fn scroll_area_body(&self, root: RootId, node_id: crate::NodeId) -> Option<Recti> {
         self.roots
             .iter()
             .find(|entry| entry.id == root)
@@ -166,21 +163,13 @@ impl<R: Renderer> Context<R> {
             .map(|state| state.body)
     }
 
-    /// Returns the measured child content size for a scroll-area node in a registered root.
-    pub fn scroll_area_content_size(&self, root: RootId, node_id: crate::NodeId) -> Option<Dimensioni> {
+    #[cfg(test)]
+    pub(crate) fn scroll_area_content_size(&self, root: RootId, node_id: crate::NodeId) -> Option<Dimensioni> {
         self.roots
             .iter()
             .find(|entry| entry.id == root)
             .and_then(|entry| entry.runtime.scroll_area_state(node_id))
             .map(|state| state.content_size)
-    }
-
-    /// Sets the scroll offset for a scroll-area node in a registered root.
-    pub fn set_scroll_area_scroll(&mut self, root: RootId, node_id: crate::NodeId, scroll: Vec2i) -> bool {
-        self.roots
-            .iter_mut()
-            .find(|entry| entry.id == root)
-            .is_some_and(|entry| entry.runtime.set_scroll_area_scroll(node_id, scroll))
     }
 
     pub(crate) fn root_control_metrics(&self) -> (i32, i32) {
@@ -193,18 +182,17 @@ impl<R: Renderer> Context<R> {
 
     /// Registers a hidden dialog root.
     pub fn create_dialog(&mut self, name: &str, rect: Recti, tree: UiNodeSet) -> RootId {
-        self.register_root(RootKind::Dialog, name, rect, tree, ContainerOption::NONE, ScrollBehavior::NONE, false)
+        self.register_root(WindowKind::Dialog, name, rect, tree, ContainerOption::NONE, false)
     }
 
     /// Registers a hidden popup root.
     pub fn create_popup(&mut self, name: &str, tree: UiNodeSet) -> RootId {
         self.register_root(
-            RootKind::Popup,
+            WindowKind::Popup,
             name,
             Recti::default(),
             tree,
             Self::default_popup_options(),
-            ScrollBehavior::NO_SCROLL,
             false,
         )
     }
@@ -216,11 +204,10 @@ impl<R: Renderer> Context<R> {
         }
     }
 
-    /// Replaces the chrome options and scroll behavior for a registered root.
-    pub fn set_root_options(&mut self, root: RootId, opt: ContainerOption, scroll_behavior: ScrollBehavior) {
+    /// Replaces the chrome options for a registered root.
+    pub fn set_root_options(&mut self, root: RootId, opt: ContainerOption) {
         if let Some(entry) = self.roots.iter_mut().find(|entry| entry.id == root) {
             entry.opt = opt;
-            entry.scroll_behavior = scroll_behavior;
         }
     }
 
@@ -231,12 +218,12 @@ impl<R: Renderer> Context<R> {
             let was_visible = entry.visible;
             entry.visible = visible;
             if visible {
-                if entry.kind == RootKind::Popup && !was_visible {
+                if entry.kind == WindowKind::Popup && !was_visible {
                     entry.rect = rect(mouse_pos.x, mouse_pos.y, 1, 1);
                 }
                 self.last_zindex += 1;
                 entry.z_index = self.last_zindex;
-                if entry.kind == RootKind::Popup && !was_visible {
+                if entry.kind == WindowKind::Popup && !was_visible {
                     entry.just_opened = true;
                 }
             } else {
@@ -253,7 +240,7 @@ impl<R: Renderer> Context<R> {
         }
     }
 
-    pub(super) fn render_roots(&mut self) {
+    pub(super) fn render_window_manager(&mut self) {
         for entry in &mut self.roots {
             if entry.visible && entry.opt.intersects(ContainerOption::AUTO_SIZE) {
                 let size = entry
@@ -280,13 +267,13 @@ impl<R: Renderer> Context<R> {
             }
         }
 
-        self.update_root_window_manager_chrome(hover_root, mouse_pos, mouse_pressed, mouse_down, mouse_delta);
+        self.update_window_manager_chrome(hover_root, mouse_pos, mouse_pressed, mouse_down, mouse_delta);
 
         let mut roots = std::mem::take(&mut self.roots);
         roots.sort_by(|a, b| a.z_index.cmp(&b.z_index));
         for entry in &mut roots {
             if entry.visible {
-                if entry.kind == RootKind::Popup {
+                if entry.kind == WindowKind::Popup {
                     if entry.just_opened {
                         entry.just_opened = false;
                     } else if !mouse_pressed.is_empty() && hover_root != Some(entry.id) && !entry.rect.contains(&mouse_pos) {
@@ -294,9 +281,9 @@ impl<R: Renderer> Context<R> {
                         continue;
                     }
                 }
-                let chrome_capturing_pointer = matches!(entry.active_chrome, Some(RootChromePart::Title | RootChromePart::Resize));
+                let chrome_capturing_pointer = matches!(entry.active_chrome, Some(WindowChromePart::Title | WindowChromePart::Resize));
                 let hover_root_active = hover_root == Some(entry.id) && !chrome_capturing_pointer;
-                let chrome = RootChrome::new(entry.rect, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt);
+                let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt);
                 self.paint_root_frame(entry);
                 let input = self.input.borrow();
                 entry.runtime.render_frame(
@@ -307,7 +294,6 @@ impl<R: Renderer> Context<R> {
                     &input,
                     &mut self.frame_results,
                     chrome.body,
-                    entry.scroll_behavior,
                     hover_root_active,
                 );
                 drop(input);
@@ -317,13 +303,13 @@ impl<R: Renderer> Context<R> {
         self.roots = roots;
     }
 
-    fn paint_root_frame(&mut self, entry: &RootEntry) {
+    fn paint_root_frame(&mut self, entry: &WindowEntry) {
         if !entry.opt.intersects(ContainerOption::NO_FRAME) {
             self.draw_root_frame(entry.rect, ControlColor::WindowBG);
         }
     }
 
-    fn paint_root_chrome(&mut self, entry: &RootEntry, chrome: RootChrome) {
+    fn paint_root_chrome(&mut self, entry: &WindowEntry, chrome: WindowChrome) {
         if let Some(title) = chrome.title {
             self.draw_root_frame(title, ControlColor::TitleBG);
             let mut text = title;
@@ -368,7 +354,7 @@ impl<R: Renderer> Context<R> {
         self.canvas.set_clip_rect(old_clip);
     }
 
-    fn update_root_window_manager_chrome(
+    fn update_window_manager_chrome(
         &mut self,
         hover_root: Option<RootId>,
         mouse_pos: crate::Vec2i,
@@ -392,34 +378,34 @@ impl<R: Renderer> Context<R> {
             }
 
             if mouse_pressed.intersects(MouseButton::LEFT) && hover_root == Some(entry.id) {
-                let chrome = RootChrome::new(entry.rect, self.style.as_ref(), &atlas, entry.opt);
+                let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &atlas, entry.opt);
                 match chrome.hit_test(mouse_pos) {
-                    Some(RootChromePart::Close) => {
+                    Some(WindowChromePart::Close) => {
                         entry.visible = false;
                         entry.active_chrome = None;
                         continue;
                     }
-                    Some(RootChromePart::Resize) => {
-                        entry.active_chrome = Some(RootChromePart::Resize);
+                    Some(WindowChromePart::Resize) => {
+                        entry.active_chrome = Some(WindowChromePart::Resize);
                         continue;
                     }
-                    Some(RootChromePart::Title) => {
-                        entry.active_chrome = Some(RootChromePart::Title);
+                    Some(WindowChromePart::Title) => {
+                        entry.active_chrome = Some(WindowChromePart::Title);
                     }
                     None => {}
                 }
             }
 
             match entry.active_chrome {
-                Some(RootChromePart::Title) => {
+                Some(WindowChromePart::Title) => {
                     entry.rect.x = entry.rect.x.saturating_add(mouse_delta.x);
                     entry.rect.y = entry.rect.y.saturating_add(mouse_delta.y);
                 }
-                Some(RootChromePart::Resize) => {
+                Some(WindowChromePart::Resize) => {
                     entry.rect.width = entry.rect.width.saturating_add(mouse_delta.x).max(min_size.width);
                     entry.rect.height = entry.rect.height.saturating_add(mouse_delta.y).max(min_size.height);
                 }
-                Some(RootChromePart::Close) | None => {}
+                Some(WindowChromePart::Close) | None => {}
             }
         }
     }
@@ -464,7 +450,7 @@ impl<R: Renderer> Context<R> {
         self.roots
             .iter()
             .find(|entry| entry.id == root)
-            .map(|entry| RootChrome::new(entry.rect, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt).body)
+            .map(|entry| WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt).body)
     }
 
     #[cfg(test)]
@@ -486,7 +472,7 @@ impl<R: Renderer> Context<R> {
     #[cfg(test)]
     pub(crate) fn debug_root_chrome(&self, root: RootId) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
         self.roots.iter().find(|entry| entry.id == root).map(|entry| {
-            let chrome = RootChrome::new(entry.rect, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt);
+            let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt);
             (chrome.title, chrome.close, chrome.resize)
         })
     }
