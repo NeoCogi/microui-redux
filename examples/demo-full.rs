@@ -936,10 +936,7 @@ impl State {
             ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
         );
         let popup_root = ctx.create_popup("Test Popup", UiNodeSet::default());
-        ctx.set_root_options(
-            popup_root,
-            ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
-        );
+        ctx.set_root_options(popup_root, ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE);
         ctx.set_root_visible(popup_root, false);
         let typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), UiNodeSet::default());
         let triangle_root = ctx.create_window("Triangle Window", rect(200, 100, 200, 200), UiNodeSet::default());

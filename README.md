@@ -20,13 +20,40 @@ Running with only `--features example-backend` will fail intentionally at compil
 
 `demo-full` now loads `examples/FACEPALM.png` and `assets/suzanne.obj` from disk at runtime (no `include_bytes!` for those files).
 
-For a smaller release executable, use nightly + rebuilt `std`:
+For a smaller release executable with runtime-loaded assets, build without default features and
+enable exactly one backend plus `builder`:
 ```bash
-RUSTFLAGS="-C strip=symbols -C link-arg=-s -Zlocation-detail=none -Zfmt-debug=none" \
+cargo build \
+  --release \
+  --example demo-full \
+  --no-default-features \
+  --features "example-glow builder"
+```
+
+This keeps demo assets outside the executable: fonts/icons are read from `assets/`, the external
+demo image is read from `examples/FACEPALM.png`, and the Suzanne mesh is read from
+`assets/suzanne.obj`. To inspect real binary section size rather than asset size, use
+`size -A target/release/examples/demo-full`.
+
+If `atlas.png` has already been generated, the demo can skip runtime font/icon atlas construction
+and load the atlas image from disk instead:
+```bash
+cargo build \
+  --release \
+  --example demo-full \
+  --no-default-features \
+  --features "example-glow external-atlas"
+```
+
+For an even smaller executable, use nightly + rebuilt `std`:
+```bash
+CARGO_PROFILE_RELEASE_PANIC=immediate-abort \
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C strip=symbols -C link-arg=-s -Zlocation-detail=none -Zfmt-debug=none" \
 cargo +nightly build \
   --release \
   -Z build-std=std,panic_abort \
   -Z build-std-features=optimize_for_size \
+  -Z panic-immediate-abort \
   --example demo-full \
   --no-default-features \
   --features "example-wgpu builder"

@@ -1,24 +1,18 @@
-use std::collections::HashMap;
 use super::*;
 
-#[derive(Default)]
 pub(crate) struct UiRuntime {
-    /// Runtime nodes keyed by stable id.
-    pub(crate) nodes: HashMap<UiNodeId, UiNode>,
-    /// Root nodes in submission order.
-    pub(crate) roots: Vec<UiNodeId>,
-    /// Root nodes in z-order.
-    pub(crate) z_order: Vec<UiNodeId>,
+    /// Aggregate root content size in root body coordinates.
+    root_content_size: Dimensioni,
+    /// Traversal from root body coordinates into screen coordinates.
+    root_traversal: TraversalState,
     /// Focused node.
     pub(crate) focus: Option<UiNodeId>,
     /// Hovered node.
     pub(crate) hover: Option<UiNodeId>,
     /// Pointer-capturing node.
     pub(crate) capture: Option<UiNodeId>,
-    /// Root currently owning hover routing.
-    pub(crate) hover_root: Option<UiNodeId>,
-    /// Whether this runtime's current root owns pointer routing for the frame.
-    pub(super) hover_root_active: bool,
+    /// Whether this runtime accepts pointer routing for the frame.
+    pub(super) pointer_input_enabled: bool,
     /// Commands recorded by the node paint path.
     pub(super) commands: Vec<Command>,
     /// Snapshot of text commands before renderer replay drains them.
@@ -35,80 +29,43 @@ pub(crate) struct UiRuntime {
     pub(super) updated_focus: bool,
 }
 
+impl Default for UiRuntime {
+    fn default() -> Self {
+        Self {
+            root_content_size: Dimensioni::default(),
+            root_traversal: TraversalState::root(UNCLIPPED_RECT),
+            focus: None,
+            hover: None,
+            capture: None,
+            pointer_input_enabled: false,
+            commands: Vec::new(),
+            #[cfg(test)]
+            debug_texts: Vec::new(),
+            #[cfg(test)]
+            debug_rects: Vec::new(),
+            triangle_vertices: Vec::new(),
+            clip_stack: Vec::new(),
+            updated_focus: false,
+        }
+    }
+}
+
 impl UiRuntime {
     /// Creates an empty runtime.
     pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    /// Builds runtime nodes by consuming a retained UI node set.
-    pub(crate) fn from_ui_nodes(tree: UiNodeSet) -> Self {
-        let (roots, nodes) = tree.into_parts();
-        let mut runtime = Self::new();
-        let root_window = runtime_root_id();
-        let mut root_node = UiNode::new(
-            root_window,
-            None,
-            crate::Policy::auto(),
-            GridSpan::ONE,
-            UiNodeData::Branch {
-                behavior: Box::new(RootWindow::default()),
-                children: Vec::new(),
-            },
-        );
-        root_node.metadata.kind = UiNodeKind::RootWindow;
-        runtime.nodes.insert(root_window, root_node);
-        runtime.nodes.extend(nodes);
-        let mut root_children = Vec::new();
-        for root in roots {
-            if let Some(node) = runtime.nodes.get_mut(&root) {
-                node.parent = Some(root_window);
-            }
-            root_children.push(root);
-        }
-        if let Some(children) = runtime.nodes.get_mut(&root_window).and_then(UiNode::children_mut) {
-            *children = root_children;
-        }
-        runtime.roots.push(root_window);
-        runtime.z_order.push(root_window);
-        runtime
-    }
-
-    /// Replaces all runtime nodes by consuming a fresh retained nodes.
-    pub(crate) fn replace_ui_nodes(&mut self, tree: UiNodeSet) {
-        let mut next = Self::from_ui_nodes(tree);
-        next.transfer_runtime_state_from(self);
-        *self = next;
-    }
-
     /// Moves focus to a node in this runtime.
-    pub(crate) fn set_focus_node(&mut self, node: UiNodeId) {
-        if self.nodes.contains_key(&node) {
+    pub(crate) fn set_focus_node(&mut self, roots: &[UiNode], node: UiNodeId) {
+        if contains_node_in(roots, node) {
             self.focus = Some(node);
             self.updated_focus = true;
         }
     }
 
-    /// Returns scroll-area state for tests without exposing it in release runtime APIs.
-    #[cfg(test)]
-    pub(crate) fn scroll_area_state(&self, scroll_area: UiNodeId) -> Option<ScrollAreaState> {
-        self.nodes.get(&scroll_area).and_then(|node| match &node.data {
-            UiNodeData::Leaf { behavior } | UiNodeData::Branch { behavior, .. } => behavior.debug_scroll_area_state(),
-        })
-    }
-
-    /// Replaces scroll-area offset for tests without exposing it in release runtime APIs.
-    #[cfg(test)]
-    pub(crate) fn set_scroll_area_scroll(&mut self, scroll_area: UiNodeId, scroll: Vec2i) -> bool {
-        self.nodes
-            .get_mut(&scroll_area)
-            .is_some_and(|node| match &mut node.data {
-                UiNodeData::Leaf { behavior } | UiNodeData::Branch { behavior, .. } => behavior.debug_set_scroll_area_scroll(scroll),
-            })
-    }
-
     /// Measures the outer root size needed for `AUTO_SIZE` node roots.
-    pub(crate) fn measure_auto_size(&self, style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption, min_width: i32) -> Dimensioni {
+    pub(crate) fn measure_auto_size(&self, roots: &[UiNode], style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption, min_width: i32) -> Dimensioni {
         let title_height = if opt.intersects(ContainerOption::NO_TITLE) {
             0
         } else {
@@ -119,12 +76,11 @@ impl UiRuntime {
         let available = Dimensioni::new(min_width.saturating_sub(horizontal_padding).max(1), 10_000);
         let mut width: i32 = 0;
         let mut height: i32 = 0;
-        for index in 0..self.roots.len() {
-            let Some(root) = self.root_at(index) else { continue };
-            let preferred = self.measure_node(root, style, atlas, available);
+        for (index, root) in roots.iter().enumerate() {
+            let preferred = self.measure_node_ref(root, style, atlas, available);
             width = width.max(preferred.width);
             height = height.saturating_add(preferred.height);
-            if index + 1 < self.roots.len() {
+            if index + 1 < roots.len() {
                 height = height.saturating_add(style.spacing);
             }
         }
@@ -134,18 +90,31 @@ impl UiRuntime {
         )
     }
 
-    /// Returns a read-only node context.
-    pub(crate) fn node_ctx(&mut self, id: UiNodeId) -> NodeCtx<'_> {
-        NodeCtx { runtime: self, id }
+    /// Clears frame-local runtime state before layout/input/update/paint passes.
+    pub(crate) fn begin_frame(&mut self, pointer_input_enabled: bool) {
+        self.commands.clear();
+        self.triangle_vertices.clear();
+        self.clip_stack.clear();
+        self.clip_stack.push(UNCLIPPED_RECT);
+        self.updated_focus = false;
+        self.pointer_input_enabled = pointer_input_enabled;
     }
 
-    /// Runs a minimal enum-based frame and replays the recorded commands immediately.
+    /// Runs the pre-input layout pass that establishes hit targets.
+    pub(crate) fn layout_frame_roots(&mut self, roots: &mut [UiNode], style: &Style, atlas: crate::AtlasHandle, body: Recti) -> Dimensioni {
+        self.set_root_body(body);
+        let local_body = local_rect_for(body);
+        let body_view = root_window_body_view(local_body, style);
+        self.layout_roots_in_view(roots, style, atlas, body_view)
+    }
+
+    /// Runs post-input update/paint passes and replays the recorded commands immediately.
     ///
-    /// The pre-update layout establishes hit targets for input and scroll dispatch. `UpdateCtx` may
-    /// then add new children or remove direct child subtrees immediately. A second layout runs after
-    /// update so paint observes the post-update tree. Later passes keep child topology read-only.
-    pub(crate) fn render_frame<R: Renderer>(
+    /// The caller must run one pre-input layout pass and route input before calling this method. A
+    /// final layout runs after update so paint observes post-update widget/container state.
+    pub(crate) fn update_paint_frame<R: Renderer>(
         &mut self,
+        roots: &mut [UiNode],
         root_id: crate::RootId,
         root_name: &str,
         canvas: &mut Canvas<R>,
@@ -153,41 +122,26 @@ impl UiRuntime {
         input: &Input,
         results: &mut FrameResults,
         body: Recti,
-        hover_root_active: bool,
     ) {
-        self.commands.clear();
-        self.triangle_vertices.clear();
-        self.clip_stack.clear();
-        self.clip_stack.push(UNCLIPPED_RECT);
-        self.updated_focus = false;
-        self.hover_root_active = hover_root_active;
-        self.hover_root = hover_root_active.then(|| self.roots.first().copied()).flatten();
-        let body_view = root_window_body_view(body, style);
+        self.set_root_body(body);
+        let local_body = local_rect_for(body);
+        let body_view = root_window_body_view(local_body, style);
 
-        self.layout_roots_in_view(style, canvas.get_atlas(), body_view, body);
-        self.route_input_events(style, input);
-        self.layout_roots_in_view(style, canvas.get_atlas(), body_view, body);
+        self.layout_roots_in_view(roots, style, canvas.get_atlas(), body_view);
 
         let mut root_index = 0;
-        while let Some(root) = self.root_at(root_index) {
-            self.update_node(
-                root_id,
-                root_name,
-                root,
-                TraversalState::root(UNCLIPPED_RECT),
-                style,
-                canvas.get_atlas(),
-                input,
-                results,
-            );
+        while root_index < roots.len() {
+            let root = &mut roots[root_index];
+            self.update_node_ref(root_id, root_name, root, self.root_traversal, style, canvas.get_atlas(), input, results);
             root_index += 1;
         }
 
-        self.layout_roots_in_view(style, canvas.get_atlas(), body_view, body);
+        self.layout_roots_in_view(roots, style, canvas.get_atlas(), body_view);
 
         let mut root_index = 0;
-        while let Some(root) = self.root_at(root_index) {
-            self.paint_node(root, TraversalState::root(UNCLIPPED_RECT), style, canvas.get_atlas(), input);
+        while root_index < roots.len() {
+            let root = &mut roots[root_index];
+            self.paint_node_ref(root, self.root_traversal, style, canvas.get_atlas(), input);
             root_index += 1;
         }
 
@@ -230,342 +184,202 @@ impl UiRuntime {
         &self.debug_rects
     }
 
-    /// Returns the first synthetic root-window content size.
+    /// Returns the aggregate root content size from the most recent layout.
     #[cfg(test)]
     pub(crate) fn debug_root_content_size(&self) -> Dimensioni {
-        self.root_window_content_size()
+        self.root_content_size
+    }
+
+    /// Returns whether this runtime accepts pointer hit routing for the current frame.
+    pub(crate) fn accepts_pointer_input(&self) -> bool {
+        self.pointer_input_enabled
+    }
+
+    fn set_root_body(&mut self, body: Recti) {
+        self.root_traversal = TraversalState::root_at(root_origin_for(body), body);
+    }
+
+    /// Returns the current root-body traversal state.
+    pub(crate) fn root_traversal(&self) -> TraversalState {
+        self.root_traversal
     }
 
     /// Returns the current full rectangle for a retained node.
     #[cfg(test)]
-    pub(crate) fn debug_node_rect(&self, id: UiNodeId) -> Option<Recti> {
-        self.nodes.get(&id).map(|node| self.traversal_state_for_node(id).screen_frame(node.layout))
+    pub(crate) fn debug_node_rect(&self, roots: &[UiNode], id: UiNodeId) -> Option<Recti> {
+        find_node(roots, id).map(|node| self.traversal_state_for_node(roots, id).screen_frame(node.layout))
     }
 
-    /// Returns a root id by traversal index.
-    pub(super) fn root_at(&self, index: usize) -> Option<UiNodeId> {
-        self.roots.get(index).copied()
+    /// Returns a parent-content-local rectangle in screen coordinates for a retained node.
+    #[cfg(test)]
+    pub(crate) fn debug_node_local_rect(&self, roots: &[UiNode], id: UiNodeId, rect: Recti) -> Option<Recti> {
+        let node = find_node(roots, id)?;
+        let screen_frame = self.traversal_state_for_node(roots, id).screen_frame(node.layout);
+        Some(Recti::new(
+            rect.x + screen_frame.x - node.layout.frame.x,
+            rect.y + screen_frame.y - node.layout.frame.y,
+            rect.width,
+            rect.height,
+        ))
     }
 
-    /// Returns the number of children on a container node.
-    pub(super) fn child_count(&self, node: UiNodeId) -> usize {
-        self.nodes.get(&node).map(|node| node.children().len()).unwrap_or(0)
+    /// Returns whether a node exists in this runtime.
+    pub(crate) fn contains_node(&self, roots: &[UiNode], id: UiNodeId) -> bool {
+        contains_node_in(roots, id)
     }
 
-    /// Returns a child id by traversal index.
-    pub(super) fn child_at(&self, node: UiNodeId, index: usize) -> Option<UiNodeId> {
-        self.nodes.get(&node).and_then(|node| node.children().get(index).copied())
+    /// Returns a node by id.
+    pub(crate) fn node<'a>(&self, roots: &'a [UiNode], id: UiNodeId) -> Option<&'a UiNode> {
+        find_node(roots, id)
     }
 
-    /// Returns a cloned node behavior object for traversal without holding a node borrow.
-    pub(super) fn behavior_clone(&self, node: UiNodeId) -> Option<Box<dyn NodeBehavior>> {
-        self.nodes.get(&node).and_then(|node| match &node.data {
-            UiNodeData::Leaf { behavior } | UiNodeData::Branch { behavior, .. } => Some(behavior.clone()),
-        })
+    /// Returns a mutable node by id.
+    pub(crate) fn node_mut<'a>(&mut self, roots: &'a mut [UiNode], id: UiNodeId) -> Option<&'a mut UiNode> {
+        find_node_mut(roots, id)
     }
 
-    /// Replaces a node behavior object after it mutates its own state.
-    pub(super) fn set_behavior(&mut self, node: UiNodeId, replacement: Box<dyn NodeBehavior>) {
-        if let Some(data) = self.nodes.get_mut(&node).map(|node| &mut node.data) {
-            match data {
-                UiNodeData::Leaf { behavior } | UiNodeData::Branch { behavior, .. } => *behavior = replacement,
+    /// Finds the current parent of `child` by walking root/container child membership.
+    pub(super) fn parent_of(&self, roots: &[UiNode], child: UiNodeId) -> Option<UiNodeId> {
+        for root in roots {
+            if let Some(parent) = Self::parent_of_from(root, child) {
+                return Some(parent);
             }
         }
+        None
     }
 
-    /// Inserts a new node as a child of `parent` immediately.
-    ///
-    /// This is the only topology-add primitive used after initialization. It rejects reparenting:
-    /// the child must not already exist in the runtime and must not already name a parent. Containers
-    /// may call this through `UpdateCtx`; measure, layout, paint, and scroll dispatch contexts keep
-    /// child membership read-only.
-    pub(super) fn insert_child_immediate(&mut self, parent: UiNodeId, mut child: UiNode, index: usize) -> Option<UiNodeId> {
-        if child.parent.is_some() || self.nodes.contains_key(&child.id) {
-            return None;
+    fn parent_of_from(current: &UiNode, child: UiNodeId) -> Option<UiNodeId> {
+        if current.children().iter().any(|node| node.id() == child) {
+            return Some(current.id());
         }
-        let child_id = child.id;
-        let children_len = self.nodes.get(&parent).and_then(|node| match &node.data {
-            UiNodeData::Branch { children, .. } => Some(children.len()),
-            _ => None,
-        })?;
-
-        child.parent = Some(parent);
-        self.nodes.insert(child_id, child);
-        let insert_at = index.min(children_len);
-        if let Some(children) = self.nodes.get_mut(&parent).and_then(UiNode::children_mut) {
-            children.insert(insert_at, child_id);
-            Some(child_id)
-        } else {
-            self.nodes.remove(&child_id);
-            None
-        }
-    }
-
-    /// Removes a direct child and its subtree immediately.
-    ///
-    /// Reparenting is intentionally unsupported, so removal is the only way a node leaves its
-    /// parent. Update traversal snapshots child ids before visiting them and skips ids that are no
-    /// longer direct children.
-    pub(super) fn remove_child_immediate(&mut self, parent: UiNodeId, child: UiNodeId) -> bool {
-        if self.nodes.get(&child).and_then(|node| node.parent) != Some(parent) {
-            return false;
-        }
-        self.remove_subtree(child);
-        true
-    }
-
-    /// Removes a node from its parent child list.
-    pub(super) fn detach_from_parent(&mut self, node: UiNodeId) {
-        let parent = self.nodes.get(&node).and_then(|node| node.parent);
-        if let Some(parent) = parent {
-            if let Some(parent_node) = self.nodes.get_mut(&parent) {
-                if let Some(children) = parent_node.children_mut() {
-                    children.retain(|child| *child != node);
-                }
+        for descendant in current.children() {
+            if let Some(parent) = Self::parent_of_from(descendant, child) {
+                return Some(parent);
             }
         }
-    }
-
-    /// Removes a node and all descendants.
-    pub(super) fn remove_subtree(&mut self, node: UiNodeId) {
-        self.detach_from_parent(node);
-        let mut removed = Vec::new();
-        self.collect_subtree_nodes(node, &mut removed);
-        self.clear_removed_transient_state(&removed);
-        for removed_node in &removed {
-            self.roots.retain(|root| *root != *removed_node);
-            self.z_order.retain(|root| *root != *removed_node);
-            self.nodes.remove(removed_node);
-        }
-    }
-
-    /// Collects a node and all descendants in removal order.
-    pub(super) fn collect_subtree_nodes(&self, node: UiNodeId, removed: &mut Vec<UiNodeId>) {
-        removed.push(node);
-        if let Some(node) = self.nodes.get(&node) {
-            for &child in node.children() {
-                self.collect_subtree_nodes(child, removed);
-            }
-        }
-    }
-
-    /// Clears transient runtime pointers that point into a removed subtree.
-    pub(super) fn clear_removed_transient_state(&mut self, removed: &[UiNodeId]) {
-        if self.focus.is_some_and(|id| removed.contains(&id)) {
-            self.focus = None;
-            self.updated_focus = true;
-        }
-        if self.hover.is_some_and(|id| removed.contains(&id)) {
-            self.hover = None;
-        }
-        if self.capture.is_some_and(|id| removed.contains(&id)) {
-            self.capture = None;
-        }
-        if self.hover_root.is_some_and(|id| removed.contains(&id)) {
-            self.hover_root = None;
-        }
+        None
     }
 
     /// Carries live runtime-only state into a newly submitted projection.
-    pub(super) fn transfer_runtime_state_from(&mut self, previous: &UiRuntime) {
-        for (id, node) in &mut self.nodes {
-            let Some(previous_node) = previous.nodes.get(id) else {
-                continue;
-            };
-            node.rect = previous_node.rect;
-            node.layout = previous_node.layout;
-            node.visible = previous_node.visible;
-            node.enabled = previous_node.enabled;
-            node.hovered = previous_node.hovered;
-            node.focused = previous_node.focused;
-            node.clicked = previous_node.clicked;
-            node.active = previous_node.active;
-            node.scroll_delta = previous_node.scroll_delta;
+    pub(crate) fn transfer_runtime_state_from(&mut self, roots: &mut [UiNode], previous_roots: &[UiNode], previous: &UiRuntime) {
+        for node in roots.iter_mut() {
+            transfer_node_runtime_state(node, previous_roots);
         }
 
-        self.focus = previous.focus.filter(|id| self.nodes.contains_key(id));
-        self.hover = previous.hover.filter(|id| self.nodes.contains_key(id));
-        self.capture = previous.capture.filter(|id| self.nodes.contains_key(id));
-        self.hover_root = previous.hover_root.filter(|id| self.nodes.contains_key(id));
-        self.hover_root_active = previous.hover_root_active;
+        self.focus = previous.focus.filter(|id| contains_node_in(roots, *id));
+        self.hover = previous.hover.filter(|id| contains_node_in(roots, *id));
+        self.capture = previous.capture.filter(|id| contains_node_in(roots, *id));
+        self.pointer_input_enabled = previous.pointer_input_enabled;
         self.updated_focus = previous.updated_focus && self.focus.is_some();
     }
 
     /// Lays out root nodes inside an already resolved root client area.
-    pub(super) fn layout_roots_in_view(&mut self, style: &Style, atlas: crate::AtlasHandle, client: Recti, clip: Recti) -> Dimensioni {
+    pub(super) fn layout_roots_in_view(&mut self, roots: &mut [UiNode], style: &Style, atlas: crate::AtlasHandle, client: Recti) -> Dimensioni {
         let mut y = client.y;
         let mut content_bounds = None;
-        for index in 0..self.roots.len() {
-            let Some(root) = self.root_at(index) else { continue };
+        let root_count = roots.len();
+        for (index, root_node) in roots.iter_mut().enumerate() {
             let remaining_height = (client.y + client.height - y).max(0);
-            let preferred = self.measure_node(root, style, &atlas, Dimensioni::new(client.width, remaining_height));
-            let height = if index + 1 == self.roots.len() {
+            let preferred = self.measure_node_ref(root_node, style, &atlas, Dimensioni::new(client.width, remaining_height));
+            let height = if index + 1 == root_count {
                 remaining_height
             } else {
-                preferred.height.max(0)
+                let policy = root_node.policy.height;
+                resolve_size(policy, preferred.height, remaining_height, remaining_height, None).max(0)
             };
-            let is_root_window = self.nodes.get(&root).is_some_and(|node| node.metadata.kind == UiNodeKind::RootWindow);
-            let rect = if is_root_window {
-                clip
-            } else {
-                Recti::new(client.x, y, client.width, height)
-            };
-            self.layout_node(root, style, &atlas, rect, clip);
-            if let Some(node) = self.nodes.get(&root) {
-                let frame = node.layout.frame;
-                let base = if is_root_window { node.layout.control } else { frame };
-                let content_size = node.layout.content_size;
-                let unscrolled = Recti::new(base.x, base.y, base.width.max(content_size.width), base.height.max(content_size.height));
-                content_bounds = Some(match content_bounds {
-                    Some(bounds) => union_rect(bounds, unscrolled),
-                    None => unscrolled,
-                });
-                y = frame.y + frame.height + style.spacing;
-            }
+            let rect = Recti::new(client.x, y, client.width, height);
+            self.layout_node_ref(root_node, style, &atlas, rect);
+            let frame = root_node.layout.frame;
+            let content_size = root_node.layout.content_size;
+            let unscrolled = Recti::new(frame.x, frame.y, frame.width.max(content_size.width), frame.height.max(content_size.height));
+            content_bounds = Some(match content_bounds {
+                Some(bounds) => union_rect(bounds, unscrolled),
+                None => unscrolled,
+            });
+            y = frame.y + frame.height + style.spacing;
         }
 
         let content_size = content_bounds
             .map(|bounds| Dimensioni::new((bounds.x + bounds.width - client.x).max(0), (bounds.y + bounds.height - client.y).max(0)))
             .unwrap_or_default();
-        for index in 0..self.roots.len() {
-            if let Some(root) = self.root_at(index).and_then(|root| self.nodes.get_mut(&root)) {
-                root.set_layout(root.layout.with_content_size(content_size));
-            }
-        }
+        self.root_content_size = content_size;
         content_size
     }
 
-    /// Returns the first root content size in the root-window client coordinate space.
-    pub(super) fn root_window_content_size(&self) -> Dimensioni {
-        self.roots
-            .first()
-            .and_then(|root| self.nodes.get(root))
-            .map(|node| node.layout.content_size)
-            .unwrap_or_default()
-    }
-
-    /// Measures one node's preferred size in the box-tree layout path.
-    pub(super) fn measure_node(&self, id: UiNodeId, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+    /// Measures one already-borrowed node's preferred size.
+    pub(super) fn measure_node_ref(&self, node: &UiNode, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
         let ctx = MeasureCtx { runtime: self, style, atlas };
-        self.behavior_clone(id)
-            .map(|behavior| behavior.measure(&ctx, id, available))
-            .unwrap_or_default()
+        match &node.data {
+            UiNodeData::Widget { behavior } => behavior.measure(&ctx, node, available),
+            UiNodeData::Container { behavior } => behavior.measure(&ctx, node, available),
+        }
     }
 
-    /// Lays out one node through its behavior.
-    pub(super) fn layout_node(&mut self, id: UiNodeId, style: &Style, atlas: &crate::AtlasHandle, rect: Recti, clip: Recti) -> Dimensioni {
-        let is_branch = self.nodes.get(&id).is_some_and(|node| matches!(node.data, UiNodeData::Branch { .. }));
+    /// Lays out one already-borrowed node through its behavior.
+    pub(super) fn layout_node_ref(&mut self, node: &mut UiNode, style: &Style, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
+        let is_branch = node.is_container();
         if is_branch {
-            if let Some(node) = self.nodes.get_mut(&id) {
-                node.set_layout(NodeLayout::from_rect(rect, clip, node.layout.content_size));
-            }
+            node.set_layout(NodeLayout::from_rect(rect, node.layout.content_size));
         }
 
-        let mut behavior = self.behavior_clone(id);
-        if let Some(behavior) = behavior.as_mut() {
-            let node_clip = if is_branch {
-                self.nodes
-                    .get(&id)
-                    .map(|node| node.layout.content.viewport)
-                    .unwrap_or_else(|| clip.intersect(&rect).unwrap_or_default())
-            } else {
-                clip
-            };
-            let mut ctx = LayoutCtx { runtime: self, style, atlas };
-            behavior.layout(&mut ctx, id, rect, node_clip);
-        }
-        let kind = self.nodes.get(&id).map(|node| node.metadata.kind).unwrap_or(UiNodeKind::Normal);
-        if let Some(behavior) = behavior {
-            self.set_behavior(id, behavior);
+        let mut behavior = match &mut node.data {
+            UiNodeData::Widget { behavior } => TakenBehavior::Widget(std::mem::replace(behavior, Box::new(TakenWidget))),
+            UiNodeData::Container { behavior } => TakenBehavior::Container(std::mem::replace(behavior, Box::new(TakenContainer::new(Vec::new())))),
+        };
+        let mut ctx = LayoutCtx { runtime: self, style, atlas };
+        behavior.widget_mut().layout(&mut ctx, node, rect);
+        match (&mut node.data, behavior) {
+            (UiNodeData::Widget { behavior }, TakenBehavior::Widget(replacement)) => *behavior = replacement,
+            (UiNodeData::Container { behavior }, TakenBehavior::Container(replacement)) => *behavior = replacement,
+            _ => {}
         }
 
-        let propagate_child_overflow = self.nodes.get(&id).map(|node| node.layout.propagate_child_overflow).unwrap_or(true);
-        if is_branch && kind != UiNodeKind::RootWindow && propagate_child_overflow {
-            let content_rect = self.child_content_bounds(id).unwrap_or(rect);
+        let propagate_child_overflow = node.layout.propagate_child_overflow;
+        if is_branch && propagate_child_overflow {
+            let content_rect = child_content_bounds_from_children(node.children()).unwrap_or(rect);
             let content_size = Dimensioni::new(
                 (content_rect.x + content_rect.width - rect.x).max(0),
                 (content_rect.y + content_rect.height - rect.y).max(0),
             );
-            if let Some(node) = self.nodes.get_mut(&id) {
-                node.set_layout(node.layout.with_content_size(content_size));
-            }
+            node.set_layout(node.layout.with_content_size(content_size));
         }
         Dimensioni::new(rect.width, rect.height)
     }
 
-    /// Returns the union of child rectangles, including each child's measured content overflow.
-    pub(super) fn child_content_bounds(&self, id: UiNodeId) -> Option<Recti> {
-        let mut bounds = None;
-        for index in 0..self.child_count(id) {
-            let child_rect = self.child_at(id, index).and_then(|child| self.nodes.get(&child)).map(child_content_rect)?;
-            bounds = Some(match bounds {
-                Some(rect) => union_rect(rect, child_rect),
-                None => child_rect,
-            });
-        }
-        bounds
-    }
-
-    /// Returns the effective vertical placement policy for a child in a column.
-    pub(super) fn vertical_child_policy(&self, child: UiNodeId) -> SizePolicy {
-        let policy = self.nodes.get(&child).map(|node| node.policy.height).unwrap_or(SizePolicy::Auto);
-        if policy != SizePolicy::Auto {
-            return policy;
-        }
-        self.nodes
-            .get(&child)
-            .and_then(|node| node.metadata.vertical_child_policy)
-            .unwrap_or(SizePolicy::Auto)
-    }
-
-    /// Returns the effective horizontal placement policy for a child in a row.
-    pub(super) fn horizontal_track_policy(&self, child: UiNodeId, track: SizePolicy) -> SizePolicy {
-        let policy = self.nodes.get(&child).map(|node| node.policy.width).unwrap_or(SizePolicy::Auto);
-        if policy != SizePolicy::Auto { policy } else { track }
-    }
-
-    /// Updates one node and descendants.
-    pub(super) fn update_node(
+    /// Updates one already-borrowed node and descendants.
+    pub(super) fn update_node_ref(
         &mut self,
         root_id: crate::RootId,
         root_name: &str,
-        id: UiNodeId,
+        node: &mut UiNode,
         parent_traversal: TraversalState,
         style: &Style,
         atlas: crate::AtlasHandle,
         input: &Input,
         results: &mut FrameResults,
     ) {
-        let traversal = self.node_traversal_state(id, parent_traversal);
-        let mut behavior = self.behavior_clone(id);
-        let traverse_children = behavior
-            .as_mut()
-            .map(|behavior| {
-                let mut ctx = UpdateCtx {
-                    runtime: self,
-                    root_id,
-                    root_name,
-                    style,
-                    atlas: atlas.clone(),
-                    input,
-                    results,
-                    traversal,
-                };
-                behavior.update(&mut ctx, id)
-            })
-            .unwrap_or(true);
+        let traversal = parent_traversal.enter(node.layout);
+        let mut behavior = take_behavior_from_node(node);
+        let traverse_children = {
+            let mut ctx = UpdateCtx {
+                runtime: self,
+                root_id,
+                root_name,
+                style,
+                atlas: atlas.clone(),
+                input,
+                results,
+                traversal,
+            };
+            behavior.widget_mut().update(&mut ctx, node)
+        };
+        restore_behavior_to_node(node, behavior);
         if traverse_children {
-            let children: Vec<_> = (0..self.child_count(id))
-                .filter_map(|index| self.child_at(id, index))
-                .collect();
-            for child in children {
-                if self.nodes.get(&child).and_then(|node| node.parent) == Some(id) {
-                    self.update_node(root_id, root_name, child, traversal, style, atlas.clone(), input, results);
+            if let Some(children) = node.children_mut() {
+                for child in children {
+                    self.update_node_ref(root_id, root_name, child, traversal, style, atlas.clone(), input, results);
                 }
             }
-        }
-        if let Some(behavior) = behavior {
-            self.set_behavior(id, behavior);
         }
     }
 
@@ -584,7 +398,7 @@ impl UiRuntime {
             return (false, false, false, false, None);
         }
 
-        let hovered = self.hover_root_active && rect.contains(&input.mouse_pos) && clip.contains(&input.mouse_pos);
+        let hovered = self.pointer_input_enabled && rect.contains(&input.mouse_pos) && clip.contains(&input.mouse_pos);
         if hovered {
             self.hover = Some(id);
         }
@@ -621,62 +435,35 @@ impl UiRuntime {
         (hovered, focused, clicked, active, scroll_delta)
     }
 
-    /// Routes pre-update input events to the deepest eligible owner below the root.
-    pub(super) fn route_input_events(&mut self, style: &Style, input: &Input) -> bool {
+    /// Routes focus input events to the focused node.
+    pub(crate) fn route_focus_input_events(&mut self, roots: &mut [UiNode], style: &Style, input: &Input) -> bool {
         let mut consumed = false;
-        if self.hover_root_active || self.capture.is_some() {
-            for event in pointer_events_from_input(input) {
-                consumed |= self.route_input_event(style, input, &event);
-            }
-        }
         for event in focus_events_from_input(input) {
-            consumed |= self.route_input_event(style, input, &event);
+            consumed |= self.route_focus_input_event(roots, style, input, &event);
         }
         consumed
     }
 
-    /// Routes one input event through roots in z-order.
-    pub(super) fn route_input_event(&mut self, style: &Style, input: &Input, event: &UiInputEvent) -> bool {
-        if event.is_focus_input() {
-            return self.route_focus_input_event(style, input, event);
-        }
-        if event.is_pointer() {
-            return self.route_pointer_input_event(style, input, event);
-        }
-        self.route_hit_input_event(style, input, event).is_some()
+    /// Routes one pointer event to the capturing node, if there is one.
+    pub(crate) fn route_captured_pointer_input_event(&mut self, roots: &mut [UiNode], style: &Style, input: &Input, event: &UiInputEvent) -> Option<bool> {
+        let capture = self.capture.filter(|id| contains_node_in(roots, *id))?;
+        let traversal = self.traversal_state_for_node(roots, capture);
+        let result = self.route_input_event_to_node_only(roots, capture, traversal, style, input, event);
+        self.update_pointer_capture(capture, result, event, input);
+        Some(result.is_consumed())
     }
 
     /// Routes keyboard/text input to the focused node only.
-    fn route_focus_input_event(&mut self, style: &Style, input: &Input, event: &UiInputEvent) -> bool {
-        let Some(focus) = self.focus.filter(|id| self.nodes.contains_key(id)) else {
+    fn route_focus_input_event(&mut self, roots: &mut [UiNode], style: &Style, input: &Input, event: &UiInputEvent) -> bool {
+        let Some(focus) = self.focus.filter(|id| contains_node_in(roots, *id)) else {
             return false;
         };
-        let traversal = self.traversal_state_for_node(focus);
-        self.route_input_event_to_node_only(focus, traversal, style, input, event).is_consumed()
-    }
-
-    /// Routes pointer input through capture first, then through normal hit traversal.
-    fn route_pointer_input_event(&mut self, style: &Style, input: &Input, event: &UiInputEvent) -> bool {
-        if let Some(capture) = self.capture.filter(|id| self.nodes.contains_key(id)) {
-            let traversal = self.traversal_state_for_node(capture);
-            let result = self.route_input_event_to_node_only(capture, traversal, style, input, event);
-            self.update_pointer_capture(capture, result, event, input);
-            return result.is_consumed();
-        }
-
-        if !self.hover_root_active {
-            return false;
-        }
-
-        let Some((owner, result)) = self.route_hit_input_event(style, input, event) else {
-            return false;
-        };
-        self.update_pointer_capture(owner, result, event, input);
-        result.is_consumed()
+        let traversal = self.traversal_state_for_node(roots, focus);
+        self.route_input_event_to_node_only(roots, focus, traversal, style, input, event).is_consumed()
     }
 
     /// Applies runtime pointer-capture ownership from one routed event result.
-    fn update_pointer_capture(&mut self, owner: UiNodeId, result: InputResult, event: &UiInputEvent, input: &Input) {
+    pub(crate) fn update_pointer_capture(&mut self, owner: UiNodeId, result: InputResult, event: &UiInputEvent, input: &Input) {
         if event.is_pointer_release() && input.mouse_down.is_empty() {
             self.capture = None;
         } else if result == InputResult::Captured {
@@ -686,91 +473,98 @@ impl UiRuntime {
         }
     }
 
-    /// Routes an event through roots in z-order and returns the consumed owner.
-    fn route_hit_input_event(&mut self, style: &Style, input: &Input, event: &UiInputEvent) -> Option<(UiNodeId, InputResult)> {
-        for index in (0..self.roots.len()).rev() {
-            let Some(root) = self.root_at(index) else { continue };
-            if let Some(result) = self.route_input_event_to_node(root, TraversalState::root(UNCLIPPED_RECT), style, input, event) {
-                return Some(result);
-            }
-        }
-        None
-    }
-
-    /// Walks children first so nested owners beat ancestors.
-    pub(super) fn route_input_event_to_node(
+    /// Walks borrowed children first so nested owners beat ancestors.
+    pub(crate) fn route_input_event_to_node_ref(
         &mut self,
-        id: UiNodeId,
+        node: &mut UiNode,
         parent_traversal: TraversalState,
         style: &Style,
         input: &Input,
         event: &UiInputEvent,
     ) -> Option<(UiNodeId, InputResult)> {
-        let traversal = self.node_traversal_state(id, parent_traversal);
-        for index in (0..self.child_count(id)).rev() {
-            let Some(child) = self.child_at(id, index) else { continue };
-            if let Some(result) = self.route_input_event_to_node(child, traversal, style, input, event) {
-                return Some(result);
+        let id = node.id();
+        let traversal = parent_traversal.enter(node.layout);
+        if let Some(children) = node.children_mut() {
+            for child in children.iter_mut().rev() {
+                if let Some(result) = self.route_input_event_to_node_ref(child, traversal, style, input, event) {
+                    return Some(result);
+                }
             }
         }
 
-        let result = self.route_input_event_to_node_only(id, traversal, style, input, event);
+        let result = self.route_input_event_to_node_only_ref(node, traversal, style, input, event);
         result.is_consumed().then_some((id, result))
     }
 
     /// Routes an event to exactly one node behavior without traversing descendants.
-    fn route_input_event_to_node_only(&mut self, id: UiNodeId, traversal: TraversalState, style: &Style, input: &Input, event: &UiInputEvent) -> InputResult {
-        let Some(mut behavior) = self.behavior_clone(id) else {
-            return InputResult::Ignored;
-        };
+    fn route_input_event_to_node_only(
+        &mut self,
+        roots: &mut [UiNode],
+        id: UiNodeId,
+        traversal: TraversalState,
+        style: &Style,
+        input: &Input,
+        event: &UiInputEvent,
+    ) -> InputResult {
+        find_node_mut(roots, id)
+            .map(|node| self.route_input_event_to_node_only_ref(node, traversal, style, input, event))
+            .unwrap_or(InputResult::Ignored)
+    }
+
+    /// Routes an event to exactly one borrowed node behavior without traversing descendants.
+    fn route_input_event_to_node_only_ref(
+        &mut self,
+        node: &mut UiNode,
+        traversal: TraversalState,
+        style: &Style,
+        input: &Input,
+        event: &UiInputEvent,
+    ) -> InputResult {
+        let mut behavior = take_behavior_from_node(node);
         let mut ctx = InputCtx { runtime: self, style, input, traversal };
-        let result = behavior.update_on(&mut ctx, id, event);
-        self.set_behavior(id, behavior);
+        let result = behavior.widget_mut().update_on(&mut ctx, node, event);
+        restore_behavior_to_node(node, behavior);
         result
     }
 
-    /// Paints one node and descendants.
-    pub(super) fn paint_node(&mut self, id: UiNodeId, parent_traversal: TraversalState, style: &Style, atlas: crate::AtlasHandle, input: &Input) {
-        let traversal = self.node_traversal_state(id, parent_traversal);
-        let mut behavior = self.behavior_clone(id);
-        let traverse_children = behavior
-            .as_mut()
-            .map(|behavior| {
-                let mut ctx = PaintCtx {
-                    runtime: self,
-                    style,
-                    atlas: atlas.clone(),
-                    input,
-                    traversal,
-                };
-                behavior.paint(&mut ctx, id)
-            })
-            .unwrap_or(true);
+    /// Paints one already-borrowed node and descendants.
+    pub(super) fn paint_node_ref(&mut self, node: &mut UiNode, parent_traversal: TraversalState, style: &Style, atlas: crate::AtlasHandle, input: &Input) {
+        let traversal = parent_traversal.enter(node.layout);
+        let mut behavior = take_behavior_from_node(node);
+        let traverse_children = {
+            let mut ctx = PaintCtx {
+                runtime: self,
+                style,
+                atlas: atlas.clone(),
+                input,
+                traversal,
+            };
+            behavior.widget_mut().paint(&mut ctx, node)
+        };
+        restore_behavior_to_node(node, behavior);
         if traverse_children {
-            for index in 0..self.child_count(id) {
-                let Some(child) = self.child_at(id, index) else { continue };
-                self.paint_node(child, traversal, style, atlas.clone(), input);
+            if let Some(children) = node.children_mut() {
+                for child in children {
+                    self.paint_node_ref(child, traversal, style, atlas.clone(), input);
+                }
             }
-        }
-        if let Some(behavior) = behavior {
-            self.set_behavior(id, behavior);
         }
     }
 
     /// Derives this node's traversal state from its parent traversal state.
-    pub(super) fn node_traversal_state(&self, id: UiNodeId, parent: TraversalState) -> TraversalState {
-        self.nodes.get(&id).map(|node| parent.enter(node.layout)).unwrap_or(parent)
+    pub(super) fn node_traversal_state(&self, roots: &[UiNode], id: UiNodeId, parent: TraversalState) -> TraversalState {
+        find_node(roots, id).map(|node| parent.enter(node.layout)).unwrap_or(parent)
     }
 
     /// Derives traversal state for one node by walking parent links on the call stack.
-    pub(super) fn traversal_state_for_node(&self, id: UiNodeId) -> TraversalState {
+    pub(super) fn traversal_state_for_node(&self, roots: &[UiNode], id: UiNodeId) -> TraversalState {
         let parent_state = self
-            .nodes
-            .get(&id)
-            .and_then(|node| node.parent)
-            .map(|parent| self.traversal_state_for_node(parent))
-            .unwrap_or_else(|| TraversalState::root(UNCLIPPED_RECT));
-        self.node_traversal_state(id, parent_state)
+            .contains_node(roots, id)
+            .then(|| self.parent_of(roots, id))
+            .flatten()
+            .map(|parent| self.traversal_state_for_node(roots, parent))
+            .unwrap_or(self.root_traversal);
+        self.node_traversal_state(roots, id, parent_state)
     }
 
     /// Returns the current effective clip rectangle.
@@ -795,7 +589,86 @@ impl UiRuntime {
     }
 }
 
+fn local_rect_for(rect: Recti) -> Recti {
+    Recti::new(0, 0, rect.width, rect.height)
+}
+
+fn root_origin_for(body: Recti) -> Vec2i {
+    Vec2i::new(body.x, body.y)
+}
+
 /// Returns the root content viewport. Root/window layout clips to this rect but never scrolls it.
 fn root_window_body_view(body: Recti, style: &Style) -> Recti {
     expand_rect(body, -style.padding)
+}
+
+fn find_node(roots: &[UiNode], id: UiNodeId) -> Option<&UiNode> {
+    roots.iter().find_map(|root| root.find(id))
+}
+
+fn find_node_mut(roots: &mut [UiNode], id: UiNodeId) -> Option<&mut UiNode> {
+    roots.iter_mut().find_map(|root| root.find_mut(id))
+}
+
+fn contains_node_in(roots: &[UiNode], id: UiNodeId) -> bool {
+    find_node(roots, id).is_some()
+}
+
+fn transfer_node_runtime_state(node: &mut UiNode, previous_roots: &[UiNode]) {
+    if let Some(previous_node) = find_node(previous_roots, node.id()) {
+        node.layout = previous_node.layout;
+        node.visible = previous_node.visible;
+        node.enabled = previous_node.enabled;
+        node.hovered = previous_node.hovered;
+        node.focused = previous_node.focused;
+        node.clicked = previous_node.clicked;
+        node.active = previous_node.active;
+        node.scroll_delta = previous_node.scroll_delta;
+    }
+    if let Some(children) = node.children_mut() {
+        for child in children {
+            transfer_node_runtime_state(child, previous_roots);
+        }
+    }
+}
+
+fn child_content_bounds_from_children(children: &[UiNode]) -> Option<Recti> {
+    let mut bounds = None;
+    for child in children {
+        let child_rect = child_content_rect(child);
+        bounds = Some(match bounds {
+            Some(rect) => union_rect(rect, child_rect),
+            None => child_rect,
+        });
+    }
+    bounds
+}
+
+pub(super) enum TakenBehavior {
+    Widget(Box<dyn Widget>),
+    Container(Box<dyn Container>),
+}
+
+impl TakenBehavior {
+    fn widget_mut(&mut self) -> &mut dyn Widget {
+        match self {
+            Self::Widget(behavior) => behavior.as_mut(),
+            Self::Container(behavior) => behavior.as_mut(),
+        }
+    }
+}
+
+fn take_behavior_from_node(node: &mut UiNode) -> TakenBehavior {
+    match &mut node.data {
+        UiNodeData::Widget { behavior } => TakenBehavior::Widget(std::mem::replace(behavior, Box::new(TakenWidget))),
+        UiNodeData::Container { behavior } => TakenBehavior::Container(std::mem::replace(behavior, Box::new(TakenContainer::new(Vec::new())))),
+    }
+}
+
+fn restore_behavior_to_node(node: &mut UiNode, replacement: TakenBehavior) {
+    match (&mut node.data, replacement) {
+        (UiNodeData::Widget { behavior }, TakenBehavior::Widget(replacement)) => *behavior = replacement,
+        (UiNodeData::Container { behavior }, TakenBehavior::Container(replacement)) => *behavior = replacement,
+        _ => {}
+    }
 }

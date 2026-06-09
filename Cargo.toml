@@ -20,6 +20,7 @@ builder = ["dep:fontdue", "dep:png"]
 png_source = ["dep:png"]
 save-to-rust = []
 prebuilt-atlas = ["png_source"]
+external-atlas = ["png_source"]
 example-backend = []
 # Example backends are only used by examples and are wired to optional deps.
 example-glow = ["example-backend", "dep:sdl2", "dep:glow"]
@@ -93,3 +94,4 @@ panic = "abort"
 lto = "fat"
 codegen-units = 1
 debug = "none"
+strip = "symbols"

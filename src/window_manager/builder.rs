@@ -38,12 +38,12 @@ use crate::{
     id::{hash_id_key, IdNamespace},
     input::{ContainerOption, ScrollBehavior},
     sizing::{SizePolicy, StackDirection},
-	    ui_node::{
-	        scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData,
-	        UiNodeId, WidgetNode,
-	    },
+    ui_node::{
+        scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData,
+        UiNodeId, WidgetNode,
+    },
     widget::Widget,
-    Custom, CustomRenderArgs, Node, TextBlock, TextWrap,
+    Custom, CustomRenderArgs, Node, Recti, TextBlock, TextWrap,
 };
 
 use super::{erased_widget_state, widget_handle, TreeCustomRender, WidgetHandle};
@@ -117,27 +117,25 @@ impl Policy {
 /// Completed retained UI node set.
 #[derive(Default)]
 pub struct UiNodeSet {
-    /// Root node ids submitted to the context.
-    roots: Vec<UiNodeId>,
-    /// Runtime nodes owned by the retained nodes.
-    nodes: HashMap<UiNodeId, UiNode>,
+    /// Root nodes submitted to the context.
+    roots: Vec<UiNode>,
 }
 
 impl UiNodeSet {
     /// Returns the root ids in this set.
-    pub fn roots(&self) -> &[UiNodeId] {
-        &self.roots
+    pub fn roots(&self) -> Vec<UiNodeId> {
+        self.roots.iter().map(UiNode::id).collect()
     }
 
     /// Returns a retained node by id.
     #[cfg(test)]
     pub(crate) fn node(&self, id: UiNodeId) -> Option<&UiNode> {
-        self.nodes.get(&id)
+        self.roots.iter().find_map(|root| root.find(id))
     }
 
-    /// Consumes this tree into root ids and runtime nodes.
-    pub(crate) fn into_parts(self) -> (Vec<UiNodeId>, HashMap<UiNodeId, UiNode>) {
-        (self.roots, self.nodes)
+    /// Consumes this tree into owned root nodes.
+    pub(crate) fn into_roots(self) -> Vec<UiNode> {
+        self.roots
     }
 }
 
@@ -151,16 +149,22 @@ const TAG_GRID: u8 = 7;
 const TAG_COLUMN: u8 = 8;
 const TAG_STACK: u8 = 9;
 
+/// Child collected while the builder is assembling one parent scope.
+struct BuilderChild {
+    /// Child node.
+    node: UiNode,
+    /// Grid placement span requested for this child by the builder call.
+    grid_span: GridSpan,
+}
+
 /// Stack frame used while the builder collects a group node's children.
 struct BuilderFrame {
-    /// Parent node for children collected in this frame.
-    parent: Option<UiNodeId>,
     /// Seed mixed into automatic child ids for this scope.
     scope_seed: u64,
     /// Next ordinal for unkeyed automatic children.
     next_auto: u64,
-    /// Child node ids collected inside this frame.
-    nodes: Vec<UiNodeId>,
+    /// Child nodes collected inside this frame.
+    nodes: Vec<BuilderChild>,
 }
 
 impl BuilderFrame {
@@ -168,16 +172,14 @@ impl BuilderFrame {
     fn root(seed: u64) -> Self {
         Self {
             scope_seed: seed,
-            parent: None,
             next_auto: 0,
             nodes: Vec::new(),
         }
     }
 
     /// Creates a child frame whose automatic ids are scoped by its parent node id.
-    fn child(parent: UiNodeId, seed: u64) -> Self {
+    fn child(seed: u64) -> Self {
         Self {
-            parent: Some(parent),
             scope_seed: seed,
             next_auto: 0,
             nodes: Vec::new(),
@@ -264,8 +266,6 @@ fn hash_builder_key<K: Hash>(key: K) -> u64 {
 pub struct UiNodeBuilder {
     /// Stack of open builder scopes.
     frames: Vec<BuilderFrame>,
-    /// Nodes emitted by the builder, keyed by stable id.
-    nodes: HashMap<UiNodeId, UiNode>,
 }
 
 /// Builder adapter that applies one [`NodeOptions`] value to the next inserted node.
@@ -343,10 +343,7 @@ impl UiNodeBuilder {
 
     /// Creates an empty builder whose root IDs are derived from `seed`.
     pub fn with_seed(seed: u64) -> Self {
-        Self {
-            frames: vec![BuilderFrame::root(seed)],
-            nodes: HashMap::new(),
-        }
+        Self { frames: vec![BuilderFrame::root(seed)] }
     }
 
     /// Builds retained nodes by executing `f` within a fresh builder.
@@ -367,8 +364,9 @@ impl UiNodeBuilder {
     pub fn finish(mut self) -> UiNodeSet {
         debug_assert_eq!(self.frames.len(), 1, "ui node builder scopes must be balanced");
         let frame = self.frames.pop().expect("root frame missing");
-        Self::validate_unique_node_ids(&frame.nodes);
-        UiNodeSet { roots: frame.nodes, nodes: self.nodes }
+        let roots = Self::child_nodes(frame.nodes);
+        Self::validate_unique_node_ids(&roots);
+        UiNodeSet { roots }
     }
 
     /// Applies `options` to the next inserted node.
@@ -387,7 +385,7 @@ impl UiNodeBuilder {
         self.push_leaf(
             options,
             TAG_WIDGET,
-            UiNodeData::Leaf {
+            UiNodeData::Widget {
                 behavior: Box::new(WidgetNode {
                     widget: erased_widget_state(widget),
                     custom_render: None,
@@ -427,7 +425,7 @@ impl UiNodeBuilder {
         self.push_leaf(
             options,
             TAG_CUSTOM_RENDER,
-            UiNodeData::Leaf {
+            UiNodeData::Widget {
                 behavior: Box::new(WidgetNode {
                     widget: erased_widget_state(state),
                     custom_render: Some(render),
@@ -445,13 +443,8 @@ impl UiNodeBuilder {
     /// Adds a scroll area node with optional identity and placement metadata.
     fn insert_scroll_area(&mut self, options: NodeOptions, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut Self)) -> NodeId {
         let id = self.alloc_id(TAG_SCROLL_AREA, options.key);
-        let parent = self.current_frame().parent;
         let state = shared_scroll_area_state();
-        let viewport = scroll_viewport_node(id, state.clone(), scroll_behavior, Vec::new());
-        let viewport_id = viewport.id;
-
         self.frames.push(BuilderFrame {
-            parent: Some(viewport_id),
             scope_seed: id.raw() as u64,
             next_auto: 0,
             nodes: Vec::new(),
@@ -459,36 +452,22 @@ impl UiNodeBuilder {
         f(self);
         let frame = self.frames.pop().expect("scroll viewport frame missing");
 
-        let mut viewport = scroll_viewport_node(id, state.clone(), scroll_behavior, frame.nodes);
-        viewport.parent = Some(id);
+        let viewport = scroll_viewport_node(id, state.clone(), scroll_behavior, Self::child_nodes(frame.nodes));
 
         let scrollbars = scrollbar_nodes(id, state.clone(), scroll_behavior);
         let mut children = Vec::with_capacity(1 + scrollbars.len());
-        children.push(viewport_id);
-        children.extend(scrollbars.iter().map(|node| node.id));
+        children.push(viewport);
+        children.extend(scrollbars);
 
-        let node = UiNode::new(
+        let node = self.create_node_with_id(
             id,
-            parent,
-            options.policy,
-            options.grid_span,
-            UiNodeData::Branch {
-                behavior: Box::new(UiScrollArea::new(state, scroll_behavior, opt)),
-                children,
+            options,
+            UiNodeData::Container {
+                behavior: Box::new(UiScrollArea::new(state, scroll_behavior, opt, children)),
             },
         );
-        if self.nodes.contains_key(&id) || self.nodes.contains_key(&viewport_id) || scrollbars.iter().any(|node| self.nodes.contains_key(&node.id)) {
-            panic!(
-                "duplicate retained node id {:?} in UiNodeBuilder output. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
-                id
-            );
-        }
-        self.nodes.insert(id, node);
-        self.nodes.insert(viewport_id, viewport);
-        for scrollbar in scrollbars {
-            self.nodes.insert(scrollbar.id, scrollbar);
-        }
-        self.current_frame_mut().nodes.push(id);
+        Self::validate_unique_node_ids(std::slice::from_ref(&node));
+        self.current_frame_mut().nodes.push(BuilderChild { node, grid_span: options.grid_span });
         id
     }
 
@@ -503,13 +482,13 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_HEADER,
-            UiNodeData::Branch {
+            UiNodeData::Container {
                 behavior: Box::new(Disclosure {
                     state,
                     indent_children: false,
-                    content_layout: Column,
+                    header_rect: Recti::default(),
+                    content_layout: Column::default(),
                 }),
-                children: Vec::new(),
             },
             f,
         )
@@ -526,13 +505,13 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_TREE,
-            UiNodeData::Branch {
+            UiNodeData::Container {
                 behavior: Box::new(Disclosure {
                     state,
                     indent_children: true,
-                    content_layout: Column,
+                    header_rect: Recti::default(),
+                    content_layout: Column::default(),
                 }),
-                children: Vec::new(),
             },
             f,
         )
@@ -545,19 +524,22 @@ impl UiNodeBuilder {
 
     /// Adds a row flow group with optional identity and placement metadata.
     fn insert_row(&mut self, options: NodeOptions, widths: &[SizePolicy], height: SizePolicy, f: impl FnOnce(&mut Self)) -> NodeId {
-        let id = self.push_group(
+        let mut options = options;
+        if options.policy.height == SizePolicy::Auto {
+            options.policy.height = height;
+        }
+        self.push_group(
             options,
             TAG_ROW,
-            UiNodeData::Branch {
-                behavior: Box::new(Row { widths: widths.to_vec(), height }),
-                children: Vec::new(),
+            UiNodeData::Container {
+                behavior: Box::new(Row {
+                    widths: widths.to_vec(),
+                    height,
+                    children: Vec::new(),
+                }),
             },
             f,
-        );
-        if let Some(node) = self.nodes.get_mut(&id) {
-            node.metadata.vertical_child_policy = Some(height);
-        }
-        id
+        )
     }
 
     /// Adds an unkeyed grid flow group.
@@ -567,18 +549,26 @@ impl UiNodeBuilder {
 
     /// Adds a grid flow group with optional identity and placement metadata.
     fn insert_grid(&mut self, options: NodeOptions, widths: &[SizePolicy], heights: &[SizePolicy], f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(
+        let id = self.alloc_id(TAG_GRID, options.key);
+        self.frames.push(BuilderFrame::child(id.raw() as u64));
+        f(self);
+        let frame = self.frames.pop().expect("grid frame missing");
+        let spans = frame.nodes.iter().map(|child| child.grid_span).collect();
+        let children = Self::child_nodes(frame.nodes);
+        let node = self.create_node_with_id(
+            id,
             options,
-            TAG_GRID,
-            UiNodeData::Branch {
+            UiNodeData::Container {
                 behavior: Box::new(Grid {
                     widths: widths.to_vec(),
                     heights: heights.to_vec(),
+                    spans,
+                    children,
                 }),
-                children: Vec::new(),
             },
-            f,
-        )
+        );
+        self.current_frame_mut().nodes.push(BuilderChild { node, grid_span: options.grid_span });
+        id
     }
 
     /// Adds an unkeyed nested column scope.
@@ -588,15 +578,7 @@ impl UiNodeBuilder {
 
     /// Adds a nested column scope with optional identity and placement metadata.
     fn insert_column(&mut self, options: NodeOptions, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(
-            options,
-            TAG_COLUMN,
-            UiNodeData::Branch {
-                behavior: Box::new(Column),
-                children: Vec::new(),
-            },
-            f,
-        )
+        self.push_group(options, TAG_COLUMN, UiNodeData::Container { behavior: Box::new(Column::default()) }, f)
     }
 
     /// Adds an unkeyed stack scope.
@@ -609,9 +591,13 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_STACK,
-            UiNodeData::Branch {
-                behavior: Box::new(Stack { width, height, direction }),
-                children: Vec::new(),
+            UiNodeData::Container {
+                behavior: Box::new(Stack {
+                    width,
+                    height,
+                    direction,
+                    children: Vec::new(),
+                }),
             },
             f,
         )
@@ -619,43 +605,44 @@ impl UiNodeBuilder {
 
     /// Pushes a leaf node into the current builder frame.
     fn push_leaf(&mut self, options: NodeOptions, tag: u8, data: UiNodeData) -> NodeId {
-        let id = self.alloc_id(tag, options.key);
-        let parent = self.current_frame().parent;
-        let node = UiNode::new(id, parent, options.policy, options.grid_span, data);
-        // Leaf nodes have no child frame; they become siblings in the current frame directly.
-        if self.nodes.contains_key(&id) {
-            panic!(
-                "duplicate retained node id {:?} in UiNodeBuilder output. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
-                id
-            );
-        }
-        self.nodes.insert(id, node);
-        self.current_frame_mut().nodes.push(id);
+        let (id, node) = self.create_node(tag, options, data);
+        // Widget nodes have no child frame; they become siblings in the current frame directly.
+        self.current_frame_mut().nodes.push(BuilderChild { node, grid_span: options.grid_span });
         id
     }
 
     /// Pushes a group node after collecting children in a nested builder frame.
     fn push_group(&mut self, options: NodeOptions, tag: u8, mut data: UiNodeData, f: impl FnOnce(&mut Self)) -> NodeId {
         let id = self.alloc_id(tag, options.key);
-        let parent = self.current_frame().parent;
         // Child auto-ids are scoped by the group id, so sibling insertion outside the group does
         // not affect descendants.
-        self.frames.push(BuilderFrame::child(id, id.raw() as u64));
+        self.frames.push(BuilderFrame::child(id.raw() as u64));
         f(self);
         let frame = self.frames.pop().expect("child frame missing");
-        if let UiNodeData::Branch { children, .. } = &mut data {
-            *children = frame.nodes;
+        let children = Self::child_nodes(frame.nodes);
+        if let UiNodeData::Container { behavior } = &mut data {
+            *behavior.children_mut() = children;
         }
-        let node = UiNode::new(id, parent, options.policy, options.grid_span, data);
-        if self.nodes.contains_key(&id) {
-            panic!(
-                "duplicate retained node id {:?} in UiNodeBuilder output. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
-                id
-            );
-        }
-        self.nodes.insert(id, node);
-        self.current_frame_mut().nodes.push(id);
+        let node = self.create_node_with_id(id, options, data);
+        self.current_frame_mut().nodes.push(BuilderChild { node, grid_span: options.grid_span });
         id
+    }
+
+    /// Creates a retained node and assigns its stable id inside the window-manager builder.
+    fn create_node(&mut self, tag: u8, options: NodeOptions, data: UiNodeData) -> (NodeId, UiNode) {
+        let id = self.alloc_id(tag, options.key);
+        let node = self.create_node_with_id(id, options, data);
+        (id, node)
+    }
+
+    /// Creates a retained node from an already allocated window-manager node id.
+    fn create_node_with_id(&self, id: NodeId, options: NodeOptions, data: UiNodeData) -> UiNode {
+        UiNode::new(id, options.policy, data)
+    }
+
+    /// Extracts owned child nodes from builder-only placement metadata.
+    fn child_nodes(children: Vec<BuilderChild>) -> Vec<UiNode> {
+        children.into_iter().map(|child| child.node).collect()
     }
 
     /// Allocates a stable node id from the current scope, node kind, and optional user key.
@@ -686,27 +673,24 @@ impl UiNodeBuilder {
         self.frames.last_mut().expect("ui node builder frame missing")
     }
 
-    /// Returns the frame currently receiving new nodes.
-    fn current_frame(&self) -> &BuilderFrame {
-        self.frames.last().expect("ui node builder frame missing")
-    }
-
     /// Rejects duplicate retained IDs before a tree can enter runtime traversal.
-    fn validate_unique_node_ids(nodes: &[UiNodeId]) {
+    fn validate_unique_node_ids(nodes: &[UiNode]) {
         let mut seen = HashMap::new();
         Self::collect_node_ids(nodes, "root", &mut seen);
     }
 
     /// Recursively collects node ids and panics if the same id appears twice.
-    fn collect_node_ids(nodes: &[UiNodeId], parent_path: &str, seen: &mut HashMap<NodeId, String>) {
-        for (index, node_id) in nodes.iter().enumerate() {
+    fn collect_node_ids(nodes: &[UiNode], parent_path: &str, seen: &mut HashMap<NodeId, String>) {
+        for (index, node) in nodes.iter().enumerate() {
+            let node_id = node.id();
             let path = format!("{parent_path}/{index}:{}", node_id.raw());
-            if let Some(first_path) = seen.insert(*node_id, path.clone()) {
+            if let Some(first_path) = seen.insert(node_id, path.clone()) {
                 panic!(
                     "duplicate retained node id {:?} in UiNodeBuilder output; first node: {}; duplicate node: {}. Use distinct NodeOptions::keyed(...) values for siblings with the same kind.",
                     node_id, first_path, path
                 );
             }
+            Self::collect_node_ids(node.children(), &path, seen);
         }
     }
 }

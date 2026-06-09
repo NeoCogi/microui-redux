@@ -1,21 +1,20 @@
 //! Common runtime node model used by the next retained traversal path.
 //!
 //! Internal retained UI node runtime.
-//! It gives the crate one node representation that can own either a leaf widget or a framework
-//! container without introducing a broad container trait before the enum-based passes exist.
+//! It gives the crate one node representation that can own either a widget or a framework
+//! container.
 //!
-//! Topology mutation is immediate but phase-limited. Initialization may build child membership
-//! directly, and `UpdateCtx` may add new children or remove direct children/subtrees. Measure,
-//! layout, paint, and scroll dispatch observe child membership without mutating it. Reparenting is
-//! intentionally unsupported: once a node is attached, it has exactly one parent until removal.
+//! Topology is built by the window-manager/builder path and then traversed by input, update,
+//! measure, layout, and paint passes. Runtime traversal does not mutate child membership.
 #![allow(dead_code)]
 
 use crate::{
-    expand_rect, Canvas, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, GridSpan, KeyCode, KeyMode, MouseButton, Recti, Renderer,
-    RetainedId, Style, UiNodeSet, Vec2i, Vertex, UNCLIPPED_RECT,
+    expand_rect, Canvas, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, KeyCode, KeyMode, MouseButton, Recti, Renderer, RetainedId,
+    Style, Vec2i, Vertex, UNCLIPPED_RECT,
 };
+#[cfg(test)]
+use crate::UiNodeSet;
 use crate::render_command::{render_command_stream, Command};
-use crate::id::IdNamespace;
 use crate::input::{ContainerOption, ScrollBehavior, WidgetOption};
 use crate::sizing::SizePolicy;
 use crate::widget::FocusPolicy;
@@ -23,16 +22,16 @@ use crate::widget_ctx::WidgetCtx;
 use crate::window_manager::TreeCustomRender;
 
 mod node;
-pub(crate) use node::{ContentSpace, NodeLayout, TraversalState, UiNode, UiNodeData, UiNodeId, UiNodeKind};
+pub(crate) use node::{NodeLayout, TraversalState, UiNode, UiNodeData, UiNodeId};
 mod runtime;
 pub(crate) use runtime::UiRuntime;
 mod containers;
 pub(crate) use containers::{
-    scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Disclosure, Grid, InputCtx, InputResult, LayoutCtx, MeasureCtx, NodeBehavior,
-    PaintCtx, RootWindow, Row, ScrollArea, Stack, UpdateCtx, WidgetNode,
+    scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Container, Disclosure, Grid, InputCtx, InputResult, LayoutCtx, MeasureCtx, Widget,
+    PaintCtx, Row, ScrollArea, Stack, TakenContainer, TakenWidget, UpdateCtx, WidgetNode,
 };
 #[cfg(test)]
-pub(crate) use containers::ScrollAreaState;
+pub(crate) use containers::{scroll_area_state, set_scroll_area_scroll};
 pub use containers::UiInputEvent;
 
 /// Command wrapper that lets node-runtime custom render callbacks enter the backend stream.
@@ -44,87 +43,6 @@ struct NodeCustomRenderCommand {
 impl CustomRenderCommand for NodeCustomRenderCommand {
     fn render(&mut self, dim: Dimensioni, args: &CustomRenderArgs) {
         self.render.borrow_mut().render(dim, args);
-    }
-}
-
-/// Stable internal id for the synthetic root-window container.
-fn runtime_root_id() -> UiNodeId {
-    IdNamespace::UINODE_ROOT.id([0])
-}
-
-/// Internal node context used by future container passes.
-///
-/// This context is read/layout-state oriented. Topology mutation is intentionally limited to
-/// initialization and `UpdateCtx`; measure, layout, paint, and scroll dispatch should observe child
-/// membership without mutating it.
-pub(crate) struct NodeCtx<'a> {
-    /// Runtime owning the node graph.
-    runtime: &'a mut UiRuntime,
-    /// Current node id.
-    id: UiNodeId,
-}
-
-impl<'a> NodeCtx<'a> {
-    /// Returns the current node id.
-    pub(crate) fn id(&self) -> UiNodeId {
-        self.id
-    }
-
-    /// Returns the parent node id, if any.
-    pub(crate) fn parent(&self) -> Option<UiNodeId> {
-        self.runtime.nodes.get(&self.id).and_then(|node| node.parent)
-    }
-
-    /// Returns the current container children, or an empty slice for leaf widgets.
-    pub(crate) fn children(&self) -> &[UiNodeId] {
-        self.runtime.nodes.get(&self.id).map(UiNode::children).unwrap_or(&[])
-    }
-
-    /// Returns the current full node rect.
-    pub(crate) fn rect(&self) -> Recti {
-        self.runtime.nodes.get(&self.id).map(|node| node.rect).unwrap_or_default()
-    }
-
-    /// Returns the current node client rect.
-    pub(crate) fn client(&self) -> Recti {
-        self.runtime.nodes.get(&self.id).map(|node| node.layout.control).unwrap_or_default()
-    }
-
-    /// Returns the current effective clip rect.
-    pub(crate) fn clip(&self) -> Recti {
-        self.runtime.nodes.get(&self.id).map(|node| node.layout.content.viewport).unwrap_or_default()
-    }
-
-    /// Updates the current full node rect.
-    pub(crate) fn set_rect(&mut self, value: Recti) {
-        if let Some(node) = self.runtime.nodes.get_mut(&self.id) {
-            node.rect = value;
-            node.set_layout(NodeLayout { frame: value, ..node.layout });
-        }
-    }
-
-    /// Updates the current node client rect.
-    pub(crate) fn set_client(&mut self, value: Recti) {
-        if let Some(node) = self.runtime.nodes.get_mut(&self.id) {
-            node.set_layout(node.layout.with_control(value));
-        }
-    }
-
-    /// Updates the current effective clip rect.
-    pub(crate) fn set_clip(&mut self, value: Recti) {
-        if let Some(node) = self.runtime.nodes.get_mut(&self.id) {
-            node.set_layout(NodeLayout {
-                content: ContentSpace { viewport: value, ..node.layout.content },
-                ..node.layout
-            });
-        }
-    }
-
-    /// Updates the current measured content size.
-    pub(crate) fn set_content_size(&mut self, value: Dimensioni) {
-        if let Some(node) = self.runtime.nodes.get_mut(&self.id) {
-            node.set_layout(node.layout.with_content_size(value));
-        }
     }
 }
 
@@ -330,7 +248,7 @@ fn child_content_rect(node: &UiNode) -> Recti {
 }
 
 /// Builds pointer events from raw frame input.
-pub(super) fn pointer_events_from_input(input: &Input) -> Vec<UiInputEvent> {
+pub(crate) fn pointer_events_from_input(input: &Input) -> Vec<UiInputEvent> {
     let mut events = Vec::new();
     if !input.mouse_pressed.is_empty() {
         events.push(UiInputEvent::MouseDown {
@@ -368,7 +286,7 @@ pub(super) fn pointer_events_from_input(input: &Input) -> Vec<UiInputEvent> {
 }
 
 /// Builds focus transition events from raw frame input.
-pub(super) fn focus_events_from_input(input: &Input) -> Vec<UiInputEvent> {
+pub(crate) fn focus_events_from_input(input: &Input) -> Vec<UiInputEvent> {
     let mut events = Vec::new();
     if !input.key_pressed.is_empty() {
         events.push(UiInputEvent::KeyDown { key: input.key_pressed });
@@ -459,6 +377,123 @@ mod tests {
     };
     use crate::test_support::{test_atlas, NoopRenderer};
 
+    struct TestRuntime {
+        runtime: UiRuntime,
+        roots: Vec<UiNode>,
+        z_order: Vec<UiNodeId>,
+    }
+
+    impl std::ops::Deref for TestRuntime {
+        type Target = UiRuntime;
+
+        fn deref(&self) -> &Self::Target {
+            &self.runtime
+        }
+    }
+
+    impl std::ops::DerefMut for TestRuntime {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.runtime
+        }
+    }
+
+    impl TestRuntime {
+        fn new() -> Self {
+            Self {
+                runtime: UiRuntime::new(),
+                roots: Vec::new(),
+                z_order: Vec::new(),
+            }
+        }
+
+        fn from_ui_nodes(tree: UiNodeSet) -> Self {
+            let roots = tree.into_roots();
+            let z_order = roots.iter().map(UiNode::id).collect();
+            Self {
+                runtime: UiRuntime::new(),
+                roots,
+                z_order,
+            }
+        }
+
+        fn node(&self, id: UiNodeId) -> Option<&UiNode> {
+            self.runtime.node(&self.roots, id)
+        }
+
+        fn contains_node(&self, id: UiNodeId) -> bool {
+            self.runtime.contains_node(&self.roots, id)
+        }
+
+        fn parent_of(&self, id: UiNodeId) -> Option<UiNodeId> {
+            self.runtime.parent_of(&self.roots, id)
+        }
+
+        fn traversal_state_for_node(&self, id: UiNodeId) -> TraversalState {
+            self.runtime.traversal_state_for_node(&self.roots, id)
+        }
+
+        fn node_screen_rect(&self, id: UiNodeId) -> Option<Recti> {
+            self.node(id).map(|node| self.traversal_state_for_node(id).screen_frame(node.layout))
+        }
+
+        fn replace_ui_nodes(&mut self, tree: UiNodeSet) {
+            let previous_roots = std::mem::replace(&mut self.roots, tree.into_roots());
+            self.z_order = self.roots.iter().map(UiNode::id).collect();
+            let mut next_runtime = UiRuntime::new();
+            next_runtime.transfer_runtime_state_from(&mut self.roots, &previous_roots, &self.runtime);
+            self.runtime = next_runtime;
+        }
+
+        fn route_input_events(&mut self, style: &Style, input: &Input) -> bool {
+            let mut consumed = false;
+            if self.runtime.accepts_pointer_input() || self.runtime.capture.is_some() {
+                for event in pointer_events_from_input(input) {
+                    if let Some(captured) = self.runtime.route_captured_pointer_input_event(&mut self.roots, style, input, &event) {
+                        consumed |= captured;
+                        continue;
+                    }
+                    if !self.runtime.accepts_pointer_input() {
+                        continue;
+                    }
+                    let mut routed = None;
+                    let root_traversal = self.runtime.root_traversal();
+                    for root in self.z_order.iter().copied().rev() {
+                        let Some(root) = self.roots.iter_mut().find(|node| node.id() == root) else {
+                            continue;
+                        };
+                        routed = self.runtime.route_input_event_to_node_ref(root, root_traversal, style, input, &event);
+                        if routed.is_some() {
+                            break;
+                        }
+                    }
+                    if let Some((owner, result)) = routed {
+                        self.runtime.update_pointer_capture(owner, result, &event, input);
+                        consumed |= result.is_consumed();
+                    }
+                }
+            }
+            consumed | self.runtime.route_focus_input_events(&mut self.roots, style, input)
+        }
+
+        fn render_frame<R: Renderer>(
+            &mut self,
+            root_id: crate::RootId,
+            root_name: &str,
+            canvas: &mut Canvas<R>,
+            style: &Style,
+            input: &Input,
+            results: &mut FrameResults,
+            body: Recti,
+            pointer_input_enabled: bool,
+        ) {
+            self.runtime.begin_frame(pointer_input_enabled);
+            self.runtime.layout_frame_roots(&mut self.roots, style, canvas.get_atlas(), body);
+            self.route_input_events(style, input);
+            self.runtime
+                .update_paint_frame(&mut self.roots, root_id, root_name, canvas, style, input, results, body);
+        }
+    }
+
     #[derive(Clone)]
     struct RecordingBehavior {
         log: Rc<RefCell<Vec<(UiNodeId, &'static str)>>>,
@@ -471,14 +506,15 @@ mod tests {
         }
     }
 
-    impl NodeBehavior for RecordingBehavior {
-        fn measure(&self, _ctx: &MeasureCtx<'_>, _id: UiNodeId, _available: Dimensioni) -> Dimensioni {
+    impl Widget for RecordingBehavior {
+        fn measure(&self, _ctx: &MeasureCtx<'_>, _node: &UiNode, _available: Dimensioni) -> Dimensioni {
             Dimensioni::default()
         }
 
-        fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _id: UiNodeId, _rect: Recti, _clip: Recti) {}
+        fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _node: &mut UiNode, _rect: Recti) {}
 
-        fn update_on(&mut self, _ctx: &mut InputCtx<'_>, id: UiNodeId, event: &UiInputEvent) -> InputResult {
+        fn update_on(&mut self, _ctx: &mut InputCtx<'_>, node: &mut UiNode, event: &UiInputEvent) -> InputResult {
+            let id = node.id();
             let name = match event {
                 UiInputEvent::MouseMove { .. } => "mouse_move",
                 UiInputEvent::MouseDrag { .. } => "mouse_drag",
@@ -535,110 +571,33 @@ mod tests {
             });
         });
 
-        let runtime = UiRuntime::from_ui_nodes(tree);
-        let root = runtime.roots[0];
-        let root_node = runtime.nodes.get(&root).expect("root node missing");
-        let column = root_node.children()[0];
-        let column_node = runtime.nodes.get(&column).expect("column node missing");
-        let child = column_node.children()[0];
-        let child_node = runtime.nodes.get(&child).expect("child node missing");
+        let runtime = TestRuntime::from_ui_nodes(tree);
+        let column_node = runtime.roots.first().expect("column node missing");
+        let child_node = column_node.children().first().expect("child node missing");
 
-        assert!(matches!(root_node.data, UiNodeData::Branch { .. }));
-        assert!(matches!(column_node.data, UiNodeData::Branch { .. }));
-        assert!(matches!(child_node.data, UiNodeData::Leaf { .. }));
+        assert!(matches!(column_node.data, UiNodeData::Container { .. }));
+        assert!(matches!(child_node.data, UiNodeData::Widget { .. }));
         assert!(child_node.children().is_empty());
-    }
-
-    #[test]
-    fn immediate_insert_rejects_already_parented_child() {
-        let parent = UiNode::new(
-            Id::new(1),
-            None,
-            crate::Policy::auto(),
-            GridSpan::ONE,
-            UiNodeData::Branch {
-                behavior: Box::new(Column),
-                children: Vec::new(),
-            },
-        );
-        let child = UiNode::new(
-            Id::new(2),
-            Some(Id::new(99)),
-            crate::Policy::auto(),
-            GridSpan::ONE,
-            UiNodeData::Branch {
-                behavior: Box::new(Column),
-                children: Vec::new(),
-            },
-        );
-
-        let mut runtime = UiRuntime::new();
-        runtime.nodes.insert(parent.id, parent);
-
-        assert_eq!(runtime.insert_child_immediate(Id::new(1), child, 0), None);
-        assert!(runtime.nodes.get(&Id::new(1)).unwrap().children().is_empty());
-        assert!(!runtime.nodes.contains_key(&Id::new(2)));
-    }
-
-    #[test]
-    fn immediate_insert_sets_parent_membership() {
-        let parent = UiNode::new(
-            Id::new(1),
-            None,
-            crate::Policy::auto(),
-            GridSpan::ONE,
-            UiNodeData::Branch {
-                behavior: Box::new(Column),
-                children: Vec::new(),
-            },
-        );
-        let child = UiNode::new(
-            Id::new(2),
-            None,
-            crate::Policy::auto(),
-            GridSpan::ONE,
-            UiNodeData::Branch {
-                behavior: Box::new(Column),
-                children: Vec::new(),
-            },
-        );
-
-        let mut runtime = UiRuntime::new();
-        runtime.nodes.insert(parent.id, parent);
-
-        assert_eq!(runtime.insert_child_immediate(Id::new(1), child, 0), Some(Id::new(2)));
-        assert_eq!(runtime.nodes.get(&Id::new(1)).unwrap().children(), &[Id::new(2)]);
-        assert_eq!(runtime.nodes.get(&Id::new(2)).unwrap().parent, Some(Id::new(1)));
     }
 
     #[test]
     fn key_text_input_routes_only_to_focused_node() {
         let log = Rc::new(RefCell::new(Vec::new()));
-        let mut runtime = UiRuntime::new();
-        runtime.nodes.insert(
+        let mut runtime = TestRuntime::new();
+        runtime.roots.push(UiNode::new(
             Id::new(1),
-            UiNode::new(
-                Id::new(1),
-                None,
-                crate::Policy::auto(),
-                GridSpan::ONE,
-                UiNodeData::Leaf {
-                    behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed)),
-                },
-            ),
-        );
-        runtime.nodes.insert(
+            crate::Policy::auto(),
+            UiNodeData::Widget {
+                behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed)),
+            },
+        ));
+        runtime.roots.push(UiNode::new(
             Id::new(2),
-            UiNode::new(
-                Id::new(2),
-                None,
-                crate::Policy::auto(),
-                GridSpan::ONE,
-                UiNodeData::Leaf {
-                    behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed)),
-                },
-            ),
-        );
+            crate::Policy::auto(),
+            UiNodeData::Widget {
+                behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed)),
+            },
+        ));
         runtime.focus = Some(Id::new(2));
 
         let mut input = Input::default();
@@ -662,7 +621,7 @@ mod tests {
                 focused_id = tree.widget(&focused_widget);
             });
         });
-        let mut runtime = UiRuntime::from_ui_nodes(tree);
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
         runtime.focus = Some(focused_id);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
@@ -700,47 +659,30 @@ mod tests {
     #[test]
     fn pointer_capture_routes_without_hover_and_clears_on_release() {
         let log = Rc::new(RefCell::new(Vec::new()));
-        let mut runtime = UiRuntime::new();
-        runtime.nodes.insert(
-            Id::new(1),
-            UiNode::new(
-                Id::new(1),
-                None,
-                crate::Policy::auto(),
-                GridSpan::ONE,
-                UiNodeData::Branch {
-                    behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Ignored)),
-                    children: vec![Id::new(2), Id::new(3)],
-                },
-            ),
-        );
-        runtime.nodes.insert(
+        let mut runtime = TestRuntime::new();
+        let child_a = UiNode::new(
             Id::new(2),
-            UiNode::new(
-                Id::new(2),
-                Some(Id::new(1)),
-                crate::Policy::auto(),
-                GridSpan::ONE,
-                UiNodeData::Leaf {
-                    behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Captured)),
-                },
-            ),
+            crate::Policy::auto(),
+            UiNodeData::Widget {
+                behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Captured)),
+            },
         );
-        runtime.nodes.insert(
+        let child_b = UiNode::new(
             Id::new(3),
-            UiNode::new(
-                Id::new(3),
-                Some(Id::new(1)),
-                crate::Policy::auto(),
-                GridSpan::ONE,
-                UiNodeData::Leaf {
-                    behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Ignored)),
-                },
-            ),
+            crate::Policy::auto(),
+            UiNodeData::Widget {
+                behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Ignored)),
+            },
         );
-        runtime.roots.push(Id::new(1));
+        runtime.roots.push(UiNode::new(
+            Id::new(1),
+            crate::Policy::auto(),
+            UiNodeData::Container {
+                behavior: Box::new(Column { children: vec![child_a, child_b] }),
+            },
+        ));
         runtime.z_order.push(Id::new(1));
-        runtime.hover_root_active = true;
+        runtime.pointer_input_enabled = true;
 
         let mut input = Input::default();
         input.mousedown(10, 10, MouseButton::LEFT);
@@ -748,7 +690,7 @@ mod tests {
         assert_eq!(runtime.capture, Some(Id::new(2)));
         input.epilogue();
 
-        runtime.hover_root_active = false;
+        runtime.pointer_input_enabled = false;
         input.mousemove(20, 10);
         input.prelude();
         assert!(runtime.route_input_events(&Style::default(), &input));
@@ -771,74 +713,20 @@ mod tests {
     }
 
     #[test]
-    fn immediate_remove_deletes_subtree_and_clears_transient_refs() {
-        let parent = UiNode::new(
-            Id::new(1),
-            None,
-            crate::Policy::auto(),
-            GridSpan::ONE,
-            UiNodeData::Branch {
-                behavior: Box::new(Column),
-                children: vec![Id::new(2)],
-            },
-        );
-        let child = UiNode::new(
-            Id::new(2),
-            Some(Id::new(1)),
-            crate::Policy::auto(),
-            GridSpan::ONE,
-            UiNodeData::Branch {
-                behavior: Box::new(Column),
-                children: vec![Id::new(3)],
-            },
-        );
-        let grandchild = UiNode::new(
-            Id::new(3),
-            Some(Id::new(2)),
-            crate::Policy::auto(),
-            GridSpan::ONE,
-            UiNodeData::Branch {
-                behavior: Box::new(Column),
-                children: Vec::new(),
-            },
-        );
-
-        let mut runtime = UiRuntime::new();
-        runtime.nodes.insert(parent.id, parent);
-        runtime.nodes.insert(child.id, child);
-        runtime.nodes.insert(grandchild.id, grandchild);
-        runtime.roots.push(Id::new(1));
-        runtime.z_order.push(Id::new(1));
-        runtime.focus = Some(Id::new(3));
-        runtime.hover = Some(Id::new(2));
-        runtime.capture = Some(Id::new(3));
-        runtime.hover_root = Some(Id::new(2));
-        assert!(runtime.remove_child_immediate(Id::new(1), Id::new(2)));
-
-        assert_eq!(runtime.nodes.get(&Id::new(1)).unwrap().children(), &[]);
-        assert!(!runtime.nodes.contains_key(&Id::new(2)));
-        assert!(!runtime.nodes.contains_key(&Id::new(3)));
-        assert_eq!(runtime.focus, None);
-        assert_eq!(runtime.hover, None);
-        assert_eq!(runtime.capture, None);
-        assert_eq!(runtime.hover_root, None);
-    }
-
-    #[test]
     fn replacing_projection_drops_absent_nodes_and_transient_state() {
         let button = widget_handle(Button::new("removed"));
         let mut removed_id = Id::default();
         let first = UiNodeBuilder::build(|tree| {
             removed_id = tree.widget(button.clone());
         });
-        let mut runtime = UiRuntime::from_ui_nodes(first);
+        let mut runtime = TestRuntime::from_ui_nodes(first);
         runtime.focus = Some(removed_id);
         runtime.hover = Some(removed_id);
         runtime.capture = Some(removed_id);
 
         runtime.replace_ui_nodes(UiNodeBuilder::build(|_| {}));
 
-        assert!(!runtime.nodes.contains_key(&removed_id));
+        assert!(!runtime.contains_node(removed_id));
         assert_eq!(runtime.focus, None);
         assert_eq!(runtime.hover, None);
         assert_eq!(runtime.capture, None);
@@ -847,12 +735,13 @@ mod tests {
     #[test]
     fn node_window_chrome_offsets_layout_body() {
         let button = widget_handle(Button::new("bbbb"));
+        let mut button_id = Id::default();
         let tree = UiNodeBuilder::build(|tree| {
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
-                tree.widget(button.clone());
+                button_id = tree.widget(button.clone());
             });
         });
-        let mut runtime = UiRuntime::from_ui_nodes(tree);
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(400, 500));
@@ -871,14 +760,12 @@ mod tests {
             true,
         );
 
-        let button_node = runtime
-            .nodes
-            .values()
-            .find(|node| matches!(node.data, UiNodeData::Leaf { .. }))
-            .expect("button node missing");
-        assert!(button_node.rect.y > 40 + style.title_height);
-        assert_eq!(button_node.rect.x, 40 + style.padding);
-        assert!(button_node.rect.width > 250);
+        let button_rect = runtime.node_screen_rect(button_id).expect("button node missing");
+        let button_layout = runtime.node(button_id).expect("button node missing").layout.frame;
+        assert_eq!(button_layout.x, style.padding);
+        assert!(button_rect.y > 40 + style.title_height);
+        assert_eq!(button_rect.x, 40 + style.padding);
+        assert!(button_rect.width > 250);
     }
 
     #[test]
@@ -902,7 +789,7 @@ mod tests {
                 });
             });
         });
-        let mut runtime = UiRuntime::from_ui_nodes(tree);
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(320, 420));
@@ -922,9 +809,9 @@ mod tests {
         );
 
         let ids = button_ids.borrow();
-        let first = runtime.nodes.get(&ids[0]).unwrap().rect;
-        let fourth = runtime.nodes.get(&ids[3]).unwrap().rect;
-        let fifth = runtime.nodes.get(&ids[4]).unwrap().rect;
+        let first = runtime.node_screen_rect(ids[0]).unwrap();
+        let fourth = runtime.node_screen_rect(ids[3]).unwrap();
+        let fifth = runtime.node_screen_rect(ids[4]).unwrap();
         assert!(first.width > 60);
         assert_eq!(first.y, fourth.y);
         assert!(fourth.x > first.x);
@@ -946,7 +833,7 @@ mod tests {
                 right_id = tree.widget(&right);
             });
         });
-        let mut runtime = UiRuntime::from_ui_nodes(tree);
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(320, 120));
@@ -965,8 +852,8 @@ mod tests {
             true,
         );
 
-        let middle_rect = runtime.nodes.get(&middle_id).unwrap().rect;
-        let right_rect = runtime.nodes.get(&right_id).unwrap().rect;
+        let middle_rect = runtime.node_screen_rect(middle_id).unwrap();
+        let right_rect = runtime.node_screen_rect(right_id).unwrap();
         assert!(middle_rect.width > 0);
         assert!(right_rect.width > middle_rect.width);
         assert!(right_rect.x >= middle_rect.x + middle_rect.width + style.spacing);
@@ -984,7 +871,7 @@ mod tests {
                 });
             });
         });
-        let mut runtime = UiRuntime::from_ui_nodes(tree);
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(320, 160));
@@ -1003,8 +890,7 @@ mod tests {
             true,
         );
 
-        let root = runtime.roots[0];
-        let root_node = runtime.nodes.get(&root).unwrap();
+        let root_node = &runtime.roots[0];
         assert!(root_node.layout.content_size.height >= 67 + style.spacing + 256);
     }
 
@@ -1028,8 +914,8 @@ mod tests {
                         });
                     });
         });
-        let mut runtime = UiRuntime::from_ui_nodes(tree);
-        runtime.set_scroll_area_scroll(scroll_area_id, Vec2i::new(0, 36));
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
+        set_scroll_area_scroll(&mut runtime.roots, scroll_area_id, Vec2i::new(0, 36));
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(180, 100));
         let mut results = FrameResults::default();
@@ -1046,10 +932,10 @@ mod tests {
             true,
         );
 
-        let first_node = runtime.nodes.get(&first_id).unwrap();
-        let first_rect = first_node.rect;
-        let first_screen_rect = runtime.traversal_state_for_node(first_id).screen_frame(first_node.layout);
-        let scroll_state = runtime.scroll_area_state(scroll_area_id).unwrap();
+        let first_node = runtime.node(first_id).unwrap();
+        let first_rect = first_node.layout.frame;
+        let first_screen_rect = runtime.node_screen_rect(first_id).unwrap();
+        let scroll_state = scroll_area_state(&runtime.roots, scroll_area_id).unwrap();
         let body = scroll_state.body;
         let content = scroll_state.content_size;
         let scroll = scroll_state.scroll;
@@ -1057,9 +943,9 @@ mod tests {
         assert!(scroll.y > 0);
         assert!(first_rect.y >= 0);
         assert!(first_screen_rect.y < body.y);
-        let scroll_node = runtime.nodes.get(&scroll_area_id).unwrap();
+        let scroll_node = runtime.node(scroll_area_id).unwrap();
         assert_eq!(scroll_node.children().len(), 4);
-        let viewport_node = runtime.nodes.get(&scroll_node.children()[0]).unwrap();
+        let viewport_node = &scroll_node.children()[0];
         assert_eq!(viewport_node.children().len(), 1);
     }
 
@@ -1073,7 +959,7 @@ mod tests {
                 }
             });
         });
-        let mut runtime = UiRuntime::from_ui_nodes(tree);
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(220, 160));
@@ -1093,8 +979,8 @@ mod tests {
             body,
             true,
         );
-        let first_client = runtime.nodes.get(&runtime.roots[0]).unwrap().layout.control;
-        let first_content = runtime.nodes.get(&runtime.roots[0]).unwrap().layout.content_size;
+        let first_client = runtime.roots[0].layout.frame;
+        let first_content = runtime.roots[0].layout.content_size;
 
         results.begin_frame();
         runtime.render_frame(
@@ -1107,8 +993,8 @@ mod tests {
             body,
             true,
         );
-        let second_client = runtime.nodes.get(&runtime.roots[0]).unwrap().layout.control;
-        let second_content = runtime.nodes.get(&runtime.roots[0]).unwrap().layout.content_size;
+        let second_client = runtime.roots[0].layout.frame;
+        let second_content = runtime.roots[0].layout.content_size;
 
         assert!(same_rect(first_client, second_client));
         assert_eq!(first_client.width, body.width - style.padding * 2);
@@ -1127,7 +1013,7 @@ mod tests {
                 custom_id = tree.custom_render(&custom, |_dim, _args| {});
             });
         });
-        let mut runtime = UiRuntime::from_ui_nodes(tree);
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(220, 160));
@@ -1149,14 +1035,14 @@ mod tests {
             true,
         );
 
-        let root = runtime.nodes.get(&runtime.roots[0]).unwrap();
-        let custom_rect = runtime.nodes.get(&custom_id).unwrap().rect;
-        assert_eq!(root.layout.control.width, body.width - style.padding * 2);
-        assert_eq!(root.layout.control.height, body.height - style.padding * 2);
-        assert_eq!(custom_rect.width, root.layout.control.width);
-        assert_eq!(custom_rect.height, root.layout.control.height);
-        assert!(root.layout.content_size.width <= root.layout.control.width);
-        assert!(root.layout.content_size.height <= root.layout.control.height);
+        let root = &runtime.roots[0];
+        let custom_rect = runtime.node_screen_rect(custom_id).unwrap();
+        assert_eq!(root.layout.frame.width, body.width - style.padding * 2);
+        assert_eq!(root.layout.frame.height, body.height - style.padding * 2);
+        assert_eq!(custom_rect.width, root.layout.frame.width);
+        assert_eq!(custom_rect.height, root.layout.frame.height);
+        assert!(root.layout.content_size.width <= root.layout.frame.width);
+        assert!(root.layout.content_size.height <= root.layout.frame.height);
     }
 
     #[test]
@@ -1214,7 +1100,7 @@ mod tests {
                         slot_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 40))).widget(slot_button.clone());
                     });
         });
-        let mut runtime = UiRuntime::from_ui_nodes(tree);
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(140, 80));
         let mut style = Style::default();
@@ -1235,7 +1121,7 @@ mod tests {
         );
         assert_eq!(paint_count.get(), 0);
 
-        runtime.set_scroll_area_scroll(scroll_area_id, Vec2i::new(0, 160));
+        set_scroll_area_scroll(&mut runtime.roots, scroll_area_id, Vec2i::new(0, 160));
         results.begin_frame();
         runtime.render_frame(
             crate::RootId::from_raw(1),
@@ -1247,19 +1133,20 @@ mod tests {
             rect(0, 0, 120, 70),
             true,
         );
-        let root = runtime.nodes.get(&runtime.roots[0]).unwrap();
-        let slot_node = runtime.nodes.get(&slot_id).unwrap();
-        let scroll_state = runtime.scroll_area_state(scroll_area_id).unwrap();
+        let root = &runtime.roots[0];
+        let slot_node = runtime.node(slot_id).unwrap();
+        let slot_rect = runtime.node_screen_rect(slot_id).unwrap();
+        let scroll_state = scroll_area_state(&runtime.roots, scroll_area_id).unwrap();
         let body = scroll_state.body;
         let scroll = scroll_state.scroll;
         assert!(
             paint_count.get() > 0,
             "slot not painted; root client {:?} content {:?} scroll body {:?} scroll {:?} slot rect {:?} clip {:?}",
-            root.layout.control,
+            root.layout.frame,
             root.layout.content_size,
             body,
             scroll,
-            slot_node.rect,
+            slot_rect,
             slot_node.layout.content.viewport
         );
     }
@@ -1308,7 +1195,7 @@ mod tests {
                 button_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed_width(48))).widget(&button);
             });
         });
-        let mut runtime = UiRuntime::from_ui_nodes(tree);
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(200, 140));
         let style = Style::default();
@@ -1326,7 +1213,7 @@ mod tests {
             true,
         );
 
-        let button_rect = runtime.nodes.get(&button_id).unwrap().rect;
+        let button_rect = runtime.node_screen_rect(button_id).unwrap();
         assert_eq!(button_rect.width, 48);
         assert_eq!(button_rect.height, 48);
     }
@@ -1370,7 +1257,7 @@ mod tests {
                 button_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed_width(256))).widget(&button);
             });
         });
-        let mut runtime = UiRuntime::from_ui_nodes(tree);
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(300, 160));
         let style = Style::default();
@@ -1388,7 +1275,7 @@ mod tests {
             true,
         );
 
-        let button_rect = runtime.nodes.get(&button_id).unwrap().rect;
+        let button_rect = runtime.node_screen_rect(button_id).unwrap();
         assert_eq!(button_rect.width, 256);
         assert!(button_rect.height < 100, "regular slot button should stay inline-sized, got {:?}", button_rect);
     }
@@ -1410,7 +1297,7 @@ mod tests {
                 third_id = tree.node(crate::NodeOptions::with_policy(Policy::fill())).widget(third.clone());
             });
         });
-        let mut runtime = UiRuntime::from_ui_nodes(tree);
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
         let renderer = RendererHandle::new(NoopRenderer { atlas });
         let mut canvas = Canvas::from(renderer, Dimensioni::new(220, 80));
@@ -1429,9 +1316,9 @@ mod tests {
             true,
         );
 
-        let first_rect = runtime.nodes.get(&first_id).unwrap().rect;
-        let second_rect = runtime.nodes.get(&second_id).unwrap().rect;
-        let third_rect = runtime.nodes.get(&third_id).unwrap().rect;
+        let first_rect = runtime.node_screen_rect(first_id).unwrap();
+        let second_rect = runtime.node_screen_rect(second_id).unwrap();
+        let third_rect = runtime.node_screen_rect(third_id).unwrap();
         assert_eq!(first_rect.width, 40 + style.spacing + 50);
         assert_eq!(second_rect.width, 60);
         assert!(second_rect.x > first_rect.x);

@@ -88,7 +88,6 @@
 
 pub mod atlas;
 mod canvas;
-mod window_manager;
 mod draw_context;
 mod file_dialog;
 mod graphics;
@@ -109,6 +108,7 @@ mod ui_node;
 mod widget;
 mod widget_ctx;
 pub mod widgets;
+mod window_manager;
 
 /// Low-level renderer integration types.
 ///

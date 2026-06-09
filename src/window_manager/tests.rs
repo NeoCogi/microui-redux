@@ -832,12 +832,12 @@ fn retained_root_hover_selection_uses_registered_root_z_order() {
     ctx.mousemove(20, 20);
     ctx.update_ui();
     let left_entry = ctx.roots.iter().find(|entry| entry.id == left).unwrap();
-    assert!(left_entry.runtime.hover_root.is_none());
+    assert!(!left_entry.runtime.accepts_pointer_input());
 
     ctx.bring_root_to_front(left);
     ctx.update_ui();
     let left_entry = ctx.roots.iter().find(|entry| entry.id == left).unwrap();
-    assert!(left_entry.runtime.hover_root.is_some());
+    assert!(left_entry.runtime.accepts_pointer_input());
 }
 
 #[test]
@@ -867,16 +867,16 @@ fn root_hover_selection_uses_root_z_order() {
 
     let left_entry = ctx.roots.iter().find(|entry| entry.id == left).unwrap();
     let right_entry = ctx.roots.iter().find(|entry| entry.id == right).unwrap();
-    assert!(left_entry.runtime.hover_root.is_none());
-    assert!(right_entry.runtime.hover_root.is_some());
+    assert!(!left_entry.runtime.accepts_pointer_input());
+    assert!(right_entry.runtime.accepts_pointer_input());
 
     ctx.mousedown(20, 30, MouseButton::LEFT);
     ctx.update_ui();
 
     let left_entry = ctx.roots.iter().find(|entry| entry.id == left).unwrap();
     let right_entry = ctx.roots.iter().find(|entry| entry.id == right).unwrap();
-    assert!(left_entry.runtime.hover_root.is_some());
-    assert!(right_entry.runtime.hover_root.is_none());
+    assert!(left_entry.runtime.accepts_pointer_input());
+    assert!(!right_entry.runtime.accepts_pointer_input());
     assert!(left_entry.z_index > right_entry.z_index);
 }
 
@@ -1184,10 +1184,7 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     let renderer = RendererHandle::new(NoopRenderer { atlas });
     let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
     let popup_root = ctx.create_popup("combo popup", UiNodeSet::default());
-    ctx.set_root_options(
-        popup_root,
-        ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
-    );
+    ctx.set_root_options(popup_root, ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE);
     let combo = widget_handle(Combo::new());
     let items = [widget_handle(ListItem::new("Apple")), widget_handle(ListItem::new("Banana"))];
     let mut item_ids = [NodeId::default(); 2];
@@ -1435,7 +1432,7 @@ fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
     ctx.update_ui();
 
     let root_entry = ctx.roots.iter().find(|entry| entry.id == root).unwrap();
-    let root_node = root_entry.runtime.nodes.get(&root_entry.runtime.roots[0]).unwrap();
+    let root_node = root_entry.roots.first().unwrap();
     assert!(ctx.scroll_area_content_size(root, scroll_area).unwrap().height > ctx.scroll_area_body(root, scroll_area).unwrap().height);
-    assert!(root_node.layout.content_size.height <= root_node.layout.control.height);
+    assert!(root_node.layout.content_size.height <= root_node.layout.frame.height);
 }

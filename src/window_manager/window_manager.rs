@@ -21,6 +21,8 @@ pub(super) struct WindowEntry {
     just_opened: bool,
     active_chrome: Option<WindowChromePart>,
     pub(super) z_index: i32,
+    pub(super) roots: Vec<UiNode>,
+    pub(super) z_order: Vec<UiNodeId>,
     pub(super) runtime: UiRuntime,
 }
 
@@ -71,16 +73,10 @@ impl WindowChrome {
 }
 
 impl<R: Renderer> Context<R> {
-    fn register_root(
-        &mut self,
-        kind: WindowKind,
-        name: &str,
-        rect: Recti,
-        tree: UiNodeSet,
-        opt: ContainerOption,
-        visible: bool,
-    ) -> RootId {
+    fn register_root(&mut self, kind: WindowKind, name: &str, rect: Recti, tree: UiNodeSet, opt: ContainerOption, visible: bool) -> RootId {
         let id = self.next_root_id();
+        let roots = tree.into_roots();
+        let z_order = roots.iter().map(UiNode::id).collect();
         let z_index = if visible {
             self.last_zindex += 1;
             self.last_zindex
@@ -97,7 +93,9 @@ impl<R: Renderer> Context<R> {
             just_opened: false,
             active_chrome: None,
             z_index,
-            runtime: UiRuntime::from_ui_nodes(tree),
+            roots,
+            z_order,
+            runtime: UiRuntime::new(),
         });
         id
     }
@@ -141,7 +139,7 @@ impl<R: Renderer> Context<R> {
     /// Sets focus to a node inside a registered root.
     pub fn set_root_focus_node(&mut self, root: RootId, node_id: crate::NodeId) {
         if let Some(entry) = self.roots.iter_mut().find(|entry| entry.id == root) {
-            entry.runtime.set_focus_node(node_id);
+            entry.runtime.set_focus_node(&entry.roots, node_id);
         }
     }
 
@@ -150,17 +148,15 @@ impl<R: Renderer> Context<R> {
         self.roots
             .iter()
             .find(|entry| entry.id == root)
-            .and_then(|entry| entry.runtime.scroll_area_state(node_id))
+            .and_then(|entry| crate::ui_node::scroll_area_state(&entry.roots, node_id))
             .map(|state| state.scroll)
     }
 
     #[cfg(test)]
     pub(crate) fn scroll_area_body(&self, root: RootId, node_id: crate::NodeId) -> Option<Recti> {
-        self.roots
-            .iter()
-            .find(|entry| entry.id == root)
-            .and_then(|entry| entry.runtime.scroll_area_state(node_id))
-            .map(|state| state.body)
+        let entry = self.roots.iter().find(|entry| entry.id == root)?;
+        let state = crate::ui_node::scroll_area_state(&entry.roots, node_id)?;
+        entry.runtime.debug_node_local_rect(&entry.roots, node_id, state.body)
     }
 
     #[cfg(test)]
@@ -168,7 +164,7 @@ impl<R: Renderer> Context<R> {
         self.roots
             .iter()
             .find(|entry| entry.id == root)
-            .and_then(|entry| entry.runtime.scroll_area_state(node_id))
+            .and_then(|entry| crate::ui_node::scroll_area_state(&entry.roots, node_id))
             .map(|state| state.content_size)
     }
 
@@ -187,20 +183,17 @@ impl<R: Renderer> Context<R> {
 
     /// Registers a hidden popup root.
     pub fn create_popup(&mut self, name: &str, tree: UiNodeSet) -> RootId {
-        self.register_root(
-            WindowKind::Popup,
-            name,
-            Recti::default(),
-            tree,
-            Self::default_popup_options(),
-            false,
-        )
+        self.register_root(WindowKind::Popup, name, Recti::default(), tree, Self::default_popup_options(), false)
     }
 
     /// Replaces the retained UI node set for a registered root.
     pub fn set_root_nodes(&mut self, root: RootId, tree: UiNodeSet) {
         if let Some(entry) = self.roots.iter_mut().find(|entry| entry.id == root) {
-            entry.runtime.replace_ui_nodes(tree);
+            let previous_roots = std::mem::replace(&mut entry.roots, tree.into_roots());
+            entry.z_order = entry.roots.iter().map(UiNode::id).collect();
+            let mut next_runtime = UiRuntime::new();
+            next_runtime.transfer_runtime_state_from(&mut entry.roots, &previous_roots, &entry.runtime);
+            entry.runtime = next_runtime;
         }
     }
 
@@ -245,7 +238,7 @@ impl<R: Renderer> Context<R> {
             if entry.visible && entry.opt.intersects(ContainerOption::AUTO_SIZE) {
                 let size = entry
                     .runtime
-                    .measure_auto_size(self.style.as_ref(), &self.canvas.get_atlas(), entry.opt, entry.rect.width);
+                    .measure_auto_size(&entry.roots, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt, entry.rect.width);
                 entry.rect.width = size.width;
                 entry.rect.height = size.height;
             }
@@ -282,11 +275,17 @@ impl<R: Renderer> Context<R> {
                     }
                 }
                 let chrome_capturing_pointer = matches!(entry.active_chrome, Some(WindowChromePart::Title | WindowChromePart::Resize));
-                let hover_root_active = hover_root == Some(entry.id) && !chrome_capturing_pointer;
+                let pointer_input_enabled = hover_root == Some(entry.id) && !chrome_capturing_pointer;
                 let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt);
                 self.paint_root_frame(entry);
                 let input = self.input.borrow();
-                entry.runtime.render_frame(
+                entry.runtime.begin_frame(pointer_input_enabled);
+                entry
+                    .runtime
+                    .layout_frame_roots(&mut entry.roots, self.style.as_ref(), self.canvas.get_atlas(), chrome.body);
+                Self::route_entry_input(entry, self.style.as_ref(), &input);
+                entry.runtime.update_paint_frame(
+                    &mut entry.roots,
                     entry.id,
                     &entry.name,
                     &mut self.canvas,
@@ -294,13 +293,46 @@ impl<R: Renderer> Context<R> {
                     &input,
                     &mut self.frame_results,
                     chrome.body,
-                    hover_root_active,
                 );
                 drop(input);
                 self.paint_root_chrome(entry, chrome);
             }
         }
         self.roots = roots;
+    }
+
+    fn route_entry_input(entry: &mut WindowEntry, style: &Style, input: &Input) -> bool {
+        let mut consumed = false;
+        if entry.runtime.accepts_pointer_input() || entry.runtime.capture.is_some() {
+            for event in pointer_events_from_input(input) {
+                if let Some(captured) = entry.runtime.route_captured_pointer_input_event(&mut entry.roots, style, input, &event) {
+                    consumed |= captured;
+                    continue;
+                }
+                if !entry.runtime.accepts_pointer_input() {
+                    continue;
+                }
+
+                let mut routed = None;
+                let root_traversal = entry.runtime.root_traversal();
+                for root in entry.z_order.iter().copied().rev() {
+                    let Some(root) = entry.roots.iter_mut().find(|node| node.id() == root) else {
+                        continue;
+                    };
+                    routed = entry.runtime.route_input_event_to_node_ref(root, root_traversal, style, input, &event);
+                    if routed.is_some() {
+                        break;
+                    }
+                }
+
+                if let Some((owner, result)) = routed {
+                    entry.runtime.update_pointer_capture(owner, result, &event, input);
+                    consumed |= result.is_consumed();
+                }
+            }
+        }
+
+        consumed | entry.runtime.route_focus_input_events(&mut entry.roots, style, input)
     }
 
     fn paint_root_frame(&mut self, entry: &WindowEntry) {
@@ -466,7 +498,7 @@ impl<R: Renderer> Context<R> {
         self.roots
             .iter()
             .find(|entry| entry.id == root)
-            .and_then(|entry| entry.runtime.debug_node_rect(node))
+            .and_then(|entry| entry.runtime.debug_node_rect(&entry.roots, node))
     }
 
     #[cfg(test)]
