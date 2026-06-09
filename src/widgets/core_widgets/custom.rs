@@ -45,7 +45,7 @@ impl Custom {
     }
 
     /// Custom render state itself does not update; the retained command callback owns drawing.
-    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
         ResourceState::NONE
     }
 

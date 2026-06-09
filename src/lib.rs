@@ -136,7 +136,7 @@ pub mod retained {
     pub use crate::window_manager::{Context, RootId};
     pub use crate::render_command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
     pub use crate::ui_node::UiInputEvent;
-    pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
+    pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetInputEvents};
     pub use crate::window_manager::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, UiNodeSet, UiNodeBuilder};
 }
 
@@ -157,7 +157,7 @@ pub mod prelude {
     pub use crate::render::{Renderer, RendererHandle};
     pub use crate::retained::{
         Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeBuilder, NodeId, NodeOptions, Policy, RetainedId, RootId,
-        TextWrap, UiInputEvent, Widget, WidgetCtx, WidgetHandle, UiNodeSet, UiNodeBuilder, widget_handle,
+        TextWrap, UiInputEvent, Widget, WidgetCtx, WidgetHandle, WidgetInputEvents, UiNodeSet, UiNodeBuilder, widget_handle,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
@@ -182,7 +182,7 @@ pub use render_command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
 pub use render::{Renderer, RendererHandle};
 pub use sizing::{SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
-pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx};
+pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetInputEvents};
 pub use ui_node::UiInputEvent;
 pub use widgets::{
     Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, Slider, TextArea, TextBlock, Textbox,

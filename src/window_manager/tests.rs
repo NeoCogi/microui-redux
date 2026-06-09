@@ -9,7 +9,7 @@ use super::*;
 use crate::{
     test_support::{test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer},
     widget_handle, AtlasHandle, Button, Combo, ListItem, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId, SizePolicy,
-    ScrollBehavior, StackDirection, TextBlock, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
+    ScrollBehavior, StackDirection, TextBlock, UiInputEvent, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
@@ -73,7 +73,7 @@ impl Widget for AlwaysSubmitWidget {
         Dimensioni::new((self.label.len() as i32 * 8).max(8), 12)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
         ResourceState::SUBMIT
     }
 
@@ -1434,5 +1434,5 @@ fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
     let root_entry = ctx.roots.iter().find(|entry| entry.id == root).unwrap();
     let root_node = root_entry.roots.first().unwrap();
     assert!(ctx.scroll_area_content_size(root, scroll_area).unwrap().height > ctx.scroll_area_body(root, scroll_area).unwrap().height);
-    assert!(root_node.layout.content_size.height <= root_node.layout.frame.height);
+    assert!(root_node.state.layout.content_size.height <= root_node.state.layout.frame.height);
 }

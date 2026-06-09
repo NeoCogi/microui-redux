@@ -43,7 +43,7 @@ use crate::{
         UiNodeId, WidgetNode,
     },
     widget::Widget,
-    Custom, CustomRenderArgs, Node, Recti, TextBlock, TextWrap,
+    CustomRenderArgs, Node, Recti, TextBlock, TextWrap,
 };
 
 use super::{erased_widget_state, widget_handle, TreeCustomRender, WidgetHandle};
@@ -283,8 +283,9 @@ impl<'a> NodeBuilder<'a> {
     }
 
     /// Adds a custom-render widget node.
-    pub fn custom_render<F>(self, state: impl Into<WidgetHandle<Custom>>, f: F) -> NodeId
+    pub fn custom_render<W, F>(self, state: impl Into<WidgetHandle<W>>, f: F) -> NodeId
     where
+        W: Widget + 'static,
         F: FnMut(Dimensioni, &CustomRenderArgs) + 'static,
     {
         self.builder.insert_custom_render(self.options, state, f)
@@ -405,16 +406,18 @@ impl UiNodeBuilder {
     }
 
     /// Adds a custom-render widget node.
-    pub fn custom_render<F>(&mut self, state: impl Into<WidgetHandle<Custom>>, f: F) -> NodeId
+    pub fn custom_render<W, F>(&mut self, state: impl Into<WidgetHandle<W>>, f: F) -> NodeId
     where
+        W: Widget + 'static,
         F: FnMut(Dimensioni, &CustomRenderArgs) + 'static,
     {
         self.insert_custom_render(NodeOptions::new(), state, f)
     }
 
     /// Adds a custom-render widget node with optional identity and placement metadata.
-    fn insert_custom_render<F>(&mut self, options: NodeOptions, state: impl Into<WidgetHandle<Custom>>, f: F) -> NodeId
+    fn insert_custom_render<W, F>(&mut self, options: NodeOptions, state: impl Into<WidgetHandle<W>>, f: F) -> NodeId
     where
+        W: Widget + 'static,
         F: FnMut(Dimensioni, &CustomRenderArgs) + 'static,
     {
         let state = state.into();

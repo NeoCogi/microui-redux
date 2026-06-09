@@ -175,17 +175,17 @@ impl Slider {
     }
 
     /// Updates slider value from shift-click text entry, scroll, or pointer drag.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
         let mut res = ResourceState::NONE;
         let base = ctx.screen_rect();
         let last = self.value;
         let mut v = last;
         let font = ctx.style().resolve_font_choice(self.config.font);
-        if !number_textbox_update(ctx, &mut self.edit, self.precision, font, &mut v).is_none() {
+        if !number_textbox_update(ctx, input, &mut self.edit, self.precision, font, &mut v).is_none() {
             // While the text editor is active it owns state changes for this frame.
             return res;
         }
-        if let Some(delta) = ctx.scroll_delta() {
+        if let Some(delta) = input.scroll_delta() {
             let range = self.high - self.low;
             if range != 0.0 {
                 let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
@@ -200,9 +200,9 @@ impl Slider {
             }
         }
         let range = self.high - self.low;
-        if ctx.focused() && (!ctx.mouse_down().is_empty() || ctx.mouse_pressed().intersects(MouseButton::LEFT)) && base.width > 0 && range != 0.0 {
+        if ctx.focused() && (!input.mouse_down().is_empty() || input.mouse_pressed().intersects(MouseButton::LEFT)) && base.width > 0 && range != 0.0 {
             // Mouse x maps linearly across the slider track.
-            v = self.low + ctx.mouse_pos().x as Real * range / base.width as Real;
+            v = self.low + input.mouse_pos().x as Real * range / base.width as Real;
             if self.step != 0. {
                 v = snap_slider_value(v, self.low, self.step);
             }
@@ -265,8 +265,15 @@ fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
 }
 
 /// Runs the shared textbox editor for shift-click numeric input.
-fn number_textbox_update(ctx: &mut WidgetCtx<'_>, edit: &mut NumberEditState, precision: usize, font: FontId, value: &mut Real) -> ResourceState {
-    let shift_click = { ctx.mouse_pressed().intersects(MouseButton::LEFT) && ctx.key_mods().intersects(KeyMode::SHIFT) && ctx.hovered() };
+fn number_textbox_update(
+    ctx: &mut WidgetCtx<'_>,
+    input: &[UiInputEvent],
+    edit: &mut NumberEditState,
+    precision: usize,
+    font: FontId,
+    value: &mut Real,
+) -> ResourceState {
+    let shift_click = { input.mouse_pressed().intersects(MouseButton::LEFT) && input.key_mods().intersects(KeyMode::SHIFT) && ctx.hovered() };
 
     if shift_click {
         // Enter edit mode by seeding the textbox with the current formatted value.
@@ -277,7 +284,7 @@ fn number_textbox_update(ctx: &mut WidgetCtx<'_>, edit: &mut NumberEditState, pr
     }
 
     if edit.editing {
-        let res = textbox_update(ctx, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE, font);
+        let res = textbox_update(ctx, input, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE, font);
         if res.is_submitted() || !ctx.focused() {
             if let Ok(v) = edit.buf.parse::<f32>() {
                 *value = v as Real;
@@ -310,10 +317,10 @@ impl Widget for Slider {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let old_value = self.value;
         let old_edit = self.edit.clone();
-        let mut res = self.update_widget(ctx);
+        let mut res = self.update_widget(ctx, &input);
         let changed = self.value != old_value || self.edit != old_edit;
         res |= number_active_result(ctx, self.edit.editing, changed);
         res
@@ -402,17 +409,17 @@ impl Number {
     }
 
     /// Updates number value from shift-click text entry or horizontal drag.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
         let mut res = ResourceState::NONE;
         let last = self.value;
         let font = ctx.style().resolve_font_choice(self.config.font);
-        if !number_textbox_update(ctx, &mut self.edit, self.precision, font, &mut self.value).is_none() {
+        if !number_textbox_update(ctx, input, &mut self.edit, self.precision, font, &mut self.value).is_none() {
             // Text editing suppresses drag updates while active.
             self.set_value(self.value);
             return res;
         }
-        if ctx.focused() && ctx.mouse_down().intersects(MouseButton::LEFT) {
-            self.set_value(self.value + ctx.mouse_delta().x as Real * self.step);
+        if ctx.focused() && input.mouse_down().intersects(MouseButton::LEFT) {
+            self.set_value(self.value + input.mouse_delta().x as Real * self.step);
         } else {
             self.set_value(self.value);
         }
@@ -450,10 +457,10 @@ impl Widget for Number {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let old_value = self.value;
         let old_edit = self.edit.clone();
-        let mut res = self.update_widget(ctx);
+        let mut res = self.update_widget(ctx, &input);
         let changed = self.value != old_value || self.edit != old_edit;
         res |= number_active_result(ctx, self.edit.editing, changed);
         res

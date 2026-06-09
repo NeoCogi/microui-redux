@@ -47,7 +47,7 @@ impl Widget for Row {
         for (index, child) in self.children.iter().enumerate() {
             let child_size = ctx.measure_node_ref(child, Dimensioni::new(available_width, rect.height));
             preferred.push(child_size.width);
-            let child_policy = child.policy.width;
+            let child_policy = child.state.policy.width;
             let track_policy = self.widths.get(index).copied().unwrap_or(SizePolicy::Auto);
             policies.push(if child_policy != SizePolicy::Auto { child_policy } else { track_policy });
         }

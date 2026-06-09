@@ -190,9 +190,9 @@ impl TextArea {
     }
 
     /// Applies multiline editing, scrolling, and scrollbar dragging.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
         let font = ctx.style().resolve_font_choice(self.config.font);
-        textarea_update(ctx, self, font)
+        textarea_update(ctx, input, self, font)
     }
 
     /// Paints the multiline editor and scrollbars.
@@ -313,7 +313,7 @@ fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextA
 }
 
 /// Updates text-area buffer, cursor, scroll position, and scrollbar drag state.
-fn textarea_update(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) -> ResourceState {
+fn textarea_update(ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent], state: &mut TextArea, font: FontId) -> ResourceState {
     let mut res = ResourceState::NONE;
     if !ctx.focused() {
         // Blurred text areas park the cursor at the end and forget vertical cursor preference.
@@ -328,14 +328,14 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) 
     let mut preferred_x = state.preferred_x;
 
     if ctx.focused() {
-        let text_input = ctx.text_input();
+        let text_input = input.text_input();
         let edit = apply_text_input(
             &mut state.buf,
             cursor_pos,
             text_input.as_str(),
-            ctx.key_mods(),
-            ctx.key_pressed(),
-            ctx.key_code_pressed(),
+            input.key_mods(),
+            input.key_pressed(),
+            input.key_code_pressed(),
             true,
             ReturnBehavior::Newline { submit_on_ctrl: true },
         );
@@ -356,7 +356,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) 
 
     let layout = textarea_layout(ctx, state, font);
 
-    if let Some(delta) = ctx.scroll_delta() {
+    if let Some(delta) = input.scroll_delta() {
         // Wheel/trackpad scrolling only affects axes that actually overflow.
         if layout.maxscroll_y > 0 {
             state.scroll.y += delta.y;
@@ -366,7 +366,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) 
         }
     }
 
-    if !ctx.mouse_down().intersects(MouseButton::LEFT) {
+    if !input.mouse_down().intersects(MouseButton::LEFT) {
         state.dragging_y = false;
         state.dragging_x = false;
     }
@@ -380,13 +380,13 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) 
             layout.vscroll_base.width,
             layout.vscroll_base.height,
         );
-        if ctx.mouse_pressed().intersects(MouseButton::LEFT) && vscroll_base_local.contains(&ctx.mouse_pos()) {
+        if input.mouse_pressed().intersects(MouseButton::LEFT) && vscroll_base_local.contains(&input.mouse_pos()) {
             // Track scrollbar drag separately so text clicks do not also move the caret.
             state.dragging_y = true;
             clicked_scrollbar = true;
         }
         if state.dragging_y {
-            state.scroll.y += scrollbar_drag_delta(ScrollAxis::Vertical, ctx.mouse_delta(), layout.content_size.y, layout.vscroll_base);
+            state.scroll.y += scrollbar_drag_delta(ScrollAxis::Vertical, input.mouse_delta(), layout.content_size.y, layout.vscroll_base);
         }
     }
 
@@ -397,12 +397,12 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) 
             layout.hscroll_base.width,
             layout.hscroll_base.height,
         );
-        if ctx.mouse_pressed().intersects(MouseButton::LEFT) && hscroll_base_local.contains(&ctx.mouse_pos()) {
+        if input.mouse_pressed().intersects(MouseButton::LEFT) && hscroll_base_local.contains(&input.mouse_pos()) {
             state.dragging_x = true;
             clicked_scrollbar = true;
         }
         if state.dragging_x {
-            state.scroll.x += scrollbar_drag_delta(ScrollAxis::Horizontal, ctx.mouse_delta(), layout.content_size.x, layout.hscroll_base);
+            state.scroll.x += scrollbar_drag_delta(ScrollAxis::Horizontal, input.mouse_delta(), layout.content_size.x, layout.hscroll_base);
         }
     }
 
@@ -410,14 +410,14 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) 
     let mut caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
     if ctx.focused() {
-        if ctx.key_code_pressed().intersects(KeyCode::END) {
+        if input.key_code_pressed().intersects(KeyCode::END) {
             cursor_pos = layout.lines[cursor_line].end;
             caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
             ensure_visible = true;
             reset_preferred = true;
         }
 
-        if ctx.key_code_pressed().intersects(KeyCode::UP) {
+        if input.key_code_pressed().intersects(KeyCode::UP) {
             // Vertical movement preserves preferred x so repeated Up/Down follows a visual column.
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line > 0 {
@@ -429,7 +429,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) 
             vertical_moved = true;
         }
 
-        if ctx.key_code_pressed().intersects(KeyCode::DOWN) {
+        if input.key_code_pressed().intersects(KeyCode::DOWN) {
             // Vertical movement preserves preferred x so repeated Up/Down follows a visual column.
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line + 1 < layout.lines.len() {
@@ -442,9 +442,9 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) 
         }
     }
 
-    if ctx.focused() && ctx.mouse_pressed().intersects(MouseButton::LEFT) && ctx.mouse_over(layout.bounds) && !clicked_scrollbar {
+    if ctx.focused() && input.mouse_pressed().intersects(MouseButton::LEFT) && ctx.mouse_over(layout.bounds, input.mouse_pos()) && !clicked_scrollbar {
         // Convert a widget-local click to content-local coordinates before resolving cursor.
-        let mouse_pos = ctx.mouse_pos();
+        let mouse_pos = input.mouse_pos();
         let local_x = mouse_pos.x - (layout.body_local.x + layout.padding) + state.scroll.x;
         let local_y = mouse_pos.y - (layout.body_local.y + layout.padding) + state.scroll.y;
         let line_idx = (local_y / layout.metrics.line_height).clamp(0, layout.lines.len().saturating_sub(1) as i32) as usize;
@@ -564,14 +564,14 @@ impl Widget for TextArea {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let old_buf = self.buf.clone();
         let old_cursor = self.cursor;
         let old_scroll = self.scroll;
         let old_preferred_x = self.preferred_x;
         let old_dragging_y = self.dragging_y;
         let old_dragging_x = self.dragging_x;
-        let mut res = self.update_widget(ctx);
+        let mut res = self.update_widget(ctx, &input);
         let scroll_changed = self.scroll.x != old_scroll.x || self.scroll.y != old_scroll.y;
         let changed = self.buf != old_buf
             || self.cursor != old_cursor

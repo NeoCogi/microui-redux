@@ -61,6 +61,7 @@ use crate::{
     id::Id,
     input::{ResourceState, ScrollBehavior, WidgetOption},
     style::Style,
+    ui_node::UiInputEvent,
     widget::{FocusPolicy, Widget},
     widget_ctx::WidgetCtx,
     CustomRenderCommand,
@@ -150,7 +151,7 @@ pub(crate) trait WidgetStateHandleDyn {
     /// Measures the widget without mutating it.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     /// Updates the widget through interior mutability.
-    fn update(&self, ctx: &mut WidgetCtx<'_>) -> ResourceState;
+    fn update(&self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState;
     /// Paints the widget through interior mutability.
     fn paint(&self, ctx: &mut WidgetCtx<'_>);
 }
@@ -186,9 +187,9 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
         self.handle.read(|widget| widget.measure(style, atlas, avail))
     }
 
-    fn update(&self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update(&self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         // Borrow only for the duration of dispatch so later result recording cannot hold state.
-        self.handle.update(|widget| widget.update(ctx))
+        self.handle.update(|widget| widget.update(ctx, input))
     }
 
     fn paint(&self, ctx: &mut WidgetCtx<'_>) {

@@ -52,7 +52,7 @@ fn layout_column_children(ctx: &mut LayoutCtx<'_>, children: &mut [UiNode], rect
     for child in children.iter() {
         let child_size = ctx.measure_node_ref(child, Dimensioni::new(rect.width, available_height));
         preferred.push(child_size.height);
-        policies.push(child.policy.height);
+        policies.push(child.state.policy.height);
     }
     let heights = super::super::resolve_axis_tracks(&policies, &preferred, available_height);
     let mut y = rect.y;

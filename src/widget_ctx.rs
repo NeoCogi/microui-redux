@@ -64,18 +64,137 @@ use crate::graphics::Graphics;
 use crate::input::{ControlColor, KeyCode, KeyMode, MouseButton, WidgetOption};
 use crate::ui_node::UiInputEvent;
 use crate::style::{Color, Image, Style};
-use crate::widget::RetainedId;
+use crate::ui_node::UiNodeId;
+
+/// Convenience methods for a widget-local routed input batch.
+pub trait WidgetInputEvents {
+    /// Returns the currently held mouse buttons.
+    fn mouse_down(&self) -> MouseButton;
+    /// Returns mouse buttons pressed by routed events.
+    fn mouse_pressed(&self) -> MouseButton;
+    /// Returns the last routed mouse position, or `(0, 0)` if this frame has no routed pointer event.
+    fn mouse_pos(&self) -> Vec2i;
+    /// Returns accumulated routed mouse movement.
+    fn mouse_delta(&self) -> Vec2i;
+    /// Returns currently held modifier keys.
+    fn key_mods(&self) -> KeyMode;
+    /// Returns modifier keys pressed by routed events.
+    fn key_pressed(&self) -> KeyMode;
+    /// Returns navigation keys pressed by routed events.
+    fn key_code_pressed(&self) -> KeyCode;
+    /// Returns text input from routed events.
+    fn text_input(&self) -> String;
+    /// Returns scroll delta from routed events.
+    fn scroll_delta(&self) -> Option<Vec2i>;
+}
+
+impl WidgetInputEvents for [UiInputEvent] {
+    fn mouse_down(&self) -> MouseButton {
+        self.iter().fold(MouseButton::NONE, |buttons, event| match event {
+            UiInputEvent::MouseDrag { buttons: held, .. } => buttons | *held,
+            _ => buttons,
+        })
+    }
+
+    fn mouse_pressed(&self) -> MouseButton {
+        self.iter().fold(MouseButton::NONE, |buttons, event| match event {
+            UiInputEvent::MouseDown { button, .. } => buttons | *button,
+            _ => buttons,
+        })
+    }
+
+    fn mouse_pos(&self) -> Vec2i {
+        self.iter()
+            .rev()
+            .find_map(|event| match event {
+                UiInputEvent::MouseMove { pos, .. }
+                | UiInputEvent::MouseDrag { pos, .. }
+                | UiInputEvent::MouseDown { pos, .. }
+                | UiInputEvent::MouseUp { pos, .. }
+                | UiInputEvent::Scroll { pos, .. } => Some(*pos),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    fn mouse_delta(&self) -> Vec2i {
+        self.iter().fold(Vec2i::default(), |mut delta, event| {
+            match event {
+                UiInputEvent::MouseMove { delta: event_delta, .. } | UiInputEvent::MouseDrag { delta: event_delta, .. } => {
+                    delta.x += event_delta.x;
+                    delta.y += event_delta.y;
+                }
+                _ => {}
+            }
+            delta
+        })
+    }
+
+    fn key_mods(&self) -> KeyMode {
+        self.iter().fold(KeyMode::NONE, |keys, event| match event {
+            UiInputEvent::KeyState { keys: state } => keys | *state,
+            _ => keys,
+        })
+    }
+
+    fn key_pressed(&self) -> KeyMode {
+        self.iter().fold(KeyMode::NONE, |keys, event| match event {
+            UiInputEvent::KeyDown { key } => keys | *key,
+            _ => keys,
+        })
+    }
+
+    fn key_code_pressed(&self) -> KeyCode {
+        self.iter().fold(KeyCode::NONE, |keys, event| match event {
+            UiInputEvent::KeyCodeDown { code } => keys | *code,
+            _ => keys,
+        })
+    }
+
+    fn text_input(&self) -> String {
+        let mut text = String::new();
+        for event in self {
+            if let UiInputEvent::Text { text: event_text } = event {
+                text.push_str(event_text);
+            }
+        }
+        text
+    }
+
+    fn scroll_delta(&self) -> Option<Vec2i> {
+        self.iter().fold(None, |acc, event| match event {
+            UiInputEvent::Scroll { delta, .. } if delta.x != 0 || delta.y != 0 => Some(*delta),
+            _ => acc,
+        })
+    }
+}
+
+/// Converts routed events from container coordinates into widget-local coordinates.
+pub(crate) fn localize_events(rect: Recti, events: Vec<UiInputEvent>) -> Vec<UiInputEvent> {
+    let origin = Vec2i::new(rect.x, rect.y);
+    events
+        .into_iter()
+        .map(|event| match event {
+            UiInputEvent::MouseMove { pos, delta } => UiInputEvent::MouseMove { pos: pos - origin, delta },
+            UiInputEvent::MouseDrag { pos, delta, buttons } => UiInputEvent::MouseDrag { pos: pos - origin, delta, buttons },
+            UiInputEvent::MouseDown { pos, button } => UiInputEvent::MouseDown { pos: pos - origin, button },
+            UiInputEvent::MouseUp { pos, button } => UiInputEvent::MouseUp { pos: pos - origin, button },
+            UiInputEvent::Scroll { pos, delta } => UiInputEvent::Scroll { pos: pos - origin, delta },
+            event => event,
+        })
+        .collect()
+}
 
 /// Shared context passed to widget handlers.
 pub struct WidgetCtx<'a> {
-    /// Retained identity used for focus operations.
-    interaction_id: RetainedId,
+    /// Runtime node identity used for focus operations.
+    interaction_id: UiNodeId,
     /// Widget rectangle in container/screen coordinates.
     rect: Recti,
     /// Draw command recorder borrowed from the active container.
     draw: DrawCtx<'a>,
     /// Focus slot owned by the active container.
-    focus: &'a mut Option<RetainedId>,
+    focus: &'a mut Option<UiNodeId>,
     /// Flag indicating whether focus was refreshed or changed this frame.
     updated_focus: &'a mut bool,
     /// Whether this widget is inside the current hover root.
@@ -88,29 +207,11 @@ pub struct WidgetCtx<'a> {
     clicked: bool,
     /// Whether this widget is in an active pointer interaction.
     active: bool,
-    /// Scroll delta routed to this widget for this frame.
+    /// Scroll delta committed by update for this frame.
     scroll_delta: Option<Vec2i>,
-    /// Ranged input events delivered by retained node routing.
-    events: Vec<UiInputEvent>,
 }
 
 impl<'a> WidgetCtx<'a> {
-    /// Converts routed events from container coordinates into widget-local coordinates.
-    pub(crate) fn localize_events(rect: Recti, events: Vec<UiInputEvent>) -> Vec<UiInputEvent> {
-        let origin = Vec2i::new(rect.x, rect.y);
-        events
-            .into_iter()
-            .map(|event| match event {
-                UiInputEvent::MouseMove { pos, delta } => UiInputEvent::MouseMove { pos: pos - origin, delta },
-                UiInputEvent::MouseDrag { pos, delta, buttons } => UiInputEvent::MouseDrag { pos: pos - origin, delta, buttons },
-                UiInputEvent::MouseDown { pos, button } => UiInputEvent::MouseDown { pos: pos - origin, button },
-                UiInputEvent::MouseUp { pos, button } => UiInputEvent::MouseUp { pos: pos - origin, button },
-                UiInputEvent::Scroll { pos, delta } => UiInputEvent::Scroll { pos: pos - origin, delta },
-                event => event,
-            })
-            .collect()
-    }
-
     /// Converts a screen/container-space rectangle into widget-local space.
     fn local_rect_for(&self, rect: Recti) -> Recti {
         Recti::new(rect.x - self.rect.x, rect.y - self.rect.y, rect.width, rect.height)
@@ -121,16 +222,16 @@ impl<'a> WidgetCtx<'a> {
         pos - Vec2i::new(self.rect.x, self.rect.y)
     }
 
-    /// Creates a widget context with a stable retained interaction identity.
+    /// Creates a widget context with a stable runtime interaction identity.
     pub(crate) fn new_with_interaction(
-        interaction_id: RetainedId,
+        interaction_id: UiNodeId,
         rect: Recti,
         commands: &'a mut Vec<Command>,
         triangle_vertices: &'a mut Vec<Vertex>,
         clip_stack: &'a mut Vec<Recti>,
         style: &'a Style,
         atlas: &'a AtlasHandle,
-        focus: &'a mut Option<RetainedId>,
+        focus: &'a mut Option<UiNodeId>,
         updated_focus: &'a mut bool,
         in_hover_root: bool,
         hovered: bool,
@@ -138,7 +239,6 @@ impl<'a> WidgetCtx<'a> {
         clicked: bool,
         active: bool,
         scroll_delta: Option<Vec2i>,
-        events: Vec<UiInputEvent>,
     ) -> Self {
         Self {
             interaction_id,
@@ -152,7 +252,6 @@ impl<'a> WidgetCtx<'a> {
             clicked,
             active,
             scroll_delta,
-            events: Self::localize_events(rect, events),
         }
     }
 
@@ -197,92 +296,6 @@ impl<'a> WidgetCtx<'a> {
     /// container coordinates should call [`Self::screen_rect`] explicitly.
     pub fn rect(&self) -> Recti {
         self.local_rect()
-    }
-
-    /// Returns routed input events in widget-local coordinates.
-    pub fn input_events(&self) -> &[UiInputEvent] {
-        &self.events
-    }
-
-    /// Returns the currently held mouse buttons.
-    pub fn mouse_down(&self) -> MouseButton {
-        self.events.iter().fold(MouseButton::NONE, |buttons, event| match event {
-            UiInputEvent::MouseDrag { buttons: held, .. } => buttons | *held,
-            _ => buttons,
-        })
-    }
-
-    /// Returns mouse buttons pressed by routed events.
-    pub fn mouse_pressed(&self) -> MouseButton {
-        self.events.iter().fold(MouseButton::NONE, |buttons, event| match event {
-            UiInputEvent::MouseDown { button, .. } => buttons | *button,
-            _ => buttons,
-        })
-    }
-
-    /// Returns the last routed mouse position, or `(0, 0)` if this frame has no routed pointer event.
-    pub fn mouse_pos(&self) -> Vec2i {
-        self.events
-            .iter()
-            .rev()
-            .find_map(|event| match event {
-                UiInputEvent::MouseMove { pos, .. }
-                | UiInputEvent::MouseDrag { pos, .. }
-                | UiInputEvent::MouseDown { pos, .. }
-                | UiInputEvent::MouseUp { pos, .. }
-                | UiInputEvent::Scroll { pos, .. } => Some(*pos),
-                _ => None,
-            })
-            .unwrap_or_default()
-    }
-
-    /// Returns accumulated routed mouse movement.
-    pub fn mouse_delta(&self) -> Vec2i {
-        self.events.iter().fold(Vec2i::default(), |mut delta, event| {
-            match event {
-                UiInputEvent::MouseMove { delta: event_delta, .. } | UiInputEvent::MouseDrag { delta: event_delta, .. } => {
-                    delta.x += event_delta.x;
-                    delta.y += event_delta.y;
-                }
-                _ => {}
-            }
-            delta
-        })
-    }
-
-    /// Returns currently held modifier keys.
-    pub fn key_mods(&self) -> KeyMode {
-        self.events.iter().fold(KeyMode::NONE, |keys, event| match event {
-            UiInputEvent::KeyState { keys: state } => keys | *state,
-            _ => keys,
-        })
-    }
-
-    /// Returns modifier keys pressed by routed events.
-    pub fn key_pressed(&self) -> KeyMode {
-        self.events.iter().fold(KeyMode::NONE, |keys, event| match event {
-            UiInputEvent::KeyDown { key } => keys | *key,
-            _ => keys,
-        })
-    }
-
-    /// Returns navigation keys pressed by routed events.
-    pub fn key_code_pressed(&self) -> KeyCode {
-        self.events.iter().fold(KeyCode::NONE, |keys, event| match event {
-            UiInputEvent::KeyCodeDown { code } => keys | *code,
-            _ => keys,
-        })
-    }
-
-    /// Returns text input from routed events.
-    pub fn text_input(&self) -> String {
-        let mut text = String::new();
-        for event in &self.events {
-            if let UiInputEvent::Text { text: event_text } = event {
-                text.push_str(event_text);
-            }
-        }
-        text
     }
 
     /// Returns whether the pointer is currently over this widget.
@@ -445,15 +458,14 @@ impl<'a> WidgetCtx<'a> {
         graphics.draw_control_text_with_font(font, text, rect, colorid, opt);
     }
 
-    /// Hit-tests a screen-space rect against widget-local input and the active clip.
-    pub(crate) fn mouse_over(&self, rect: Recti) -> bool {
+    /// Hit-tests a screen-space rect against a widget-local mouse position and the active clip.
+    pub(crate) fn mouse_over(&self, rect: Recti, mouse_pos: Vec2i) -> bool {
         if !self.in_hover_root {
             return false;
         }
         // Both the target rect and current clip are translated so the localized input can be used.
         let local_rect = self.local_rect_for(rect);
         let clip_rect = self.local_rect_for(self.current_clip_rect());
-        let mouse_pos = self.mouse_pos();
         local_rect.contains(&mouse_pos) && clip_rect.contains(&mouse_pos)
     }
 }

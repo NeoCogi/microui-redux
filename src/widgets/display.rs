@@ -103,7 +103,7 @@ impl TextBlock {
     }
 
     /// Display text is non-interactive.
-    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
         ResourceState::NONE
     }
 
@@ -172,7 +172,7 @@ impl ColorSwatch {
     }
 
     /// Color swatches are non-interactive.
-    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update_widget(&mut self, _ctx: &mut WidgetCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
         ResourceState::NONE
     }
 

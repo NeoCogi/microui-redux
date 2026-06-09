@@ -1,5 +1,4 @@
 use crate::{Dimensioni, Id, Recti, Vec2i};
-use std::ops::{Deref, DerefMut};
 
 use super::{Container, Widget};
 
@@ -181,20 +180,6 @@ pub(crate) struct UiNode {
     pub(crate) data: UiNodeData,
 }
 
-impl Deref for UiNode {
-    type Target = UiNodeState;
-
-    fn deref(&self) -> &Self::Target {
-        &self.state
-    }
-}
-
-impl DerefMut for UiNode {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.state
-    }
-}
-
 impl UiNode {
     /// Returns this node's stable identity.
     pub const fn id(&self) -> UiNodeId {
@@ -232,7 +217,7 @@ impl UiNode {
 
     /// Writes layout as the source of truth.
     pub(crate) fn set_layout(&mut self, layout: NodeLayout) {
-        self.layout = layout;
+        self.state.set_layout(layout);
     }
 
     /// Writes a simple non-scrolled layout.

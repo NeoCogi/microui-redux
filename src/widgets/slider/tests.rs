@@ -3,6 +3,7 @@
 use super::*;
 use crate::test_support::test_atlas as make_test_atlas;
 use crate::ui_node::UiInputEvent;
+use crate::widget_ctx::localize_events;
 
 fn run_slider_once(
     slider: &mut Slider,
@@ -21,7 +22,7 @@ fn run_slider_once(
     let mut focus = None;
     let mut updated_focus = false;
     let mut ctx = WidgetCtx::new_with_interaction(
-        RetainedId::node(Id::new(1)),
+        Id::new(1),
         rect,
         &mut commands,
         &mut triangle_vertices,
@@ -36,9 +37,12 @@ fn run_slider_once(
         false,
         active,
         scroll_delta,
-        events,
     );
-    slider.update(&mut ctx)
+    let mut events = localize_events(rect, events);
+    if let Some(delta) = scroll_delta {
+        events.push(UiInputEvent::Scroll { pos: Vec2i::default(), delta });
+    }
+    slider.update(&mut ctx, events)
 }
 
 fn assert_real_close(actual: Real, expected: Real) {
@@ -63,7 +67,7 @@ fn slider_zero_range_keeps_value() {
         buttons: MouseButton::LEFT,
     }];
     let mut ctx = WidgetCtx::new_with_interaction(
-        RetainedId::node(Id::new(2)),
+        Id::new(2),
         rect,
         &mut commands,
         &mut triangle_vertices,
@@ -78,10 +82,9 @@ fn slider_zero_range_keeps_value() {
         false,
         true,
         None,
-        input,
     );
 
-    let res = slider.update(&mut ctx);
+    let res = slider.update(&mut ctx, localize_events(rect, input));
 
     assert!(res.is_active());
     assert!(slider.value.is_finite());
@@ -130,7 +133,7 @@ fn slider_uses_widget_local_mouse_position() {
         buttons: MouseButton::LEFT,
     }];
     let mut ctx = WidgetCtx::new_with_interaction(
-        RetainedId::node(Id::new(3)),
+        Id::new(3),
         rect,
         &mut commands,
         &mut triangle_vertices,
@@ -145,10 +148,9 @@ fn slider_uses_widget_local_mouse_position() {
         false,
         true,
         None,
-        input,
     );
 
-    let res = slider.update(&mut ctx);
+    let res = slider.update(&mut ctx, localize_events(rect, input));
 
     assert!(!res.is_none());
     assert_eq!(slider.value, 50.0);

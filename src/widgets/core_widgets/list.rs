@@ -71,7 +71,7 @@ impl ListItem {
     }
 
     /// List items submit on click and otherwise keep no local transient state.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
         submit_on_click(ctx)
     }
 
@@ -151,7 +151,7 @@ impl ListBox {
     }
 
     /// List boxes submit on click and otherwise keep no local transient state.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
         submit_on_click(ctx)
     }
 

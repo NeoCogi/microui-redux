@@ -144,7 +144,7 @@ impl Widget for GraphicsDemo {
         Dimensioni::new(240, 200)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let bounds = ctx.local_rect();
         let local_width = bounds.width.max(0) as f32;
         let local_height = bounds.height.max(0) as f32;
@@ -154,7 +154,7 @@ impl Widget for GraphicsDemo {
 
         self.phase = (self.phase + 0.025) % (PI * 2.0);
         if ctx.hovered() {
-            for event in ctx.input_events() {
+            for event in &input {
                 match event {
                     UiInputEvent::MouseMove { pos, .. }
                     | UiInputEvent::MouseDrag { pos, .. }
@@ -546,7 +546,7 @@ impl Widget for FalloffEditor {
         Dimensioni::new(300, 220)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let bounds = ctx.local_rect();
         let graph = Self::graph_rect(bounds);
         if graph.width <= 0 || graph.height <= 0 {
@@ -559,7 +559,7 @@ impl Widget for FalloffEditor {
             self.active = None;
         }
 
-        let mouse_pos = ctx.mouse_pos();
+        let mouse_pos = input.mouse_pos();
         let mouse_local = Vec2f::new(mouse_pos.x as f32, mouse_pos.y as f32);
         self.hovered = if ctx.hovered() { self.pick_target(graph, mouse_local) } else { None };
 
@@ -573,7 +573,7 @@ impl Widget for FalloffEditor {
             self.active = None;
         }
 
-        let mouse_delta = ctx.mouse_delta();
+        let mouse_delta = input.mouse_delta();
         if ctx.active() && (mouse_delta.x != 0 || mouse_delta.y != 0) {
             if let Some(target) = self.active {
                 let point = Self::local_to_graph(graph, mouse_local);
@@ -716,6 +716,102 @@ struct SuzanneData {
     mesh: MeshBuffers,
 }
 
+#[derive(Clone)]
+struct SuzanneWidget {
+    data: Arc<RwLock<SuzanneData>>,
+    config: WidgetConfig,
+}
+
+impl SuzanneWidget {
+    fn new(data: Arc<RwLock<SuzanneData>>) -> Self {
+        Self {
+            data,
+            config: WidgetConfig::new(WidgetOption::HOLD_FOCUS, ScrollBehavior::GRAB_SCROLL),
+        }
+    }
+}
+
+impl Widget for SuzanneWidget {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.config.opt
+    }
+
+    fn scroll_behavior(&self) -> ScrollBehavior {
+        self.config.scroll_behavior
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        Dimensioni::new(80, 24)
+    }
+
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+        let bounds = ctx.local_rect();
+        if bounds.width <= 0 || bounds.height <= 0 {
+            return ResourceState::NONE;
+        }
+
+        let Ok(mut suzanne) = self.data.write() else {
+            return ResourceState::NONE;
+        };
+
+        suzanne.view_3d.set_dimension(Dimensioni::new(bounds.width, bounds.height));
+        let mut handled_drag = false;
+        for event in &input {
+            if let UiInputEvent::MouseDrag { pos, delta, buttons } = event {
+                if buttons.intersects(MouseButton::LEFT) {
+                    let prev = Vec2i::new(pos.x - delta.x, pos.y - delta.y);
+                    let _ = suzanne.view_3d.update_drag(prev, *pos);
+                    handled_drag = true;
+                }
+            }
+        }
+
+        if let Some(delta) = input.scroll_delta() {
+            let axis = if delta.y != 0 { delta.y } else { delta.x };
+            if axis != 0 {
+                suzanne.view_3d.apply_scroll(axis as f32);
+            }
+        }
+
+        if !handled_drag && input.scroll_delta().is_none() {
+            let step = 20;
+            let mut delta = Vec2i::new(0, 0);
+            if input.key_code_pressed().intersects(KeyCode::LEFT) {
+                delta.x -= step;
+            }
+            if input.key_code_pressed().intersects(KeyCode::RIGHT) {
+                delta.x += step;
+            }
+            if input.key_code_pressed().intersects(KeyCode::UP) {
+                delta.y -= step;
+            }
+            if input.key_code_pressed().intersects(KeyCode::DOWN) {
+                delta.y += step;
+            }
+            if delta.x != 0 || delta.y != 0 {
+                let center = Vec2i::new(bounds.width / 2, bounds.height / 2);
+                let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
+                suzanne.view_3d.update_drag(center, curr);
+            }
+            for ch in input.text_input().chars() {
+                match ch {
+                    'w' | 'W' => {
+                        let _ = suzanne.view_3d.apply_scroll(-0.5);
+                    }
+                    's' | 'S' => {
+                        let _ = suzanne.view_3d.apply_scroll(0.5);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        ResourceState::ACTIVE
+    }
+
+    fn paint(&mut self, _ctx: &mut WidgetCtx<'_>) {}
+}
+
 fn static_label(text: impl Into<String>) -> WidgetHandle<ListItem> {
     widget_handle(ListItem::with_opt(text, WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME))
 }
@@ -802,7 +898,7 @@ struct State {
     triangle_widget: WidgetHandle<Custom>,
     graphics_widget: WidgetHandle<GraphicsDemo>,
     falloff_widget: WidgetHandle<FalloffEditor>,
-    suzanne_widget: WidgetHandle<Custom>,
+    suzanne_widget: WidgetHandle<SuzanneWidget>,
     background_swatch: WidgetHandle<ColorSwatch>,
     style_tree: UiNodeSet,
     log_tree: UiNodeSet,
@@ -1087,11 +1183,11 @@ impl State {
             open_dialog: false,
             white_uv,
             triangle_data,
-            suzanne_data,
+            suzanne_data: suzanne_data.clone(),
             triangle_widget: widget_handle(Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS, ScrollBehavior::NONE)),
             graphics_widget: widget_handle(GraphicsDemo::new()),
             falloff_widget: widget_handle(FalloffEditor::new()),
-            suzanne_widget: widget_handle(Custom::with_opt("Suzanne", WidgetOption::HOLD_FOCUS, ScrollBehavior::GRAB_SCROLL)),
+            suzanne_widget: widget_handle(SuzanneWidget::new(suzanne_data.clone())),
             background_swatch: widget_handle(ColorSwatch::new(color(90, 95, 100, 0xFF))),
             style_tree: UiNodeSet::default(),
             log_tree: UiNodeSet::default(),
@@ -1291,57 +1387,7 @@ impl State {
                     if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                         return;
                     }
-                    if let Ok(mut suzanne) = suzanne_data.write() {
-                        suzanne.view_3d.set_dimension(Dimensioni::new(cra.content_area.width, cra.content_area.height));
-                        let mut handled_drag = false;
-                        for event in &cra.input_events {
-                            if let UiInputEvent::MouseDrag { pos, delta, buttons } = event {
-                                if buttons.intersects(MouseButton::LEFT) {
-                                    let prev = Vec2i::new(pos.x - delta.x, pos.y - delta.y);
-                                    let _ = suzanne.view_3d.update_drag(prev, *pos);
-                                    handled_drag = true;
-                                }
-                            }
-                        }
-                        if let Some(delta) = cra.scroll_delta {
-                            let axis = if delta.y != 0 { delta.y } else { delta.x };
-                            if axis != 0 {
-                                suzanne.view_3d.apply_scroll(axis as f32);
-                            }
-                        }
-                        if !handled_drag && cra.scroll_delta.is_none() {
-                            let step = 20;
-                            let mut delta = Vec2i::new(0, 0);
-                            if cra.key_codes.intersects(KeyCode::LEFT) {
-                                delta.x -= step;
-                            }
-                            if cra.key_codes.intersects(KeyCode::RIGHT) {
-                                delta.x += step;
-                            }
-                            if cra.key_codes.intersects(KeyCode::UP) {
-                                delta.y -= step;
-                            }
-                            if cra.key_codes.intersects(KeyCode::DOWN) {
-                                delta.y += step;
-                            }
-                            if delta.x != 0 || delta.y != 0 {
-                                let center = Vec2i::new(cra.content_area.width / 2, cra.content_area.height / 2);
-                                let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
-                                suzanne.view_3d.update_drag(center, curr);
-                            }
-                            for ch in cra.text_input.chars() {
-                                match ch {
-                                    'w' | 'W' => {
-                                        let _ = suzanne.view_3d.apply_scroll(-0.5);
-                                    }
-                                    's' | 'S' => {
-                                        let _ = suzanne.view_3d.apply_scroll(0.5);
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-
+                    if let Ok(suzanne) = suzanne_data.read() {
                         let area = area_from_args(cra);
                         let submission = MeshSubmission {
                             mesh: suzanne.mesh.clone(),

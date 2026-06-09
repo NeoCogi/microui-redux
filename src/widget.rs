@@ -62,7 +62,8 @@ use crate::window_manager::RootId;
 use crate::id::Id;
 use crate::input::{ResourceState, ScrollBehavior, WidgetOption};
 use crate::style::Style;
-pub use crate::widget_ctx::WidgetCtx;
+use crate::ui_node::UiInputEvent;
+pub use crate::widget_ctx::{WidgetCtx, WidgetInputEvents};
 
 /// High-level focus behavior requested by a widget.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -111,7 +112,7 @@ pub trait Widget {
     /// Values less than or equal to zero are treated as "use layout defaults" for that axis.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     /// Updates retained widget state for the current frame and returns its interaction result.
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState;
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState;
     /// Records paint commands for the current frame.
     fn paint(&mut self, ctx: &mut WidgetCtx<'_>);
     /// Returns the effective widget options used by generic dispatch.
@@ -352,7 +353,7 @@ impl Widget for (WidgetOption, ScrollBehavior) {
         Dimensioni::new(width, height)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
         ResourceState::NONE
     }
 

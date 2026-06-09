@@ -1,10 +1,11 @@
-use crate::window_manager::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
 use crate::input::{ScrollBehavior, WidgetOption};
+use crate::widget_ctx::localize_events;
+use crate::window_manager::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
 use crate::{CustomRenderArgs, Dimensioni, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
 
 use super::{
-    events_key_codes, events_key_mods, events_text, measure_axis_available, resolve_allocated_size, resolve_size, retained_focus_to_node,
-    NodeCustomRenderCommand, NodeLayout, TraversalState, UiNode, UiNodeId, UiNodeState, UiRuntime, WidgetCtx,
+    measure_axis_available, resolve_allocated_size, resolve_size, NodeCustomRenderCommand, NodeLayout, TraversalState, UiNode, UiNodeId, UiNodeState,
+    UiRuntime, WidgetCtx,
 };
 use crate::render_command::Command;
 
@@ -141,19 +142,18 @@ impl Widget for WidgetNode {
         state.active = active;
         state.scroll_delta = scroll_delta;
 
-        let mut focus_slot = ctx.runtime.focus.map(RetainedId::node);
         let mut focus_seen = ctx.runtime.updated_focus;
-        let events = ctx.runtime.take_routed_events(id);
+        let events = localize_events(rect, ctx.runtime.take_routed_events(id));
         let accepts_pointer_input = ctx.runtime.accepts_pointer_input();
         let mut widget_ctx = WidgetCtx::new_with_interaction(
-            RetainedId::node(id),
+            id,
             rect,
             &mut ctx.runtime.commands,
             &mut ctx.runtime.triangle_vertices,
             &mut ctx.runtime.clip_stack,
             ctx.style,
             &ctx.atlas,
-            &mut focus_slot,
+            &mut ctx.runtime.focus,
             &mut focus_seen,
             accepts_pointer_input,
             hovered,
@@ -161,10 +161,8 @@ impl Widget for WidgetNode {
             clicked,
             active,
             scroll_delta,
-            events,
         );
-        let result = self.widget.update(&mut widget_ctx);
-        ctx.runtime.focus = retained_focus_to_node(focus_slot);
+        let result = self.widget.update(&mut widget_ctx, events);
         ctx.runtime.updated_focus = focus_seen;
 
         ctx.results.record_retained_with_context(
@@ -180,20 +178,18 @@ impl Widget for WidgetNode {
         let id = state.id();
         let rect = ctx.node_rect(state);
         let (hovered, focused, clicked, active, scroll_delta) = (state.hovered, state.focused, state.clicked, state.active, state.scroll_delta);
-        let mut focus_slot = ctx.runtime.focus.map(RetainedId::node);
         let mut focus_seen = ctx.runtime.updated_focus;
-        let events = ctx.runtime.widget_frame_events(id);
         let node_clip = ctx.node_clip();
         ctx.push_node_clip(id);
         let mut widget_ctx = WidgetCtx::new_with_interaction(
-            RetainedId::node(id),
+            id,
             rect,
             &mut ctx.runtime.commands,
             &mut ctx.runtime.triangle_vertices,
             &mut ctx.runtime.clip_stack,
             ctx.style,
             &ctx.atlas,
-            &mut focus_slot,
+            &mut ctx.runtime.focus,
             &mut focus_seen,
             true,
             hovered,
@@ -201,27 +197,23 @@ impl Widget for WidgetNode {
             clicked,
             active,
             scroll_delta,
-            events,
         );
         self.widget.paint(&mut widget_ctx);
         ctx.pop_node_clip();
-        ctx.runtime.focus = retained_focus_to_node(focus_slot);
         ctx.runtime.updated_focus = focus_seen;
 
         if let Some(render) = self.custom_render.clone() {
-            let events = ctx.runtime.widget_frame_events(id);
-            let input_events = WidgetCtx::localize_events(rect, events.clone());
             let view = node_clip.intersect(&rect).unwrap_or_else(|| Recti::new(rect.x, rect.y, 0, 0));
             let cra = CustomRenderArgs {
                 content_area: rect,
                 view,
-                input_events,
+                input_events: Vec::new(),
                 scroll_delta,
                 widget_opt: self.widget.effective_widget_opt(),
                 scroll_behavior: self.widget.effective_scroll_behavior(),
-                key_mods: if focused { events_key_mods(&events) } else { KeyMode::NONE },
-                key_codes: if focused { events_key_codes(&events) } else { KeyCode::NONE },
-                text_input: if focused { events_text(&events) } else { String::new() },
+                key_mods: KeyMode::NONE,
+                key_codes: KeyCode::NONE,
+                text_input: String::new(),
             };
             ctx.runtime
                 .commands
@@ -533,19 +525,18 @@ impl UpdateCtx<'_> {
         state.active = active;
         state.scroll_delta = scroll_delta;
 
-        let mut focus_slot = self.runtime.focus.map(RetainedId::node);
         let mut focus_seen = self.runtime.updated_focus;
         let accepts_pointer_input = self.runtime.accepts_pointer_input();
-        let events = self.runtime.take_routed_events(id);
+        let events = localize_events(rect, self.runtime.take_routed_events(id));
         let mut ctx = WidgetCtx::new_with_interaction(
-            RetainedId::node(id),
+            id,
             rect,
             &mut self.runtime.commands,
             &mut self.runtime.triangle_vertices,
             &mut self.runtime.clip_stack,
             self.style,
             &self.atlas,
-            &mut focus_slot,
+            &mut self.runtime.focus,
             &mut focus_seen,
             accepts_pointer_input,
             hovered,
@@ -553,10 +544,8 @@ impl UpdateCtx<'_> {
             clicked,
             active,
             scroll_delta,
-            events,
         );
-        let result = widget.update(&mut ctx);
-        self.runtime.focus = retained_focus_to_node(focus_slot);
+        let result = widget.update(&mut ctx, events);
         self.runtime.updated_focus = focus_seen;
 
         self.results
@@ -632,19 +621,17 @@ impl PaintCtx<'_> {
         let rect = self.traversal.screen_rect(local_rect);
         let (hovered, focused, clicked, active, scroll_delta) = (state.hovered, state.focused, state.clicked, state.active, state.scroll_delta);
         let widget = erased_widget_state(handle);
-        let mut focus_slot = self.runtime.focus.map(RetainedId::node);
         let mut focus_seen = self.runtime.updated_focus;
-        let events = self.runtime.widget_frame_events(id);
         self.push_node_clip(id);
         let mut ctx = WidgetCtx::new_with_interaction(
-            RetainedId::node(id),
+            id,
             rect,
             &mut self.runtime.commands,
             &mut self.runtime.triangle_vertices,
             &mut self.runtime.clip_stack,
             self.style,
             &self.atlas,
-            &mut focus_slot,
+            &mut self.runtime.focus,
             &mut focus_seen,
             true,
             hovered,
@@ -652,11 +639,9 @@ impl PaintCtx<'_> {
             clicked,
             active,
             scroll_delta,
-            events,
         );
         widget.paint(&mut ctx);
         self.pop_node_clip();
-        self.runtime.focus = retained_focus_to_node(focus_slot);
         self.runtime.updated_focus = focus_seen;
     }
 }

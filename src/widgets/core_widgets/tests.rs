@@ -47,7 +47,7 @@ fn combo_run_toggles_open_state() {
     let mut updated_focus = false;
     let rect = rect(0, 0, 100, 20);
     let mut ctx = WidgetCtx::new_with_interaction(
-        RetainedId::node(Id::new(1)),
+        Id::new(1),
         rect,
         &mut commands,
         &mut triangle_vertices,
@@ -62,15 +62,14 @@ fn combo_run_toggles_open_state() {
         true,
         true,
         None,
-        Vec::new(),
     );
 
-    combo.update(&mut ctx);
+    combo.update(&mut ctx, Vec::new());
     assert!(combo.is_open());
 
     combo.open_popup();
     let mut ctx = WidgetCtx::new_with_interaction(
-        RetainedId::node(Id::new(1)),
+        Id::new(1),
         rect,
         &mut commands,
         &mut triangle_vertices,
@@ -85,9 +84,8 @@ fn combo_run_toggles_open_state() {
         true,
         true,
         None,
-        Vec::new(),
     );
-    combo.update(&mut ctx);
+    combo.update(&mut ctx, Vec::new());
     assert!(!combo.is_open());
 }
 

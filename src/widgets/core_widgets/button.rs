@@ -124,7 +124,7 @@ impl Button {
     }
 
     /// Buttons submit on click and do not keep extra transient state.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
         submit_on_click(ctx)
     }
 

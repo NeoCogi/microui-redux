@@ -9,8 +9,8 @@
 #![allow(dead_code)]
 
 use crate::{
-    expand_rect, Canvas, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, KeyCode, KeyMode, MouseButton, Recti, Renderer, RetainedId,
-    Style, Vec2i, Vertex, UNCLIPPED_RECT,
+    expand_rect, Canvas, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, MouseButton, Recti, Renderer, Style, Vec2i, Vertex,
+    UNCLIPPED_RECT,
 };
 #[cfg(test)]
 use crate::UiNodeSet;
@@ -242,8 +242,8 @@ fn resolve_axis_tracks(policies: &[SizePolicy], preferred: &[i32], available: i3
 
 /// Returns the screen-space rectangle occupied by a child and any overflow content it measured.
 fn child_content_rect(node: &UiNode) -> Recti {
-    let frame = node.layout.frame;
-    let content_size = node.layout.content_size;
+    let frame = node.state.layout.frame;
+    let content_size = node.state.layout.content_size;
     Recti::new(frame.x, frame.y, frame.width.max(content_size.width), frame.height.max(content_size.height))
 }
 
@@ -318,38 +318,6 @@ pub(super) fn held_events_from_input(input: &Input) -> Vec<UiInputEvent> {
     events
 }
 
-/// Converts the retained focus slot used by `WidgetCtx` back to a node id.
-fn retained_focus_to_node(focus: Option<RetainedId>) -> Option<UiNodeId> {
-    match focus {
-        Some(RetainedId::Node(id)) => Some(id),
-        _ => None,
-    }
-}
-
-pub(super) fn events_key_mods(events: &[UiInputEvent]) -> KeyMode {
-    events.iter().fold(KeyMode::NONE, |keys, event| match event {
-        UiInputEvent::KeyState { keys: state } => keys | *state,
-        _ => keys,
-    })
-}
-
-pub(super) fn events_key_codes(events: &[UiInputEvent]) -> KeyCode {
-    events.iter().fold(KeyCode::NONE, |keys, event| match event {
-        UiInputEvent::KeyCodeState { codes } => keys | *codes,
-        _ => keys,
-    })
-}
-
-pub(super) fn events_text(events: &[UiInputEvent]) -> String {
-    let mut text = String::new();
-    for event in events {
-        if let UiInputEvent::Text { text: event_text } = event {
-            text.push_str(event_text);
-        }
-    }
-    text
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,7 +385,7 @@ mod tests {
         }
 
         fn node_screen_rect(&self, id: UiNodeId) -> Option<Recti> {
-            self.node(id).map(|node| self.traversal_state_for_node(id).screen_frame(node.layout))
+            self.node(id).map(|node| self.traversal_state_for_node(id).screen_frame(node.state.layout))
         }
 
         fn replace_ui_nodes(&mut self, tree: UiNodeSet) {
@@ -538,8 +506,8 @@ mod tests {
             Dimensioni::new(10, 10)
         }
 
-        fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
-            self.seen.borrow_mut().push(ctx.input_events().to_vec());
+        fn update(&mut self, _ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+            self.seen.borrow_mut().push(input);
             ResourceState::NONE
         }
 
@@ -735,7 +703,7 @@ mod tests {
         );
 
         let button_rect = runtime.node_screen_rect(button_id).expect("button node missing");
-        let button_layout = runtime.node(button_id).expect("button node missing").layout.frame;
+        let button_layout = runtime.node(button_id).expect("button node missing").state.layout.frame;
         assert_eq!(button_layout.x, style.padding);
         assert!(button_rect.y > 40 + style.title_height);
         assert_eq!(button_rect.x, 40 + style.padding);
@@ -865,7 +833,7 @@ mod tests {
         );
 
         let root_node = &runtime.roots[0];
-        assert!(root_node.layout.content_size.height >= 67 + style.spacing + 256);
+        assert!(root_node.state.layout.content_size.height >= 67 + style.spacing + 256);
     }
 
     #[test]
@@ -907,7 +875,7 @@ mod tests {
         );
 
         let first_node = runtime.node(first_id).unwrap();
-        let first_rect = first_node.layout.frame;
+        let first_rect = first_node.state.layout.frame;
         let first_screen_rect = runtime.node_screen_rect(first_id).unwrap();
         let scroll_state = scroll_area_state(&runtime.roots, scroll_area_id).unwrap();
         let body = scroll_state.body;
@@ -953,8 +921,8 @@ mod tests {
             body,
             true,
         );
-        let first_client = runtime.roots[0].layout.frame;
-        let first_content = runtime.roots[0].layout.content_size;
+        let first_client = runtime.roots[0].state.layout.frame;
+        let first_content = runtime.roots[0].state.layout.content_size;
 
         results.begin_frame();
         runtime.render_frame(
@@ -967,8 +935,8 @@ mod tests {
             body,
             true,
         );
-        let second_client = runtime.roots[0].layout.frame;
-        let second_content = runtime.roots[0].layout.content_size;
+        let second_client = runtime.roots[0].state.layout.frame;
+        let second_content = runtime.roots[0].state.layout.content_size;
 
         assert!(same_rect(first_client, second_client));
         assert_eq!(first_client.width, body.width - style.padding * 2);
@@ -1011,12 +979,12 @@ mod tests {
 
         let root = &runtime.roots[0];
         let custom_rect = runtime.node_screen_rect(custom_id).unwrap();
-        assert_eq!(root.layout.frame.width, body.width - style.padding * 2);
-        assert_eq!(root.layout.frame.height, body.height - style.padding * 2);
-        assert_eq!(custom_rect.width, root.layout.frame.width);
-        assert_eq!(custom_rect.height, root.layout.frame.height);
-        assert!(root.layout.content_size.width <= root.layout.frame.width);
-        assert!(root.layout.content_size.height <= root.layout.frame.height);
+        assert_eq!(root.state.layout.frame.width, body.width - style.padding * 2);
+        assert_eq!(root.state.layout.frame.height, body.height - style.padding * 2);
+        assert_eq!(custom_rect.width, root.state.layout.frame.width);
+        assert_eq!(custom_rect.height, root.state.layout.frame.height);
+        assert!(root.state.layout.content_size.width <= root.state.layout.frame.width);
+        assert!(root.state.layout.content_size.height <= root.state.layout.frame.height);
     }
 
     #[test]
@@ -1116,12 +1084,12 @@ mod tests {
         assert!(
             paint_count.get() > 0,
             "slot not painted; root client {:?} content {:?} scroll body {:?} scroll {:?} slot rect {:?} clip {:?}",
-            root.layout.frame,
-            root.layout.content_size,
+            root.state.layout.frame,
+            root.state.layout.content_size,
             body,
             scroll,
             slot_rect,
-            slot_node.layout.content.viewport
+            slot_node.state.layout.content.viewport
         );
     }
 

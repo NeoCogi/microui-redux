@@ -106,8 +106,8 @@ macro_rules! implement_widget {
             fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
                 self.$measure(style, atlas, avail)
             }
-            fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
-                self.$update(ctx)
+            fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+                self.$update(ctx, &input)
             }
             fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
                 self.$paint(ctx);

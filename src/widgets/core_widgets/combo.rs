@@ -128,7 +128,7 @@ impl Combo {
     }
 
     /// Updates popup open state and reports submit/active transitions.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
         let mut res = ResourceState::NONE;
         if self.clamped {
             res |= ResourceState::CHANGE;
@@ -187,8 +187,8 @@ impl Widget for Combo {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
-        self.update_widget(ctx)
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+        self.update_widget(ctx, &input)
     }
 
     fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {

@@ -145,9 +145,9 @@ impl Textbox {
     }
 
     /// Applies input and cursor movement for this textbox.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
         let font = ctx.style().resolve_font_choice(self.config.font);
-        textbox_update(ctx, &mut self.buf, &mut self.cursor, self.config.opt, font)
+        textbox_update(ctx, input, &mut self.buf, &mut self.cursor, self.config.opt, font)
     }
 
     /// Paints the textbox frame, text, and caret.
@@ -158,7 +158,14 @@ impl Textbox {
 }
 
 /// Shared single-line text editing update used by textbox and numeric inline editors.
-pub(crate) fn textbox_update(ctx: &mut WidgetCtx<'_>, buf: &mut String, cursor: &mut usize, _opt: WidgetOption, font: FontId) -> ResourceState {
+pub(crate) fn textbox_update(
+    ctx: &mut WidgetCtx<'_>,
+    input: &[UiInputEvent],
+    buf: &mut String,
+    cursor: &mut usize,
+    _opt: WidgetOption,
+    font: FontId,
+) -> ResourceState {
     let mut res = ResourceState::NONE;
     let r = ctx.screen_rect();
     if !ctx.focused() {
@@ -172,10 +179,10 @@ pub(crate) fn textbox_update(ctx: &mut WidgetCtx<'_>, buf: &mut String, cursor: 
             apply_text_input(
                 buf,
                 cursor_pos,
-                ctx.text_input().as_str(),
-                ctx.key_mods(),
-                ctx.key_pressed(),
-                ctx.key_code_pressed(),
+                input.text_input().as_str(),
+                input.key_mods(),
+                input.key_pressed(),
+                input.key_code_pressed(),
                 false,
                 ReturnBehavior::Submit,
             )
@@ -188,7 +195,12 @@ pub(crate) fn textbox_update(ctx: &mut WidgetCtx<'_>, buf: &mut String, cursor: 
                 submit: false,
             }
         };
-        (ctx.mouse_pressed(), ctx.mouse_pos(), ctx.key_code_pressed().intersects(KeyCode::END), edit)
+        (
+            input.mouse_pressed(),
+            input.mouse_pos(),
+            input.key_code_pressed().intersects(KeyCode::END),
+            edit,
+        )
     };
     if ctx.focused() {
         cursor_pos = edit.cursor;
@@ -212,7 +224,7 @@ pub(crate) fn textbox_update(ctx: &mut WidgetCtx<'_>, buf: &mut String, cursor: 
     let ofx = r.width - padding - text_metrics.width - 1;
     let textx = r.x + if ofx < padding { ofx } else { padding };
 
-    if ctx.focused() && mouse_pressed.intersects(MouseButton::LEFT) && ctx.mouse_over(r) {
+    if ctx.focused() && mouse_pressed.intersects(MouseButton::LEFT) && ctx.mouse_over(r, mouse_pos) {
         // Convert local click x into a UTF-8 boundary cursor position.
         let click_x = mouse_pos.x - (textx - r.x);
         cursor_pos = cursor_from_text_x(buf, click_x, font, ctx.atlas());
@@ -268,10 +280,10 @@ impl Widget for Textbox {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let old_buf = self.buf.clone();
         let old_cursor = self.cursor;
-        let mut res = self.update_widget(ctx);
+        let mut res = self.update_widget(ctx, &input);
         let changed = self.buf != old_buf || self.cursor != old_cursor;
         if ctx.focused() || changed {
             res |= ResourceState::ACTIVE;

@@ -88,7 +88,7 @@ impl Widget for RetainedPaint {
         Dimensioni::new(96, 48)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetCtx<'_>) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
         ResourceState::NONE
     }
 

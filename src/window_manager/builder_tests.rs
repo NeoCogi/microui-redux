@@ -115,7 +115,7 @@ fn row_nodes_capture_children_and_track_policy() {
 
     let row_id = tree.roots()[0];
     let row = tree.node(row_id).expect("row node missing");
-    assert_eq!(row.policy, Policy::fill());
+    assert_eq!(row.state.policy, Policy::fill());
     assert_eq!(row.children().len(), 2);
     assert!(matches!(row.data, UiNodeData::Container(_)));
 }
