@@ -385,13 +385,10 @@ impl UiNodeBuilder {
         self.push_leaf(
             options,
             TAG_WIDGET,
-            UiNodeData::Widget {
-                behavior: Box::new(WidgetNode {
-                    widget: erased_widget_state(widget),
-                    custom_render: None,
-                    pending_events: Vec::new(),
-                }),
-            },
+            UiNodeData::Widget(Box::new(WidgetNode {
+                widget: erased_widget_state(widget),
+                custom_render: None,
+            })),
         )
     }
 
@@ -425,13 +422,10 @@ impl UiNodeBuilder {
         self.push_leaf(
             options,
             TAG_CUSTOM_RENDER,
-            UiNodeData::Widget {
-                behavior: Box::new(WidgetNode {
-                    widget: erased_widget_state(state),
-                    custom_render: Some(render),
-                    pending_events: Vec::new(),
-                }),
-            },
+            UiNodeData::Widget(Box::new(WidgetNode {
+                widget: erased_widget_state(state),
+                custom_render: Some(render),
+            })),
         )
     }
 
@@ -462,9 +456,7 @@ impl UiNodeBuilder {
         let node = self.create_node_with_id(
             id,
             options,
-            UiNodeData::Container {
-                behavior: Box::new(UiScrollArea::new(state, scroll_behavior, opt, children)),
-            },
+            UiNodeData::Container(Box::new(UiScrollArea::new(state, scroll_behavior, opt, children))),
         );
         Self::validate_unique_node_ids(std::slice::from_ref(&node));
         self.current_frame_mut().nodes.push(BuilderChild { node, grid_span: options.grid_span });
@@ -482,14 +474,12 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_HEADER,
-            UiNodeData::Container {
-                behavior: Box::new(Disclosure {
-                    state,
-                    indent_children: false,
-                    header_rect: Recti::default(),
-                    content_layout: Column::default(),
-                }),
-            },
+            UiNodeData::Container(Box::new(Disclosure {
+                state,
+                indent_children: false,
+                header_rect: Recti::default(),
+                content_layout: Column::default(),
+            })),
             f,
         )
     }
@@ -505,14 +495,12 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_TREE,
-            UiNodeData::Container {
-                behavior: Box::new(Disclosure {
-                    state,
-                    indent_children: true,
-                    header_rect: Recti::default(),
-                    content_layout: Column::default(),
-                }),
-            },
+            UiNodeData::Container(Box::new(Disclosure {
+                state,
+                indent_children: true,
+                header_rect: Recti::default(),
+                content_layout: Column::default(),
+            })),
             f,
         )
     }
@@ -531,13 +519,11 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_ROW,
-            UiNodeData::Container {
-                behavior: Box::new(Row {
-                    widths: widths.to_vec(),
-                    height,
-                    children: Vec::new(),
-                }),
-            },
+            UiNodeData::Container(Box::new(Row {
+                widths: widths.to_vec(),
+                height,
+                children: Vec::new(),
+            })),
             f,
         )
     }
@@ -558,14 +544,12 @@ impl UiNodeBuilder {
         let node = self.create_node_with_id(
             id,
             options,
-            UiNodeData::Container {
-                behavior: Box::new(Grid {
-                    widths: widths.to_vec(),
-                    heights: heights.to_vec(),
-                    spans,
-                    children,
-                }),
-            },
+            UiNodeData::Container(Box::new(Grid {
+                widths: widths.to_vec(),
+                heights: heights.to_vec(),
+                spans,
+                children,
+            })),
         );
         self.current_frame_mut().nodes.push(BuilderChild { node, grid_span: options.grid_span });
         id
@@ -578,7 +562,7 @@ impl UiNodeBuilder {
 
     /// Adds a nested column scope with optional identity and placement metadata.
     fn insert_column(&mut self, options: NodeOptions, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.push_group(options, TAG_COLUMN, UiNodeData::Container { behavior: Box::new(Column::default()) }, f)
+        self.push_group(options, TAG_COLUMN, UiNodeData::Container(Box::new(Column::default())), f)
     }
 
     /// Adds an unkeyed stack scope.
@@ -591,14 +575,12 @@ impl UiNodeBuilder {
         self.push_group(
             options,
             TAG_STACK,
-            UiNodeData::Container {
-                behavior: Box::new(Stack {
-                    width,
-                    height,
-                    direction,
-                    children: Vec::new(),
-                }),
-            },
+            UiNodeData::Container(Box::new(Stack {
+                width,
+                height,
+                direction,
+                children: Vec::new(),
+            })),
             f,
         )
     }
@@ -620,8 +602,8 @@ impl UiNodeBuilder {
         f(self);
         let frame = self.frames.pop().expect("child frame missing");
         let children = Self::child_nodes(frame.nodes);
-        if let UiNodeData::Container { behavior } = &mut data {
-            *behavior.children_mut() = children;
+        if let UiNodeData::Container(container) = &mut data {
+            *container.children_mut() = children;
         }
         let node = self.create_node_with_id(id, options, data);
         self.current_frame_mut().nodes.push(BuilderChild { node, grid_span: options.grid_span });

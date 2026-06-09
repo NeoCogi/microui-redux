@@ -22,13 +22,13 @@ use crate::widget_ctx::WidgetCtx;
 use crate::window_manager::TreeCustomRender;
 
 mod node;
-pub(crate) use node::{NodeLayout, TraversalState, UiNode, UiNodeData, UiNodeId};
+pub(crate) use node::{NodeLayout, TraversalState, UiNode, UiNodeData, UiNodeId, UiNodeState};
 mod runtime;
 pub(crate) use runtime::UiRuntime;
 mod containers;
 pub(crate) use containers::{
     scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Container, Disclosure, Grid, InputCtx, InputResult, LayoutCtx, MeasureCtx, Widget,
-    PaintCtx, Row, ScrollArea, Stack, TakenContainer, TakenWidget, UpdateCtx, WidgetNode,
+    PaintCtx, Row, ScrollArea, Stack, UpdateCtx, WidgetNode,
 };
 #[cfg(test)]
 pub(crate) use containers::{scroll_area_state, set_scroll_area_scroll};
@@ -318,22 +318,6 @@ pub(super) fn held_events_from_input(input: &Input) -> Vec<UiInputEvent> {
     events
 }
 
-/// Builds widget-visible frame events from raw input.
-pub(super) fn frame_events_from_input(input: &Input) -> Vec<UiInputEvent> {
-    let mut events = pointer_events_from_input(input);
-    events.extend(held_events_from_input(input));
-    events
-}
-
-/// Builds all events relevant to a focused custom render node.
-pub(super) fn custom_render_events_from_input(input: &Input, focused: bool) -> Vec<UiInputEvent> {
-    let mut events = frame_events_from_input(input);
-    if focused {
-        events.extend(focus_events_from_input(input));
-    }
-    events
-}
-
 /// Converts the retained focus slot used by `WidgetCtx` back to a node id.
 fn retained_focus_to_node(focus: Option<RetainedId>) -> Option<UiNodeId> {
     match focus {
@@ -507,14 +491,14 @@ mod tests {
     }
 
     impl Widget for RecordingBehavior {
-        fn measure(&self, _ctx: &MeasureCtx<'_>, _node: &UiNode, _available: Dimensioni) -> Dimensioni {
+        fn measure(&self, _ctx: &MeasureCtx<'_>, _state: &UiNodeState, _available: Dimensioni) -> Dimensioni {
             Dimensioni::default()
         }
 
-        fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _node: &mut UiNode, _rect: Recti) {}
+        fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _state: &mut UiNodeState, _rect: Recti) {}
 
-        fn update_on(&mut self, _ctx: &mut InputCtx<'_>, node: &mut UiNode, event: &UiInputEvent) -> InputResult {
-            let id = node.id();
+        fn update_on(&mut self, _ctx: &mut InputCtx<'_>, state: &mut UiNodeState, event: &UiInputEvent) -> InputResult {
+            let id = state.id();
             let name = match event {
                 UiInputEvent::MouseMove { .. } => "mouse_move",
                 UiInputEvent::MouseDrag { .. } => "mouse_drag",
@@ -575,8 +559,8 @@ mod tests {
         let column_node = runtime.roots.first().expect("column node missing");
         let child_node = column_node.children().first().expect("child node missing");
 
-        assert!(matches!(column_node.data, UiNodeData::Container { .. }));
-        assert!(matches!(child_node.data, UiNodeData::Widget { .. }));
+        assert!(matches!(column_node.data, UiNodeData::Container(_)));
+        assert!(matches!(child_node.data, UiNodeData::Widget(_)));
         assert!(child_node.children().is_empty());
     }
 
@@ -587,16 +571,12 @@ mod tests {
         runtime.roots.push(UiNode::new(
             Id::new(1),
             crate::Policy::auto(),
-            UiNodeData::Widget {
-                behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed)),
-            },
+            UiNodeData::Widget(Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed))),
         ));
         runtime.roots.push(UiNode::new(
             Id::new(2),
             crate::Policy::auto(),
-            UiNodeData::Widget {
-                behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed)),
-            },
+            UiNodeData::Widget(Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed))),
         ));
         runtime.focus = Some(Id::new(2));
 
@@ -605,7 +585,7 @@ mod tests {
         input.keydown(KeyMode::CTRL);
         assert!(runtime.route_input_events(&Style::default(), &input));
 
-        assert_eq!(&*log.borrow(), &[(Id::new(2), "key_down"), (Id::new(2), "text")]);
+        assert_eq!(&*log.borrow(), &[(Id::new(2), "key_down"), (Id::new(2), "text"), (Id::new(2), "key_state")]);
     }
 
     #[test]
@@ -663,23 +643,17 @@ mod tests {
         let child_a = UiNode::new(
             Id::new(2),
             crate::Policy::auto(),
-            UiNodeData::Widget {
-                behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Captured)),
-            },
+            UiNodeData::Widget(Box::new(RecordingBehavior::new(log.clone(), InputResult::Captured))),
         );
         let child_b = UiNode::new(
             Id::new(3),
             crate::Policy::auto(),
-            UiNodeData::Widget {
-                behavior: Box::new(RecordingBehavior::new(log.clone(), InputResult::Ignored)),
-            },
+            UiNodeData::Widget(Box::new(RecordingBehavior::new(log.clone(), InputResult::Ignored))),
         );
         runtime.roots.push(UiNode::new(
             Id::new(1),
             crate::Policy::auto(),
-            UiNodeData::Container {
-                behavior: Box::new(Column { children: vec![child_a, child_b] }),
-            },
+            UiNodeData::Container(Box::new(Column { children: vec![child_a, child_b] })),
         ));
         runtime.z_order.push(Id::new(1));
         runtime.pointer_input_enabled = true;

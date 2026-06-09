@@ -117,7 +117,7 @@ fn row_nodes_capture_children_and_track_policy() {
     let row = tree.node(row_id).expect("row node missing");
     assert_eq!(row.policy, Policy::fill());
     assert_eq!(row.children().len(), 2);
-    assert!(matches!(row.data, UiNodeData::Container { .. }));
+    assert!(matches!(row.data, UiNodeData::Container(_)));
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn scroll_area_nodes_store_viewport_and_chrome_children() {
     assert_eq!(node.children().len(), 4);
     let viewport = &node.children()[0];
     assert_eq!(viewport.children().len(), 1);
-    assert!(matches!(node.data, UiNodeData::Container { .. }));
+    assert!(matches!(node.data, UiNodeData::Container(_)));
 }
 
 #[test]
@@ -147,5 +147,5 @@ fn text_nodes_are_recorded_as_widgets() {
 
     assert_eq!(tree.roots().len(), 1);
     let node = tree.node(tree.roots()[0]).expect("text node missing");
-    assert!(matches!(node.data, UiNodeData::Widget { .. }));
+    assert!(matches!(node.data, UiNodeData::Widget(_)));
 }

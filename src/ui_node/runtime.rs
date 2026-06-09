@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 
 pub(crate) struct UiRuntime {
     /// Aggregate root content size in root body coordinates.
@@ -27,6 +28,10 @@ pub(crate) struct UiRuntime {
     pub(super) clip_stack: Vec<Recti>,
     /// Whether focus was refreshed or changed this frame.
     pub(super) updated_focus: bool,
+    /// Input events routed to each node during the current frame, consumed by update.
+    routed_events: HashMap<UiNodeId, Vec<UiInputEvent>>,
+    /// Snapshot of consumed routed events kept available for paint/custom render in the same frame.
+    widget_frame_events: HashMap<UiNodeId, Vec<UiInputEvent>>,
 }
 
 impl Default for UiRuntime {
@@ -46,6 +51,8 @@ impl Default for UiRuntime {
             triangle_vertices: Vec::new(),
             clip_stack: Vec::new(),
             updated_focus: false,
+            routed_events: HashMap::new(),
+            widget_frame_events: HashMap::new(),
         }
     }
 }
@@ -97,7 +104,26 @@ impl UiRuntime {
         self.clip_stack.clear();
         self.clip_stack.push(UNCLIPPED_RECT);
         self.updated_focus = false;
+        self.routed_events.clear();
+        self.widget_frame_events.clear();
         self.pointer_input_enabled = pointer_input_enabled;
+    }
+
+    /// Records one routed event for a node-local widget update.
+    pub(crate) fn push_routed_event(&mut self, node: UiNodeId, event: UiInputEvent) {
+        self.routed_events.entry(node).or_default().push(event);
+    }
+
+    /// Takes routed events for update and preserves a same-frame snapshot for paint.
+    pub(crate) fn take_routed_events(&mut self, node: UiNodeId) -> Vec<UiInputEvent> {
+        let events = self.routed_events.remove(&node).unwrap_or_default();
+        self.widget_frame_events.insert(node, events.clone());
+        events
+    }
+
+    /// Returns the same-frame routed events already consumed by update.
+    pub(crate) fn widget_frame_events(&self, node: UiNodeId) -> Vec<UiInputEvent> {
+        self.widget_frame_events.get(&node).cloned().unwrap_or_default()
     }
 
     /// Runs the pre-input layout pass that establishes hit targets.
@@ -310,8 +336,8 @@ impl UiRuntime {
     pub(super) fn measure_node_ref(&self, node: &UiNode, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
         let ctx = MeasureCtx { runtime: self, style, atlas };
         match &node.data {
-            UiNodeData::Widget { behavior } => behavior.measure(&ctx, node, available),
-            UiNodeData::Container { behavior } => behavior.measure(&ctx, node, available),
+            UiNodeData::Widget(widget) => widget.measure(&ctx, node.state(), available),
+            UiNodeData::Container(container) => container.measure(&ctx, node.state(), available),
         }
     }
 
@@ -322,16 +348,10 @@ impl UiRuntime {
             node.set_layout(NodeLayout::from_rect(rect, node.layout.content_size));
         }
 
-        let mut behavior = match &mut node.data {
-            UiNodeData::Widget { behavior } => TakenBehavior::Widget(std::mem::replace(behavior, Box::new(TakenWidget))),
-            UiNodeData::Container { behavior } => TakenBehavior::Container(std::mem::replace(behavior, Box::new(TakenContainer::new(Vec::new())))),
-        };
         let mut ctx = LayoutCtx { runtime: self, style, atlas };
-        behavior.widget_mut().layout(&mut ctx, node, rect);
-        match (&mut node.data, behavior) {
-            (UiNodeData::Widget { behavior }, TakenBehavior::Widget(replacement)) => *behavior = replacement,
-            (UiNodeData::Container { behavior }, TakenBehavior::Container(replacement)) => *behavior = replacement,
-            _ => {}
+        match &mut node.data {
+            UiNodeData::Widget(widget) => widget.layout(&mut ctx, &mut node.state, rect),
+            UiNodeData::Container(container) => container.layout(&mut ctx, &mut node.state, rect),
         }
 
         let propagate_child_overflow = node.layout.propagate_child_overflow;
@@ -359,7 +379,6 @@ impl UiRuntime {
         results: &mut FrameResults,
     ) {
         let traversal = parent_traversal.enter(node.layout);
-        let mut behavior = take_behavior_from_node(node);
         let traverse_children = {
             let mut ctx = UpdateCtx {
                 runtime: self,
@@ -371,9 +390,11 @@ impl UiRuntime {
                 results,
                 traversal,
             };
-            behavior.widget_mut().update(&mut ctx, node)
+            match &mut node.data {
+                UiNodeData::Widget(widget) => widget.update(&mut ctx, &mut node.state),
+                UiNodeData::Container(container) => container.update(&mut ctx, &mut node.state),
+            }
         };
-        restore_behavior_to_node(node, behavior);
         if traverse_children {
             if let Some(children) = node.children_mut() {
                 for child in children {
@@ -439,6 +460,9 @@ impl UiRuntime {
     pub(crate) fn route_focus_input_events(&mut self, roots: &mut [UiNode], style: &Style, input: &Input) -> bool {
         let mut consumed = false;
         for event in focus_events_from_input(input) {
+            consumed |= self.route_focus_input_event(roots, style, input, &event);
+        }
+        for event in held_events_from_input(input) {
             consumed |= self.route_focus_input_event(roots, style, input, &event);
         }
         consumed
@@ -520,17 +544,16 @@ impl UiRuntime {
         input: &Input,
         event: &UiInputEvent,
     ) -> InputResult {
-        let mut behavior = take_behavior_from_node(node);
         let mut ctx = InputCtx { runtime: self, style, input, traversal };
-        let result = behavior.widget_mut().update_on(&mut ctx, node, event);
-        restore_behavior_to_node(node, behavior);
-        result
+        match &mut node.data {
+            UiNodeData::Widget(widget) => widget.update_on(&mut ctx, &mut node.state, event),
+            UiNodeData::Container(container) => container.update_on(&mut ctx, &mut node.state, event),
+        }
     }
 
     /// Paints one already-borrowed node and descendants.
     pub(super) fn paint_node_ref(&mut self, node: &mut UiNode, parent_traversal: TraversalState, style: &Style, atlas: crate::AtlasHandle, input: &Input) {
         let traversal = parent_traversal.enter(node.layout);
-        let mut behavior = take_behavior_from_node(node);
         let traverse_children = {
             let mut ctx = PaintCtx {
                 runtime: self,
@@ -539,9 +562,11 @@ impl UiRuntime {
                 input,
                 traversal,
             };
-            behavior.widget_mut().paint(&mut ctx, node)
+            match &mut node.data {
+                UiNodeData::Widget(widget) => widget.paint(&mut ctx, &mut node.state),
+                UiNodeData::Container(container) => container.paint(&mut ctx, &mut node.state),
+            }
         };
-        restore_behavior_to_node(node, behavior);
         if traverse_children {
             if let Some(children) = node.children_mut() {
                 for child in children {
@@ -642,33 +667,4 @@ fn child_content_bounds_from_children(children: &[UiNode]) -> Option<Recti> {
         });
     }
     bounds
-}
-
-pub(super) enum TakenBehavior {
-    Widget(Box<dyn Widget>),
-    Container(Box<dyn Container>),
-}
-
-impl TakenBehavior {
-    fn widget_mut(&mut self) -> &mut dyn Widget {
-        match self {
-            Self::Widget(behavior) => behavior.as_mut(),
-            Self::Container(behavior) => behavior.as_mut(),
-        }
-    }
-}
-
-fn take_behavior_from_node(node: &mut UiNode) -> TakenBehavior {
-    match &mut node.data {
-        UiNodeData::Widget { behavior } => TakenBehavior::Widget(std::mem::replace(behavior, Box::new(TakenWidget))),
-        UiNodeData::Container { behavior } => TakenBehavior::Container(std::mem::replace(behavior, Box::new(TakenContainer::new(Vec::new())))),
-    }
-}
-
-fn restore_behavior_to_node(node: &mut UiNode, replacement: TakenBehavior) {
-    match (&mut node.data, replacement) {
-        (UiNodeData::Widget { behavior }, TakenBehavior::Widget(replacement)) => *behavior = replacement,
-        (UiNodeData::Container { behavior }, TakenBehavior::Container(replacement)) => *behavior = replacement,
-        _ => {}
-    }
 }

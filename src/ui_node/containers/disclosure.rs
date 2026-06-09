@@ -1,7 +1,7 @@
 use crate::{Dimensioni, Node, Recti, WidgetHandle};
 
-use super::{Column, Container, LayoutCtx, MeasureCtx, PaintCtx, UpdateCtx, Widget};
-use crate::ui_node::UiNode;
+use super::{route_public_widget_input, Column, Container, InputCtx, InputResult, LayoutCtx, MeasureCtx, PaintCtx, UiInputEvent, UpdateCtx, Widget};
+use crate::ui_node::{UiNode, UiNodeState};
 
 /// Header/tree disclosure container.
 pub(crate) struct Disclosure {
@@ -16,7 +16,7 @@ pub(crate) struct Disclosure {
 }
 
 impl Widget for Disclosure {
-    fn measure(&self, ctx: &MeasureCtx<'_>, node: &UiNode, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &MeasureCtx<'_>, state: &UiNodeState, available: Dimensioni) -> Dimensioni {
         let widget = crate::window_manager::erased_widget_state(self.state.clone());
         let header_size = widget.measure(ctx.style, ctx.atlas, available);
         if !self.state.read(|state| state.state).is_expanded() {
@@ -29,7 +29,7 @@ impl Widget for Disclosure {
                 .saturating_sub(super::super::disclosure_child_indent(self.indent_children, ctx.style)),
             available.height.saturating_sub(header_size.height),
         );
-        let child_size = self.content_layout.measure(ctx, node, child_available);
+        let child_size = self.content_layout.measure(ctx, state, child_available);
         Dimensioni::new(
             available
                 .width
@@ -39,7 +39,7 @@ impl Widget for Disclosure {
         )
     }
 
-    fn layout(&mut self, ctx: &mut LayoutCtx<'_>, node: &mut UiNode, rect: Recti) {
+    fn layout(&mut self, ctx: &mut LayoutCtx<'_>, state: &mut UiNodeState, rect: Recti) {
         let widget = crate::window_manager::erased_widget_state(self.state.clone());
         let header_preferred = widget.measure(ctx.style, ctx.atlas, Dimensioni::new(rect.width, rect.height));
         let header_height = header_preferred
@@ -60,17 +60,30 @@ impl Widget for Disclosure {
             rect.width.saturating_sub(indent),
             rect.height.saturating_sub(header_height).saturating_sub(ctx.style.spacing),
         );
-        self.content_layout.layout(ctx, node, child_rect);
+        self.content_layout.layout(ctx, state, child_rect);
     }
 
-    fn update(&mut self, ctx: &mut UpdateCtx<'_>, node: &mut UiNode) -> bool {
-        ctx.update_container_widget_in_rect(node, self.header_rect, self.state.clone(), "ui node disclosure");
+    fn update(&mut self, ctx: &mut UpdateCtx<'_>, state: &mut UiNodeState) -> bool {
+        ctx.update_container_widget_in_rect(state, self.header_rect, self.state.clone(), "ui node disclosure");
         self.state.read(|state| state.state).is_expanded()
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx<'_>, node: &mut UiNode) -> bool {
-        ctx.paint_container_widget_in_rect(node, self.header_rect, self.state.clone());
+    fn paint(&mut self, ctx: &mut PaintCtx<'_>, state: &mut UiNodeState) -> bool {
+        ctx.paint_container_widget_in_rect(state, self.header_rect, self.state.clone());
         self.state.read(|state| state.state).is_expanded()
+    }
+
+    fn update_on(&mut self, ctx: &mut InputCtx<'_>, state: &mut UiNodeState, event: &UiInputEvent) -> InputResult {
+        let widget = crate::window_manager::erased_widget_state(self.state.clone());
+        let (_, header_rect) = ctx.node_clip_and_rect(self.header_rect);
+        route_public_widget_input(
+            ctx,
+            state,
+            header_rect,
+            widget.effective_widget_opt(),
+            widget.effective_scroll_behavior(),
+            event,
+        )
     }
 }
 

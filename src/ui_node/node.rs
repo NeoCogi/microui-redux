@@ -1,4 +1,5 @@
 use crate::{Dimensioni, Id, Recti, Vec2i};
+use std::ops::{Deref, DerefMut};
 
 use super::{Container, Widget};
 
@@ -132,7 +133,7 @@ fn translate_rect(rect: Recti, offset: Vec2i) -> Recti {
 }
 
 /// Common runtime node state shared by widgets and containers.
-pub(crate) struct UiNode {
+pub(crate) struct UiNodeState {
     /// Stable runtime node id.
     id: UiNodeId,
     /// Persistent layout result for traversal.
@@ -153,29 +154,78 @@ pub(crate) struct UiNode {
     pub(crate) scroll_delta: Option<Vec2i>,
     /// Placement policy used by runtime layout passes.
     pub(crate) policy: crate::Policy,
+}
+
+impl UiNodeState {
+    /// Returns this node state's stable identity.
+    pub const fn id(&self) -> UiNodeId {
+        self.id
+    }
+
+    /// Writes layout as the source of truth.
+    pub(crate) fn set_layout(&mut self, layout: NodeLayout) {
+        self.layout = layout;
+    }
+
+    /// Writes a simple non-scrolled layout.
+    pub(crate) fn set_layout_from_rect(&mut self, rect: Recti, content_size: Dimensioni) {
+        self.set_layout(NodeLayout::from_rect(rect, content_size));
+    }
+}
+
+/// Runtime node that owns shared state plus widget/container payload.
+pub(crate) struct UiNode {
+    /// Common state for layout, identity, and interaction.
+    pub(crate) state: UiNodeState,
     /// Node-specific payload.
     pub(crate) data: UiNodeData,
+}
+
+impl Deref for UiNode {
+    type Target = UiNodeState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
+impl DerefMut for UiNode {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
 }
 
 impl UiNode {
     /// Returns this node's stable identity.
     pub const fn id(&self) -> UiNodeId {
-        self.id
+        self.state.id()
+    }
+
+    /// Returns this node's shared runtime state.
+    pub(crate) fn state(&self) -> &UiNodeState {
+        &self.state
+    }
+
+    /// Returns this node's shared runtime state mutably.
+    pub(crate) fn state_mut(&mut self) -> &mut UiNodeState {
+        &mut self.state
     }
 
     /// Creates a node with default geometry and traversal state.
     pub(crate) fn new(id: UiNodeId, policy: crate::Policy, data: UiNodeData) -> Self {
         Self {
-            id,
-            layout: NodeLayout::default(),
-            visible: true,
-            enabled: true,
-            hovered: false,
-            focused: false,
-            clicked: false,
-            active: false,
-            scroll_delta: None,
-            policy,
+            state: UiNodeState {
+                id,
+                layout: NodeLayout::default(),
+                visible: true,
+                enabled: true,
+                hovered: false,
+                focused: false,
+                clicked: false,
+                active: false,
+                scroll_delta: None,
+                policy,
+            },
             data,
         }
     }
@@ -193,27 +243,27 @@ impl UiNode {
     /// Returns the node's children when it accepts children.
     pub(crate) fn children(&self) -> &[UiNode] {
         match &self.data {
-            UiNodeData::Widget { .. } => &[],
-            UiNodeData::Container { behavior } => behavior.children(),
+            UiNodeData::Widget(_) => &[],
+            UiNodeData::Container(container) => container.children(),
         }
     }
 
     /// Returns the node's mutable children when it accepts children.
     pub(crate) fn children_mut(&mut self) -> Option<&mut Vec<UiNode>> {
         match &mut self.data {
-            UiNodeData::Widget { .. } => None,
-            UiNodeData::Container { behavior } => Some(behavior.children_mut()),
+            UiNodeData::Widget(_) => None,
+            UiNodeData::Container(container) => Some(container.children_mut()),
         }
     }
 
     /// Returns whether this node is a container.
     pub(crate) fn is_container(&self) -> bool {
-        matches!(self.data, UiNodeData::Container { .. })
+        matches!(self.data, UiNodeData::Container(_))
     }
 
     /// Finds a node in this subtree.
     pub(crate) fn find(&self, id: UiNodeId) -> Option<&UiNode> {
-        if self.id == id {
+        if self.id() == id {
             return Some(self);
         }
         self.children().iter().find_map(|child| child.find(id))
@@ -221,7 +271,7 @@ impl UiNode {
 
     /// Finds a mutable node in this subtree.
     pub(crate) fn find_mut(&mut self, id: UiNodeId) -> Option<&mut UiNode> {
-        if self.id == id {
+        if self.id() == id {
             return Some(self);
         }
         self.children_mut()?.iter_mut().find_map(|child| child.find_mut(id))
@@ -229,7 +279,7 @@ impl UiNode {
 
     /// Collects this node id and all descendant ids.
     pub(crate) fn collect_ids(&self, ids: &mut Vec<UiNodeId>) {
-        ids.push(self.id);
+        ids.push(self.id());
         for child in self.children() {
             child.collect_ids(ids);
         }
@@ -239,13 +289,7 @@ impl UiNode {
 /// Runtime payload for a common UI node.
 pub(crate) enum UiNodeData {
     /// Widget behavior without child membership.
-    Widget {
-        /// Concrete retained node behavior.
-        behavior: Box<dyn Widget>,
-    },
+    Widget(Box<dyn Widget>),
     /// Container behavior with child membership.
-    Container {
-        /// Concrete retained node behavior.
-        behavior: Box<dyn Container>,
-    },
+    Container(Box<dyn Container>),
 }

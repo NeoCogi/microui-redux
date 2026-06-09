@@ -2,7 +2,7 @@ use crate::sizing::SizePolicy;
 use crate::{Dimensioni, Recti, StackDirection};
 
 use super::{Container, LayoutCtx, MeasureCtx, Widget};
-use crate::ui_node::UiNode;
+use crate::ui_node::{UiNode, UiNodeState};
 
 /// Stack container.
 pub(crate) struct Stack {
@@ -17,8 +17,7 @@ pub(crate) struct Stack {
 }
 
 impl Widget for Stack {
-    fn measure(&self, ctx: &MeasureCtx<'_>, node: &UiNode, available: Dimensioni) -> Dimensioni {
-        let _ = node;
+    fn measure(&self, ctx: &MeasureCtx<'_>, _state: &UiNodeState, available: Dimensioni) -> Dimensioni {
         let mut width = 0;
         let mut height: i32 = 0;
         for (index, child) in self.children.iter().enumerate() {
@@ -38,8 +37,7 @@ impl Widget for Stack {
         Dimensioni::new(width.max(0), height.max(0))
     }
 
-    fn layout(&mut self, ctx: &mut LayoutCtx<'_>, node: &mut UiNode, rect: Recti) {
-        let _ = node;
+    fn layout(&mut self, ctx: &mut LayoutCtx<'_>, _state: &mut UiNodeState, rect: Recti) {
         let count = self.children.len();
         let mut heights = Vec::with_capacity(count);
         for child in &self.children {

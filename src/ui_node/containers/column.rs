@@ -1,7 +1,7 @@
 use crate::{Dimensioni, Recti};
 
 use super::{Container, LayoutCtx, MeasureCtx, Widget};
-use crate::ui_node::UiNode;
+use crate::ui_node::{UiNode, UiNodeState};
 
 /// Column container.
 #[derive(Default)]
@@ -11,13 +11,11 @@ pub(crate) struct Column {
 }
 
 impl Widget for Column {
-    fn measure(&self, ctx: &MeasureCtx<'_>, node: &UiNode, available: Dimensioni) -> Dimensioni {
-        let _ = node;
+    fn measure(&self, ctx: &MeasureCtx<'_>, _state: &UiNodeState, available: Dimensioni) -> Dimensioni {
         measure_column(ctx, &self.children, available)
     }
 
-    fn layout(&mut self, ctx: &mut LayoutCtx<'_>, node: &mut UiNode, rect: Recti) {
-        let _ = node;
+    fn layout(&mut self, ctx: &mut LayoutCtx<'_>, _state: &mut UiNodeState, rect: Recti) {
         layout_column_children(ctx, &mut self.children, rect);
     }
 }
