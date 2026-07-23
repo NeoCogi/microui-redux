@@ -1,4 +1,5 @@
 use super::*;
+use crate::render::geometry::SolidGeometry;
 use std::collections::HashMap;
 
 pub(crate) struct UiRuntime {
@@ -24,6 +25,8 @@ pub(crate) struct UiRuntime {
     debug_rects: Vec<Recti>,
     /// Triangle vertex arena referenced by retained triangle commands.
     pub(super) triangle_vertices: Vec<Vertex>,
+    /// Reusable typed solid geometry and its private polygon workspace.
+    pub(super) solid_geometry: SolidGeometry,
     /// Active screen-space clip stack.
     pub(super) clip_stack: Vec<Recti>,
     /// Whether focus was refreshed or changed this frame.
@@ -47,6 +50,7 @@ impl Default for UiRuntime {
             #[cfg(test)]
             debug_rects: Vec::new(),
             triangle_vertices: Vec::new(),
+            solid_geometry: SolidGeometry::new(),
             clip_stack: Vec::new(),
             updated_focus: false,
             routed_events: HashMap::new(),
@@ -98,6 +102,7 @@ impl UiRuntime {
     pub(crate) fn begin_frame(&mut self, pointer_input_enabled: bool) {
         self.commands.clear();
         self.triangle_vertices.clear();
+        self.solid_geometry.clear();
         self.clip_stack.clear();
         self.clip_stack.push(UNCLIPPED_RECT);
         self.updated_focus = false;

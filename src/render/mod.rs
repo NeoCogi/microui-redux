@@ -5,8 +5,11 @@
 //! Canvas that manages frame execution and texture resources.
 
 mod backend;
-mod display_list;
+pub(crate) mod display_list;
+pub(crate) mod geometry;
+mod painter;
 
 pub use backend::{CustomRenderArgs, CustomRenderCommand, Renderer, RendererHandle, Vertex};
 pub use crate::canvas::Canvas;
 pub use display_list::DisplayList;
+pub use painter::Painter;

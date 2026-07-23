@@ -72,7 +72,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override `config.font`.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2-backed glow, Vulkan, and WGPU examples demonstrate how to batch the commands produced by a container and upload them to the GPU.
 
-The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `ScrollAreaHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. Renderer integration, Canvas access, and backend vertices live under `microui_redux::render`; atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, rect-packing details, and container-level manual drawing are not part of the application authoring surface.
+The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `ScrollAreaHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. Renderer integration, `Canvas`, `DisplayList`, `Painter`, and backend vertices live under `microui_redux::render`; atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, rect-packing details, and container-level manual drawing are not part of the application authoring surface.
 
 ### Retained-mode migration status
 

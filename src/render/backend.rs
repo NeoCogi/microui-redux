@@ -54,7 +54,7 @@
 
 use crate::atlas::AtlasHandle;
 use crate::style::{Color, TextureId};
-use rs_math3d::{Color4b, Dimensioni, Rect, Vec2f};
+use rs_math3d::{Color4b, Dimensioni, Rect, Vec2f, color4b};
 use std::sync::{Arc, RwLock};
 
 #[derive(Default, Copy, Clone)]
@@ -88,6 +88,31 @@ impl Vertex {
     /// Returns the vertex color.
     pub fn color(&self) -> Color4b {
         self.color
+    }
+
+    /// Linearly interpolates every render attribute between two vertices.
+    ///
+    /// Positions and texture coordinates use vector arithmetic, while packed color channels are
+    /// rounded back to the nearest byte. Clamping the amount prevents callers from extrapolating
+    /// attributes beyond the supplied segment.
+    pub(crate) fn lerp(left: Self, right: Self, amount: f32) -> Self {
+        let amount = amount.clamp(0.0, 1.0);
+
+        Self {
+            pos: left.pos + (right.pos - left.pos) * amount,
+            tex: left.tex + (right.tex - left.tex) * amount,
+            color: color4b(
+                Self::lerp_channel(left.color.x, right.color.x, amount),
+                Self::lerp_channel(left.color.y, right.color.y, amount),
+                Self::lerp_channel(left.color.z, right.color.z, amount),
+                Self::lerp_channel(left.color.w, right.color.w, amount),
+            ),
+        }
+    }
+
+    /// Interpolates one packed color channel and rounds it back into byte storage.
+    fn lerp_channel(left: u8, right: u8, amount: f32) -> u8 {
+        ((left as f32) + (right as f32 - left as f32) * amount).round().clamp(0.0, 255.0) as u8
     }
 }
 

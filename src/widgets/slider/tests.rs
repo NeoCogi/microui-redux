@@ -1,6 +1,7 @@
 //! Tests for slider and numeric editing behavior.
 
 use super::*;
+use crate::render::geometry::SolidGeometry;
 use crate::test_support::test_atlas as make_test_atlas;
 use crate::ui_node::UiInputEvent;
 use crate::widget_ctx::localize_events;
@@ -18,6 +19,7 @@ fn run_slider_once(
     let style = Style::default();
     let mut commands = Vec::new();
     let mut triangle_vertices = Vec::new();
+    let mut solid_geometry = SolidGeometry::new();
     let mut clip_stack = Vec::new();
     let mut focus = None;
     let mut updated_focus = false;
@@ -26,6 +28,7 @@ fn run_slider_once(
         rect,
         &mut commands,
         &mut triangle_vertices,
+        &mut solid_geometry,
         &mut clip_stack,
         &style,
         &atlas,
@@ -55,6 +58,7 @@ fn slider_zero_range_keeps_value() {
     let style = Style::default();
     let mut commands = Vec::new();
     let mut triangle_vertices = Vec::new();
+    let mut solid_geometry = SolidGeometry::new();
     let mut clip_stack = Vec::new();
     let mut focus = None;
     let mut updated_focus = false;
@@ -71,6 +75,7 @@ fn slider_zero_range_keeps_value() {
         rect,
         &mut commands,
         &mut triangle_vertices,
+        &mut solid_geometry,
         &mut clip_stack,
         &style,
         &atlas,
@@ -121,6 +126,7 @@ fn slider_uses_widget_local_mouse_position() {
     let style = Style::default();
     let mut commands = Vec::new();
     let mut triangle_vertices = Vec::new();
+    let mut solid_geometry = SolidGeometry::new();
     let mut clip_stack = Vec::new();
     let mut focus = None;
     let mut updated_focus = false;
@@ -137,6 +143,7 @@ fn slider_uses_widget_local_mouse_position() {
         rect,
         &mut commands,
         &mut triangle_vertices,
+        &mut solid_geometry,
         &mut clip_stack,
         &style,
         &atlas,

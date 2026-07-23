@@ -29,24 +29,6 @@ fn clip_relation_reports_partial_overlap() {
 }
 
 #[test]
-fn triangle_bounds_are_conservative() {
-    let bounds = rect_from_points(&[Vec2f::new(1.2, 2.6), Vec2f::new(4.8, 3.1), Vec2f::new(3.0, 9.9)]);
-    assert_rect_eq(bounds, rect(1, 2, 4, 8));
-}
-
-#[test]
-fn polygon_cleanup_removes_duplicate_closing_point() {
-    let points = dedupe_and_simplify_polygon(&[
-        Vec2f::new(0.0, 0.0),
-        Vec2f::new(10.0, 0.0),
-        Vec2f::new(10.0, 10.0),
-        Vec2f::new(0.0, 10.0),
-        Vec2f::new(0.0, 0.0),
-    ]);
-    assert_eq!(points.len(), 4);
-}
-
-#[test]
 fn local_rect_translation_is_preserved_in_emitted_vertices() {
     let atlas = AtlasHandle::from(&AtlasSource {
         width: 1,
@@ -60,10 +42,11 @@ fn local_rect_translation_is_preserved_in_emitted_vertices() {
     let style = Style::default();
     let mut commands = Vec::new();
     let mut triangle_vertices = Vec::new();
+    let mut solid_geometry = SolidGeometry::new();
     let mut clip_stack = vec![rect(0, 0, 200, 200)];
     let mut draw = DrawCtx::new(&mut commands, &mut triangle_vertices, &mut clip_stack, &style, &atlas);
     {
-        let mut graphics = Graphics::new(&mut draw, rect(20, 30, 50, 50));
+        let mut graphics = Graphics::new(&mut draw, &mut solid_geometry, rect(20, 30, 50, 50));
         graphics.push_triangle_local(Vec2f::new(0.0, 0.0), Vec2f::new(10.0, 0.0), Vec2f::new(0.0, 10.0), color4b(255, 255, 255, 255));
     }
 
@@ -95,10 +78,11 @@ fn local_clip_changes_stay_in_one_triangle_batch() {
     let style = Style::default();
     let mut commands = Vec::new();
     let mut triangle_vertices = Vec::new();
+    let mut solid_geometry = SolidGeometry::new();
     let mut clip_stack = vec![rect(0, 0, 200, 200)];
     let mut draw = DrawCtx::new(&mut commands, &mut triangle_vertices, &mut clip_stack, &style, &atlas);
     {
-        let mut graphics = Graphics::new(&mut draw, rect(0, 0, 50, 50));
+        let mut graphics = Graphics::new(&mut draw, &mut solid_geometry, rect(0, 0, 50, 50));
         graphics.stroke_line(Vec2f::new(0.0, 0.0), Vec2f::new(10.0, 0.0), 2.0, color(255, 0, 0, 255));
         graphics.push_clip_rect(rect(0, 0, 5, 5));
         graphics.stroke_line(Vec2f::new(0.0, 2.0), Vec2f::new(10.0, 2.0), 2.0, color(255, 0, 0, 255));
@@ -124,10 +108,11 @@ fn graphics_restores_shared_clip_stack_on_drop() {
     let style = Style::default();
     let mut commands = Vec::new();
     let mut triangle_vertices = Vec::new();
+    let mut solid_geometry = SolidGeometry::new();
     let mut clip_stack = vec![rect(0, 0, 200, 200)];
     let mut draw = DrawCtx::new(&mut commands, &mut triangle_vertices, &mut clip_stack, &style, &atlas);
     {
-        let mut graphics = Graphics::new(&mut draw, rect(20, 30, 50, 50));
+        let mut graphics = Graphics::new(&mut draw, &mut solid_geometry, rect(20, 30, 50, 50));
         graphics.push_clip_rect(rect(0, 0, 5, 5));
         assert_rect_eq(graphics.current_clip_rect(), rect(0, 0, 5, 5));
     }
@@ -149,10 +134,11 @@ fn local_triangles_are_software_clipped_before_emission() {
     let style = Style::default();
     let mut commands = Vec::new();
     let mut triangle_vertices = Vec::new();
+    let mut solid_geometry = SolidGeometry::new();
     let mut clip_stack = vec![rect(0, 0, 200, 200)];
     let mut draw = DrawCtx::new(&mut commands, &mut triangle_vertices, &mut clip_stack, &style, &atlas);
     {
-        let mut graphics = Graphics::new(&mut draw, rect(20, 30, 50, 50));
+        let mut graphics = Graphics::new(&mut draw, &mut solid_geometry, rect(20, 30, 50, 50));
         graphics.push_clip_rect(rect(0, 0, 5, 5));
         graphics.stroke_line(Vec2f::new(-10.0, 2.0), Vec2f::new(20.0, 2.0), 2.0, color(255, 0, 0, 255));
     }
@@ -169,14 +155,6 @@ fn local_triangles_are_software_clipped_before_emission() {
         }
         _ => panic!("expected triangle command"),
     }
-}
-
-#[test]
-fn point_in_triangle_accepts_boundary_points() {
-    let a = Vec2f::new(0.0, 0.0);
-    let b = Vec2f::new(10.0, 0.0);
-    let c = Vec2f::new(0.0, 10.0);
-    assert!(point_in_triangle_ccw(Vec2f::new(5.0, 0.0), a, b, c));
 }
 
 #[test]
@@ -199,10 +177,11 @@ fn nested_widget_local_clips_bound_final_renderer_geometry() {
     let style = Style::default();
     let mut commands = Vec::new();
     let mut triangle_vertices = Vec::new();
+    let mut solid_geometry = SolidGeometry::new();
     let mut clip_stack = vec![rect(0, 0, 200, 200)];
     let mut draw = DrawCtx::new(&mut commands, &mut triangle_vertices, &mut clip_stack, &style, &atlas);
     {
-        let mut graphics = Graphics::new(&mut draw, rect(10, 20, 20, 20));
+        let mut graphics = Graphics::new(&mut draw, &mut solid_geometry, rect(10, 20, 20, 20));
         graphics.with_clip(rect(2, 2, 10, 10), |graphics| {
             graphics.with_clip(rect(5, 5, 10, 10), |graphics| {
                 graphics.draw_rect(rect(0, 0, 20, 20), color(255, 0, 0, 255));

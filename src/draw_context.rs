@@ -187,11 +187,9 @@ impl<'a> CommandEmitter<'a> {
         self.triangle_vertices.len()
     }
 
-    /// Appends one triangle to the shared triangle arena.
-    pub(crate) fn push_triangle_vertices(&mut self, v0: Vertex, v1: Vertex, v2: Vertex) {
-        self.triangle_vertices.push(v0);
-        self.triangle_vertices.push(v1);
-        self.triangle_vertices.push(v2);
+    /// Returns the shared triangle arena for direct geometry output.
+    pub(crate) fn triangle_vertices_mut(&mut self) -> &mut Vec<Vertex> {
+        self.triangle_vertices
     }
 
     /// Emits a replay command that pushes a clip during render playback.

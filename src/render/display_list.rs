@@ -29,15 +29,18 @@
 //
 //! Owned render-operation and solid-geometry storage.
 //!
-//! Painter and Canvas adopt this internal operation surface in subsequent subsystem steps. Keep
-//! the complete representation together now without producing transitional crate-wide warnings.
+//! Painter records through this internal operation surface. Canvas adopts the remaining execution
+//! types in a subsequent subsystem step, so keep them available without transitional warnings.
 #![allow(dead_code)]
 
-use super::backend::{CustomRenderArgs, CustomRenderCommand};
+use super::{
+    backend::{CustomRenderArgs, CustomRenderCommand},
+    geometry::{SolidGeometry, SolidTriangle, SolidTriangleRange},
+};
 use crate::atlas::{FontId, IconId, SlotId};
 use crate::style::{Color, Image};
 use rs_math3d::{Color4b, Recti, Vec2f, Vec2i};
-use std::{ops::Range, rc::Rc};
+use std::rc::Rc;
 
 /// An owned sequence of rendering operations and their solid geometry.
 ///
@@ -47,8 +50,8 @@ use std::{ops::Range, rc::Rc};
 pub struct DisplayList {
     /// Operations in final painter order.
     ops: Vec<DrawOp>,
-    /// Screen-space solid triangles referenced by operation-owned ranges.
-    solid_triangles: Vec<SolidTriangle>,
+    /// Retained solid geometry and its reusable tessellation workspace.
+    solid_geometry: SolidGeometry,
 }
 
 /// One recorded operation and its final screen-space clip.
@@ -99,7 +102,7 @@ pub(super) enum DrawKind {
     },
     /// Draws one contiguous range of solid triangles.
     SolidTriangles {
-        /// Validated range inside [`DisplayList::solid_triangles`].
+        /// Validated range inside [`DisplayList::solid_geometry`].
         triangles: SolidTriangleRange,
     },
     /// Regenerates an atlas slot immediately before drawing it.
@@ -122,74 +125,12 @@ pub(super) enum DrawKind {
     },
 }
 
-/// Texture-independent vertex used by solid triangle operations.
-#[derive(Clone, Copy)]
-pub(super) struct SolidVertex {
-    /// Screen-space position.
-    pub(super) position: Vec2f,
-    /// Interpolated vertex color.
-    pub(super) color: Color4b,
-}
-
-impl SolidVertex {
-    /// Creates one texture-independent solid vertex.
-    pub(super) const fn new(position: Vec2f, color: Color4b) -> Self {
-        Self { position, color }
-    }
-}
-
-/// Strongly typed, texture-independent solid triangle.
-#[derive(Clone, Copy)]
-pub(super) struct SolidTriangle([SolidVertex; 3]);
-
-impl SolidTriangle {
-    /// Creates one complete solid triangle.
-    pub(super) const fn new(v0: SolidVertex, v1: SolidVertex, v2: SolidVertex) -> Self {
-        Self([v0, v1, v2])
-    }
-
-    /// Returns the triangle's three vertices in winding order.
-    pub(super) const fn vertices(&self) -> &[SolidVertex; 3] {
-        &self.0
-    }
-}
-
-/// Validated solid-triangle range created and extended only by [`DisplayList`].
-pub(super) struct SolidTriangleRange {
-    /// Inclusive start index.
-    start: usize,
-    /// Exclusive end index.
-    end: usize,
-}
-
-impl SolidTriangleRange {
-    /// Creates a validated non-empty range of complete triangles.
-    fn new(start: usize, end: usize) -> Self {
-        assert!(start < end, "solid geometry range must not be empty");
-        Self { start, end }
-    }
-
-    /// Returns a standard range for read-only execution.
-    pub(super) fn as_range(&self) -> Range<usize> {
-        self.start..self.end
-    }
-
-    /// Extends this range over newly appended contiguous triangles.
-    fn extend_to(&mut self, start: usize, end: usize) -> bool {
-        if self.end != start || start >= end {
-            return false;
-        }
-        self.end = end;
-        true
-    }
-}
-
 /// Operations and triangles detached from a [`DisplayList`] for execution.
 pub(super) struct RecordedFrame {
     /// Operations in painter order.
     pub(super) ops: Vec<DrawOp>,
     /// Solid geometry referenced by the operations.
-    pub(super) solid_triangles: Vec<SolidTriangle>,
+    pub(super) solid_geometry: SolidGeometry,
 }
 
 impl DisplayList {
@@ -197,26 +138,26 @@ impl DisplayList {
     pub const fn new() -> Self {
         Self {
             ops: Vec::new(),
-            solid_triangles: Vec::new(),
+            solid_geometry: SolidGeometry::new(),
         }
     }
 
     /// Removes every recorded operation and triangle while retaining allocated storage for reuse.
     pub fn clear(&mut self) {
         self.ops.clear();
-        self.solid_triangles.clear();
+        self.solid_geometry.clear();
     }
 
     /// Returns `true` when the list contains no operations or solid geometry.
     pub fn is_empty(&self) -> bool {
-        self.ops.is_empty() && self.solid_triangles.is_empty()
+        self.ops.is_empty() && self.solid_geometry.is_empty()
     }
 
     /// Detaches the recorded frame and leaves this list empty and ready for new recording.
     pub(super) fn take(&mut self) -> RecordedFrame {
         RecordedFrame {
             ops: std::mem::take(&mut self.ops),
-            solid_triangles: std::mem::take(&mut self.solid_triangles),
+            solid_geometry: self.solid_geometry.take_recorded(),
         }
     }
 
@@ -252,30 +193,38 @@ impl DisplayList {
 
     /// Appends strongly typed solid triangles and records their valid contiguous range.
     pub(super) fn push_solid_triangles(&mut self, clip: Recti, triangles: &[SolidTriangle]) {
-        if triangles.is_empty() {
-            return;
+        if let Some(range) = self.solid_geometry.append_triangles(triangles, Vec2f::new(0.0, 0.0)) {
+            self.push_solid_range(clip, range);
         }
+    }
 
-        let start = self.solid_triangles.len();
-        self.solid_triangles.extend_from_slice(triangles);
-        let end = self.solid_triangles.len();
+    /// Tessellates and records one translated thick line.
+    pub(super) fn push_line(&mut self, clip: Recti, from: Vec2f, to: Vec2f, width: f32, color: Color4b, offset: Vec2f) {
+        if let Some(range) = self.solid_geometry.append_line(from, to, width, color, offset) {
+            self.push_solid_range(clip, range);
+        }
+    }
 
+    /// Tessellates and records one translated simple polygon.
+    pub(super) fn push_polygon(&mut self, clip: Recti, points: &[Vec2f], color: Color4b, offset: Vec2f) {
+        if let Some(range) = self.solid_geometry.append_polygon(points, color, offset) {
+            self.push_solid_range(clip, range);
+        }
+    }
+
+    /// Associates one newly appended geometry range with operation ordering and clipping.
+    fn push_solid_range(&mut self, clip: Recti, range: SolidTriangleRange) {
         if let Some(DrawOp {
             clip: previous_clip,
             kind: DrawKind::SolidTriangles { triangles: previous_triangles },
         }) = self.ops.last_mut()
         {
-            if same_rect(*previous_clip, clip) && previous_triangles.extend_to(start, end) {
+            if same_rect(*previous_clip, clip) && previous_triangles.extend(&range) {
                 return;
             }
         }
 
-        self.push(
-            clip,
-            DrawKind::SolidTriangles {
-                triangles: SolidTriangleRange::new(start, end),
-            },
-        );
+        self.push(clip, DrawKind::SolidTriangles { triangles: range });
     }
 
     /// Appends an opaque payload with its effective clip.
@@ -294,11 +243,10 @@ mod tests {
     use super::*;
     use crate::{color, color4b};
 
-    fn solid_triangle(offset: f32) -> SolidTriangle {
+    fn triangle_at(offset: f32) -> SolidTriangle {
         SolidTriangle::new(
-            SolidVertex::new(Vec2f::new(offset, 0.0), color4b(255, 0, 0, 255)),
-            SolidVertex::new(Vec2f::new(offset + 1.0, 0.0), color4b(0, 255, 0, 255)),
-            SolidVertex::new(Vec2f::new(offset, 1.0), color4b(0, 0, 255, 255)),
+            [Vec2f::new(offset, 0.0), Vec2f::new(offset + 1.0, 0.0), Vec2f::new(offset, 1.0)],
+            color4b(255, 0, 0, 255),
         )
     }
 
@@ -357,18 +305,22 @@ mod tests {
         for offset in 0..32 {
             list.push_fill_rect(clip, Recti::new(offset, offset, 1, 1), color(255, 255, 255, 255));
         }
-        list.push_solid_triangles(clip, &[solid_triangle(0.0)]);
+        list.push_solid_triangles(clip, &[triangle_at(0.0)]);
+        list.solid_geometry.reserve_polygon_capacity(32);
 
         let operation_capacity = list.ops.capacity();
-        let triangle_capacity = list.solid_triangles.capacity();
+        let triangle_capacity = list.solid_geometry.triangle_capacity();
+        let polygon_capacity = list.solid_geometry.polygon_capacity();
         assert!(operation_capacity > 0);
         assert!(triangle_capacity > 0);
+        assert!(polygon_capacity > 0);
 
         list.clear();
 
         assert!(list.is_empty());
         assert_eq!(list.ops.capacity(), operation_capacity);
-        assert_eq!(list.solid_triangles.capacity(), triangle_capacity);
+        assert_eq!(list.solid_geometry.triangle_capacity(), triangle_capacity);
+        assert_eq!(list.solid_geometry.polygon_capacity(), polygon_capacity);
     }
 
     #[test]
@@ -376,13 +328,13 @@ mod tests {
         let mut list = DisplayList::new();
         let clip = Recti::new(0, 0, 50, 50);
         list.push_fill_rect(clip, Recti::new(1, 2, 3, 4), color(10, 20, 30, 40));
-        list.push_solid_triangles(clip, &[solid_triangle(0.0)]);
+        list.push_solid_triangles(clip, &[triangle_at(0.0)]);
 
         let frame = list.take();
 
         assert!(list.is_empty());
         assert_eq!(frame.ops.len(), 2);
-        assert_eq!(frame.solid_triangles.len(), 1);
+        assert_eq!(frame.solid_geometry.triangles().len(), 1);
 
         list.push_fill_rect(clip, Recti::new(5, 6, 7, 8), color(50, 60, 70, 80));
         assert!(!list.is_empty());
@@ -394,11 +346,11 @@ mod tests {
         let mut list = DisplayList::new();
         let clip = Recti::new(0, 0, 100, 100);
 
-        list.push_solid_triangles(clip, &[solid_triangle(0.0)]);
-        list.push_solid_triangles(clip, &[solid_triangle(10.0)]);
+        list.push_solid_triangles(clip, &[triangle_at(0.0)]);
+        list.push_solid_triangles(clip, &[triangle_at(10.0)]);
 
         assert_eq!(list.ops.len(), 1);
-        assert_eq!(list.solid_triangles.len(), 2);
+        assert_eq!(list.solid_geometry.triangles().len(), 2);
         let DrawKind::SolidTriangles { triangles } = &list.ops[0].kind else {
             panic!("expected a solid-triangle operation");
         };
@@ -411,13 +363,13 @@ mod tests {
         let first_clip = Recti::new(0, 0, 100, 100);
         let second_clip = Recti::new(1, 1, 99, 99);
 
-        list.push_solid_triangles(first_clip, &[solid_triangle(0.0)]);
-        list.push_solid_triangles(second_clip, &[solid_triangle(10.0)]);
+        list.push_solid_triangles(first_clip, &[triangle_at(0.0)]);
+        list.push_solid_triangles(second_clip, &[triangle_at(10.0)]);
         list.push_fill_rect(first_clip, Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
-        list.push_solid_triangles(second_clip, &[solid_triangle(20.0)]);
+        list.push_solid_triangles(second_clip, &[triangle_at(20.0)]);
 
         assert_eq!(list.ops.len(), 4);
-        assert_eq!(list.solid_triangles.len(), 3);
+        assert_eq!(list.solid_geometry.triangles().len(), 3);
 
         let ranges = list
             .ops
@@ -434,12 +386,12 @@ mod tests {
     fn solid_triangle_storage_preserves_complete_triplets() {
         let mut list = DisplayList::new();
         let clip = Recti::new(0, 0, 100, 100);
-        let triangle = solid_triangle(0.0);
+        let triangle = triangle_at(0.0);
 
         list.push_solid_triangles(clip, &[triangle]);
 
-        assert_eq!(list.solid_triangles.len(), 1);
-        assert_eq!(list.solid_triangles[0].vertices().len(), 3);
+        assert_eq!(list.solid_geometry.triangles().len(), 1);
+        assert_eq!(list.solid_geometry.triangles()[0].vertices().len(), 3);
     }
 
     #[test]

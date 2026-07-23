@@ -57,7 +57,7 @@ use std::rc::Rc;
 use rs_math3d::{Color4b, Recti, Vec2i};
 
 use crate::atlas::{AtlasHandle, FontId, IconId, SlotId};
-use crate::render::Vertex;
+use crate::render::{Vertex, geometry::SolidGeometry};
 use crate::render_command::Command;
 use crate::draw_context::DrawCtx;
 use crate::graphics::Graphics;
@@ -193,6 +193,8 @@ pub struct WidgetCtx<'a> {
     rect: Recti,
     /// Draw command recorder borrowed from the active container.
     draw: DrawCtx<'a>,
+    /// Reusable typed geometry and polygon workspace used by widget-local drawing.
+    solid_geometry: &'a mut SolidGeometry,
     /// Focus slot owned by the active container.
     focus: &'a mut Option<UiNodeId>,
     /// Flag indicating whether focus was refreshed or changed this frame.
@@ -228,6 +230,7 @@ impl<'a> WidgetCtx<'a> {
         rect: Recti,
         commands: &'a mut Vec<Command>,
         triangle_vertices: &'a mut Vec<Vertex>,
+        solid_geometry: &'a mut SolidGeometry,
         clip_stack: &'a mut Vec<Recti>,
         style: &'a Style,
         atlas: &'a AtlasHandle,
@@ -244,6 +247,7 @@ impl<'a> WidgetCtx<'a> {
             interaction_id,
             rect,
             draw: DrawCtx::new(commands, triangle_vertices, clip_stack, style, atlas),
+            solid_geometry,
             focus,
             updated_focus,
             in_hover_root,
@@ -364,7 +368,7 @@ impl<'a> WidgetCtx<'a> {
     /// Use this for custom widget-local geometry. The builder starts clipped to the visible part
     /// of the widget, so local clips can only reduce visibility further.
     pub fn begin_graphics(&mut self) -> Graphics<'_, 'a> {
-        Graphics::new(&mut self.draw, self.rect)
+        Graphics::new(&mut self.draw, self.solid_geometry, self.rect)
     }
 
     /// Starts a graphics builder for built-in widget paint helpers.
@@ -375,7 +379,7 @@ impl<'a> WidgetCtx<'a> {
     /// still routing paint through `Graphics`.
     fn begin_widget_paint(&mut self) -> Graphics<'_, 'a> {
         let clip_root = self.draw.current_clip_rect();
-        Graphics::new_with_clip_root(&mut self.draw, self.rect, clip_root)
+        Graphics::new_with_clip_root(&mut self.draw, self.solid_geometry, self.rect, clip_root)
     }
 
     /// Returns the current screen-space clip rectangle from the shared draw context.

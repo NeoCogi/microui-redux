@@ -31,8 +31,7 @@
 //!
 //! `Canvas` turns retained draw commands into renderer calls, handles atlas/external texture
 //! quads, applies clipping, and owns the external texture id lifetime for a renderer handle.
-use crate::graphics::clip_triangle_vertices_to_rect;
-use crate::render::{Renderer, RendererHandle, Vertex};
+use crate::render::{Renderer, RendererHandle, Vertex, geometry::ClipRect};
 use super::*;
 use std::collections::HashMap;
 
@@ -59,6 +58,8 @@ pub struct Canvas<R: Renderer> {
     textures: HashMap<TextureId, TextureInfo>,
     /// Scratch buffer used to batch glyph rectangles without reallocating.
     rect_batch: Vec<(Recti, Recti, Color)>,
+    /// Scratch buffer used for the triangles produced by rectangular clipping.
+    clipped_triangles: Vec<Vertex>,
 }
 
 #[derive(Clone, Copy)]
@@ -86,6 +87,7 @@ impl<R: Renderer> Canvas<R> {
             next_texture_id: 1,
             textures: HashMap::new(),
             rect_batch: Vec::new(),
+            clipped_triangles: Vec::new(),
         }
     }
 
@@ -189,6 +191,7 @@ impl<R: Renderer> Canvas<R> {
             clip,
             textures,
             rect_batch,
+            clipped_triangles,
             ..
         } = self;
         // Copy immutable fields out before borrowing the renderer so the frame helper can borrow
@@ -206,6 +209,7 @@ impl<R: Renderer> Canvas<R> {
                 clip,
                 textures,
                 rect_batch,
+                clipped_triangles,
             };
             f(&mut frame)
         })
@@ -317,6 +321,8 @@ pub(crate) struct CanvasFrame<'a, R: Renderer> {
     textures: &'a HashMap<TextureId, TextureInfo>,
     /// Reusable glyph rectangle batch owned by the parent canvas.
     rect_batch: &'a mut Vec<(Recti, Recti, Color)>,
+    /// Reusable output for rectangular triangle clipping.
+    clipped_triangles: &'a mut Vec<Vertex>,
 }
 
 impl<R: Renderer> CanvasFrame<'_, R> {
@@ -402,14 +408,16 @@ impl<R: Renderer> CanvasFrame<'_, R> {
         }
         let frame_bounds = Recti::new(0, 0, self.current_dim.width.max(0), self.current_dim.height.max(0));
         let clip = (*self.clip).intersect(&frame_bounds).unwrap_or_default();
-        if clip.width <= 0 || clip.height <= 0 {
+        let Some(clip) = ClipRect::new(clip) else {
             return;
-        }
+        };
 
         for triangle in vertices.chunks_exact(3) {
-            clip_triangle_vertices_to_rect(triangle[0], triangle[1], triangle[2], clip, |a, b, c| {
-                self.renderer.push_triangle_vertices(&a, &b, &c);
-            });
+            self.clipped_triangles.clear();
+            clip.clip_triangle([triangle[0], triangle[1], triangle[2]], self.clipped_triangles);
+            for triangle in self.clipped_triangles.chunks_exact(3) {
+                self.renderer.push_triangle_vertices(&triangle[0], &triangle[1], &triangle[2]);
+            }
         }
     }
 
