@@ -12,3 +12,6 @@ pub(crate) use command::Command;
 
 mod replay;
 pub(crate) use replay::render_command_stream;
+
+#[cfg(test)]
+mod tests;

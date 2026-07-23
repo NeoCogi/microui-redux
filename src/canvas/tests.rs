@@ -1,6 +1,7 @@
 //! Tests for canvas clipping, texture upload, and draw submission behavior.
 
 use super::*;
+use crate::test_support::{recording_renderer, RenderEvent, RecordedVertex};
 use std::cell::Cell;
 
 struct NoopRenderer;
@@ -142,6 +143,48 @@ fn make_test_atlas() -> AtlasHandle {
     AtlasHandle::from(&source)
 }
 
+fn make_characterization_atlas() -> AtlasHandle {
+    let pixels = [0xFF; 8 * 8 * 4];
+    let icons = [("white", Recti::new(0, 0, 1, 1)), ("close", Recti::new(4, 0, 4, 4))];
+    let entries = [
+        (
+            '_',
+            CharEntry {
+                offset: Vec2i::new(0, 0),
+                advance: Vec2i::new(4, 0),
+                rect: Recti::new(0, 4, 4, 4),
+            },
+        ),
+        (
+            'a',
+            CharEntry {
+                offset: Vec2i::new(0, 0),
+                advance: Vec2i::new(4, 0),
+                rect: Recti::new(0, 4, 4, 4),
+            },
+        ),
+    ];
+    let fonts = [(
+        "default",
+        FontEntry {
+            line_size: 4,
+            baseline: 4,
+            font_size: 4,
+            entries: &entries,
+        },
+    )];
+    let slots = [Recti::new(4, 4, 4, 4)];
+    AtlasHandle::from(&AtlasSource {
+        width: 8,
+        height: 8,
+        pixels: &pixels,
+        icons: &icons,
+        fonts: &fonts,
+        format: SourceFormat::Raw,
+        slots: &slots,
+    })
+}
+
 fn assert_rect_eq(actual: Recti, expected: Recti) {
     assert_eq!(
         (actual.x, actual.y, actual.width, actual.height),
@@ -152,6 +195,16 @@ fn assert_rect_eq(actual: Recti, expected: Recti) {
 fn assert_vec2f_eq(actual: Vec2f, expected: Vec2f) {
     assert!((actual.x - expected.x).abs() < 1.0e-6, "expected x {}, got {}", expected.x, actual.x);
     assert!((actual.y - expected.y).abs() < 1.0e-6, "expected y {}, got {}", expected.y, actual.y);
+}
+
+fn assert_recorded_position(actual: RecordedVertex, expected: [f32; 2]) {
+    assert!((actual.position[0] - expected[0]).abs() < 1.0e-6);
+    assert!((actual.position[1] - expected[1]).abs() < 1.0e-6);
+}
+
+fn assert_recorded_tex_coord(actual: RecordedVertex, expected: [f32; 2]) {
+    assert!((actual.tex_coord[0] - expected[0]).abs() < 1.0e-6);
+    assert!((actual.tex_coord[1] - expected[1]).abs() < 1.0e-6);
 }
 
 #[test]
@@ -288,4 +341,167 @@ fn external_texture_draw_submits_preclipped_vertices_and_uvs() {
         assert_vec2f_eq(vertices[0].tex_coord(), Vec2f::new(0.25, 0.25));
         assert_vec2f_eq(vertices[2].tex_coord(), Vec2f::new(0.75, 0.75));
     });
+}
+
+#[test]
+fn solid_rect_visibility_is_reflected_in_renderer_quads() {
+    let (renderer, log) = recording_renderer(make_characterization_atlas());
+    let mut canvas = Canvas::from(renderer, Dimensioni::new(32, 32));
+    let white = color(255, 255, 255, 255);
+
+    canvas.set_clip_rect(Recti::new(0, 0, 32, 32));
+    canvas.draw_rect(Recti::new(1, 2, 8, 6), white);
+    canvas.set_clip_rect(Recti::new(5, 0, 5, 10));
+    canvas.draw_rect(Recti::new(0, 0, 10, 10), white);
+    canvas.set_clip_rect(Recti::new(20, 20, 5, 5));
+    canvas.draw_rect(Recti::new(0, 0, 10, 10), white);
+
+    let quads: Vec<_> = log
+        .snapshot()
+        .into_iter()
+        .filter_map(|event| match event {
+            RenderEvent::AtlasQuad(vertices) => Some(vertices),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(quads.len(), 2, "fully hidden rectangles must not reach the renderer");
+
+    for (actual, expected) in quads[0].iter().copied().zip([[1.0, 2.0], [9.0, 2.0], [9.0, 8.0], [1.0, 8.0]]) {
+        assert_recorded_position(actual, expected);
+    }
+    for (actual, expected) in quads[1].iter().copied().zip([[5.0, 0.0], [10.0, 0.0], [10.0, 10.0], [5.0, 10.0]]) {
+        assert_recorded_position(actual, expected);
+    }
+}
+
+#[test]
+fn partially_clipped_atlas_quad_preserves_source_mapping() {
+    let (renderer, log) = recording_renderer(make_characterization_atlas());
+    let mut canvas = Canvas::from(renderer, Dimensioni::new(32, 32));
+    canvas.set_clip_rect(Recti::new(4, 4, 8, 8));
+
+    canvas.push_rect(Recti::new(0, 0, 16, 16), Recti::new(0, 0, 8, 8), color(255, 255, 255, 255));
+
+    let events = log.snapshot();
+    let RenderEvent::AtlasQuad(vertices) = &events[0] else {
+        panic!("expected one atlas quad");
+    };
+    assert_recorded_position(vertices[0], [4.0, 4.0]);
+    assert_recorded_position(vertices[2], [12.0, 12.0]);
+    assert_recorded_tex_coord(vertices[0], [0.25, 0.25]);
+    assert_recorded_tex_coord(vertices[2], [0.75, 0.75]);
+}
+
+#[test]
+fn text_and_icon_quads_use_the_active_clip_and_adjust_uvs() {
+    let (renderer, log) = recording_renderer(make_characterization_atlas());
+    let mut canvas = Canvas::from(renderer, Dimensioni::new(32, 32));
+    canvas.set_clip_rect(Recti::new(2, 0, 2, 4));
+    let white = color(255, 255, 255, 255);
+
+    canvas.draw_chars(FontId::default(), "a", Vec2i::new(0, 0), white);
+    canvas.draw_icon(CLOSE_ICON, Recti::new(0, 0, 4, 4), white);
+
+    let quads: Vec<_> = log
+        .snapshot()
+        .into_iter()
+        .filter_map(|event| match event {
+            RenderEvent::AtlasQuad(vertices) => Some(vertices),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(quads.len(), 2);
+
+    assert_recorded_position(quads[0][0], [2.0, 0.0]);
+    assert_recorded_position(quads[0][2], [4.0, 4.0]);
+    assert_recorded_tex_coord(quads[0][0], [0.25, 0.5]);
+    assert_recorded_tex_coord(quads[0][2], [0.5, 1.0]);
+
+    assert_recorded_position(quads[1][0], [2.0, 0.0]);
+    assert_recorded_position(quads[1][2], [4.0, 4.0]);
+    assert_recorded_tex_coord(quads[1][0], [0.75, 0.0]);
+    assert_recorded_tex_coord(quads[1][2], [1.0, 0.5]);
+}
+
+#[test]
+fn triangle_clipping_interpolates_edge_colors() {
+    let (renderer, log) = recording_renderer(make_characterization_atlas());
+    let mut canvas = Canvas::from(renderer, Dimensioni::new(20, 20));
+    canvas.set_clip_rect(Recti::new(0, 0, 10, 10));
+    let vertices = [
+        Vertex::new(Vec2f::new(-10.0, 0.0), Vec2f::default(), color4b(255, 0, 0, 255)),
+        Vertex::new(Vec2f::new(10.0, 0.0), Vec2f::default(), color4b(0, 0, 255, 255)),
+        Vertex::new(Vec2f::new(0.0, 10.0), Vec2f::default(), color4b(0, 255, 0, 255)),
+    ];
+
+    canvas.draw_triangles(&vertices);
+
+    let triangles: Vec<_> = log
+        .snapshot()
+        .into_iter()
+        .filter_map(|event| match event {
+            RenderEvent::Triangle(vertices) => Some(vertices),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(triangles.len(), 1, "the left-edge intersection reuses the existing top vertex");
+    let emitted: Vec<_> = triangles.into_iter().flatten().collect();
+    assert!(
+        emitted
+            .iter()
+            .all(|vertex| vertex.position[0] >= 0.0 && vertex.position[0] <= 10.0 && vertex.position[1] >= 0.0 && vertex.position[1] <= 10.0)
+    );
+    assert!(emitted.iter().any(|vertex| vertex.position == [0.0, 0.0] && vertex.color == [128, 0, 128, 255]));
+    assert!(emitted.iter().any(|vertex| vertex.position == [0.0, 10.0] && vertex.color == [0, 255, 0, 255]));
+}
+
+#[test]
+fn unknown_and_freed_textures_are_noops_and_drop_destroys_owned_textures_once() {
+    let (renderer, log) = recording_renderer(make_characterization_atlas());
+    let mut canvas = Canvas::from(renderer, Dimensioni::new(32, 32));
+    let first = canvas.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
+    let second = canvas.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
+    let third = canvas.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
+    log.clear();
+
+    canvas.free_texture(first);
+    canvas.free_texture(first);
+    canvas.draw_image(Image::Texture(first), Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+    canvas.draw_image(Image::Texture(TextureId::new(999, 1, 1)), Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+    drop(canvas);
+
+    let events = log.snapshot();
+    assert!(!events.iter().any(|event| matches!(event, RenderEvent::ExternalTexture { .. })));
+    let mut destroyed: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            RenderEvent::DestroyTexture(id) => Some(id.raw()),
+            _ => None,
+        })
+        .collect();
+    destroyed.sort_unstable();
+    assert_eq!(destroyed, vec![first.raw(), second.raw(), third.raw()]);
+}
+
+#[test]
+fn frame_lifecycle_is_forwarded_in_order() {
+    let (renderer, log) = recording_renderer(make_characterization_atlas());
+    let mut canvas = Canvas::from(renderer, Dimensioni::new(1, 1));
+
+    canvas.begin(20, 10, color(1, 2, 3, 4));
+    canvas.flush();
+    canvas.end();
+
+    assert_eq!(
+        log.snapshot(),
+        vec![
+            RenderEvent::Begin {
+                width: 20,
+                height: 10,
+                clear: [1, 2, 3, 4],
+            },
+            RenderEvent::Flush,
+            RenderEvent::End,
+        ]
+    );
 }

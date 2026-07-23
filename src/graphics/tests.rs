@@ -1,8 +1,9 @@
 //! Tests for widget-local graphics translation, clipping, and batching.
 
 use super::*;
-use crate::render_command::Command;
+use crate::render_command::{render_command_stream, Command};
 use crate::draw_context::clip_relation;
+use crate::test_support::{recording_renderer, RenderEvent};
 
 fn assert_rect_eq(actual: Recti, expected: Recti) {
     assert_eq!(
@@ -182,4 +183,54 @@ fn point_in_triangle_accepts_boundary_points() {
 fn helper_vertices_are_constructible() {
     let vertex = make_vertex((1.0, 2.0));
     assert_vec2_eq(vertex.position(), Vec2f::new(1.0, 2.0));
+}
+
+#[test]
+fn nested_widget_local_clips_bound_final_renderer_geometry() {
+    let atlas = AtlasHandle::from(&AtlasSource {
+        width: 1,
+        height: 1,
+        pixels: &[255, 255, 255, 255],
+        icons: &[("white", Recti::new(0, 0, 1, 1))],
+        fonts: &[],
+        format: SourceFormat::Raw,
+        slots: &[],
+    });
+    let style = Style::default();
+    let mut commands = Vec::new();
+    let mut triangle_vertices = Vec::new();
+    let mut clip_stack = vec![rect(0, 0, 200, 200)];
+    let mut draw = DrawCtx::new(&mut commands, &mut triangle_vertices, &mut clip_stack, &style, &atlas);
+    {
+        let mut graphics = Graphics::new(&mut draw, rect(10, 20, 20, 20));
+        graphics.with_clip(rect(2, 2, 10, 10), |graphics| {
+            graphics.with_clip(rect(5, 5, 10, 10), |graphics| {
+                graphics.draw_rect(rect(0, 0, 20, 20), color(255, 0, 0, 255));
+            });
+        });
+    }
+
+    let (renderer, log) = recording_renderer(atlas);
+    let mut canvas = Canvas::from(renderer, Dimensioni::new(200, 200));
+    render_command_stream(&mut canvas, &mut commands, &triangle_vertices);
+
+    let triangles: Vec<_> = log
+        .snapshot()
+        .into_iter()
+        .filter_map(|event| match event {
+            RenderEvent::Triangle(vertices) => Some(vertices),
+            _ => None,
+        })
+        .collect();
+    assert!(!triangles.is_empty());
+    for vertex in triangles.into_iter().flatten() {
+        assert!(
+            vertex.position[0] >= 15.0 - GEOM_EPS
+                && vertex.position[0] <= 22.0 + GEOM_EPS
+                && vertex.position[1] >= 25.0 - GEOM_EPS
+                && vertex.position[1] <= 32.0 + GEOM_EPS,
+            "nested widget-local clip leaked renderer vertex {:?}",
+            vertex.position
+        );
+    }
 }
