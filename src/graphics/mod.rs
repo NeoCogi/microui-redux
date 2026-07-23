@@ -44,6 +44,7 @@
 //! allocate their own per-batch vertex vectors.
 
 use crate::render_command::Command;
+use crate::render::Vertex;
 use crate::draw_context::{intersect_clip_rect, DrawCtx};
 use crate::text_layout::control_text_position_with_font;
 use crate::*;

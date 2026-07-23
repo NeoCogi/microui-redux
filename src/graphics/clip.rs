@@ -1,5 +1,6 @@
 //! Software clipping for retained triangle geometry.
 
+use crate::render::Vertex;
 use crate::*;
 
 /// Floating-point tolerance used by clipping predicates.

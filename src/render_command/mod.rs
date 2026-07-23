@@ -1,13 +1,11 @@
 //! Backend-neutral draw command payloads and replay.
 
-use crate::{
-    Canvas, Color, Color4b, Dimensioni, FontId, IconId, Image, KeyCode, KeyMode, Rect, Recti, Renderer, ScrollBehavior, SlotId, UiInputEvent, Vec2i, Vertex,
-    WidgetOption,
-};
+use crate::render::{CustomRenderArgs, CustomRenderCommand, Renderer, Vertex};
+use crate::{Canvas, Color, Color4b, FontId, IconId, Image, Recti, SlotId, Vec2i};
 use std::rc::Rc;
 
 mod command;
-pub use command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
+pub use command::TextWrap;
 pub(crate) use command::Command;
 
 mod replay;

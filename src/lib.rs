@@ -94,7 +94,7 @@ mod graphics;
 mod id;
 mod input;
 mod rect_packer;
-mod render;
+pub mod render;
 mod render_command;
 mod scrollbar;
 mod sizing;
@@ -110,31 +110,14 @@ mod widget_ctx;
 pub mod widgets;
 mod window_manager;
 
-/// Low-level renderer integration types.
-///
-/// Most applications should use [`Context`] plus retained [`UiNodeSet`] values. Backend authors
-/// and renderer smoke tests can use these types when they need direct access to the command canvas
-/// or the exact vertex payload delivered to [`Renderer`].
-pub mod backend {
-    pub use crate::canvas::{Canvas, Vertex};
-    pub use crate::render::{Renderer, RendererHandle};
-}
-
-/// Advanced inspection types.
-///
-/// These are intentionally outside the default retained prelude because they expose low-level state
-/// views rather than the primary retained UI authoring model.
-pub mod advanced {
-    pub use crate::graphics::Graphics;
-}
-
 /// Retained UI authoring types.
 ///
 /// This module groups the stable retained concepts used by application code without exposing
 /// low-level renderer/canvas details or manual container drawing helpers through default imports.
 pub mod retained {
+    pub use crate::render::{CustomRenderArgs, CustomRenderCommand};
+    pub use crate::render_command::TextWrap;
     pub use crate::window_manager::{Context, RootId};
-    pub use crate::render_command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
     pub use crate::ui_node::UiInputEvent;
     pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetInputEvents};
     pub use crate::window_manager::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, UiNodeSet, UiNodeBuilder};
@@ -143,7 +126,7 @@ pub mod retained {
 /// Common imports for retained UI applications.
 ///
 /// The prelude intentionally favors retained authoring, widget state, style/input/image types, and
-/// renderer integration. Backend-specific canvas access remains under [`backend`].
+/// renderer integration. Low-level backend and Canvas types live under [`render`].
 pub mod prelude {
     pub use crate::atlas::{
         AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry, FontId,
@@ -178,8 +161,7 @@ pub use window_manager::{widget_handle, Context, GridSpan, NodeBuilder, NodeId, 
 pub use file_dialog::FileDialogState;
 pub use id::Id;
 pub use input::{Clip, ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption};
-pub use render_command::{CustomRenderArgs, CustomRenderCommand, TextWrap};
-pub use render::{Renderer, RendererHandle};
+pub use render_command::TextWrap;
 pub use sizing::{SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
 pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetInputEvents};
@@ -189,7 +171,7 @@ pub use widgets::{
     WidgetConfig,
 };
 
-pub(crate) use canvas::{Canvas, Vertex};
+pub(crate) use canvas::Canvas;
 #[allow(unused_imports)]
 pub(crate) use rs_math3d::{
     Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3, color4b,

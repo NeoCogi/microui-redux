@@ -1,7 +1,8 @@
 use crate::input::{ScrollBehavior, WidgetOption};
+use crate::render::CustomRenderArgs;
 use crate::widget_ctx::localize_events;
 use crate::window_manager::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
-use crate::{CustomRenderArgs, Dimensioni, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
+use crate::{Dimensioni, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
 
 use super::{
     measure_axis_available, resolve_allocated_size, resolve_size, NodeCustomRenderCommand, NodeLayout, TraversalState, UiNode, UiNodeId, UiNodeState,
@@ -204,17 +205,7 @@ impl Widget for WidgetNode {
 
         if let Some(render) = self.custom_render.clone() {
             let view = node_clip.intersect(&rect).unwrap_or_else(|| Recti::new(rect.x, rect.y, 0, 0));
-            let cra = CustomRenderArgs {
-                content_area: rect,
-                view,
-                input_events: Vec::new(),
-                scroll_delta,
-                widget_opt: self.widget.effective_widget_opt(),
-                scroll_behavior: self.widget.effective_scroll_behavior(),
-                key_mods: KeyMode::NONE,
-                key_codes: KeyCode::NONE,
-                text_input: String::new(),
-            };
+            let cra = CustomRenderArgs { content_area: rect, view };
             ctx.runtime
                 .commands
                 .push(Command::BackendCustomRender(cra, Box::new(NodeCustomRenderCommand { render })));

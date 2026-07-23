@@ -72,7 +72,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override `config.font`.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2-backed glow, Vulkan, and WGPU examples demonstrate how to batch the commands produced by a container and upload them to the GPU.
 
-The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `ScrollAreaHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. Backend-specific canvas and vertex access is available as `microui_redux::backend::{Canvas, Vertex}`; atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, rect-packing details, and container-level manual drawing are not part of the application authoring surface.
+The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `ScrollAreaHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. Renderer integration, Canvas access, and backend vertices live under `microui_redux::render`; atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, rect-packing details, and container-level manual drawing are not part of the application authoring surface.
 
 ### Retained-mode migration status
 
@@ -118,7 +118,7 @@ For retained focus, keep the `NodeId` returned by `WidgetTreeBuilder` and use `s
 my_window.set_focus_node(textbox_node_id);
 ```
 
-Registered roots can be configured with `Context::set_root_options(...)` to control chrome/container options. Root overflow does not scroll implicitly; wrap overflowing retained content in `WidgetTreeBuilder::scroll_area(...)`. Custom widgets can still use widget-level `ScrollBehavior` and receive consumed scroll in `CustomRenderArgs::scroll_delta`.
+Registered roots can be configured with `Context::set_root_options(...)` to control chrome/container options. Root overflow does not scroll implicitly; wrap overflowing retained content in `WidgetTreeBuilder::scroll_area(...)`. Custom widgets can still use widget-level `ScrollBehavior` and receive consumed scroll through `WidgetCtx` during their update phase.
 
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
@@ -253,7 +253,7 @@ To export an atlas as Rust, enable `save-to-rust` (and `png_source` when seriali
 ## Text rendering and layout
 - Retained text widgets automatically center the font’s **baseline** inside each cell, and every line gets a small vertical pad so glyphs never touch the widget borders.
 - `TextBlock` supports wrapped multi-line content while preserving outer padding without adding extra spacing between lines.
-- Custom rendering still goes through retained `custom_render` nodes, which receive layout, input, and clip information through `CustomRenderArgs`.
+- Custom rendering still goes through retained `custom_render` nodes. Their callbacks receive only content and clip geometry through `CustomRenderArgs`; interaction is handled by the widget update API.
 
 ### Version 0.7.0
 Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`, it completes the retained migration by moving root lifetime, interaction identity, and frame traversal into the context instead of requiring applications to resubmit each root every frame.
@@ -268,7 +268,7 @@ Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`,
     - [x] Root windows, scroll areas, and window chrome derive scoped retained IDs so focus, hover, resize, and close interactions survive tree replacement.
 - [x] Split retained widget execution into explicit `measure`, `update`, and `paint` phases.
     - [x] Layout records geometry first; update records control state and frame results; paint records commands from updated widget state.
-    - [x] Custom-render nodes receive localized input, scroll, clip, and content payloads through `CustomRenderArgs`.
+    - [x] Custom-render nodes receive content and clip geometry through `CustomRenderArgs`, while widget input remains in the update phase.
     - [x] Built-in widgets, file dialog UI, and examples now follow the same committed-results path.
 - [x] Reworked retained layout, scroll areas, and root chrome.
     - [x] `SizePolicy::Weight` now uses sibling share ratios, and `SizePolicy::Fraction` covers explicit proportional sizing.
@@ -280,7 +280,7 @@ Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`,
     - [x] Atlas code is split into builder, runtime, image, source, and codegen modules; `atlas_export` now requires `png_source` when exporting PNG-backed atlas data.
     - [x] Glow, Vulkan, and WGPU examples share retained root handling, and `examples/retained-custom-drawing` documents the custom graphics path.
 - [x] Reduced migration surface and documented internals.
-    - [x] Public imports are grouped around `prelude`, `retained`, `backend`, and `advanced`.
+    - [x] Public imports are grouped around `prelude`, `retained`, and the `render` subsystem.
     - [x] Direct container drawing is no longer part of the application authoring path.
     - [x] Runtime modules, private structs, enums, and functions now have rustdoc or implementation comments, and the retained behavior is covered by focused tests.
 

@@ -75,7 +75,7 @@ use common::vulkan_renderer::VulkanRenderer as BackendRenderer;
 use common::wgpu_renderer::WgpuRenderer as BackendRenderer;
 #[cfg(feature = "builder")]
 use microui_redux::atlas::builder;
-use microui_redux::{advanced::Graphics, backend::Vertex, prelude::*};
+use microui_redux::{prelude::*, render::Vertex};
 use rand::{RngExt, rng};
 use std::{
     cell::RefCell,
@@ -203,8 +203,12 @@ impl Widget for GraphicsDemo {
             ];
 
             g.fill_polygon(background.as_slice(), color(34, 38, 44, 255));
-            stroke_graphics_rect(g, outer, 2.0, color(65, 70, 76, 255));
-            stroke_graphics_rect(g, clip_rect, 1.5, color(240, 210, 110, 255));
+            for (start, end) in graphics_rect_edges(outer).into_iter().flatten() {
+                g.stroke_line(start, end, 2.0, color(65, 70, 76, 255));
+            }
+            for (start, end) in graphics_rect_edges(clip_rect).into_iter().flatten() {
+                g.stroke_line(start, end, 1.5, color(240, 210, 110, 255));
+            }
 
             g.stroke_line(
                 Vec2f::new(12.0, 12.0),
@@ -613,13 +617,15 @@ impl Widget for FalloffEditor {
                 Vec2f::new(0.0, local.height as f32),
             ];
             g.fill_polygon(background.as_slice(), color(25, 29, 34, 255));
-            stroke_graphics_rect(
-                g,
-                rect(6, 6, (local.width - 12).max(0), (local.height - 12).max(0)),
-                1.5,
-                color(62, 68, 76, 255),
-            );
-            stroke_graphics_rect(g, graph, 1.5, color(88, 96, 106, 255));
+            for (start, end) in graphics_rect_edges(rect(6, 6, (local.width - 12).max(0), (local.height - 12).max(0)))
+                .into_iter()
+                .flatten()
+            {
+                g.stroke_line(start, end, 1.5, color(62, 68, 76, 255));
+            }
+            for (start, end) in graphics_rect_edges(graph).into_iter().flatten() {
+                g.stroke_line(start, end, 1.5, color(88, 96, 106, 255));
+            }
 
             g.with_clip(graph, |g| {
                 for idx in 1..4 {
@@ -2005,19 +2011,21 @@ fn area_from_args(args: &CustomRenderArgs) -> CustomRenderArea {
     CustomRenderArea { rect: args.content_area, clip }
 }
 
-fn stroke_graphics_rect(graphics: &mut Graphics<'_, '_>, rect: Recti, width: f32, color: Color) {
+fn graphics_rect_edges(rect: Recti) -> Option<[(Vec2f, Vec2f); 4]> {
     if rect.width <= 0 || rect.height <= 0 {
-        return;
+        return None;
     }
 
     let x0 = rect.x as f32;
     let y0 = rect.y as f32;
     let x1 = (rect.x + rect.width) as f32;
     let y1 = (rect.y + rect.height) as f32;
-    graphics.stroke_line(Vec2f::new(x0, y0), Vec2f::new(x1, y0), width, color);
-    graphics.stroke_line(Vec2f::new(x1, y0), Vec2f::new(x1, y1), width, color);
-    graphics.stroke_line(Vec2f::new(x1, y1), Vec2f::new(x0, y1), width, color);
-    graphics.stroke_line(Vec2f::new(x0, y1), Vec2f::new(x0, y0), width, color);
+    Some([
+        (Vec2f::new(x0, y0), Vec2f::new(x1, y0)),
+        (Vec2f::new(x1, y0), Vec2f::new(x1, y1)),
+        (Vec2f::new(x1, y1), Vec2f::new(x0, y1)),
+        (Vec2f::new(x0, y1), Vec2f::new(x0, y0)),
+    ])
 }
 
 fn build_star_polygon(center: Vec2f, outer_radius: f32, inner_radius: f32, spikes: usize, angle: f32) -> Vec<Vec2f> {

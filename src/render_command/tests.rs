@@ -1,11 +1,9 @@
 //! Characterization tests for ordered command replay into the renderer boundary.
 
 use super::*;
+use crate::render::{Renderer, RendererHandle, Vertex};
 use crate::test_support::{recording_renderer, RenderEvent};
-use crate::{
-    color, color4b, AtlasHandle, AtlasSource, Canvas, CharEntry, FontEntry, Image, KeyCode, KeyMode, Recti, RendererHandle, ScrollBehavior, SourceFormat,
-    TextureId, Vec2f, Vec2i, WidgetOption, CLOSE_ICON,
-};
+use crate::{color, color4b, AtlasHandle, AtlasSource, Canvas, CharEntry, FontEntry, Image, Recti, SourceFormat, TextureId, Vec2f, Vec2i, CLOSE_ICON};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -52,20 +50,10 @@ fn make_replay_atlas() -> AtlasHandle {
 }
 
 fn custom_args(content_area: Recti, view: Recti) -> CustomRenderArgs {
-    CustomRenderArgs {
-        content_area,
-        view,
-        input_events: Vec::new(),
-        scroll_delta: None,
-        widget_opt: WidgetOption::NONE,
-        scroll_behavior: ScrollBehavior::NONE,
-        key_mods: KeyMode::NONE,
-        key_codes: KeyCode::NONE,
-        text_input: String::new(),
-    }
+    CustomRenderArgs { content_area, view }
 }
 
-fn load_test_texture<R: crate::Renderer>(canvas: &mut Canvas<R>) -> TextureId {
+fn load_test_texture<R: Renderer>(canvas: &mut Canvas<R>) -> TextureId {
     canvas.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap()
 }
 
@@ -95,9 +83,9 @@ fn mixed_commands_reach_the_renderer_in_stream_order() {
         },
     ];
     let triangle_vertices = [
-        crate::Vertex::new(Vec2f::new(8.0, 0.0), Vec2f::default(), color4b(0, 0, 255, 255)),
-        crate::Vertex::new(Vec2f::new(12.0, 0.0), Vec2f::default(), color4b(0, 0, 255, 255)),
-        crate::Vertex::new(Vec2f::new(8.0, 4.0), Vec2f::default(), color4b(0, 0, 255, 255)),
+        Vertex::new(Vec2f::new(8.0, 0.0), Vec2f::default(), color4b(0, 0, 255, 255)),
+        Vertex::new(Vec2f::new(12.0, 0.0), Vec2f::default(), color4b(0, 0, 255, 255)),
+        Vertex::new(Vec2f::new(8.0, 4.0), Vec2f::default(), color4b(0, 0, 255, 255)),
     ];
 
     render_command_stream(&mut canvas, &mut commands, &triangle_vertices);

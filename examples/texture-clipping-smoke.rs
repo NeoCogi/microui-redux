@@ -32,8 +32,8 @@
 //! This standalone example validates that external texture drawing respects UI clipping.
 
 use microui_redux::{
-    backend::{Canvas, Vertex},
     prelude::*,
+    render::{Canvas, Vertex},
     AtlasSource,
 };
 

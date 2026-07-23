@@ -32,45 +32,12 @@
 //! `Canvas` turns retained draw commands into renderer calls, handles atlas/external texture
 //! quads, applies clipping, and owns the external texture id lifetime for a renderer handle.
 use crate::graphics::clip_triangle_vertices_to_rect;
+use crate::render::{Renderer, RendererHandle, Vertex};
 use super::*;
 use std::collections::HashMap;
 
 mod quad;
 use quad::textured_quad_vertices;
-
-#[derive(Default, Copy, Clone)]
-#[repr(C)]
-/// Vertex submitted by the UI.
-pub struct Vertex {
-    /// Screen-space position in pixels.
-    pos: Vec2f,
-    /// Normalized texture coordinate.
-    tex: Vec2f,
-    /// Vertex color multiplied with the sampled texture.
-    color: Color4b,
-}
-
-impl Vertex {
-    /// Creates a vertex with the provided position, texture coordinate, and color.
-    pub fn new(pos: Vec2f, tex: Vec2f, color: Color4b) -> Self {
-        Self { pos, tex, color }
-    }
-
-    /// Returns the position of the vertex in screen space.
-    pub fn position(&self) -> Vec2f {
-        self.pos
-    }
-
-    /// Returns the texture coordinates associated with the vertex.
-    pub fn tex_coord(&self) -> Vec2f {
-        self.tex
-    }
-
-    /// Returns the vertex color.
-    pub fn color(&self) -> Color4b {
-        self.color
-    }
-}
 
 /// High-level drawing helper that batches draw commands for a renderer.
 pub struct Canvas<R: Renderer> {

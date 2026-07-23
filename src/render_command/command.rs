@@ -50,53 +50,12 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Command definitions and callback payloads recorded during node traversal.
+//! Draw operation definitions recorded during node traversal.
 //!
 //! The layout and widget passes record what should be drawn or invoked; the final canvas/backend
 //! consumes this list later when the command stream is replayed.
 
 use super::*;
-
-/// Arguments forwarded to custom rendering callbacks.
-pub struct CustomRenderArgs {
-    /// Rectangle describing the widget's content area.
-    pub content_area: Rect<i32>,
-    /// Final clipped region that is visible.
-    pub view: Rect<i32>,
-    /// Routed input events affecting the custom render node, in content-local coordinates.
-    pub input_events: Vec<UiInputEvent>,
-    /// Scroll delta consumed for this widget, if any.
-    pub scroll_delta: Option<Vec2i>,
-    /// Options provided when the widget was created.
-    pub widget_opt: WidgetOption,
-    /// Scroll behavior provided when the widget was created.
-    pub scroll_behavior: ScrollBehavior,
-    /// Currently active modifier keys.
-    pub key_mods: KeyMode,
-    /// Currently active navigation keys.
-    pub key_codes: KeyCode,
-    /// Text input collected while the widget was focused.
-    pub text_input: String,
-}
-
-/// Backend extension callback invoked from a retained custom-render node.
-///
-/// This API is intentionally explicit about being renderer-extension work rather than portable UI
-/// geometry. Implementations usually capture a concrete renderer handle and enqueue backend-owned
-/// draw work using the clipped [`CustomRenderArgs`] payload.
-pub trait CustomRenderCommand {
-    /// Records backend-specific draw work for the current frame.
-    fn render(&mut self, dim: Dimensioni, args: &CustomRenderArgs);
-}
-
-impl<F> CustomRenderCommand for F
-where
-    F: FnMut(Dimensioni, &CustomRenderArgs),
-{
-    fn render(&mut self, dim: Dimensioni, args: &CustomRenderArgs) {
-        self(dim, args);
-    }
-}
 
 /// Controls how text should wrap when rendered inside a container.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

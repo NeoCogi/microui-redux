@@ -50,13 +50,75 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Renderer-facing traits and handles.
-
-use std::sync::{Arc, RwLock};
+//! Public renderer integration types.
 
 use crate::atlas::AtlasHandle;
-use crate::canvas::Vertex;
 use crate::style::{Color, TextureId};
+use rs_math3d::{Color4b, Dimensioni, Rect, Vec2f};
+use std::sync::{Arc, RwLock};
+
+#[derive(Default, Copy, Clone)]
+#[repr(C)]
+/// Vertex submitted by the UI to a renderer backend.
+pub struct Vertex {
+    /// Screen-space position in pixels.
+    pos: Vec2f,
+    /// Normalized texture coordinate.
+    tex: Vec2f,
+    /// Vertex color multiplied with the sampled texture.
+    color: Color4b,
+}
+
+impl Vertex {
+    /// Creates a vertex with the provided position, texture coordinate, and color.
+    pub fn new(pos: Vec2f, tex: Vec2f, color: Color4b) -> Self {
+        Self { pos, tex, color }
+    }
+
+    /// Returns the position of the vertex in screen space.
+    pub fn position(&self) -> Vec2f {
+        self.pos
+    }
+
+    /// Returns the texture coordinates associated with the vertex.
+    pub fn tex_coord(&self) -> Vec2f {
+        self.tex
+    }
+
+    /// Returns the vertex color.
+    pub fn color(&self) -> Color4b {
+        self.color
+    }
+}
+
+/// Geometry forwarded to a custom backend rendering callback.
+#[derive(Copy, Clone, Debug)]
+pub struct CustomRenderArgs {
+    /// Rectangle describing the widget's content area.
+    pub content_area: Rect<i32>,
+    /// Final clipped region that is visible.
+    pub view: Rect<i32>,
+}
+
+/// Backend extension callback invoked from a retained custom-render node.
+///
+/// This API is intentionally explicit about being renderer-extension work rather than portable UI
+/// geometry. Interaction is handled during widget update and is deliberately absent from this
+/// boundary. Implementations usually capture a concrete renderer handle and enqueue backend-owned
+/// draw work using the clipped [`CustomRenderArgs`] geometry.
+pub trait CustomRenderCommand {
+    /// Records backend-specific draw work for the current frame.
+    fn render(&mut self, dim: Dimensioni, args: &CustomRenderArgs);
+}
+
+impl<F> CustomRenderCommand for F
+where
+    F: FnMut(Dimensioni, &CustomRenderArgs),
+{
+    fn render(&mut self, dim: Dimensioni, args: &CustomRenderArgs) {
+        self(dim, args);
+    }
+}
 
 /// Trait implemented by render backends used by the UI context.
 pub trait Renderer {
@@ -81,11 +143,11 @@ pub trait Renderer {
     fn destroy_texture(&mut self, id: TextureId);
     /// Draws the provided textured quad.
     ///
-    /// `Canvas` clips the quad against the active UI clip rectangle and adjusts texture
-    /// coordinates before calling this method. Backends should therefore treat `vertices` as final
-    /// pre-clipped screen-space geometry and should not expect a separate clip rectangle for this
-    /// draw. Backends that batch atlas geometry must preserve command order by flushing or closing
-    /// the active atlas batch before drawing or queuing this external texture command.
+    /// [`crate::render::Canvas`] clips the quad against the active UI clip rectangle and adjusts
+    /// texture coordinates before calling this method. Backends should therefore treat `vertices`
+    /// as final pre-clipped screen-space geometry and should not expect a separate clip rectangle
+    /// for this draw. Backends that batch atlas geometry must preserve command order by flushing or
+    /// closing the active atlas batch before drawing or queuing this external texture command.
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
 

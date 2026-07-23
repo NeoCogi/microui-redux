@@ -36,7 +36,7 @@
 use core::slice;
 use std::{collections::HashMap, io, sync::Arc, usize};
 
-use microui_redux::{backend::Vertex, prelude::*};
+use microui_redux::{prelude::*, render::Vertex};
 use glow::*;
 use rs_math3d::{Vec3f, Vec4f};
 

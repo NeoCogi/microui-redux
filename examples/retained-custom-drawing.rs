@@ -32,7 +32,7 @@
 //! This example demonstrates implementing a custom widget that emits widget-local triangle
 //! geometry through `WidgetCtx::graphics`.
 
-use microui_redux::{backend::Vertex, prelude::*, AtlasSource};
+use microui_redux::{prelude::*, render::Vertex, AtlasSource};
 
 const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
 

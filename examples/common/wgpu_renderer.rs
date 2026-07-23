@@ -35,7 +35,7 @@
 
 use std::{collections::HashMap, mem, slice};
 
-use microui_redux::{backend::Vertex, prelude::*};
+use microui_redux::{prelude::*, render::Vertex};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use rs_math3d::{Vec3f, Vec4f};
 use sdl2::video::Window;

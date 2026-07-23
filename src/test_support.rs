@@ -1,6 +1,7 @@
 //! Shared fixtures, renderer recordings, and no-op helpers used by unit tests.
 
-use crate::{AtlasHandle, AtlasSource, CharEntry, Color, Color4b, FontEntry, Recti, Renderer, RendererHandle, SourceFormat, TextureId, Vec2i, Vertex};
+use crate::render::{Renderer, RendererHandle, Vertex};
+use crate::{AtlasHandle, AtlasSource, CharEntry, Color, Color4b, FontEntry, Recti, SourceFormat, TextureId, Vec2i};
 use std::cell::RefCell;
 use std::rc::Rc;
 

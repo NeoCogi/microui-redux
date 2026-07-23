@@ -63,9 +63,10 @@ use std::io::Cursor;
 use png::{ColorType, Decoder};
 
 use crate::{
-    rect, Canvas, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Renderer,
-    RendererHandle, Style, TextureId, UiRuntime,
+    rect, Canvas, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style,
+    TextureId, UiRuntime,
 };
+use crate::render::{Renderer, RendererHandle};
 use crate::ui_node::{pointer_events_from_input, UiNode, UiNodeId};
 use window_manager::WindowEntry;
 mod builder;
@@ -219,8 +220,8 @@ impl<R: Renderer> Context<R> {
     /// Returns the underlying canvas used for advanced backend inspection.
     ///
     /// Application code should prefer the higher-level context image APIs and retained widget
-    /// rendering. Backend tests can name this type as [`crate::backend::Canvas`].
-    pub fn canvas(&self) -> &crate::backend::Canvas<R> {
+    /// rendering. Backend tests can name this type as [`crate::render::Canvas`].
+    pub fn canvas(&self) -> &crate::render::Canvas<R> {
         &self.canvas
     }
 

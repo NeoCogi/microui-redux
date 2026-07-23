@@ -33,7 +33,7 @@
 //! and selection state so applications can open it repeatedly without rebuilding runtime state.
 use std::path::Path;
 
-use crate::*;
+use crate::{render::Renderer, *};
 
 /// Simple modal dialog that lets the user browse and pick files.
 pub struct FileDialogState {
@@ -533,6 +533,7 @@ impl FileDialogState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::RendererHandle;
     use crate::test_support::{test_atlas, NoopRenderer};
     use std::{
         fs,

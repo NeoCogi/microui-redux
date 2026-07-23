@@ -56,6 +56,7 @@
 //! retained [`Command`] values. It deliberately does not talk to a renderer; that happens later
 //! when draw commands are replayed through [`crate::Canvas`].
 use crate::render_command::Command;
+use crate::render::Vertex;
 use crate::*;
 
 /// Returns the intersection of `rect` with `limit`, defaulting to an empty rect when disjoint.

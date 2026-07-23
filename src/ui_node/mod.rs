@@ -8,10 +8,8 @@
 //! measure, layout, and paint passes. Runtime traversal does not mutate child membership.
 #![allow(dead_code)]
 
-use crate::{
-    expand_rect, Canvas, CustomRenderArgs, CustomRenderCommand, Dimensioni, FrameResults, Input, MouseButton, Recti, Renderer, Style, Vec2i, Vertex,
-    UNCLIPPED_RECT,
-};
+use crate::render::{CustomRenderArgs, CustomRenderCommand, Renderer, Vertex};
+use crate::{expand_rect, Canvas, Dimensioni, FrameResults, Input, MouseButton, Recti, Style, Vec2i, UNCLIPPED_RECT};
 #[cfg(test)]
 use crate::UiNodeSet;
 use crate::render_command::{render_command_stream, Command};
@@ -323,9 +321,10 @@ mod tests {
     use super::*;
     use std::{cell::RefCell, rc::Rc};
 
+    use crate::render::RendererHandle;
     use crate::{
-        color4b, rect, AtlasHandle, AtlasSource, Button, Canvas, CharEntry, Custom, FontEntry, Id, Image, Input, KeyMode, ListItem, Policy, RendererHandle,
-        ResourceState, SourceFormat, StackDirection, Textbox, WidgetFillOption, WidgetOption, UiNodeBuilder, widget_handle,
+        color4b, rect, AtlasHandle, AtlasSource, Button, Canvas, CharEntry, Custom, FontEntry, Id, Image, Input, KeyMode, ListItem, Policy, ResourceState,
+        SourceFormat, StackDirection, Textbox, WidgetFillOption, WidgetOption, UiNodeBuilder, widget_handle,
     };
     use crate::test_support::{test_atlas, NoopRenderer};
 
