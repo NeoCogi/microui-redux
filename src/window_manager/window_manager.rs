@@ -235,6 +235,10 @@ impl<R: Renderer> Context<R> {
     }
 
     pub(super) fn render_window_manager(&mut self) {
+        // Context owns the frame list lifecycle. Recording below appends every visible root in
+        // painter order, and Canvas consumes the completed list exactly once at the end.
+        self.display_list.clear();
+
         for entry in &mut self.roots {
             if entry.visible && entry.opt.intersects(ContainerOption::AUTO_SIZE) {
                 let size = entry
@@ -278,7 +282,7 @@ impl<R: Renderer> Context<R> {
                 let chrome_capturing_pointer = matches!(entry.active_chrome, Some(WindowChromePart::Title | WindowChromePart::Resize));
                 let pointer_input_enabled = hover_root == Some(entry.id) && !chrome_capturing_pointer;
                 let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.atlas(), entry.opt);
-                self.paint_root_frame(entry);
+                self.record_window_frame(entry);
                 let input = self.input.borrow();
                 entry.runtime.begin_frame(pointer_input_enabled);
                 entry
@@ -298,11 +302,11 @@ impl<R: Renderer> Context<R> {
                     chrome.body,
                 );
                 drop(input);
-                self.canvas.render(&mut self.display_list);
-                self.paint_root_chrome(entry, chrome);
+                self.record_window_chrome(entry, chrome);
             }
         }
         self.roots = roots;
+        self.canvas.render(&mut self.display_list);
     }
 
     fn route_entry_input(entry: &mut WindowEntry, style: &Style, input: &Input) -> bool {
@@ -339,7 +343,8 @@ impl<R: Renderer> Context<R> {
         consumed | entry.runtime.route_focus_input_events(&mut entry.roots, style, input)
     }
 
-    fn paint_root_frame(&mut self, entry: &WindowEntry) {
+    /// Records the root background and border before retained contents.
+    fn record_window_frame(&mut self, entry: &WindowEntry) {
         if entry.opt.intersects(ContainerOption::NO_FRAME) {
             return;
         }
@@ -348,38 +353,35 @@ impl<R: Renderer> Context<R> {
         let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
         let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);
         record_root_frame(&mut painter, self.style.as_ref(), entry.rect, ControlColor::WindowBG);
-        self.canvas.render(&mut self.display_list);
     }
 
-    fn paint_root_chrome(&mut self, entry: &WindowEntry, chrome: WindowChrome) {
+    /// Records title, close, and resize chrome after retained contents.
+    fn record_window_chrome(&mut self, entry: &WindowEntry, chrome: WindowChrome) {
         let dimensions = self.canvas.dimensions();
         let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
         let atlas = self.canvas.atlas();
-        {
-            let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);
+        let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);
 
-            if let Some(title) = chrome.title {
-                record_root_frame(&mut painter, self.style.as_ref(), title, ControlColor::TitleBG);
-                let mut text = title;
-                if let Some(close) = chrome.close {
-                    text.width = (close.x.max(title.x) - title.x).max(0);
-                }
-                record_root_title_text(&mut painter, self.style.as_ref(), &atlas, text, &entry.name);
-
-                if let Some(close) = chrome.close {
-                    let color = self.style.colors[ControlColor::TitleText as usize];
-                    painter.icon(crate::CLOSE_ICON, close, color);
-                }
+        if let Some(title) = chrome.title {
+            record_root_frame(&mut painter, self.style.as_ref(), title, ControlColor::TitleBG);
+            let mut text = title;
+            if let Some(close) = chrome.close {
+                text.width = (close.x.max(title.x) - title.x).max(0);
             }
+            record_root_title_text(&mut painter, self.style.as_ref(), &atlas, text, &entry.name);
 
-            if let Some(resize) = chrome.resize
-                && resize.width > 0
-                && resize.height > 0
-            {
-                record_root_frame(&mut painter, self.style.as_ref(), resize, ControlColor::WindowBG);
+            if let Some(close) = chrome.close {
+                let color = self.style.colors[ControlColor::TitleText as usize];
+                painter.icon(crate::CLOSE_ICON, close, color);
             }
         }
-        self.canvas.render(&mut self.display_list);
+
+        if let Some(resize) = chrome.resize
+            && resize.width > 0
+            && resize.height > 0
+        {
+            record_root_frame(&mut painter, self.style.as_ref(), resize, ControlColor::WindowBG);
+        }
     }
 
     fn update_window_manager_chrome(

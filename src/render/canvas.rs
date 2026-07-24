@@ -71,6 +71,9 @@ pub struct Canvas<R: Renderer> {
     rect_batch: Vec<(Recti, Recti, Color)>,
     /// Scratch output reused by final rectangular triangle clipping.
     clipped_triangles: Vec<Vertex>,
+    /// Number of display lists executed, used to assert frame-level ownership.
+    #[cfg(test)]
+    render_count: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -103,6 +106,8 @@ impl<R: Renderer> Canvas<R> {
             textures: HashMap::new(),
             rect_batch: Vec::new(),
             clipped_triangles: Vec::new(),
+            #[cfg(test)]
+            render_count: 0,
         }
     }
 
@@ -112,6 +117,10 @@ impl<R: Renderer> Canvas<R> {
     /// Canvas releases the lock, flushes before and after the callback, then starts a new normal
     /// segment. The operation iterator is never restarted or searched for later barriers.
     pub fn render(&mut self, list: &mut DisplayList) {
+        #[cfg(test)]
+        {
+            self.render_count += 1;
+        }
         let mut frame = list.take();
         let viewport = self.viewport();
         let current_dim = self.current_dim;
@@ -190,6 +199,12 @@ impl<R: Renderer> Canvas<R> {
     /// Returns the last viewport dimensions passed to [`Canvas::begin`].
     pub fn dimensions(&self) -> Dimensioni {
         self.current_dim
+    }
+
+    /// Returns how many display lists this Canvas has executed.
+    #[cfg(test)]
+    pub(crate) fn debug_render_count(&self) -> usize {
+        self.render_count
     }
 
     /// Returns a clone of the underlying renderer handle.

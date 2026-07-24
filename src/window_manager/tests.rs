@@ -7,8 +7,8 @@ use std::{
 
 use super::*;
 use crate::{
-    test_support::{test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer},
-    widget_handle, AtlasHandle, Button, Combo, ListItem, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId, SizePolicy,
+    test_support::{recording_renderer, test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer, RenderEvent},
+    widget_handle, AtlasHandle, Button, Combo, Custom, ListItem, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId, SizePolicy,
     ScrollBehavior, StackDirection, TextBlock, UiInputEvent, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
 };
 
@@ -754,6 +754,49 @@ fn root_ids_preserve_z_order_and_fronting() {
     ctx.bring_root_to_front(left);
     ctx.update_ui();
     assert_eq!(rendered_root_names(&ctx), vec!["right", "left"]);
+}
+
+#[test]
+fn window_manager_executes_one_z_ordered_display_list_per_ui_frame() {
+    let (renderer, log) = recording_renderer(make_test_atlas());
+    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+
+    let back = widget_handle(Custom::new("back"));
+    let back_log = log.clone();
+    let back_tree = UiNodeBuilder::build(|tree| {
+        tree.custom_render(&back, move |_dim, _args| back_log.record_marker("back-content"));
+    });
+    ctx.create_window("back", rect(0, 0, 90, 60), back_tree);
+
+    let front = widget_handle(Custom::new("front"));
+    let front_log = log.clone();
+    let front_tree = UiNodeBuilder::build(|tree| {
+        tree.custom_render(&front, move |_dim, _args| front_log.record_marker("front-content"));
+    });
+    ctx.create_window("front", rect(20, 0, 90, 60), front_tree);
+
+    let renders_before = ctx.canvas().debug_render_count();
+    ctx.update_ui();
+    assert_eq!(ctx.canvas().debug_render_count(), renders_before + 1);
+
+    let events = log.snapshot();
+    let back_content = events
+        .iter()
+        .position(|event| matches!(event, RenderEvent::Marker(marker) if marker == "back-content"))
+        .expect("back custom-render marker");
+    let front_content = events
+        .iter()
+        .position(|event| matches!(event, RenderEvent::Marker(marker) if marker == "front-content"))
+        .expect("front custom-render marker");
+    let is_draw = |event: &RenderEvent| matches!(event, RenderEvent::AtlasQuad(_) | RenderEvent::Triangle(_));
+
+    assert!(back_content < front_content, "roots must execute in ascending z-order");
+    assert!(events[..back_content].iter().any(is_draw), "back root frame must precede its contents");
+    assert!(
+        events[back_content + 1..front_content].iter().any(is_draw),
+        "back chrome and front frame must remain between root contents"
+    );
+    assert!(events[front_content + 1..].iter().any(is_draw), "front root chrome must follow its contents");
 }
 
 #[test]
