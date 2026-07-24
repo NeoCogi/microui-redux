@@ -31,7 +31,7 @@
 
 use super::backend::Vertex;
 use crate::style::Color;
-use rs_math3d::{color4b, Color4b, Dimensioni, FloatVector, Recti, Vec2f, Vec2i};
+use rs_math3d::{color4b, Color4b, Dimensioni, FloatVector, Recti, Vec2f, Vec2i, Vector};
 use std::ops::Range;
 
 /// Floating-point tolerance shared by tessellation and clipping predicates.
@@ -657,24 +657,20 @@ pub(super) fn bounds_for_points(points: &[Vec2f]) -> Option<Recti> {
         return None;
     }
 
-    let mut min_x = first.x;
-    let mut min_y = first.y;
-    let mut max_x = first.x;
-    let mut max_y = first.y;
+    let mut min = first;
+    let mut max = first;
     for point in points.iter().copied().skip(1) {
         if !point_is_finite(point) {
             return None;
         }
-        min_x = min_x.min(point.x);
-        min_y = min_y.min(point.y);
-        max_x = max_x.max(point.x);
-        max_y = max_y.max(point.y);
+        min = Vec2f::min(&min, &point);
+        max = Vec2f::max(&max, &point);
     }
 
-    let x0 = min_x.floor() as i32;
-    let y0 = min_y.floor() as i32;
-    let x1 = max_x.ceil() as i32;
-    let y1 = max_y.ceil() as i32;
+    let x0 = min.x.floor() as i32;
+    let y0 = min.y.floor() as i32;
+    let x1 = max.x.ceil() as i32;
+    let y1 = max.y.ceil() as i32;
     Some(Recti::new(
         x0,
         y0,
@@ -689,11 +685,10 @@ pub(super) fn bounds_for_line(from: Vec2f, to: Vec2f, width: f32) -> Option<Rect
         return None;
     }
 
-    let half = width * 0.5;
-    bounds_for_points(&[
-        Vec2f::new(from.x.min(to.x) - half, from.y.min(to.y) - half),
-        Vec2f::new(from.x.max(to.x) + half, from.y.max(to.y) + half),
-    ])
+    let half_extent = Vec2f::new(width * 0.5, width * 0.5);
+    let min = Vec2f::min(&from, &to) - half_extent;
+    let max = Vec2f::max(&from, &to) + half_extent;
+    bounds_for_points(&[min, max])
 }
 
 /// Returns whether both point components are finite.

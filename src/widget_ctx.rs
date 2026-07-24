@@ -116,15 +116,9 @@ impl WidgetInputEvents for [UiInputEvent] {
     }
 
     fn mouse_delta(&self) -> Vec2i {
-        self.iter().fold(Vec2i::default(), |mut delta, event| {
-            match event {
-                UiInputEvent::MouseMove { delta: event_delta, .. } | UiInputEvent::MouseDrag { delta: event_delta, .. } => {
-                    delta.x += event_delta.x;
-                    delta.y += event_delta.y;
-                }
-                _ => {}
-            }
-            delta
+        self.iter().fold(Vec2i::default(), |delta, event| match event {
+            UiInputEvent::MouseMove { delta: event_delta, .. } | UiInputEvent::MouseDrag { delta: event_delta, .. } => delta + *event_delta,
+            _ => delta,
         })
     }
 

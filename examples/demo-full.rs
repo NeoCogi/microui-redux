@@ -460,9 +460,7 @@ impl FalloffEditor {
             if idx > 0 && idx + 1 < self.nodes.len() {
                 let target = FalloffTarget::Anchor(idx);
                 let pos = self.target_local(graph, target);
-                let dx = pos.x - mouse_local.x;
-                let dy = pos.y - mouse_local.y;
-                let dist_sq = dx * dx + dy * dy;
+                let dist_sq = (pos - mouse_local).length_squared();
                 if dist_sq <= best_dist_sq {
                     best = Some(target);
                     best_dist_sq = dist_sq;
@@ -472,9 +470,7 @@ impl FalloffEditor {
             if idx > 0 {
                 let target = FalloffTarget::InHandle(idx);
                 let pos = self.target_local(graph, target);
-                let dx = pos.x - mouse_local.x;
-                let dy = pos.y - mouse_local.y;
-                let dist_sq = dx * dx + dy * dy;
+                let dist_sq = (pos - mouse_local).length_squared();
                 if dist_sq <= best_dist_sq {
                     best = Some(target);
                     best_dist_sq = dist_sq;
@@ -484,9 +480,7 @@ impl FalloffEditor {
             if idx + 1 < self.nodes.len() {
                 let target = FalloffTarget::OutHandle(idx);
                 let pos = self.target_local(graph, target);
-                let dx = pos.x - mouse_local.x;
-                let dy = pos.y - mouse_local.y;
-                let dist_sq = dx * dx + dy * dy;
+                let dist_sq = (pos - mouse_local).length_squared();
                 if dist_sq <= best_dist_sq {
                     best = Some(target);
                     best_dist_sq = dist_sq;
@@ -767,7 +761,7 @@ impl Widget for SuzanneWidget {
         for event in &input {
             if let UiInputEvent::MouseDrag { pos, delta, buttons } = event {
                 if buttons.intersects(MouseButton::LEFT) {
-                    let prev = Vec2i::new(pos.x - delta.x, pos.y - delta.y);
+                    let prev = *pos - *delta;
                     let _ = suzanne.view_3d.update_drag(prev, *pos);
                     handled_drag = true;
                 }
@@ -798,7 +792,7 @@ impl Widget for SuzanneWidget {
             }
             if delta.x != 0 || delta.y != 0 {
                 let center = Vec2i::new(bounds.width / 2, bounds.height / 2);
-                let curr = Vec2i::new(center.x + delta.x, center.y + delta.y);
+                let curr = center + delta;
                 suzanne.view_3d.update_drag(center, curr);
             }
             for ch in input.text_input().chars() {
@@ -932,10 +926,10 @@ impl State {
             let atlas = r.get_atlas();
             let rect = atlas.get_icon_rect(WHITE_ICON);
             let dim = atlas.get_texture_dimension();
-            Vec2f::new(
-                (rect.x as f32 + rect.width as f32 * 0.5) / dim.width as f32,
-                (rect.y as f32 + rect.height as f32 * 0.5) / dim.height as f32,
-            )
+            let rect_min = Vec2f::new(rect.x as f32, rect.y as f32);
+            let rect_extent = Vec2f::new(rect.width as f32, rect.height as f32);
+            let texture_extent = Vec2f::new(dim.width as f32, dim.height as f32);
+            (rect_min + rect_extent * 0.5) / texture_extent
         });
 
         let triangle_data = Arc::new(RwLock::new(TriangleState { angle: 0.0 }));

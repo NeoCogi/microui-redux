@@ -417,8 +417,7 @@ impl Input {
 
     /// Computes per-frame derived input before UI traversal starts.
     pub(crate) fn prelude(&mut self) {
-        self.mouse_delta.x = self.mouse_pos.x - self.last_mouse_pos.x;
-        self.mouse_delta.y = self.mouse_pos.y - self.last_mouse_pos.y;
+        self.mouse_delta = self.mouse_pos - self.last_mouse_pos;
     }
 
     /// Clears one-frame input fields after UI traversal finishes.

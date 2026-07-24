@@ -90,10 +90,10 @@ impl<R: Renderer> Canvas<R> {
         let atlas = renderer.scope(Renderer::get_atlas);
         let atlas_dim = atlas.get_texture_dimension();
         let white_icon_rect = atlas.get_icon_rect(WHITE_ICON);
-        let white_uv = Vec2f::new(
-            (white_icon_rect.x as f32 + white_icon_rect.width as f32 * 0.5) / atlas_dim.width.max(1) as f32,
-            (white_icon_rect.y as f32 + white_icon_rect.height as f32 * 0.5) / atlas_dim.height.max(1) as f32,
-        );
+        let white_icon_min = Vec2f::new(white_icon_rect.x as f32, white_icon_rect.y as f32);
+        let white_icon_extent = Vec2f::new(white_icon_rect.width as f32, white_icon_rect.height as f32);
+        let atlas_extent = Vec2f::new(atlas_dim.width.max(1) as f32, atlas_dim.height.max(1) as f32);
+        let white_uv = (white_icon_min + white_icon_extent * 0.5) / atlas_extent;
         Self {
             current_dim: dim,
             renderer,
@@ -407,16 +407,26 @@ fn clip_textured_rect(dst: Recti, src: Recti, clip: Recti) -> Option<(Recti, Rec
         return Some((dst, src));
     }
 
-    let tx0 = (clipped.x - dst.x) as f32 / dst.width as f32;
-    let ty0 = (clipped.y - dst.y) as f32 / dst.height as f32;
-    let tx1 = (clipped.x + clipped.width - dst.x) as f32 / dst.width as f32;
-    let ty1 = (clipped.y + clipped.height - dst.y) as f32 / dst.height as f32;
-    let sx0 = src.x as f32 + tx0 * src.width as f32;
-    let sy0 = src.y as f32 + ty0 * src.height as f32;
-    let sx1 = src.x as f32 + tx1 * src.width as f32;
-    let sy1 = src.y as f32 + ty1 * src.height as f32;
+    let dst_extent = Vec2f::new(dst.width as f32, dst.height as f32);
+    let clipped_offset_min = Vec2f::new((clipped.x - dst.x) as f32, (clipped.y - dst.y) as f32);
+    let clipped_offset_max = Vec2f::new((clipped.x + clipped.width - dst.x) as f32, (clipped.y + clipped.height - dst.y) as f32);
+    let t_min = clipped_offset_min / dst_extent;
+    let t_max = clipped_offset_max / dst_extent;
 
-    Some((clipped, Recti::new(sx0 as i32, sy0 as i32, (sx1 - sx0) as i32, (sy1 - sy0) as i32)))
+    let src_min = Vec2f::new(src.x as f32, src.y as f32);
+    let src_extent = Vec2f::new(src.width as f32, src.height as f32);
+    let projected_min = src_min + t_min * src_extent;
+    let projected_max = src_min + t_max * src_extent;
+
+    Some((
+        clipped,
+        Recti::new(
+            projected_min.x as i32,
+            projected_min.y as i32,
+            (projected_max.x - projected_min.x) as i32,
+            (projected_max.y - projected_min.y) as i32,
+        ),
+    ))
 }
 
 /// Returns the positive-area intersection of two integer rectangles.

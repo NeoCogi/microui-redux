@@ -134,10 +134,10 @@ impl WgpuRenderer {
         // vertex color for final shading.
         let rect = self.atlas.get_icon_rect(WHITE_ICON);
         let dim = self.atlas.get_texture_dimension();
-        Vec2f::new(
-            (rect.x as f32 + rect.width as f32 * 0.5) / dim.width as f32,
-            (rect.y as f32 + rect.height as f32 * 0.5) / dim.height as f32,
-        )
+        let rect_min = Vec2f::new(rect.x as f32, rect.y as f32);
+        let rect_extent = Vec2f::new(rect.width as f32, rect.height as f32);
+        let texture_extent = Vec2f::new(dim.width as f32, dim.height as f32);
+        (rect_min + rect_extent * 0.5) / texture_extent
     }
 
     /// Reinterprets a plain-old-data value as a byte slice for queue/buffer uploads.
