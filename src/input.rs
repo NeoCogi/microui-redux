@@ -57,18 +57,6 @@ use rs_math3d::Vec2i;
 
 #[derive(PartialEq, Copy, Clone)]
 #[repr(u32)]
-/// Describes whether a rectangle is clipped by the current scissor.
-pub enum Clip {
-    /// Rectangle is fully visible.
-    None = 0,
-    /// Rectangle is partially visible.
-    Part = 1,
-    /// Rectangle is fully clipped away.
-    All = 2,
-}
-
-#[derive(PartialEq, Copy, Clone)]
-#[repr(u32)]
 /// Identifiers for each of the built-in style colors.
 pub enum ControlColor {
     /// Number of color entries in [`crate::Style::colors`].

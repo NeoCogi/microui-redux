@@ -36,8 +36,7 @@
 use super::{
     backend::{CustomRenderArgs, CustomRenderCommand, Renderer, RendererHandle, Vertex},
     display_list::{DisplayList, DrawKind, DrawOp},
-    geometry::{ClipRect, SolidTriangle},
-    quad::textured_quad_vertices,
+    geometry::{textured_quad_vertices, ClipRect, SolidTriangle},
 };
 use crate::{
     atlas::{AtlasHandle, FontId, IconId, SlotId, WHITE_ICON},

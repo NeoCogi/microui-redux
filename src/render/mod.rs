@@ -9,7 +9,6 @@ mod canvas;
 pub(crate) mod display_list;
 pub(crate) mod geometry;
 mod painter;
-mod quad;
 
 pub use backend::{CustomRenderArgs, CustomRenderCommand, Renderer, RendererHandle, Vertex};
 pub use canvas::Canvas;

@@ -2469,7 +2469,7 @@ impl VulkanContext {
         _frame_index: u64,
         commands: &mut Vec<FrameCommand>,
     ) -> Result<()> {
-        // Graphics recording is intentionally linear: begin render pass, replay the queued UI /
+        // GPU command recording is intentionally linear: begin render pass, replay the queued UI /
         // custom jobs in order, then end the pass. The `commands` vec is drained here so the
         // higher-level renderer can reuse its allocation next frame.
         let begin_info = vk::CommandBufferBeginInfo::builder();

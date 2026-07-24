@@ -113,14 +113,14 @@ struct TriangleState {
 }
 
 #[derive(Clone)]
-struct GraphicsDemo {
+struct PainterDemo {
     phase: f32,
     star_center: Option<Vec2f>,
     opt: WidgetOption,
     scroll_behavior: ScrollBehavior,
 }
 
-impl GraphicsDemo {
+impl PainterDemo {
     fn new() -> Self {
         Self {
             phase: 0.0,
@@ -131,7 +131,7 @@ impl GraphicsDemo {
     }
 }
 
-impl Widget for GraphicsDemo {
+impl Widget for PainterDemo {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
     }
@@ -204,10 +204,10 @@ impl Widget for GraphicsDemo {
             ];
 
             g.fill_polygon(background.as_slice(), color(34, 38, 44, 255));
-            for (start, end) in graphics_rect_edges(outer).into_iter().flatten() {
+            for (start, end) in rect_edges(outer).into_iter().flatten() {
                 g.stroke_line(start, end, 2.0, color(65, 70, 76, 255));
             }
-            for (start, end) in graphics_rect_edges(clip_rect).into_iter().flatten() {
+            for (start, end) in rect_edges(clip_rect).into_iter().flatten() {
                 g.stroke_line(start, end, 1.5, color(240, 210, 110, 255));
             }
 
@@ -619,13 +619,13 @@ impl Widget for FalloffEditor {
                 Vec2f::new(0.0, local.height as f32),
             ];
             g.fill_polygon(background.as_slice(), color(25, 29, 34, 255));
-            for (start, end) in graphics_rect_edges(rect(6, 6, (local.width - 12).max(0), (local.height - 12).max(0)))
+            for (start, end) in rect_edges(rect(6, 6, (local.width - 12).max(0), (local.height - 12).max(0)))
                 .into_iter()
                 .flatten()
             {
                 g.stroke_line(start, end, 1.5, color(62, 68, 76, 255));
             }
-            for (start, end) in graphics_rect_edges(graph).into_iter().flatten() {
+            for (start, end) in rect_edges(graph).into_iter().flatten() {
                 g.stroke_line(start, end, 1.5, color(88, 96, 106, 255));
             }
 
@@ -854,7 +854,7 @@ struct State {
     popup_root: RootId,
     typography_root: RootId,
     triangle_root: RootId,
-    graphics_root: RootId,
+    painter_root: RootId,
     falloff_root: RootId,
     suzanne_root: RootId,
     stack_direction_root: RootId,
@@ -904,7 +904,7 @@ struct State {
     triangle_data: Arc<RwLock<TriangleState>>,
     suzanne_data: Arc<RwLock<SuzanneData>>,
     triangle_widget: WidgetHandle<Custom>,
-    graphics_widget: WidgetHandle<GraphicsDemo>,
+    painter_widget: WidgetHandle<PainterDemo>,
     falloff_widget: WidgetHandle<FalloffEditor>,
     suzanne_widget: WidgetHandle<SuzanneWidget>,
     background_swatch: WidgetHandle<ColorSwatch>,
@@ -912,7 +912,7 @@ struct State {
     log_tree: UiNodeSet,
     typography_tree: UiNodeSet,
     triangle_tree: UiNodeSet,
-    graphics_tree: UiNodeSet,
+    painter_tree: UiNodeSet,
     falloff_tree: UiNodeSet,
     suzanne_tree: UiNodeSet,
     stack_direction_tree: UiNodeSet,
@@ -1044,7 +1044,7 @@ impl State {
         ctx.set_root_visible(popup_root, false);
         let typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), UiNodeSet::default());
         let triangle_root = ctx.create_window("Triangle Window", rect(200, 100, 200, 200), UiNodeSet::default());
-        let graphics_root = ctx.create_window("Graphics Window", rect(820, 40, 280, 240), UiNodeSet::default());
+        let painter_root = ctx.create_window("Painter Window", rect(820, 40, 280, 240), UiNodeSet::default());
         let falloff_root = ctx.create_window("Brush Falloff", rect(820, 300, 320, 260), UiNodeSet::default());
         let suzanne_root = ctx.create_window("Suzanne Window", rect(220, 220, 300, 300), UiNodeSet::default());
         let stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), UiNodeSet::default());
@@ -1108,7 +1108,7 @@ impl State {
             popup_root,
             typography_root,
             triangle_root,
-            graphics_root,
+            painter_root,
             falloff_root,
             suzanne_root,
             stack_direction_root,
@@ -1193,7 +1193,7 @@ impl State {
             triangle_data,
             suzanne_data: suzanne_data.clone(),
             triangle_widget: widget_handle(Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS, ScrollBehavior::NONE)),
-            graphics_widget: widget_handle(GraphicsDemo::new()),
+            painter_widget: widget_handle(PainterDemo::new()),
             falloff_widget: widget_handle(FalloffEditor::new()),
             suzanne_widget: widget_handle(SuzanneWidget::new(suzanne_data.clone())),
             background_swatch: widget_handle(ColorSwatch::new(color(90, 95, 100, 0xFF))),
@@ -1201,7 +1201,7 @@ impl State {
             log_tree: UiNodeSet::default(),
             typography_tree: UiNodeSet::default(),
             triangle_tree: UiNodeSet::default(),
-            graphics_tree: UiNodeSet::default(),
+            painter_tree: UiNodeSet::default(),
             falloff_tree: UiNodeSet::default(),
             suzanne_tree: UiNodeSet::default(),
             stack_direction_tree: UiNodeSet::default(),
@@ -1252,7 +1252,7 @@ impl State {
         ctx.set_root_nodes(self.log_root, mem::take(&mut self.log_tree));
         ctx.set_root_nodes(self.typography_root, mem::take(&mut self.typography_tree));
         ctx.set_root_nodes(self.triangle_root, mem::take(&mut self.triangle_tree));
-        ctx.set_root_nodes(self.graphics_root, mem::take(&mut self.graphics_tree));
+        ctx.set_root_nodes(self.painter_root, mem::take(&mut self.painter_tree));
         ctx.set_root_nodes(self.falloff_root, mem::take(&mut self.falloff_tree));
         ctx.set_root_nodes(self.suzanne_root, mem::take(&mut self.suzanne_tree));
         ctx.set_root_nodes(self.stack_direction_root, mem::take(&mut self.stack_direction_tree));
@@ -1411,10 +1411,10 @@ impl State {
             });
         });
 
-        let graphics_widget = self.graphics_widget.clone();
-        self.graphics_tree = UiNodeBuilder::build(move |tree| {
+        let painter_widget = self.painter_widget.clone();
+        self.painter_tree = UiNodeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                tree.widget(&graphics_widget);
+                tree.widget(&painter_widget);
             });
         });
 
@@ -1744,7 +1744,7 @@ impl State {
 
     fn suzanne_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
 
-    fn graphics_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
+    fn painter_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
 
     fn falloff_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
 
@@ -1972,7 +1972,7 @@ impl State {
         self.typography_window(ctx);
         self.test_window(ctx);
         self.triangle_window(ctx);
-        self.graphics_window(ctx);
+        self.painter_window(ctx);
         self.falloff_window(ctx);
         self.suzanne_window(ctx);
         self.stack_direction_window(ctx);
@@ -2013,7 +2013,7 @@ fn area_from_args(args: &CustomRenderArgs) -> CustomRenderArea {
     CustomRenderArea { rect: args.content_area, clip }
 }
 
-fn graphics_rect_edges(rect: Recti) -> Option<[(Vec2f, Vec2f); 4]> {
+fn rect_edges(rect: Recti) -> Option<[(Vec2f, Vec2f); 4]> {
     if rect.width <= 0 || rect.height <= 0 {
         return None;
     }

@@ -27,16 +27,37 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
-//! Stateless tessellation, bounds, translation, and final triangle clipping.
+//! Stateless vertex construction, tessellation, bounds, translation, and final triangle clipping.
 
 use super::backend::Vertex;
-use rs_math3d::{Color4b, FloatVector, Recti, Vec2f, Vec2i};
+use crate::style::Color;
+use rs_math3d::{color4b, Color4b, Dimensioni, FloatVector, Recti, Vec2f, Vec2i};
 use std::ops::Range;
 
 /// Floating-point tolerance shared by tessellation and clipping predicates.
 pub(crate) const GEOM_EPS: f32 = 1.0e-5;
 /// Squared tolerance used for duplicate-position checks.
 const GEOM_EPS_SQ: f32 = GEOM_EPS * GEOM_EPS;
+
+/// Builds the four clockwise vertices for a textured rectangle draw.
+pub(super) fn textured_quad_vertices(dst: Recti, src: Recti, texture_dim: Dimensioni, color: Color) -> [Vertex; 4] {
+    let texture_size = Vec2f::new(texture_dim.width as f32, texture_dim.height as f32);
+    let src_min = Vec2f::new(src.x as f32, src.y as f32);
+    let src_extent = Vec2f::new(src.width as f32, src.height as f32);
+    let uv_min = src_min / texture_size;
+    let uv_max = (src_min + src_extent) / texture_size;
+
+    let dst_min = Vec2f::new(dst.x as f32, dst.y as f32);
+    let dst_max = dst_min + Vec2f::new(dst.width as f32, dst.height as f32);
+    let color = color4b(color.r, color.g, color.b, color.a);
+
+    [
+        Vertex::new(dst_min, uv_min, color),
+        Vertex::new(Vec2f::new(dst_max.x, dst_min.y), Vec2f::new(uv_max.x, uv_min.y), color),
+        Vertex::new(dst_max, uv_max, color),
+        Vertex::new(Vec2f::new(dst_min.x, dst_max.y), Vec2f::new(uv_min.x, uv_max.y), color),
+    ]
+}
 
 /// Texture-independent vertex used by solid geometry.
 #[derive(Clone, Copy)]

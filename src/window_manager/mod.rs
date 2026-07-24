@@ -63,10 +63,10 @@ use std::io::Cursor;
 use png::{ColorType, Decoder};
 
 use crate::{
-    rect, Canvas, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style,
-    TextureId, UiRuntime,
+    rect, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId,
+    UiRuntime,
 };
-use crate::render::{DisplayList, Renderer, RendererHandle};
+use crate::render::{Canvas, DisplayList, Renderer, RendererHandle};
 use crate::ui_node::{pointer_events_from_input, UiNode, UiNodeId};
 use window_manager::WindowEntry;
 mod builder;

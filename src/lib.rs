@@ -129,9 +129,7 @@ pub mod prelude {
         IconId, OPEN_FOLDER_16_ICON, SlotId, SourceFormat, WHITE_ICON, load_image_bytes,
     };
     pub use crate::file_dialog::FileDialogState;
-    pub use crate::input::{
-        Clip, ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption,
-    };
+    pub use crate::input::{ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption};
     pub use crate::sizing::{SizePolicy, StackDirection};
     pub use crate::render::{Renderer, RendererHandle};
     pub use crate::retained::{
@@ -156,7 +154,7 @@ pub use atlas::{
 pub use window_manager::{widget_handle, Context, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, RootId, WidgetHandle, UiNodeSet, UiNodeBuilder};
 pub use file_dialog::FileDialogState;
 pub use id::Id;
-pub use input::{Clip, ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption};
+pub use input::{ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption};
 pub use text_layout::TextWrap;
 pub use sizing::{SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
@@ -167,7 +165,6 @@ pub use widgets::{
     WidgetConfig,
 };
 
-pub(crate) use render::Canvas;
 #[allow(unused_imports)]
 pub(crate) use rs_math3d::{
     Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3, color4b,

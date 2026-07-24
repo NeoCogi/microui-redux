@@ -322,9 +322,9 @@ mod tests {
     use super::*;
     use std::{cell::RefCell, rc::Rc};
 
-    use crate::render::RendererHandle;
+    use crate::render::{Canvas, RendererHandle};
     use crate::{
-        color4b, rect, AtlasHandle, AtlasSource, Button, Canvas, CharEntry, Custom, FontEntry, Id, Image, Input, KeyMode, ListItem, Policy, ResourceState,
+        color4b, rect, AtlasHandle, AtlasSource, Button, CharEntry, Custom, FontEntry, Id, Image, Input, KeyMode, ListItem, Policy, ResourceState,
         SourceFormat, StackDirection, Textbox, WidgetFillOption, WidgetOption, UiNodeBuilder, widget_handle,
     };
     use crate::test_support::{test_atlas, NoopRenderer};

@@ -291,7 +291,7 @@ Version `0.6.0` introduced retained `WidgetTree` authoring on top of the older p
 - [x] `WidgetTreeBuilder` introduced reusable widget/layout hierarchies with widgets, panels, headers/tree nodes, row/grid/column/stack groups, and custom-render leaves.
 - [x] Widgets reported intrinsic sizes through `measure` and updated persistent state through the retained traversal.
 - [x] `Context::committed_results()` became the public business-logic view of the previous frame's interaction results.
-- [x] `WidgetCtx::graphics(...)` added rectangles, frames, text/icons/images, line strokes, polygon fills, and local clip scopes.
+- [x] `WidgetCtx` gained widget-local custom painting for rectangles, text/icons/images, line strokes, polygon fills, and scoped clips.
 - [x] Runtime atlas building and offline/prebuilt atlas export gained shared multi-font configuration.
 - [x] Version `0.6.1` switched demos to runtime atlas construction by default and made prebuilt atlas embedding opt-in.
 
@@ -316,7 +316,7 @@ Version `0.6.0` introduced retained `WidgetTree` authoring on top of the older p
     - [x] IdManager removed; widget IDs now derive from state pointers.
     - [x] Widget API redesign requires stateful widget instances; trait/type renames applied.
     - [x] Legacy `button_ex*` shims removed.
-    - [x] DrawCtx extracted into its own module and shared via WidgetCtx.
+    - [x] Drawing state was extracted into the shared widget execution context.
     - [x] WidgetState/WidgetCtx pipeline with ControlState returned from `update_control`.
 - [x] File dialog UX fixes (close on OK/cancel, path-aware browsing).
 - [x] Expanded unit tests for scrollbars, sliders, and PNG decoding paths.
