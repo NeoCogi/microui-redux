@@ -55,7 +55,7 @@
 //! This file owns clip-stack mutation and conversion from high-level widget drawing requests into
 //! retained [`Command`] values. It deliberately does not talk to a renderer; that happens later
 //! when draw commands are replayed through [`crate::Canvas`].
-use crate::render_command::Command;
+use crate::render_command::{Command, CommandKind};
 use crate::render::Vertex;
 use crate::*;
 
@@ -173,9 +173,14 @@ impl<'a> CommandEmitter<'a> {
         }
     }
 
-    /// Appends a draw command to the container's retained command stream.
-    pub(crate) fn push_command(&mut self, cmd: Command) {
-        self.commands.push(cmd);
+    /// Appends a draw payload with the current effective clip.
+    pub(crate) fn push_command(&mut self, kind: CommandKind) {
+        self.push_command_with_clip(self.current_clip_rect(), kind);
+    }
+
+    /// Appends a draw payload with an explicitly resolved effective clip.
+    pub(crate) fn push_command_with_clip(&mut self, clip: Recti, kind: CommandKind) {
+        self.commands.push(Command::new(clip, kind));
     }
 
     /// Returns the number of vertices currently stored in the retained triangle arena.
@@ -192,44 +197,13 @@ impl<'a> CommandEmitter<'a> {
         self.triangle_vertices
     }
 
-    /// Emits a replay command that pushes a clip during render playback.
-    fn push_replay_clip(&mut self, rect: Recti) {
-        self.push_command(Command::PushClip { rect });
-    }
-
-    /// Emits a replay command that pops a clip during render playback.
-    fn pop_replay_clip(&mut self) {
-        self.push_command(Command::PopClip);
-    }
-
-    /// Emits a command under the minimum replay clip required by `bounds`.
+    /// Records a visible solid rectangle without modifying its geometry.
     ///
-    /// This reuses the same clip-state wrapper for text, icons, images, and slot redraws so both
-    /// the legacy draw-context path and the graphics builder can emit those commands consistently.
-    pub(crate) fn emit_clipped<F>(&mut self, bounds: Recti, clip: Recti, emit: F)
-    where
-        F: FnOnce(&mut Self),
-    {
-        let clipped = clip_relation(bounds, clip);
-        if clipped == Clip::All {
-            return;
-        }
-        // Partially visible commands replay under a temporary clip; fully visible commands avoid
-        // the extra push/pop pair to keep the command stream compact.
-        if clipped == Clip::Part {
-            self.push_replay_clip(clip);
-        }
-        emit(self);
-        if clipped != Clip::None {
-            self.pop_replay_clip();
-        }
-    }
-
-    /// Records a solid rectangle after applying the active clip immediately.
+    /// The overlap check is only a recording cull. Final rectangle clipping belongs to Canvas.
     pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
-        let rect = rect.intersect(&self.current_clip_rect()).unwrap_or_default();
-        if rect.width > 0 && rect.height > 0 {
-            self.push_command(Command::Recti { rect, color });
+        let visible = rect.intersect(&self.current_clip_rect()).is_some_and(|rect| rect.width > 0 && rect.height > 0);
+        if rect.width > 0 && rect.height > 0 && color.a != 0 && visible {
+            self.push_command(CommandKind::Recti { rect, color });
         }
     }
 

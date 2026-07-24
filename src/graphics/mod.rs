@@ -34,21 +34,19 @@
 //! coordinates. This module adds a dedicated widget-local geometry builder that:
 //! - accepts points relative to the current widget origin,
 //! - forwards widget-local clips onto the shared draw-context clip stack,
-//! - clips tessellated triangles against the current widget-local clip rect in software,
-//! - emits already-clipped retained triangle commands that do not depend on backend scissor state.
+//! - retains the effective clip beside each finalized triangle range,
+//! - leaves final software clipping to Canvas execution.
 //!
-//! Because clipping happens before commands are emitted, clip-stack changes no longer need to
-//! fragment the retained command stream. A single graphics closure can therefore accumulate one
-//! larger triangle batch even if it uses nested local clip scopes internally. The actual triangle
-//! vertices live in the container-owned arena held by `DrawCtx`, so individual widgets do not
-//! allocate their own per-batch vertex vectors.
+//! The actual triangle vertices live in the container-owned arena held by `DrawCtx`, so individual
+//! widgets do not allocate their own per-batch vertex vectors. A clip change finalizes the current
+//! range because every retained operation owns one effective clip.
 
-use crate::draw_context::{intersect_clip_rect, DrawCtx};
+use crate::draw_context::{clip_relation, intersect_clip_rect, DrawCtx};
 use crate::render::Vertex;
-use crate::render::geometry::{ClipRect, SolidGeometry, SolidTriangle, translate_rect};
+use crate::render::geometry::{SolidGeometry, SolidTriangle, translate_rect};
 #[cfg(test)]
 use crate::render::geometry::GEOM_EPS;
-use crate::render_command::Command;
+use crate::render_command::CommandKind;
 use crate::text_layout::control_text_position_with_font;
 use crate::*;
 use std::rc::Rc;
@@ -61,10 +59,8 @@ use std::rc::Rc;
 /// being translated into screen space, so a widget-local clip can only reduce visibility and can
 /// never expand beyond the area the widget already owns.
 ///
-/// The builder tessellates higher-level shapes into triangles immediately and software-clips every
-/// triangle against the current widget-local clip rectangle before storing it. Because the emitted
-/// triangles are already clipped, nested local clip scopes do not need to flush the batch or emit
-/// retained clip commands.
+/// The builder tessellates higher-level shapes immediately but does not clip their triangles.
+/// Canvas applies the retained effective clip exactly once during final execution.
 pub struct Graphics<'a, 'b> {
     /// Shared draw context receiving commands and triangle vertices.
     draw: &'a mut DrawCtx<'b>,
@@ -74,8 +70,6 @@ pub struct Graphics<'a, 'b> {
     widget_rect: Recti,
     /// Floating-point widget origin used when translating triangle vertices.
     widget_origin: Vec2f,
-    /// UV coordinate of the atlas white pixel used by solid geometry.
-    white_uv: Vec2f,
     /// Clip-stack depth that existed before this builder was created.
     clip_base_depth: usize,
     /// First vertex of the current unflushed triangle batch.
@@ -101,12 +95,6 @@ impl<'a, 'b> Graphics<'a, 'b> {
         // same stack, and drop restores the previous depth so the outer traversal state is intact.
         let clip_base_depth = draw.clip_depth();
         draw.push_clip_rect(clip_root);
-        let white_rect = draw.atlas().get_icon_rect(WHITE_ICON);
-        let atlas_dim = draw.atlas().get_texture_dimension();
-        let white_uv = Vec2f::new(
-            (white_rect.x as f32 + white_rect.width as f32 * 0.5) / atlas_dim.width as f32,
-            (white_rect.y as f32 + white_rect.height as f32 * 0.5) / atlas_dim.height as f32,
-        );
         let triangle_batch_start = draw.triangle_vertex_count();
 
         Self {
@@ -114,7 +102,6 @@ impl<'a, 'b> Graphics<'a, 'b> {
             solid_geometry,
             widget_rect,
             widget_origin: Vec2f::new(widget_rect.x as f32, widget_rect.y as f32),
-            white_uv,
             clip_base_depth,
             triangle_batch_start,
             triangle_batch_count: 0,
@@ -143,6 +130,7 @@ impl<'a, 'b> Graphics<'a, 'b> {
     /// onto the shared draw-context stack. Because `DrawCtx::push_clip_rect` intersects against
     /// the current top, this can never expand the visible area.
     pub fn push_clip_rect(&mut self, rect: Recti) {
+        self.flush_batch();
         self.draw.push_clip_rect(self.local_to_screen_rect(rect));
     }
 
@@ -151,6 +139,7 @@ impl<'a, 'b> Graphics<'a, 'b> {
     /// Unlike `push_clip_rect`, this keeps the current stack depth. The replacement is still
     /// monotonic: it intersects with the existing top clip instead of replacing it wholesale.
     pub fn set_clip_rect(&mut self, rect: Recti) {
+        self.flush_batch();
         let clip = intersect_clip_rect(self.draw.current_clip_rect(), self.local_to_screen_rect(rect));
         self.draw.replace_current_clip_rect(clip);
     }
@@ -158,6 +147,7 @@ impl<'a, 'b> Graphics<'a, 'b> {
     /// Restores the previous widget-local clip rectangle.
     pub fn pop_clip_rect(&mut self) {
         if self.draw.clip_depth() > self.clip_base_depth + 1 {
+            self.flush_batch();
             self.draw.pop_clip_rect();
         }
     }
@@ -216,33 +206,25 @@ impl<'a, 'b> Graphics<'a, 'b> {
         let bounds = Recti::new(pos.x, pos.y, size.width, size.height);
         let screen_pos = self.local_to_screen_pos(pos);
         let text = text.to_string();
-        self.emit_clipped_command(bounds, |draw| {
-            draw.push_command(Command::Text { text, pos: screen_pos, color, font });
-        });
+        self.emit_clipped_command(bounds, CommandKind::Text { text, pos: screen_pos, color, font });
     }
 
     /// Draws one icon rectangle using widget-local coordinates.
     pub fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
         let screen_rect = self.local_to_screen_rect(rect);
-        self.emit_clipped_command(rect, |draw| {
-            draw.push_command(Command::Icon { id, rect: screen_rect, color });
-        });
+        self.emit_clipped_command(rect, CommandKind::Icon { id, rect: screen_rect, color });
     }
 
     /// Draws one image rectangle using widget-local coordinates.
     pub fn draw_image(&mut self, image: Image, rect: Recti, color: Color) {
         let screen_rect = self.local_to_screen_rect(rect);
-        self.emit_clipped_command(rect, |draw| {
-            draw.push_command(Command::Image { image, rect: screen_rect, color });
-        });
+        self.emit_clipped_command(rect, CommandKind::Image { image, rect: screen_rect, color });
     }
 
     /// Re-renders a slot and then draws it using widget-local coordinates.
     pub fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
         let screen_rect = self.local_to_screen_rect(rect);
-        self.emit_clipped_command(rect, |draw| {
-            draw.push_command(Command::SlotRedraw { id, rect: screen_rect, color, payload });
-        });
+        self.emit_clipped_command(rect, CommandKind::SlotRedraw { id, rect: screen_rect, color, payload });
     }
 
     /// Draws one framed control using the current style colors.
@@ -350,8 +332,7 @@ impl<'a, 'b> Graphics<'a, 'b> {
 
     /// Converts a screen-space rectangle into widget-local coordinates.
     ///
-    /// This lets the tessellator software-clip generated triangles before they ever reach the
-    /// retained command stream.
+    /// This expresses the shared screen clip in coordinates meaningful to widget code.
     fn screen_to_local_rect(&self, rect: Recti) -> Recti {
         translate_rect(rect, Vec2i::new(-self.widget_rect.x, -self.widget_rect.y))
     }
@@ -360,39 +341,29 @@ impl<'a, 'b> Graphics<'a, 'b> {
     ///
     /// This keeps ordering correct when widgets mix text, images, and solid geometry inside one
     /// graphics builder.
-    fn emit_clipped_command<F>(&mut self, bounds_local: Recti, emit: F)
-    where
-        F: FnOnce(&mut DrawCtx<'b>),
-    {
+    fn emit_clipped_command(&mut self, bounds_local: Recti, kind: CommandKind) {
         self.flush_batch();
         let clip = self.current_screen_clip_rect();
         let bounds = self.local_to_screen_rect(bounds_local);
-        self.draw.emit_clipped(bounds, clip, emit);
+        if clip_relation(bounds, clip) != Clip::All {
+            self.draw.push_command_with_clip(clip, kind);
+        }
     }
 
-    /// Clips and appends one widget-local triangle into the shared vertex arena.
-    ///
-    /// Clipping here means later clip-stack changes no longer need to fragment the retained
-    /// command stream.
+    /// Appends one unclipped widget-local triangle into the shared vertex arena.
     fn push_triangle_local(&mut self, a: Vec2f, b: Vec2f, c: Vec2f, color: Color4b) {
-        let Some(clip) = ClipRect::new(self.current_clip_rect()) else {
+        let clip = self.current_screen_clip_rect();
+        if clip.width <= 0 || clip.height <= 0 {
             return;
-        };
-        let widget_origin = self.widget_origin;
-        let start = self.draw.triangle_vertex_count();
-        let vertices = self.draw.triangle_vertices_mut();
-        clip.clip_triangle(
-            [
-                Vertex::new(a, self.white_uv, color),
-                Vertex::new(b, self.white_uv, color),
-                Vertex::new(c, self.white_uv, color),
-            ],
-            vertices,
-        );
-        for vertex in &mut vertices[start..] {
-            *vertex = Vertex::new(vertex.position() + widget_origin, vertex.tex_coord(), vertex.color());
         }
-        self.triangle_batch_count += vertices.len() - start;
+        let widget_origin = self.widget_origin;
+        let vertices = self.draw.triangle_vertices_mut();
+        vertices.extend([
+            Vertex::new(a + widget_origin, Vec2f::default(), color),
+            Vertex::new(b + widget_origin, Vec2f::default(), color),
+            Vertex::new(c + widget_origin, Vec2f::default(), color),
+        ]);
+        self.triangle_batch_count += 3;
     }
 
     /// Appends one strongly typed solid triangle through the transitional recorder.
@@ -403,14 +374,13 @@ impl<'a, 'b> Graphics<'a, 'b> {
 
     /// Finalizes the current triangle batch as one retained command.
     ///
-    /// Every triangle has already been clipped in software, so replay only needs the range into
-    /// the shared arena and no extra clip-state changes.
+    /// The range captures the active effective clip for final Canvas execution.
     fn flush_batch(&mut self) {
         if self.triangle_batch_count == 0 {
             return;
         }
 
-        self.draw.push_command(Command::Triangle {
+        self.draw.push_command(CommandKind::Triangle {
             vertex_start: self.triangle_batch_start,
             vertex_count: self.triangle_batch_count,
         });

@@ -1,6 +1,8 @@
 //! Shared quad vertex construction for atlas and external texture draws.
 
-use super::*;
+use super::backend::Vertex;
+use crate::style::Color;
+use rs_math3d::{Dimensioni, Recti, Vec2f, color4b};
 
 /// Builds the four clockwise vertices for a textured rectangle draw.
 pub(super) fn textured_quad_vertices(dst: Recti, src: Recti, texture_dim: Dimensioni, color: Color) -> [Vertex; 4] {

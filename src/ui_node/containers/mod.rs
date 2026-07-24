@@ -8,7 +8,7 @@ use super::{
     measure_axis_available, resolve_allocated_size, resolve_size, NodeCustomRenderCommand, NodeLayout, TraversalState, UiNode, UiNodeId, UiNodeState,
     UiRuntime, WidgetCtx,
 };
-use crate::render_command::Command;
+use crate::render_command::{Command, CommandKind};
 
 mod column;
 mod disclosure;
@@ -208,9 +208,10 @@ impl Widget for WidgetNode {
         if let Some(render) = self.custom_render.clone() {
             let view = node_clip.intersect(&rect).unwrap_or_else(|| Recti::new(rect.x, rect.y, 0, 0));
             let cra = CustomRenderArgs { content_area: rect, view };
-            ctx.runtime
-                .commands
-                .push(Command::BackendCustomRender(cra, Box::new(NodeCustomRenderCommand { render })));
+            ctx.runtime.commands.push(Command::new(
+                node_clip,
+                CommandKind::BackendCustomRender(cra, Box::new(NodeCustomRenderCommand { render })),
+            ));
         }
         false
     }

@@ -66,15 +66,23 @@ pub enum TextWrap {
     Word,
 }
 
-/// Draw commands recorded during container traversal.
-pub(crate) enum Command {
-    /// Pushes an effective clip rectangle for subsequent replayed commands.
-    PushClip {
-        /// Rect to clip against.
-        rect: Recti,
-    },
-    /// Pops the most recent replay clip rectangle.
-    PopClip,
+/// One legacy draw payload and the effective screen-space clip captured with it.
+pub(crate) struct Command {
+    /// Final producer-side clip for this operation.
+    pub(crate) clip: Recti,
+    /// Backend-neutral draw payload.
+    pub(crate) kind: CommandKind,
+}
+
+impl Command {
+    /// Associates a draw payload with its effective clip.
+    pub(crate) const fn new(clip: Recti, kind: CommandKind) -> Self {
+        Self { clip, kind }
+    }
+}
+
+/// Backend-neutral payload retained until the runtime records directly into DisplayList.
+pub(crate) enum CommandKind {
     /// Draws a solid rectangle.
     Recti {
         /// Target rectangle.
@@ -124,9 +132,8 @@ pub(crate) enum Command {
     },
     /// Draws a triangle list using already transformed screen-space vertices.
     ///
-    /// Every three consecutive vertices form one solid triangle. The widget-local graphics path
-    /// clips these triangles in software before emission, so replay can treat them as plain UI
-    /// geometry and batch them alongside the rest of the frame.
+    /// Every three consecutive vertices form one solid triangle. Geometry remains unclipped until
+    /// Canvas execution; the effective clip is retained alongside the arena range.
     Triangle {
         /// Index of the first triangle vertex inside the container-owned arena.
         vertex_start: usize,
@@ -146,6 +153,9 @@ pub(crate) enum Command {
 
 impl Default for Command {
     fn default() -> Self {
-        Command::None
+        Self {
+            clip: Recti::default(),
+            kind: CommandKind::None,
+        }
     }
 }

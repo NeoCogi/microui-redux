@@ -33,7 +33,7 @@
 
 use microui_redux::{
     prelude::*,
-    render::{Canvas, Vertex},
+    render::{Canvas, DisplayList, Painter, Vertex},
     AtlasSource,
 };
 
@@ -143,15 +143,20 @@ fn assert_vec2f_eq(actual: Vec2f, expected: Vec2f) {
 
 fn main() -> Result<(), String> {
     let renderer = RendererHandle::new(SmokeRenderer::new(make_smoke_atlas()));
-    let mut canvas = Canvas::from(renderer.clone(), Dimensioni::new(64, 64));
+    let mut canvas = Canvas::new(renderer.clone(), Dimensioni::new(64, 64));
     let texture = canvas.try_load_texture_rgba(16, 12, &[0xFF; 16 * 12 * 4])?;
 
     canvas.begin(64, 64, color(0, 0, 0, 255));
-    canvas.draw_icon(WHITE_ICON, Recti::new(0, 0, 4, 4), color(255, 255, 255, 255));
-    canvas.set_clip_rect(Recti::new(10, 12, 8, 6));
-    canvas.draw_image(Image::Texture(texture), Recti::new(6, 9, 16, 12), color(255, 255, 255, 255));
-    canvas.set_clip_rect(Recti::new(0, 0, 64, 64));
-    canvas.draw_icon(WHITE_ICON, Recti::new(30, 0, 4, 4), color(255, 255, 255, 255));
+    let viewport = Recti::new(0, 0, 64, 64);
+    let mut list = DisplayList::new();
+    Painter::new(&mut list, Vec2i::new(0, 0), viewport, viewport).icon(WHITE_ICON, Recti::new(0, 0, 4, 4), color(255, 255, 255, 255));
+    Painter::new(&mut list, Vec2i::new(0, 0), viewport, Recti::new(10, 12, 8, 6)).image(
+        Image::Texture(texture),
+        Recti::new(6, 9, 16, 12),
+        color(255, 255, 255, 255),
+    );
+    Painter::new(&mut list, Vec2i::new(0, 0), viewport, viewport).icon(WHITE_ICON, Recti::new(30, 0, 4, 4), color(255, 255, 255, 255));
+    canvas.render(&mut list);
     canvas.end();
 
     renderer.scope(|renderer| {

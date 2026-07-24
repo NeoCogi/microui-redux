@@ -1,7 +1,8 @@
 //! Window manager root registry, visibility policy, chrome handling, and traversal.
 
 use super::*;
-use crate::ControlColor;
+use crate::render::Painter;
+use crate::{ControlColor, Vec2i};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(super) enum WindowKind {
@@ -170,9 +171,9 @@ impl<R: Renderer> Context<R> {
 
     pub(crate) fn root_control_metrics(&self) -> (i32, i32) {
         let padding = self.style.padding.max(0);
-        let font_height = self.canvas.get_atlas().get_font_height(self.style.font) as i32;
+        let font_height = self.canvas.atlas().get_font_height(self.style.font) as i32;
         let vertical_pad = std::cmp::max(1, padding / 2);
-        let icon_height = self.canvas.get_atlas().get_icon_size(crate::EXPAND_DOWN_ICON).height;
+        let icon_height = self.canvas.atlas().get_icon_size(crate::EXPAND_DOWN_ICON).height;
         (std::cmp::max(font_height + vertical_pad * 2, icon_height), self.style.spacing.max(0))
     }
 
@@ -238,7 +239,7 @@ impl<R: Renderer> Context<R> {
             if entry.visible && entry.opt.intersects(ContainerOption::AUTO_SIZE) {
                 let size = entry
                     .runtime
-                    .measure_auto_size(&entry.roots, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt, entry.rect.width);
+                    .measure_auto_size(&entry.roots, self.style.as_ref(), &self.canvas.atlas(), entry.opt, entry.rect.width);
                 entry.rect.width = size.width;
                 entry.rect.height = size.height;
             }
@@ -276,19 +277,20 @@ impl<R: Renderer> Context<R> {
                 }
                 let chrome_capturing_pointer = matches!(entry.active_chrome, Some(WindowChromePart::Title | WindowChromePart::Resize));
                 let pointer_input_enabled = hover_root == Some(entry.id) && !chrome_capturing_pointer;
-                let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt);
+                let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.atlas(), entry.opt);
                 self.paint_root_frame(entry);
                 let input = self.input.borrow();
                 entry.runtime.begin_frame(pointer_input_enabled);
                 entry
                     .runtime
-                    .layout_frame_roots(&mut entry.roots, self.style.as_ref(), self.canvas.get_atlas(), chrome.body);
+                    .layout_frame_roots(&mut entry.roots, self.style.as_ref(), self.canvas.atlas(), chrome.body);
                 Self::route_entry_input(entry, self.style.as_ref(), &input);
                 entry.runtime.update_paint_frame(
                     &mut entry.roots,
                     entry.id,
                     &entry.name,
                     &mut self.canvas,
+                    &mut self.display_list,
                     self.style.as_ref(),
                     &input,
                     &mut self.frame_results,
@@ -336,54 +338,46 @@ impl<R: Renderer> Context<R> {
     }
 
     fn paint_root_frame(&mut self, entry: &WindowEntry) {
-        if !entry.opt.intersects(ContainerOption::NO_FRAME) {
-            self.draw_root_frame(entry.rect, ControlColor::WindowBG);
+        if entry.opt.intersects(ContainerOption::NO_FRAME) {
+            return;
         }
+
+        let dimensions = self.canvas.dimensions();
+        let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
+        let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);
+        record_root_frame(&mut painter, self.style.as_ref(), entry.rect, ControlColor::WindowBG);
+        self.canvas.render(&mut self.display_list);
     }
 
     fn paint_root_chrome(&mut self, entry: &WindowEntry, chrome: WindowChrome) {
-        if let Some(title) = chrome.title {
-            self.draw_root_frame(title, ControlColor::TitleBG);
-            let mut text = title;
-            if let Some(close) = chrome.close {
-                text.width = (close.x.max(title.x) - title.x).max(0);
+        let dimensions = self.canvas.dimensions();
+        let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
+        let atlas = self.canvas.atlas();
+        {
+            let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);
+
+            if let Some(title) = chrome.title {
+                record_root_frame(&mut painter, self.style.as_ref(), title, ControlColor::TitleBG);
+                let mut text = title;
+                if let Some(close) = chrome.close {
+                    text.width = (close.x.max(title.x) - title.x).max(0);
+                }
+                record_root_title_text(&mut painter, self.style.as_ref(), &atlas, text, &entry.name);
+
+                if let Some(close) = chrome.close {
+                    let color = self.style.colors[ControlColor::TitleText as usize];
+                    painter.icon(crate::CLOSE_ICON, close, color);
+                }
             }
-            self.draw_root_title_text(text, &entry.name);
 
-            if let Some(close) = chrome.close {
-                let color = self.style.colors[ControlColor::TitleText as usize];
-                self.canvas.draw_icon(crate::CLOSE_ICON, close, color);
+            if let Some(resize) = chrome.resize
+                && resize.width > 0
+                && resize.height > 0
+            {
+                record_root_frame(&mut painter, self.style.as_ref(), resize, ControlColor::WindowBG);
             }
         }
-
-        if let Some(resize) = chrome.resize {
-            if resize.width > 0 && resize.height > 0 {
-                self.draw_root_frame(resize, ControlColor::WindowBG);
-            }
-        }
-    }
-
-    fn draw_root_frame(&mut self, rect: Recti, color: ControlColor) {
-        let fill = self.style.colors[color as usize];
-        self.canvas.draw_rect(rect, fill);
-        if let Some(border) = self.style.frame_border_color(color) {
-            draw_canvas_box(&mut self.canvas, crate::expand_rect(rect, 1), border);
-        }
-    }
-
-    fn draw_root_title_text(&mut self, rect: Recti, title: &str) {
-        if rect.width <= 0 || rect.height <= 0 {
-            return;
-        }
-        let atlas = self.canvas.get_atlas();
-        let color = self.style.colors[ControlColor::TitleText as usize];
-        let pos =
-            crate::text_layout::control_text_position_with_font(self.style.as_ref(), &atlas, self.style.title_font, title, rect, crate::WidgetOption::NONE);
-        let old_clip = self.canvas.current_clip_rect();
-        let text_clip = old_clip.intersect(&rect).unwrap_or_default();
-        self.canvas.set_clip_rect(text_clip);
-        self.canvas.draw_chars(self.style.title_font, title, pos, color);
-        self.canvas.set_clip_rect(old_clip);
+        self.canvas.render(&mut self.display_list);
     }
 
     fn update_window_manager_chrome(
@@ -394,7 +388,7 @@ impl<R: Renderer> Context<R> {
         mouse_down: MouseButton,
         mouse_delta: crate::Vec2i,
     ) {
-        let atlas = self.canvas.get_atlas();
+        let atlas = self.canvas.atlas();
         for entry in &mut self.roots {
             if !entry.visible {
                 entry.active_chrome = None;
@@ -482,7 +476,7 @@ impl<R: Renderer> Context<R> {
         self.roots
             .iter()
             .find(|entry| entry.id == root)
-            .map(|entry| WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt).body)
+            .map(|entry| WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.atlas(), entry.opt).body)
     }
 
     #[cfg(test)]
@@ -504,7 +498,7 @@ impl<R: Renderer> Context<R> {
     #[cfg(test)]
     pub(crate) fn debug_root_chrome(&self, root: RootId) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
         self.roots.iter().find(|entry| entry.id == root).map(|entry| {
-            let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.get_atlas(), entry.opt);
+            let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.atlas(), entry.opt);
             (chrome.title, chrome.close, chrome.resize)
         })
     }
@@ -537,9 +531,28 @@ fn root_min_size(style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption
     Dimensioni::new(width, height)
 }
 
-fn draw_canvas_box<R: Renderer>(canvas: &mut Canvas<R>, r: Recti, color: Color) {
-    canvas.draw_rect(rect(r.x + 1, r.y, r.width - 2, 1), color);
-    canvas.draw_rect(rect(r.x + 1, r.y + r.height - 1, r.width - 2, 1), color);
-    canvas.draw_rect(rect(r.x, r.y, 1, r.height), color);
-    canvas.draw_rect(rect(r.x + r.width - 1, r.y, 1, r.height), color);
+/// Records a window frame through the retained screen-space painter.
+fn record_root_frame(painter: &mut Painter<'_>, style: &Style, rect: Recti, color: ControlColor) {
+    painter.fill_rect(rect, style.colors[color as usize]);
+    if let Some(border) = style.frame_border_color(color) {
+        record_painter_box(painter, crate::expand_rect(rect, 1), border);
+    }
+}
+
+/// Records title text with an operation-local clip.
+fn record_root_title_text(painter: &mut Painter<'_>, style: &Style, atlas: &crate::AtlasHandle, rect: Recti, title: &str) {
+    if rect.width <= 0 || rect.height <= 0 {
+        return;
+    }
+    let color = style.colors[ControlColor::TitleText as usize];
+    let pos = crate::text_layout::control_text_position_with_font(style, atlas, style.title_font, title, rect, crate::WidgetOption::NONE);
+    painter.with_clip(rect, |painter| painter.text(style.title_font, title, pos, color));
+}
+
+/// Records the historical one-pixel window border geometry.
+fn record_painter_box(painter: &mut Painter<'_>, r: Recti, color: Color) {
+    painter.fill_rect(rect(r.x + 1, r.y, r.width - 2, 1), color);
+    painter.fill_rect(rect(r.x + 1, r.y + r.height - 1, r.width - 2, 1), color);
+    painter.fill_rect(rect(r.x, r.y, 1, r.height), color);
+    painter.fill_rect(rect(r.x + r.width - 1, r.y, 1, r.height), color);
 }

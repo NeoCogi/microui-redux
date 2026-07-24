@@ -1,7 +1,7 @@
 //! Characterization tests for ordered command replay into the renderer boundary.
 
 use super::*;
-use crate::render::{Renderer, RendererHandle, Vertex};
+use crate::render::{DisplayList, Renderer, RendererHandle, Vertex};
 use crate::test_support::{recording_renderer, RenderEvent};
 use crate::{color, color4b, AtlasHandle, AtlasSource, Canvas, CharEntry, FontEntry, Image, Recti, SourceFormat, TextureId, Vec2f, Vec2i, CLOSE_ICON};
 use std::cell::{Cell, RefCell};
@@ -53,6 +53,10 @@ fn custom_args(content_area: Recti, view: Recti) -> CustomRenderArgs {
     CustomRenderArgs { content_area, view }
 }
 
+fn command(clip: Recti, kind: CommandKind) -> Command {
+    Command::new(clip, kind)
+}
+
 fn load_test_texture<R: Renderer>(canvas: &mut Canvas<R>) -> TextureId {
     canvas.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap()
 }
@@ -60,27 +64,37 @@ fn load_test_texture<R: Renderer>(canvas: &mut Canvas<R>) -> TextureId {
 #[test]
 fn mixed_commands_reach_the_renderer_in_stream_order() {
     let (renderer, log) = recording_renderer(make_replay_atlas());
-    let mut canvas = Canvas::from(renderer, crate::Dimensioni::new(32, 32));
+    let mut canvas = Canvas::new(renderer, crate::Dimensioni::new(32, 32));
     let texture = load_test_texture(&mut canvas);
     log.clear();
 
+    let clip = Recti::new(0, 0, 32, 32);
     let mut commands = vec![
-        Command::Recti {
-            rect: Recti::new(0, 0, 4, 4),
-            color: color(255, 0, 0, 255),
-        },
-        Command::Text {
-            font: crate::FontId::default(),
-            pos: Vec2i::new(4, 0),
-            color: color(0, 255, 0, 255),
-            text: String::from("a"),
-        },
-        Command::Triangle { vertex_start: 0, vertex_count: 3 },
-        Command::Image {
-            rect: Recti::new(12, 0, 4, 4),
-            image: Image::Texture(texture),
-            color: color(255, 255, 0, 255),
-        },
+        command(
+            clip,
+            CommandKind::Recti {
+                rect: Recti::new(0, 0, 4, 4),
+                color: color(255, 0, 0, 255),
+            },
+        ),
+        command(
+            clip,
+            CommandKind::Text {
+                font: crate::FontId::default(),
+                pos: Vec2i::new(4, 0),
+                color: color(0, 255, 0, 255),
+                text: String::from("a"),
+            },
+        ),
+        command(clip, CommandKind::Triangle { vertex_start: 0, vertex_count: 3 }),
+        command(
+            clip,
+            CommandKind::Image {
+                rect: Recti::new(12, 0, 4, 4),
+                image: Image::Texture(texture),
+                color: color(255, 255, 0, 255),
+            },
+        ),
     ];
     let triangle_vertices = [
         Vertex::new(Vec2f::new(8.0, 0.0), Vec2f::default(), color4b(0, 0, 255, 255)),
@@ -88,7 +102,7 @@ fn mixed_commands_reach_the_renderer_in_stream_order() {
         Vertex::new(Vec2f::new(8.0, 4.0), Vec2f::default(), color4b(0, 0, 255, 255)),
     ];
 
-    render_command_stream(&mut canvas, &mut commands, &triangle_vertices);
+    render_command_stream(&mut canvas, &mut DisplayList::new(), &mut commands, &triangle_vertices);
 
     assert!(commands.is_empty());
     let events = log.snapshot();
@@ -115,8 +129,7 @@ fn mixed_commands_reach_the_renderer_in_stream_order() {
 #[test]
 fn custom_render_is_clipped_flushed_and_can_reenter_the_renderer_handle() {
     let (renderer, log) = recording_renderer(make_replay_atlas());
-    let mut canvas = Canvas::from(renderer.clone(), crate::Dimensioni::new(20, 20));
-    canvas.set_clip_rect(Recti::new(0, 0, 20, 20));
+    let mut canvas = Canvas::new(renderer.clone(), crate::Dimensioni::new(20, 20));
     let observed = Rc::new(RefCell::new(Vec::new()));
     let callback_observed = observed.clone();
     let mut callback_renderer: RendererHandle<_> = renderer.clone();
@@ -127,23 +140,31 @@ fn custom_render_is_clipped_flushed_and_can_reenter_the_renderer_handle() {
             .push(((dim.width, dim.height), (args.view.x, args.view.y, args.view.width, args.view.height)));
         callback_renderer.scope_mut(|renderer| renderer.record_marker("custom"));
     };
+    let clip = Recti::new(0, 0, 20, 20);
     let mut commands = vec![
-        Command::Recti {
-            rect: Recti::new(0, 0, 4, 4),
-            color: color(255, 0, 0, 255),
-        },
-        Command::BackendCustomRender(custom_args(Recti::new(0, 0, 40, 40), Recti::new(10, 10, 20, 20)), Box::new(callback)),
-        Command::Recti {
-            rect: Recti::new(4, 0, 4, 4),
-            color: color(0, 0, 255, 255),
-        },
+        command(
+            clip,
+            CommandKind::Recti {
+                rect: Recti::new(0, 0, 4, 4),
+                color: color(255, 0, 0, 255),
+            },
+        ),
+        command(
+            clip,
+            CommandKind::BackendCustomRender(custom_args(Recti::new(0, 0, 40, 40), Recti::new(10, 10, 20, 20)), Box::new(callback)),
+        ),
+        command(
+            clip,
+            CommandKind::Recti {
+                rect: Recti::new(4, 0, 4, 4),
+                color: color(0, 0, 255, 255),
+            },
+        ),
     ];
 
-    render_command_stream(&mut canvas, &mut commands, &[]);
+    render_command_stream(&mut canvas, &mut DisplayList::new(), &mut commands, &[]);
 
     assert_eq!(*observed.borrow(), vec![((20, 20), (10, 10, 10, 10))]);
-    let restored_clip = canvas.current_clip_rect();
-    assert_eq!((restored_clip.x, restored_clip.y, restored_clip.width, restored_clip.height), (0, 0, 20, 20));
     let events = log.snapshot();
     assert_eq!(events.len(), 5);
     assert!(matches!(events[0], RenderEvent::AtlasQuad(_)));
@@ -158,7 +179,7 @@ fn dynamic_slot_payload_runs_before_its_atlas_quad() {
     let atlas = make_replay_atlas();
     let update_before = atlas.get_last_update_id();
     let (renderer, log) = recording_renderer(atlas.clone());
-    let mut canvas = Canvas::from(renderer, crate::Dimensioni::new(20, 20));
+    let mut canvas = Canvas::new(renderer, crate::Dimensioni::new(20, 20));
     let payload_log = log.clone();
     let payload_called = Rc::new(Cell::new(false));
     let payload_called_in_callback = payload_called.clone();
@@ -168,14 +189,17 @@ fn dynamic_slot_payload_runs_before_its_atlas_quad() {
         }
         color4b(7, 8, 9, 255)
     });
-    let mut commands = vec![Command::SlotRedraw {
-        rect: Recti::new(0, 0, 4, 4),
-        id: crate::SlotId::default(),
-        color: color(255, 255, 255, 255),
-        payload,
-    }];
+    let mut commands = vec![command(
+        Recti::new(0, 0, 20, 20),
+        CommandKind::SlotRedraw {
+            rect: Recti::new(0, 0, 4, 4),
+            id: crate::SlotId::default(),
+            color: color(255, 255, 255, 255),
+            payload,
+        },
+    )];
 
-    render_command_stream(&mut canvas, &mut commands, &[]);
+    render_command_stream(&mut canvas, &mut DisplayList::new(), &mut commands, &[]);
 
     assert_eq!(atlas.get_last_update_id(), update_before.wrapping_add(1));
     assert!(payload_called.get());
@@ -187,22 +211,19 @@ fn dynamic_slot_payload_runs_before_its_atlas_quad() {
 }
 
 #[test]
-fn icon_command_obeys_nested_replay_clips() {
+fn icon_command_obeys_its_recorded_effective_clip() {
     let (renderer, log) = recording_renderer(make_replay_atlas());
-    let mut canvas = Canvas::from(renderer, crate::Dimensioni::new(20, 20));
-    let mut commands = vec![
-        Command::PushClip { rect: Recti::new(2, 0, 10, 10) },
-        Command::PushClip { rect: Recti::new(3, 1, 2, 2) },
-        Command::Icon {
+    let mut canvas = Canvas::new(renderer, crate::Dimensioni::new(20, 20));
+    let mut commands = vec![command(
+        Recti::new(3, 1, 2, 2),
+        CommandKind::Icon {
             rect: Recti::new(1, 0, 4, 4),
             id: CLOSE_ICON,
             color: color(255, 255, 255, 255),
         },
-        Command::PopClip,
-        Command::PopClip,
-    ];
+    )];
 
-    render_command_stream(&mut canvas, &mut commands, &[]);
+    render_command_stream(&mut canvas, &mut DisplayList::new(), &mut commands, &[]);
 
     let events = log.snapshot();
     let [RenderEvent::AtlasQuad(vertices)] = events.as_slice() else {

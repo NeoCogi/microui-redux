@@ -1028,7 +1028,7 @@ impl State {
             TextWrap::Word,
         );
         typography_body.config.font = FontRole::Body.into();
-        let style = Style::default().with_named_fonts(&ctx.canvas().get_atlas());
+        let style = Style::default().with_named_fonts(&ctx.canvas().atlas());
         let demo_root = ctx.create_window("Demo Window", rect(40, 40, 300, 450), UiNodeSet::default());
         let style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), UiNodeSet::default());
         let log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), UiNodeSet::default());

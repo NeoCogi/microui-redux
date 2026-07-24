@@ -1,7 +1,8 @@
 //! Tests for widget-local graphics translation, clipping, and batching.
 
 use super::*;
-use crate::render_command::{render_command_stream, Command};
+use crate::render::DisplayList;
+use crate::render_command::render_command_stream;
 use crate::draw_context::clip_relation;
 use crate::test_support::{recording_renderer, RenderEvent};
 
@@ -50,8 +51,8 @@ fn local_rect_translation_is_preserved_in_emitted_vertices() {
         graphics.push_triangle_local(Vec2f::new(0.0, 0.0), Vec2f::new(10.0, 0.0), Vec2f::new(0.0, 10.0), color4b(255, 255, 255, 255));
     }
 
-    match &commands[0] {
-        &Command::Triangle { vertex_start, vertex_count } => {
+    match &commands[0].kind {
+        &CommandKind::Triangle { vertex_start, vertex_count } => {
             let vertices = &triangle_vertices[vertex_start..vertex_start + vertex_count];
             let a = vertices[0].position();
             let b = vertices[1].position();
@@ -65,7 +66,7 @@ fn local_rect_translation_is_preserved_in_emitted_vertices() {
 }
 
 #[test]
-fn local_clip_changes_stay_in_one_triangle_batch() {
+fn local_clip_changes_finalize_triangle_ranges_with_distinct_clips() {
     let atlas = AtlasHandle::from(&AtlasSource {
         width: 1,
         height: 1,
@@ -88,10 +89,15 @@ fn local_clip_changes_stay_in_one_triangle_batch() {
         graphics.stroke_line(Vec2f::new(0.0, 2.0), Vec2f::new(10.0, 2.0), 2.0, color(255, 0, 0, 255));
     }
 
-    let triangle_count = commands.iter().filter(|cmd| matches!(cmd, Command::Triangle { .. })).count();
-    let clip_count = commands.iter().filter(|cmd| matches!(cmd, Command::PushClip { .. } | Command::PopClip)).count();
-    assert_eq!(triangle_count, 1);
-    assert_eq!(clip_count, 0);
+    let triangle_clips: Vec<_> = commands
+        .iter()
+        .filter_map(|command| match command.kind {
+            CommandKind::Triangle { .. } => Some((command.clip.x, command.clip.y, command.clip.width, command.clip.height)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(triangle_clips, vec![(0, 0, 50, 50), (0, 0, 5, 5)]);
+    assert_eq!(commands.len(), 2);
 }
 
 #[test]
@@ -121,7 +127,7 @@ fn graphics_restores_shared_clip_stack_on_drop() {
 }
 
 #[test]
-fn local_triangles_are_software_clipped_before_emission() {
+fn local_triangles_remain_unclipped_until_canvas_execution() {
     let atlas = AtlasHandle::from(&AtlasSource {
         width: 1,
         height: 1,
@@ -143,18 +149,35 @@ fn local_triangles_are_software_clipped_before_emission() {
         graphics.stroke_line(Vec2f::new(-10.0, 2.0), Vec2f::new(20.0, 2.0), 2.0, color(255, 0, 0, 255));
     }
 
-    match &commands[0] {
-        &Command::Triangle { vertex_start, vertex_count } => {
+    match &commands[0].kind {
+        &CommandKind::Triangle { vertex_start, vertex_count } => {
             let vertices = &triangle_vertices[vertex_start..vertex_start + vertex_count];
             assert!(!vertices.is_empty());
-            for vertex in vertices {
-                let pos = vertex.position();
-                assert!(pos.x >= 20.0 - GEOM_EPS && pos.x <= 25.0 + GEOM_EPS);
-                assert!(pos.y >= 30.0 - GEOM_EPS && pos.y <= 35.0 + GEOM_EPS);
-            }
+            assert!(vertices.iter().any(|vertex| vertex.position().x < 20.0));
+            assert_rect_eq(commands[0].clip, rect(20, 30, 5, 5));
         }
         _ => panic!("expected triangle command"),
     }
+
+    let (renderer, log) = recording_renderer(atlas);
+    let mut canvas = Canvas::new(renderer, Dimensioni::new(200, 200));
+    render_command_stream(&mut canvas, &mut DisplayList::new(), &mut commands, &triangle_vertices);
+    let rendered: Vec<_> = log
+        .snapshot()
+        .into_iter()
+        .filter_map(|event| match event {
+            RenderEvent::Triangle(vertices) => Some(vertices),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert!(!rendered.is_empty());
+    assert!(rendered.iter().all(|vertex| {
+        vertex.position[0] >= 20.0 - GEOM_EPS
+            && vertex.position[0] <= 25.0 + GEOM_EPS
+            && vertex.position[1] >= 30.0 - GEOM_EPS
+            && vertex.position[1] <= 35.0 + GEOM_EPS
+    }));
 }
 
 #[test]
@@ -190,8 +213,8 @@ fn nested_widget_local_clips_bound_final_renderer_geometry() {
     }
 
     let (renderer, log) = recording_renderer(atlas);
-    let mut canvas = Canvas::from(renderer, Dimensioni::new(200, 200));
-    render_command_stream(&mut canvas, &mut commands, &triangle_vertices);
+    let mut canvas = Canvas::new(renderer, Dimensioni::new(200, 200));
+    render_command_stream(&mut canvas, &mut DisplayList::new(), &mut commands, &triangle_vertices);
 
     let triangles: Vec<_> = log
         .snapshot()

@@ -29,12 +29,10 @@
 //
 //! Owned render-operation and solid-geometry storage.
 //!
-//! Painter records through this internal operation surface. Canvas adopts the remaining execution
-//! types in a subsequent subsystem step, so keep them available without transitional warnings.
-#![allow(dead_code)]
+//! Painter records through this internal operation surface and Canvas consumes it exactly once.
 
 use super::{
-    backend::{CustomRenderArgs, CustomRenderCommand},
+    backend::{CustomRenderArgs, CustomRenderCommand, Vertex},
     geometry::{SolidGeometry, SolidTriangle, SolidTriangleRange},
 };
 use crate::atlas::{FontId, IconId, SlotId};
@@ -55,15 +53,15 @@ pub struct DisplayList {
 }
 
 /// One recorded operation and its final screen-space clip.
-pub(super) struct DrawOp {
+pub(crate) struct DrawOp {
     /// Effective clip resolved when the operation was recorded.
-    pub(super) clip: Recti,
+    pub(crate) clip: Recti,
     /// Operation payload.
-    pub(super) kind: DrawKind,
+    pub(crate) kind: DrawKind,
 }
 
 /// Private rendering operation payload.
-pub(super) enum DrawKind {
+pub(crate) enum DrawKind {
     /// Draws a semantic solid rectangle.
     FillRect {
         /// Rectangle in screen space.
@@ -126,11 +124,11 @@ pub(super) enum DrawKind {
 }
 
 /// Operations and triangles detached from a [`DisplayList`] for execution.
-pub(super) struct RecordedFrame {
+pub(crate) struct RecordedFrame {
     /// Operations in painter order.
-    pub(super) ops: Vec<DrawOp>,
+    pub(crate) ops: Vec<DrawOp>,
     /// Solid geometry referenced by the operations.
-    pub(super) solid_geometry: SolidGeometry,
+    pub(crate) solid_geometry: SolidGeometry,
 }
 
 impl DisplayList {
@@ -154,59 +152,77 @@ impl DisplayList {
     }
 
     /// Detaches the recorded frame and leaves this list empty and ready for new recording.
-    pub(super) fn take(&mut self) -> RecordedFrame {
+    pub(crate) fn take(&mut self) -> RecordedFrame {
         RecordedFrame {
             ops: std::mem::take(&mut self.ops),
             solid_geometry: self.solid_geometry.take_recorded(),
         }
     }
 
+    /// Reclaims an executed frame's operation and triangle allocations.
+    pub(crate) fn recycle(&mut self, mut frame: RecordedFrame) {
+        frame.ops.clear();
+        self.ops = frame.ops;
+        self.solid_geometry.recycle_recorded(frame.solid_geometry);
+    }
+
     /// Appends one semantic rectangle operation.
-    pub(super) fn push_fill_rect(&mut self, clip: Recti, rect: Recti, color: Color) {
+    pub(crate) fn push_fill_rect(&mut self, clip: Recti, rect: Recti, color: Color) {
         self.push(clip, DrawKind::FillRect { rect, color });
     }
 
     /// Appends one owned text operation.
-    pub(super) fn push_text(&mut self, clip: Recti, font: FontId, pos: Vec2i, color: Color, text: impl Into<String>) {
+    pub(crate) fn push_text(&mut self, clip: Recti, font: FontId, pos: Vec2i, color: Color, text: impl Into<String>) {
         self.push(clip, DrawKind::Text { font, pos, color, text: text.into() });
     }
 
     /// Appends one atlas icon operation.
-    pub(super) fn push_icon(&mut self, clip: Recti, id: IconId, rect: Recti, color: Color) {
+    pub(crate) fn push_icon(&mut self, clip: Recti, id: IconId, rect: Recti, color: Color) {
         self.push(clip, DrawKind::Icon { id, rect, color });
     }
 
     /// Appends one image operation.
-    pub(super) fn push_image(&mut self, clip: Recti, image: Image, rect: Recti, color: Color) {
+    pub(crate) fn push_image(&mut self, clip: Recti, image: Image, rect: Recti, color: Color) {
         self.push(clip, DrawKind::Image { image, rect, color });
     }
 
     /// Appends one dynamic atlas-slot redraw operation.
-    pub(super) fn push_redraw_slot(&mut self, clip: Recti, id: SlotId, rect: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
+    pub(crate) fn push_redraw_slot(&mut self, clip: Recti, id: SlotId, rect: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
         self.push(clip, DrawKind::RedrawSlot { id, rect, color, payload });
     }
 
     /// Appends one backend-specific custom drawing barrier.
-    pub(super) fn push_custom(&mut self, clip: Recti, args: CustomRenderArgs, command: Box<dyn CustomRenderCommand>) {
+    pub(crate) fn push_custom(&mut self, clip: Recti, args: CustomRenderArgs, command: Box<dyn CustomRenderCommand>) {
         self.push(clip, DrawKind::Custom { args, command });
     }
 
     /// Appends strongly typed solid triangles and records their valid contiguous range.
-    pub(super) fn push_solid_triangles(&mut self, clip: Recti, triangles: &[SolidTriangle]) {
+    #[allow(dead_code)]
+    pub(crate) fn push_solid_triangles(&mut self, clip: Recti, triangles: &[SolidTriangle]) {
         if let Some(range) = self.solid_geometry.append_triangles(triangles, Vec2f::new(0.0, 0.0)) {
             self.push_solid_range(clip, range);
         }
     }
 
+    /// Converts complete backend vertex triplets into texture-independent retained triangles.
+    ///
+    /// This is a temporary bridge for the legacy command arena. Texture coordinates are discarded
+    /// because the geometry is solid and Canvas resolves the white-pixel UV during execution.
+    pub(crate) fn push_backend_triangles(&mut self, clip: Recti, vertices: &[Vertex]) {
+        if let Some(range) = self.solid_geometry.append_backend_triangles(vertices) {
+            self.push_solid_range(clip, range);
+        }
+    }
+
     /// Tessellates and records one translated thick line.
-    pub(super) fn push_line(&mut self, clip: Recti, from: Vec2f, to: Vec2f, width: f32, color: Color4b, offset: Vec2f) {
+    pub(crate) fn push_line(&mut self, clip: Recti, from: Vec2f, to: Vec2f, width: f32, color: Color4b, offset: Vec2f) {
         if let Some(range) = self.solid_geometry.append_line(from, to, width, color, offset) {
             self.push_solid_range(clip, range);
         }
     }
 
     /// Tessellates and records one translated simple polygon.
-    pub(super) fn push_polygon(&mut self, clip: Recti, points: &[Vec2f], color: Color4b, offset: Vec2f) {
+    pub(crate) fn push_polygon(&mut self, clip: Recti, points: &[Vec2f], color: Color4b, offset: Vec2f) {
         if let Some(range) = self.solid_geometry.append_polygon(points, color, offset) {
             self.push_solid_range(clip, range);
         }
@@ -399,5 +415,29 @@ mod tests {
         let mut list = DisplayList::new();
         list.push_solid_triangles(Recti::new(0, 0, 100, 100), &[]);
         assert!(list.is_empty());
+    }
+
+    #[test]
+    fn backend_triangle_bridge_retains_only_complete_triplets() {
+        let mut list = DisplayList::new();
+        let clip = Recti::new(0, 0, 100, 100);
+        let vertices = [
+            Vertex::new(Vec2f::new(0.0, 0.0), Vec2f::default(), color4b(1, 2, 3, 4)),
+            Vertex::new(Vec2f::new(1.0, 0.0), Vec2f::default(), color4b(5, 6, 7, 8)),
+            Vertex::new(Vec2f::new(0.0, 1.0), Vec2f::default(), color4b(9, 10, 11, 12)),
+            Vertex::new(Vec2f::new(9.0, 9.0), Vec2f::default(), color4b(13, 14, 15, 16)),
+        ];
+
+        list.push_backend_triangles(clip, &vertices);
+
+        assert_eq!(list.ops.len(), 1);
+        assert_eq!(list.solid_geometry.triangles().len(), 1);
+        let retained = list.solid_geometry.triangles()[0].vertices();
+        assert_eq!(
+            (retained[0].color.x, retained[0].color.y, retained[0].color.z, retained[0].color.w),
+            (1, 2, 3, 4)
+        );
+        assert_eq!(retained[2].position.x, 0.0);
+        assert_eq!(retained[2].position.y, 1.0);
     }
 }

@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 mod command;
 pub use command::TextWrap;
-pub(crate) use command::Command;
+pub(crate) use command::{Command, CommandKind};
 
 mod replay;
 pub(crate) use replay::render_command_stream;

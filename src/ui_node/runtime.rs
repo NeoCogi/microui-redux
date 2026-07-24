@@ -1,5 +1,7 @@
 use super::*;
 use crate::render::geometry::SolidGeometry;
+#[cfg(test)]
+use crate::render_command::CommandKind;
 use std::collections::HashMap;
 
 pub(crate) struct UiRuntime {
@@ -138,6 +140,7 @@ impl UiRuntime {
         root_id: crate::RootId,
         root_name: &str,
         canvas: &mut Canvas<R>,
+        display_list: &mut DisplayList,
         style: &Style,
         input: &Input,
         results: &mut FrameResults,
@@ -147,21 +150,21 @@ impl UiRuntime {
         let local_body = local_rect_for(body);
         let body_view = root_window_body_view(local_body, style);
 
-        self.layout_roots_in_view(roots, style, canvas.get_atlas(), body_view);
+        self.layout_roots_in_view(roots, style, canvas.atlas(), body_view);
 
         let mut root_index = 0;
         while root_index < roots.len() {
             let root = &mut roots[root_index];
-            self.update_node_ref(root_id, root_name, root, self.root_traversal, style, canvas.get_atlas(), input, results);
+            self.update_node_ref(root_id, root_name, root, self.root_traversal, style, canvas.atlas(), input, results);
             root_index += 1;
         }
 
-        self.layout_roots_in_view(roots, style, canvas.get_atlas(), body_view);
+        self.layout_roots_in_view(roots, style, canvas.atlas(), body_view);
 
         let mut root_index = 0;
         while root_index < roots.len() {
             let root = &mut roots[root_index];
-            self.paint_node_ref(root, self.root_traversal, style, canvas.get_atlas(), input);
+            self.paint_node_ref(root, self.root_traversal, style, canvas.atlas(), input);
             root_index += 1;
         }
 
@@ -174,21 +177,21 @@ impl UiRuntime {
             self.debug_texts = self
                 .commands
                 .iter()
-                .filter_map(|cmd| match cmd {
-                    Command::Text { text, .. } => Some(text.clone()),
+                .filter_map(|command| match &command.kind {
+                    CommandKind::Text { text, .. } => Some(text.clone()),
                     _ => None,
                 })
                 .collect();
             self.debug_rects = self
                 .commands
                 .iter()
-                .filter_map(|cmd| match cmd {
-                    Command::Recti { rect, .. } => Some(*rect),
+                .filter_map(|command| match &command.kind {
+                    CommandKind::Recti { rect, .. } => Some(*rect),
                     _ => None,
                 })
                 .collect();
         }
-        render_command_stream(canvas, &mut self.commands, &self.triangle_vertices);
+        render_command_stream(canvas, display_list, &mut self.commands, &self.triangle_vertices);
         self.triangle_vertices.clear();
     }
 
@@ -596,7 +599,6 @@ impl UiRuntime {
         let current = self.current_clip_rect();
         let effective = current.intersect(&traversal.screen_clip).unwrap_or_default();
         self.clip_stack.push(effective);
-        self.commands.push(Command::PushClip { rect: effective });
     }
 
     /// Pops a node clip pushed by [`Self::push_node_clip_for_traversal`].
@@ -604,7 +606,6 @@ impl UiRuntime {
         if self.clip_stack.len() > 1 {
             self.clip_stack.pop();
         }
-        self.commands.push(Command::PopClip);
     }
 }
 

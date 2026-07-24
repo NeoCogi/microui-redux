@@ -75,6 +75,13 @@ impl SolidTriangle {
     }
 }
 
+impl From<[SolidVertex; 3]> for SolidTriangle {
+    /// Creates a triangle from three independently colored vertices.
+    fn from(vertices: [SolidVertex; 3]) -> Self {
+        Self(vertices)
+    }
+}
+
 /// Validated range inside a [`SolidGeometry`] triangle arena.
 pub(crate) struct SolidTriangleRange {
     /// Inclusive triangle index.
@@ -90,7 +97,6 @@ impl SolidTriangleRange {
     }
 
     /// Returns a standard range for read-only execution.
-    #[allow(dead_code)]
     pub(crate) fn as_range(&self) -> Range<usize> {
         self.start..self.end
     }
@@ -145,6 +151,33 @@ impl SolidGeometry {
         self.triangles.reserve(triangles.len());
         for triangle in triangles {
             self.triangles.push(triangle.translated(offset));
+        }
+        SolidTriangleRange::new(start, self.triangles.len())
+    }
+
+    /// Converts and appends complete backend vertex triplets without temporary storage.
+    ///
+    /// This is the allocation-free bridge used while the legacy vertex arena still exists. UVs
+    /// are intentionally discarded because Canvas resolves the atlas white-pixel coordinate for
+    /// every solid triangle during execution.
+    pub(crate) fn append_backend_triangles(&mut self, vertices: &[Vertex]) -> Option<SolidTriangleRange> {
+        let start = self.triangles.len();
+        self.triangles.reserve(vertices.len() / 3);
+        for vertices in vertices.chunks_exact(3) {
+            self.triangles.push(SolidTriangle::from([
+                SolidVertex {
+                    position: vertices[0].position(),
+                    color: vertices[0].color(),
+                },
+                SolidVertex {
+                    position: vertices[1].position(),
+                    color: vertices[1].color(),
+                },
+                SolidVertex {
+                    position: vertices[2].position(),
+                    color: vertices[2].color(),
+                },
+            ]));
         }
         SolidTriangleRange::new(start, self.triangles.len())
     }
@@ -338,6 +371,12 @@ impl SolidGeometry {
             triangles: std::mem::take(&mut self.triangles),
             polygon_boundary: Vec::new(),
         }
+    }
+
+    /// Reclaims a detached triangle allocation while preserving polygon tessellation scratch.
+    pub(crate) fn recycle_recorded(&mut self, mut recorded: Self) {
+        recorded.triangles.clear();
+        self.triangles = recorded.triangles;
     }
 
     #[cfg(test)]

@@ -66,7 +66,7 @@ use crate::{
     rect, Canvas, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style,
     TextureId, UiRuntime,
 };
-use crate::render::{Renderer, RendererHandle};
+use crate::render::{DisplayList, Renderer, RendererHandle};
 use crate::ui_node::{pointer_events_from_input, UiNode, UiNodeId};
 use window_manager::WindowEntry;
 mod builder;
@@ -98,6 +98,8 @@ impl RootId {
 pub struct Context<R: Renderer> {
     /// Renderer-facing canvas that replays root command lists.
     canvas: Canvas<R>,
+    /// Reusable operation storage for window-manager frame and chrome drawing.
+    display_list: DisplayList,
     /// Shared style used by all roots and scroll areas.
     style: Rc<Style>,
 
@@ -120,10 +122,11 @@ impl<R: Renderer> Context<R> {
     /// Creates a new UI context around the provided renderer and dimensions.
     pub fn new(renderer: RendererHandle<R>, dim: Dimensioni) -> Self {
         // The renderer supplies the atlas; the default style then binds semantic font roles from it.
-        let canvas = Canvas::from(renderer, dim);
-        let style = Style::default().with_named_fonts(&canvas.get_atlas());
+        let canvas = Canvas::new(renderer, dim);
+        let style = Style::default().with_named_fonts(&canvas.atlas());
         Self {
             canvas,
+            display_list: DisplayList::new(),
             style: Rc::new(style),
             last_zindex: 0,
             frame: 0,
@@ -213,7 +216,7 @@ impl<R: Renderer> Context<R> {
     /// semantic roles to those atlas bindings explicitly.
     pub fn set_style(&mut self, style: &Style) {
         let mut resolved = style.clone();
-        resolved.bind_default_named_fonts(&self.canvas.get_atlas());
+        resolved.bind_default_named_fonts(&self.canvas.atlas());
         self.style = Rc::new(resolved)
     }
 

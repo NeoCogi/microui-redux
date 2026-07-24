@@ -1,84 +1,52 @@
-//! Draw-command replay.
+//! Transitional conversion from legacy commands into the unified DisplayList executor.
 
 use super::*;
+use crate::render::DisplayList;
 
-/// Replays a command list into the renderer canvas.
-pub(crate) fn render_command_stream<R: Renderer>(canvas: &mut Canvas<R>, commands: &mut Vec<Command>, triangle_vertices: &[Vertex]) {
-    let mut pending = std::mem::take(commands);
-    while !pending.is_empty() {
-        let special_index = pending.iter().position(|command| matches!(command, Command::BackendCustomRender(_, _)));
-        let batch_len = special_index.unwrap_or(pending.len());
-        if batch_len > 0 {
-            render_command_batch(canvas, triangle_vertices, pending.drain(..batch_len));
-        }
-
-        if special_index.is_none() {
-            break;
-        }
-
-        if let Some(Command::BackendCustomRender(mut cra, mut f)) = pending.drain(..1).next() {
-            canvas.flush();
-            let prev_clip = canvas.current_clip_rect();
-            let merged_clip = match prev_clip.intersect(&cra.view) {
-                Some(rect) => rect,
-                None => Recti::new(cra.content_area.x, cra.content_area.y, 0, 0),
-            };
-            canvas.set_clip_rect(merged_clip);
-            cra.view = merged_clip;
-            f.render(canvas.current_dimension(), &cra);
-            canvas.flush();
-            canvas.set_clip_rect(prev_clip);
-        }
-    }
-    *commands = pending;
+/// Converts a legacy command list once, then executes it through [`Canvas::render`].
+///
+/// This adapter exists only until all producers record directly into DisplayList. It performs no
+/// renderer work and never scans ahead for custom operations; each command is consumed exactly
+/// once and custom barriers are handled later by Canvas.
+pub(crate) fn render_command_stream<R: Renderer>(canvas: &mut Canvas<R>, list: &mut DisplayList, commands: &mut Vec<Command>, triangle_vertices: &[Vertex]) {
+    let pending = std::mem::take(commands);
+    list.clear();
+    record_legacy_commands(list, pending, triangle_vertices);
+    canvas.render(list);
 }
 
-fn render_command_batch<R, I>(canvas: &mut Canvas<R>, triangle_vertices: &[Vertex], commands: I)
-where
-    R: Renderer,
-    I: IntoIterator<Item = Command>,
-{
-    let base_clip = canvas.current_clip_rect();
-    canvas.render_scope(|canvas| {
-        let mut clip_stack = vec![base_clip];
-        canvas.set_clip_rect(base_clip);
-        for command in commands {
-            match command {
-                Command::Text { text, pos, color, font } => {
-                    canvas.draw_chars(font, &text, pos, color);
-                }
-                Command::Recti { rect, color } => {
-                    canvas.draw_rect(rect, color);
-                }
-                Command::Icon { id, rect, color } => {
-                    canvas.draw_icon(id, rect, color);
-                }
-                Command::PushClip { rect } => {
-                    let current = clip_stack.last().copied().unwrap_or(base_clip);
-                    let next = current.intersect(&rect).unwrap_or_default();
-                    clip_stack.push(next);
-                    canvas.set_clip_rect(next);
-                }
-                Command::PopClip => {
-                    if clip_stack.len() > 1 {
-                        clip_stack.pop();
-                    }
-                    let current = clip_stack.last().copied().unwrap_or(base_clip);
-                    canvas.set_clip_rect(current);
-                }
-                Command::Image { rect, image, color } => {
-                    canvas.draw_image(image, rect, color);
-                }
-                Command::SlotRedraw { rect, id, color, payload } => {
-                    canvas.draw_slot_with_function(id, rect, color, payload);
-                }
-                Command::Triangle { vertex_start, vertex_count } => {
-                    let end = vertex_start + vertex_count;
-                    canvas.draw_triangles(&triangle_vertices[vertex_start..end]);
-                }
-                Command::BackendCustomRender(_, _) | Command::None => (),
+/// Translates legacy payloads whose effective clips were captured during recording.
+fn record_legacy_commands(list: &mut DisplayList, commands: Vec<Command>, triangle_vertices: &[Vertex]) {
+    for Command { clip, kind } in commands {
+        match kind {
+            CommandKind::Text { text, pos, color, font } => {
+                list.push_text(clip, font, pos, color, text);
             }
+            CommandKind::Recti { rect, color } => {
+                list.push_fill_rect(clip, rect, color);
+            }
+            CommandKind::Icon { id, rect, color } => {
+                list.push_icon(clip, id, rect, color);
+            }
+            CommandKind::Image { rect, image, color } => {
+                list.push_image(clip, image, rect, color);
+            }
+            CommandKind::SlotRedraw { rect, id, color, payload } => {
+                list.push_redraw_slot(clip, id, rect, color, payload);
+            }
+            CommandKind::Triangle { vertex_start, vertex_count } => {
+                let Some(vertex_end) = vertex_start.checked_add(vertex_count) else {
+                    continue;
+                };
+                let Some(vertices) = triangle_vertices.get(vertex_start..vertex_end) else {
+                    continue;
+                };
+                list.push_backend_triangles(clip, vertices);
+            }
+            CommandKind::BackendCustomRender(args, command) => {
+                list.push_custom(clip, args, command);
+            }
+            CommandKind::None => {}
         }
-        canvas.set_clip_rect(base_clip);
-    });
+    }
 }

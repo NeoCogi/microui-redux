@@ -87,7 +87,6 @@
 //! interaction generation as the crate's public retained contract.
 
 pub mod atlas;
-mod canvas;
 mod draw_context;
 mod file_dialog;
 mod graphics;
@@ -171,7 +170,7 @@ pub use widgets::{
     WidgetConfig,
 };
 
-pub(crate) use canvas::Canvas;
+pub(crate) use render::Canvas;
 #[allow(unused_imports)]
 pub(crate) use rs_math3d::{
     Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3, color4b,
