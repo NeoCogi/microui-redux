@@ -85,6 +85,25 @@
 //! Retained application/business logic reacts through
 //! [`Context::committed_results`], which exposes the previous frame's published
 //! interaction generation as the crate's public retained contract.
+//!
+//! # Rendering pipeline
+//!
+//! Drawing is recorded before it reaches the backend:
+//!
+//! ```text
+//! Widget::paint
+//!      |
+//!      v
+//!   Painter  --->  DisplayList  --->  Renderer  --->  BackendHandle  --->  RendererBackend
+//! (records)         (owns ops)        (executes)       (shares)             (submits)
+//! ```
+//!
+//! Widgets obtain a [`render::Painter`] from [`WidgetCtx::painter`] and record
+//! backend-neutral operations. [`render::Renderer`] executes the resulting
+//! [`render::DisplayList`], performs final clipping and tessellation, and submits final
+//! [`render::Vertex`] values through [`render::RendererBackend`]. Applications normally import
+//! retained UI types from [`prelude`], while backend integrations import low-level types from
+//! [`render`].
 
 pub mod atlas;
 mod file_dialog;

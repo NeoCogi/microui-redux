@@ -1,8 +1,4 @@
-//! Rendering backend contracts and high-level frame execution.
-//!
-//! This module is the public integration boundary for render backends. It owns the final vertex
-//! payload, backend trait and handle, custom-render callback API, owned display lists, and the
-//! [`Renderer`] that manages frame execution and texture resources.
+#![doc = include_str!("RENDER.md")]
 
 mod backend;
 pub(crate) mod display_list;

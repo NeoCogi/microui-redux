@@ -45,6 +45,56 @@ use std::rc::Rc;
 /// A Painter borrows exactly one [`DisplayList`]. It translates local primitives into screen
 /// space, attaches the current effective screen-space clip to every operation, and tessellates
 /// custom solid geometry without consulting style, input, atlas, Renderer, or RendererBackend state.
+///
+/// Custom widgets obtain a painter from their [`WidgetCtx`](crate::WidgetCtx):
+///
+/// ```
+/// use microui_redux::prelude::*;
+///
+/// #[derive(Clone)]
+/// struct Swatch {
+///     options: WidgetOption,
+/// }
+///
+/// impl Widget for Swatch {
+///     fn widget_opt(&self) -> &WidgetOption {
+///         &self.options
+///     }
+///
+///     fn measure(
+///         &self,
+///         _style: &Style,
+///         _atlas: &AtlasHandle,
+///         _available: Dimensioni,
+///     ) -> Dimensioni {
+///         Dimensioni::new(48, 24)
+///     }
+///
+///     fn update(
+///         &mut self,
+///         _ctx: &mut WidgetCtx<'_>,
+///         _events: Vec<UiInputEvent>,
+///     ) -> ResourceState {
+///         ResourceState::NONE
+///     }
+///
+///     fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+///         let mut painter = ctx.painter();
+///         let bounds = painter.local_rect();
+///         painter.fill_rect(bounds, color(42, 48, 60, 255));
+///
+///         let inset = Recti::new(2, 2, bounds.width - 4, bounds.height - 4);
+///         painter.with_clip(inset, |painter| {
+///             painter.stroke_line(
+///                 Vec2f::new(0.0, 0.0),
+///                 Vec2f::new(bounds.width as f32, bounds.height as f32),
+///                 2.0,
+///                 color(110, 190, 255, 255),
+///             );
+///         });
+///     }
+/// }
+/// ```
 pub struct Painter<'a> {
     /// Display list receiving operations.
     list: &'a mut DisplayList,

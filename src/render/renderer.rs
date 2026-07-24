@@ -49,6 +49,32 @@ use std::collections::HashMap;
 ///
 /// Renderer has no mutable drawing clip and exposes no clip stack. Clips belong to operations in a
 /// [`DisplayList`], making execution deterministic and independent of prior draw calls.
+///
+/// A low-level integration can record and execute a display list directly:
+///
+/// ```
+/// use microui_redux::{
+///     prelude::{color, Recti, Vec2i},
+///     render::{DisplayList, Painter, Renderer, RendererBackend},
+/// };
+///
+/// fn render_frame<B: RendererBackend>(
+///     renderer: &mut Renderer<B>,
+///     display_list: &mut DisplayList,
+/// ) {
+///     let dimensions = renderer.dimensions();
+///     let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
+///
+///     renderer.begin(dimensions.width, dimensions.height, color(18, 20, 24, 255));
+///     {
+///         let mut painter =
+///             Painter::new(display_list, Vec2i::default(), viewport, viewport);
+///         painter.fill_rect(Recti::new(8, 8, 80, 24), color(70, 110, 180, 255));
+///     }
+///     renderer.render(display_list);
+///     renderer.end();
+/// }
+/// ```
 pub struct Renderer<B: RendererBackend> {
     /// Current viewport dimensions in pixels.
     current_dim: Dimensioni,
@@ -215,6 +241,23 @@ impl<B: RendererBackend> Renderer<B> {
     ///
     /// Dimensions and byte length are checked before an id is allocated or backend state is
     /// mutated. The texture is tracked by the renderer only after the backend reports success.
+    ///
+    /// ```
+    /// use microui_redux::{
+    ///     prelude::TextureId,
+    ///     render::{Renderer, RendererBackend},
+    /// };
+    ///
+    /// fn upload_checkerboard<B: RendererBackend>(
+    ///     renderer: &mut Renderer<B>,
+    /// ) -> Result<TextureId, String> {
+    ///     let rgba = [
+    ///         255, 255, 255, 255, 0, 0, 0, 255,
+    ///         0, 0, 0, 255, 255, 255, 255, 255,
+    ///     ];
+    ///     renderer.try_load_texture_rgba(2, 2, &rgba)
+    /// }
+    /// ```
     pub fn try_load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
         crate::atlas::validate_rgba_buffer(width, height, pixels.len())?;
         let next_texture_id = self.next_texture_id.checked_add(1).ok_or_else(|| String::from("Texture id space exhausted"))?;

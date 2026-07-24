@@ -131,6 +131,24 @@ pub struct CustomRenderArgs {
 /// geometry. Interaction is handled during widget update and is deliberately absent from this
 /// boundary. Implementations usually capture a concrete backend handle and enqueue backend-owned
 /// draw work using the clipped [`CustomRenderArgs`] geometry.
+///
+/// The callback contains rendering geometry only:
+///
+/// ```
+/// use microui_redux::{
+///     prelude::{Dimensioni, Recti},
+///     render::{CustomRenderArgs, CustomRenderCommand},
+/// };
+///
+/// fn clipped_callback() -> Box<dyn CustomRenderCommand> {
+///     Box::new(|dimensions: Dimensioni, args: &CustomRenderArgs| {
+///         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
+///         let visible_area = args.view;
+///         let content_area = args.content_area;
+///         let _ = (viewport, visible_area, content_area);
+///     })
+/// }
+/// ```
 pub trait CustomRenderCommand {
     /// Records backend-specific draw work for the current frame.
     fn render(&mut self, dim: Dimensioni, args: &CustomRenderArgs);
@@ -146,6 +164,56 @@ where
 }
 
 /// Trait implemented by render backends used by the UI context.
+///
+/// Backends consume final [`Vertex`] values from the [`crate::render::Renderer`]:
+///
+/// ```
+/// use microui_redux::{
+///     prelude::{AtlasHandle, Color, TextureId},
+///     render::{RendererBackend, Vertex},
+/// };
+///
+/// struct Backend {
+///     atlas: AtlasHandle,
+/// }
+///
+/// impl RendererBackend for Backend {
+///     fn get_atlas(&self) -> AtlasHandle {
+///         self.atlas.clone()
+///     }
+///
+///     fn begin(&mut self, _width: i32, _height: i32, _clear: Color) {}
+///
+///     fn push_quad_vertices(
+///         &mut self,
+///         _v0: &Vertex,
+///         _v1: &Vertex,
+///         _v2: &Vertex,
+///         _v3: &Vertex,
+///     ) {
+///     }
+///
+///     fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
+///
+///     fn flush(&mut self) {}
+///
+///     fn end(&mut self) {}
+///
+///     fn create_texture(
+///         &mut self,
+///         _id: TextureId,
+///         _width: i32,
+///         _height: i32,
+///         _pixels: &[u8],
+///     ) -> Result<(), String> {
+///         Ok(())
+///     }
+///
+///     fn destroy_texture(&mut self, _id: TextureId) {}
+///
+///     fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
+/// }
+/// ```
 pub trait RendererBackend {
     /// Returns the atlas backing the UI renderer.
     fn get_atlas(&self) -> AtlasHandle;
