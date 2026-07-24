@@ -68,7 +68,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 - **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). Retained traversal keys widget interaction by stable retained node IDs.
 - **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and stored in retained roots through `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)`. Tree nodes cover widgets, scroll areas, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
-- **Graphics**: widget-local primitive drawing exposed through `WidgetCtx::graphics(...)` and the `Graphics` builder. It covers rectangles, frames, text/icons/images, thick line strokes, filled polygons, and nested local clip scopes.
+- **Painter**: widget-local primitive recording exposed through `WidgetCtx::painter()`. It records rectangles, text/icons/images, thick line strokes, filled polygons, and scoped local clips into the current frame display list.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override `config.font`.
 - **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2-backed glow, Vulkan, and WGPU examples demonstrate how to batch the commands produced by a container and upload them to the GPU.
 
@@ -157,12 +157,12 @@ if ctx.committed_results().state_of_retained(RetainedId::root_node(image_root, i
 - `WidgetFillOption` controls which interaction states draw a filled background; use `WidgetFillOption::ALL` to keep the default normal/hover/click fills.
 - Use `Context::try_load_image_rgba`/`load_image_from` and `Context::free_image` to manage the lifetime of external textures; `load_image_rgba` is a panicking convenience wrapper for already-validated RGBA buffers.
 
-## Graphics primitives
-- `WidgetCtx::graphics(...)` exposes a widget-local `Graphics` builder for custom widgets and paint code.
-- `WidgetCtx::local_rect()` / `WidgetCtx::rect()` and `WidgetCtx::input()` use widget-local coordinates; `WidgetCtx::screen_rect()` is the explicit absolute rectangle when a widget needs container-space geometry.
-- The builder provides `draw_rect`, `draw_box`, `draw_text`, `draw_icon`, `draw_image`, `draw_frame`, `draw_widget_frame`, `draw_control_text`, `stroke_line`, `fill_polygon`, and local clip helpers such as `with_clip`.
-- Filled shapes and strokes are tessellated into retained triangles and clipped in software before replay, so primitive rendering stays consistent across glow, Vulkan, and WGPU backends.
-- `examples/retained-custom-drawing` shows a retained custom widget drawing through `WidgetCtx::graphics(...)`, and `examples/demo-full` includes a larger graphics window.
+## Painting primitives
+- `WidgetCtx::painter()` returns a widget-local `Painter` that records directly into the current frame `DisplayList`.
+- `WidgetCtx::local_rect()` / `WidgetCtx::rect()` and routed input use widget-local coordinates; `WidgetCtx::screen_rect()` is the explicit absolute rectangle when a widget needs container-space geometry.
+- `Painter` provides `fill_rect`, `stroke_rect`, `text`, `icon`, `image`, `redraw_slot`, `stroke_line`, `fill_polygon`, and scoped clipping through `with_clip`.
+- Filled shapes and strokes are tessellated into retained triangles, while `Canvas` applies the operation's effective clip during execution so primitive rendering stays consistent across glow, Vulkan, and WGPU backends.
+- `examples/retained-custom-drawing` shows a retained custom widget drawing through `WidgetCtx::painter()`, and `examples/demo-full` includes a larger painting example.
 - Direct scroll-area/container draw and clip methods are no longer public; retained widgets and `WidgetTreeBuilder::custom_render(...)` are the supported custom drawing paths.
 
 ## Fonts and typography

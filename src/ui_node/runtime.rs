@@ -1,7 +1,4 @@
 use super::*;
-use crate::render::geometry::SolidGeometry;
-#[cfg(test)]
-use crate::render_command::CommandKind;
 use std::collections::HashMap;
 
 pub(crate) struct UiRuntime {
@@ -17,20 +14,12 @@ pub(crate) struct UiRuntime {
     pub(crate) capture: Option<UiNodeId>,
     /// Whether this runtime accepts pointer routing for the frame.
     pub(super) pointer_input_enabled: bool,
-    /// Commands recorded by the node paint path.
-    pub(super) commands: Vec<Command>,
-    /// Snapshot of text commands before renderer replay drains them.
+    /// Snapshot of text operations from the most recently recorded display list.
     #[cfg(test)]
     debug_texts: Vec<String>,
-    /// Snapshot of rectangle commands before renderer replay drains them.
+    /// Snapshot of rectangle operations from the most recently recorded display list.
     #[cfg(test)]
     debug_rects: Vec<Recti>,
-    /// Triangle vertex arena referenced by retained triangle commands.
-    pub(super) triangle_vertices: Vec<Vertex>,
-    /// Reusable typed solid geometry and its private polygon workspace.
-    pub(super) solid_geometry: SolidGeometry,
-    /// Active screen-space clip stack.
-    pub(super) clip_stack: Vec<Recti>,
     /// Whether focus was refreshed or changed this frame.
     pub(super) updated_focus: bool,
     /// Input events routed to each node during the current frame, consumed by update.
@@ -46,14 +35,10 @@ impl Default for UiRuntime {
             hover: None,
             capture: None,
             pointer_input_enabled: false,
-            commands: Vec::new(),
             #[cfg(test)]
             debug_texts: Vec::new(),
             #[cfg(test)]
             debug_rects: Vec::new(),
-            triangle_vertices: Vec::new(),
-            solid_geometry: SolidGeometry::new(),
-            clip_stack: Vec::new(),
             updated_focus: false,
             routed_events: HashMap::new(),
         }
@@ -102,11 +87,6 @@ impl UiRuntime {
 
     /// Clears frame-local runtime state before layout/input/update/paint passes.
     pub(crate) fn begin_frame(&mut self, pointer_input_enabled: bool) {
-        self.commands.clear();
-        self.triangle_vertices.clear();
-        self.solid_geometry.clear();
-        self.clip_stack.clear();
-        self.clip_stack.push(UNCLIPPED_RECT);
         self.updated_focus = false;
         self.routed_events.clear();
         self.pointer_input_enabled = pointer_input_enabled;
@@ -130,17 +110,17 @@ impl UiRuntime {
         self.layout_roots_in_view(roots, style, atlas, body_view)
     }
 
-    /// Runs post-input update/paint passes and replays the recorded commands immediately.
+    /// Runs post-input update/paint passes and appends directly to a borrowed display list.
     ///
     /// The caller must run one pre-input layout pass and route input before calling this method. A
     /// final layout runs after update so paint observes post-update widget/container state.
-    pub(crate) fn update_paint_frame<R: Renderer>(
+    pub(crate) fn update_paint_frame(
         &mut self,
         roots: &mut [UiNode],
         root_id: crate::RootId,
         root_name: &str,
-        canvas: &mut Canvas<R>,
         display_list: &mut DisplayList,
+        atlas: crate::AtlasHandle,
         style: &Style,
         input: &Input,
         results: &mut FrameResults,
@@ -150,49 +130,42 @@ impl UiRuntime {
         let local_body = local_rect_for(body);
         let body_view = root_window_body_view(local_body, style);
 
-        self.layout_roots_in_view(roots, style, canvas.atlas(), body_view);
+        self.layout_roots_in_view(roots, style, atlas.clone(), body_view);
 
         let mut root_index = 0;
         while root_index < roots.len() {
             let root = &mut roots[root_index];
-            self.update_node_ref(root_id, root_name, root, self.root_traversal, style, canvas.atlas(), input, results);
+            self.update_node_ref(
+                root_id,
+                root_name,
+                root,
+                self.root_traversal,
+                display_list,
+                style,
+                atlas.clone(),
+                input,
+                results,
+            );
             root_index += 1;
         }
 
-        self.layout_roots_in_view(roots, style, canvas.atlas(), body_view);
+        self.layout_roots_in_view(roots, style, atlas.clone(), body_view);
 
         let mut root_index = 0;
         while root_index < roots.len() {
             let root = &mut roots[root_index];
-            self.paint_node_ref(root, self.root_traversal, style, canvas.atlas(), input);
+            self.paint_node_ref(root, self.root_traversal, display_list, style, atlas.clone());
             root_index += 1;
         }
 
         if !self.updated_focus {
             self.focus = None;
         }
-        self.clip_stack.pop();
         #[cfg(test)]
         {
-            self.debug_texts = self
-                .commands
-                .iter()
-                .filter_map(|command| match &command.kind {
-                    CommandKind::Text { text, .. } => Some(text.clone()),
-                    _ => None,
-                })
-                .collect();
-            self.debug_rects = self
-                .commands
-                .iter()
-                .filter_map(|command| match &command.kind {
-                    CommandKind::Recti { rect, .. } => Some(*rect),
-                    _ => None,
-                })
-                .collect();
+            self.debug_texts = display_list.debug_texts();
+            self.debug_rects = display_list.debug_rects();
         }
-        render_command_stream(canvas, display_list, &mut self.commands, &self.triangle_vertices);
-        self.triangle_vertices.clear();
     }
 
     /// Returns text commands recorded by the most recent frame.
@@ -370,6 +343,7 @@ impl UiRuntime {
         root_name: &str,
         node: &mut UiNode,
         parent_traversal: TraversalState,
+        display_list: &mut DisplayList,
         style: &Style,
         atlas: crate::AtlasHandle,
         input: &Input,
@@ -379,6 +353,7 @@ impl UiRuntime {
         let traverse_children = {
             let mut ctx = UpdateCtx {
                 runtime: self,
+                display_list,
                 root_id,
                 root_name,
                 style,
@@ -395,7 +370,7 @@ impl UiRuntime {
         if traverse_children {
             if let Some(children) = node.children_mut() {
                 for child in children {
-                    self.update_node_ref(root_id, root_name, child, traversal, style, atlas.clone(), input, results);
+                    self.update_node_ref(root_id, root_name, child, traversal, display_list, style, atlas.clone(), input, results);
                 }
             }
         }
@@ -549,14 +524,21 @@ impl UiRuntime {
     }
 
     /// Paints one already-borrowed node and descendants.
-    pub(super) fn paint_node_ref(&mut self, node: &mut UiNode, parent_traversal: TraversalState, style: &Style, atlas: crate::AtlasHandle, input: &Input) {
+    pub(super) fn paint_node_ref(
+        &mut self,
+        node: &mut UiNode,
+        parent_traversal: TraversalState,
+        display_list: &mut DisplayList,
+        style: &Style,
+        atlas: crate::AtlasHandle,
+    ) {
         let traversal = parent_traversal.enter(node.state.layout);
         let traverse_children = {
             let mut ctx = PaintCtx {
                 runtime: self,
+                display_list,
                 style,
                 atlas: atlas.clone(),
-                input,
                 traversal,
             };
             match &mut node.data {
@@ -567,7 +549,7 @@ impl UiRuntime {
         if traverse_children {
             if let Some(children) = node.children_mut() {
                 for child in children {
-                    self.paint_node_ref(child, traversal, style, atlas.clone(), input);
+                    self.paint_node_ref(child, traversal, display_list, style, atlas.clone());
                 }
             }
         }
@@ -587,25 +569,6 @@ impl UiRuntime {
             .map(|parent| self.traversal_state_for_node(roots, parent))
             .unwrap_or(self.root_traversal);
         self.node_traversal_state(roots, id, parent_state)
-    }
-
-    /// Returns the current effective clip rectangle.
-    pub(super) fn current_clip_rect(&self) -> Recti {
-        self.clip_stack.last().copied().unwrap_or(UNCLIPPED_RECT)
-    }
-
-    /// Pushes the traversal-derived clip for a node.
-    pub(super) fn push_node_clip_for_traversal(&mut self, _id: UiNodeId, traversal: TraversalState) {
-        let current = self.current_clip_rect();
-        let effective = current.intersect(&traversal.screen_clip).unwrap_or_default();
-        self.clip_stack.push(effective);
-    }
-
-    /// Pops a node clip pushed by [`Self::push_node_clip_for_traversal`].
-    pub(super) fn pop_node_clip(&mut self) {
-        if self.clip_stack.len() > 1 {
-            self.clip_stack.pop();
-        }
     }
 }
 

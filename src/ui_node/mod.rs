@@ -8,11 +8,12 @@
 //! measure, layout, and paint passes. Runtime traversal does not mutate child membership.
 #![allow(dead_code)]
 
-use crate::render::{CustomRenderArgs, CustomRenderCommand, DisplayList, Renderer, Vertex};
-use crate::{expand_rect, Canvas, Dimensioni, FrameResults, Input, MouseButton, Recti, Style, Vec2i, UNCLIPPED_RECT};
+use crate::render::{CustomRenderArgs, CustomRenderCommand, DisplayList};
+#[cfg(test)]
+use crate::render::Renderer;
+use crate::{expand_rect, Dimensioni, FrameResults, Input, MouseButton, Recti, Style, Vec2i, UNCLIPPED_RECT};
 #[cfg(test)]
 use crate::UiNodeSet;
-use crate::render_command::{render_command_stream, Command};
 use crate::input::{ContainerOption, ScrollBehavior, WidgetOption};
 use crate::sizing::SizePolicy;
 use crate::widget::FocusPolicy;
@@ -32,7 +33,7 @@ pub(crate) use containers::{
 pub(crate) use containers::{scroll_area_state, set_scroll_area_scroll};
 pub use containers::UiInputEvent;
 
-/// Command wrapper that lets node-runtime custom render callbacks enter the backend stream.
+/// Adapter that lets a retained custom-render callback enter the display list.
 struct NodeCustomRenderCommand {
     /// Shared retained callback invoked during renderer replay.
     render: TreeCustomRender,
@@ -443,8 +444,10 @@ mod tests {
             self.runtime.begin_frame(pointer_input_enabled);
             self.runtime.layout_frame_roots(&mut self.roots, style, canvas.atlas(), body);
             self.route_input_events(style, input);
+            let atlas = canvas.atlas();
             self.runtime
-                .update_paint_frame(&mut self.roots, root_id, root_name, canvas, &mut self.display_list, style, input, results, body);
+                .update_paint_frame(&mut self.roots, root_id, root_name, &mut self.display_list, atlas, style, input, results, body);
+            canvas.render(&mut self.display_list);
         }
     }
 

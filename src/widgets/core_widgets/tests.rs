@@ -1,7 +1,7 @@
 //! Tests for basic widget sizing and state behavior.
 
 use super::*;
-use crate::render::geometry::SolidGeometry;
+use crate::render::DisplayList;
 use crate::test_support::test_atlas as make_test_atlas;
 use std::rc::Rc;
 
@@ -41,20 +41,15 @@ fn combo_run_toggles_open_state() {
     let atlas = make_test_atlas();
     let style = Rc::new(Style::default());
     let mut combo = Combo::new();
-    let mut commands = Vec::new();
-    let mut triangle_vertices = Vec::new();
-    let mut solid_geometry = SolidGeometry::new();
-    let mut clip_stack = Vec::new();
+    let mut display_list = DisplayList::new();
     let mut focus = None;
     let mut updated_focus = false;
     let rect = rect(0, 0, 100, 20);
     let mut ctx = WidgetCtx::new_with_interaction(
         Id::new(1),
         rect,
-        &mut commands,
-        &mut triangle_vertices,
-        &mut solid_geometry,
-        &mut clip_stack,
+        &mut display_list,
+        rect,
         style.as_ref(),
         &atlas,
         &mut focus,
@@ -74,10 +69,8 @@ fn combo_run_toggles_open_state() {
     let mut ctx = WidgetCtx::new_with_interaction(
         Id::new(1),
         rect,
-        &mut commands,
-        &mut triangle_vertices,
-        &mut solid_geometry,
-        &mut clip_stack,
+        &mut display_list,
+        rect,
         style.as_ref(),
         &atlas,
         &mut focus,

@@ -155,33 +155,6 @@ impl SolidGeometry {
         SolidTriangleRange::new(start, self.triangles.len())
     }
 
-    /// Converts and appends complete backend vertex triplets without temporary storage.
-    ///
-    /// This is the allocation-free bridge used while the legacy vertex arena still exists. UVs
-    /// are intentionally discarded because Canvas resolves the atlas white-pixel coordinate for
-    /// every solid triangle during execution.
-    pub(crate) fn append_backend_triangles(&mut self, vertices: &[Vertex]) -> Option<SolidTriangleRange> {
-        let start = self.triangles.len();
-        self.triangles.reserve(vertices.len() / 3);
-        for vertices in vertices.chunks_exact(3) {
-            self.triangles.push(SolidTriangle::from([
-                SolidVertex {
-                    position: vertices[0].position(),
-                    color: vertices[0].color(),
-                },
-                SolidVertex {
-                    position: vertices[1].position(),
-                    color: vertices[1].color(),
-                },
-                SolidVertex {
-                    position: vertices[2].position(),
-                    color: vertices[2].color(),
-                },
-            ]));
-        }
-        SolidTriangleRange::new(start, self.triangles.len())
-    }
-
     /// Tessellates and appends one thick line.
     pub(crate) fn append_line(&mut self, from: Vec2f, to: Vec2f, width: f32, color: Color4b, offset: Vec2f) -> Option<SolidTriangleRange> {
         let triangles = Self::line_triangles(from, to, width, color)?;

@@ -192,7 +192,8 @@ impl Widget for GraphicsDemo {
         };
         let star_center = Vec2f::new(star_center.x.clamp(0.0, local_width), star_center.y.clamp(0.0, local_height));
 
-        ctx.graphics(|g| {
+        {
+            let mut g = ctx.painter();
             let local = g.local_rect();
             let outer = rect(8, 8, (local.width - 16).max(0), (local.height - 16).max(0));
             let background = [
@@ -247,7 +248,7 @@ impl Widget for GraphicsDemo {
                 );
                 g.fill_polygon(sweep.as_slice(), color(90, 220, 180, 190));
             });
-        });
+        }
     }
 }
 
@@ -608,7 +609,8 @@ impl Widget for FalloffEditor {
 
         let curve = self.sample_curve_local(graph, FALLOFF_SEGMENT_STEPS);
 
-        ctx.graphics(|g| {
+        {
+            let mut g = ctx.painter();
             let local = g.local_rect();
             let background = [
                 Vec2f::new(0.0, 0.0),
@@ -713,7 +715,7 @@ impl Widget for FalloffEditor {
                 };
                 g.fill_polygon(marker.as_slice(), color);
             }
-        });
+        }
     }
 }
 

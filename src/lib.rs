@@ -87,14 +87,11 @@
 //! interaction generation as the crate's public retained contract.
 
 pub mod atlas;
-mod draw_context;
 mod file_dialog;
-mod graphics;
 mod id;
 mod input;
 mod rect_packer;
 pub mod render;
-mod render_command;
 mod scrollbar;
 mod sizing;
 mod style;
@@ -115,7 +112,7 @@ mod window_manager;
 /// low-level renderer/canvas details or manual container drawing helpers through default imports.
 pub mod retained {
     pub use crate::render::{CustomRenderArgs, CustomRenderCommand};
-    pub use crate::render_command::TextWrap;
+    pub use crate::text_layout::TextWrap;
     pub use crate::window_manager::{Context, RootId};
     pub use crate::ui_node::UiInputEvent;
     pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetInputEvents};
@@ -160,7 +157,7 @@ pub use window_manager::{widget_handle, Context, GridSpan, NodeBuilder, NodeId, 
 pub use file_dialog::FileDialogState;
 pub use id::Id;
 pub use input::{Clip, ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption};
-pub use render_command::TextWrap;
+pub use text_layout::TextWrap;
 pub use sizing::{SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
 pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetInputEvents};

@@ -54,7 +54,16 @@
 //!
 //! Text widgets and simple display widgets use these routines to keep UTF-8 line slicing,
 //! baseline alignment, and control text placement consistent.
-use crate::{vec2, AtlasHandle, Dimensioni, FontId, Recti, Style, TextWrap, Vec2i, WidgetOption};
+use crate::{vec2, AtlasHandle, Dimensioni, FontId, Recti, Style, Vec2i, WidgetOption};
+
+/// Controls how text should wrap when rendered inside a container.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum TextWrap {
+    /// Render text on a single line without wrapping.
+    None,
+    /// Wrap text at word boundaries when it exceeds the cell width.
+    Word,
+}
 
 #[derive(Clone, Copy)]
 /// Byte range and measured width for one display line.

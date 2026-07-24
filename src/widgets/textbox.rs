@@ -258,10 +258,14 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetCtx<'_>, buf: &str, cursor: usize, o
     if ctx.focused() {
         // Focused editing path clips text/caret to the textbox bounds.
         let color = ctx.style().colors[ControlColor::Text as usize];
-        ctx.push_clip_rect(r);
-        ctx.draw_text(font, buf, vec2(textx, texty), color);
-        ctx.draw_rect(caret_rect(textx + caret_offset, baseline_y, metrics, r), color);
-        ctx.pop_clip_rect();
+        let local_rect = ctx.screen_to_local_rect(r);
+        let local_text_pos = ctx.screen_to_local_pos(vec2(textx, texty));
+        let local_caret = ctx.screen_to_local_rect(caret_rect(textx + caret_offset, baseline_y, metrics, r));
+        let mut painter = ctx.painter();
+        painter.with_clip(local_rect, |painter| {
+            painter.text(font, buf, local_text_pos, color);
+            painter.fill_rect(local_caret, color);
+        });
     } else {
         ctx.draw_control_text_with_font(font, buf, r, ControlColor::Text, opt);
     }

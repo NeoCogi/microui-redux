@@ -285,18 +285,20 @@ impl<R: Renderer> Context<R> {
                     .runtime
                     .layout_frame_roots(&mut entry.roots, self.style.as_ref(), self.canvas.atlas(), chrome.body);
                 Self::route_entry_input(entry, self.style.as_ref(), &input);
+                let atlas = self.canvas.atlas();
                 entry.runtime.update_paint_frame(
                     &mut entry.roots,
                     entry.id,
                     &entry.name,
-                    &mut self.canvas,
                     &mut self.display_list,
+                    atlas,
                     self.style.as_ref(),
                     &input,
                     &mut self.frame_results,
                     chrome.body,
                 );
                 drop(input);
+                self.canvas.render(&mut self.display_list);
                 self.paint_root_chrome(entry, chrome);
             }
         }

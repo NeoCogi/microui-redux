@@ -1,7 +1,7 @@
 //! Shared fixtures, renderer recordings, and no-op helpers used by unit tests.
 
 use crate::render::{Renderer, RendererHandle, Vertex};
-use crate::{AtlasHandle, AtlasSource, CharEntry, Color, Color4b, FontEntry, Recti, SourceFormat, TextureId, Vec2i};
+use crate::{AtlasHandle, AtlasSource, CharEntry, Color, FontEntry, Recti, SourceFormat, TextureId, Vec2i};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -281,9 +281,4 @@ impl Renderer for RecordingRenderer {
             vertices: vertices.map(RecordedVertex::from),
         });
     }
-}
-
-/// Converts a packed test color into its channel array.
-pub(crate) fn recorded_color(color: Color4b) -> [u8; 4] {
-    [color.x, color.y, color.z, color.w]
 }

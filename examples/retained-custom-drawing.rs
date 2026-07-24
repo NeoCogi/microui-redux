@@ -29,8 +29,8 @@
 //
 //! Retained custom drawing example.
 //!
-//! This example demonstrates implementing a custom widget that emits widget-local triangle
-//! geometry through `WidgetCtx::graphics`.
+//! This example demonstrates implementing a custom widget that records widget-local geometry
+//! through `WidgetCtx::painter`.
 
 use microui_redux::{prelude::*, render::Vertex, AtlasSource};
 
@@ -94,19 +94,18 @@ impl Widget for RetainedPaint {
 
     fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
         let hovered = ctx.hovered();
-        ctx.graphics(|graphics| {
-            let bounds = graphics.local_rect();
-            let fill = if hovered { color(54, 116, 155, 255) } else { color(42, 70, 92, 255) };
-            graphics.draw_rect(bounds, fill);
-            graphics.draw_box(bounds, color(230, 236, 240, 255));
-            graphics.with_clip(rect(4, 4, bounds.width - 8, bounds.height - 8), |graphics| {
-                graphics.stroke_line(
-                    Vec2f::new(8.0, bounds.height as f32 - 10.0),
-                    Vec2f::new(bounds.width as f32 - 8.0, 10.0),
-                    3.0,
-                    color(255, 202, 72, 255),
-                );
-            });
+        let mut painter = ctx.painter();
+        let bounds = painter.local_rect();
+        let fill = if hovered { color(54, 116, 155, 255) } else { color(42, 70, 92, 255) };
+        painter.fill_rect(bounds, fill);
+        painter.stroke_rect(bounds, 1, color(230, 236, 240, 255));
+        painter.with_clip(rect(4, 4, bounds.width - 8, bounds.height - 8), |painter| {
+            painter.stroke_line(
+                Vec2f::new(8.0, bounds.height as f32 - 10.0),
+                Vec2f::new(bounds.width as f32 - 8.0, 10.0),
+                3.0,
+                color(255, 202, 72, 255),
+            );
         });
     }
 }

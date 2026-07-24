@@ -503,26 +503,39 @@ fn textarea_paint(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) {
 
     let text_origin = vec2(layout.body.x + layout.padding - state.scroll.x, layout.body.y + layout.padding - state.scroll.y);
     let color = ctx.style().colors[ControlColor::Text as usize];
-    ctx.push_clip_rect(layout.body);
-    for (idx, line) in layout.lines.iter().enumerate() {
-        let line_top = text_origin.y + idx as i32 * layout.metrics.line_height;
-        let line_bottom = line_top + layout.metrics.line_height;
-        if line_bottom < layout.body.y || line_top > layout.body.y + layout.body.height {
-            // Skip fully clipped lines before slicing/drawing text.
-            continue;
-        }
-        let text = &state.buf[line.start..line.end];
-        if !text.is_empty() {
-            ctx.draw_text(font, text, vec2(text_origin.x, line_top), color);
-        }
-    }
-
-    if ctx.focused() {
+    let local_body = ctx.screen_to_local_rect(layout.body);
+    let local_text_origin = ctx.screen_to_local_pos(text_origin);
+    let local_caret = if ctx.focused() {
         let caret_line_top = text_origin.y + cursor_line as i32 * layout.metrics.line_height;
         let baseline_y = caret_line_top + layout.metrics.baseline;
-        ctx.draw_rect(caret_rect(text_origin.x + caret_x, baseline_y, layout.metrics, layout.body), color);
-    }
-    ctx.pop_clip_rect();
+        Some(ctx.screen_to_local_rect(caret_rect(text_origin.x + caret_x, baseline_y, layout.metrics, layout.body)))
+    } else {
+        None
+    };
+    let mut painter = ctx.painter();
+    painter.with_clip(local_body, |painter| {
+        for (idx, line) in layout.lines.iter().enumerate() {
+            let line_top = text_origin.y + idx as i32 * layout.metrics.line_height;
+            let line_bottom = line_top + layout.metrics.line_height;
+            if line_bottom < layout.body.y || line_top > layout.body.y + layout.body.height {
+                // Skip fully clipped lines before slicing/drawing text.
+                continue;
+            }
+            let text = &state.buf[line.start..line.end];
+            if !text.is_empty() {
+                painter.text(
+                    font,
+                    text,
+                    vec2(local_text_origin.x, local_text_origin.y + idx as i32 * layout.metrics.line_height),
+                    color,
+                );
+            }
+        }
+
+        if let Some(caret) = local_caret {
+            painter.fill_rect(caret, color);
+        }
+    });
 
     if layout.needs_v && layout.maxscroll_y > 0 && layout.body.height > 0 {
         ctx.draw_frame(layout.vscroll_base, ControlColor::ScrollBase);

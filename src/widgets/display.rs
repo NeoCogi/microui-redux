@@ -121,17 +121,19 @@ impl TextBlock {
         let max_width = if self.wrap == TextWrap::Word { bounds.width.max(1) } else { i32::MAX / 4 };
         let lines = build_display_text_lines(self.text.as_str(), self.wrap, max_width, font, ctx.atlas());
 
-        ctx.push_clip_rect(bounds);
-        for (idx, line) in lines.iter().enumerate() {
-            let line_rect = rect(bounds.x, bounds.y + idx as i32 * line_height, bounds.width, line_height);
-            let line_top = baseline_aligned_top(line_rect, line_height, baseline);
-            // Lines keep byte ranges into the source string, so slicing remains allocation-free.
-            let slice = &self.text[line.start..line.end];
-            if !slice.is_empty() {
-                ctx.draw_text(font, slice, vec2(line_rect.x, line_top), color);
+        let local_bounds = ctx.screen_to_local_rect(bounds);
+        let mut painter = ctx.painter();
+        painter.with_clip(local_bounds, |painter| {
+            for (idx, line) in lines.iter().enumerate() {
+                let line_rect = rect(local_bounds.x, local_bounds.y + idx as i32 * line_height, local_bounds.width, line_height);
+                let line_top = baseline_aligned_top(line_rect, line_height, baseline);
+                // Lines keep byte ranges into the source string, so slicing remains allocation-free.
+                let slice = &self.text[line.start..line.end];
+                if !slice.is_empty() {
+                    painter.text(font, slice, vec2(line_rect.x, line_top), color);
+                }
             }
-        }
-        ctx.pop_clip_rect();
+        });
     }
 }
 

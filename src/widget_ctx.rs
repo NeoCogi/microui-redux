@@ -50,20 +50,18 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Shared widget execution context built on top of draw command recording.
+//! Shared widget execution context with direct display-list painting.
 
 use std::rc::Rc;
 
 use rs_math3d::{Color4b, Recti, Vec2i};
 
 use crate::atlas::{AtlasHandle, FontId, IconId, SlotId};
-use crate::render::{Vertex, geometry::SolidGeometry};
-use crate::render_command::Command;
-use crate::draw_context::DrawCtx;
-use crate::graphics::Graphics;
+use crate::render::{DisplayList, Painter};
 use crate::input::{ControlColor, KeyCode, KeyMode, MouseButton, WidgetOption};
 use crate::ui_node::UiInputEvent;
 use crate::style::{Color, Image, Style};
+use crate::text_layout::control_text_position_with_font;
 use crate::ui_node::UiNodeId;
 
 /// Convenience methods for a widget-local routed input batch.
@@ -191,10 +189,14 @@ pub struct WidgetCtx<'a> {
     interaction_id: UiNodeId,
     /// Widget rectangle in container/screen coordinates.
     rect: Recti,
-    /// Draw command recorder borrowed from the active container.
-    draw: DrawCtx<'a>,
-    /// Reusable typed geometry and polygon workspace used by widget-local drawing.
-    solid_geometry: &'a mut SolidGeometry,
+    /// Display list receiving this widget's paint operations.
+    display_list: &'a mut DisplayList,
+    /// Effective screen-space clip derived by retained traversal.
+    screen_clip: Recti,
+    /// Style used by built-in widget paint helpers.
+    style: &'a Style,
+    /// Atlas used for text and icon metrics.
+    atlas: &'a AtlasHandle,
     /// Focus slot owned by the active container.
     focus: &'a mut Option<UiNodeId>,
     /// Flag indicating whether focus was refreshed or changed this frame.
@@ -228,10 +230,8 @@ impl<'a> WidgetCtx<'a> {
     pub(crate) fn new_with_interaction(
         interaction_id: UiNodeId,
         rect: Recti,
-        commands: &'a mut Vec<Command>,
-        triangle_vertices: &'a mut Vec<Vertex>,
-        solid_geometry: &'a mut SolidGeometry,
-        clip_stack: &'a mut Vec<Recti>,
+        display_list: &'a mut DisplayList,
+        screen_clip: Recti,
         style: &'a Style,
         atlas: &'a AtlasHandle,
         focus: &'a mut Option<UiNodeId>,
@@ -246,8 +246,10 @@ impl<'a> WidgetCtx<'a> {
         Self {
             interaction_id,
             rect,
-            draw: DrawCtx::new(commands, triangle_vertices, clip_stack, style, atlas),
-            solid_geometry,
+            display_list,
+            screen_clip,
+            style,
+            atlas,
             focus,
             updated_focus,
             in_hover_root,
@@ -261,8 +263,8 @@ impl<'a> WidgetCtx<'a> {
 
     /// Returns the widget-local rectangle for this context.
     ///
-    /// The top-left corner is always `(0, 0)`. Use this with [`Self::input`] and
-    /// [`Self::graphics`], which also operate in widget-local coordinates.
+    /// The top-left corner is always `(0, 0)`. Use this with routed input positions and
+    /// [`Self::painter`], which also operates in widget-local coordinates.
     pub fn local_rect(&self) -> Recti {
         Recti::new(0, 0, self.rect.width, self.rect.height)
     }
@@ -339,127 +341,90 @@ impl<'a> WidgetCtx<'a> {
         *self.updated_focus = true;
     }
 
-    /// Pushes a new clip rectangle onto the stack.
-    pub(crate) fn push_clip_rect(&mut self, rect: Recti) {
-        self.draw.push_clip_rect(rect);
-    }
-
-    /// Pops the current clip rectangle.
-    pub(crate) fn pop_clip_rect(&mut self) {
-        self.draw.pop_clip_rect();
-    }
-
-    /// Executes `f` with a widget-local 2D graphics builder.
+    /// Returns a widget-local painter that records directly into the current frame display list.
     ///
-    /// Geometry passed through this API uses coordinates relative to the current widget's top-left
-    /// corner instead of container space. The builder forwards widget-local clips onto the shared
-    /// draw-context clip stack, translates vertices into screen space once while recording, and
-    /// flushes its retained triangle batches automatically when the closure returns.
-    pub fn graphics<F>(&mut self, f: F)
-    where
-        F: FnOnce(&mut Graphics<'_, 'a>),
-    {
-        let mut graphics = self.begin_graphics();
-        f(&mut graphics);
-    }
-
-    /// Returns a widget-local graphics builder whose clip root is the widget rect itself.
-    ///
-    /// Use this for custom widget-local geometry. The builder starts clipped to the visible part
-    /// of the widget, so local clips can only reduce visibility further.
-    pub fn begin_graphics(&mut self) -> Graphics<'_, 'a> {
-        Graphics::new(&mut self.draw, self.solid_geometry, self.rect)
-    }
-
-    /// Starts a graphics builder for built-in widget paint helpers.
-    ///
-    /// Internal widget paint helpers need local coordinates but must preserve the legacy draw
-    /// semantics where borders may extend a pixel beyond the widget rect. Starting the graphics
-    /// builder from the current container clip instead of the widget rect keeps that behavior while
-    /// still routing paint through `Graphics`.
-    fn begin_widget_paint(&mut self) -> Graphics<'_, 'a> {
-        let clip_root = self.draw.current_clip_rect();
-        Graphics::new_with_clip_root(&mut self.draw, self.solid_geometry, self.rect, clip_root)
-    }
-
-    /// Returns the current screen-space clip rectangle from the shared draw context.
-    fn current_clip_rect(&self) -> Recti {
-        self.draw.current_clip_rect()
+    /// The painter receives the widget origin, local bounds, and the traversal-derived effective
+    /// clip. Custom widgets can narrow that clip with [`Painter::with_clip`] without mutating
+    /// shared rendering state.
+    pub fn painter(&mut self) -> Painter<'_> {
+        let origin = Vec2i::new(self.rect.x, self.rect.y);
+        let local_bounds = Recti::new(0, 0, self.rect.width, self.rect.height);
+        let screen_clip = self.screen_clip;
+        Painter::new(&mut *self.display_list, origin, local_bounds, screen_clip)
     }
 
     /// Returns the active style.
     pub(crate) fn style(&self) -> &Style {
-        self.draw.style()
+        self.style
     }
 
     /// Returns the active atlas.
     pub(crate) fn atlas(&self) -> &AtlasHandle {
-        self.draw.atlas()
+        self.atlas
     }
 
-    /// Draws a filled rectangle through the widget-local graphics path.
+    /// Draws a filled rectangle through a widget-local painter.
     pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
         let rect = self.local_rect_for(rect);
-        let mut graphics = self.begin_widget_paint();
-        graphics.draw_rect(rect, color);
+        self.painter().fill_rect(rect, color);
     }
 
     /// Draws a 1-pixel box outline using the supplied color.
     pub(crate) fn draw_box(&mut self, r: Recti, color: Color) {
         let rect = self.local_rect_for(r);
-        let mut graphics = self.begin_widget_paint();
-        graphics.draw_box(rect, color);
+        self.painter().stroke_rect(rect, 1, color);
     }
 
-    /// Draws text through the widget-local graphics path.
-    pub(crate) fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
-        let pos = self.local_pos_for(pos);
-        let mut graphics = self.begin_widget_paint();
-        graphics.draw_text(font, text, pos, color);
-    }
-
-    /// Draws an atlas icon through the widget-local graphics path.
+    /// Draws an atlas icon through a widget-local painter.
     pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
         let rect = self.local_rect_for(rect);
-        let mut graphics = self.begin_widget_paint();
-        graphics.draw_icon(id, rect, color);
+        self.painter().icon(id, rect, color);
     }
 
-    /// Draws an atlas slot or external image through the widget-local graphics path.
+    /// Draws an atlas slot or external image through a widget-local painter.
     pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
         let rect = self.local_rect_for(rect);
-        let mut graphics = self.begin_widget_paint();
-        graphics.draw_image(image, rect, color);
+        self.painter().image(image, rect, color);
     }
 
-    /// Draws a dynamic atlas slot through the widget-local graphics path.
+    /// Draws a dynamic atlas slot through a widget-local painter.
     pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
         let rect = self.local_rect_for(rect);
-        let mut graphics = self.begin_widget_paint();
-        graphics.draw_slot_with_function(id, rect, color, f);
+        self.painter().redraw_slot(id, rect, color, f);
     }
 
-    /// Draws a control frame through the widget-local graphics path.
+    /// Draws a control frame through a widget-local painter.
     pub(crate) fn draw_frame(&mut self, rect: Recti, colorid: ControlColor) {
         let rect = self.local_rect_for(rect);
-        let mut graphics = self.begin_widget_paint();
-        graphics.draw_frame(rect, colorid);
+        let color = self.style.colors[colorid as usize];
+        let border = self.style.frame_border_color(colorid);
+        let mut painter = self.painter();
+        painter.fill_rect(rect, color);
+        if let Some(border) = border {
+            painter.stroke_rect(crate::expand_rect(rect, 1), 1, border);
+        }
     }
 
     /// Draws a control frame with hover/focus color adjustment.
-    pub(crate) fn draw_widget_frame(&mut self, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let rect = self.local_rect_for(rect);
-        let focused = self.focused;
-        let hovered = self.hovered;
-        let mut graphics = self.begin_widget_paint();
-        graphics.draw_widget_frame(focused, hovered, rect, colorid, opt);
+    pub(crate) fn draw_widget_frame(&mut self, rect: Recti, mut colorid: ControlColor, opt: WidgetOption) {
+        if opt.intersects(WidgetOption::NO_FRAME) {
+            return;
+        }
+        if self.focused {
+            colorid.focus();
+        } else if self.hovered {
+            colorid.hover();
+        }
+        self.draw_frame(rect, colorid);
     }
 
     /// Draws aligned control text with an explicit font.
     pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let rect = self.local_rect_for(rect);
-        let mut graphics = self.begin_widget_paint();
-        graphics.draw_control_text_with_font(font, text, rect, colorid, opt);
+        let color = self.style.colors[colorid as usize];
+        let pos = control_text_position_with_font(self.style, self.atlas, font, text, rect, opt);
+        let mut painter = self.painter();
+        painter.with_clip(rect, |painter| painter.text(font, text, pos, color));
     }
 
     /// Hit-tests a screen-space rect against a widget-local mouse position and the active clip.
@@ -469,7 +434,7 @@ impl<'a> WidgetCtx<'a> {
         }
         // Both the target rect and current clip are translated so the localized input can be used.
         let local_rect = self.local_rect_for(rect);
-        let clip_rect = self.local_rect_for(self.current_clip_rect());
+        let clip_rect = self.local_rect_for(self.screen_clip);
         local_rect.contains(&mouse_pos) && clip_rect.contains(&mouse_pos)
     }
 }
