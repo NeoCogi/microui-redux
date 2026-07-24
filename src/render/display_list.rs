@@ -261,6 +261,30 @@ impl DisplayList {
             })
             .collect()
     }
+
+    /// Returns the number of opaque operations for performance assertions.
+    #[cfg(test)]
+    pub(crate) fn debug_operation_count(&self) -> usize {
+        self.ops.len()
+    }
+
+    /// Returns the operation allocation capacity retained by this list.
+    #[cfg(test)]
+    pub(crate) fn debug_operation_capacity(&self) -> usize {
+        self.ops.capacity()
+    }
+
+    /// Returns the number of strongly typed solid triangles retained by this list.
+    #[cfg(test)]
+    pub(crate) fn debug_triangle_count(&self) -> usize {
+        self.solid_geometry.triangles().len()
+    }
+
+    /// Returns the solid-triangle allocation capacity retained by this list.
+    #[cfg(test)]
+    pub(crate) fn debug_triangle_capacity(&self) -> usize {
+        self.solid_geometry.triangle_capacity()
+    }
 }
 
 /// Compares rectangle components without requiring an equality implementation from `rs-math3d`.
@@ -369,6 +393,25 @@ mod tests {
         list.push_fill_rect(clip, Recti::new(5, 6, 7, 8), color(50, 60, 70, 80));
         assert!(!list.is_empty());
         assert_eq!(list.ops.len(), 1);
+    }
+
+    #[test]
+    fn recycle_restores_detached_operation_and_triangle_allocations() {
+        let mut list = DisplayList::new();
+        let clip = Recti::new(0, 0, 50, 50);
+        for offset in 0..32 {
+            list.push_fill_rect(clip, Recti::new(offset, offset, 1, 1), color(10, 20, 30, 255));
+            list.push_solid_triangles(clip, &[triangle_at(offset as f32)]);
+        }
+        let operation_capacity = list.ops.capacity();
+        let triangle_capacity = list.solid_geometry.triangle_capacity();
+
+        let frame = list.take();
+        list.recycle(frame);
+
+        assert!(list.is_empty());
+        assert_eq!(list.ops.capacity(), operation_capacity);
+        assert_eq!(list.solid_geometry.triangle_capacity(), triangle_capacity);
     }
 
     #[test]

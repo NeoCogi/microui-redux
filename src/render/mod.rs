@@ -4,6 +4,8 @@ mod backend;
 pub(crate) mod display_list;
 pub(crate) mod geometry;
 mod painter;
+#[cfg(test)]
+mod performance;
 mod renderer;
 
 pub use backend::{BackendHandle, CustomRenderArgs, CustomRenderCommand, RendererBackend, Vertex};

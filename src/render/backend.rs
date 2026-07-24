@@ -56,6 +56,8 @@ use crate::atlas::AtlasHandle;
 use crate::style::{Color, TextureId};
 use rs_math3d::{Color4b, Dimensioni, Rect, Vec2f, color4b};
 use std::sync::{Arc, RwLock};
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
@@ -248,20 +250,31 @@ pub trait RendererBackend {
 pub struct BackendHandle<B: RendererBackend> {
     /// Shared lock protecting the backend implementation.
     handle: Arc<RwLock<B>>,
+    /// Test-only count of exclusive backend scopes.
+    #[cfg(test)]
+    write_acquisitions: Arc<AtomicUsize>,
 }
 
 // `derive(Clone)` does not infer the bound correctly here, but `Arc` already provides
 // the behavior we need.
 impl<B: RendererBackend> Clone for BackendHandle<B> {
     fn clone(&self) -> Self {
-        Self { handle: self.handle.clone() }
+        Self {
+            handle: self.handle.clone(),
+            #[cfg(test)]
+            write_acquisitions: self.write_acquisitions.clone(),
+        }
     }
 }
 
 impl<B: RendererBackend> BackendHandle<B> {
     /// Wraps a backend inside an [`Arc<RwLock<...>>`] so it can be shared.
     pub fn new(backend: B) -> Self {
-        Self { handle: Arc::new(RwLock::new(backend)) }
+        Self {
+            handle: Arc::new(RwLock::new(backend)),
+            #[cfg(test)]
+            write_acquisitions: Arc::new(AtomicUsize::new(0)),
+        }
     }
 
     /// Executes the provided closure with a shared reference to the backend.
@@ -277,6 +290,8 @@ impl<B: RendererBackend> BackendHandle<B> {
 
     /// Executes the provided closure with a mutable reference to the backend.
     pub fn scope_mut<Res, F: FnOnce(&mut B) -> Res>(&mut self, f: F) -> Res {
+        #[cfg(test)]
+        self.write_acquisitions.fetch_add(1, Ordering::Relaxed);
         match self.handle.write() {
             Ok(mut guard) => f(&mut *guard),
             Err(poisoned) => {
@@ -284,5 +299,11 @@ impl<B: RendererBackend> BackendHandle<B> {
                 f(&mut *poisoned.into_inner())
             }
         }
+    }
+
+    /// Returns the number of exclusive backend scopes entered by all clones.
+    #[cfg(test)]
+    pub(crate) fn debug_write_acquisition_count(&self) -> usize {
+        self.write_acquisitions.load(Ordering::Relaxed)
     }
 }

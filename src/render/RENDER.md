@@ -45,6 +45,7 @@ src/render/
 ├── display_list.rs  owned operations and recording storage
 ├── geometry.rs      internal tessellation and final clipping geometry
 ├── painter.rs       public widget-local recorder
+├── performance.rs   test-only timing, allocation, lock, and submission benchmark
 ├── renderer.rs      public frame/resource owner and operation executor
 └── RENDER.md        architecture and integration guide
 ```
@@ -432,6 +433,71 @@ Backend rules:
 `scope` provides read access and `scope_mut` provides exclusive mutable access.
 The renderer holds the lock across runs of ordinary operations instead of
 locking once per primitive.
+
+## Performance validation
+
+The render microbenchmark measures recording and execution together after one
+warm-up frame has populated reusable storage:
+
+```bash
+cargo test --release render_performance_baseline \
+  -- --ignored --nocapture --test-threads=1
+```
+
+It uses a counting global allocator and a counter-only backend. The reported
+lock count covers `Renderer::render`, excluding setup, texture upload, and
+explicit frame `begin`/`end` calls. Allocation counts include both Painter
+recording and Renderer execution. Timings include the allocation counter's
+atomic instrumentation and are intended as a reproducible regression baseline,
+not as GPU frame timings.
+
+The following baseline was recorded on 2026-07-24 with Rust 1.97.1 in the
+crate's release profile on an Intel Core Ultra 7 155H:
+
+| Scenario | Operations | Solid triangles | Write locks | Allocations | Bytes | Submitted vertices | Time/frame |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4,096 rectangles | 4,096 | 0 | 1 | 0 | 0 | 16,384 | 332.2 µs |
+| 4,096 glyphs | 1 | 0 | 1 | 1 | 4,096 | 16,384 | 188.8 µs |
+| 2,048 rectangles + concave polygons | 4,096 | 6,144 | 1 | 0 | 0 | 26,624 | 1,751.5 µs |
+| 32 nested clips + 4,096 attempted rectangles | 3,844 | 0 | 1 | 0 | 0 | 15,376 | 262.7 µs |
+| 2,048 atlas/external texture pairs | 4,096 | 0 | 1 | 0 | 0 | 16,384 | 348.5 µs |
+| 4,096 rectangles + 8 custom barriers | 4,104 | 0 | 25 | 0 | 0 | 16,384 | 277.9 µs |
+
+The nested-clip scenario records 3,844 operations because Painter rejects the
+rectangles fully outside the final effective clip. Text intentionally allocates
+one owned `String` snapshot for its single display-list operation; allocation
+count does not scale with its 4,096 glyphs. The benchmark asserts the exact
+aggregate allocation and lock counts across 200 frames, so integer averaging
+cannot conceal an intermittent growth allocation.
+
+### Historical comparison
+
+No wall-clock or allocator benchmark was checked in before the rendering
+migration, so a trustworthy historical timing number cannot be reconstructed.
+The pre-migration implementation at commit `8ecdb95` can still be compared
+structurally:
+
+| Property | Pre-migration implementation | Current implementation |
+| --- | --- | --- |
+| Normal backend locking | One renderer scope per normal replay segment | One backend scope per normal display-list segment |
+| Custom barriers | One normal scope per segment plus two flush scopes per barrier | Same `3 × barriers + 1` pattern when normal work surrounds every barrier |
+| Replay clipping | Allocated a `Vec` clip stack for every normal replay segment | No replay clip stack; each operation owns its effective clip |
+| Concave polygon recording | Allocated simplified-point and index vectors per polygon | Reuses `SolidGeometry` polygon and triangle storage; zero warmed allocations |
+| Glyph expansion | Reused Canvas-owned rectangle scratch | Reuses Renderer-owned rectangle scratch |
+| Custom-widget rectangles | Batched as two solid triangles, submitting six vertices per rectangle | Remain semantic atlas quads, submitting four vertices per rectangle |
+| Recording storage | Reused command and flat vertex vectors | Reuses operation and strongly typed triangle vectors |
+
+The new per-operation clip adds fixed display-list metadata, and semantic
+custom-widget rectangles can produce more operation records than the old
+triangle-batch command. In return, those rectangles submit one quad instead of
+two triangles, clipping has one authority, and the measured warmed path has no
+per-rectangle or per-triangle allocation. The representative results show no
+meaningful regression that requires a follow-up.
+
+The performance tests also enforce the architectural constraints: normal
+operations remain inside one lock scope, custom callbacks remain lock-free
+barriers, final clipping stays in Renderer, and no state commands or
+recording-time software triangle clipping are introduced for benchmark gains.
 
 ## Working examples
 

@@ -180,6 +180,89 @@ fn semantic_atlas_operations_use_the_cached_atlas_and_one_executor() {
 }
 
 #[test]
+fn backend_write_locks_scale_with_custom_barriers_not_normal_operations() {
+    let backend = BackendHandle::new(CountingRenderer {
+        atlas: make_atlas(),
+        atlas_reads: Cell::new(0),
+        quads: 0,
+    });
+    let mut renderer = Renderer::new(backend.clone(), Dimensioni::new(32, 32));
+    let white = color(255, 255, 255, 255);
+    let mut list = DisplayList::new();
+
+    {
+        let mut painter = painter(&mut list, viewport());
+        for index in 0..4_096 {
+            painter.fill_rect(Recti::new(index % 32, (index / 32) % 32, 1, 1), white);
+        }
+    }
+    let before_normal = backend.debug_write_acquisition_count();
+    renderer.render(&mut list);
+    assert_eq!(backend.debug_write_acquisition_count() - before_normal, 1);
+
+    for segment in 0..=3 {
+        {
+            let mut painter = painter(&mut list, viewport());
+            for index in 0..1_024 {
+                painter.fill_rect(Recti::new(index % 32, (index / 32) % 32, 1, 1), white);
+            }
+        }
+        if segment < 3 {
+            list.push_custom(
+                viewport(),
+                CustomRenderArgs {
+                    content_area: viewport(),
+                    view: viewport(),
+                },
+                Box::new(|_: Dimensioni, _: &CustomRenderArgs| {}),
+            );
+        }
+    }
+
+    let before_barriers = backend.debug_write_acquisition_count();
+    renderer.render(&mut list);
+
+    // Four normal segments use four locks. Each of the three barriers uses one lock for the
+    // pre-callback flush and one for the post-callback flush: 4 + 2 * 3 = 10.
+    assert_eq!(backend.debug_write_acquisition_count() - before_barriers, 10);
+}
+
+#[test]
+fn renderer_and_display_list_reuse_text_and_clipping_scratch_after_execution() {
+    let backend = BackendHandle::new(CountingRenderer {
+        atlas: make_atlas(),
+        atlas_reads: Cell::new(0),
+        quads: 0,
+    });
+    let mut renderer = Renderer::new(backend, Dimensioni::new(32, 32));
+    let white = color(255, 255, 255, 255);
+    let mut list = DisplayList::new();
+    let long_text = "a".repeat(256);
+
+    painter(&mut list, viewport()).text(FontId::default(), &long_text, Vec2i::new(0, 0), white);
+    painter(&mut list, viewport()).fill_polygon(&[Vec2f::new(-8.0, -8.0), Vec2f::new(40.0, 0.0), Vec2f::new(0.0, 40.0)], white);
+    renderer.render(&mut list);
+
+    let operation_capacity = list.debug_operation_capacity();
+    let triangle_capacity = list.debug_triangle_capacity();
+    let glyph_capacity = renderer.rect_batch.capacity();
+    let clipped_capacity = renderer.clipped_triangles.capacity();
+    assert!(operation_capacity >= 2);
+    assert!(triangle_capacity >= 1);
+    assert!(glyph_capacity >= long_text.len());
+    assert!(clipped_capacity >= 3);
+
+    painter(&mut list, viewport()).text(FontId::default(), "a", Vec2i::new(0, 0), white);
+    painter(&mut list, viewport()).fill_polygon(&[Vec2f::new(1.0, 1.0), Vec2f::new(2.0, 1.0), Vec2f::new(1.0, 2.0)], white);
+    renderer.render(&mut list);
+
+    assert_eq!(list.debug_operation_capacity(), operation_capacity);
+    assert_eq!(list.debug_triangle_capacity(), triangle_capacity);
+    assert_eq!(renderer.rect_batch.capacity(), glyph_capacity);
+    assert_eq!(renderer.clipped_triangles.capacity(), clipped_capacity);
+}
+
+#[test]
 fn operation_clip_is_intersected_with_viewport_for_every_quad_kind() {
     let (backend, log) = recording_backend(make_atlas());
     let mut renderer = Renderer::new(backend, Dimensioni::new(8, 8));
