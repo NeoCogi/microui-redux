@@ -68,11 +68,11 @@ use common::{
     view3d::View3D,
 };
 #[cfg(feature = "example-glow")]
-use common::glow_renderer::GLRenderer as BackendRenderer;
+use common::glow_renderer::GLRenderer as SelectedBackend;
 #[cfg(all(not(feature = "example-glow"), feature = "example-vulkan"))]
-use common::vulkan_renderer::VulkanRenderer as BackendRenderer;
+use common::vulkan_renderer::VulkanRenderer as SelectedBackend;
 #[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
-use common::wgpu_renderer::WgpuRenderer as BackendRenderer;
+use common::wgpu_renderer::WgpuRenderer as SelectedBackend;
 #[cfg(feature = "builder")]
 use microui_redux::atlas::builder;
 use microui_redux::{prelude::*, render::Vertex};
@@ -819,7 +819,7 @@ fn static_label(text: impl Into<String>) -> WidgetHandle<ListItem> {
 }
 
 struct State {
-    renderer: RendererHandle<BackendRenderer>,
+    backend: BackendHandle<SelectedBackend>,
     bg: [Real; 3],
     bg_sliders: [WidgetHandle<Slider>; 3],
     style_color_sliders: [WidgetHandle<Slider>; 60],
@@ -917,12 +917,12 @@ struct State {
 }
 
 impl State {
-    pub fn new(_backend: BackendInitContext, renderer: RendererHandle<BackendRenderer>, slots: Vec<SlotId>, ctx: &mut Context<BackendRenderer>) -> Self {
+    pub fn new(_backend: BackendInitContext, backend: BackendHandle<SelectedBackend>, slots: Vec<SlotId>, ctx: &mut Context<SelectedBackend>) -> Self {
         #[cfg(any(feature = "builder", feature = "png_source"))]
         let image_texture = load_external_image_texture(ctx);
         #[cfg(not(any(feature = "builder", feature = "png_source")))]
         let image_texture = None;
-        let white_uv = renderer.scope(|r| {
+        let white_uv = backend.scope(|r| {
             let atlas = r.get_atlas();
             let rect = atlas.get_icon_rect(WHITE_ICON);
             let dim = atlas.get_texture_dimension();
@@ -1024,7 +1024,7 @@ impl State {
             TextWrap::Word,
         );
         typography_body.config.font = FontRole::Body.into();
-        let style = Style::default().with_named_fonts(&ctx.canvas().atlas());
+        let style = Style::default().with_named_fonts(&ctx.renderer().atlas());
         let demo_root = ctx.create_window("Demo Window", rect(40, 40, 300, 450), UiNodeSet::default());
         let style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), UiNodeSet::default());
         let log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), UiNodeSet::default());
@@ -1044,7 +1044,7 @@ impl State {
         let stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), UiNodeSet::default());
         let weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), UiNodeSet::default());
         let mut state = Self {
-            renderer,
+            backend,
             bg: [90.0, 95.0, 100.0],
             bg_sliders,
             style_color_sliders,
@@ -1241,7 +1241,7 @@ impl State {
         self.style_value_sliders[4].update(|slider| slider.set_value(self.style.scrollbar_size as Real));
     }
 
-    fn install_root_nodes(&mut self, ctx: &mut Context<BackendRenderer>) {
+    fn install_root_nodes(&mut self, ctx: &mut Context<SelectedBackend>) {
         ctx.set_root_nodes(self.style_root, mem::take(&mut self.style_tree));
         ctx.set_root_nodes(self.log_root, mem::take(&mut self.log_tree));
         ctx.set_root_nodes(self.typography_root, mem::take(&mut self.typography_tree));
@@ -1354,12 +1354,12 @@ impl State {
 
         let triangle_widget = self.triangle_widget.clone();
         let triangle_data = self.triangle_data.clone();
-        let renderer = self.renderer.clone();
+        let backend = self.backend.clone();
         let white_uv = self.white_uv;
         self.triangle_tree = UiNodeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
                 let triangle_data = triangle_data.clone();
-                let renderer = renderer.clone();
+                let backend = backend.clone();
                 tree.custom_render(&triangle_widget, move |_dim, cra| {
                     if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                         return;
@@ -1368,8 +1368,8 @@ impl State {
                     if let Ok(mut tri) = triangle_data.write() {
                         tri.angle = (tri.angle + 0.02) % (std::f32::consts::PI * 2.0);
                         let mut verts = build_triangle_vertices(area.rect, white_uv, tri.angle);
-                        let mut renderer = renderer.clone();
-                        renderer.scope_mut(move |vk| {
+                        let mut backend = backend.clone();
+                        backend.scope_mut(move |vk| {
                             let verts_local = std::mem::take(&mut verts);
                             vk.enqueue_colored_vertices(area, verts_local);
                         });
@@ -1380,11 +1380,11 @@ impl State {
 
         let suzanne_widget = self.suzanne_widget.clone();
         let suzanne_data = self.suzanne_data.clone();
-        let renderer = self.renderer.clone();
+        let backend = self.backend.clone();
         self.suzanne_tree = UiNodeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
                 let suzanne_data = suzanne_data.clone();
-                let renderer = renderer.clone();
+                let backend = backend.clone();
                 tree.custom_render(&suzanne_widget, move |_dim, cra| {
                     if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
                         return;
@@ -1396,8 +1396,8 @@ impl State {
                             pvm: suzanne.view_3d.pvm(),
                             view_model: suzanne.view_3d.view_matrix(),
                         };
-                        let mut renderer = renderer.clone();
-                        renderer.scope_mut(|r| {
+                        let mut backend = backend.clone();
+                        backend.scope_mut(|r| {
                             r.enqueue_mesh_draw(area, submission.clone());
                         });
                     }
@@ -1688,7 +1688,7 @@ impl State {
         self.tree_button_ids = tree_button_ids;
     }
 
-    fn style_window(&mut self, ctx: &mut Context<BackendRenderer>) {
+    fn style_window(&mut self, ctx: &mut Context<SelectedBackend>) {
         for (color, sliders) in self.style.colors.iter_mut().zip(self.style_color_sliders.chunks_exact(4)) {
             color.r = sliders[0].read(|slider| slider.value() as u8);
             color.g = sliders[1].read(|slider| slider.value() as u8);
@@ -1706,7 +1706,7 @@ impl State {
         ctx.set_style(&self.style);
     }
 
-    fn log_window(&mut self, ctx: &mut Context<BackendRenderer>) {
+    fn log_window(&mut self, ctx: &mut Context<SelectedBackend>) {
         self.log_text.update(|log_text| {
             log_text.text = self.logbuf.borrow().clone();
         });
@@ -1732,17 +1732,17 @@ impl State {
         }
     }
 
-    fn typography_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
+    fn typography_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
 
-    fn triangle_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
+    fn triangle_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
 
-    fn suzanne_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
+    fn suzanne_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
 
-    fn painter_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
+    fn painter_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
 
-    fn falloff_window(&mut self, _ctx: &mut Context<BackendRenderer>) {}
+    fn falloff_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
 
-    fn stack_direction_window(&mut self, ctx: &mut Context<BackendRenderer>) {
+    fn stack_direction_window(&mut self, ctx: &mut Context<SelectedBackend>) {
         let mut logs: Vec<&'static str> = Vec::new();
 
         let results = ctx.committed_results();
@@ -1770,7 +1770,7 @@ impl State {
         }
     }
 
-    fn weight_window(&mut self, ctx: &mut Context<BackendRenderer>) {
+    fn weight_window(&mut self, ctx: &mut Context<SelectedBackend>) {
         let mut logs: Vec<&'static str> = Vec::new();
 
         let results = ctx.committed_results();
@@ -1807,7 +1807,7 @@ impl State {
         }
     }
 
-    fn test_window(&mut self, ctx: &mut Context<BackendRenderer>) {
+    fn test_window(&mut self, ctx: &mut Context<SelectedBackend>) {
         {
             let mut win = ctx.root_rect(self.demo_root).unwrap_or_else(|| rect(40, 40, 300, 450));
             win.width = win.width.max(240);
@@ -1922,7 +1922,7 @@ impl State {
         self.dialog(ctx);
     }
 
-    fn dialog(&mut self, ctx: &mut Context<BackendRenderer>) {
+    fn dialog(&mut self, ctx: &mut Context<SelectedBackend>) {
         if self.open_dialog {
             self.dialog_window.open(ctx);
             self.open_dialog = false;
@@ -1952,7 +1952,7 @@ impl State {
         }
     }
 
-    fn process_frame(&mut self, ctx: &mut Context<BackendRenderer>) {
+    fn process_frame(&mut self, ctx: &mut Context<SelectedBackend>) {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
@@ -1989,8 +1989,8 @@ fn main() {
 
     let mut app = Application::new(atlas.clone(), move |backend: BackendInitContext, ctx| {
         let slots = atlas.clone_slot_table();
-        let renderer = ctx.renderer_handle();
-        State::new(backend, renderer, slots, ctx)
+        let backend_handle = ctx.backend_handle();
+        State::new(backend, backend_handle, slots, ctx)
     })
     .unwrap();
 
@@ -2104,7 +2104,7 @@ fn demo_asset_path(relative: &str) -> PathBuf {
 }
 
 #[cfg(any(feature = "builder", feature = "png_source"))]
-fn load_external_image_texture(ctx: &mut Context<BackendRenderer>) -> Option<TextureId> {
+fn load_external_image_texture(ctx: &mut Context<SelectedBackend>) -> Option<TextureId> {
     let image_path = demo_asset_path("examples/FACEPALM.png");
     let png_bytes = match fs::read(&image_path) {
         Ok(bytes) => bytes,

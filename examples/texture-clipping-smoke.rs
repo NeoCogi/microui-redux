@@ -33,7 +33,7 @@
 
 use microui_redux::{
     prelude::*,
-    render::{Canvas, DisplayList, Painter, Vertex},
+    render::{Renderer, DisplayList, Painter, Vertex},
     AtlasSource,
 };
 
@@ -76,7 +76,7 @@ impl SmokeRenderer {
     }
 }
 
-impl Renderer for SmokeRenderer {
+impl RendererBackend for SmokeRenderer {
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }
@@ -142,11 +142,11 @@ fn assert_vec2f_eq(actual: Vec2f, expected: Vec2f) {
 }
 
 fn main() -> Result<(), String> {
-    let renderer = RendererHandle::new(SmokeRenderer::new(make_smoke_atlas()));
-    let mut canvas = Canvas::new(renderer.clone(), Dimensioni::new(64, 64));
-    let texture = canvas.try_load_texture_rgba(16, 12, &[0xFF; 16 * 12 * 4])?;
+    let backend = BackendHandle::new(SmokeRenderer::new(make_smoke_atlas()));
+    let mut renderer = Renderer::new(backend.clone(), Dimensioni::new(64, 64));
+    let texture = renderer.try_load_texture_rgba(16, 12, &[0xFF; 16 * 12 * 4])?;
 
-    canvas.begin(64, 64, color(0, 0, 0, 255));
+    renderer.begin(64, 64, color(0, 0, 0, 255));
     let viewport = Recti::new(0, 0, 64, 64);
     let mut list = DisplayList::new();
     Painter::new(&mut list, Vec2i::new(0, 0), viewport, viewport).icon(WHITE_ICON, Recti::new(0, 0, 4, 4), color(255, 255, 255, 255));
@@ -156,18 +156,18 @@ fn main() -> Result<(), String> {
         color(255, 255, 255, 255),
     );
     Painter::new(&mut list, Vec2i::new(0, 0), viewport, viewport).icon(WHITE_ICON, Recti::new(30, 0, 4, 4), color(255, 255, 255, 255));
-    canvas.render(&mut list);
-    canvas.end();
+    renderer.render(&mut list);
+    renderer.end();
 
-    renderer.scope(|renderer| {
-        assert_eq!(renderer.events.len(), 3);
+    backend.scope(|backend| {
+        assert_eq!(backend.events.len(), 3);
 
-        match &renderer.events[0] {
+        match &backend.events[0] {
             SmokeEvent::AtlasBatch { quads } => assert_eq!(*quads, 1),
             event => panic!("expected first event to be an atlas batch, got {}", event.name()),
         }
 
-        match &renderer.events[1] {
+        match &backend.events[1] {
             SmokeEvent::Texture { id, vertices } => {
                 assert_eq!(*id, texture);
                 assert_vec2f_eq(vertices[0].position(), Vec2f::new(10.0, 12.0));
@@ -180,7 +180,7 @@ fn main() -> Result<(), String> {
             event => panic!("expected second event to be a texture draw, got {}", event.name()),
         }
 
-        match &renderer.events[2] {
+        match &backend.events[2] {
             SmokeEvent::AtlasBatch { quads } => assert_eq!(*quads, 1),
             event => panic!("expected final event to be an atlas batch, got {}", event.name()),
         }

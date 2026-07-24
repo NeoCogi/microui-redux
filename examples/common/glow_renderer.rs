@@ -30,7 +30,7 @@
 //
 //! OpenGL/Glow renderer backend used by examples.
 //!
-//! This module implements the `Renderer` trait, texture uploads, UI batching, and optional custom
+//! This module implements the `RendererBackend` trait, texture uploads, UI batching, and optional custom
 //! mesh rendering for the demo application.
 
 use core::slice;
@@ -216,7 +216,7 @@ impl GLRenderer {
     }
 }
 
-impl Renderer for GLRenderer {
+impl RendererBackend for GLRenderer {
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }
@@ -375,7 +375,7 @@ impl Renderer for GLRenderer {
         self.flush();
     }
 
-    /// Creates a GL texture for a renderer-owned external image.
+    /// Creates a GL texture for a backend-owned external image.
     fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String> {
         let gl = &self.gl;
         unsafe {
@@ -417,14 +417,14 @@ impl Renderer for GLRenderer {
         }
     }
 
-    /// Draws one pre-clipped textured quad using a renderer-owned texture outside the atlas batch.
+    /// Draws one pre-clipped textured quad using a backend-owned texture outside the atlas batch.
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
         let tex = match self.textures.get(&id) {
             Some(tex) => *tex,
             None => return,
         };
         // External textures cannot be folded into the atlas batch because they change the bound
-        // GL texture object. `Canvas` has already clipped the vertices, so the one-off draw uses
+        // GL texture object. `Renderer` has already clipped the vertices, so the one-off draw uses
         // the full framebuffer scissor and relies on the submitted quad geometry for clipping.
         self.flush();
         let gl = &self.gl;

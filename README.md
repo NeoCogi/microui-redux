@@ -63,16 +63,31 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 ![random](res/microui-0.6.png)
 
 ## Key Concepts
-- **Context**: owns the renderer handle, user input, frame results, and retained root windows. A frame has explicit phases: `begin_render_frame(...)` starts renderer work, input events are fed into the context, `update_ui()` traverses roots registered with `create_window(...)`, `create_dialog(...)`, or `create_popup(...)`, and `end_render_frame()` presents recorded root commands.
+- **Context**: owns the high-level `Renderer`, user input, frame results, and retained root windows. A frame has explicit phases: `begin_render_frame(...)` starts renderer work, input events are fed into the context, `update_ui()` traverses roots registered with `create_window(...)`, `create_dialog(...)`, or `create_popup(...)`, and `end_render_frame()` presents recorded root commands.
 - **Container**: the internal execution object behind windows, popups, scroll areas, and retained tree nodes. Application code should normally work through `Context`, `ScrollAreaHandle`, and `WidgetTreeBuilder` instead of authoring widgets directly on a container. `ScrollAreaHandle` exposes retained state, focus, and scroll access; direct draw/clip/body mutation is not part of the public application API.
 - **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). Retained traversal keys widget interaction by stable retained node IDs.
 - **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and stored in retained roots through `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)`. Tree nodes cover widgets, scroll areas, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
 - **Painter**: widget-local primitive recording exposed through `WidgetCtx::painter()`. It records rectangles, text/icons/images, thick line strokes, filled polygons, and scoped local clips into the current frame display list.
+- **Renderer**: the high-level frame and resource owner. It consumes each `DisplayList`, resolves final clipping and atlas geometry, manages external textures, and submits backend-ready operations through a `BackendHandle`.
+- **BackendHandle**: shared synchronized access to one concrete rendering backend. It allows custom render commands and the high-level renderer to coordinate backend work without exposing ownership details.
+- **RendererBackend**: the implementation contract for GPU or software backends. The included SDL2-backed glow, Vulkan, and WGPU examples demonstrate batching, texture management, and final submission.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override `config.font`.
-- **Renderer**: any backend that implements the `Renderer` trait can be used. The included SDL2-backed glow, Vulkan, and WGPU examples demonstrate how to batch the commands produced by a container and upload them to the GPU.
 
-The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `ScrollAreaHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. Renderer integration, `Canvas`, `DisplayList`, `Painter`, and backend vertices live under `microui_redux::render`; atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, rect-packing details, and container-level manual drawing are not part of the application authoring surface.
+The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `ScrollAreaHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. The `Renderer`, `RendererBackend`, `BackendHandle`, `DisplayList`, `Painter`, and backend vertices live under `microui_redux::render`; atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, rect-packing details, and container-level manual drawing are not part of the application authoring surface.
+
+### Rendering flow
+
+```text
+Widget::paint
+     |
+     v
+  Painter  ->  DisplayList  ->  Renderer  ->  BackendHandle  ->  RendererBackend
+  records       owns ordered    clips and     synchronizes       batches and
+  primitives    draw operations expands work backend access      submits work
+```
+
+`Painter` only records widget-local intent. `DisplayList` owns that ordered frame data. `Renderer` consumes it once, expands semantic operations into final geometry, applies clipping, and manages frame resources. `BackendHandle` provides synchronized access to the concrete `RendererBackend`, which performs the platform-specific submission.
 
 ### Retained-mode migration status
 
@@ -153,7 +168,7 @@ if ctx.committed_results().state_of_retained(RetainedId::root_node(image_root, i
 ```
 
 - `Image::Slot` renders an entry from the atlas and benefits from batching.
-- `Image::Texture` targets renderer-owned textures (the backend handles binding when drawing).
+- `Image::Texture` targets renderer-managed external textures (the backend handles binding when drawing).
 - `WidgetFillOption` controls which interaction states draw a filled background; use `WidgetFillOption::ALL` to keep the default normal/hover/click fills.
 - Use `Context::try_load_image_rgba`/`load_image_from` and `Context::free_image` to manage the lifetime of external textures; `load_image_rgba` is a panicking convenience wrapper for already-validated RGBA buffers.
 
@@ -161,7 +176,7 @@ if ctx.committed_results().state_of_retained(RetainedId::root_node(image_root, i
 - `WidgetCtx::painter()` returns a widget-local `Painter` that records directly into the current frame `DisplayList`.
 - `WidgetCtx::local_rect()` / `WidgetCtx::rect()` and routed input use widget-local coordinates; `WidgetCtx::screen_rect()` is the explicit absolute rectangle when a widget needs container-space geometry.
 - `Painter` provides `fill_rect`, `stroke_rect`, `text`, `icon`, `image`, `redraw_slot`, `stroke_line`, `fill_polygon`, and scoped clipping through `with_clip`.
-- Filled shapes and strokes are tessellated into retained triangles, while `Canvas` applies the operation's effective clip during execution so primitive rendering stays consistent across glow, Vulkan, and WGPU backends.
+- Filled shapes and strokes are tessellated into retained triangles, while `Renderer` applies the operation's effective clip during execution so primitive rendering stays consistent across glow, Vulkan, and WGPU backends.
 - `examples/retained-custom-drawing` shows a retained custom widget drawing through `WidgetCtx::painter()`, and `examples/demo-full` includes a larger painting example.
 - Direct scroll-area/container draw and clip methods are no longer public; retained widgets and `WidgetTreeBuilder::custom_render(...)` are the supported custom drawing paths.
 
@@ -275,7 +290,7 @@ Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`,
     - [x] `ScrollAreaHandle` is the retained nested-scroll API; old panel/container compatibility names were removed.
     - [x] Root auto-size, popup placement/close behavior, dialog z-order, scrollbars, and bottom-right resize handling were aligned with retained traversal.
 - [x] Tightened drawing, texture, atlas, and backend behavior.
-    - [x] Canvas command replay batches ordinary draw commands while preserving custom render and retained scroll-area boundaries.
+    - [x] Renderer command replay batches ordinary draw commands while preserving custom render and retained scroll-area boundaries.
     - [x] External texture uploads validate dimensions and byte counts, and texture clipping has a dedicated smoke example.
     - [x] Atlas code is split into builder, runtime, image, source, and codegen modules; `atlas_export` now requires `png_source` when exporting PNG-backed atlas data.
     - [x] Glow, Vulkan, and WGPU examples share retained root handling, and `examples/retained-custom-drawing` documents the custom graphics path.

@@ -1,11 +1,11 @@
-//! Characterization tests for single-pass Canvas execution and resource ownership.
+//! Characterization tests for single-pass Renderer execution and resource ownership.
 
 use super::*;
 use crate::render::{
     DisplayList, Painter,
     geometry::{SolidTriangle, SolidVertex},
 };
-use crate::test_support::{RecordedVertex, RenderEvent, recording_renderer};
+use crate::test_support::{RecordedVertex, RenderEvent, recording_backend};
 use crate::{AtlasSource, CharEntry, CLOSE_ICON, FontEntry, SourceFormat, color, color4b};
 use std::{
     cell::{Cell, RefCell},
@@ -18,7 +18,7 @@ struct CountingRenderer {
     quads: usize,
 }
 
-impl Renderer for CountingRenderer {
+impl RendererBackend for CountingRenderer {
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas_reads.set(self.atlas_reads.get() + 1);
         self.atlas.clone()
@@ -52,7 +52,7 @@ struct TextureUploadRenderer {
     fail_upload: bool,
 }
 
-impl Renderer for TextureUploadRenderer {
+impl RendererBackend for TextureUploadRenderer {
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }
@@ -153,12 +153,12 @@ fn textured_rectangle_clipping_projects_into_source_coordinates() {
 
 #[test]
 fn semantic_atlas_operations_use_the_cached_atlas_and_one_executor() {
-    let renderer = RendererHandle::new(CountingRenderer {
+    let backend = BackendHandle::new(CountingRenderer {
         atlas: make_atlas(),
         atlas_reads: Cell::new(0),
         quads: 0,
     });
-    let mut canvas = Canvas::new(renderer.clone(), Dimensioni::new(32, 32));
+    let mut renderer = Renderer::new(backend.clone(), Dimensioni::new(32, 32));
     let white = color(255, 255, 255, 255);
     let mut list = DisplayList::new();
     {
@@ -170,19 +170,19 @@ fn semantic_atlas_operations_use_the_cached_atlas_and_one_executor() {
         painter.redraw_slot(SlotId::default(), Recti::new(0, 0, 4, 4), white, Rc::new(|_, _| color4b(255, 255, 255, 255)));
     }
 
-    canvas.render(&mut list);
+    renderer.render(&mut list);
 
     assert!(list.is_empty());
-    renderer.scope(|renderer| {
-        assert_eq!(renderer.atlas_reads.get(), 1);
-        assert_eq!(renderer.quads, 6);
+    backend.scope(|backend| {
+        assert_eq!(backend.atlas_reads.get(), 1);
+        assert_eq!(backend.quads, 6);
     });
 }
 
 #[test]
 fn operation_clip_is_intersected_with_viewport_for_every_quad_kind() {
-    let (renderer, log) = recording_renderer(make_atlas());
-    let mut canvas = Canvas::new(renderer, Dimensioni::new(8, 8));
+    let (backend, log) = recording_backend(make_atlas());
+    let mut renderer = Renderer::new(backend, Dimensioni::new(8, 8));
     let white = color(255, 255, 255, 255);
     let clip = Recti::new(2, 0, 20, 4);
     let mut list = DisplayList::new();
@@ -194,7 +194,7 @@ fn operation_clip_is_intersected_with_viewport_for_every_quad_kind() {
         painter.image(Image::Slot(SlotId::default()), Recti::new(0, 0, 4, 4), white);
     }
 
-    canvas.render(&mut list);
+    renderer.render(&mut list);
 
     let quads: Vec<_> = log
         .snapshot()
@@ -215,9 +215,9 @@ fn operation_clip_is_intersected_with_viewport_for_every_quad_kind() {
 
 #[test]
 fn external_texture_clipping_preserves_uv_mapping_and_stream_order() {
-    let (renderer, log) = recording_renderer(make_atlas());
-    let mut canvas = Canvas::new(renderer, Dimensioni::new(32, 32));
-    let texture = canvas.try_load_texture_rgba(20, 20, &[0xFF; 20 * 20 * 4]).unwrap();
+    let (backend, log) = recording_backend(make_atlas());
+    let mut renderer = Renderer::new(backend, Dimensioni::new(32, 32));
+    let texture = renderer.try_load_texture_rgba(20, 20, &[0xFF; 20 * 20 * 4]).unwrap();
     log.clear();
     let white = color(255, 255, 255, 255);
     let mut list = DisplayList::new();
@@ -225,7 +225,7 @@ fn external_texture_clipping_preserves_uv_mapping_and_stream_order() {
     painter(&mut list, Recti::new(5, 5, 10, 10)).image(Image::Texture(texture), Recti::new(0, 0, 20, 20), white);
     painter(&mut list, viewport()).fill_rect(Recti::new(20, 0, 1, 1), white);
 
-    canvas.render(&mut list);
+    renderer.render(&mut list);
 
     let events = log.snapshot();
     assert!(matches!(events[0], RenderEvent::AtlasQuad(_)));
@@ -242,8 +242,8 @@ fn external_texture_clipping_preserves_uv_mapping_and_stream_order() {
 
 #[test]
 fn solid_triangles_are_clipped_only_during_execution_and_interpolate_color() {
-    let (renderer, log) = recording_renderer(make_atlas());
-    let mut canvas = Canvas::new(renderer, Dimensioni::new(20, 20));
+    let (backend, log) = recording_backend(make_atlas());
+    let mut renderer = Renderer::new(backend, Dimensioni::new(20, 20));
     let triangle = SolidTriangle::from([
         SolidVertex {
             position: Vec2f::new(-10.0, 0.0),
@@ -261,7 +261,7 @@ fn solid_triangles_are_clipped_only_during_execution_and_interpolate_color() {
     let mut list = DisplayList::new();
     list.push_solid_triangles(Recti::new(0, 0, 10, 10), &[triangle]);
 
-    canvas.render(&mut list);
+    renderer.render(&mut list);
 
     let triangles: Vec<_> = log
         .snapshot()
@@ -287,16 +287,16 @@ fn solid_triangles_are_clipped_only_during_execution_and_interpolate_color() {
 
 #[test]
 fn custom_barrier_flushes_releases_lock_clips_and_preserves_order() {
-    let (renderer, log) = recording_renderer(make_atlas());
-    let mut canvas = Canvas::new(renderer.clone(), Dimensioni::new(20, 20));
+    let (backend, log) = recording_backend(make_atlas());
+    let mut renderer = Renderer::new(backend.clone(), Dimensioni::new(20, 20));
     let observed = Rc::new(RefCell::new(Vec::new()));
     let callback_observed = observed.clone();
-    let mut callback_renderer = renderer.clone();
+    let mut callback_backend = backend.clone();
     let callback = move |dim: Dimensioni, args: &CustomRenderArgs| {
         callback_observed
             .borrow_mut()
             .push(((dim.width, dim.height), (args.view.x, args.view.y, args.view.width, args.view.height)));
-        callback_renderer.scope_mut(|renderer| renderer.record_marker("custom"));
+        callback_backend.scope_mut(|backend| backend.record_marker("custom"));
     };
     let mut list = DisplayList::new();
     list.push_fill_rect(viewport(), Recti::new(0, 0, 4, 4), color(255, 0, 0, 255));
@@ -310,7 +310,7 @@ fn custom_barrier_flushes_releases_lock_clips_and_preserves_order() {
     );
     list.push_fill_rect(viewport(), Recti::new(4, 0, 4, 4), color(0, 0, 255, 255));
 
-    canvas.render(&mut list);
+    renderer.render(&mut list);
 
     assert_eq!(*observed.borrow(), vec![((20, 20), (10, 10, 10, 10))]);
     let events = log.snapshot();
@@ -326,8 +326,8 @@ fn custom_barrier_flushes_releases_lock_clips_and_preserves_order() {
 fn dynamic_slot_payload_runs_before_the_slot_quad() {
     let atlas = make_atlas();
     let update_before = atlas.get_last_update_id();
-    let (renderer, log) = recording_renderer(atlas.clone());
-    let mut canvas = Canvas::new(renderer, Dimensioni::new(20, 20));
+    let (backend, log) = recording_backend(atlas.clone());
+    let mut renderer = Renderer::new(backend, Dimensioni::new(20, 20));
     let payload_log = log.clone();
     let called = Rc::new(Cell::new(false));
     let callback_called = called.clone();
@@ -340,7 +340,7 @@ fn dynamic_slot_payload_runs_before_the_slot_quad() {
     let mut list = DisplayList::new();
     painter(&mut list, viewport()).redraw_slot(SlotId::default(), Recti::new(0, 0, 4, 4), color(255, 255, 255, 255), payload);
 
-    canvas.render(&mut list);
+    renderer.render(&mut list);
 
     assert_eq!(atlas.get_last_update_id(), update_before.wrapping_add(1));
     assert!(called.get());
@@ -351,42 +351,42 @@ fn dynamic_slot_payload_runs_before_the_slot_quad() {
 
 #[test]
 fn texture_upload_validation_and_backend_failure_do_not_consume_ids() {
-    let mut renderer = RendererHandle::new(TextureUploadRenderer {
+    let mut backend = BackendHandle::new(TextureUploadRenderer {
         atlas: make_atlas(),
         create_calls: 0,
         destroy_calls: 0,
         fail_upload: false,
     });
-    let mut canvas = Canvas::new(renderer.clone(), Dimensioni::new(16, 16));
-    let error = canvas.try_load_texture_rgba(2, 2, &[0xFF; 4]).unwrap_err();
+    let mut renderer = Renderer::new(backend.clone(), Dimensioni::new(16, 16));
+    let error = renderer.try_load_texture_rgba(2, 2, &[0xFF; 4]).unwrap_err();
     assert_eq!(error, "Expected 16 RGBA bytes, received 4");
-    assert_eq!(canvas.next_texture_id, 1);
-    assert!(canvas.textures.is_empty());
-    renderer.scope(|renderer| assert_eq!(renderer.create_calls, 0));
+    assert_eq!(renderer.next_texture_id, 1);
+    assert!(renderer.textures.is_empty());
+    backend.scope(|backend| assert_eq!(backend.create_calls, 0));
 
-    renderer.scope_mut(|renderer| renderer.fail_upload = true);
-    let error = canvas.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap_err();
+    backend.scope_mut(|backend| backend.fail_upload = true);
+    let error = renderer.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap_err();
     assert_eq!(error, "backend rejected texture");
-    assert_eq!(canvas.next_texture_id, 1);
-    assert!(canvas.textures.is_empty());
-    renderer.scope(|renderer| assert_eq!(renderer.create_calls, 1));
+    assert_eq!(renderer.next_texture_id, 1);
+    assert!(renderer.textures.is_empty());
+    backend.scope(|backend| assert_eq!(backend.create_calls, 1));
 }
 
 #[test]
 fn unknown_and_freed_textures_are_noops_and_drop_destroys_owned_textures_once() {
-    let (renderer, log) = recording_renderer(make_atlas());
-    let mut canvas = Canvas::new(renderer, Dimensioni::new(32, 32));
-    let first = canvas.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
-    let second = canvas.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
-    let third = canvas.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
+    let (backend, log) = recording_backend(make_atlas());
+    let mut renderer = Renderer::new(backend, Dimensioni::new(32, 32));
+    let first = renderer.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
+    let second = renderer.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
+    let third = renderer.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
     log.clear();
-    canvas.free_texture(first);
-    canvas.free_texture(first);
+    renderer.free_texture(first);
+    renderer.free_texture(first);
     let mut list = DisplayList::new();
     painter(&mut list, viewport()).image(Image::Texture(first), Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
     painter(&mut list, viewport()).image(Image::Texture(TextureId::new(999, 1, 1)), Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
-    canvas.render(&mut list);
-    drop(canvas);
+    renderer.render(&mut list);
+    drop(renderer);
 
     let events = log.snapshot();
     assert!(!events.iter().any(|event| matches!(event, RenderEvent::ExternalTexture { .. })));
@@ -403,12 +403,12 @@ fn unknown_and_freed_textures_are_noops_and_drop_destroys_owned_textures_once() 
 
 #[test]
 fn frame_lifecycle_is_forwarded_in_order() {
-    let (renderer, log) = recording_renderer(make_atlas());
-    let mut canvas = Canvas::new(renderer, Dimensioni::new(1, 1));
+    let (backend, log) = recording_backend(make_atlas());
+    let mut renderer = Renderer::new(backend, Dimensioni::new(1, 1));
 
-    canvas.begin(20, 10, color(1, 2, 3, 4));
-    canvas.flush();
-    canvas.end();
+    renderer.begin(20, 10, color(1, 2, 3, 4));
+    renderer.flush();
+    renderer.end();
 
     assert_eq!(
         log.snapshot(),

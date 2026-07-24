@@ -171,7 +171,7 @@ pub struct Style {
 pub type Real = f32;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-/// Handle referencing a renderer-owned texture.
+/// Handle referencing an external texture managed by the renderer.
 pub struct TextureId {
     /// Backend-local texture identifier.
     raw: u32,

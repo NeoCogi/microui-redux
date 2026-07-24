@@ -10,7 +10,7 @@
 
 use crate::render::{CustomRenderArgs, CustomRenderCommand, DisplayList};
 #[cfg(test)]
-use crate::render::Renderer;
+use crate::render::RendererBackend;
 use crate::{expand_rect, Dimensioni, FrameResults, Input, MouseButton, Recti, Style, Vec2i, UNCLIPPED_RECT};
 #[cfg(test)]
 use crate::UiNodeSet;
@@ -35,7 +35,7 @@ pub use containers::UiInputEvent;
 
 /// Adapter that lets a retained custom-render callback enter the display list.
 struct NodeCustomRenderCommand {
-    /// Shared retained callback invoked during renderer replay.
+    /// Shared retained callback invoked during backend replay.
     render: TreeCustomRender,
 }
 
@@ -322,7 +322,7 @@ mod tests {
     use super::*;
     use std::{cell::RefCell, rc::Rc};
 
-    use crate::render::{Canvas, RendererHandle};
+    use crate::render::{Renderer, BackendHandle};
     use crate::{
         color4b, rect, AtlasHandle, AtlasSource, Button, CharEntry, Custom, FontEntry, Id, Image, Input, KeyMode, ListItem, Policy, ResourceState,
         SourceFormat, StackDirection, Textbox, WidgetFillOption, WidgetOption, UiNodeBuilder, widget_handle,
@@ -430,11 +430,11 @@ mod tests {
             consumed | self.runtime.route_focus_input_events(&mut self.roots, style, input)
         }
 
-        fn render_frame<R: Renderer>(
+        fn render_frame<B: RendererBackend>(
             &mut self,
             root_id: crate::RootId,
             root_name: &str,
-            canvas: &mut Canvas<R>,
+            renderer: &mut Renderer<B>,
             style: &Style,
             input: &Input,
             results: &mut FrameResults,
@@ -442,12 +442,12 @@ mod tests {
             pointer_input_enabled: bool,
         ) {
             self.runtime.begin_frame(pointer_input_enabled);
-            self.runtime.layout_frame_roots(&mut self.roots, style, canvas.atlas(), body);
+            self.runtime.layout_frame_roots(&mut self.roots, style, renderer.atlas(), body);
             self.route_input_events(style, input);
-            let atlas = canvas.atlas();
+            let atlas = renderer.atlas();
             self.runtime
                 .update_paint_frame(&mut self.roots, root_id, root_name, &mut self.display_list, atlas, style, input, results, body);
-            canvas.render(&mut self.display_list);
+            renderer.render(&mut self.display_list);
         }
     }
 
@@ -577,8 +577,8 @@ mod tests {
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         runtime.focus = Some(focused_id);
         let atlas = test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut canvas = Canvas::new(renderer, Dimensioni::new(120, 80));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut renderer = Renderer::new(backend, Dimensioni::new(120, 80));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -589,7 +589,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &input,
             &mut results,
@@ -690,8 +690,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut canvas = Canvas::new(renderer, Dimensioni::new(400, 500));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut renderer = Renderer::new(backend, Dimensioni::new(400, 500));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -699,7 +699,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &Input::default(),
             &mut results,
@@ -738,8 +738,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut canvas = Canvas::new(renderer, Dimensioni::new(320, 420));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut renderer = Renderer::new(backend, Dimensioni::new(320, 420));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -747,7 +747,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &Input::default(),
             &mut results,
@@ -782,8 +782,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut canvas = Canvas::new(renderer, Dimensioni::new(320, 120));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut renderer = Renderer::new(backend, Dimensioni::new(320, 120));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -791,7 +791,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &Input::default(),
             &mut results,
@@ -820,8 +820,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut canvas = Canvas::new(renderer, Dimensioni::new(320, 160));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut renderer = Renderer::new(backend, Dimensioni::new(320, 160));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -829,7 +829,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &Input::default(),
             &mut results,
@@ -863,15 +863,15 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         set_scroll_area_scroll(&mut runtime.roots, scroll_area_id, Vec2i::new(0, 36));
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut canvas = Canvas::new(renderer, Dimensioni::new(180, 100));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut renderer = Renderer::new(backend, Dimensioni::new(180, 100));
         let mut results = FrameResults::default();
         results.begin_frame();
 
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             style.as_ref(),
             &Input::default(),
             &mut results,
@@ -908,8 +908,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut canvas = Canvas::new(renderer, Dimensioni::new(220, 160));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut renderer = Renderer::new(backend, Dimensioni::new(220, 160));
         let mut style = Style::default();
         style.scrollbar_size = 10;
         let mut results = FrameResults::default();
@@ -919,7 +919,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &Input::default(),
             &mut results,
@@ -933,7 +933,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &Input::default(),
             &mut results,
@@ -962,8 +962,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut canvas = Canvas::new(renderer, Dimensioni::new(220, 160));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut renderer = Renderer::new(backend, Dimensioni::new(220, 160));
         let mut style = Style::default();
         style.padding = 6;
         style.scrollbar_size = 10;
@@ -974,7 +974,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &Input::default(),
             &mut results,
@@ -1048,8 +1048,8 @@ mod tests {
                     });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut canvas = Canvas::new(renderer, Dimensioni::new(140, 80));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut renderer = Renderer::new(backend, Dimensioni::new(140, 80));
         let mut style = Style::default();
         style.padding = 0;
         style.scrollbar_size = 10;
@@ -1059,7 +1059,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &Input::default(),
             &mut results,
@@ -1073,7 +1073,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &Input::default(),
             &mut results,
@@ -1143,8 +1143,8 @@ mod tests {
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut canvas = Canvas::new(renderer, Dimensioni::new(200, 140));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut renderer = Renderer::new(backend, Dimensioni::new(200, 140));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -1152,7 +1152,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &Input::default(),
             &mut results,
@@ -1205,8 +1205,8 @@ mod tests {
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut canvas = Canvas::new(renderer, Dimensioni::new(300, 160));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut renderer = Renderer::new(backend, Dimensioni::new(300, 160));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -1214,7 +1214,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &Input::default(),
             &mut results,
@@ -1246,8 +1246,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut canvas = Canvas::new(renderer, Dimensioni::new(220, 80));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut renderer = Renderer::new(backend, Dimensioni::new(220, 80));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -1255,7 +1255,7 @@ mod tests {
         runtime.render_frame(
             crate::RootId::from_raw(1),
             "test",
-            &mut canvas,
+            &mut renderer,
             &style,
             &Input::default(),
             &mut results,

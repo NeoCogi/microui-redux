@@ -52,7 +52,7 @@
 //
 //! Top-level retained UI context.
 //!
-//! `Context` owns renderer-facing canvas state, global input, window-manager state, and the published
+//! `Context` owns the high-level renderer, global input, window-manager state, and the published
 //! frame results that application code reads after each retained update.
 use std::{cell::RefCell, rc::Rc};
 
@@ -66,7 +66,7 @@ use crate::{
     rect, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId,
     UiRuntime,
 };
-use crate::render::{Canvas, DisplayList, Renderer, RendererHandle};
+use crate::render::{BackendHandle, DisplayList, Renderer, RendererBackend};
 use crate::ui_node::{pointer_events_from_input, UiNode, UiNodeId};
 use window_manager::WindowEntry;
 mod builder;
@@ -94,10 +94,10 @@ impl RootId {
     }
 }
 
-/// Primary entry point used to drive the UI over a renderer implementation.
-pub struct Context<R: Renderer> {
-    /// Renderer-facing canvas that replays root command lists.
-    canvas: Canvas<R>,
+/// Primary entry point used to drive the UI over a rendering backend.
+pub struct Context<B: RendererBackend> {
+    /// High-level renderer that replays root display lists.
+    renderer: Renderer<B>,
     /// Reusable operation storage for window-manager frame and chrome drawing.
     display_list: DisplayList,
     /// Shared style used by all roots and scroll areas.
@@ -118,14 +118,14 @@ pub struct Context<R: Renderer> {
     input: Rc<RefCell<Input>>,
 }
 
-impl<R: Renderer> Context<R> {
-    /// Creates a new UI context around the provided renderer and dimensions.
-    pub fn new(renderer: RendererHandle<R>, dim: Dimensioni) -> Self {
-        // The renderer supplies the atlas; the default style then binds semantic font roles from it.
-        let canvas = Canvas::new(renderer, dim);
-        let style = Style::default().with_named_fonts(&canvas.atlas());
+impl<B: RendererBackend> Context<B> {
+    /// Creates a new UI context around the provided backend and dimensions.
+    pub fn new(backend: BackendHandle<B>, dim: Dimensioni) -> Self {
+        // The backend supplies the atlas; the default style then binds semantic font roles from it.
+        let renderer = Renderer::new(backend, dim);
+        let style = Style::default().with_named_fonts(&renderer.atlas());
         Self {
-            canvas,
+            renderer,
             display_list: DisplayList::new(),
             style: Rc::new(style),
             last_zindex: 0,
@@ -144,24 +144,24 @@ mod builder_tests;
 #[cfg(test)]
 mod tests;
 
-impl<R: Renderer> Context<R> {
+impl<B: RendererBackend> Context<B> {
     /// Begins a renderer draw pass for the current viewport.
     ///
     /// Call this once after determining the viewport size and before presenting UI commands for
     /// the frame. Input events may be collected before or after this call, as long as
     /// [`Context::update_ui`] runs after the input state has been updated.
     pub fn begin_render_frame(&mut self, width: i32, height: i32, clr: Color) {
-        self.canvas.begin(width, height, clr);
+        self.renderer.begin(width, height, clr);
     }
 
     /// Flushes recorded root commands to the renderer and ends the draw pass.
     pub fn end_render_frame(&mut self) {
-        self.canvas.end()
+        self.renderer.end()
     }
 
-    /// Returns a handle to the underlying renderer.
-    pub fn renderer_handle(&self) -> RendererHandle<R> {
-        self.canvas.renderer_handle()
+    /// Returns a handle to the underlying backend.
+    pub fn backend_handle(&self) -> BackendHandle<B> {
+        self.renderer.backend_handle()
     }
 
     #[inline(never)]
@@ -216,24 +216,24 @@ impl<R: Renderer> Context<R> {
     /// semantic roles to those atlas bindings explicitly.
     pub fn set_style(&mut self, style: &Style) {
         let mut resolved = style.clone();
-        resolved.bind_default_named_fonts(&self.canvas.atlas());
+        resolved.bind_default_named_fonts(&self.renderer.atlas());
         self.style = Rc::new(resolved)
     }
 
-    /// Returns the underlying canvas used for advanced backend inspection.
+    /// Returns the high-level renderer used for frame execution and resource management.
     ///
     /// Application code should prefer the higher-level context image APIs and retained widget
-    /// rendering. Backend tests can name this type as [`crate::render::Canvas`].
-    pub fn canvas(&self) -> &crate::render::Canvas<R> {
-        &self.canvas
+    /// rendering. Backend integrations can use this accessor for dimensions and atlas metadata.
+    pub fn renderer(&self) -> &Renderer<B> {
+        &self.renderer
     }
 
     /// Attempts to upload an RGBA image to the renderer and returns its [`TextureId`].
     ///
     /// Dimensions and byte length are validated before an id is allocated. Backend upload errors
-    /// are returned without recording texture state in the canvas.
+    /// are returned without recording texture state in the renderer.
     pub fn try_load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
-        self.canvas.try_load_texture_rgba(width, height, pixels)
+        self.renderer.try_load_texture_rgba(width, height, pixels)
     }
 
     /// Uploads an RGBA image to the renderer and returns its [`TextureId`].
@@ -247,7 +247,7 @@ impl<R: Renderer> Context<R> {
 
     /// Deletes a previously uploaded texture.
     pub fn free_image(&mut self, id: TextureId) {
-        self.canvas.free_texture(id);
+        self.renderer.free_texture(id);
     }
 
     /// Uploads texture data described by `source`. PNG decoding is only available when the

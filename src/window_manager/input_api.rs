@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl<R: Renderer> Context<R> {
+impl<B: RendererBackend> Context<B> {
     /// Updates the current mouse pointer position.
     pub fn mousemove(&mut self, x: i32, y: i32) {
         self.input.borrow_mut().mousemove(x, y);

@@ -40,7 +40,7 @@ struct NoopRenderer {
     atlas: AtlasHandle,
 }
 
-impl Renderer for NoopRenderer {
+impl RendererBackend for NoopRenderer {
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }
@@ -153,8 +153,8 @@ fn make_atlas() -> AtlasHandle {
 }
 
 fn main() {
-    let renderer = RendererHandle::new(NoopRenderer { atlas: make_atlas() });
-    let mut ctx = Context::new(renderer, Dimensioni::new(160, 100));
+    let backend = BackendHandle::new(NoopRenderer { atlas: make_atlas() });
+    let mut ctx = Context::new(backend, Dimensioni::new(160, 100));
     let paint = widget_handle(RetainedPaint::new());
     let tree = UiNodeBuilder::build(move |tree| {
         tree.widget(&paint);

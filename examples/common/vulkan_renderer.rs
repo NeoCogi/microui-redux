@@ -44,7 +44,7 @@
 //
 //! Vulkan renderer backend used by examples.
 //!
-//! This module implements the `Renderer` trait, texture uploads, UI batching, swapchain handling,
+//! This module implements the `RendererBackend` trait, texture uploads, UI batching, swapchain handling,
 //! and optional custom mesh rendering for the demo application.
 
 use std::{collections::HashMap, convert::TryFrom, ffi::CString, io::Cursor, mem, ptr};
@@ -157,7 +157,7 @@ const MESH_VERT_SPV: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), 
 const MESH_FRAG_SPV: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/vulkan/mesh.frag.spv"));
 
 pub struct VulkanRenderer {
-    // `VulkanRenderer` is the high-level microui `Renderer` implementation. It batches UI quads
+    // `VulkanRenderer` is the microui `RendererBackend` implementation. It batches UI quads
     // into `vertices`, records custom render jobs into `commands`, and delegates all Vulkan object
     // lifetime and frame submission concerns to `VulkanContext`.
     atlas: AtlasHandle,
@@ -225,7 +225,7 @@ impl VulkanRenderer {
         Ok(())
     }
 
-    /// Rebinds renderer-owned texture descriptors after a swapchain/UI resource rebuild.
+    /// Rebinds backend-owned texture descriptors after a swapchain/UI resource rebuild.
     fn handle_swapchain_updates(&mut self) {
         let generation = self.context.swapchain_generation();
         if self.last_swapchain_generation != generation {
@@ -239,7 +239,7 @@ impl VulkanRenderer {
         }
     }
 
-    /// Allocates fresh descriptor sets for every renderer-owned texture image.
+    /// Allocates fresh descriptor sets for every backend-owned texture image.
     fn rebind_texture_descriptors(&mut self) -> Result<()> {
         for texture in self.textures.values_mut() {
             let descriptor = self.context.allocate_texture_descriptor(&texture.image)?;
@@ -274,7 +274,7 @@ impl VulkanRenderer {
         if self.device_lost {
             return;
         }
-        // The atlas is treated like another renderer-owned texture: if the atlas pixels changed or
+        // The atlas is treated like another backend-owned texture: if the atlas pixels changed or
         // the UI resources were recreated, upload it before the frame records any draw commands.
         let needs_upload = self.last_atlas_update_id != self.atlas.get_last_update_id() || !self.context.ui_has_atlas();
         if needs_upload {
@@ -287,7 +287,7 @@ impl VulkanRenderer {
     }
 }
 
-impl Renderer for VulkanRenderer {
+impl RendererBackend for VulkanRenderer {
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }
@@ -363,7 +363,7 @@ impl Renderer for VulkanRenderer {
         self.current_batch_end = 0;
     }
 
-    /// Creates a renderer-owned sampled texture and tracks it by `TextureId`.
+    /// Creates a backend-owned sampled texture and tracks it by `TextureId`.
     fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<()> {
         if self.device_lost {
             return Err(String::from("Vulkan device is lost"));
@@ -373,14 +373,14 @@ impl Renderer for VulkanRenderer {
         Ok(())
     }
 
-    /// Destroys a renderer-owned sampled texture if it is still tracked.
+    /// Destroys a backend-owned sampled texture if it is still tracked.
     fn destroy_texture(&mut self, id: TextureId) {
         if let Some(mut texture) = self.textures.remove(&id) {
             texture.image.destroy(&self.context.device);
         }
     }
 
-    /// Queues a pre-clipped textured custom draw that samples from a renderer-owned texture.
+    /// Queues a pre-clipped textured custom draw that samples from a backend-owned texture.
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
         if self.device_lost {
             return;
@@ -393,7 +393,7 @@ impl Renderer for VulkanRenderer {
         let mut quad = Vec::with_capacity(6);
         quad.extend_from_slice(&[vertices[0], vertices[1], vertices[2], vertices[0], vertices[2], vertices[3]]);
 
-        // `Canvas` already clipped the quad and adjusted UVs, so the texture command's draw area
+        // `Renderer` already clipped the quad and adjusted UVs, so the texture command's draw area
         // is just the submitted geometry bounds used to preserve ordering.
         let area_rect = rect_from_vertices(&vertices);
         let area = CustomRenderArea { rect: area_rect, clip: area_rect };

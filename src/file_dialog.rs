@@ -33,7 +33,7 @@
 //! and selection state so applications can open it repeatedly without rebuilding runtime state.
 use std::path::Path;
 
-use crate::{render::Renderer, *};
+use crate::{render::RendererBackend, *};
 
 /// Simple modal dialog that lets the user browse and pick files.
 pub struct FileDialogState {
@@ -349,7 +349,7 @@ impl FileDialogState {
     }
 
     /// Pushes the current retained nodes/options into the registered context root.
-    fn sync_retained_root<R: Renderer>(&mut self, ctx: &mut Context<R>) {
+    fn sync_retained_root<B: RendererBackend>(&mut self, ctx: &mut Context<B>) {
         let (control_height, spacing) = ctx.root_control_metrics();
         self.sync_retained_view(control_height, spacing);
         ctx.set_root_nodes(self.root, std::mem::take(&mut self.tree));
@@ -455,7 +455,7 @@ impl FileDialogState {
     }
 
     /// Creates a new dialog window and associated scroll areas.
-    pub fn new<R: Renderer>(ctx: &mut Context<R>) -> Self {
+    pub fn new<B: RendererBackend>(ctx: &mut Context<B>) -> Self {
         let current_working_directory = std::env::current_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .to_string_lossy()
@@ -505,13 +505,13 @@ impl FileDialogState {
     }
 
     /// Marks the dialog as open for the next frame.
-    pub fn open<R: Renderer>(&mut self, ctx: &mut Context<R>) {
+    pub fn open<B: RendererBackend>(&mut self, ctx: &mut Context<B>) {
         ctx.set_root_visible(self.root, true);
         self.open = true;
     }
 
     /// Renders the dialog and updates the selected file when confirmed.
-    pub fn eval<R: Renderer>(&mut self, ctx: &mut Context<R>) {
+    pub fn eval<B: RendererBackend>(&mut self, ctx: &mut Context<B>) {
         let results = ctx.committed_results();
         let needs_refresh = self.apply_navigation_actions(results) || self.apply_folder_actions(results);
         self.apply_file_actions(results);
@@ -533,7 +533,7 @@ impl FileDialogState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::RendererHandle;
+    use crate::render::BackendHandle;
     use crate::test_support::{test_atlas, NoopRenderer};
     use std::{
         fs,
@@ -572,8 +572,8 @@ mod tests {
         fs::write(&file_path, b"picked").unwrap();
 
         let atlas = test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut ctx = Context::new(renderer, Dimensioni::new(800, 600));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(backend, Dimensioni::new(800, 600));
         let mut dialog = FileDialogState::new(&mut ctx);
         dialog.current_working_directory = dir.to_string_lossy().to_string();
         dialog.refresh_entries();
@@ -608,8 +608,8 @@ mod tests {
         fs::write(&file_path, b"picked").unwrap();
 
         let atlas = test_atlas();
-        let renderer = RendererHandle::new(NoopRenderer { atlas });
-        let mut ctx = Context::new(renderer, Dimensioni::new(800, 600));
+        let backend = BackendHandle::new(NoopRenderer { atlas });
+        let mut ctx = Context::new(backend, Dimensioni::new(800, 600));
         let mut dialog = FileDialogState::new(&mut ctx);
         dialog.current_working_directory = dir.to_string_lossy().to_string();
         dialog.refresh_entries();

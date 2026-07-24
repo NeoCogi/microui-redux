@@ -30,7 +30,7 @@
 //
 //! WGPU renderer backend used by examples.
 //!
-//! This module implements the `Renderer` trait, texture uploads, UI batching, and optional custom
+//! This module implements the `RendererBackend` trait, texture uploads, UI batching, and optional custom
 //! mesh rendering for the demo application.
 
 use std::{collections::HashMap, mem, slice};
@@ -659,7 +659,7 @@ impl WgpuRenderer {
     }
 }
 
-impl Renderer for WgpuRenderer {
+impl RendererBackend for WgpuRenderer {
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }
@@ -866,7 +866,7 @@ impl Renderer for WgpuRenderer {
         frame.present();
     }
 
-    /// Creates a renderer-owned sampled texture and its bind group.
+    /// Creates a backend-owned sampled texture and its bind group.
     fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String> {
         if width <= 0 || height <= 0 {
             return Err(String::from("texture dimensions must be positive"));
@@ -886,19 +886,19 @@ impl Renderer for WgpuRenderer {
         Ok(())
     }
 
-    /// Drops a renderer-owned texture by removing it from the bind-group map.
+    /// Drops a backend-owned texture by removing it from the bind-group map.
     fn destroy_texture(&mut self, id: TextureId) {
         self.textures.remove(&id);
     }
 
-    /// Queues one pre-clipped textured quad that samples from a renderer-owned texture.
+    /// Queues one pre-clipped textured quad that samples from a backend-owned texture.
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
         if !self.textures.contains_key(&id) {
             return;
         }
 
         // Textured draws must preserve ordering with surrounding UI draws, so flush the current
-        // atlas batch before appending the explicit texture command. `Canvas` already clipped the
+        // atlas batch before appending the explicit texture command. `Renderer` already clipped the
         // quad and adjusted UVs, so no additional scissor is needed here.
         self.flush_ui_batch();
         let mut quad = Vec::with_capacity(6);

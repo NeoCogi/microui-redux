@@ -73,7 +73,7 @@ impl WindowChrome {
     }
 }
 
-impl<R: Renderer> Context<R> {
+impl<B: RendererBackend> Context<B> {
     fn register_root(&mut self, kind: WindowKind, name: &str, rect: Recti, tree: UiNodeSet, opt: ContainerOption, visible: bool) -> RootId {
         let id = self.next_root_id();
         let roots = tree.into_roots();
@@ -171,9 +171,9 @@ impl<R: Renderer> Context<R> {
 
     pub(crate) fn root_control_metrics(&self) -> (i32, i32) {
         let padding = self.style.padding.max(0);
-        let font_height = self.canvas.atlas().get_font_height(self.style.font) as i32;
+        let font_height = self.renderer.atlas().get_font_height(self.style.font) as i32;
         let vertical_pad = std::cmp::max(1, padding / 2);
-        let icon_height = self.canvas.atlas().get_icon_size(crate::EXPAND_DOWN_ICON).height;
+        let icon_height = self.renderer.atlas().get_icon_size(crate::EXPAND_DOWN_ICON).height;
         (std::cmp::max(font_height + vertical_pad * 2, icon_height), self.style.spacing.max(0))
     }
 
@@ -236,14 +236,14 @@ impl<R: Renderer> Context<R> {
 
     pub(super) fn render_window_manager(&mut self) {
         // Context owns the frame list lifecycle. Recording below appends every visible root in
-        // painter order, and Canvas consumes the completed list exactly once at the end.
+        // painter order, and Renderer consumes the completed list exactly once at the end.
         self.display_list.clear();
 
         for entry in &mut self.roots {
             if entry.visible && entry.opt.intersects(ContainerOption::AUTO_SIZE) {
                 let size = entry
                     .runtime
-                    .measure_auto_size(&entry.roots, self.style.as_ref(), &self.canvas.atlas(), entry.opt, entry.rect.width);
+                    .measure_auto_size(&entry.roots, self.style.as_ref(), &self.renderer.atlas(), entry.opt, entry.rect.width);
                 entry.rect.width = size.width;
                 entry.rect.height = size.height;
             }
@@ -281,15 +281,15 @@ impl<R: Renderer> Context<R> {
                 }
                 let chrome_capturing_pointer = matches!(entry.active_chrome, Some(WindowChromePart::Title | WindowChromePart::Resize));
                 let pointer_input_enabled = hover_root == Some(entry.id) && !chrome_capturing_pointer;
-                let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.atlas(), entry.opt);
+                let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.renderer.atlas(), entry.opt);
                 self.record_window_frame(entry);
                 let input = self.input.borrow();
                 entry.runtime.begin_frame(pointer_input_enabled);
                 entry
                     .runtime
-                    .layout_frame_roots(&mut entry.roots, self.style.as_ref(), self.canvas.atlas(), chrome.body);
+                    .layout_frame_roots(&mut entry.roots, self.style.as_ref(), self.renderer.atlas(), chrome.body);
                 Self::route_entry_input(entry, self.style.as_ref(), &input);
-                let atlas = self.canvas.atlas();
+                let atlas = self.renderer.atlas();
                 entry.runtime.update_paint_frame(
                     &mut entry.roots,
                     entry.id,
@@ -306,7 +306,7 @@ impl<R: Renderer> Context<R> {
             }
         }
         self.roots = roots;
-        self.canvas.render(&mut self.display_list);
+        self.renderer.render(&mut self.display_list);
     }
 
     fn route_entry_input(entry: &mut WindowEntry, style: &Style, input: &Input) -> bool {
@@ -349,7 +349,7 @@ impl<R: Renderer> Context<R> {
             return;
         }
 
-        let dimensions = self.canvas.dimensions();
+        let dimensions = self.renderer.dimensions();
         let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
         let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);
         record_root_frame(&mut painter, self.style.as_ref(), entry.rect, ControlColor::WindowBG);
@@ -357,9 +357,9 @@ impl<R: Renderer> Context<R> {
 
     /// Records title, close, and resize chrome after retained contents.
     fn record_window_chrome(&mut self, entry: &WindowEntry, chrome: WindowChrome) {
-        let dimensions = self.canvas.dimensions();
+        let dimensions = self.renderer.dimensions();
         let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
-        let atlas = self.canvas.atlas();
+        let atlas = self.renderer.atlas();
         let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);
 
         if let Some(title) = chrome.title {
@@ -392,7 +392,7 @@ impl<R: Renderer> Context<R> {
         mouse_down: MouseButton,
         mouse_delta: crate::Vec2i,
     ) {
-        let atlas = self.canvas.atlas();
+        let atlas = self.renderer.atlas();
         for entry in &mut self.roots {
             if !entry.visible {
                 entry.active_chrome = None;
@@ -480,7 +480,7 @@ impl<R: Renderer> Context<R> {
         self.roots
             .iter()
             .find(|entry| entry.id == root)
-            .map(|entry| WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.atlas(), entry.opt).body)
+            .map(|entry| WindowChrome::new(entry.rect, self.style.as_ref(), &self.renderer.atlas(), entry.opt).body)
     }
 
     #[cfg(test)]
@@ -502,7 +502,7 @@ impl<R: Renderer> Context<R> {
     #[cfg(test)]
     pub(crate) fn debug_root_chrome(&self, root: RootId) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
         self.roots.iter().find(|entry| entry.id == root).map(|entry| {
-            let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.canvas.atlas(), entry.opt);
+            let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.renderer.atlas(), entry.opt);
             (chrome.title, chrome.close, chrome.resize)
         })
     }

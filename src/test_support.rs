@@ -1,6 +1,6 @@
 //! Shared fixtures, renderer recordings, and no-op helpers used by unit tests.
 
-use crate::render::{Renderer, RendererHandle, Vertex};
+use crate::render::{RendererBackend, BackendHandle, Vertex};
 use crate::{AtlasHandle, AtlasSource, CharEntry, Color, FontEntry, Recti, SourceFormat, TextureId, Vec2i};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -80,7 +80,7 @@ pub(crate) struct NoopRenderer {
     pub(crate) atlas: AtlasHandle,
 }
 
-impl Renderer for NoopRenderer {
+impl RendererBackend for NoopRenderer {
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }
@@ -200,9 +200,9 @@ impl RenderLog {
     }
 }
 
-/// Renderer implementation that records the exact backend-facing call stream.
+/// RendererBackend implementation that records the exact backend-facing call stream.
 pub(crate) struct RecordingRenderer {
-    /// Atlas returned to Canvas.
+    /// Atlas returned to Renderer.
     atlas: AtlasHandle,
     /// Shared event log.
     log: RenderLog,
@@ -217,18 +217,18 @@ impl RecordingRenderer {
     }
 }
 
-/// Creates a recording renderer handle and its independently readable event log.
-pub(crate) fn recording_renderer(atlas: AtlasHandle) -> (RendererHandle<RecordingRenderer>, RenderLog) {
+/// Creates a recording backend handle and its independently readable event log.
+pub(crate) fn recording_backend(atlas: AtlasHandle) -> (BackendHandle<RecordingRenderer>, RenderLog) {
     let log = RenderLog::default();
-    let renderer = RecordingRenderer {
+    let backend = RecordingRenderer {
         atlas,
         log: log.clone(),
         fail_texture_upload: false,
     };
-    (RendererHandle::new(renderer), log)
+    (BackendHandle::new(backend), log)
 }
 
-impl Renderer for RecordingRenderer {
+impl RendererBackend for RecordingRenderer {
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }

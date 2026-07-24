@@ -7,7 +7,7 @@ use std::{
 
 use super::*;
 use crate::{
-    test_support::{recording_renderer, test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer, RenderEvent},
+    test_support::{recording_backend, test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer, RenderEvent},
     widget_handle, AtlasHandle, Button, Combo, Custom, ListItem, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId, SizePolicy,
     ScrollBehavior, StackDirection, TextBlock, UiInputEvent, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
 };
@@ -83,8 +83,8 @@ impl Widget for AlwaysSubmitWidget {
 #[test]
 fn root_windows_do_not_render_scrollbars_for_overflow_content() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let mut style = Style::default();
     style.padding = 0;
     style.scrollbar_size = 10;
@@ -113,8 +113,8 @@ fn set_style_rebinds_default_font_fields_from_named_atlas() {
     let body = atlas.font_id("body").unwrap();
     let small = atlas.font_id("small").unwrap();
     let title = atlas.font_id("title").unwrap();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
 
     let mut style = Style::default();
     style.padding = 0;
@@ -129,8 +129,8 @@ fn set_style_rebinds_default_font_fields_from_named_atlas() {
 #[test]
 fn resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 240));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 240));
     let mut style = Style::default();
     style.padding = 0;
     style.scrollbar_size = 10;
@@ -166,8 +166,8 @@ fn resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
 #[test]
 fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 240));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 240));
     let mut style = Style::default();
     style.padding = 0;
     style.scrollbar_size = 10;
@@ -209,8 +209,8 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
 #[test]
 fn title_drag_does_not_route_pointer_to_scroll_area() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(260, 240));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(260, 240));
     let mut style = Style::default();
     style.padding = 0;
     style.scrollbar_size = 10;
@@ -261,8 +261,8 @@ fn title_drag_does_not_route_pointer_to_scroll_area() {
 #[test]
 fn resize_handle_geometry_matches_scrollbar_corner_size() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 240));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 240));
     let mut style = Style::default();
     style.scrollbar_size = 10;
     ctx.set_style(&style);
@@ -288,8 +288,8 @@ fn resize_handle_geometry_matches_scrollbar_corner_size() {
 #[test]
 fn context_result_accessors_expose_committed_and_current_generations() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let committed_id = NodeId::new(1);
     let current_id = NodeId::new(2);
 
@@ -309,8 +309,8 @@ fn context_result_accessors_expose_committed_and_current_generations() {
 #[test]
 fn closing_window_resets_transient_render_state() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let root = ctx.create_window("window", rect(0, 0, 80, 40), UiNodeSet::default());
 
     ctx.update_ui();
@@ -324,8 +324,8 @@ fn closing_window_resets_transient_render_state() {
 #[test]
 fn reshown_windows_prepare_on_first_render_after_a_gap() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let tree = UiNodeBuilder::build(|tree| {
         tree.text("hello");
     });
@@ -345,8 +345,8 @@ fn reshown_windows_prepare_on_first_render_after_a_gap() {
 #[test]
 fn reopening_dialog_replaces_old_commands_with_current_frame_commands() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let first_tree = UiNodeBuilder::build(|tree| {
         tree.text("before");
     });
@@ -376,8 +376,8 @@ fn reopening_dialog_replaces_old_commands_with_current_frame_commands() {
 #[test]
 fn open_dialog_does_not_bump_zindex_every_frame() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let background_tree = UiNodeBuilder::build(|tree| {
         tree.text("background");
     });
@@ -401,8 +401,8 @@ fn open_dialog_does_not_bump_zindex_every_frame() {
 #[test]
 fn reshown_roots_drop_stale_scroll_area_state_after_a_gap() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let mut scroll_area = NodeId::default();
     let tree_with_scroll_area = UiNodeBuilder::build(|tree| {
         scroll_area = tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
@@ -430,8 +430,8 @@ fn reshown_roots_drop_stale_scroll_area_state_after_a_gap() {
 #[test]
 fn scroll_area_node_renders_scroll_area_node() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let mut scroll_area = NodeId::default();
     let tree = UiNodeBuilder::build(|tree| {
         scroll_area = tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
@@ -448,8 +448,8 @@ fn scroll_area_node_renders_scroll_area_node() {
 #[test]
 fn scroll_area_paints_disclosure_headers_in_screen_space() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 160));
     let header = widget_handle(Node::header("Visible Header", NodeStateValue::Expanded));
     let tree_node = widget_handle(Node::tree("Visible Tree", NodeStateValue::Expanded));
     let tree = UiNodeBuilder::build(|tree| {
@@ -475,8 +475,8 @@ fn scroll_area_paints_disclosure_headers_in_screen_space() {
 #[test]
 fn newly_opened_popup_auto_sizes_on_first_frame() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let tree = UiNodeBuilder::build(|tree| {
         tree.text("hello popup");
     });
@@ -497,8 +497,8 @@ fn newly_opened_popup_auto_sizes_on_first_frame() {
 #[test]
 fn auto_sized_titled_window_uses_current_frame_content_size() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let tree = UiNodeBuilder::build(|tree| {
         tree.text("hello\nhello\nhello");
     });
@@ -518,8 +518,8 @@ fn auto_sized_titled_window_uses_current_frame_content_size() {
 #[test]
 fn popup_content_changes_resize_without_a_frame_lag() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let short_tree = UiNodeBuilder::build(|tree| {
         tree.text("a");
     });
@@ -542,8 +542,8 @@ fn popup_content_changes_resize_without_a_frame_lag() {
 #[test]
 fn auto_sized_titled_window_body_fits_current_content_same_frame() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let mut style = Style::default();
     style.padding = 0;
     style.scrollbar_size = 10;
@@ -568,8 +568,8 @@ fn auto_sized_titled_window_body_fits_current_content_same_frame() {
 #[test]
 fn title_option_controls_root_window_title_bar_geometry() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let titled = ctx.create_window("titled", rect(0, 0, 80, 40), UiNodeBuilder::build(|_tree| {}));
     let plain = ctx.create_window("plain", rect(100, 0, 80, 40), UiNodeBuilder::build(|_tree| {}));
     ctx.set_root_options(plain, ContainerOption::NO_TITLE);
@@ -593,8 +593,8 @@ fn title_option_controls_root_window_title_bar_geometry() {
 #[test]
 fn duplicate_widget_dispatch_in_same_tree_panics_with_context() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let shared = widget_handle(AlwaysSubmitWidget::new("shared"));
     let tree = UiNodeBuilder::build(|tree| {
         tree.widget(shared.clone());
@@ -617,8 +617,8 @@ fn duplicate_widget_dispatch_in_same_tree_panics_with_context() {
 #[test]
 fn duplicate_widget_dispatch_across_windows_panics() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let shared = widget_handle(AlwaysSubmitWidget::new("shared"));
     let left_tree = UiNodeBuilder::build(|tree| {
         tree.widget(shared.clone());
@@ -643,8 +643,8 @@ fn duplicate_widget_dispatch_across_windows_panics() {
 #[test]
 fn distinct_widget_handles_with_identical_labels_render_normally() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let first = widget_handle(AlwaysSubmitWidget::new("same"));
     let second = widget_handle(AlwaysSubmitWidget::new("same"));
     let mut first_id = NodeId::default();
@@ -664,8 +664,8 @@ fn distinct_widget_handles_with_identical_labels_render_normally() {
 #[test]
 fn registered_window_renders_across_frames_without_resubmission() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let text = widget_handle(TextBlock::new("before"));
     let tree = UiNodeBuilder::build({
         let text = text.clone();
@@ -690,8 +690,8 @@ fn registered_window_renders_across_frames_without_resubmission() {
 #[test]
 fn retained_root_visibility_controls_rendering() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let tree = UiNodeBuilder::build(|tree| {
         tree.text("visible");
     });
@@ -714,8 +714,8 @@ fn retained_root_visibility_controls_rendering() {
 #[test]
 fn retained_root_nodes_can_be_replaced_after_registration() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(200, 200));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(200, 200));
     let first_tree = UiNodeBuilder::build(|tree| {
         tree.text("first");
     });
@@ -737,8 +737,8 @@ fn retained_root_nodes_can_be_replaced_after_registration() {
 #[test]
 fn root_ids_preserve_z_order_and_fronting() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let left_tree = UiNodeBuilder::build(|tree| {
         tree.text("left");
     });
@@ -758,8 +758,8 @@ fn root_ids_preserve_z_order_and_fronting() {
 
 #[test]
 fn window_manager_executes_one_z_ordered_display_list_per_ui_frame() {
-    let (renderer, log) = recording_renderer(make_test_atlas());
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let (backend, log) = recording_backend(make_test_atlas());
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
 
     let back = widget_handle(Custom::new("back"));
     let back_log = log.clone();
@@ -775,9 +775,9 @@ fn window_manager_executes_one_z_ordered_display_list_per_ui_frame() {
     });
     ctx.create_window("front", rect(20, 0, 90, 60), front_tree);
 
-    let renders_before = ctx.canvas().debug_render_count();
+    let renders_before = ctx.renderer().debug_render_count();
     ctx.update_ui();
-    assert_eq!(ctx.canvas().debug_render_count(), renders_before + 1);
+    assert_eq!(ctx.renderer().debug_render_count(), renders_before + 1);
 
     let events = log.snapshot();
     let back_content = events
@@ -802,8 +802,8 @@ fn window_manager_executes_one_z_ordered_display_list_per_ui_frame() {
 #[test]
 fn retained_dialog_becomes_front_root_when_shown() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let background = ctx.create_window(
         "background",
         rect(0, 0, 120, 80),
@@ -831,8 +831,8 @@ fn retained_dialog_becomes_front_root_when_shown() {
 #[test]
 fn retained_popup_opens_at_mouse_and_auto_sizes_on_first_frame() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let popup = ctx.create_popup(
         "popup",
         UiNodeBuilder::build(|tree| {
@@ -855,8 +855,8 @@ fn retained_popup_opens_at_mouse_and_auto_sizes_on_first_frame() {
 #[test]
 fn retained_root_hover_selection_uses_registered_root_z_order() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let left = ctx.create_window(
         "left",
         rect(0, 0, 100, 80),
@@ -886,8 +886,8 @@ fn retained_root_hover_selection_uses_registered_root_z_order() {
 #[test]
 fn root_hover_selection_uses_root_z_order() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let left_button = widget_handle(Button::new("left"));
     let right_button = widget_handle(Button::new("right"));
     let left = ctx.create_window(
@@ -926,8 +926,8 @@ fn root_hover_selection_uses_root_z_order() {
 #[test]
 fn root_title_drag_moves_window() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 160));
     let root = ctx.create_window(
         "node",
         rect(10, 10, 120, 80),
@@ -951,8 +951,8 @@ fn root_title_drag_moves_window() {
 #[test]
 fn root_resize_handle_resizes_window() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 160));
     let root = ctx.create_window(
         "node",
         rect(10, 10, 120, 80),
@@ -976,8 +976,8 @@ fn root_resize_handle_resizes_window() {
 #[test]
 fn root_close_button_hides_window() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 160));
     let root = ctx.create_window(
         "node",
         rect(10, 10, 120, 80),
@@ -997,8 +997,8 @@ fn root_close_button_hides_window() {
 #[test]
 fn retained_chrome_node_ids_are_root_derived_and_stable() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let root = ctx.create_window(
         "retained",
         rect(0, 0, 100, 70),
@@ -1032,8 +1032,8 @@ fn retained_chrome_node_ids_are_root_derived_and_stable() {
 #[test]
 fn retained_chrome_nodes_are_recorded_in_root_cache() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let root = ctx.create_window(
         "Typography Demo Window Title",
         rect(10, 12, 20, 40),
@@ -1063,8 +1063,8 @@ fn retained_chrome_nodes_are_recorded_in_root_cache() {
 #[test]
 fn retained_title_drag_uses_chrome_node_after_tree_update() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let root = ctx.create_window(
         "retained",
         rect(10, 10, 100, 70),
@@ -1102,8 +1102,8 @@ fn retained_title_drag_uses_chrome_node_after_tree_update() {
 #[test]
 fn retained_close_button_closes_root_and_records_chrome_result() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let root = ctx.create_window(
         "retained",
         rect(10, 10, 100, 70),
@@ -1130,8 +1130,8 @@ fn retained_close_button_closes_root_and_records_chrome_result() {
 #[test]
 fn retained_resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 240));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 240));
     let mut style = Style::default();
     style.padding = 0;
     style.scrollbar_size = 10;
@@ -1167,8 +1167,8 @@ fn retained_resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
 #[test]
 fn retained_popup_closes_from_root_state_when_clicking_outside() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let popup = ctx.create_popup(
         "popup",
         UiNodeBuilder::build(|tree| {
@@ -1224,8 +1224,8 @@ fn run_combo_frame(
 #[test]
 fn retained_combo_popup_stays_closed_after_mouse_selection() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let popup_root = ctx.create_popup("combo popup", UiNodeSet::default());
     ctx.set_root_options(popup_root, ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE);
     let combo = widget_handle(Combo::new());
@@ -1289,8 +1289,8 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
 #[test]
 fn node_popup_auto_size_is_stable_with_remainder_stack() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let popup = ctx.create_popup(
         "popup",
         UiNodeBuilder::build(|tree| {
@@ -1319,8 +1319,8 @@ fn node_popup_auto_size_is_stable_with_remainder_stack() {
 #[test]
 fn node_popup_auto_size_fits_stacked_buttons() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let hello = widget_handle(Button::with_opt("Hello", WidgetOption::ALIGN_CENTER));
     let world = widget_handle(Button::with_opt("World", WidgetOption::ALIGN_CENTER));
     let mut hello_id = NodeId::default();
@@ -1349,8 +1349,8 @@ fn node_popup_auto_size_fits_stacked_buttons() {
 #[test]
 fn node_popup_closes_when_clicking_outside() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let popup = ctx.create_popup(
         "popup",
         UiNodeBuilder::build(|tree| {
@@ -1374,8 +1374,8 @@ fn node_popup_closes_when_clicking_outside() {
 #[test]
 fn node_popup_closes_when_clicking_another_node_window() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 120));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 120));
     let window = ctx.create_window(
         "window",
         rect(120, 10, 90, 80),
@@ -1407,8 +1407,8 @@ fn node_popup_closes_when_clicking_another_node_window() {
 #[test]
 fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 160));
     let mut style = Style::default();
     style.padding = 0;
     style.scrollbar_size = 10;
@@ -1452,8 +1452,8 @@ fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
 #[test]
 fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
     let atlas = make_test_atlas();
-    let renderer = RendererHandle::new(NoopRenderer { atlas });
-    let mut ctx = Context::new(renderer, Dimensioni::new(240, 160));
+    let backend = BackendHandle::new(NoopRenderer { atlas });
+    let mut ctx = Context::new(backend, Dimensioni::new(240, 160));
     let mut style = Style::default();
     style.padding = 0;
     style.scrollbar_size = 10;

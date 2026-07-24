@@ -73,7 +73,7 @@
 //! `microui-redux` provides a GUI toolkit inspired by [rxi/microui](https://github.com/rxi/microui).
 //! The crate uses retained [`UiNodeSet`] values as the public UI authoring input while keeping Microui's
 //! compact frame-driven execution and renderer integration.
-//! It exposes the core context, retained node builders, widget state types, renderer traits,
+//! It exposes the core context, retained node builders, widget state types, rendering types,
 //! styles, and image APIs needed to embed a UI inside custom render backends while remaining
 //! allocator- and platform-agnostic.
 //! Built-in widget placement is driven by each widget's `measure` result, so auto-sized rows can use
@@ -109,7 +109,7 @@ mod window_manager;
 /// Retained UI authoring types.
 ///
 /// This module groups the stable retained concepts used by application code without exposing
-/// low-level renderer/canvas details or manual container drawing helpers through default imports.
+/// low-level renderer details or manual container drawing helpers through default imports.
 pub mod retained {
     pub use crate::render::{CustomRenderArgs, CustomRenderCommand};
     pub use crate::text_layout::TextWrap;
@@ -122,7 +122,7 @@ pub mod retained {
 /// Common imports for retained UI applications.
 ///
 /// The prelude intentionally favors retained authoring, widget state, style/input/image types, and
-/// renderer integration. Low-level backend and Canvas types live under [`render`].
+/// renderer integration. Low-level backend and Renderer types live under [`render`].
 pub mod prelude {
     pub use crate::atlas::{
         AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry, FontId,
@@ -131,7 +131,7 @@ pub mod prelude {
     pub use crate::file_dialog::FileDialogState;
     pub use crate::input::{ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption};
     pub use crate::sizing::{SizePolicy, StackDirection};
-    pub use crate::render::{Renderer, RendererHandle};
+    pub use crate::render::{BackendHandle, RendererBackend};
     pub use crate::retained::{
         Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeBuilder, NodeId, NodeOptions, Policy, RetainedId, RootId,
         TextWrap, UiInputEvent, Widget, WidgetCtx, WidgetHandle, WidgetInputEvents, UiNodeSet, UiNodeBuilder, widget_handle,

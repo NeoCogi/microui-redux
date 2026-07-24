@@ -380,7 +380,7 @@ fn main() {
     .unwrap();
 
     fw.event_loop(|ctx, state| {
-        let dim = ctx.canvas().dimensions();
+        let dim = ctx.renderer().dimensions();
         ctx.set_root_rect(state._root, rect(0, 0, dim.width, dim.height));
         state.display.update(|display| {
             display.set_text(state.calculator.display_text());

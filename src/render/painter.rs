@@ -44,7 +44,7 @@ use std::rc::Rc;
 ///
 /// A Painter borrows exactly one [`DisplayList`]. It translates local primitives into screen
 /// space, attaches the current effective screen-space clip to every operation, and tessellates
-/// custom solid geometry without consulting style, input, atlas, Canvas, or Renderer state.
+/// custom solid geometry without consulting style, input, atlas, Renderer, or RendererBackend state.
 pub struct Painter<'a> {
     /// Display list receiving operations.
     list: &'a mut DisplayList,
@@ -118,7 +118,7 @@ impl<'a> Painter<'a> {
 
     /// Records one UTF-8 text run at a local position.
     ///
-    /// Text measurement remains outside Painter; final glyph clipping is performed by Canvas.
+    /// Text measurement remains outside Painter; final glyph clipping is performed by Renderer.
     pub fn text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
         if text.is_empty() || color.a == 0 || !clip_has_area(self.clip) {
             return;
@@ -137,7 +137,7 @@ impl<'a> Painter<'a> {
         }
     }
 
-    /// Records one atlas slot or renderer-owned image in a local rectangle.
+    /// Records one atlas slot or external image in a local rectangle.
     pub fn image(&mut self, image: Image, rect: Recti, color: Color) {
         if !drawable_rect(rect, color) {
             return;

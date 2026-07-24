@@ -29,7 +29,7 @@
 //
 //! Owned render-operation and solid-geometry storage.
 //!
-//! Painter records through this internal operation surface and Canvas consumes it exactly once.
+//! Painter records through this internal operation surface and Renderer consumes it exactly once.
 
 use super::{
     backend::{CustomRenderArgs, CustomRenderCommand},
@@ -89,7 +89,7 @@ pub(super) enum DrawKind {
         /// Icon tint.
         color: Color,
     },
-    /// Draws one atlas slot or renderer-owned texture.
+    /// Draws one atlas slot or external texture.
     Image {
         /// Image identifier.
         image: Image,

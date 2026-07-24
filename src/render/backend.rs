@@ -129,7 +129,7 @@ pub struct CustomRenderArgs {
 ///
 /// This API is intentionally explicit about being renderer-extension work rather than portable UI
 /// geometry. Interaction is handled during widget update and is deliberately absent from this
-/// boundary. Implementations usually capture a concrete renderer handle and enqueue backend-owned
+/// boundary. Implementations usually capture a concrete backend handle and enqueue backend-owned
 /// draw work using the clipped [`CustomRenderArgs`] geometry.
 pub trait CustomRenderCommand {
     /// Records backend-specific draw work for the current frame.
@@ -146,8 +146,8 @@ where
 }
 
 /// Trait implemented by render backends used by the UI context.
-pub trait Renderer {
-    /// Returns the atlas backing the renderer.
+pub trait RendererBackend {
+    /// Returns the atlas backing the UI renderer.
     fn get_atlas(&self) -> AtlasHandle;
     /// Begins a new frame with the viewport size and clear color.
     fn begin(&mut self, width: i32, height: i32, clr: Color);
@@ -159,7 +159,7 @@ pub trait Renderer {
     fn flush(&mut self);
     /// Ends the frame, finalizing any outstanding GPU work.
     fn end(&mut self);
-    /// Creates a texture owned by the renderer.
+    /// Creates a texture owned by the backend.
     ///
     /// The caller validates RGBA dimensions and byte length before calling this method. Backends
     /// should return an error without retaining `id` when GPU texture creation or upload fails.
@@ -168,7 +168,7 @@ pub trait Renderer {
     fn destroy_texture(&mut self, id: TextureId);
     /// Draws the provided textured quad.
     ///
-    /// [`crate::render::Canvas`] clips the quad against the active UI clip rectangle and adjusts
+    /// [`crate::render::Renderer`] clips the quad against the active UI clip rectangle and adjusts
     /// texture coordinates before calling this method. Backends should therefore treat `vertices`
     /// as final pre-clipped screen-space geometry and should not expect a separate clip rectangle
     /// for this draw. Backends that batch atlas geometry must preserve command order by flushing or
@@ -176,28 +176,28 @@ pub trait Renderer {
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
 
-/// Thread-safe handle that shares ownership of a [`Renderer`].
-pub struct RendererHandle<R: Renderer> {
-    /// Shared lock protecting the renderer implementation.
-    handle: Arc<RwLock<R>>,
+/// Thread-safe handle that shares ownership of a [`RendererBackend`].
+pub struct BackendHandle<B: RendererBackend> {
+    /// Shared lock protecting the backend implementation.
+    handle: Arc<RwLock<B>>,
 }
 
 // `derive(Clone)` does not infer the bound correctly here, but `Arc` already provides
 // the behavior we need.
-impl<R: Renderer> Clone for RendererHandle<R> {
+impl<B: RendererBackend> Clone for BackendHandle<B> {
     fn clone(&self) -> Self {
         Self { handle: self.handle.clone() }
     }
 }
 
-impl<R: Renderer> RendererHandle<R> {
-    /// Wraps a renderer inside an [`Arc<RwLock<...>>`] so it can be shared.
-    pub fn new(renderer: R) -> Self {
-        Self { handle: Arc::new(RwLock::new(renderer)) }
+impl<B: RendererBackend> BackendHandle<B> {
+    /// Wraps a backend inside an [`Arc<RwLock<...>>`] so it can be shared.
+    pub fn new(backend: B) -> Self {
+        Self { handle: Arc::new(RwLock::new(backend)) }
     }
 
-    /// Executes the provided closure with a shared reference to the renderer.
-    pub fn scope<Res, F: FnOnce(&R) -> Res>(&self, f: F) -> Res {
+    /// Executes the provided closure with a shared reference to the backend.
+    pub fn scope<Res, F: FnOnce(&B) -> Res>(&self, f: F) -> Res {
         match self.handle.read() {
             Ok(guard) => f(&*guard),
             Err(poisoned) => {
@@ -207,12 +207,12 @@ impl<R: Renderer> RendererHandle<R> {
         }
     }
 
-    /// Executes the provided closure with a mutable reference to the renderer.
-    pub fn scope_mut<Res, F: FnOnce(&mut R) -> Res>(&mut self, f: F) -> Res {
+    /// Executes the provided closure with a mutable reference to the backend.
+    pub fn scope_mut<Res, F: FnOnce(&mut B) -> Res>(&mut self, f: F) -> Res {
         match self.handle.write() {
             Ok(mut guard) => f(&mut *guard),
             Err(poisoned) => {
-                // Preserve the current renderer state instead of aborting on poison.
+                // Preserve the current backend state instead of aborting on poison.
                 f(&mut *poisoned.into_inner())
             }
         }

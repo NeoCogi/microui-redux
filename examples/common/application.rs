@@ -35,7 +35,7 @@ use crate::*;
 use common::*;
 use microui_redux::{
     self as microui,
-    prelude::{AtlasHandle, Dimensioni, RendererHandle},
+    prelude::{AtlasHandle, Dimensioni, BackendHandle},
 };
 
 #[cfg(feature = "example-glow")]
@@ -55,16 +55,16 @@ use sdl2::video::Window;
 use sdl2::{Sdl, VideoSubsystem};
 
 #[cfg(feature = "example-glow")]
-type RendererBackend = glow_renderer::GLRenderer;
+type SelectedBackend = glow_renderer::GLRenderer;
 #[cfg(all(not(feature = "example-glow"), feature = "example-vulkan"))]
-type RendererBackend = vulkan_renderer::VulkanRenderer;
+type SelectedBackend = vulkan_renderer::VulkanRenderer;
 #[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
-type RendererBackend = wgpu_renderer::WgpuRenderer;
+type SelectedBackend = wgpu_renderer::WgpuRenderer;
 
 // The example app keeps one concrete renderer backend behind the shared microui `Context`. The
 // rest of the example code only talks to `MicroUI`, while backend initialization stays feature-
 // gated in this file.
-type MicroUI = microui::Context<RendererBackend>;
+type MicroUI = microui::Context<SelectedBackend>;
 
 #[cfg(feature = "example-glow")]
 pub type BackendInitContext = Arc<glow::Context>;
@@ -95,14 +95,14 @@ impl<S> Application<S> {
         let video = sdl_ctx.video().map_err(|err| err.to_string())?;
         let (bundle, init_ctx) = init_backend(&video, atlas)?;
         #[cfg(feature = "example-glow")]
-        let BackendBundle { window, backend, renderer, size } = bundle;
+        let BackendBundle { window, backend, backend_handle, size } = bundle;
         #[cfg(any(
             all(not(feature = "example-glow"), feature = "example-vulkan"),
             all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"),
         ))]
-        let BackendBundle { window, renderer, size } = bundle;
+        let BackendBundle { window, backend_handle, size } = bundle;
 
-        let mut ctx = microui::Context::new(renderer, Dimensioni::new(size.0 as i32, size.1 as i32));
+        let mut ctx = microui::Context::new(backend_handle, Dimensioni::new(size.0 as i32, size.1 as i32));
         Ok(Self {
             state: init_state(init_ctx, &mut ctx),
             ctx,
@@ -234,13 +234,13 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
 
     let (width, height) = window.size();
     let gl = Arc::new(gl);
-    let renderer = RendererHandle::new(glow_renderer::GLRenderer::new(gl.clone(), atlas, width, height));
+    let backend_handle = BackendHandle::new(glow_renderer::GLRenderer::new(gl.clone(), atlas, width, height));
 
     Ok((
         BackendBundle {
             window,
             backend: BackendData { gl_ctx },
-            renderer,
+            backend_handle,
             size: (width, height),
         },
         gl,
@@ -254,10 +254,17 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
     // created immediately from that window handle and then stored inside the microui `Context`.
     let window = video.window("Window", 1024, 768).resizable().vulkan().build().map_err(|err| err.to_string())?;
     let (width, height) = window.size();
-    let renderer = RendererHandle::new(vulkan_renderer::VulkanRenderer::new(&window, atlas, width, height)?);
+    let backend_handle = BackendHandle::new(vulkan_renderer::VulkanRenderer::new(&window, atlas, width, height)?);
     let init_ctx = BackendInitContext;
 
-    Ok((BackendBundle { window, renderer, size: (width, height) }, init_ctx))
+    Ok((
+        BackendBundle {
+            window,
+            backend_handle,
+            size: (width, height),
+        },
+        init_ctx,
+    ))
 }
 
 #[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
@@ -265,17 +272,24 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
 fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBundle, BackendInitContext), String> {
     let window = video.window("Window", 1024, 768).resizable().build().map_err(|err| err.to_string())?;
     let (width, height) = window.size();
-    let renderer = RendererHandle::new(wgpu_renderer::WgpuRenderer::new(&window, atlas, width, height)?);
+    let backend_handle = BackendHandle::new(wgpu_renderer::WgpuRenderer::new(&window, atlas, width, height)?);
     let init_ctx = BackendInitContext;
 
-    Ok((BackendBundle { window, renderer, size: (width, height) }, init_ctx))
+    Ok((
+        BackendBundle {
+            window,
+            backend_handle,
+            size: (width, height),
+        },
+        init_ctx,
+    ))
 }
 
 struct BackendBundle {
     window: Window,
     #[cfg(feature = "example-glow")]
     backend: BackendData,
-    renderer: RendererHandle<RendererBackend>,
+    backend_handle: BackendHandle<SelectedBackend>,
     size: (u32, u32),
 }
 
