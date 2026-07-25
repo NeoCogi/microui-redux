@@ -62,15 +62,18 @@ impl AtlasHandle {
             .collect();
         let slots: Vec<Recti> = source.slots.iter().copied().collect();
 
-        Self(Rc::new(RefCell::new(Atlas {
-            width: source.width,
-            height: source.height,
-            icons,
-            fonts,
-            slots,
-            pixels,
-            last_update_id: 0,
-        })))
+        Self(Rc::new(AtlasShared {
+            active_frame_readers: Cell::new(0),
+            data: RefCell::new(Atlas {
+                width: source.width,
+                height: source.height,
+                icons,
+                fonts,
+                slots,
+                pixels,
+                last_update_id: 0,
+            }),
+        }))
     }
 
     /// Reconstructs an atlas from a serialized [`AtlasSource`].

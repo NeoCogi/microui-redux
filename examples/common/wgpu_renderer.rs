@@ -99,7 +99,7 @@ struct GpuTexture {
 /// replays a lightweight command list (`RenderCommand`) to switch texture/scissor state.
 pub struct WgpuRenderer {
     atlas: AtlasHandle,
-    atlas_last_update_id: usize,
+    atlas_last_update_id: u64,
     textures: HashMap<TextureId, GpuTexture>,
 
     _instance: wgpu::Instance,
@@ -127,7 +127,32 @@ pub struct WgpuRenderer {
     clear_color: Color,
 }
 
+trait WgpuFrameOps {
+    fn begin(&mut self, width: i32, height: i32, clr: Color);
+    fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex);
+    fn push_triangle_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex);
+    fn flush(&mut self);
+    fn finish(&mut self, frame: wgpu::SurfaceTexture);
+    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String>;
+    fn destroy_texture(&mut self, id: TextureId);
+    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
+}
+
 impl WgpuRenderer {
+    /// Acquires the native surface texture before any display-list execution begins.
+    fn acquire_surface_frame(&mut self) -> Result<wgpu::SurfaceTexture, FrameError> {
+        match self.surface.get_current_texture() {
+            Ok(frame) => Ok(frame),
+            Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
+                self.surface.configure(&self.device, &self.config);
+                self.surface
+                    .get_current_texture()
+                    .map_err(|error| FrameError::new(format!("failed to acquire WGPU frame after reconfigure: {error}")))
+            }
+            Err(error) => Err(FrameError::new(format!("failed to acquire WGPU frame: {error}"))),
+        }
+    }
+
     /// Returns the atlas UV used as a solid-white sample for colored primitive draws.
     fn white_uv_center(&self) -> Vec2f {
         // Colored primitives sample the center of the white icon in the atlas and rely on
@@ -530,7 +555,7 @@ impl WgpuRenderer {
 
         let mut renderer = Self {
             atlas,
-            atlas_last_update_id: usize::MAX,
+            atlas_last_update_id: u64::MAX,
             textures: HashMap::new(),
 
             _instance: instance,
@@ -659,11 +684,7 @@ impl WgpuRenderer {
     }
 }
 
-impl RendererBackend for WgpuRenderer {
-    fn get_atlas(&self) -> AtlasHandle {
-        self.atlas.clone()
-    }
-
+impl WgpuFrameOps for WgpuRenderer {
     /// Starts a new frame by resetting CPU-side queues, syncing surface size, and updating uniforms.
     fn begin(&mut self, width: i32, height: i32, clr: Color) {
         // Reset per-frame CPU-side command/vertex queues.
@@ -701,42 +722,10 @@ impl RendererBackend for WgpuRenderer {
         self.flush_ui_batch();
     }
 
-    /// Acquires a surface frame, uploads all queued vertices, records the render pass, and presents.
-    fn end(&mut self) {
+    /// Uploads all queued vertices, records the render pass, and presents an acquired surface frame.
+    fn finish(&mut self, frame: wgpu::SurfaceTexture) {
         self.flush_ui_batch();
         self.sync_atlas();
-
-        if self.width == 0 || self.height == 0 {
-            return;
-        }
-
-        // Acquire the current swapchain texture, handling common resize/lost-surface recovery.
-        let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
-                // Resize/lost surface recovery path.
-                self.surface.configure(&self.device, &self.config);
-                match self.surface.get_current_texture() {
-                    Ok(frame) => frame,
-                    Err(err) => {
-                        eprintln!("[microui-redux][wgpu] failed to acquire frame after reconfigure: {err}");
-                        return;
-                    }
-                }
-            }
-            Err(wgpu::SurfaceError::Timeout) => {
-                // Skip frame on transient timeout.
-                return;
-            }
-            Err(wgpu::SurfaceError::Other) => {
-                eprintln!("[microui-redux][wgpu] surface returned an unspecified error");
-                return;
-            }
-            Err(wgpu::SurfaceError::OutOfMemory) => {
-                eprintln!("[microui-redux][wgpu] surface out of memory");
-                return;
-            }
-        };
 
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self
@@ -897,13 +886,85 @@ impl RendererBackend for WgpuRenderer {
             return;
         }
 
-        // Textured draws must preserve ordering with surrounding UI draws, so flush the current
-        // atlas batch before appending the explicit texture command. `Renderer` already clipped the
-        // quad and adjusted UVs, so no additional scissor is needed here.
-        self.flush_ui_batch();
+        // Renderer owns the pre-texture ordering boundary and has already clipped/adjusted UVs.
         let mut quad = Vec::with_capacity(6);
         Self::append_quad(&mut quad, &vertices[0], &vertices[1], &vertices[2], &vertices[3]);
         self.commands.push(RenderCommand::DrawTexture { id, vertices: quad });
+    }
+}
+
+#[must_use = "the WGPU frame is finalized when dropped"]
+pub struct WgpuFrame<'a> {
+    backend: &'a mut WgpuRenderer,
+    surface_frame: Option<wgpu::SurfaceTexture>,
+}
+
+impl WgpuFrame<'_> {
+    pub fn enqueue_colored_vertices(&mut self, area: CustomRenderArea, vertices: Vec<Vertex>) {
+        self.backend.enqueue_colored_vertices(area, vertices);
+    }
+
+    pub fn enqueue_mesh_draw(&mut self, area: CustomRenderArea, submission: MeshSubmission) {
+        self.backend.enqueue_mesh_draw(area, submission);
+    }
+}
+
+impl RendererFrame for WgpuFrame<'_> {
+    fn push_quad(&mut self, vertices: [Vertex; 4]) {
+        WgpuFrameOps::push_quad_vertices(self.backend, &vertices[0], &vertices[1], &vertices[2], &vertices[3]);
+    }
+
+    fn push_triangle(&mut self, vertices: [Vertex; 3]) {
+        WgpuFrameOps::push_triangle_vertices(self.backend, &vertices[0], &vertices[1], &vertices[2]);
+    }
+
+    fn flush(&mut self) {
+        WgpuFrameOps::flush(self.backend);
+    }
+
+    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
+        WgpuFrameOps::draw_texture(self.backend, id, vertices);
+    }
+}
+
+impl Drop for WgpuFrame<'_> {
+    fn drop(&mut self) {
+        let Some(surface_frame) = self.surface_frame.take() else {
+            return;
+        };
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            WgpuFrameOps::finish(self.backend, surface_frame);
+        }))
+        .is_err()
+        {
+            eprintln!("[microui-redux][wgpu] frame finalization panicked");
+        }
+    }
+}
+
+impl RendererBackend for WgpuRenderer {
+    type Frame<'a> = WgpuFrame<'a>;
+
+    fn get_atlas(&self) -> AtlasHandle {
+        self.atlas.clone()
+    }
+
+    fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
+        let dimensions = info.dimensions();
+        WgpuFrameOps::begin(self, dimensions.width, dimensions.height, info.clear());
+        let surface_frame = self.acquire_surface_frame()?;
+        Ok(WgpuFrame {
+            backend: self,
+            surface_frame: Some(surface_frame),
+        })
+    }
+
+    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String> {
+        WgpuFrameOps::create_texture(self, id, width, height, pixels)
+    }
+
+    fn destroy_texture(&mut self, id: TextureId) {
+        WgpuFrameOps::destroy_texture(self, id);
     }
 }
 

@@ -63,12 +63,12 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 ![random](res/microui-0.6.png)
 
 ## Key Concepts
-- **Context**: owns the high-level `Renderer`, user input, frame results, and retained root windows. A frame has explicit phases: `begin_render_frame(...)` starts renderer work, input events are fed into the context, `update_ui()` traverses roots registered with `create_window(...)`, `create_dialog(...)`, or `create_popup(...)`, and `end_render_frame()` presents recorded root commands.
+- **Context**: owns the high-level `Renderer`, user input, frame results, and retained root windows. Applications deliver input and mutate frame resources first, then `frame(FrameInfo)?.render_ui()?` traverses registered roots and submits one owned frame.
 - **Container**: the internal execution object behind windows, popups, scroll areas, and retained tree nodes. Application code should normally work through `Context`, `ScrollAreaHandle`, and `WidgetTreeBuilder` instead of authoring widgets directly on a container. `ScrollAreaHandle` exposes retained state, focus, and scroll access; direct draw/clip/body mutation is not part of the public application API.
 - **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). Retained traversal keys widget interaction by stable retained node IDs.
 - **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and stored in retained roots through `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)`. Tree nodes cover widgets, scroll areas, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
-- **Rendering**: widgets record local primitives through `Painter`; `Renderer` executes the resulting `DisplayList` through a shared `RendererBackend`. See the [render subsystem guide](src/render/RENDER.md) for the architecture and integration API.
+- **Rendering**: widgets record local primitives through `Painter`; `Renderer` executes the resulting `DisplayList` through one exclusively borrowed `RendererBackend::Frame`. See the [render subsystem guide](src/render/RENDER.md) for the architecture and integration API.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override `config.font`.
 
 The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `ScrollAreaHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. Low-level rendering lives under `microui_redux::render`, and atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, rect-packing details, and container-level manual drawing are not part of the application authoring surface.
@@ -77,9 +77,155 @@ The public API is intentionally centered on `microui_redux::prelude` for applica
 
 Widgets record backend-neutral drawing through `Painter`; `Renderer` executes the owned `DisplayList` and submits final geometry through `RendererBackend`. The [render subsystem guide](src/render/RENDER.md) covers architecture, clipping, textures, custom callbacks, backend implementation, and compiling code examples. For the clean breaking change from the former API, see the [rendering migration guide](MIGRATION.md).
 
+### How `SelectedBackend::Frame<'a>` works
+
+`SelectedBackend` is not a special type supplied by microui-redux. The examples define it as an
+ordinary compile-time alias for exactly one concrete renderer:
+
+```rust
+#[cfg(feature = "example-glow")]
+use common::glow_renderer::GLRenderer as SelectedBackend;
+#[cfg(all(not(feature = "example-glow"), feature = "example-vulkan"))]
+use common::vulkan_renderer::VulkanRenderer as SelectedBackend;
+#[cfg(all(
+    not(feature = "example-glow"),
+    not(feature = "example-vulkan"),
+    feature = "example-wgpu"
+))]
+use common::wgpu_renderer::WgpuRenderer as SelectedBackend;
+
+type SelectedFrame<'a> =
+    <SelectedBackend as RendererBackend>::Frame<'a>;
+```
+
+`RendererBackend::Frame<'a>` is a generic associated type (GAT): each backend chooses its own
+active-frame type, and that type may borrow the backend for `'a`. For example, the GL backend
+selects `GlFrame<'a>`, WGPU selects `WgpuFrame<'a>`, and Vulkan selects `VulkanFrame<'a>`. The
+fully qualified alias above is simply an unambiguous way to spell “the frame type associated with
+the backend selected by this build.”
+
+The relevant part of the backend contract is:
+
+```rust
+trait RendererBackend {
+    type Frame<'a>: RendererFrame
+    where
+        Self: 'a;
+
+    fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError>;
+    // atlas and persistent-texture methods omitted
+}
+```
+
+`Self: 'a` permits the concrete frame to contain a borrow of its backend. Because Cargo selects a
+concrete `SelectedBackend`, the compiler monomorphizes the callback and its frame methods; this is
+not a `dyn RendererBackend` or runtime backend switch. If a selected frame does not implement an
+inherent extension method used by a callback, that backend selection fails at compile time.
+
+There are two frame values and one shared frame trait in the public lifecycle:
+
+| Type | What it represents | What ending it does |
+| --- | --- | --- |
+| `ContextFrame<'ctx, B>` | The application-level logical UI frame. It exclusively borrows `Context<B>` while retained UI is traversed and recorded. | `render_ui(self)` records and submits once. Dropping without submission cancels. |
+| `B::Frame<'backend>` | The backend-level RAII frame. It exclusively borrows the concrete backend only while the recorded display list is executing. | Its `Drop` implementation performs backend-specific, best-effort finalization. WGPU/Vulkan submit and present there; GL flushes before the outer window runner swaps buffers. |
+| `RendererFrame` | The common trait implemented by every `B::Frame<'_>`. | Defines the standard UI operations: atlas quads/triangles, flush boundaries, and external textures. |
+
+The lifetime is created by the borrow of `&mut B` in `RendererBackend::frame`; applications do not
+choose it and should not try to make it `'static`. While the returned frame exists, it owns the
+backend's exclusive mutable borrow. Safe Rust therefore prevents acquiring a second frame or
+retaining the frame after rendering, and the API exposes no parallel mutable backend handle. This
+is the ownership guarantee that replaces a stateful `begin`/`end` protocol.
+
+The complete sequence is:
+
+```text
+application/resource updates
+        |
+Context::frame(FrameInfo)             logical ContextFrame + atlas freeze
+        |
+ContextFrame::render_ui(self)         retained update, paint, DisplayList recording
+        |
+Renderer preflight                    validate texture/custom-render keys
+        |
+RendererBackend::frame(&mut backend)  acquire SelectedBackend::Frame<'_>
+        |
+DisplayList execution                 RendererFrame calls + typed custom callbacks
+        |
+drop backend frame                    finalize/submit/present as applicable; release borrow
+        |
+drop logical frame                    release the outer atlas freeze
+```
+
+The renderer acquires the backend frame only after resource preflight succeeds. Normal UI
+operations use the backend-neutral `RendererFrame` methods. Immediately before a custom-render
+operation, the renderer closes the current UI batch and invokes the registered callback with
+`&mut SelectedFrame<'_>`. Later UI commands continue after that callback, preserving painter
+order. Acquisition failures are returned as `FrameError` before callbacks execute. Once a frame
+exists, its `Drop` path must be non-panicking and best-effort because Rust destructors cannot
+return a presentation error.
+
+This concrete type is useful because a backend frame may expose additional inherent methods that
+are deliberately absent from `RendererFrame`: a render-pass encoder, a mesh submission method, or
+another backend-specific command recorder. The example backends all provide
+`enqueue_colored_vertices`, so a selected-backend callback can call it directly:
+
+```rust
+let cube_renderer = ctx.register_custom_renderer({
+    let angle = angle.clone();
+    move |frame: &mut SelectedFrame<'_>, args: CustomRenderArgs| {
+        let Some(clip) = args.content_area.intersect(&args.view) else {
+            return;
+        };
+        let area = CustomRenderArea { rect: args.content_area, clip };
+        let vertices = build_cube_vertices(args.content_area, white_uv, angle.get());
+
+        // This is an inherent SelectedFrame method, not part of RendererFrame.
+        frame.enqueue_colored_vertices(area, vertices);
+    }
+})?;
+
+let cube = widget_handle(CubeWidget::new());
+let tree = UiNodeBuilder::build(move |tree| {
+    tree.node(NodeOptions::with_policy(Policy::fill()))
+        .custom_render(&cube, cube_renderer);
+});
+ctx.create_window("Cube", rect(40, 40, 360, 360), tree);
+```
+
+`register_custom_renderer` accepts a callback valid for every frame borrow lifetime. In expanded
+form its important bound is `for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs)`. That
+higher-ranked lifetime means the callback can use the active frame but cannot save it in captured
+state. The returned `CustomRenderHandle<B>` is also tagged with `B`, so inserting it into a tree for
+a different backend type is a compile-time error. The UI tree stores this typed registry handle,
+not a backend pointer. A handle from a different context using the same backend type has the same
+Rust type, but its foreign registry namespace is rejected during renderer preflight before any
+backend frame is acquired.
+
+`CustomRenderArgs` carries the geometry needed at execution time:
+
+- `content_area` is the full screen-space rectangle allocated to the custom widget;
+- `view` is the final visible rectangle after window and scroll clipping;
+- `dimensions` is the validated drawable size of the active frame.
+
+Custom callbacks receive no input and should not acquire another frame, mutate the atlas, or
+finalize/present the backend frame. Update application/widget state before `Context::frame`; inside
+the callback, read that state and record work on the supplied frame. Use `Painter` instead when the
+drawing can be expressed with portable UI primitives.
+
+The complete, documented [backend-frame cube example](examples/backend-frame-cube.rs) implements a
+small retained `CubeWidget`. It uses `rs_math3d`'s `Vec3f`, `Quatf`, `lookat`, `perspective`, and
+`project3` primitives to transform the cube, depth-sorts its faces, and submits the resulting
+triangles through `SelectedFrame::enqueue_colored_vertices`. Run it with exactly one backend:
+
+```bash
+cargo run --example backend-frame-cube --features example-glow
+cargo run --example backend-frame-cube --features example-vulkan
+cargo run --example backend-frame-cube --features example-wgpu
+```
+
 ### Retained-mode migration status
 
-The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate retained widget handle state over time, and drive frames with `Context::update_ui()`.
+The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate retained widget handle state over time, and drive frames with `Context::frame(FrameInfo)?.render_ui()?`.
 
 Per-frame root submission APIs have been removed from the public surface. Root trees are registered or replaced explicitly with `create_window`, `create_dialog`, `create_popup`, and `set_root_tree`; visibility is controlled with `set_root_visible`.
 
@@ -94,7 +240,8 @@ let tree = WidgetTreeBuilder::build(|tree| {
 });
 
 let root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
-ctx.update_ui();
+let info = FrameInfo::try_new(Dimensioni::new(800, 600), color(20, 22, 26, 255))?;
+ctx.frame(info)?.render_ui()?;
 
 if ctx.committed_results().state_of_retained(RetainedId::root_node(root, name_node)).is_submitted() {
     // react to the textbox submission here
@@ -104,7 +251,8 @@ if ctx.committed_results().state_of_retained(RetainedId::root_node(root, name_no
 Retained trees are the supported public authoring path. Post-render business logic reads from `ctx.committed_results()`, which intentionally exposes the previous frame's published interaction generation:
 
 ```rust
-ctx.update_ui();
+let info = FrameInfo::try_new(Dimensioni::new(800, 600), color(20, 22, 26, 255))?;
+ctx.frame(info)?.render_ui()?;
 
 let results = ctx.committed_results();
 if results.state_of_retained(RetainedId::root_node(root, submit_button_node)).is_submitted() {
@@ -222,8 +370,8 @@ Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`,
 
 - [x] Moved retained root lifetime into `Context`.
     - [x] Applications register windows, dialogs, and popups with `create_window`, `create_dialog`, and `create_popup`.
-    - [x] Registered roots are traversed by `update_ui`; visibility, replacement, and options are controlled with `set_root_visible`, `set_root_tree`, and `set_root_options`.
-    - [x] The old per-frame `Context::window`, `Context::dialog`, `Context::popup`, and `Context::frame` submission path was removed from the supported API.
+    - [x] Registered roots are traversed by `ContextFrame::render_ui`; visibility, replacement, and options are controlled with `set_root_visible`, `set_root_tree`, and `set_root_options`.
+    - [x] The old callback-based per-frame root submission path was removed from the supported API.
 - [x] Replaced pointer-derived public interaction lookup with stable retained identity.
     - [x] `WidgetTreeBuilder` returns stable `NodeId`s for result lookup and focus control.
     - [x] `FrameResultGeneration::state_of_retained` and `state_of_node` supersede handle/address-based result lookup.

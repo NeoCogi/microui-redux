@@ -4,12 +4,14 @@
 //!
 //! `cargo test --release render_performance_baseline -- --ignored --nocapture --test-threads=1`
 
-use super::{BackendHandle, CustomRenderArgs, DisplayList, Painter, Renderer, RendererBackend, Vertex};
+use super::{CustomRenderHandle, DisplayList, FrameError, FrameInfo, Painter, Renderer, RendererBackend, RendererFrame, Vertex};
 use crate::{AtlasSource, CharEntry, FontEntry, FontId, Image, SourceFormat, TextureId, color};
 use rs_math3d::{Dimensioni, Recti, Vec2f, Vec2i};
 use std::{
     alloc::{GlobalAlloc, Layout, System},
+    cell::Cell,
     hint::black_box,
+    rc::Rc,
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::Instant,
 };
@@ -93,6 +95,8 @@ struct AllocationCount {
 /// Backend submission counters for one scenario.
 #[derive(Clone, Copy, Default)]
 struct SubmissionCount {
+    /// Backend frames acquired.
+    frames: u64,
     /// Atlas-backed quads.
     quads: u64,
     /// Solid triangles.
@@ -115,39 +119,59 @@ struct MeasurementBackend {
     /// Atlas used by the renderer.
     atlas: crate::AtlasHandle,
     /// Submission counters.
-    submissions: SubmissionCount,
+    submissions: Rc<Cell<SubmissionCount>>,
+}
+
+#[must_use]
+struct MeasurementFrame<'a> {
+    backend: &'a mut MeasurementBackend,
+}
+
+impl RendererFrame for MeasurementFrame<'_> {
+    fn push_quad(&mut self, _vertices: [Vertex; 4]) {
+        let mut submissions = self.backend.submissions.get();
+        submissions.quads += 1;
+        self.backend.submissions.set(submissions);
+    }
+
+    fn push_triangle(&mut self, _vertices: [Vertex; 3]) {
+        let mut submissions = self.backend.submissions.get();
+        submissions.triangles += 1;
+        self.backend.submissions.set(submissions);
+    }
+
+    fn flush(&mut self) {
+        let mut submissions = self.backend.submissions.get();
+        submissions.flushes += 1;
+        self.backend.submissions.set(submissions);
+    }
+
+    fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {
+        let mut submissions = self.backend.submissions.get();
+        submissions.texture_quads += 1;
+        self.backend.submissions.set(submissions);
+    }
 }
 
 impl RendererBackend for MeasurementBackend {
+    type Frame<'a> = MeasurementFrame<'a>;
+
     fn get_atlas(&self) -> crate::AtlasHandle {
         self.atlas.clone()
     }
 
-    fn begin(&mut self, _width: i32, _height: i32, _clear: crate::Color) {}
-
-    fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {
-        self.submissions.quads += 1;
+    fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
+        let mut submissions = self.submissions.get();
+        submissions.frames += 1;
+        self.submissions.set(submissions);
+        Ok(MeasurementFrame { backend: self })
     }
-
-    fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {
-        self.submissions.triangles += 1;
-    }
-
-    fn flush(&mut self) {
-        self.submissions.flushes += 1;
-    }
-
-    fn end(&mut self) {}
 
     fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
         Ok(())
     }
 
     fn destroy_texture(&mut self, _id: TextureId) {}
-
-    fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {
-        self.submissions.texture_quads += 1;
-    }
 }
 
 /// Representative renderer workload.
@@ -180,14 +204,6 @@ impl Scenario {
         }
     }
 
-    /// Expected renderer write locks per execution after recording.
-    const fn expected_locks(self) -> u64 {
-        match self {
-            Self::CustomBarriers => (CUSTOM_BARRIER_COUNT as u64) * 3 + 1,
-            _ => 1,
-        }
-    }
-
     /// Expected warmed allocation events per frame.
     const fn expected_allocations(self) -> u64 {
         match self {
@@ -214,8 +230,8 @@ struct ScenarioResult {
     scenario: Scenario,
     /// Display-list shape.
     recording: RecordingCount,
-    /// Average exclusive backend locks per frame.
-    locks: u64,
+    /// Average backend frames acquired per logical frame.
+    frames: u64,
     /// Average allocation events per frame.
     allocations: u64,
     /// Average allocated bytes per frame.
@@ -269,7 +285,14 @@ fn item_rect(index: usize) -> Recti {
 }
 
 /// Records one representative frame and reports its opaque list shape.
-fn record_scenario(scenario: Scenario, list: &mut DisplayList, font: FontId, text: &str, texture: TextureId) -> RecordingCount {
+fn record_scenario(
+    scenario: Scenario,
+    list: &mut DisplayList,
+    font: FontId,
+    text: &str,
+    texture: TextureId,
+    custom_renderer: CustomRenderHandle<MeasurementBackend>,
+) -> RecordingCount {
     let clip = viewport();
     let white = color(255, 255, 255, 255);
 
@@ -325,11 +348,7 @@ fn record_scenario(scenario: Scenario, list: &mut DisplayList, font: FontId, tex
                     }
                 }
                 if segment < CUSTOM_BARRIER_COUNT {
-                    list.push_custom(
-                        clip,
-                        CustomRenderArgs { content_area: clip, view: clip },
-                        Box::new(|_: Dimensioni, _: &CustomRenderArgs| {}),
-                    );
+                    list.push_custom(clip, custom_renderer.key, clip);
                 }
             }
         }
@@ -360,37 +379,35 @@ fn record_nested_rectangles(painter: &mut Painter<'_>, depth: usize, color: crat
 fn measure_scenario(scenario: Scenario, text: &str) -> ScenarioResult {
     let atlas = make_atlas();
     let font = atlas.font_id("default").expect("benchmark atlas must contain its default font");
-    let mut backend = BackendHandle::new(MeasurementBackend {
-        atlas,
-        submissions: SubmissionCount::default(),
-    });
-    let mut renderer = Renderer::new(backend.clone(), Dimensioni::new(VIEW_SIZE, VIEW_SIZE));
+    let submissions = Rc::new(Cell::new(SubmissionCount::default()));
+    let backend = MeasurementBackend { atlas, submissions: submissions.clone() };
+    let mut renderer = Renderer::new(backend);
+    let custom_renderer = renderer.register_custom_renderer(|_frame, _args| {}).unwrap();
+    let frame_info = FrameInfo::try_new(Dimensioni::new(VIEW_SIZE, VIEW_SIZE), color(0, 0, 0, 0)).unwrap();
     let texture = renderer.try_load_texture_rgba(1, 1, &[0xFF; 4]).expect("benchmark texture upload must succeed");
     let mut list = DisplayList::new();
 
-    let recording = record_scenario(scenario, &mut list, font, text, texture);
-    renderer.render(&mut list);
-    backend.scope_mut(|backend| backend.submissions = SubmissionCount::default());
+    let recording = record_scenario(scenario, &mut list, font, text, texture, custom_renderer);
+    renderer.render(frame_info, &mut list).unwrap();
+    submissions.set(SubmissionCount::default());
 
-    let locks_before = backend.debug_write_acquisition_count() as u64;
     let started = Instant::now();
     begin_allocation_measurement();
     for _ in 0..ITERATIONS {
-        let current = record_scenario(scenario, &mut list, font, text, texture);
+        let current = record_scenario(scenario, &mut list, font, text, texture, custom_renderer);
         black_box((current.operations, current.triangles));
-        renderer.render(&mut list);
+        renderer.render(frame_info, &mut list).unwrap();
     }
     let allocations = end_allocation_measurement();
     let elapsed = started.elapsed();
-    let locks = backend.debug_write_acquisition_count() as u64 - locks_before;
-    let submissions = backend.scope(|backend| backend.submissions);
-    assert_eq!(locks, scenario.expected_locks() * ITERATIONS);
+    let submissions = submissions.get();
+    assert_eq!(submissions.frames, ITERATIONS);
     assert_eq!(allocations.events, scenario.expected_allocations() * ITERATIONS);
 
     ScenarioResult {
         scenario,
         recording,
-        locks: locks / ITERATIONS,
+        frames: submissions.frames / ITERATIONS,
         allocations: allocations.events / ITERATIONS,
         allocated_bytes: allocations.bytes / ITERATIONS,
         vertices: submissions.vertices() / ITERATIONS,
@@ -412,7 +429,7 @@ fn render_performance_baseline() {
     ];
     let results: Vec<_> = scenarios.into_iter().map(|scenario| measure_scenario(scenario, &text)).collect();
 
-    println!("| scenario | ops | triangles | locks | allocs | bytes | vertices | ns/frame |");
+    println!("| scenario | ops | triangles | frames | allocs | bytes | vertices | ns/frame |");
     println!("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
     for result in &results {
         println!(
@@ -420,14 +437,14 @@ fn render_performance_baseline() {
             result.scenario.name(),
             result.recording.operations,
             result.recording.triangles,
-            result.locks,
+            result.frames,
             result.allocations,
             result.allocated_bytes,
             result.vertices,
             result.nanoseconds,
         );
 
-        assert_eq!(result.locks, result.scenario.expected_locks());
+        assert_eq!(result.frames, 1);
         assert_eq!(result.allocations, result.scenario.expected_allocations());
     }
 }

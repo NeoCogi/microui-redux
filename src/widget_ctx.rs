@@ -52,11 +52,9 @@
 //
 //! Shared widget execution context with direct display-list painting.
 
-use std::rc::Rc;
+use rs_math3d::{Recti, Vec2i};
 
-use rs_math3d::{Color4b, Recti, Vec2i};
-
-use crate::atlas::{AtlasHandle, FontId, IconId, SlotId};
+use crate::atlas::{AtlasHandle, FontId, IconId};
 use crate::render::{DisplayList, Painter};
 use crate::input::{ControlColor, KeyCode, KeyMode, MouseButton, WidgetOption};
 use crate::ui_node::UiInputEvent;
@@ -379,12 +377,6 @@ impl<'a> WidgetCtx<'a> {
     pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
         let rect = self.local_rect_for(rect);
         self.painter().image(image, rect, color);
-    }
-
-    /// Draws a dynamic atlas slot through a widget-local painter.
-    pub(crate) fn draw_slot_with_function(&mut self, id: SlotId, rect: Recti, color: Color, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        let rect = self.local_rect_for(rect);
-        self.painter().redraw_slot(id, rect, color, f);
     }
 
     /// Draws a control frame through a widget-local painter.

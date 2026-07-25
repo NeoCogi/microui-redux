@@ -32,13 +32,12 @@
 //! Painter records through this internal operation surface and Renderer consumes it exactly once.
 
 use super::{
-    backend::{CustomRenderArgs, CustomRenderCommand},
+    backend::CustomRenderKey,
     geometry::{SolidGeometry, SolidTriangle, SolidTriangleRange},
 };
-use crate::atlas::{FontId, IconId, SlotId};
+use crate::atlas::{FontId, IconId};
 use crate::style::{Color, Image};
 use rs_math3d::{Color4b, Recti, Vec2f, Vec2i};
-use std::rc::Rc;
 
 /// An owned sequence of rendering operations and their solid geometry.
 ///
@@ -103,23 +102,12 @@ pub(super) enum DrawKind {
         /// Validated range inside [`DisplayList::solid_geometry`].
         triangles: SolidTriangleRange,
     },
-    /// Regenerates an atlas slot immediately before drawing it.
-    RedrawSlot {
-        /// Atlas slot identifier.
-        id: SlotId,
-        /// Destination rectangle in screen space.
-        rect: Recti,
-        /// Slot tint.
-        color: Color,
-        /// Pixel generator.
-        payload: Rc<dyn Fn(usize, usize) -> Color4b>,
-    },
     /// Invokes backend-specific drawing at this point in the operation stream.
     Custom {
-        /// Content and clip geometry for the callback.
-        args: CustomRenderArgs,
-        /// Backend-specific callback.
-        command: Box<dyn CustomRenderCommand>,
+        /// Renderer-owned callback key.
+        renderer: CustomRenderKey,
+        /// Unclipped custom-render content rectangle.
+        content_area: Recti,
     },
 }
 
@@ -186,14 +174,9 @@ impl DisplayList {
         self.push(clip, DrawKind::Image { image, rect, color });
     }
 
-    /// Appends one dynamic atlas-slot redraw operation.
-    pub(super) fn push_redraw_slot(&mut self, clip: Recti, id: SlotId, rect: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        self.push(clip, DrawKind::RedrawSlot { id, rect, color, payload });
-    }
-
     /// Appends one backend-specific custom drawing barrier.
-    pub(crate) fn push_custom(&mut self, clip: Recti, args: CustomRenderArgs, command: Box<dyn CustomRenderCommand>) {
-        self.push(clip, DrawKind::Custom { args, command });
+    pub(crate) fn push_custom(&mut self, clip: Recti, renderer: CustomRenderKey, content_area: Recti) {
+        self.push(clip, DrawKind::Custom { renderer, content_area });
     }
 
     /// Appends strongly typed solid triangles and records their valid contiguous range.
@@ -295,7 +278,7 @@ fn same_rect(left: Recti, right: Recti) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{color, color4b};
+    use crate::{color, color4b, SlotId};
 
     fn triangle_at(offset: f32) -> SolidTriangle {
         SolidTriangle::new(
@@ -316,29 +299,12 @@ mod tests {
             Recti::new(2, 3, 29, 39),
             Recti::new(3, 4, 28, 38),
             Recti::new(4, 5, 27, 37),
-            Recti::new(5, 6, 26, 36),
-            Recti::new(6, 7, 25, 35),
         ];
 
         list.push_fill_rect(clips[0], Recti::new(0, 0, 2, 2), color(1, 2, 3, 4));
         list.push_text(clips[1], FontId::default(), Vec2i::new(4, 5), color(5, 6, 7, 8), "text");
         list.push_icon(clips[2], IconId::default(), Recti::new(6, 7, 8, 9), color(9, 10, 11, 12));
         list.push_image(clips[3], Image::Slot(SlotId::default()), Recti::new(10, 11, 12, 13), color(13, 14, 15, 16));
-        list.push_redraw_slot(
-            clips[4],
-            SlotId::default(),
-            Recti::new(14, 15, 16, 17),
-            color(17, 18, 19, 20),
-            Rc::new(|_, _| color4b(255, 255, 255, 255)),
-        );
-        list.push_custom(
-            clips[5],
-            CustomRenderArgs {
-                content_area: Recti::new(18, 19, 20, 21),
-                view: clips[5],
-            },
-            Box::new(|_, _args: &CustomRenderArgs| {}),
-        );
 
         assert_eq!(list.ops.len(), clips.len());
         for (operation, expected) in list.ops.iter().zip(clips) {
@@ -348,8 +314,6 @@ mod tests {
         assert!(matches!(list.ops[1].kind, DrawKind::Text { .. }));
         assert!(matches!(list.ops[2].kind, DrawKind::Icon { .. }));
         assert!(matches!(list.ops[3].kind, DrawKind::Image { .. }));
-        assert!(matches!(list.ops[4].kind, DrawKind::RedrawSlot { .. }));
-        assert!(matches!(list.ops[5].kind, DrawKind::Custom { .. }));
     }
 
     #[test]

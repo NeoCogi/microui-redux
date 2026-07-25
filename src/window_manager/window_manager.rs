@@ -234,11 +234,9 @@ impl<B: RendererBackend> Context<B> {
         }
     }
 
-    pub(super) fn render_window_manager(&mut self) {
+    pub(super) fn render_window_manager(&mut self, dimensions: Dimensioni) {
         // Context owns the frame list lifecycle. Recording below appends every visible root in
         // painter order, and Renderer consumes the completed list exactly once at the end.
-        self.display_list.clear();
-
         for entry in &mut self.roots {
             if entry.visible && entry.opt.intersects(ContainerOption::AUTO_SIZE) {
                 let size = entry
@@ -282,7 +280,7 @@ impl<B: RendererBackend> Context<B> {
                 let chrome_capturing_pointer = matches!(entry.active_chrome, Some(WindowChromePart::Title | WindowChromePart::Resize));
                 let pointer_input_enabled = hover_root == Some(entry.id) && !chrome_capturing_pointer;
                 let chrome = WindowChrome::new(entry.rect, self.style.as_ref(), &self.renderer.atlas(), entry.opt);
-                self.record_window_frame(entry);
+                self.record_window_frame(entry, dimensions);
                 let input = self.input.borrow();
                 entry.runtime.begin_frame(pointer_input_enabled);
                 entry
@@ -302,11 +300,10 @@ impl<B: RendererBackend> Context<B> {
                     chrome.body,
                 );
                 drop(input);
-                self.record_window_chrome(entry, chrome);
+                self.record_window_chrome(entry, chrome, dimensions);
             }
         }
         self.roots = roots;
-        self.renderer.render(&mut self.display_list);
     }
 
     fn route_entry_input(entry: &mut WindowEntry, style: &Style, input: &Input) -> bool {
@@ -344,20 +341,18 @@ impl<B: RendererBackend> Context<B> {
     }
 
     /// Records the root background and border before retained contents.
-    fn record_window_frame(&mut self, entry: &WindowEntry) {
+    fn record_window_frame(&mut self, entry: &WindowEntry, dimensions: Dimensioni) {
         if entry.opt.intersects(ContainerOption::NO_FRAME) {
             return;
         }
 
-        let dimensions = self.renderer.dimensions();
         let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
         let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);
         record_root_frame(&mut painter, self.style.as_ref(), entry.rect, ControlColor::WindowBG);
     }
 
     /// Records title, close, and resize chrome after retained contents.
-    fn record_window_chrome(&mut self, entry: &WindowEntry, chrome: WindowChrome) {
-        let dimensions = self.renderer.dimensions();
+    fn record_window_chrome(&mut self, entry: &WindowEntry, chrome: WindowChrome, dimensions: Dimensioni) {
         let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
         let atlas = self.renderer.atlas();
         let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);

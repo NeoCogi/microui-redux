@@ -60,7 +60,12 @@ use std::fs;
 use microui_redux::atlas::builder;
 
 pub fn default_slots() -> Vec<Dimensioni> {
-    vec![Dimensioni::new(64, 64), Dimensioni::new(24, 32), Dimensioni::new(64, 24)]
+    vec![
+        Dimensioni::new(64, 64),
+        Dimensioni::new(24, 32),
+        Dimensioni::new(64, 24),
+        Dimensioni::new(24, 32),
+    ]
 }
 
 #[cfg(all(not(feature = "prebuilt-atlas"), not(feature = "external-atlas"), feature = "builder"))]

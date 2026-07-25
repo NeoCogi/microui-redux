@@ -8,7 +8,7 @@
 //! measure, layout, and paint passes. Runtime traversal does not mutate child membership.
 #![allow(dead_code)]
 
-use crate::render::{CustomRenderArgs, CustomRenderCommand, DisplayList};
+use crate::render::DisplayList;
 #[cfg(test)]
 use crate::render::RendererBackend;
 use crate::{expand_rect, Dimensioni, FrameResults, Input, MouseButton, Recti, Style, Vec2i, UNCLIPPED_RECT};
@@ -18,7 +18,6 @@ use crate::input::{ContainerOption, ScrollBehavior, WidgetOption};
 use crate::sizing::SizePolicy;
 use crate::widget::FocusPolicy;
 use crate::widget_ctx::WidgetCtx;
-use crate::window_manager::TreeCustomRender;
 
 mod node;
 pub(crate) use node::{NodeLayout, TraversalState, UiNode, UiNodeData, UiNodeId, UiNodeState};
@@ -32,18 +31,6 @@ pub(crate) use containers::{
 #[cfg(test)]
 pub(crate) use containers::{scroll_area_state, set_scroll_area_scroll};
 pub use containers::UiInputEvent;
-
-/// Adapter that lets a retained custom-render callback enter the display list.
-struct NodeCustomRenderCommand {
-    /// Shared retained callback invoked during backend replay.
-    render: TreeCustomRender,
-}
-
-impl CustomRenderCommand for NodeCustomRenderCommand {
-    fn render(&mut self, dim: Dimensioni, args: &CustomRenderArgs) {
-        self.render.borrow_mut().render(dim, args);
-    }
-}
 
 /// Computes titlebar height from style minimums and current title font metrics.
 fn root_titlebar_height(style: &Style, atlas: &crate::AtlasHandle) -> i32 {
@@ -322,10 +309,10 @@ mod tests {
     use super::*;
     use std::{cell::RefCell, rc::Rc};
 
-    use crate::render::{Renderer, BackendHandle};
+    use crate::render::Renderer;
     use crate::{
-        color4b, rect, AtlasHandle, AtlasSource, Button, CharEntry, Custom, FontEntry, Id, Image, Input, KeyMode, ListItem, Policy, ResourceState,
-        SourceFormat, StackDirection, Textbox, WidgetFillOption, WidgetOption, UiNodeBuilder, widget_handle,
+        rect, AtlasHandle, AtlasSource, Button, CharEntry, Custom, FontEntry, Id, Image, Input, KeyMode, ListItem, Policy, ResourceState, SourceFormat,
+        StackDirection, Textbox, WidgetFillOption, WidgetOption, UiNodeBuilder, widget_handle,
     };
     use crate::test_support::{test_atlas, NoopRenderer};
 
@@ -447,7 +434,7 @@ mod tests {
             let atlas = renderer.atlas();
             self.runtime
                 .update_paint_frame(&mut self.roots, root_id, root_name, &mut self.display_list, atlas, style, input, results, body);
-            renderer.render(&mut self.display_list);
+            renderer.render_test(&mut self.display_list);
         }
     }
 
@@ -577,8 +564,8 @@ mod tests {
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         runtime.focus = Some(focused_id);
         let atlas = test_atlas();
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut renderer = Renderer::new(backend, Dimensioni::new(120, 80));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(120, 80));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -690,8 +677,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut renderer = Renderer::new(backend, Dimensioni::new(400, 500));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(400, 500));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -738,8 +725,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut renderer = Renderer::new(backend, Dimensioni::new(320, 420));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(320, 420));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -782,8 +769,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut renderer = Renderer::new(backend, Dimensioni::new(320, 120));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(320, 120));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -820,8 +807,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut renderer = Renderer::new(backend, Dimensioni::new(320, 160));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(320, 160));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -863,8 +850,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         set_scroll_area_scroll(&mut runtime.roots, scroll_area_id, Vec2i::new(0, 36));
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut renderer = Renderer::new(backend, Dimensioni::new(180, 100));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(180, 100));
         let mut results = FrameResults::default();
         results.begin_frame();
 
@@ -908,8 +895,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut renderer = Renderer::new(backend, Dimensioni::new(220, 160));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(220, 160));
         let mut style = Style::default();
         style.scrollbar_size = 10;
         let mut results = FrameResults::default();
@@ -953,17 +940,18 @@ mod tests {
 
     #[test]
     fn root_full_viewport_custom_render_does_not_overflow_from_padding() {
+        let atlas = test_atlas();
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(220, 160));
+        let custom_renderer = renderer.register_custom_renderer(|_frame, _args| {}).unwrap();
         let custom = widget_handle(Custom::new("viewport"));
         let mut custom_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                custom_id = tree.custom_render(&custom, |_dim, _args| {});
+                custom_id = tree.custom_render(&custom, custom_renderer);
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
-        let atlas = test_atlas();
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut renderer = Renderer::new(backend, Dimensioni::new(220, 160));
         let mut style = Style::default();
         style.padding = 6;
         style.scrollbar_size = 10;
@@ -993,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn scroll_area_paints_slot_button_after_scrolling_to_slot_section() {
+    fn scroll_area_reveals_slot_button_after_scrolling_to_slot_section() {
         let pixels = [255, 255, 255, 255];
         let chars = [(
             'a',
@@ -1024,18 +1012,7 @@ mod tests {
             slots: &slots,
         });
         let slot = atlas.clone_slot_table()[0];
-        let paint_count = Rc::new(std::cell::Cell::new(0));
-        let paint_count_for_slot = paint_count.clone();
-        let slot_button = widget_handle(Button::with_slot(
-            "slot",
-            slot,
-            Rc::new(move |_x, _y| {
-                paint_count_for_slot.set(paint_count_for_slot.get() + 1);
-                color4b(255, 0, 0, 255)
-            }),
-            WidgetOption::NONE,
-            WidgetFillOption::ALL,
-        ));
+        let slot_button = widget_handle(Button::with_slot("slot", slot, WidgetOption::NONE, WidgetFillOption::ALL));
         let filler = widget_handle(Button::new("filler"));
         let mut scroll_area_id = Id::new(0);
         let mut slot_id = Id::new(0);
@@ -1048,8 +1025,8 @@ mod tests {
                     });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut renderer = Renderer::new(backend, Dimensioni::new(140, 80));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(140, 80));
         let mut style = Style::default();
         style.padding = 0;
         style.scrollbar_size = 10;
@@ -1066,7 +1043,6 @@ mod tests {
             rect(0, 0, 120, 70),
             true,
         );
-        assert_eq!(paint_count.get(), 0);
 
         set_scroll_area_scroll(&mut runtime.roots, scroll_area_id, Vec2i::new(0, 160));
         results.begin_frame();
@@ -1086,15 +1062,14 @@ mod tests {
         let scroll_state = scroll_area_state(&runtime.roots, scroll_area_id).unwrap();
         let body = scroll_state.body;
         let scroll = scroll_state.scroll;
+        let slot_is_visible = slot_rect.x < body.x + body.width
+            && slot_rect.x + slot_rect.width > body.x
+            && slot_rect.y < body.y + body.height
+            && slot_rect.y + slot_rect.height > body.y;
         assert!(
-            paint_count.get() > 0,
-            "slot not painted; root client {:?} content {:?} scroll body {:?} scroll {:?} slot rect {:?} clip {:?}",
-            root.state.layout.frame,
-            root.state.layout.content_size,
-            body,
-            scroll,
-            slot_rect,
-            slot_node.state.layout.content.viewport
+            slot_is_visible,
+            "slot not visible; root client {:?} content {:?} scroll body {:?} scroll {:?} slot rect {:?} clip {:?}",
+            root.state.layout.frame, root.state.layout.content_size, body, scroll, slot_rect, slot_node.state.layout.content.viewport
         );
     }
 
@@ -1143,8 +1118,8 @@ mod tests {
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut renderer = Renderer::new(backend, Dimensioni::new(200, 140));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(200, 140));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -1205,8 +1180,8 @@ mod tests {
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut renderer = Renderer::new(backend, Dimensioni::new(300, 160));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(300, 160));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -1246,8 +1221,8 @@ mod tests {
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut renderer = Renderer::new(backend, Dimensioni::new(220, 80));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(220, 80));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();

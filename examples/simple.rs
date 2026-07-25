@@ -83,8 +83,7 @@ fn main() {
     })
     .unwrap();
 
-    fw.event_loop(|ctx, state| {
+    fw.event_loop(|_ctx, state, _dimensions| {
         let _ = state;
-        ctx.update_ui();
     });
 }

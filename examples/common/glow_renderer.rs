@@ -98,8 +98,19 @@ pub struct GLRenderer {
     height: u32,
 
     atlas: AtlasHandle,
-    last_update_id: usize,
+    last_update_id: u64,
     textures: HashMap<TextureId, NativeTexture>,
+}
+
+trait GlFrameOps {
+    fn begin(&mut self, width: i32, height: i32, clr: Color);
+    fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex);
+    fn push_triangle_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex);
+    fn flush(&mut self);
+    fn end(&mut self);
+    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String>;
+    fn destroy_texture(&mut self, id: TextureId);
+    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
 
 impl GLRenderer {
@@ -209,18 +220,14 @@ impl GLRenderer {
                 width,
                 height,
                 atlas,
-                last_update_id: usize::MAX,
+                last_update_id: u64::MAX,
                 textures: HashMap::new(),
             }
         }
     }
 }
 
-impl RendererBackend for GLRenderer {
-    fn get_atlas(&self) -> AtlasHandle {
-        self.atlas.clone()
-    }
-
+impl GlFrameOps for GLRenderer {
     /// Flushes the accumulated UI quad batch through the shared atlas pipeline.
     fn flush(&mut self) {
         self.update_atlas();
@@ -426,7 +433,6 @@ impl RendererBackend for GLRenderer {
         // External textures cannot be folded into the atlas batch because they change the bound
         // GL texture object. `Renderer` has already clipped the vertices, so the one-off draw uses
         // the full framebuffer scissor and relies on the submitted quad geometry for clipping.
-        self.flush();
         let gl = &self.gl;
         unsafe {
             gl.viewport(0, 0, self.width as i32, self.height as i32);
@@ -477,6 +483,73 @@ impl RendererBackend for GLRenderer {
             gl.disable_vertex_attrib_array(col_attrib_id);
             gl.use_program(None);
         }
+    }
+}
+
+#[must_use = "the OpenGL frame is finalized when dropped"]
+pub struct GlFrame<'a> {
+    backend: &'a mut GLRenderer,
+}
+
+impl GlFrame<'_> {
+    pub fn enqueue_colored_vertices(&mut self, area: CustomRenderArea, vertices: Vec<Vertex>) {
+        self.backend.enqueue_colored_vertices(area, vertices);
+    }
+
+    pub fn enqueue_mesh_draw(&mut self, area: CustomRenderArea, submission: MeshSubmission) {
+        self.backend.enqueue_mesh_draw(area, submission);
+    }
+}
+
+impl RendererFrame for GlFrame<'_> {
+    fn push_quad(&mut self, vertices: [Vertex; 4]) {
+        GlFrameOps::push_quad_vertices(self.backend, &vertices[0], &vertices[1], &vertices[2], &vertices[3]);
+    }
+
+    fn push_triangle(&mut self, vertices: [Vertex; 3]) {
+        GlFrameOps::push_triangle_vertices(self.backend, &vertices[0], &vertices[1], &vertices[2]);
+    }
+
+    fn flush(&mut self) {
+        GlFrameOps::flush(self.backend);
+    }
+
+    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
+        GlFrameOps::draw_texture(self.backend, id, vertices);
+    }
+}
+
+impl Drop for GlFrame<'_> {
+    fn drop(&mut self) {
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            GlFrameOps::end(self.backend);
+        }))
+        .is_err()
+        {
+            eprintln!("[microui-redux][glow] frame finalization panicked");
+        }
+    }
+}
+
+impl RendererBackend for GLRenderer {
+    type Frame<'a> = GlFrame<'a>;
+
+    fn get_atlas(&self) -> AtlasHandle {
+        self.atlas.clone()
+    }
+
+    fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
+        let dimensions = info.dimensions();
+        GlFrameOps::begin(self, dimensions.width, dimensions.height, info.clear());
+        Ok(GlFrame { backend: self })
+    }
+
+    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String> {
+        GlFrameOps::create_texture(self, id, width, height, pixels)
+    }
+
+    fn destroy_texture(&mut self, id: TextureId) {
+        GlFrameOps::destroy_texture(self, id);
     }
 }
 

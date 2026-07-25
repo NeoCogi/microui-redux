@@ -36,6 +36,7 @@ use microui_redux::{
     render::{Renderer, DisplayList, Painter, Vertex},
     AtlasSource,
 };
+use std::{cell::RefCell, rc::Rc};
 
 enum SmokeEvent {
     AtlasBatch { quads: usize },
@@ -54,52 +55,72 @@ impl SmokeEvent {
 struct SmokeRenderer {
     atlas: AtlasHandle,
     pending_quads: usize,
-    events: Vec<SmokeEvent>,
+    events: Rc<RefCell<Vec<SmokeEvent>>>,
     textures: Vec<TextureId>,
 }
 
 impl SmokeRenderer {
-    fn new(atlas: AtlasHandle) -> Self {
+    fn new(atlas: AtlasHandle, events: Rc<RefCell<Vec<SmokeEvent>>>) -> Self {
         Self {
             atlas,
             pending_quads: 0,
-            events: Vec::new(),
+            events,
             textures: Vec::new(),
         }
     }
 
     fn flush_pending_quads(&mut self) {
         if self.pending_quads > 0 {
-            self.events.push(SmokeEvent::AtlasBatch { quads: self.pending_quads });
+            self.events.borrow_mut().push(SmokeEvent::AtlasBatch { quads: self.pending_quads });
             self.pending_quads = 0;
         }
     }
 }
 
+#[must_use]
+struct SmokeFrame<'a> {
+    backend: &'a mut SmokeRenderer,
+}
+
+impl RendererFrame for SmokeFrame<'_> {
+    fn push_quad(&mut self, _vertices: [Vertex; 4]) {
+        self.backend.pending_quads += 1;
+    }
+
+    fn push_triangle(&mut self, _vertices: [Vertex; 3]) {
+        self.backend.pending_quads += 1;
+    }
+
+    fn flush(&mut self) {
+        self.backend.flush_pending_quads();
+    }
+
+    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
+        if !self.backend.textures.contains(&id) {
+            return;
+        }
+        self.backend.flush_pending_quads();
+        self.backend.events.borrow_mut().push(SmokeEvent::Texture { id, vertices });
+    }
+}
+
+impl Drop for SmokeFrame<'_> {
+    fn drop(&mut self) {
+        self.backend.flush_pending_quads();
+    }
+}
+
 impl RendererBackend for SmokeRenderer {
+    type Frame<'a> = SmokeFrame<'a>;
+
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }
 
-    fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {
+    fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
         self.pending_quads = 0;
-        self.events.clear();
-    }
-
-    fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {
-        self.pending_quads += 1;
-    }
-
-    fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {
-        self.pending_quads += 1;
-    }
-
-    fn flush(&mut self) {
-        self.flush_pending_quads();
-    }
-
-    fn end(&mut self) {
-        self.flush();
+        self.events.borrow_mut().clear();
+        Ok(SmokeFrame { backend: self })
     }
 
     fn create_texture(&mut self, id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
@@ -109,15 +130,6 @@ impl RendererBackend for SmokeRenderer {
 
     fn destroy_texture(&mut self, id: TextureId) {
         self.textures.retain(|texture| *texture != id);
-    }
-
-    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
-        if !self.textures.contains(&id) {
-            return;
-        }
-
-        self.flush_pending_quads();
-        self.events.push(SmokeEvent::Texture { id, vertices });
     }
 }
 
@@ -142,11 +154,11 @@ fn assert_vec2f_eq(actual: Vec2f, expected: Vec2f) {
 }
 
 fn main() -> Result<(), String> {
-    let backend = BackendHandle::new(SmokeRenderer::new(make_smoke_atlas()));
-    let mut renderer = Renderer::new(backend.clone(), Dimensioni::new(64, 64));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let backend = SmokeRenderer::new(make_smoke_atlas(), events.clone());
+    let mut renderer = Renderer::new(backend);
     let texture = renderer.try_load_texture_rgba(16, 12, &[0xFF; 16 * 12 * 4])?;
 
-    renderer.begin(64, 64, color(0, 0, 0, 255));
     let viewport = Recti::new(0, 0, 64, 64);
     let mut list = DisplayList::new();
     Painter::new(&mut list, Vec2i::new(0, 0), viewport, viewport).icon(WHITE_ICON, Recti::new(0, 0, 4, 4), color(255, 255, 255, 255));
@@ -156,18 +168,19 @@ fn main() -> Result<(), String> {
         color(255, 255, 255, 255),
     );
     Painter::new(&mut list, Vec2i::new(0, 0), viewport, viewport).icon(WHITE_ICON, Recti::new(30, 0, 4, 4), color(255, 255, 255, 255));
-    renderer.render(&mut list);
-    renderer.end();
+    let info = FrameInfo::try_new(Dimensioni::new(64, 64), color(0, 0, 0, 255)).map_err(|error| error.to_string())?;
+    renderer.render(info, &mut list).map_err(|error| error.to_string())?;
 
-    backend.scope(|backend| {
-        assert_eq!(backend.events.len(), 3);
+    {
+        let events = events.borrow();
+        assert_eq!(events.len(), 3);
 
-        match &backend.events[0] {
+        match &events[0] {
             SmokeEvent::AtlasBatch { quads } => assert_eq!(*quads, 1),
             event => panic!("expected first event to be an atlas batch, got {}", event.name()),
         }
 
-        match &backend.events[1] {
+        match &events[1] {
             SmokeEvent::Texture { id, vertices } => {
                 assert_eq!(*id, texture);
                 assert_vec2f_eq(vertices[0].position(), Vec2f::new(10.0, 12.0));
@@ -180,11 +193,11 @@ fn main() -> Result<(), String> {
             event => panic!("expected second event to be a texture draw, got {}", event.name()),
         }
 
-        match &backend.events[2] {
+        match &events[2] {
             SmokeEvent::AtlasBatch { quads } => assert_eq!(*quads, 1),
             event => panic!("expected final event to be an atlas batch, got {}", event.name()),
         }
-    });
+    }
 
     Ok(())
 }

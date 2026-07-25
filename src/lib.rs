@@ -94,8 +94,8 @@
 //! Widget::paint
 //!      |
 //!      v
-//!   Painter  --->  DisplayList  --->  Renderer  --->  BackendHandle  --->  RendererBackend
-//! (records)         (owns ops)        (executes)       (shares)             (submits)
+//!   Painter  --->  DisplayList  --->  Renderer  --->  RendererBackend::Frame
+//! (records)         (owns ops)        (executes)       (submits/presents)
 //! ```
 //!
 //! Widgets obtain a [`render::Painter`] from [`WidgetCtx::painter`] and record
@@ -130,9 +130,9 @@ mod window_manager;
 /// This module groups the stable retained concepts used by application code without exposing
 /// low-level renderer details or manual container drawing helpers through default imports.
 pub mod retained {
-    pub use crate::render::{CustomRenderArgs, CustomRenderCommand};
+    pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
     pub use crate::text_layout::TextWrap;
-    pub use crate::window_manager::{Context, RootId};
+    pub use crate::window_manager::{Context, ContextFrame, RootId};
     pub use crate::ui_node::UiInputEvent;
     pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetInputEvents};
     pub use crate::window_manager::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, UiNodeSet, UiNodeBuilder};
@@ -150,10 +150,10 @@ pub mod prelude {
     pub use crate::file_dialog::FileDialogState;
     pub use crate::input::{ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption};
     pub use crate::sizing::{SizePolicy, StackDirection};
-    pub use crate::render::{BackendHandle, RendererBackend};
+    pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame};
     pub use crate::retained::{
-        Context, CustomRenderArgs, CustomRenderCommand, FocusPolicy, FrameResultGeneration, NodeBuilder, NodeId, NodeOptions, Policy, RetainedId, RootId,
-        TextWrap, UiInputEvent, Widget, WidgetCtx, WidgetHandle, WidgetInputEvents, UiNodeSet, UiNodeBuilder, widget_handle,
+        Context, ContextFrame, CustomRenderArgs, CustomRenderHandle, FocusPolicy, FrameResultGeneration, NodeBuilder, NodeId, NodeOptions, Policy, RetainedId,
+        RootId, TextWrap, UiInputEvent, Widget, WidgetCtx, WidgetHandle, WidgetInputEvents, UiNodeSet, UiNodeBuilder, widget_handle,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, Image, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
@@ -170,7 +170,7 @@ pub use atlas::{
     AtlasHandle, AtlasSource, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry,
     FontId, IconId, OPEN_FOLDER_16_ICON, SlotId, SourceFormat, WHITE_ICON, load_image_bytes,
 };
-pub use window_manager::{widget_handle, Context, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, RootId, WidgetHandle, UiNodeSet, UiNodeBuilder};
+pub use window_manager::{widget_handle, Context, ContextFrame, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, RootId, WidgetHandle, UiNodeSet, UiNodeBuilder};
 pub use file_dialog::FileDialogState;
 pub use id::Id;
 pub use input::{ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, ScrollBehavior, WidgetFillOption, WidgetOption};
@@ -189,7 +189,7 @@ pub(crate) use rs_math3d::{
     Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3, color4b,
     ortho4,
 };
-pub(crate) use std::{cell::RefCell, cmp::max, hash::Hash, rc::Rc};
+pub(crate) use std::{cmp::max, hash::Hash, rc::Rc};
 pub(crate) use style::UNCLIPPED_RECT;
 pub(crate) use ui_node::UiRuntime;
 pub(crate) use widget::FrameResults;

@@ -66,7 +66,8 @@ use crate::{
     rect, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId,
     UiRuntime,
 };
-use crate::render::{BackendHandle, DisplayList, Renderer, RendererBackend};
+use crate::atlas::{AtlasFrameError, AtlasFrameGuard};
+use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, DisplayList, FrameInfo, RenderError, Renderer, RendererBackend};
 use crate::ui_node::{pointer_events_from_input, UiNode, UiNodeId};
 use window_manager::WindowEntry;
 mod builder;
@@ -76,7 +77,7 @@ mod window_manager;
 
 pub use builder::{GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, UiNodeSet, UiNodeBuilder};
 pub use retained::{widget_handle, WidgetHandle};
-pub(crate) use retained::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
+pub(crate) use retained::{erased_widget_state, WidgetStateHandleDyn};
 
 /// Opaque identifier for a root window, dialog, or popup registered with [`Context`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -95,6 +96,20 @@ impl RootId {
 }
 
 /// Primary entry point used to drive the UI over a rendering backend.
+///
+/// A live [`ContextFrame`] exclusively owns the Context borrow, preventing input/resource
+/// mutation or another logical frame until it is rendered or cancelled:
+///
+/// ```compile_fail
+/// use microui_redux::Context;
+/// use microui_redux::render::{FrameInfo, RendererBackend};
+///
+/// fn mutate_during_frame<B: RendererBackend>(context: &mut Context<B>, info: FrameInfo) {
+///     let frame = context.frame(info).unwrap();
+///     context.mousemove(10, 20);
+///     drop(frame);
+/// }
+/// ```
 pub struct Context<B: RendererBackend> {
     /// High-level renderer that replays root display lists.
     renderer: Renderer<B>,
@@ -107,7 +122,7 @@ pub struct Context<B: RendererBackend> {
     last_zindex: i32,
     /// Monotonic frame counter used for root freshness bookkeeping.
     frame: usize,
-    /// Registered window-manager roots replayed by [`Context::update_ui`].
+    /// Registered window-manager roots replayed by [`ContextFrame::render_ui`].
     roots: Vec<WindowEntry>,
     /// Next root id counter.
     next_root_id: usize,
@@ -116,13 +131,16 @@ pub struct Context<B: RendererBackend> {
 
     /// Shared input state mutated by public input APIs and consumed during traversal.
     input: Rc<RefCell<Input>>,
+    /// Drawable size used by retained behavior tests that drive complete frames tersely.
+    #[cfg(test)]
+    test_dimensions: Dimensioni,
 }
 
 impl<B: RendererBackend> Context<B> {
-    /// Creates a new UI context around the provided backend and dimensions.
-    pub fn new(backend: BackendHandle<B>, dim: Dimensioni) -> Self {
+    /// Creates a new UI context with unique ownership of the provided backend.
+    pub fn new(backend: B) -> Self {
         // The backend supplies the atlas; the default style then binds semantic font roles from it.
-        let renderer = Renderer::new(backend, dim);
+        let renderer = Renderer::new(backend);
         let style = Style::default().with_named_fonts(&renderer.atlas());
         Self {
             renderer,
@@ -135,8 +153,50 @@ impl<B: RendererBackend> Context<B> {
             frame_results: FrameResults::default(),
 
             input: Rc::new(RefCell::new(Input::default())),
+            #[cfg(test)]
+            test_dimensions: Dimensioni::new(1, 1),
         }
     }
+
+    /// Creates a Context whose test-only frame helper uses `dimensions`.
+    #[cfg(test)]
+    pub(crate) fn new_test(backend: B, dimensions: Dimensioni) -> Self {
+        let mut context = Self::new(backend);
+        context.test_dimensions = dimensions;
+        context
+    }
+
+    /// Drives one complete owned frame for retained behavior tests.
+    #[cfg(test)]
+    pub(crate) fn update_ui(&mut self) {
+        let info = FrameInfo::try_new(self.test_dimensions, crate::color(0, 0, 0, 0)).expect("test Context dimensions must be positive");
+        self.frame(info)
+            .expect("test atlas should be available")
+            .render_ui()
+            .expect("test backend frame should render");
+    }
+}
+
+/// Exclusively owned logical UI frame.
+///
+/// Submission consumes the frame, making a second submission unrepresentable:
+///
+/// ```compile_fail
+/// use microui_redux::Context;
+/// use microui_redux::render::{FrameInfo, RendererBackend};
+///
+/// fn submit_twice<B: RendererBackend>(context: &mut Context<B>, info: FrameInfo) {
+///     let frame = context.frame(info).unwrap();
+///     frame.render_ui().unwrap();
+///     frame.render_ui().unwrap();
+/// }
+/// ```
+#[must_use = "call render_ui() to submit this UI frame; dropping it cancels"]
+pub struct ContextFrame<'a, B: RendererBackend> {
+    context: &'a mut Context<B>,
+    info: FrameInfo,
+    _atlas_guard: AtlasFrameGuard,
+    completed: bool,
 }
 
 #[cfg(test)]
@@ -145,23 +205,15 @@ mod builder_tests;
 mod tests;
 
 impl<B: RendererBackend> Context<B> {
-    /// Begins a renderer draw pass for the current viewport.
-    ///
-    /// Call this once after determining the viewport size and before presenting UI commands for
-    /// the frame. Input events may be collected before or after this call, as long as
-    /// [`Context::update_ui`] runs after the input state has been updated.
-    pub fn begin_render_frame(&mut self, width: i32, height: i32, clr: Color) {
-        self.renderer.begin(width, height, clr);
-    }
-
-    /// Flushes recorded root commands to the renderer and ends the draw pass.
-    pub fn end_render_frame(&mut self) {
-        self.renderer.end()
-    }
-
-    /// Returns a handle to the underlying backend.
-    pub fn backend_handle(&self) -> BackendHandle<B> {
-        self.renderer.backend_handle()
+    /// Starts one logical UI frame after application input/resource mutation is complete.
+    pub fn frame(&mut self, info: FrameInfo) -> Result<ContextFrame<'_, B>, AtlasFrameError> {
+        let atlas_guard = self.renderer.atlas().freeze_for_frame()?;
+        Ok(ContextFrame {
+            context: self,
+            info,
+            _atlas_guard: atlas_guard,
+            completed: false,
+        })
     }
 
     #[inline(never)]
@@ -179,15 +231,24 @@ impl<B: RendererBackend> Context<B> {
         self.input.borrow_mut().epilogue();
     }
 
-    /// Runs one UI frame using only roots previously registered with this context.
-    ///
-    /// Applications create roots once with [`Context::create_window`],
-    /// [`Context::create_dialog`], or [`Context::create_popup`], mutate widget handle state over
-    /// time, and call this method each frame without re-submitting root trees.
-    pub fn update_ui(&mut self) {
+    /// Updates retained roots and records exactly one display list.
+    fn update_and_record_ui(&mut self, dimensions: Dimensioni) {
         self.frame_begin();
-        self.render_window_manager();
+        self.render_window_manager(dimensions);
         self.frame_end();
+    }
+
+    /// Registers one backend-specific callback for retained custom-render nodes.
+    pub fn register_custom_renderer<F>(&mut self, callback: F) -> Result<CustomRenderHandle<B>, CustomRenderRegistryError>
+    where
+        F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,
+    {
+        self.renderer.register_custom_renderer(callback)
+    }
+
+    /// Removes a previously registered custom-render callback.
+    pub fn unregister_custom_renderer(&mut self, handle: CustomRenderHandle<B>) -> Result<(), CustomRenderRegistryError> {
+        self.renderer.unregister_custom_renderer(handle)
     }
 
     /// Returns the previous frame's published widget results.
@@ -223,7 +284,7 @@ impl<B: RendererBackend> Context<B> {
     /// Returns the high-level renderer used for frame execution and resource management.
     ///
     /// Application code should prefer the higher-level context image APIs and retained widget
-    /// rendering. Backend integrations can use this accessor for dimensions and atlas metadata.
+    /// rendering. Backend integrations can use this accessor for atlas metadata.
     pub fn renderer(&self) -> &Renderer<B> {
         &self.renderer
     }
@@ -306,5 +367,24 @@ impl<B: RendererBackend> Context<B> {
             }
         }
         Ok((width, height, rgba))
+    }
+}
+
+impl<B: RendererBackend> ContextFrame<'_, B> {
+    /// Consumes this logical frame, records the UI once, and submits it once.
+    pub fn render_ui(mut self) -> Result<(), RenderError> {
+        self.context.update_and_record_ui(self.info.dimensions());
+        let Context { renderer, display_list, .. } = &mut *self.context;
+        let result = renderer.render(self.info, display_list);
+        self.completed = true;
+        result
+    }
+}
+
+impl<B: RendererBackend> Drop for ContextFrame<'_, B> {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.context.display_list.clear();
+        }
     }
 }

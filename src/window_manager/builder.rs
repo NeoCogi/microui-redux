@@ -30,14 +30,12 @@
 // -----------------------------------------------------------------------------
 //! Builder APIs for assembling retained UI node sets with stable IDs.
 
-use std::{cell::RefCell, collections::HashMap, hash::Hash, rc::Rc};
-
-use rs_math3d::Dimensioni;
+use std::{collections::HashMap, hash::Hash};
 
 use crate::{
     id::{hash_id_key, IdNamespace},
     input::{ContainerOption, ScrollBehavior},
-    render::CustomRenderArgs,
+    render::{CustomRenderHandle, RendererBackend},
     sizing::{SizePolicy, StackDirection},
     ui_node::{
         scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData,
@@ -47,7 +45,7 @@ use crate::{
     Node, Recti, TextBlock, TextWrap,
 };
 
-use super::{erased_widget_state, widget_handle, TreeCustomRender, WidgetHandle};
+use super::{erased_widget_state, widget_handle, WidgetHandle};
 
 /// Stable identifier assigned to a retained node.
 pub type NodeId = crate::Id;
@@ -284,12 +282,12 @@ impl<'a> NodeBuilder<'a> {
     }
 
     /// Adds a custom-render widget node.
-    pub fn custom_render<W, F>(self, state: impl Into<WidgetHandle<W>>, f: F) -> NodeId
+    pub fn custom_render<B, W>(self, state: impl Into<WidgetHandle<W>>, renderer: CustomRenderHandle<B>) -> NodeId
     where
+        B: RendererBackend,
         W: Widget + 'static,
-        F: FnMut(Dimensioni, &CustomRenderArgs) + 'static,
     {
-        self.builder.insert_custom_render(self.options, state, f)
+        self.builder.insert_custom_render(self.options, state, renderer)
     }
 
     /// Adds a scroll area node.
@@ -407,28 +405,27 @@ impl UiNodeBuilder {
     }
 
     /// Adds a custom-render widget node.
-    pub fn custom_render<W, F>(&mut self, state: impl Into<WidgetHandle<W>>, f: F) -> NodeId
+    pub fn custom_render<B, W>(&mut self, state: impl Into<WidgetHandle<W>>, renderer: CustomRenderHandle<B>) -> NodeId
     where
+        B: RendererBackend,
         W: Widget + 'static,
-        F: FnMut(Dimensioni, &CustomRenderArgs) + 'static,
     {
-        self.insert_custom_render(NodeOptions::new(), state, f)
+        self.insert_custom_render(NodeOptions::new(), state, renderer)
     }
 
     /// Adds a custom-render widget node with optional identity and placement metadata.
-    fn insert_custom_render<W, F>(&mut self, options: NodeOptions, state: impl Into<WidgetHandle<W>>, f: F) -> NodeId
+    fn insert_custom_render<B, W>(&mut self, options: NodeOptions, state: impl Into<WidgetHandle<W>>, renderer: CustomRenderHandle<B>) -> NodeId
     where
+        B: RendererBackend,
         W: Widget + 'static,
-        F: FnMut(Dimensioni, &CustomRenderArgs) + 'static,
     {
         let state = state.into();
-        let render: TreeCustomRender = Rc::new(RefCell::new(Box::new(f)));
         self.push_leaf(
             options,
             TAG_CUSTOM_RENDER,
             UiNodeData::Widget(Box::new(WidgetNode {
                 widget: erased_widget_state(state),
-                custom_render: Some(render),
+                custom_render: Some(renderer.key),
             })),
         )
     }

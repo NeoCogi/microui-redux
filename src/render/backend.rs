@@ -55,9 +55,14 @@
 use crate::atlas::AtlasHandle;
 use crate::style::{Color, TextureId};
 use rs_math3d::{Color4b, Dimensioni, Rect, Vec2f, color4b};
-use std::sync::{Arc, RwLock};
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    collections::HashMap,
+    error::Error,
+    fmt,
+    marker::PhantomData,
+    num::NonZeroU64,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
@@ -121,48 +126,123 @@ impl Vertex {
 /// Geometry forwarded to a custom backend rendering callback.
 #[derive(Copy, Clone, Debug)]
 pub struct CustomRenderArgs {
+    /// Dimensions of the active backend frame.
+    pub dimensions: Dimensioni,
     /// Rectangle describing the widget's content area.
     pub content_area: Rect<i32>,
     /// Final clipped region that is visible.
     pub view: Rect<i32>,
 }
 
-/// Backend extension callback invoked from a retained custom-render node.
-///
-/// This API is intentionally explicit about being renderer-extension work rather than portable UI
-/// geometry. Interaction is handled during widget update and is deliberately absent from this
-/// boundary. Implementations usually capture a concrete backend handle and enqueue backend-owned
-/// draw work using the clipped [`CustomRenderArgs`] geometry.
-///
-/// The callback contains rendering geometry only:
-///
-/// ```
-/// use microui_redux::{
-///     prelude::{Dimensioni, Recti},
-///     render::{CustomRenderArgs, CustomRenderCommand},
-/// };
-///
-/// fn clipped_callback() -> Box<dyn CustomRenderCommand> {
-///     Box::new(|dimensions: Dimensioni, args: &CustomRenderArgs| {
-///         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
-///         let visible_area = args.view;
-///         let content_area = args.content_area;
-///         let _ = (viewport, visible_area, content_area);
-///     })
-/// }
-/// ```
-pub trait CustomRenderCommand {
-    /// Records backend-specific draw work for the current frame.
-    fn render(&mut self, dim: Dimensioni, args: &CustomRenderArgs);
+/// Error returned when constructing frame metadata.
+#[derive(Copy, Clone, Debug)]
+pub enum FrameInfoError {
+    /// A drawable frame must have positive width and height.
+    NonPositiveDimensions(Dimensioni),
 }
 
-impl<F> CustomRenderCommand for F
-where
-    F: FnMut(Dimensioni, &CustomRenderArgs),
-{
-    fn render(&mut self, dim: Dimensioni, args: &CustomRenderArgs) {
-        self(dim, args);
+impl PartialEq for FrameInfoError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::NonPositiveDimensions(left), Self::NonPositiveDimensions(right)) => (left.width, left.height) == (right.width, right.height),
+        }
     }
+}
+
+impl Eq for FrameInfoError {}
+
+impl fmt::Display for FrameInfoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NonPositiveDimensions(dimensions) => {
+                write!(f, "frame dimensions must be positive, got {}x{}", dimensions.width, dimensions.height)
+            }
+        }
+    }
+}
+
+impl Error for FrameInfoError {}
+
+/// Validated immutable metadata for one logical/backend frame.
+#[derive(Copy, Clone)]
+pub struct FrameInfo {
+    dimensions: Dimensioni,
+    clear: Color,
+}
+
+impl fmt::Debug for FrameInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FrameInfo")
+            .field("width", &self.dimensions.width)
+            .field("height", &self.dimensions.height)
+            .field("clear", &[self.clear.r, self.clear.g, self.clear.b, self.clear.a])
+            .finish()
+    }
+}
+
+impl FrameInfo {
+    /// Creates frame metadata after validating a positive drawable size.
+    pub fn try_new(dimensions: Dimensioni, clear: Color) -> Result<Self, FrameInfoError> {
+        if dimensions.width <= 0 || dimensions.height <= 0 {
+            return Err(FrameInfoError::NonPositiveDimensions(dimensions));
+        }
+        Ok(Self { dimensions, clear })
+    }
+
+    /// Returns the drawable frame dimensions.
+    pub fn dimensions(&self) -> Dimensioni {
+        self.dimensions
+    }
+
+    /// Returns the frame clear color.
+    pub fn clear(&self) -> Color {
+        self.clear
+    }
+}
+
+/// Backend-frame acquisition failure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FrameError {
+    message: String,
+}
+
+impl FrameError {
+    /// Creates a backend-frame error from a displayable message.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self { message: message.into() }
+    }
+}
+
+impl fmt::Display for FrameError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(f)
+    }
+}
+
+impl Error for FrameError {}
+
+impl From<String> for FrameError {
+    fn from(message: String) -> Self {
+        Self::new(message)
+    }
+}
+
+impl From<&str> for FrameError {
+    fn from(message: &str) -> Self {
+        Self::new(message)
+    }
+}
+
+/// Active-frame geometry submission interface implemented by every backend frame.
+pub trait RendererFrame {
+    /// Appends one atlas-backed quad.
+    fn push_quad(&mut self, vertices: [Vertex; 4]);
+    /// Appends one atlas-backed triangle.
+    fn push_triangle(&mut self, vertices: [Vertex; 3]);
+    /// Closes the current atlas batch at an ordering boundary.
+    fn flush(&mut self);
+    /// Draws one pre-clipped external-texture quad.
+    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
 
 /// Trait implemented by render backends used by the UI context.
@@ -172,34 +252,33 @@ where
 /// ```
 /// use microui_redux::{
 ///     prelude::{AtlasHandle, Color, TextureId},
-///     render::{RendererBackend, Vertex},
+///     render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex},
 /// };
 ///
 /// struct Backend {
 ///     atlas: AtlasHandle,
 /// }
 ///
+/// #[must_use]
+/// struct BackendFrame<'a>(&'a mut Backend);
+///
+/// impl RendererFrame for BackendFrame<'_> {
+///     fn push_quad(&mut self, _vertices: [Vertex; 4]) {}
+///     fn push_triangle(&mut self, _vertices: [Vertex; 3]) {}
+///     fn flush(&mut self) {}
+///     fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
+/// }
+///
 /// impl RendererBackend for Backend {
+///     type Frame<'a> = BackendFrame<'a>;
+///
 ///     fn get_atlas(&self) -> AtlasHandle {
 ///         self.atlas.clone()
 ///     }
 ///
-///     fn begin(&mut self, _width: i32, _height: i32, _clear: Color) {}
-///
-///     fn push_quad_vertices(
-///         &mut self,
-///         _v0: &Vertex,
-///         _v1: &Vertex,
-///         _v2: &Vertex,
-///         _v3: &Vertex,
-///     ) {
+///     fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
+///         Ok(BackendFrame(self))
 ///     }
-///
-///     fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
-///
-///     fn flush(&mut self) {}
-///
-///     fn end(&mut self) {}
 ///
 ///     fn create_texture(
 ///         &mut self,
@@ -212,23 +291,31 @@ where
 ///     }
 ///
 ///     fn destroy_texture(&mut self, _id: TextureId) {}
-///
-///     fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
 /// }
 /// ```
-pub trait RendererBackend {
+///
+/// An active frame owns the backend's exclusive mutable borrow, so safe Rust cannot acquire a
+/// second frame until the first is dropped:
+///
+/// ```compile_fail
+/// use microui_redux::render::{FrameInfo, RendererBackend};
+///
+/// fn acquire_twice<B: RendererBackend>(backend: &mut B, info: FrameInfo) {
+///     let first = backend.frame(info).unwrap();
+///     let second = backend.frame(info).unwrap();
+///     drop((first, second));
+/// }
+/// ```
+pub trait RendererBackend: 'static {
+    /// Exclusively borrowed active frame produced by this backend.
+    type Frame<'a>: RendererFrame
+    where
+        Self: 'a;
+
     /// Returns the atlas backing the UI renderer.
     fn get_atlas(&self) -> AtlasHandle;
-    /// Begins a new frame with the viewport size and clear color.
-    fn begin(&mut self, width: i32, height: i32, clr: Color);
-    /// Pushes four vertices representing a quad to the backend.
-    fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex);
-    /// Pushes one triangle into the backend's current UI batch.
-    fn push_triangle_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex);
-    /// Flushes any buffered geometry to the GPU.
-    fn flush(&mut self);
-    /// Ends the frame, finalizing any outstanding GPU work.
-    fn end(&mut self);
+    /// Acquires and initializes one backend frame.
+    fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError>;
     /// Creates a texture owned by the backend.
     ///
     /// The caller validates RGBA dimensions and byte length before calling this method. Backends
@@ -236,74 +323,130 @@ pub trait RendererBackend {
     fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String>;
     /// Destroys a previously created texture.
     fn destroy_texture(&mut self, id: TextureId);
-    /// Draws the provided textured quad.
-    ///
-    /// [`crate::render::Renderer`] clips the quad against the active UI clip rectangle and adjusts
-    /// texture coordinates before calling this method. Backends should therefore treat `vertices`
-    /// as final pre-clipped screen-space geometry and should not expect a separate clip rectangle
-    /// for this draw. Backends that batch atlas geometry must preserve command order by flushing or
-    /// closing the active atlas batch before drawing or queuing this external texture command.
-    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
 
-/// Thread-safe handle that shares ownership of a [`RendererBackend`].
-pub struct BackendHandle<B: RendererBackend> {
-    /// Shared lock protecting the backend implementation.
-    handle: Arc<RwLock<B>>,
-    /// Test-only count of exclusive backend scopes.
-    #[cfg(test)]
-    write_acquisitions: Arc<AtomicUsize>,
+/// Backend-specific callback invoked with the statically typed active frame.
+pub trait CustomRender<B: RendererBackend>: 'static {
+    /// Records backend-specific work at the current painter-order position.
+    fn render<'frame>(&mut self, frame: &mut B::Frame<'frame>, args: CustomRenderArgs);
 }
 
-// `derive(Clone)` does not infer the bound correctly here, but `Arc` already provides
-// the behavior we need.
-impl<B: RendererBackend> Clone for BackendHandle<B> {
+impl<B, F> CustomRender<B> for F
+where
+    B: RendererBackend,
+    F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,
+{
+    fn render<'frame>(&mut self, frame: &mut B::Frame<'frame>, args: CustomRenderArgs) {
+        self(frame, args);
+    }
+}
+
+/// Backend-neutral key retained by UI nodes and display-list operations.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct CustomRenderKey {
+    namespace: NonZeroU64,
+    slot: u64,
+}
+
+/// Typed public handle for a callback registered on a particular backend type.
+pub struct CustomRenderHandle<B: RendererBackend> {
+    pub(crate) key: CustomRenderKey,
+    _backend: PhantomData<fn(&mut B)>,
+}
+
+impl<B: RendererBackend> Copy for CustomRenderHandle<B> {}
+
+impl<B: RendererBackend> Clone for CustomRenderHandle<B> {
     fn clone(&self) -> Self {
-        Self {
-            handle: self.handle.clone(),
-            #[cfg(test)]
-            write_acquisitions: self.write_acquisitions.clone(),
+        *self
+    }
+}
+
+impl<B: RendererBackend> fmt::Debug for CustomRenderHandle<B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CustomRenderHandle").field("key", &self.key).finish()
+    }
+}
+
+/// Custom-render registry mutation failure.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum CustomRenderRegistryError {
+    /// The process-wide registry namespace counter was exhausted.
+    NamespaceExhausted,
+    /// This registry's monotonically increasing callback slot counter was exhausted.
+    SlotExhausted,
+    /// The supplied handle is foreign to this registry or has already been removed.
+    UnknownRenderer,
+}
+
+impl fmt::Display for CustomRenderRegistryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NamespaceExhausted => f.write_str("custom-render registry namespace exhausted"),
+            Self::SlotExhausted => f.write_str("custom-render registry slot counter exhausted"),
+            Self::UnknownRenderer => f.write_str("unknown custom renderer"),
         }
     }
 }
 
-impl<B: RendererBackend> BackendHandle<B> {
-    /// Wraps a backend inside an [`Arc<RwLock<...>>`] so it can be shared.
-    pub fn new(backend: B) -> Self {
+impl Error for CustomRenderRegistryError {}
+
+static NEXT_CUSTOM_RENDER_NAMESPACE: AtomicU64 = AtomicU64::new(1);
+
+/// Renderer-owned callbacks specialized for one concrete backend.
+pub(crate) struct CustomRenderRegistry<B: RendererBackend> {
+    namespace: Option<NonZeroU64>,
+    next_slot: u64,
+    callbacks: HashMap<CustomRenderKey, Box<dyn CustomRender<B>>>,
+}
+
+impl<B: RendererBackend> CustomRenderRegistry<B> {
+    pub(crate) fn new() -> Self {
         Self {
-            handle: Arc::new(RwLock::new(backend)),
-            #[cfg(test)]
-            write_acquisitions: Arc::new(AtomicUsize::new(0)),
+            namespace: None,
+            next_slot: 0,
+            callbacks: HashMap::new(),
         }
     }
 
-    /// Executes the provided closure with a shared reference to the backend.
-    pub fn scope<Res, F: FnOnce(&B) -> Res>(&self, f: F) -> Res {
-        match self.handle.read() {
-            Ok(guard) => f(&*guard),
-            Err(poisoned) => {
-                // Reads can continue safely from the poisoned value.
-                f(&*poisoned.into_inner())
+    pub(crate) fn register<F>(&mut self, callback: F) -> Result<CustomRenderHandle<B>, CustomRenderRegistryError>
+    where
+        F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,
+    {
+        let namespace = match self.namespace {
+            Some(namespace) => namespace,
+            None => {
+                let raw = NEXT_CUSTOM_RENDER_NAMESPACE
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| value.checked_add(1))
+                    .map_err(|_| CustomRenderRegistryError::NamespaceExhausted)?;
+                let namespace = NonZeroU64::new(raw).ok_or(CustomRenderRegistryError::NamespaceExhausted)?;
+                self.namespace = Some(namespace);
+                namespace
             }
-        }
+        };
+        let slot = self.next_slot.checked_add(1).ok_or(CustomRenderRegistryError::SlotExhausted)?;
+        self.next_slot = slot;
+        let key = CustomRenderKey { namespace, slot };
+        let previous = self.callbacks.insert(key, Box::new(callback));
+        debug_assert!(previous.is_none(), "fresh custom-render key was already occupied");
+        Ok(CustomRenderHandle { key, _backend: PhantomData })
     }
 
-    /// Executes the provided closure with a mutable reference to the backend.
-    pub fn scope_mut<Res, F: FnOnce(&mut B) -> Res>(&mut self, f: F) -> Res {
-        #[cfg(test)]
-        self.write_acquisitions.fetch_add(1, Ordering::Relaxed);
-        match self.handle.write() {
-            Ok(mut guard) => f(&mut *guard),
-            Err(poisoned) => {
-                // Preserve the current backend state instead of aborting on poison.
-                f(&mut *poisoned.into_inner())
-            }
+    pub(crate) fn remove(&mut self, handle: CustomRenderHandle<B>) -> Result<(), CustomRenderRegistryError> {
+        if Some(handle.key.namespace) != self.namespace || self.callbacks.remove(&handle.key).is_none() {
+            return Err(CustomRenderRegistryError::UnknownRenderer);
         }
+        Ok(())
     }
 
-    /// Returns the number of exclusive backend scopes entered by all clones.
-    #[cfg(test)]
-    pub(crate) fn debug_write_acquisition_count(&self) -> usize {
-        self.write_acquisitions.load(Ordering::Relaxed)
+    pub(crate) fn contains(&self, key: CustomRenderKey) -> bool {
+        Some(key.namespace) == self.namespace && self.callbacks.contains_key(&key)
+    }
+
+    pub(crate) fn get_mut(&mut self, key: CustomRenderKey) -> Option<&mut Box<dyn CustomRender<B>>> {
+        if Some(key.namespace) != self.namespace {
+            return None;
+        }
+        self.callbacks.get_mut(&key)
     }
 }

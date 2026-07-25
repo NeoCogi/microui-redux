@@ -1,6 +1,6 @@
 //! Button widget state and rendering.
 //!
-//! Buttons support text, atlas icons, external images, and dynamic atlas slots through one shared
+//! Buttons support text, atlas icons, external images, and prepared atlas slots through one shared
 //! layout path.
 
 use super::*;
@@ -29,14 +29,12 @@ pub enum ButtonContent {
         /// Optional image rendered on the button.
         image: Option<Image>,
     },
-    /// A text label and a slot refreshed via a paint callback.
+    /// A text label and a pre-rendered atlas slot.
     Slot {
         /// Text displayed on the button.
         label: String,
         /// Slot rendered on the button.
         slot: SlotId,
-        /// Callback used to fill the slot pixels.
-        paint: Rc<dyn Fn(usize, usize) -> Color4b>,
     },
 }
 
@@ -88,10 +86,10 @@ impl Button {
         }
     }
 
-    /// Creates a slot button that repaints via the provided callback.
-    pub fn with_slot(label: impl Into<String>, slot: SlotId, paint: Rc<dyn Fn(usize, usize) -> Color4b>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
+    /// Creates a button backed by a slot prepared before the frame begins.
+    pub fn with_slot(label: impl Into<String>, slot: SlotId, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
-            content: ButtonContent::Slot { label: label.into(), slot, paint },
+            content: ButtonContent::Slot { label: label.into(), slot },
             config: WidgetConfig::new(opt, ScrollBehavior::NONE),
             fill,
         }
@@ -177,8 +175,8 @@ impl Button {
                     ctx.push_image(image, visual, color);
                 }
             }
-            ButtonContent::Slot { label, slot, paint } => {
-                // Dynamic slots repaint the atlas slot immediately before drawing it.
+            ButtonContent::Slot { label, slot } => {
+                // Slot pixels are prepared before the logical frame begins.
                 let visual_size = Some(ctx.atlas().get_slot_size(*slot));
                 let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
@@ -186,7 +184,7 @@ impl Button {
                 }
                 if let Some(visual) = layout.visual {
                     let color = ctx.style().colors[ControlColor::Text as usize];
-                    ctx.draw_slot_with_function(*slot, visual, color, paint.clone());
+                    ctx.push_image(Image::Slot(*slot), visual, color);
                 }
             }
         }

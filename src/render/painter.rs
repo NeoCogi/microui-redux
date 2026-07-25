@@ -34,11 +34,10 @@ use super::{
     geometry::{bounds_for_line, bounds_for_points, translate_rect},
 };
 use crate::{
-    atlas::{FontId, IconId, SlotId},
+    atlas::{FontId, IconId},
     style::{Color, Image},
 };
 use rs_math3d::{Color4b, Recti, Vec2f, Vec2i, color4b};
-use std::rc::Rc;
 
 /// Records backend-neutral drawing operations in local coordinates.
 ///
@@ -198,17 +197,6 @@ impl<'a> Painter<'a> {
         }
     }
 
-    /// Records a dynamic atlas-slot redraw followed by its draw operation.
-    pub fn redraw_slot(&mut self, id: SlotId, rect: Recti, color: Color, payload: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        if !drawable_rect(rect, color) {
-            return;
-        }
-        let screen_rect = self.screen_rect(rect);
-        if rects_overlap(screen_rect, self.clip) {
-            self.list.push_redraw_slot(self.clip, id, screen_rect, color, payload);
-        }
-    }
-
     /// Tessellates and records one thick local line without clipping its generated triangles.
     pub fn stroke_line(&mut self, from: Vec2f, to: Vec2f, width: f32, color: Color) {
         if color.a == 0 || !clip_has_area(self.clip) {
@@ -326,7 +314,7 @@ fn intersect_rects(left: Recti, right: Recti) -> Option<Recti> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{color, color4b};
+    use crate::{color, SlotId};
     use super::super::display_list::DrawKind;
 
     fn rect_tuple(rect: Recti) -> (i32, i32, i32, i32) {
@@ -464,16 +452,10 @@ mod tests {
             painter.text(FontId::default(), "label", Vec2i::new(1, 2), color(255, 255, 255, 255));
             painter.icon(IconId::default(), Recti::new(2, 3, 4, 5), color(255, 255, 255, 255));
             painter.image(Image::Slot(SlotId::default()), Recti::new(100, 100, 10, 10), color(255, 255, 255, 255));
-            painter.redraw_slot(
-                SlotId::default(),
-                Recti::new(4, 5, 6, 7),
-                color(255, 255, 255, 255),
-                Rc::new(|_, _| color4b(255, 255, 255, 255)),
-            );
         }
 
         let frame = list.take();
-        assert_eq!(frame.ops.len(), 3);
+        assert_eq!(frame.ops.len(), 2);
         let DrawKind::Text { pos, .. } = &frame.ops[0].kind else {
             panic!("expected text");
         };
@@ -482,7 +464,6 @@ mod tests {
             panic!("expected icon");
         };
         assert_eq!(rect_tuple(*rect), (12, 23, 4, 5));
-        assert!(matches!(frame.ops[2].kind, DrawKind::RedrawSlot { .. }));
     }
 
     #[test]

@@ -533,7 +533,6 @@ impl FileDialogState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::BackendHandle;
     use crate::test_support::{test_atlas, NoopRenderer};
     use std::{
         fs,
@@ -572,8 +571,8 @@ mod tests {
         fs::write(&file_path, b"picked").unwrap();
 
         let atlas = test_atlas();
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut ctx = Context::new(backend, Dimensioni::new(800, 600));
+        let backend = NoopRenderer { atlas };
+        let mut ctx = Context::new_test(backend, Dimensioni::new(800, 600));
         let mut dialog = FileDialogState::new(&mut ctx);
         dialog.current_working_directory = dir.to_string_lossy().to_string();
         dialog.refresh_entries();
@@ -608,8 +607,8 @@ mod tests {
         fs::write(&file_path, b"picked").unwrap();
 
         let atlas = test_atlas();
-        let backend = BackendHandle::new(NoopRenderer { atlas });
-        let mut ctx = Context::new(backend, Dimensioni::new(800, 600));
+        let backend = NoopRenderer { atlas };
+        let mut ctx = Context::new_test(backend, Dimensioni::new(800, 600));
         let mut dialog = FileDialogState::new(&mut ctx);
         dialog.current_working_directory = dir.to_string_lossy().to_string();
         dialog.refresh_entries();

@@ -156,12 +156,19 @@ const UI_FRAG_SPV: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/
 const MESH_VERT_SPV: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/vulkan/mesh.vert.spv"));
 const MESH_FRAG_SPV: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/vulkan/mesh.frag.spv"));
 
+/// Native swapchain image and synchronization slot acquired before display-list execution.
+struct AcquiredVulkanFrame {
+    frame: usize,
+    image_index: u32,
+    suboptimal: bool,
+}
+
 pub struct VulkanRenderer {
     // `VulkanRenderer` is the microui `RendererBackend` implementation. It batches UI quads
     // into `vertices`, records custom render jobs into `commands`, and delegates all Vulkan object
     // lifetime and frame submission concerns to `VulkanContext`.
     atlas: AtlasHandle,
-    last_atlas_update_id: usize,
+    last_atlas_update_id: u64,
     textures: HashMap<TextureId, VulkanTexture>,
     context: VulkanContext,
     last_swapchain_generation: u64,
@@ -173,6 +180,17 @@ pub struct VulkanRenderer {
     height: u32,
     frame_index: u64,
     device_lost: bool,
+}
+
+trait VulkanFrameOps {
+    fn begin(&mut self, width: i32, height: i32, clr: Color) -> Result<()>;
+    fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex);
+    fn push_triangle_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex);
+    fn flush(&mut self);
+    fn finish(&mut self, acquired: AcquiredVulkanFrame);
+    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<()>;
+    fn destroy_texture(&mut self, id: TextureId);
+    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
 
 impl VulkanRenderer {
@@ -194,7 +212,7 @@ impl VulkanRenderer {
 
         Ok(Self {
             atlas,
-            last_atlas_update_id: usize::MAX,
+            last_atlas_update_id: u64::MAX,
             textures: HashMap::new(),
             context,
             last_swapchain_generation: swapchain_generation,
@@ -230,7 +248,7 @@ impl VulkanRenderer {
         let generation = self.context.swapchain_generation();
         if self.last_swapchain_generation != generation {
             self.last_swapchain_generation = generation;
-            self.last_atlas_update_id = usize::MAX;
+            self.last_atlas_update_id = u64::MAX;
             // Texture descriptor sets belong to the UI descriptor pool, so a swapchain/UI rebuild
             // invalidates them even though the logical texture map stays the same.
             if let Err(err) = self.rebind_texture_descriptors() {
@@ -287,13 +305,9 @@ impl VulkanRenderer {
     }
 }
 
-impl RendererBackend for VulkanRenderer {
-    fn get_atlas(&self) -> AtlasHandle {
-        self.atlas.clone()
-    }
-
+impl VulkanFrameOps for VulkanRenderer {
     /// Starts a new frame, syncing window size, swapchain generation, and atlas state.
-    fn begin(&mut self, width: i32, height: i32, clr: Color) {
+    fn begin(&mut self, width: i32, height: i32, clr: Color) -> Result<()> {
         // `begin` only resets CPU-side batching state and keeps the GPU-side context synchronized
         // with window size / atlas changes. Actual command buffer recording happens in `end`.
         self.frame_index = self.frame_index.wrapping_add(1);
@@ -304,14 +318,13 @@ impl RendererBackend for VulkanRenderer {
         self.commands.clear();
         self.current_batch_end = 0;
         if self.device_lost {
-            return;
+            return Err(String::from("Vulkan device is lost"));
         }
 
-        if let Err(err) = self.ensure_swapchain_extent(self.width, self.height) {
-            eprintln!("[microui-redux][vulkan] failed to resize swapchain: {err}");
-        }
+        self.ensure_swapchain_extent(self.width, self.height)?;
         self.handle_swapchain_updates();
         self.sync_atlas();
+        Ok(())
     }
 
     /// Appends a quad to the buffered UI vertex stream.
@@ -332,7 +345,7 @@ impl RendererBackend for VulkanRenderer {
     }
 
     /// Finalizes the frame by submitting the queued UI and custom commands to Vulkan.
-    fn end(&mut self) {
+    fn finish(&mut self, acquired: AcquiredVulkanFrame) {
         self.flush_ui_batch();
         if self.device_lost {
             self.commands.clear();
@@ -344,6 +357,7 @@ impl RendererBackend for VulkanRenderer {
         // `draw_frame` consumes the queued UI/custom jobs and may drain `commands`; taking the vec
         // avoids reallocating a fresh command buffer every frame.
         if let Err(err) = self.context.draw_frame(
+            acquired,
             Self::color_to_vk_clear(self.clear_color),
             &self.vertices,
             self.width,
@@ -398,7 +412,7 @@ impl RendererBackend for VulkanRenderer {
         let area_rect = rect_from_vertices(&vertices);
         let area = CustomRenderArea { rect: area_rect, clip: area_rect };
 
-        self.flush_ui_batch();
+        // Renderer owns the pre-texture ordering boundary.
         self.commands.push(FrameCommand::Custom(CustomRenderJob {
             area,
             kind: "texture",
@@ -412,6 +426,81 @@ impl RendererBackend for VulkanRenderer {
                 mesh_indices: 0,
             },
         }));
+    }
+}
+
+#[must_use = "the Vulkan frame is finalized when dropped"]
+pub struct VulkanFrame<'a> {
+    backend: &'a mut VulkanRenderer,
+    acquired: Option<AcquiredVulkanFrame>,
+}
+
+impl VulkanFrame<'_> {
+    pub fn enqueue_colored_vertices(&mut self, area: CustomRenderArea, vertices: Vec<Vertex>) {
+        self.backend.enqueue_colored_vertices(area, vertices);
+    }
+
+    pub fn enqueue_mesh_draw(&mut self, area: CustomRenderArea, submission: MeshSubmission) {
+        self.backend.enqueue_mesh_draw(area, submission);
+    }
+}
+
+impl RendererFrame for VulkanFrame<'_> {
+    fn push_quad(&mut self, vertices: [Vertex; 4]) {
+        VulkanFrameOps::push_quad_vertices(self.backend, &vertices[0], &vertices[1], &vertices[2], &vertices[3]);
+    }
+
+    fn push_triangle(&mut self, vertices: [Vertex; 3]) {
+        VulkanFrameOps::push_triangle_vertices(self.backend, &vertices[0], &vertices[1], &vertices[2]);
+    }
+
+    fn flush(&mut self) {
+        VulkanFrameOps::flush(self.backend);
+    }
+
+    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
+        VulkanFrameOps::draw_texture(self.backend, id, vertices);
+    }
+}
+
+impl Drop for VulkanFrame<'_> {
+    fn drop(&mut self) {
+        let Some(acquired) = self.acquired.take() else {
+            return;
+        };
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            VulkanFrameOps::finish(self.backend, acquired);
+        }))
+        .is_err()
+        {
+            eprintln!("[microui-redux][vulkan] frame finalization panicked");
+        }
+    }
+}
+
+impl RendererBackend for VulkanRenderer {
+    type Frame<'a> = VulkanFrame<'a>;
+
+    fn get_atlas(&self) -> AtlasHandle {
+        self.atlas.clone()
+    }
+
+    fn frame(&mut self, info: FrameInfo) -> std::result::Result<Self::Frame<'_>, FrameError> {
+        let dimensions = info.dimensions();
+        VulkanFrameOps::begin(self, dimensions.width, dimensions.height, info.clear()).map_err(FrameError::new)?;
+        let acquired = self
+            .context
+            .acquire_frame(dimensions.width as u32, dimensions.height as u32)
+            .map_err(FrameError::new)?;
+        Ok(VulkanFrame { backend: self, acquired: Some(acquired) })
+    }
+
+    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<()> {
+        VulkanFrameOps::create_texture(self, id, width, height, pixels)
+    }
+
+    fn destroy_texture(&mut self, id: TextureId) {
+        VulkanFrameOps::destroy_texture(self, id);
     }
 }
 
@@ -2281,9 +2370,38 @@ impl VulkanContext {
         }
     }
 
-    /// Executes one complete Vulkan frame from acquire through submit and present.
+    /// Acquires one swapchain image before higher-level display-list execution begins.
+    fn acquire_frame(&mut self, width: u32, height: u32) -> Result<AcquiredVulkanFrame> {
+        if self.device_lost {
+            return Err("device is lost; VulkanContext is disabled".into());
+        }
+        self.logical_width = width;
+        self.logical_height = height;
+        let frame = self.current_frame;
+        let fence = self.in_flight_fences[frame];
+        unsafe {
+            self.device
+                .wait_for_fences(&[fence], true, u64::MAX)
+                .map_err(|err| self.handle_vk_error("wait_for_fences", err))?;
+        }
+
+        match unsafe {
+            self.swapchain_loader
+                .acquire_next_image(self.swapchain, u64::MAX, self.image_available_semaphores[frame], vk::Fence::null())
+        } {
+            Ok((image_index, suboptimal)) => Ok(AcquiredVulkanFrame { frame, image_index, suboptimal }),
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Err(vk::Result::SUBOPTIMAL_KHR) => {
+                self.recreate_swapchain(width, height)?;
+                Err(String::from("Vulkan swapchain changed during frame acquisition"))
+            }
+            Err(err) => Err(self.handle_vk_error("acquire_next_image", err)),
+        }
+    }
+
+    /// Executes one complete Vulkan frame from an acquired image through submit and present.
     fn draw_frame(
         &mut self,
+        acquired: AcquiredVulkanFrame,
         clear_value: vk::ClearValue,
         vertices: &[Vertex],
         width: u32,
@@ -2294,17 +2412,11 @@ impl VulkanContext {
         if self.device_lost {
             return Err("device is lost; VulkanContext is disabled".into());
         }
-        // `draw_frame` is the per-frame orchestration entry point. By the time it runs, the higher
-        // level renderer has already collected UI vertices plus ordered custom jobs.
-        self.logical_width = width.max(1);
-        self.logical_height = height.max(1);
-        let frame = self.current_frame;
+        // `draw_frame` receives the image acquired by `RendererBackend::frame`; by the time it
+        // runs, the higher-level renderer has collected UI vertices plus ordered custom jobs.
+        let AcquiredVulkanFrame { frame, image_index, suboptimal } = acquired;
+        debug_assert_eq!(frame, self.current_frame);
         let fence = self.in_flight_fences[frame];
-        unsafe {
-            self.device
-                .wait_for_fences(&[fence], true, u64::MAX)
-                .map_err(|err| self.handle_vk_error("wait_for_fences", err))?;
-        }
 
         // Reset per-frame upload cursors only after the frame fence signaled. Retired GPU buffers
         // are likewise only reclaimed once this frame slot is no longer in flight.
@@ -2315,26 +2427,7 @@ impl VulkanContext {
         }
         self.preflight_frame_resources(vertices, commands.as_slice())?;
 
-        let mut swapchain_needs_recreate = false;
-
-        let (image_index, suboptimal) = match unsafe {
-            self.swapchain_loader
-                .acquire_next_image(self.swapchain, u64::MAX, self.image_available_semaphores[frame], vk::Fence::null())
-        } {
-            Ok((index, suboptimal)) => (index, suboptimal),
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                self.recreate_swapchain(width, height)?;
-                return Ok(());
-            }
-            Err(vk::Result::SUBOPTIMAL_KHR) => {
-                self.recreate_swapchain(width, height)?;
-                return Ok(());
-            }
-            Err(err) => return Err(self.handle_vk_error("acquire_next_image", err)),
-        };
-        if suboptimal {
-            swapchain_needs_recreate = true;
-        }
+        let mut swapchain_needs_recreate = suboptimal;
 
         unsafe {
             self.device.reset_fences(&[fence]).map_err(|err| self.handle_vk_error("reset_fences", err))?;

@@ -155,33 +155,33 @@ impl AtlasHandle {
         res
     }
 
-    /// Renders into a slot using the provided callback and bumps the update counter.
-    pub fn render_slot(&mut self, slot: SlotId, f: Rc<dyn Fn(usize, usize) -> Color4b>) {
-        let slot_rect = match self.0.borrow().slots.get(slot.0) {
-            Some(rect) => *rect,
-            None => return,
-        };
-        let width = self.width();
-        let height = self.height();
-        {
-            let pixels = &mut self.0.borrow_mut().pixels;
-            let max_y = (slot_rect.y + slot_rect.height).min(height as i32);
-            let max_x = (slot_rect.x + slot_rect.width).min(width as i32);
-            for y in slot_rect.y.max(0)..max_y {
-                for x in slot_rect.x.max(0)..max_x {
-                    let index = (x + y * (width as i32)) as usize;
-                    if index < pixels.len() {
-                        pixels[index] = f(x as _, y as _)
-                    }
+    /// Renders into a slot outside an active frame and reserves a new atlas version first.
+    pub fn render_slot(&self, slot: SlotId, f: Rc<dyn Fn(usize, usize) -> Color4b>) -> Result<(), AtlasMutationError> {
+        if self.0.active_frame_readers.get() != 0 {
+            return Err(AtlasMutationError::FrameActive);
+        }
+
+        let mut atlas = self.0.data.try_borrow_mut().map_err(|_| AtlasMutationError::BorrowConflict)?;
+        let slot_rect = atlas.slots.get(slot.0).copied().ok_or(AtlasMutationError::UnknownSlot(slot))?;
+        atlas.last_update_id = atlas.last_update_id.checked_add(1).ok_or(AtlasMutationError::VersionExhausted)?;
+
+        let width = atlas.width;
+        let height = atlas.height;
+        let max_y = (slot_rect.y + slot_rect.height).min(height as i32);
+        let max_x = (slot_rect.x + slot_rect.width).min(width as i32);
+        for y in slot_rect.y.max(0)..max_y {
+            for x in slot_rect.x.max(0)..max_x {
+                let index = (x + y * (width as i32)) as usize;
+                if index < atlas.pixels.len() {
+                    atlas.pixels[index] = f(x as _, y as _)
                 }
             }
         }
-        let last_update = self.0.borrow().last_update_id;
-        self.0.borrow_mut().last_update_id = last_update.wrapping_add(1);
+        Ok(())
     }
 
     /// Returns a monotonically increasing value that changes whenever slot pixels are modified.
-    pub fn get_last_update_id(&self) -> usize {
+    pub fn get_last_update_id(&self) -> u64 {
         self.0.borrow().last_update_id
     }
 }

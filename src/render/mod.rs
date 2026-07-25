@@ -8,7 +8,11 @@ mod painter;
 mod performance;
 mod renderer;
 
-pub use backend::{BackendHandle, CustomRenderArgs, CustomRenderCommand, RendererBackend, Vertex};
+pub use backend::{
+    CustomRender, CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame,
+    Vertex,
+};
+pub(crate) use backend::CustomRenderKey;
 pub use display_list::DisplayList;
 pub use painter::Painter;
-pub use renderer::Renderer;
+pub use renderer::{RenderError, Renderer};

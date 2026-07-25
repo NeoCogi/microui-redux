@@ -40,28 +40,32 @@ struct NoopRenderer {
     atlas: AtlasHandle,
 }
 
+#[must_use]
+struct NoopFrame;
+
+impl RendererFrame for NoopFrame {
+    fn push_quad(&mut self, _vertices: [Vertex; 4]) {}
+    fn push_triangle(&mut self, _vertices: [Vertex; 3]) {}
+    fn flush(&mut self) {}
+    fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
+}
+
 impl RendererBackend for NoopRenderer {
+    type Frame<'a> = NoopFrame;
+
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }
 
-    fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
-
-    fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {}
-
-    fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
-
-    fn flush(&mut self) {}
-
-    fn end(&mut self) {}
+    fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
+        Ok(NoopFrame)
+    }
 
     fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
         Ok(())
     }
 
     fn destroy_texture(&mut self, _id: TextureId) {}
-
-    fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
 }
 
 #[derive(Clone)]
@@ -152,16 +156,19 @@ fn make_atlas() -> AtlasHandle {
     AtlasHandle::from(&source)
 }
 
-fn main() {
-    let backend = BackendHandle::new(NoopRenderer { atlas: make_atlas() });
-    let mut ctx = Context::new(backend, Dimensioni::new(160, 100));
+fn main() -> Result<(), String> {
+    let backend = NoopRenderer { atlas: make_atlas() };
+    let mut ctx = Context::new(backend);
     let paint = widget_handle(RetainedPaint::new());
     let tree = UiNodeBuilder::build(move |tree| {
         tree.widget(&paint);
     });
     ctx.create_window("retained custom drawing", rect(12, 12, 132, 84), tree);
 
-    ctx.begin_render_frame(160, 100, color(18, 20, 22, 255));
-    ctx.update_ui();
-    ctx.end_render_frame();
+    let info = FrameInfo::try_new(Dimensioni::new(160, 100), color(18, 20, 22, 255)).map_err(|error| error.to_string())?;
+    ctx.frame(info)
+        .map_err(|error| error.to_string())?
+        .render_ui()
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }

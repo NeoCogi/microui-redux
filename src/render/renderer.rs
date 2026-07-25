@@ -34,16 +34,69 @@
 //! [`Executor`] intersects that clip with the current viewport immediately before submission.
 
 use super::{
-    backend::{BackendHandle, CustomRenderArgs, CustomRenderCommand, RendererBackend, Vertex},
+    backend::{
+        CustomRenderArgs, CustomRenderHandle, CustomRenderRegistry, CustomRenderRegistryError, FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex,
+    },
     display_list::{DisplayList, DrawKind, DrawOp},
     geometry::{textured_quad_vertices, ClipRect, SolidTriangle},
 };
 use crate::{
-    atlas::{AtlasHandle, FontId, IconId, SlotId, WHITE_ICON},
+    atlas::{AtlasFrameError, AtlasHandle, FontId, IconId, SlotId, WHITE_ICON},
     style::{Color, Image, TextureId},
 };
 use rs_math3d::{Dimensioni, Recti, Vec2f, Vec2i};
 use std::collections::HashMap;
+use std::{error::Error, fmt};
+
+/// Failure to validate, acquire, or execute one destructive display-list submission.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RenderError {
+    /// The backend could not acquire per-frame resources.
+    Frame(FrameError),
+    /// The renderer could not freeze its atlas for synchronous execution.
+    Atlas(AtlasFrameError),
+    /// An external texture operation references a texture not owned by this Renderer.
+    UnknownTexture {
+        /// Unknown texture identifier.
+        id: TextureId,
+        /// Painter-order operation index containing the reference.
+        operation_index: usize,
+    },
+    /// A custom operation references a removed or foreign registry entry.
+    UnknownCustomRenderer {
+        /// Painter-order operation index containing the reference.
+        operation_index: usize,
+    },
+}
+
+impl fmt::Display for RenderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Frame(error) => write!(f, "backend frame acquisition failed: {error}"),
+            Self::Atlas(error) => write!(f, "atlas frame freeze failed: {error}"),
+            Self::UnknownTexture { id, operation_index } => {
+                write!(f, "unknown texture {:?} in display-list operation {operation_index}", id)
+            }
+            Self::UnknownCustomRenderer { operation_index } => {
+                write!(f, "unknown custom renderer in display-list operation {operation_index}")
+            }
+        }
+    }
+}
+
+impl Error for RenderError {}
+
+impl From<FrameError> for RenderError {
+    fn from(error: FrameError) -> Self {
+        Self::Frame(error)
+    }
+}
+
+impl From<AtlasFrameError> for RenderError {
+    fn from(error: AtlasFrameError) -> Self {
+        Self::Atlas(error)
+    }
+}
 
 /// High-level UI renderer that executes display lists and owns frame resources.
 ///
@@ -54,32 +107,30 @@ use std::collections::HashMap;
 ///
 /// ```
 /// use microui_redux::{
-///     prelude::{color, Recti, Vec2i},
-///     render::{DisplayList, Painter, Renderer, RendererBackend},
+///     prelude::{color, Dimensioni, Recti, Vec2i},
+///     render::{DisplayList, FrameInfo, Painter, Renderer, RendererBackend},
 /// };
 ///
 /// fn render_frame<B: RendererBackend>(
 ///     renderer: &mut Renderer<B>,
 ///     display_list: &mut DisplayList,
-/// ) {
-///     let dimensions = renderer.dimensions();
+/// ) -> Result<(), Box<dyn std::error::Error>> {
+///     let dimensions = Dimensioni::new(640, 480);
 ///     let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
 ///
-///     renderer.begin(dimensions.width, dimensions.height, color(18, 20, 24, 255));
 ///     {
 ///         let mut painter =
 ///             Painter::new(display_list, Vec2i::default(), viewport, viewport);
 ///         painter.fill_rect(Recti::new(8, 8, 80, 24), color(70, 110, 180, 255));
 ///     }
-///     renderer.render(display_list);
-///     renderer.end();
+///     let info = FrameInfo::try_new(dimensions, color(18, 20, 24, 255))?;
+///     renderer.render(info, display_list)?;
+///     Ok(())
 /// }
 /// ```
 pub struct Renderer<B: RendererBackend> {
-    /// Current viewport dimensions in pixels.
-    current_dim: Dimensioni,
-    /// Shared backend handle used for frame and operation execution.
-    backend: BackendHandle<B>,
+    /// Uniquely owned backend.
+    backend: B,
     /// Atlas cached once from the backend.
     atlas: AtlasHandle,
     /// Atlas texture dimensions used for UV normalization.
@@ -92,6 +143,8 @@ pub struct Renderer<B: RendererBackend> {
     next_texture_id: u32,
     /// Dimensions of backend-owned external textures.
     textures: HashMap<TextureId, TextureInfo>,
+    /// Backend-specialized persistent custom callbacks.
+    custom_renderers: CustomRenderRegistry<B>,
     /// Scratch glyph rectangles reused while expanding text operations.
     rect_batch: Vec<(Recti, Recti, Color)>,
     /// Scratch output reused by final rectangular triangle clipping.
@@ -99,6 +152,9 @@ pub struct Renderer<B: RendererBackend> {
     /// Number of display lists executed, used to assert frame-level ownership.
     #[cfg(test)]
     render_count: usize,
+    /// Drawable size used by low-level retained-runtime tests.
+    #[cfg(test)]
+    test_dimensions: Dimensioni,
 }
 
 #[derive(Clone, Copy)]
@@ -111,9 +167,9 @@ struct TextureInfo {
 }
 
 impl<B: RendererBackend> Renderer<B> {
-    /// Creates a renderer around the provided backend handle.
-    pub fn new(backend: BackendHandle<B>, dim: Dimensioni) -> Self {
-        let atlas = backend.scope(RendererBackend::get_atlas);
+    /// Creates a renderer with unique ownership of the provided backend.
+    pub fn new(backend: B) -> Self {
+        let atlas = backend.get_atlas();
         let atlas_dim = atlas.get_texture_dimension();
         let white_icon_rect = atlas.get_icon_rect(WHITE_ICON);
         let white_icon_min = Vec2f::new(white_icon_rect.x as f32, white_icon_rect.y as f32);
@@ -121,7 +177,6 @@ impl<B: RendererBackend> Renderer<B> {
         let atlas_extent = Vec2f::new(atlas_dim.width.max(1) as f32, atlas_dim.height.max(1) as f32);
         let white_uv = (white_icon_min + white_icon_extent * 0.5) / atlas_extent;
         Self {
-            current_dim: dim,
             backend,
             atlas,
             atlas_dim,
@@ -129,101 +184,85 @@ impl<B: RendererBackend> Renderer<B> {
             white_uv,
             next_texture_id: 1,
             textures: HashMap::new(),
+            custom_renderers: CustomRenderRegistry::new(),
             rect_batch: Vec::new(),
             clipped_triangles: Vec::new(),
             #[cfg(test)]
             render_count: 0,
+            #[cfg(test)]
+            test_dimensions: Dimensioni::new(1, 1),
         }
     }
 
-    /// Executes a display list once in painter order and leaves it empty for reuse.
-    ///
-    /// Consecutive normal operations share one backend lock. A custom operation is a barrier:
-    /// Renderer releases the lock, flushes before and after the callback, then starts a new normal
-    /// segment. The operation iterator is never restarted or searched for later barriers.
-    pub fn render(&mut self, list: &mut DisplayList) {
+    /// Creates a Renderer whose test-only submission helper uses `dimensions`.
+    #[cfg(test)]
+    pub(crate) fn new_test(backend: B, dimensions: Dimensioni) -> Self {
+        let mut renderer = Self::new(backend);
+        renderer.test_dimensions = dimensions;
+        renderer
+    }
+
+    /// Executes one complete low-level frame for retained-runtime tests.
+    #[cfg(test)]
+    pub(crate) fn render_test(&mut self, list: &mut DisplayList) {
+        let info = FrameInfo::try_new(self.test_dimensions, crate::color(0, 0, 0, 0)).expect("test Renderer dimensions must be positive");
+        self.render(info, list).expect("test backend frame should render");
+    }
+
+    /// Executes one destructive display-list submission and leaves the list empty for reuse.
+    pub fn render(&mut self, info: FrameInfo, list: &mut DisplayList) -> Result<(), RenderError> {
         #[cfg(test)]
         {
             self.render_count += 1;
         }
         let mut frame = list.take();
-        let viewport = self.viewport();
-        let current_dim = self.current_dim;
+        let result = self.render_recorded(info, &mut frame);
+        list.recycle(frame);
+        result
+    }
+
+    fn render_recorded(&mut self, info: FrameInfo, recorded: &mut super::display_list::RecordedFrame) -> Result<(), RenderError> {
+        self.validate_recorded(recorded)?;
+        let _atlas_guard = self.atlas.freeze_for_frame()?;
+        let viewport = Recti::new(0, 0, info.dimensions().width, info.dimensions().height);
         let backend = &mut self.backend;
-        let atlas = &self.atlas;
-        let atlas_dim = self.atlas_dim;
-        let white_icon_rect = self.white_icon_rect;
-        let white_uv = self.white_uv;
-        let textures = &self.textures;
-        let rect_batch = &mut self.rect_batch;
-        let clipped_triangles = &mut self.clipped_triangles;
+        let custom_renderers = &mut self.custom_renderers;
+        let mut backend_frame = backend.frame(info)?;
+        execute_display_list(
+            &mut backend_frame,
+            custom_renderers,
+            recorded,
+            &self.atlas,
+            self.atlas_dim,
+            self.white_icon_rect,
+            self.white_uv,
+            viewport,
+            &self.textures,
+            &mut self.rect_batch,
+            &mut self.clipped_triangles,
+        );
+        drop(backend_frame);
+        Ok(())
+    }
 
-        {
-            let solid_triangles = frame.solid_geometry.triangles();
-            let mut operations = frame.ops.drain(..).peekable();
-
-            while let Some(operation) = operations.peek() {
-                if matches!(&operation.kind, DrawKind::Custom { .. }) {
-                    let operation = operations.next().expect("peeked custom operation must exist");
-                    let DrawOp {
-                        clip,
-                        kind: DrawKind::Custom { args, command },
-                    } = operation
-                    else {
-                        unreachable!("custom barrier changed after inspection");
-                    };
-                    execute_custom(backend, current_dim, viewport, clip, args, command);
-                    continue;
+    fn validate_recorded(&self, recorded: &super::display_list::RecordedFrame) -> Result<(), RenderError> {
+        for (operation_index, operation) in recorded.ops.iter().enumerate() {
+            match &operation.kind {
+                DrawKind::Image { image: Image::Texture(id), .. } if !self.textures.contains_key(id) => {
+                    return Err(RenderError::UnknownTexture { id: *id, operation_index });
                 }
-
-                backend.scope_mut(|backend| {
-                    let mut executor = Executor {
-                        backend,
-                        atlas,
-                        atlas_dim,
-                        white_icon_rect,
-                        white_uv,
-                        viewport,
-                        textures,
-                        rect_batch,
-                        clipped_triangles,
-                        solid_triangles,
-                    };
-
-                    while operations.peek().is_some_and(|operation| !matches!(&operation.kind, DrawKind::Custom { .. })) {
-                        executor.execute(operations.next().expect("peeked normal operation must exist"));
-                    }
-                });
+                DrawKind::Custom { renderer, .. } if !self.custom_renderers.contains(*renderer) => {
+                    return Err(RenderError::UnknownCustomRenderer { operation_index });
+                }
+                _ => {}
             }
         }
-
-        list.recycle(frame);
+        Ok(())
     }
 
     /// Returns the atlas associated with the renderer.
     pub fn atlas(&self) -> AtlasHandle {
         self.atlas.clone()
-    }
-
-    /// Begins a new drawing pass and updates the viewport used by final clipping.
-    pub fn begin(&mut self, width: i32, height: i32, clr: Color) {
-        self.current_dim = Dimensioni::new(width, height);
-        self.backend.scope_mut(move |backend| backend.begin(width, height, clr));
-    }
-
-    /// Ends the current drawing pass.
-    pub fn end(&mut self) {
-        self.backend.scope_mut(RendererBackend::end);
-    }
-
-    /// Flushes any buffered geometry without ending the frame.
-    pub fn flush(&mut self) {
-        self.backend.scope_mut(RendererBackend::flush);
-    }
-
-    /// Returns the last viewport dimensions passed to [`Renderer::begin`].
-    pub fn dimensions(&self) -> Dimensioni {
-        self.current_dim
     }
 
     /// Returns how many display lists this Renderer has executed.
@@ -232,9 +271,17 @@ impl<B: RendererBackend> Renderer<B> {
         self.render_count
     }
 
-    /// Returns a clone of the underlying backend handle.
-    pub fn backend_handle(&self) -> BackendHandle<B> {
-        self.backend.clone()
+    /// Registers one persistent custom renderer specialized for this backend.
+    pub(crate) fn register_custom_renderer<F>(&mut self, callback: F) -> Result<CustomRenderHandle<B>, CustomRenderRegistryError>
+    where
+        F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,
+    {
+        self.custom_renderers.register(callback)
+    }
+
+    /// Removes a previously registered custom renderer.
+    pub(crate) fn unregister_custom_renderer(&mut self, handle: CustomRenderHandle<B>) -> Result<(), CustomRenderRegistryError> {
+        self.custom_renderers.remove(handle)
     }
 
     /// Attempts to upload raw RGBA pixels as a backend-owned texture.
@@ -262,7 +309,7 @@ impl<B: RendererBackend> Renderer<B> {
         crate::atlas::validate_rgba_buffer(width, height, pixels.len())?;
         let next_texture_id = self.next_texture_id.checked_add(1).ok_or_else(|| String::from("Texture id space exhausted"))?;
         let id = TextureId::new(self.next_texture_id, width, height);
-        self.backend.scope_mut(|backend| backend.create_texture(id, width, height, pixels))?;
+        self.backend.create_texture(id, width, height, pixels)?;
         self.next_texture_id = next_texture_id;
         self.textures.insert(id, TextureInfo { width, height });
         Ok(id)
@@ -280,20 +327,15 @@ impl<B: RendererBackend> Renderer<B> {
     /// Destroys a texture allocated via [`Renderer::load_texture_rgba`].
     pub fn free_texture(&mut self, id: TextureId) {
         if self.textures.remove(&id).is_some() {
-            self.backend.scope_mut(|backend| backend.destroy_texture(id));
+            self.backend.destroy_texture(id);
         }
-    }
-
-    /// Returns the positive current viewport rectangle.
-    fn viewport(&self) -> Recti {
-        Recti::new(0, 0, self.current_dim.width.max(0), self.current_dim.height.max(0))
     }
 }
 
-/// Private normal-operation executor used only while one backend segment is locked.
-struct Executor<'a, B: RendererBackend> {
-    /// Mutably borrowed backend for the current normal segment.
-    backend: &'a mut B,
+/// Private normal-operation executor used while one backend frame is active.
+struct Executor<'a, F: RendererFrame> {
+    /// Mutably borrowed active backend frame.
+    frame: &'a mut F,
     /// Cached atlas used for glyph, icon, and slot expansion.
     atlas: &'a AtlasHandle,
     /// Atlas dimensions used to normalize texture coordinates.
@@ -314,7 +356,7 @@ struct Executor<'a, B: RendererBackend> {
     solid_triangles: &'a [SolidTriangle],
 }
 
-impl<B: RendererBackend> Executor<'_, B> {
+impl<F: RendererFrame> Executor<'_, F> {
     /// Executes one non-custom operation after resolving its final clip.
     fn execute(&mut self, operation: DrawOp) {
         let Some(clip) = intersect_rects(operation.clip, self.viewport) else {
@@ -331,11 +373,6 @@ impl<B: RendererBackend> Executor<'_, B> {
                     return;
                 };
                 self.draw_solid_triangles(triangles, clip);
-            }
-            DrawKind::RedrawSlot { id, rect, color, payload } => {
-                let mut atlas = self.atlas.clone();
-                atlas.render_slot(id, payload);
-                self.draw_slot(id, rect, color, clip);
             }
             DrawKind::Custom { .. } => unreachable!("custom operations are execution barriers"),
         }
@@ -390,8 +427,7 @@ impl<B: RendererBackend> Executor<'_, B> {
         let Some((dst, src)) = clip_textured_rect(dst, src, clip) else {
             return;
         };
-        let [v0, v1, v2, v3] = textured_quad_vertices(dst, src, self.atlas_dim, color);
-        self.backend.push_quad_vertices(&v0, &v1, &v2, &v3);
+        self.frame.push_quad(textured_quad_vertices(dst, src, self.atlas_dim, color));
     }
 
     /// Clips and submits one backend-owned external texture.
@@ -403,7 +439,8 @@ impl<B: RendererBackend> Executor<'_, B> {
         let Some((dst, src)) = clip_textured_rect(dst, src, clip) else {
             return;
         };
-        self.backend
+        self.frame.flush();
+        self.frame
             .draw_texture(id, textured_quad_vertices(dst, src, Dimensioni::new(info.width, info.height), color));
     }
 
@@ -417,27 +454,58 @@ impl<B: RendererBackend> Executor<'_, B> {
             self.clipped_triangles.clear();
             clip.clip_triangle(vertices, self.clipped_triangles);
             for triangle in self.clipped_triangles.chunks_exact(3) {
-                self.backend.push_triangle_vertices(&triangle[0], &triangle[1], &triangle[2]);
+                self.frame.push_triangle([triangle[0], triangle[1], triangle[2]]);
             }
         }
     }
 }
 
-/// Executes one custom barrier without holding the backend lock during the callback.
-fn execute_custom<B: RendererBackend>(
-    backend: &mut BackendHandle<B>,
-    dimensions: Dimensioni,
+#[allow(clippy::too_many_arguments)]
+fn execute_display_list<'frame, B: RendererBackend>(
+    frame: &mut B::Frame<'frame>,
+    custom_renderers: &mut CustomRenderRegistry<B>,
+    recorded: &mut super::display_list::RecordedFrame,
+    atlas: &AtlasHandle,
+    atlas_dim: Dimensioni,
+    white_icon_rect: Recti,
+    white_uv: Vec2f,
     viewport: Recti,
-    operation_clip: Recti,
-    mut args: CustomRenderArgs,
-    mut command: Box<dyn CustomRenderCommand>,
+    textures: &HashMap<TextureId, TextureInfo>,
+    rect_batch: &mut Vec<(Recti, Recti, Color)>,
+    clipped_triangles: &mut Vec<Vertex>,
 ) {
-    args.view = intersect_rects(operation_clip, viewport)
-        .and_then(|clip| intersect_rects(clip, args.view))
-        .unwrap_or_else(|| Recti::new(args.content_area.x, args.content_area.y, 0, 0));
-    backend.scope_mut(RendererBackend::flush);
-    command.render(dimensions, &args);
-    backend.scope_mut(RendererBackend::flush);
+    let dimensions = Dimensioni::new(viewport.width, viewport.height);
+    let solid_triangles = recorded.solid_geometry.triangles();
+    for operation in recorded.ops.drain(..) {
+        let DrawOp { clip, kind } = operation;
+        match kind {
+            DrawKind::Custom { renderer, content_area } => {
+                let Some(view) = intersect_rects(clip, viewport).and_then(|clip| intersect_rects(clip, content_area)) else {
+                    continue;
+                };
+                let callback = custom_renderers
+                    .get_mut(renderer)
+                    .expect("custom-render keys were validated before backend-frame acquisition");
+                frame.flush();
+                callback.render(frame, CustomRenderArgs { dimensions, content_area, view });
+            }
+            kind => {
+                let mut executor = Executor {
+                    frame,
+                    atlas,
+                    atlas_dim,
+                    white_icon_rect,
+                    white_uv,
+                    viewport,
+                    textures,
+                    rect_batch,
+                    clipped_triangles,
+                    solid_triangles,
+                };
+                executor.execute(DrawOp { clip, kind });
+            }
+        }
+    }
 }
 
 /// Projects clipping of a destination rectangle back into its texture source rectangle.
@@ -487,11 +555,9 @@ impl<B: RendererBackend> Drop for Renderer<B> {
     /// Releases all backend-owned textures allocated through the renderer.
     fn drop(&mut self) {
         let ids: Vec<_> = self.textures.keys().copied().collect();
-        self.backend.scope_mut(|backend| {
-            for id in ids {
-                backend.destroy_texture(id);
-            }
-        });
+        for id in ids {
+            self.backend.destroy_texture(id);
+        }
         self.textures.clear();
     }
 }

@@ -74,6 +74,11 @@ path = "examples/demo-full.rs"
 required-features = ["example-backend"]
 
 [[example]]
+name = "backend-frame-cube"
+path = "examples/backend-frame-cube.rs"
+required-features = ["example-backend"]
+
+[[example]]
 name = "calculator"
 path = "examples/calculator.rs"
 required-features = ["example-backend"]

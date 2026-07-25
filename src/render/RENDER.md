@@ -11,8 +11,8 @@ implementations import the remaining types explicitly:
 
 ```rust
 use microui_redux::{
-    prelude::{BackendHandle, RendererBackend},
-    render::{DisplayList, Painter, Renderer, Vertex},
+    prelude::RendererBackend,
+    render::{DisplayList, FrameInfo, Painter, Renderer, RendererFrame, Vertex},
 };
 ```
 
@@ -22,9 +22,9 @@ use microui_redux::{
 Widget::paint
      |
      v
-  Painter  --->  DisplayList  --->  Renderer  --->  BackendHandle  --->  RendererBackend
-  records       owns ordered     expands and     synchronizes       batches and
-  primitives    draw operations  clips work      backend access     submits work
+  Painter  --->  DisplayList  --->  Renderer  --->  RendererBackend::Frame
+  records       owns ordered     expands and       batches, submits,
+  primitives    draw operations  clips work        and presents work
 ```
 
 Each layer has one responsibility:
@@ -32,16 +32,16 @@ Each layer has one responsibility:
 | Layer | Owns | Does not own |
 | --- | --- | --- |
 | `Painter` | Local-to-screen translation, operation recording, scoped clip intersection, solid-shape tessellation | Backend state, frame lifecycle, atlas lookup, input, style policy |
-| `DisplayList` | Ordered operations, operation clips, owned text/callback payloads, solid triangles, reusable recording storage | Execution, backend locks, textures |
-| `Renderer` | Frame dimensions, atlas expansion, final clipping, texture lifetime, display-list execution, reusable execution scratch | Widget input, widget layout, mutable drawing state |
-| `BackendHandle` | Shared synchronized access to one backend | Rendering policy or command interpretation |
-| `RendererBackend` | GPU/software resources, batching, texture binding, final submission | UI input, widget state, clipping decisions |
+| `DisplayList` | Ordered operations, operation clips, owned text, custom-render keys, solid triangles, reusable recording storage | Execution, backend access, textures |
+| `Renderer` | Unique backend ownership, atlas expansion, final clipping, texture lifetime, display-list execution, reusable execution scratch | Widget input, widget layout, mutable drawing state |
+| `RendererBackend` | Persistent GPU/software and texture resources | UI input, widget state, clipping decisions |
+| `RendererBackend::Frame` | One acquired frame, batching, texture binding, final submission/presentation | Persistent application ownership |
 
 The source layout follows those boundaries:
 
 ```text
 src/render/
-├── backend.rs       public backend contract, handle, vertices, custom callbacks
+├── backend.rs       public backend/frame contracts, vertices, typed custom callbacks
 ├── display_list.rs  owned operations and recording storage
 ├── geometry.rs      internal tessellation and final clipping geometry
 ├── painter.rs       public widget-local recorder
@@ -56,20 +56,22 @@ public API.
 
 ## Frame execution
 
+Applications deliver input and mutate frame resources before opening a frame.
 The normal `Context` path is:
 
 ```text
-Context::begin_render_frame
-    -> Renderer::begin
+Context::frame(validated FrameInfo)
+    -> freezes atlas mutation
+    -> returns an exclusively borrowed ContextFrame
 
-Context::update_ui
+ContextFrame::render_ui(self)
     -> measure widgets
     -> route input and update widget state
     -> Widget::paint records one ordered DisplayList
-
-Context::end_render_frame
-    -> Renderer::render drains the DisplayList once
-    -> Renderer::end
+    -> preflight resource keys
+    -> RendererBackend::frame acquires native frame resources
+    -> Renderer executes and drains the DisplayList once
+    -> backend frame Drop flushes, submits, and presents
 ```
 
 Input belongs to widget update and never enters the rendering subsystem. By the
@@ -79,22 +81,17 @@ A low-level integration can own the list and renderer directly:
 
 ```rust
 use microui_redux::{
-    prelude::{color, Recti, Vec2i},
-    render::{DisplayList, Painter, Renderer, RendererBackend},
+    prelude::{color, Dimensioni, Recti, Vec2i},
+    render::{DisplayList, FrameInfo, Painter, RenderError, Renderer, RendererBackend},
 };
 
 fn render_frame<B: RendererBackend>(
     renderer: &mut Renderer<B>,
     display_list: &mut DisplayList,
-) {
-    let dimensions = renderer.dimensions();
+) -> Result<(), RenderError> {
+    let dimensions = Dimensioni::new(640, 480);
     let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
 
-    renderer.begin(
-        dimensions.width,
-        dimensions.height,
-        color(18, 20, 24, 255),
-    );
     {
         let mut painter =
             Painter::new(display_list, Vec2i::default(), viewport, viewport);
@@ -103,16 +100,19 @@ fn render_frame<B: RendererBackend>(
             color(70, 110, 180, 255),
         );
     }
-    renderer.render(display_list);
-    renderer.end();
+    let info = FrameInfo::try_new(
+        dimensions,
+        color(18, 20, 24, 255),
+    ).expect("fixed dimensions are positive");
+    renderer.render(info, display_list)
 }
 ```
 
 `Renderer::render` consumes every operation in painter order and leaves the
-list empty for reuse. Ordinary adjacent operations execute while one backend
-lock is held. A custom-render operation is a barrier: normal work is flushed,
-the lock is released for the callback, the callback runs, and normal execution
-then resumes.
+list empty for reuse, including validation or frame-acquisition failures.
+Ordinary adjacent operations execute through one exclusively borrowed backend
+frame. External textures and custom-render operations are ordering barriers:
+normal atlas work is flushed immediately before each barrier.
 
 ## Painting custom widgets
 
@@ -186,7 +186,6 @@ The main primitives are:
 | `text` | UTF-8 text run expanded through the atlas during execution |
 | `icon` | Atlas icon |
 | `image` | Atlas slot or external texture |
-| `redraw_slot` | Dynamic atlas-slot update followed by its draw |
 | `stroke_line` | Tessellated solid line |
 | `fill_polygon` | Tessellated solid polygon |
 | `with_clip` | Child painter with an intersected local clip |
@@ -251,8 +250,8 @@ screen-space vertices.
 ## Display-list ownership and reuse
 
 `DisplayList` owns all data required after recording, including strings,
-custom-render callbacks, and solid geometry. No operation borrows widget or
-container memory.
+typed custom-render registry keys, and solid geometry. No operation borrows
+widget or container memory.
 
 The list is designed to be reused:
 
@@ -325,22 +324,26 @@ Dropping `Renderer` destroys every external texture it still owns.
 
 ## Custom-render callbacks
 
-Portable UI drawing belongs in `Painter`. A `CustomRenderCommand` is the
+Portable UI drawing belongs in `Painter`. A registered typed callback is the
 escape hatch for backend-specific work such as a 3D viewport.
 
 ```rust
 use microui_redux::{
-    prelude::{Dimensioni, Recti},
-    render::{CustomRenderArgs, CustomRenderCommand},
+    prelude::{Context, CustomRenderArgs, CustomRenderHandle},
+    render::{CustomRenderRegistryError, RendererBackend},
 };
 
-fn custom_command() -> Box<dyn CustomRenderCommand> {
-    Box::new(|dimensions: Dimensioni, args: &CustomRenderArgs| {
-        let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
-        let content_area = args.content_area;
-        let visible_area = args.view;
-        let _ = (viewport, content_area, visible_area);
-    })
+fn register_custom<B: RendererBackend>(
+    context: &mut Context<B>,
+) -> Result<CustomRenderHandle<B>, CustomRenderRegistryError> {
+    context.register_custom_renderer(
+        |_frame: &mut B::Frame<'_>, args: CustomRenderArgs| {
+            let dimensions = args.dimensions;
+            let content_area = args.content_area;
+            let visible_area = args.view;
+            let _ = (dimensions, content_area, visible_area);
+        },
+    )
 }
 ```
 
@@ -348,11 +351,12 @@ The callback receives:
 
 - `content_area`: the custom node's full content rectangle;
 - `view`: the final visible rectangle after retained clipping;
-- frame dimensions through the callback's first argument.
+- `dimensions`: the validated active-frame dimensions.
 
 It deliberately receives no input. Interaction remains in widget update.
-Applications that need backend access can capture a cloned `BackendHandle` in
-the callback.
+The first callback argument is `&mut B::Frame<'_>`, so backend-specific methods
+can be called without raw backend exposure or a second frame acquisition.
+Retained custom nodes store the returned `CustomRenderHandle<B>`.
 
 ## Implementing a backend
 
@@ -360,41 +364,34 @@ A backend implements `RendererBackend` and consumes `render::Vertex`:
 
 ```rust
 use microui_redux::{
-    prelude::{AtlasHandle, Color, TextureId},
-    render::{RendererBackend, Vertex},
+    prelude::{AtlasHandle, TextureId},
+    render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex},
 };
 
 struct Backend {
     atlas: AtlasHandle,
 }
 
+#[must_use = "dropping the frame finalizes it"]
+struct BackendFrame<'a>(&'a mut Backend);
+
+impl RendererFrame for BackendFrame<'_> {
+    fn push_quad(&mut self, _vertices: [Vertex; 4]) {}
+    fn push_triangle(&mut self, _vertices: [Vertex; 3]) {}
+    fn flush(&mut self) {}
+    fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
+}
+
 impl RendererBackend for Backend {
+    type Frame<'a> = BackendFrame<'a>;
+
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }
 
-    fn begin(&mut self, _width: i32, _height: i32, _clear: Color) {}
-
-    fn push_quad_vertices(
-        &mut self,
-        _v0: &Vertex,
-        _v1: &Vertex,
-        _v2: &Vertex,
-        _v3: &Vertex,
-    ) {
+    fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
+        Ok(BackendFrame(self))
     }
-
-    fn push_triangle_vertices(
-        &mut self,
-        _v0: &Vertex,
-        _v1: &Vertex,
-        _v2: &Vertex,
-    ) {
-    }
-
-    fn flush(&mut self) {}
-
-    fn end(&mut self) {}
 
     fn create_texture(
         &mut self,
@@ -407,32 +404,27 @@ impl RendererBackend for Backend {
     }
 
     fn destroy_texture(&mut self, _id: TextureId) {}
-
-    fn draw_texture(
-        &mut self,
-        _id: TextureId,
-        _vertices: [Vertex; 4],
-    ) {
-    }
 }
 ```
 
 Backend rules:
 
-- `push_quad_vertices` and `push_triangle_vertices` receive final atlas-backed
+- `frame` acquires all fallible native frame resources and returns a value
+  that exclusively borrows the backend.
+- `push_quad` and `push_triangle` receive final atlas-backed
   geometry and may batch it.
 - `flush` must submit outstanding batched work without ending the frame.
 - `draw_texture` receives a pre-clipped quad. Backends that batch atlas work
   must preserve painter order when switching textures.
+- concrete frame `Drop` performs best-effort, non-panicking final flush,
+  submission, and presentation.
 - `create_texture` must return an error without retaining the ID when creation
   fails.
 - `destroy_texture` releases the matching backend resource.
 - the backend does not calculate UI clipping or inspect input.
 
-`BackendHandle` wraps the implementation in shared synchronized ownership.
-`scope` provides read access and `scope_mut` provides exclusive mutable access.
-The renderer holds the lock across runs of ordinary operations instead of
-locking once per primitive.
+`Renderer` uniquely owns the backend. Safe Rust therefore prevents persistent
+resource mutation or another frame acquisition while a backend frame exists.
 
 ## Performance validation
 
@@ -445,8 +437,8 @@ cargo test --release render_performance_baseline \
 ```
 
 It uses a counting global allocator and a counter-only backend. The reported
-lock count covers `Renderer::render`, excluding setup, texture upload, and
-explicit frame `begin`/`end` calls. Allocation counts include both Painter
+frame count covers `Renderer::render`, excluding setup and texture upload.
+Allocation counts include both Painter
 recording and Renderer execution. Timings include the allocation counter's
 atomic instrumentation and are intended as a reproducible regression baseline,
 not as GPU frame timings.
@@ -454,20 +446,20 @@ not as GPU frame timings.
 The following baseline was recorded on 2026-07-24 with Rust 1.97.1 in the
 crate's release profile on an Intel Core Ultra 7 155H:
 
-| Scenario | Operations | Solid triangles | Write locks | Allocations | Bytes | Submitted vertices | Time/frame |
+| Scenario | Operations | Solid triangles | Backend frames | Allocations | Bytes | Submitted vertices | Time/frame |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 4,096 rectangles | 4,096 | 0 | 1 | 0 | 0 | 16,384 | 332.2 µs |
 | 4,096 glyphs | 1 | 0 | 1 | 1 | 4,096 | 16,384 | 188.8 µs |
 | 2,048 rectangles + concave polygons | 4,096 | 6,144 | 1 | 0 | 0 | 26,624 | 1,751.5 µs |
 | 32 nested clips + 4,096 attempted rectangles | 3,844 | 0 | 1 | 0 | 0 | 15,376 | 262.7 µs |
 | 2,048 atlas/external texture pairs | 4,096 | 0 | 1 | 0 | 0 | 16,384 | 348.5 µs |
-| 4,096 rectangles + 8 custom barriers | 4,104 | 0 | 25 | 0 | 0 | 16,384 | 277.9 µs |
+| 4,096 rectangles + 8 custom barriers | 4,104 | 0 | 1 | 0 | 0 | 16,384 | 277.9 µs |
 
 The nested-clip scenario records 3,844 operations because Painter rejects the
 rectangles fully outside the final effective clip. Text intentionally allocates
 one owned `String` snapshot for its single display-list operation; allocation
 count does not scale with its 4,096 glyphs. The benchmark asserts the exact
-aggregate allocation and lock counts across 200 frames, so integer averaging
+aggregate allocation and backend-frame counts across 200 frames, so integer averaging
 cannot conceal an intermittent growth allocation.
 
 ### Historical comparison
@@ -479,8 +471,8 @@ structurally:
 
 | Property | Pre-migration implementation | Current implementation |
 | --- | --- | --- |
-| Normal backend locking | One renderer scope per normal replay segment | One backend scope per normal display-list segment |
-| Custom barriers | One normal scope per segment plus two flush scopes per barrier | Same `3 × barriers + 1` pattern when normal work surrounds every barrier |
+| Backend access | One renderer scope per normal replay segment | One exclusively borrowed frame for the complete submission |
+| Custom barriers | One normal scope per segment plus two flush scopes per barrier | Typed callback on the active frame after one executor-owned flush |
 | Replay clipping | Allocated a `Vec` clip stack for every normal replay segment | No replay clip stack; each operation owns its effective clip |
 | Concave polygon recording | Allocated simplified-point and index vectors per polygon | Reuses `SolidGeometry` polygon and triangle storage; zero warmed allocations |
 | Glyph expansion | Reused Canvas-owned rectangle scratch | Reuses Renderer-owned rectangle scratch |
@@ -495,8 +487,8 @@ per-rectangle or per-triangle allocation. The representative results show no
 meaningful regression that requires a follow-up.
 
 The performance tests also enforce the architectural constraints: normal
-operations remain inside one lock scope, custom callbacks remain lock-free
-barriers, final clipping stays in Renderer, and no state commands or
+operations and typed custom callbacks remain inside one backend frame, final
+clipping stays in Renderer, and no state commands or
 recording-time software triangle clipping are introduced for benchmark gains.
 
 ## Working examples

@@ -1,7 +1,7 @@
 //! Shared fixtures, renderer recordings, and no-op helpers used by unit tests.
 
-use crate::render::{RendererBackend, BackendHandle, Vertex};
-use crate::{AtlasHandle, AtlasSource, CharEntry, Color, FontEntry, Recti, SourceFormat, TextureId, Vec2i};
+use crate::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
+use crate::{AtlasHandle, AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, TextureId, Vec2i};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -80,28 +80,35 @@ pub(crate) struct NoopRenderer {
     pub(crate) atlas: AtlasHandle,
 }
 
+#[must_use]
+pub(crate) struct NoopFrame;
+
+impl RendererFrame for NoopFrame {
+    fn push_quad(&mut self, _vertices: [Vertex; 4]) {}
+
+    fn push_triangle(&mut self, _vertices: [Vertex; 3]) {}
+
+    fn flush(&mut self) {}
+
+    fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
+}
+
 impl RendererBackend for NoopRenderer {
+    type Frame<'a> = NoopFrame;
+
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }
 
-    fn begin(&mut self, _width: i32, _height: i32, _clr: Color) {}
-
-    fn push_quad_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex, _v3: &Vertex) {}
-
-    fn push_triangle_vertices(&mut self, _v0: &Vertex, _v1: &Vertex, _v2: &Vertex) {}
-
-    fn flush(&mut self) {}
-
-    fn end(&mut self) {}
+    fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
+        Ok(NoopFrame)
+    }
 
     fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
         Ok(())
     }
 
     fn destroy_texture(&mut self, _id: TextureId) {}
-
-    fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
 }
 
 /// Copyable renderer-facing vertex snapshot used by characterization tests.
@@ -217,44 +224,73 @@ impl RecordingRenderer {
     }
 }
 
-/// Creates a recording backend handle and its independently readable event log.
-pub(crate) fn recording_backend(atlas: AtlasHandle) -> (BackendHandle<RecordingRenderer>, RenderLog) {
+/// Creates a recording backend and its independently readable event log.
+pub(crate) fn recording_backend(atlas: AtlasHandle) -> (RecordingRenderer, RenderLog) {
     let log = RenderLog::default();
     let backend = RecordingRenderer {
         atlas,
         log: log.clone(),
         fail_texture_upload: false,
     };
-    (BackendHandle::new(backend), log)
+    (backend, log)
+}
+
+#[must_use]
+pub(crate) struct RecordingFrame<'a> {
+    backend: &'a mut RecordingRenderer,
+}
+
+impl RecordingFrame<'_> {
+    /// Records a custom-render marker through the statically typed active frame.
+    pub(crate) fn record_marker(&mut self, marker: impl Into<String>) {
+        self.backend.record_marker(marker);
+    }
+}
+
+impl RendererFrame for RecordingFrame<'_> {
+    fn push_quad(&mut self, vertices: [Vertex; 4]) {
+        self.backend.log.push(RenderEvent::AtlasQuad(vertices.map(RecordedVertex::from)));
+    }
+
+    fn push_triangle(&mut self, vertices: [Vertex; 3]) {
+        self.backend.log.push(RenderEvent::Triangle(vertices.map(RecordedVertex::from)));
+    }
+
+    fn flush(&mut self) {
+        self.backend.log.push(RenderEvent::Flush);
+    }
+
+    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
+        self.backend.log.push(RenderEvent::ExternalTexture {
+            id,
+            vertices: vertices.map(RecordedVertex::from),
+        });
+    }
+}
+
+impl Drop for RecordingFrame<'_> {
+    fn drop(&mut self) {
+        self.backend.log.push(RenderEvent::Flush);
+        self.backend.log.push(RenderEvent::End);
+    }
 }
 
 impl RendererBackend for RecordingRenderer {
+    type Frame<'a> = RecordingFrame<'a>;
+
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
     }
 
-    fn begin(&mut self, width: i32, height: i32, clr: Color) {
+    fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
+        let dimensions = info.dimensions();
+        let clr = info.clear();
         self.log.push(RenderEvent::Begin {
-            width,
-            height,
+            width: dimensions.width,
+            height: dimensions.height,
             clear: [clr.r, clr.g, clr.b, clr.a],
         });
-    }
-
-    fn push_quad_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex, v3: &Vertex) {
-        self.log.push(RenderEvent::AtlasQuad([(*v0).into(), (*v1).into(), (*v2).into(), (*v3).into()]));
-    }
-
-    fn push_triangle_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex) {
-        self.log.push(RenderEvent::Triangle([(*v0).into(), (*v1).into(), (*v2).into()]));
-    }
-
-    fn flush(&mut self) {
-        self.log.push(RenderEvent::Flush);
-    }
-
-    fn end(&mut self) {
-        self.log.push(RenderEvent::End);
+        Ok(RecordingFrame { backend: self })
     }
 
     fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String> {
@@ -273,12 +309,5 @@ impl RendererBackend for RecordingRenderer {
 
     fn destroy_texture(&mut self, id: TextureId) {
         self.log.push(RenderEvent::DestroyTexture(id));
-    }
-
-    fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
-        self.log.push(RenderEvent::ExternalTexture {
-            id,
-            vertices: vertices.map(RecordedVertex::from),
-        });
     }
 }

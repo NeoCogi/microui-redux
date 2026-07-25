@@ -35,7 +35,7 @@ use crate::*;
 use common::*;
 use microui_redux::{
     self as microui,
-    prelude::{AtlasHandle, Dimensioni, BackendHandle},
+    prelude::{AtlasHandle, Dimensioni, FrameInfo},
 };
 
 #[cfg(feature = "example-glow")]
@@ -95,14 +95,14 @@ impl<S> Application<S> {
         let video = sdl_ctx.video().map_err(|err| err.to_string())?;
         let (bundle, init_ctx) = init_backend(&video, atlas)?;
         #[cfg(feature = "example-glow")]
-        let BackendBundle { window, backend, backend_handle, size } = bundle;
+        let BackendBundle { window, backend, renderer } = bundle;
         #[cfg(any(
             all(not(feature = "example-glow"), feature = "example-vulkan"),
             all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"),
         ))]
-        let BackendBundle { window, backend_handle, size } = bundle;
+        let BackendBundle { window, renderer } = bundle;
 
-        let mut ctx = microui::Context::new(backend_handle, Dimensioni::new(size.0 as i32, size.1 as i32));
+        let mut ctx = microui::Context::new(renderer);
         Ok(Self {
             state: init_state(init_ctx, &mut ctx),
             ctx,
@@ -115,17 +115,13 @@ impl<S> Application<S> {
     }
 
     /// Runs the SDL event loop, forwarding input into microui and invoking the user frame callback.
-    pub fn event_loop<F: Fn(&mut MicroUI, &mut S)>(&mut self, f: F) {
+    pub fn event_loop<F: Fn(&mut MicroUI, &mut S, Dimensioni)>(&mut self, f: F) {
         #[cfg(feature = "example-glow")]
         self.window.gl_make_current(&self.backend.gl_ctx).unwrap();
 
         let mut event_pump = self.sdl_ctx.event_pump().unwrap();
         'running: loop {
             let (width, height) = self.window.size();
-
-            // Start the renderer draw pass before polling events; UI traversal runs after input
-            // translation through `Context::update_ui` in the user callback.
-            self.ctx.begin_render_frame(width as i32, height as i32, color(0x7F, 0x7F, 0x7F, 255));
 
             fn map_mouse_button(sdl_mb: sdl2::mouse::MouseButton) -> microui::MouseButton {
                 match sdl_mb {
@@ -203,10 +199,19 @@ impl<S> Application<S> {
                 }
             }
 
-            // User state builds retained trees, reads committed results, and updates app data.
-            f(&mut self.ctx, &mut self.state);
-            // End the renderer pass after the user callback has run UI traversal.
-            self.ctx.end_render_frame();
+            // User state mutates retained/application state after this frame's input is ready.
+            let dimensions = Dimensioni::new(width as i32, height as i32);
+            f(&mut self.ctx, &mut self.state, dimensions);
+            if let Ok(info) = FrameInfo::try_new(dimensions, color(0x7F, 0x7F, 0x7F, 255)) {
+                match self.ctx.frame(info) {
+                    Ok(frame) => {
+                        if let Err(error) = frame.render_ui() {
+                            eprintln!("[microui-redux][example] frame failed: {error}");
+                        }
+                    }
+                    Err(error) => eprintln!("[microui-redux][example] atlas frame failed: {error}"),
+                }
+            }
             #[cfg(feature = "example-glow")]
             self.window.gl_swap_window();
 
@@ -234,14 +239,13 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
 
     let (width, height) = window.size();
     let gl = Arc::new(gl);
-    let backend_handle = BackendHandle::new(glow_renderer::GLRenderer::new(gl.clone(), atlas, width, height));
+    let renderer = glow_renderer::GLRenderer::new(gl.clone(), atlas, width, height);
 
     Ok((
         BackendBundle {
             window,
             backend: BackendData { gl_ctx },
-            backend_handle,
-            size: (width, height),
+            renderer,
         },
         gl,
     ))
@@ -254,17 +258,10 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
     // created immediately from that window handle and then stored inside the microui `Context`.
     let window = video.window("Window", 1024, 768).resizable().vulkan().build().map_err(|err| err.to_string())?;
     let (width, height) = window.size();
-    let backend_handle = BackendHandle::new(vulkan_renderer::VulkanRenderer::new(&window, atlas, width, height)?);
+    let renderer = vulkan_renderer::VulkanRenderer::new(&window, atlas, width, height)?;
     let init_ctx = BackendInitContext;
 
-    Ok((
-        BackendBundle {
-            window,
-            backend_handle,
-            size: (width, height),
-        },
-        init_ctx,
-    ))
+    Ok((BackendBundle { window, renderer }, init_ctx))
 }
 
 #[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
@@ -272,25 +269,17 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
 fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBundle, BackendInitContext), String> {
     let window = video.window("Window", 1024, 768).resizable().build().map_err(|err| err.to_string())?;
     let (width, height) = window.size();
-    let backend_handle = BackendHandle::new(wgpu_renderer::WgpuRenderer::new(&window, atlas, width, height)?);
+    let renderer = wgpu_renderer::WgpuRenderer::new(&window, atlas, width, height)?;
     let init_ctx = BackendInitContext;
 
-    Ok((
-        BackendBundle {
-            window,
-            backend_handle,
-            size: (width, height),
-        },
-        init_ctx,
-    ))
+    Ok((BackendBundle { window, renderer }, init_ctx))
 }
 
 struct BackendBundle {
     window: Window,
     #[cfg(feature = "example-glow")]
     backend: BackendData,
-    backend_handle: BackendHandle<SelectedBackend>,
-    size: (u32, u32),
+    renderer: SelectedBackend,
 }
 
 #[cfg(feature = "example-glow")]

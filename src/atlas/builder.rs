@@ -301,6 +301,9 @@ impl Builder {
 
     /// Consumes the builder and returns an [`AtlasHandle`].
     pub fn to_atlas(self) -> AtlasHandle {
-        AtlasHandle(Rc::new(RefCell::new(self.atlas)))
+        AtlasHandle(Rc::new(AtlasShared {
+            active_frame_readers: Cell::new(0),
+            data: RefCell::new(self.atlas),
+        }))
     }
 }

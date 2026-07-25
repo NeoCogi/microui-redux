@@ -87,6 +87,8 @@ use std::{
     time::Instant,
 };
 
+type SelectedFrame<'a> = <SelectedBackend as RendererBackend>::Frame<'a>;
+
 #[repr(C)]
 pub struct TriVertex {
     pub pos: Vec2f,
@@ -819,7 +821,6 @@ fn static_label(text: impl Into<String>) -> WidgetHandle<ListItem> {
 }
 
 struct State {
-    backend: BackendHandle<SelectedBackend>,
     bg: [Real; 3],
     bg_sliders: [WidgetHandle<Slider>; 3],
     style_color_sliders: [WidgetHandle<Slider>; 60],
@@ -880,6 +881,9 @@ struct State {
     tree_buttons: [WidgetHandle<Button>; 6],
     popup_buttons: [WidgetHandle<Button>; 2],
     slot_buttons: [WidgetHandle<Button>; 4],
+    atlas: AtlasHandle,
+    random_slot: SlotId,
+    random_paint: Rc<dyn Fn(usize, usize) -> Color4b>,
     stack_direction_buttons: [WidgetHandle<Button>; 6],
     weight_buttons: [WidgetHandle<Button>; 9],
     submit_buf_id: NodeId,
@@ -894,9 +898,9 @@ struct State {
     checkboxes: [WidgetHandle<Checkbox>; 3],
     open_popup: bool,
     open_dialog: bool,
-    white_uv: Vec2f,
     triangle_data: Arc<RwLock<TriangleState>>,
-    suzanne_data: Arc<RwLock<SuzanneData>>,
+    triangle_renderer: CustomRenderHandle<SelectedBackend>,
+    suzanne_renderer: CustomRenderHandle<SelectedBackend>,
     triangle_widget: WidgetHandle<Custom>,
     painter_widget: WidgetHandle<PainterDemo>,
     falloff_widget: WidgetHandle<FalloffEditor>,
@@ -917,20 +921,20 @@ struct State {
 }
 
 impl State {
-    pub fn new(_backend: BackendInitContext, backend: BackendHandle<SelectedBackend>, slots: Vec<SlotId>, ctx: &mut Context<SelectedBackend>) -> Self {
+    pub fn new(_backend: BackendInitContext, slots: Vec<SlotId>, ctx: &mut Context<SelectedBackend>) -> Self {
         #[cfg(any(feature = "builder", feature = "png_source"))]
         let image_texture = load_external_image_texture(ctx);
         #[cfg(not(any(feature = "builder", feature = "png_source")))]
         let image_texture = None;
-        let white_uv = backend.scope(|r| {
-            let atlas = r.get_atlas();
+        let white_uv = {
+            let atlas = ctx.renderer().atlas();
             let rect = atlas.get_icon_rect(WHITE_ICON);
             let dim = atlas.get_texture_dimension();
             let rect_min = Vec2f::new(rect.x as f32, rect.y as f32);
             let rect_extent = Vec2f::new(rect.width as f32, rect.height as f32);
             let texture_extent = Vec2f::new(dim.width as f32, dim.height as f32);
             (rect_min + rect_extent * 0.5) / texture_extent
-        });
+        };
 
         let triangle_data = Arc::new(RwLock::new(TriangleState { angle: 0.0 }));
         let suzanne_path = demo_asset_path("assets/suzanne.obj");
@@ -955,13 +959,45 @@ impl State {
         );
         let suzanne_data = Arc::new(RwLock::new(SuzanneData { view_3d, mesh: mesh_buffers }));
 
-        let rng = Rc::new(RefCell::new(rng()));
-        let green_paint: Rc<dyn Fn(usize, usize) -> Color4b> = Rc::new(|_x, _y| color4b(0x00, 0xFF, 0x00, 0xFF));
+        let triangle_renderer = {
+            let triangle_data = triangle_data.clone();
+            ctx.register_custom_renderer(move |frame: &mut SelectedFrame<'_>, args: CustomRenderArgs| {
+                if args.content_area.width <= 0 || args.content_area.height <= 0 {
+                    return;
+                }
+                if let Ok(triangle) = triangle_data.read() {
+                    let area = area_from_args(&args);
+                    frame.enqueue_colored_vertices(area, build_triangle_vertices(area.rect, white_uv, triangle.angle));
+                }
+            })
+            .expect("register triangle renderer")
+        };
+        let suzanne_renderer = {
+            let suzanne_data = suzanne_data.clone();
+            ctx.register_custom_renderer(move |frame: &mut SelectedFrame<'_>, args: CustomRenderArgs| {
+                if args.content_area.width <= 0 || args.content_area.height <= 0 {
+                    return;
+                }
+                if let Ok(suzanne) = suzanne_data.read() {
+                    let area = area_from_args(&args);
+                    frame.enqueue_mesh_draw(
+                        area,
+                        MeshSubmission {
+                            mesh: suzanne.mesh.clone(),
+                            pvm: suzanne.view_3d.pvm(),
+                            view_model: suzanne.view_3d.view_matrix(),
+                        },
+                    );
+                }
+            })
+            .expect("register Suzanne renderer")
+        };
+        let random_slot = slots[3];
         let random_paint: Rc<dyn Fn(usize, usize) -> Color4b> = {
-            let rng = rng.clone();
+            let rng = Rc::new(RefCell::new(rng()));
             Rc::new(move |_x, _y| {
-                let mut rm = rng.borrow_mut();
-                color4b(rm.random(), rm.random(), rm.random(), rm.random())
+                let mut rng = rng.borrow_mut();
+                color4b(rng.random(), rng.random(), rng.random(), rng.random())
             })
         };
         let slot_buttons = [
@@ -971,26 +1007,14 @@ impl State {
                 WidgetOption::NONE,
                 WidgetFillOption::ALL,
             )),
-            widget_handle(Button::with_slot(
-                "Slot 2 - Green",
-                slots[1],
-                green_paint,
-                WidgetOption::NONE,
-                WidgetFillOption::ALL,
-            )),
+            widget_handle(Button::with_slot("Slot 2 - Green", slots[1], WidgetOption::NONE, WidgetFillOption::ALL)),
             widget_handle(Button::with_image(
                 "Slot 3",
                 Some(Image::Slot(slots[2])),
                 WidgetOption::NONE,
                 WidgetFillOption::ALL,
             )),
-            widget_handle(Button::with_slot(
-                "Slot 2 - Random",
-                slots[1],
-                random_paint,
-                WidgetOption::NONE,
-                WidgetFillOption::ALL,
-            )),
+            widget_handle(Button::with_slot("Slot 4 - Random", random_slot, WidgetOption::NONE, WidgetFillOption::ALL)),
         ];
         let external_image_button = image_texture.map(|texture| {
             widget_handle(Button::with_scaled_image(
@@ -1044,7 +1068,6 @@ impl State {
         let stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), UiNodeSet::default());
         let weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), UiNodeSet::default());
         let mut state = Self {
-            backend,
             bg: [90.0, 95.0, 100.0],
             bg_sliders,
             style_color_sliders,
@@ -1148,6 +1171,9 @@ impl State {
                 widget_handle(Button::with_opt("World", WidgetOption::ALIGN_CENTER)),
             ],
             slot_buttons,
+            atlas: ctx.renderer().atlas(),
+            random_slot,
+            random_paint,
             stack_direction_buttons: [
                 widget_handle(Button::with_opt("Call 1", WidgetOption::ALIGN_CENTER)),
                 widget_handle(Button::with_opt("Call 2", WidgetOption::ALIGN_CENTER)),
@@ -1183,9 +1209,9 @@ impl State {
             ],
             open_popup: false,
             open_dialog: false,
-            white_uv,
             triangle_data,
-            suzanne_data: suzanne_data.clone(),
+            triangle_renderer,
+            suzanne_renderer,
             triangle_widget: widget_handle(Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS, ScrollBehavior::NONE)),
             painter_widget: widget_handle(PainterDemo::new()),
             falloff_widget: widget_handle(FalloffEditor::new()),
@@ -1353,55 +1379,18 @@ impl State {
         });
 
         let triangle_widget = self.triangle_widget.clone();
-        let triangle_data = self.triangle_data.clone();
-        let backend = self.backend.clone();
-        let white_uv = self.white_uv;
+        let triangle_renderer = self.triangle_renderer;
         self.triangle_tree = UiNodeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                let triangle_data = triangle_data.clone();
-                let backend = backend.clone();
-                tree.custom_render(&triangle_widget, move |_dim, cra| {
-                    if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
-                        return;
-                    }
-                    let area = area_from_args(cra);
-                    if let Ok(mut tri) = triangle_data.write() {
-                        tri.angle = (tri.angle + 0.02) % (std::f32::consts::PI * 2.0);
-                        let mut verts = build_triangle_vertices(area.rect, white_uv, tri.angle);
-                        let mut backend = backend.clone();
-                        backend.scope_mut(move |vk| {
-                            let verts_local = std::mem::take(&mut verts);
-                            vk.enqueue_colored_vertices(area, verts_local);
-                        });
-                    }
-                });
+                tree.custom_render(&triangle_widget, triangle_renderer);
             });
         });
 
         let suzanne_widget = self.suzanne_widget.clone();
-        let suzanne_data = self.suzanne_data.clone();
-        let backend = self.backend.clone();
+        let suzanne_renderer = self.suzanne_renderer;
         self.suzanne_tree = UiNodeBuilder::build(move |tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                let suzanne_data = suzanne_data.clone();
-                let backend = backend.clone();
-                tree.custom_render(&suzanne_widget, move |_dim, cra| {
-                    if cra.content_area.width <= 0 || cra.content_area.height <= 0 {
-                        return;
-                    }
-                    if let Ok(suzanne) = suzanne_data.read() {
-                        let area = area_from_args(cra);
-                        let submission = MeshSubmission {
-                            mesh: suzanne.mesh.clone(),
-                            pvm: suzanne.view_3d.pvm(),
-                            view_model: suzanne.view_3d.view_matrix(),
-                        };
-                        let mut backend = backend.clone();
-                        backend.scope_mut(|r| {
-                            r.enqueue_mesh_draw(area, submission.clone());
-                        });
-                    }
-                });
+                tree.custom_render(&suzanne_widget, suzanne_renderer);
             });
         });
 
@@ -1953,12 +1942,19 @@ impl State {
     }
 
     fn process_frame(&mut self, ctx: &mut Context<SelectedBackend>) {
+        if let Err(error) = self.atlas.render_slot(self.random_slot, self.random_paint.clone()) {
+            eprintln!("[microui-redux][demo-full] random slot update failed: {error}");
+        }
+
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         if dt > 0.0 {
             let inst_fps = 1.0 / dt;
             self.fps = if self.fps == 0.0 { inst_fps } else { self.fps * 0.9 + inst_fps * 0.1 };
+        }
+        if let Ok(mut triangle) = self.triangle_data.write() {
+            triangle.angle = (triangle.angle + 0.02) % (std::f32::consts::PI * 2.0);
         }
 
         self.style_window(ctx);
@@ -1971,17 +1967,16 @@ impl State {
         self.suzanne_window(ctx);
         self.stack_direction_window(ctx);
         self.weight_window(ctx);
-        ctx.update_ui();
     }
 }
 
 fn main() {
     let slots_orig = atlas_assets::default_slots();
-    let mut atlas = atlas_assets::load_atlas(&slots_orig);
+    let atlas = atlas_assets::load_atlas(&slots_orig);
     let slots = atlas.clone_slot_table();
-    atlas.render_slot(slots[0], Rc::new(|_x, _y| color4b(0xFF, 0, 0, 0xFF)));
-    atlas.render_slot(slots[1], Rc::new(|_x, _y| color4b(0, 0xFF, 0, 0xFF)));
-    atlas.render_slot(slots[2], Rc::new(|_x, _y| color4b(0, 0, 0xFF, 0xFF)));
+    atlas.render_slot(slots[0], Rc::new(|_x, _y| color4b(0xFF, 0, 0, 0xFF))).unwrap();
+    atlas.render_slot(slots[1], Rc::new(|_x, _y| color4b(0, 0xFF, 0, 0xFF))).unwrap();
+    atlas.render_slot(slots[2], Rc::new(|_x, _y| color4b(0, 0, 0xFF, 0xFF))).unwrap();
     #[cfg(feature = "builder")]
     {
         builder::Builder::save_png_image(atlas.clone(), "atlas.png").unwrap();
@@ -1989,12 +1984,11 @@ fn main() {
 
     let mut app = Application::new(atlas.clone(), move |backend: BackendInitContext, ctx| {
         let slots = atlas.clone_slot_table();
-        let backend_handle = ctx.backend_handle();
-        State::new(backend, backend_handle, slots, ctx)
+        State::new(backend, slots, ctx)
     })
     .unwrap();
 
-    app.event_loop(|ctx, state| {
+    app.event_loop(|ctx, state, _dimensions| {
         state.process_frame(ctx);
     });
 }

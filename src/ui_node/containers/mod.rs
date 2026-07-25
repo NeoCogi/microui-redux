@@ -1,13 +1,10 @@
 use crate::input::{ScrollBehavior, WidgetOption};
-use crate::render::{CustomRenderArgs, DisplayList, Painter};
+use crate::render::{CustomRenderKey, DisplayList, Painter};
 use crate::widget_ctx::localize_events;
-use crate::window_manager::{erased_widget_state, TreeCustomRender, WidgetStateHandleDyn};
+use crate::window_manager::{erased_widget_state, WidgetStateHandleDyn};
 use crate::{Dimensioni, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
 
-use super::{
-    measure_axis_available, resolve_allocated_size, resolve_size, NodeCustomRenderCommand, NodeLayout, TraversalState, UiNode, UiNodeId, UiNodeState,
-    UiRuntime, WidgetCtx,
-};
+use super::{measure_axis_available, resolve_allocated_size, resolve_size, NodeLayout, TraversalState, UiNode, UiNodeId, UiNodeState, UiRuntime, WidgetCtx};
 
 mod column;
 mod disclosure;
@@ -81,7 +78,7 @@ pub(crate) struct WidgetNode {
     /// Type-erased retained widget state.
     pub(crate) widget: Box<dyn WidgetStateHandleDyn>,
     /// Optional custom backend render callback for custom-render leaves.
-    pub(crate) custom_render: Option<TreeCustomRender>,
+    pub(crate) custom_render: Option<CustomRenderKey>,
 }
 
 impl Clone for WidgetNode {
@@ -199,10 +196,8 @@ impl Widget for WidgetNode {
         self.widget.paint(&mut widget_ctx);
         ctx.runtime.updated_focus = focus_seen;
 
-        if let Some(render) = self.custom_render.clone() {
-            let view = node_clip.intersect(&rect).unwrap_or_else(|| Recti::new(rect.x, rect.y, 0, 0));
-            let cra = CustomRenderArgs { content_area: rect, view };
-            ctx.display_list.push_custom(node_clip, cra, Box::new(NodeCustomRenderCommand { render }));
+        if let Some(renderer) = self.custom_render {
+            ctx.display_list.push_custom(node_clip, renderer, rect);
         }
         false
     }

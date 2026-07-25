@@ -60,7 +60,6 @@ use crate::{
     atlas::AtlasHandle,
     id::Id,
     input::{ResourceState, ScrollBehavior, WidgetOption},
-    render::CustomRenderCommand,
     style::Style,
     ui_node::UiInputEvent,
     widget::{FocusPolicy, Widget},
@@ -132,9 +131,6 @@ pub fn widget_handle<T>(value: T) -> WidgetHandle<T> {
 pub(crate) fn widget_handle_id<W>(handle: &WidgetHandle<W>) -> Id {
     handle.id()
 }
-
-/// Shared custom-render command object stored by retained custom nodes.
-pub(crate) type TreeCustomRender = Rc<RefCell<Box<dyn CustomRenderCommand + 'static>>>;
 
 /// Type-erased adapter for retained widget state handles.
 pub(crate) trait WidgetStateHandleDyn {
