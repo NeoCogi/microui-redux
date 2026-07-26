@@ -122,7 +122,7 @@ fn make_atlas() -> AtlasHandle {
             CharEntry {
                 offset: Vec2i::new(0, 0),
                 advance: Vec2i::new(4, 0),
-                rect: Recti::new(0, 4, 4, 4),
+                rect: Recti::new(4, 4, 4, 4),
             },
         ),
         (
@@ -159,6 +159,10 @@ fn viewport() -> Recti {
 
 fn frame_info(width: i32, height: i32) -> FrameInfo {
     FrameInfo::try_new(Dimensioni::new(width, height), color(0, 0, 0, 0)).unwrap()
+}
+
+fn list_capacities(list: &DisplayList) -> (usize, usize, usize) {
+    (list.debug_operation_capacity(), list.debug_triangle_capacity(), list.debug_polygon_capacity())
 }
 
 #[test]
@@ -294,6 +298,41 @@ fn semantic_atlas_operations_use_the_cached_atlas_and_one_executor() {
 }
 
 #[test]
+fn streamed_glyphs_preserve_order_fallback_and_newline_positioning() {
+    let (backend, log) = recording_backend(make_atlas());
+    let mut renderer = Renderer::new(backend);
+    let mut list = DisplayList::new();
+    painter(&mut list, viewport()).text(FontId::default(), "a?\na", Vec2i::new(10, 10), color(255, 255, 255, 255));
+
+    renderer.render(frame_info(32, 32), &mut list).unwrap();
+
+    let quads: Vec<_> = log
+        .snapshot()
+        .into_iter()
+        .filter_map(|event| match event {
+            RenderEvent::AtlasQuad(vertices) => Some(vertices),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(quads.len(), 3);
+
+    assert_position(quads[0][0], [10.0, 10.0]);
+    assert_position(quads[0][2], [14.0, 14.0]);
+    assert_uv(quads[0][0], [0.0, 0.5]);
+    assert_uv(quads[0][2], [0.5, 1.0]);
+
+    assert_position(quads[1][0], [14.0, 10.0]);
+    assert_position(quads[1][2], [18.0, 14.0]);
+    assert_uv(quads[1][0], [0.5, 0.5]);
+    assert_uv(quads[1][2], [1.0, 1.0]);
+
+    assert_position(quads[2][0], [10.0, 14.0]);
+    assert_position(quads[2][2], [14.0, 18.0]);
+    assert_uv(quads[2][0], [0.0, 0.5]);
+    assert_uv(quads[2][2], [0.5, 1.0]);
+}
+
+#[test]
 fn one_backend_frame_owns_normal_operations_and_custom_barriers() {
     let stats = Rc::new(CountingStats::default());
     let backend = CountingRenderer {
@@ -338,7 +377,7 @@ fn one_backend_frame_owns_normal_operations_and_custom_barriers() {
 }
 
 #[test]
-fn renderer_and_display_list_reuse_text_and_clipping_scratch_after_execution() {
+fn renderer_and_display_list_reuse_recording_and_clipping_storage_after_execution() {
     let backend = CountingRenderer {
         atlas: make_atlas(),
         stats: Rc::new(CountingStats::default()),
@@ -354,11 +393,11 @@ fn renderer_and_display_list_reuse_text_and_clipping_scratch_after_execution() {
 
     let operation_capacity = list.debug_operation_capacity();
     let triangle_capacity = list.debug_triangle_capacity();
-    let glyph_capacity = renderer.rect_batch.capacity();
+    let polygon_capacity = list.debug_polygon_capacity();
     let clipped_capacity = renderer.clipped_triangles.capacity();
     assert!(operation_capacity >= 2);
     assert!(triangle_capacity >= 1);
-    assert!(glyph_capacity >= long_text.len());
+    assert!(polygon_capacity >= 3);
     assert!(clipped_capacity >= 3);
 
     painter(&mut list, viewport()).text(FontId::default(), "a", Vec2i::new(0, 0), white);
@@ -367,7 +406,7 @@ fn renderer_and_display_list_reuse_text_and_clipping_scratch_after_execution() {
 
     assert_eq!(list.debug_operation_capacity(), operation_capacity);
     assert_eq!(list.debug_triangle_capacity(), triangle_capacity);
-    assert_eq!(renderer.rect_batch.capacity(), glyph_capacity);
+    assert_eq!(list.debug_polygon_capacity(), polygon_capacity);
     assert_eq!(renderer.clipped_triangles.capacity(), clipped_capacity);
 }
 
@@ -574,9 +613,12 @@ fn unknown_and_freed_textures_fail_preflight_and_drop_destroys_owned_textures_on
     let mut list = DisplayList::new();
     painter(&mut list, viewport()).image(first, Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
     painter(&mut list, viewport()).image(TextureId::new(999, 1, 1), Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+    painter(&mut list, viewport()).fill_polygon(&[Vec2f::new(0.0, 0.0), Vec2f::new(8.0, 0.0), Vec2f::new(0.0, 8.0)], color(255, 255, 255, 255));
+    let capacities = list_capacities(&list);
     let error = renderer.render(frame_info(32, 32), &mut list).unwrap_err();
     assert!(matches!(error, RenderError::UnknownTexture { id, operation_index: 0 } if id == first));
     assert!(list.is_empty());
+    assert_eq!(list_capacities(&list), capacities);
     assert!(!log.snapshot().iter().any(|event| matches!(event, RenderEvent::Begin { .. })));
     drop(renderer);
 
@@ -649,6 +691,8 @@ fn frame_acquisition_failure_discards_the_list_without_finalization() {
     });
     let mut list = DisplayList::new();
     painter(&mut list, viewport()).fill_rect(Recti::new(0, 0, 4, 4), color(255, 255, 255, 255));
+    painter(&mut list, viewport()).fill_polygon(&[Vec2f::new(0.0, 0.0), Vec2f::new(8.0, 0.0), Vec2f::new(0.0, 8.0)], color(255, 255, 255, 255));
+    let capacities = list_capacities(&list);
 
     assert_eq!(
         renderer.render(frame_info(32, 32), &mut list),
@@ -656,6 +700,7 @@ fn frame_acquisition_failure_discards_the_list_without_finalization() {
     );
     assert_eq!(attempts.get(), 1);
     assert!(list.is_empty());
+    assert_eq!(list_capacities(&list), capacities);
 }
 
 #[test]
@@ -665,6 +710,8 @@ fn removed_custom_renderer_fails_preflight_before_backend_acquisition() {
     let callback = renderer.register_custom_renderer(|_frame, _args| {}).unwrap();
     let mut list = DisplayList::new();
     list.push_custom(viewport(), callback.key, viewport());
+    painter(&mut list, viewport()).fill_polygon(&[Vec2f::new(0.0, 0.0), Vec2f::new(8.0, 0.0), Vec2f::new(0.0, 8.0)], color(255, 255, 255, 255));
+    let capacities = list_capacities(&list);
     renderer.unregister_custom_renderer(callback).unwrap();
 
     assert_eq!(
@@ -672,6 +719,7 @@ fn removed_custom_renderer_fails_preflight_before_backend_acquisition() {
         Err(RenderError::UnknownCustomRenderer { operation_index: 0 })
     );
     assert!(list.is_empty());
+    assert_eq!(list_capacities(&list), capacities);
     assert!(log.snapshot().is_empty());
 }
 
@@ -688,6 +736,5 @@ fn panicking_custom_callback_still_drops_the_backend_frame_without_double_panick
         let _ = renderer.render(frame_info(32, 32), &mut list);
     }));
     assert!(panic.is_err());
-    assert!(list.is_empty());
     assert!(log.snapshot().iter().any(|event| matches!(event, RenderEvent::End)));
 }

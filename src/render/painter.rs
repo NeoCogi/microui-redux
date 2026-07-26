@@ -329,11 +329,10 @@ mod tests {
             painter.fill_rect(Recti::new(1, 2, 10, 12), color(1, 2, 3, 255));
         }
 
-        let frame = list.take();
-        assert_eq!(frame.ops.len(), 1);
-        assert!(frame.solid_geometry.is_empty());
-        assert_eq!(rect_tuple(frame.ops[0].clip), (12, 22, 50, 40));
-        let DrawKind::FillRect { rect, color } = &frame.ops[0].kind else {
+        assert_eq!(list.ops.len(), 1);
+        assert!(list.solid_geometry.is_empty());
+        assert_eq!(rect_tuple(list.ops[0].clip), (12, 22, 50, 40));
+        let DrawKind::FillRect { rect, color } = &list.ops[0].kind else {
             panic!("expected a semantic rectangle");
         };
         assert_eq!(rect_tuple(*rect), (11, 22, 10, 12));
@@ -357,10 +356,9 @@ mod tests {
             painter.fill_rect(Recti::new(0, 0, 2, 2), color(0, 255, 0, 255));
         }
 
-        let frame = list.take();
-        assert_eq!(frame.ops.len(), 2);
-        assert_eq!(rect_tuple(frame.ops[0].clip), (20, 25, 15, 15));
-        assert_eq!(rect_tuple(frame.ops[1].clip), (10, 20, 50, 50));
+        assert_eq!(list.ops.len(), 2);
+        assert_eq!(rect_tuple(list.ops[0].clip), (20, 25, 15, 15));
+        assert_eq!(rect_tuple(list.ops[1].clip), (10, 20, 50, 50));
     }
 
     #[test]
@@ -387,11 +385,10 @@ mod tests {
             painter.stroke_line(Vec2f::new(-10.0, 2.0), Vec2f::new(20.0, 2.0), 2.0, color(255, 0, 0, 255));
         }
 
-        let frame = list.take();
-        assert_eq!(frame.ops.len(), 1);
-        assert_eq!(frame.solid_geometry.triangles().len(), 2);
-        assert_eq!(rect_tuple(frame.ops[0].clip), (0, 0, 5, 5));
-        let positions = frame
+        assert_eq!(list.ops.len(), 1);
+        assert_eq!(list.solid_geometry.triangles().len(), 2);
+        assert_eq!(rect_tuple(list.ops[0].clip), (0, 0, 5, 5));
+        let positions = list
             .solid_geometry
             .triangles()
             .iter()
@@ -414,16 +411,14 @@ mod tests {
             painter.stroke_line(Vec2f::new(0.0, 20.0), Vec2f::new(10.0, 20.0), 2.0, color(255, 255, 255, 255));
         }
 
-        let frame = list.take();
-        assert_eq!(frame.ops.len(), 1, "adjacent compatible geometry should merge");
-        assert_eq!(frame.solid_geometry.triangles().len(), 4);
-        let DrawKind::SolidTriangles { triangles } = &frame.ops[0].kind else {
+        assert_eq!(list.ops.len(), 1, "adjacent compatible geometry should merge");
+        assert_eq!(list.solid_geometry.triangles().len(), 4);
+        let DrawKind::SolidTriangles { triangles } = &list.ops[0].kind else {
             panic!("expected a solid-triangle range");
         };
         assert_eq!(triangles.as_range(), 0..4);
         assert!(
-            frame
-                .solid_geometry
+            list.solid_geometry
                 .triangles()
                 .iter()
                 .flat_map(|triangle| triangle.vertices())
@@ -438,10 +433,9 @@ mod tests {
             let mut painter = Painter::new(&mut list, Vec2i::new(0, 0), Recti::new(0, 0, 20, 20), Recti::new(0, 0, 20, 20));
             painter.stroke_rect(Recti::new(2, 2, 10, 10), 2, color(255, 255, 255, 255));
         }
-        let frame = list.take();
-        assert_eq!(frame.ops.len(), 4);
-        assert!(frame.ops.iter().all(|operation| matches!(operation.kind, DrawKind::FillRect { .. })));
-        assert!(frame.solid_geometry.is_empty());
+        assert_eq!(list.ops.len(), 4);
+        assert!(list.ops.iter().all(|operation| matches!(operation.kind, DrawKind::FillRect { .. })));
+        assert!(list.solid_geometry.is_empty());
     }
 
     #[test]
@@ -454,13 +448,12 @@ mod tests {
             painter.image(TextureId::new(1, 10, 10), Recti::new(100, 100, 10, 10), color(255, 255, 255, 255));
         }
 
-        let frame = list.take();
-        assert_eq!(frame.ops.len(), 2);
-        let DrawKind::Text { pos, .. } = &frame.ops[0].kind else {
+        assert_eq!(list.ops.len(), 2);
+        let DrawKind::Text { pos, .. } = &list.ops[0].kind else {
             panic!("expected text");
         };
         assert_eq!((pos.x, pos.y), (11, 22));
-        let DrawKind::Icon { rect, .. } = &frame.ops[1].kind else {
+        let DrawKind::Icon { rect, .. } = &list.ops[1].kind else {
             panic!("expected icon");
         };
         assert_eq!(rect_tuple(*rect), (12, 23, 4, 5));

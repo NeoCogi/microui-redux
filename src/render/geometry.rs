@@ -352,21 +352,6 @@ impl SolidGeometry {
         })
     }
 
-    /// Detaches retained triangles while keeping polygon scratch capacity available for reuse.
-    pub(crate) fn take_recorded(&mut self) -> Self {
-        self.polygon_boundary.clear();
-        Self {
-            triangles: std::mem::take(&mut self.triangles),
-            polygon_boundary: Vec::new(),
-        }
-    }
-
-    /// Reclaims a detached triangle allocation while preserving polygon tessellation scratch.
-    pub(crate) fn recycle_recorded(&mut self, mut recorded: Self) {
-        recorded.triangles.clear();
-        self.triangles = recorded.triangles;
-    }
-
     #[cfg(test)]
     /// Returns retained triangle allocation capacity.
     pub(crate) fn triangle_capacity(&self) -> usize {
@@ -818,11 +803,12 @@ mod tests {
                 .all(|vertex| vertex.position.x >= 5.0 && vertex.position.y >= 7.0)
         );
 
+        let triangle_capacity = geometry.triangle_capacity();
         let polygon_capacity = geometry.polygon_capacity();
-        let recorded = geometry.take_recorded();
+        geometry.clear();
         assert!(geometry.is_empty());
+        assert_eq!(geometry.triangle_capacity(), triangle_capacity);
         assert_eq!(geometry.polygon_capacity(), polygon_capacity);
-        assert_eq!(recorded.triangles().len(), 4);
     }
 
     #[test]

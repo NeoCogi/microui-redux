@@ -31,11 +31,13 @@
 //!
 //! [`Renderer`] is deliberately not a drawing context. It owns frame resources and executes an
 //! already-recorded [`DisplayList`]. Every operation carries its own clip, and the private
-//! [`Executor`] intersects that clip with the current viewport immediately before submission.
+//! [`DisplayListExecutor`] intersects that clip with the current viewport immediately before
+//! submission.
 
 use super::{
     backend::{
-        CustomRenderArgs, CustomRenderHandle, CustomRenderRegistry, CustomRenderRegistryError, FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex,
+        CustomRenderArgs, CustomRenderHandle, CustomRenderKey, CustomRenderRegistry, CustomRenderRegistryError, FrameError, FrameInfo, RendererBackend,
+        RendererFrame, Vertex,
     },
     display_list::{DisplayList, DrawKind, DrawOp},
     geometry::{ClipRect, SolidTriangle, textured_quad_from_uv},
@@ -136,8 +138,6 @@ pub struct Renderer<B: RendererBackend> {
     textures: HashMap<TextureId, TextureInfo>,
     /// Backend-specialized persistent custom callbacks.
     custom_renderers: CustomRenderRegistry<B>,
-    /// Scratch glyph rectangles reused while expanding text operations.
-    rect_batch: Vec<(Recti, Recti, Color)>,
     /// Scratch output reused by final rectangular triangle clipping.
     clipped_triangles: Vec<Vertex>,
     /// Number of display lists executed, used to assert frame-level ownership.
@@ -176,7 +176,6 @@ impl<B: RendererBackend> Renderer<B> {
             next_texture_id: 1,
             textures: HashMap::new(),
             custom_renderers: CustomRenderRegistry::new(),
-            rect_batch: Vec::new(),
             clipped_triangles: Vec::new(),
             #[cfg(test)]
             render_count: 0,
@@ -206,37 +205,37 @@ impl<B: RendererBackend> Renderer<B> {
         {
             self.render_count += 1;
         }
-        let mut frame = list.take();
-        let result = self.render_recorded(info, &mut frame);
-        list.recycle(frame);
+        let result = self.render_once(info, list);
+        list.clear();
         result
     }
 
-    fn render_recorded(&mut self, info: FrameInfo, recorded: &mut super::display_list::RecordedFrame) -> Result<(), RenderError> {
-        self.validate_recorded(recorded)?;
+    /// Validates, acquires, and executes one display list before the outer wrapper clears it.
+    fn render_once(&mut self, info: FrameInfo, list: &mut DisplayList) -> Result<(), RenderError> {
+        self.validate_display_list(list)?;
         let viewport = Recti::new(0, 0, info.dimensions().width, info.dimensions().height);
-        let backend = &mut self.backend;
-        let custom_renderers = &mut self.custom_renderers;
-        let mut backend_frame = backend.frame(info)?;
-        execute_display_list(
-            &mut backend_frame,
-            custom_renderers,
-            recorded,
-            &self.atlas,
-            self.atlas_dim,
-            self.white_icon_rect,
-            self.white_uv,
+        let frame = self.backend.frame(info)?;
+        let DisplayList { ops, solid_geometry } = list;
+        let solid_triangles = solid_geometry.triangles();
+        let executor = DisplayListExecutor {
+            frame,
+            custom_renderers: &mut self.custom_renderers,
+            atlas: &self.atlas,
+            atlas_dim: self.atlas_dim,
+            white_icon_rect: self.white_icon_rect,
+            white_uv: self.white_uv,
             viewport,
-            &self.textures,
-            &mut self.rect_batch,
-            &mut self.clipped_triangles,
-        );
-        drop(backend_frame);
+            textures: &self.textures,
+            clipped_triangles: &mut self.clipped_triangles,
+            solid_triangles,
+        };
+        executor.run(ops.drain(..));
         Ok(())
     }
 
-    fn validate_recorded(&self, recorded: &super::display_list::RecordedFrame) -> Result<(), RenderError> {
-        for (operation_index, operation) in recorded.ops.iter().enumerate() {
+    /// Preflights resource references before a backend frame is acquired.
+    fn validate_display_list(&self, list: &DisplayList) -> Result<(), RenderError> {
+        for (operation_index, operation) in list.ops.iter().enumerate() {
             match &operation.kind {
                 DrawKind::Image { id, .. } if !self.textures.contains_key(id) => {
                     return Err(RenderError::UnknownTexture { id: *id, operation_index });
@@ -322,12 +321,14 @@ impl<B: RendererBackend> Renderer<B> {
     }
 }
 
-/// Private normal-operation executor used while one backend frame is active.
-struct Executor<'a, F: RendererFrame> {
-    /// Mutably borrowed active backend frame.
-    frame: &'a mut F,
+/// Interprets one display list while owning its active backend frame.
+struct DisplayListExecutor<'frame, 'resources, B: RendererBackend> {
+    /// Active backend frame finalized when this executor is dropped.
+    frame: B::Frame<'frame>,
+    /// Renderer-owned custom callbacks available at painter-order barriers.
+    custom_renderers: &'resources mut CustomRenderRegistry<B>,
     /// Cached atlas used for glyph and icon expansion.
-    atlas: &'a AtlasHandle,
+    atlas: &'resources AtlasHandle,
     /// Atlas dimensions used to normalize texture coordinates.
     atlas_dim: Dimensioni,
     /// Atlas source sampled by semantic solid rectangles.
@@ -337,23 +338,30 @@ struct Executor<'a, F: RendererFrame> {
     /// Final viewport clip.
     viewport: Recti,
     /// Backend-owned texture dimensions.
-    textures: &'a HashMap<TextureId, TextureInfo>,
-    /// Reusable text expansion scratch.
-    rect_batch: &'a mut Vec<(Recti, Recti, Color)>,
+    textures: &'resources HashMap<TextureId, TextureInfo>,
     /// Reusable triangle clipping output.
-    clipped_triangles: &'a mut Vec<Vertex>,
+    clipped_triangles: &'resources mut Vec<Vertex>,
     /// Complete typed triangle arena referenced by operation ranges.
-    solid_triangles: &'a [SolidTriangle],
+    solid_triangles: &'resources [SolidTriangle],
 }
 
-impl<F: RendererFrame> Executor<'_, F> {
-    /// Executes one non-custom operation after resolving its final clip.
-    fn execute(&mut self, operation: DrawOp) {
-        let Some(clip) = intersect_rects(operation.clip, self.viewport) else {
+impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
+    /// Drains every operation through one frame-scoped interpreter.
+    fn run(mut self, operations: impl Iterator<Item = DrawOp>) {
+        for operation in operations {
+            self.execute(operation);
+        }
+    }
+
+    /// Executes one operation after resolving its final viewport clip.
+    fn execute(&mut self, DrawOp { clip, kind }: DrawOp) {
+        let Some(clip) = intersect_rects(clip, self.viewport) else {
             return;
         };
-        match operation.kind {
-            DrawKind::FillRect { rect, color } => self.push_atlas_rect(rect, self.white_icon_rect, color, clip),
+        match kind {
+            DrawKind::FillRect { rect, color } => {
+                submit_atlas_rect(&mut self.frame, self.atlas_dim, rect, self.white_icon_rect, color, clip);
+            }
             DrawKind::Text { font, pos, color, text } => self.draw_text(font, &text, pos, color, clip),
             DrawKind::Icon { id, rect, color } => self.draw_icon(id, rect, color, clip),
             DrawKind::Image { id, rect, color } => self.draw_texture(id, rect, color, clip),
@@ -364,53 +372,39 @@ impl<F: RendererFrame> Executor<'_, F> {
                 };
                 self.draw_solid_triangles(triangles, clip);
             }
-            DrawKind::Custom { .. } => unreachable!("custom operations are execution barriers"),
+            DrawKind::Custom { renderer, content_area } => self.draw_custom(renderer, content_area, clip),
         }
     }
 
-    /// Expands a UTF-8 text run and submits each visible glyph quad.
+    /// Expands and submits a UTF-8 text run without retaining glyph scratch.
     fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color, clip: Recti) {
-        self.rect_batch.clear();
-        let rect_batch = &mut self.rect_batch;
+        let frame = &mut self.frame;
+        let atlas_dim = self.atlas_dim;
         self.atlas.draw_string(font, text, |_, _, dst, src| {
-            rect_batch.push((Recti::new(pos.x + dst.x, pos.y + dst.y, dst.width, dst.height), src, color));
+            let dst = Recti::new(pos.x + dst.x, pos.y + dst.y, dst.width, dst.height);
+            submit_atlas_rect(frame, atlas_dim, dst, src, color, clip);
         });
-        for index in 0..self.rect_batch.len() {
-            let (dst, src, color) = self.rect_batch[index];
-            self.push_atlas_rect(dst, src, color, clip);
-        }
     }
 
     /// Centers an icon inside its semantic destination and submits it.
     fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color, clip: Recti) {
         let src = self.atlas.get_icon_rect(id);
-        self.push_centered_atlas_rect(rect, src, color, clip);
-    }
-
-    /// Centers and submits one atlas source rectangle.
-    fn push_centered_atlas_rect(&mut self, rect: Recti, src: Recti, color: Color, clip: Recti) {
         let dst = Recti::new(
             rect.x + (rect.width - src.width) / 2,
             rect.y + (rect.height - src.height) / 2,
             src.width,
             src.height,
         );
-        self.push_atlas_rect(dst, src, color, clip);
-    }
-
-    /// Clips and submits one atlas-backed rectangle.
-    fn push_atlas_rect(&mut self, dst: Recti, src: Recti, color: Color, clip: Recti) {
-        let Some(vertices) = clipped_textured_quad(dst, src, self.atlas_dim, color, clip) else {
-            return;
-        };
-        self.frame.push_quad(vertices);
+        submit_atlas_rect(&mut self.frame, self.atlas_dim, dst, src, color, clip);
     }
 
     /// Clips and submits one backend-owned external texture.
     fn draw_texture(&mut self, id: TextureId, dst: Recti, color: Color, clip: Recti) {
-        let Some(info) = self.textures.get(&id).copied() else {
-            return;
-        };
+        let info = self
+            .textures
+            .get(&id)
+            .copied()
+            .expect("texture IDs were validated before backend-frame acquisition");
         let src = Recti::new(0, 0, info.width, info.height);
         let Some(vertices) = clipped_textured_quad(dst, src, Dimensioni::new(info.width, info.height), color, clip) else {
             return;
@@ -433,54 +427,34 @@ impl<F: RendererFrame> Executor<'_, F> {
             }
         }
     }
+
+    /// Flushes atlas work and invokes one visible custom callback in painter order.
+    fn draw_custom(&mut self, renderer: CustomRenderKey, content_area: Recti, clip: Recti) {
+        let Some(view) = intersect_rects(clip, content_area) else {
+            return;
+        };
+        let callback = self
+            .custom_renderers
+            .get_mut(renderer)
+            .expect("custom-render keys were validated before backend-frame acquisition");
+        self.frame.flush();
+        callback.render(
+            &mut self.frame,
+            CustomRenderArgs {
+                dimensions: Dimensioni::new(self.viewport.width, self.viewport.height),
+                content_area,
+                view,
+            },
+        );
+    }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn execute_display_list<'frame, B: RendererBackend>(
-    frame: &mut B::Frame<'frame>,
-    custom_renderers: &mut CustomRenderRegistry<B>,
-    recorded: &mut super::display_list::RecordedFrame,
-    atlas: &AtlasHandle,
-    atlas_dim: Dimensioni,
-    white_icon_rect: Recti,
-    white_uv: Vec2f,
-    viewport: Recti,
-    textures: &HashMap<TextureId, TextureInfo>,
-    rect_batch: &mut Vec<(Recti, Recti, Color)>,
-    clipped_triangles: &mut Vec<Vertex>,
-) {
-    let dimensions = Dimensioni::new(viewport.width, viewport.height);
-    let solid_triangles = recorded.solid_geometry.triangles();
-    for operation in recorded.ops.drain(..) {
-        let DrawOp { clip, kind } = operation;
-        match kind {
-            DrawKind::Custom { renderer, content_area } => {
-                let Some(view) = intersect_rects(clip, viewport).and_then(|clip| intersect_rects(clip, content_area)) else {
-                    continue;
-                };
-                let callback = custom_renderers
-                    .get_mut(renderer)
-                    .expect("custom-render keys were validated before backend-frame acquisition");
-                frame.flush();
-                callback.render(frame, CustomRenderArgs { dimensions, content_area, view });
-            }
-            kind => {
-                let mut executor = Executor {
-                    frame,
-                    atlas,
-                    atlas_dim,
-                    white_icon_rect,
-                    white_uv,
-                    viewport,
-                    textures,
-                    rect_batch,
-                    clipped_triangles,
-                    solid_triangles,
-                };
-                executor.execute(DrawOp { clip, kind });
-            }
-        }
-    }
+/// Clips and submits one atlas-backed rectangle.
+fn submit_atlas_rect<F: RendererFrame>(frame: &mut F, atlas_dim: Dimensioni, dst: Recti, src: Recti, color: Color, clip: Recti) {
+    let Some(vertices) = clipped_textured_quad(dst, src, atlas_dim, color, clip) else {
+        return;
+    };
+    frame.push_quad(vertices);
 }
 
 /// Clips a textured destination and preserves projected source coordinates through final UVs.

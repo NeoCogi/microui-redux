@@ -46,9 +46,9 @@ use rs_math3d::{Color4b, Recti, Vec2f, Vec2i};
 #[derive(Default)]
 pub struct DisplayList {
     /// Operations in final painter order.
-    ops: Vec<DrawOp>,
+    pub(super) ops: Vec<DrawOp>,
     /// Retained solid geometry and its reusable tessellation workspace.
-    solid_geometry: SolidGeometry,
+    pub(super) solid_geometry: SolidGeometry,
 }
 
 /// One recorded operation and its final screen-space clip.
@@ -111,14 +111,6 @@ pub(super) enum DrawKind {
     },
 }
 
-/// Operations and triangles detached from a [`DisplayList`] for execution.
-pub(super) struct RecordedFrame {
-    /// Operations in painter order.
-    pub(super) ops: Vec<DrawOp>,
-    /// Solid geometry referenced by the operations.
-    pub(super) solid_geometry: SolidGeometry,
-}
-
 impl DisplayList {
     /// Creates an empty display list.
     pub const fn new() -> Self {
@@ -137,21 +129,6 @@ impl DisplayList {
     /// Returns `true` when the list contains no operations or solid geometry.
     pub fn is_empty(&self) -> bool {
         self.ops.is_empty() && self.solid_geometry.is_empty()
-    }
-
-    /// Detaches the recorded frame and leaves this list empty and ready for new recording.
-    pub(super) fn take(&mut self) -> RecordedFrame {
-        RecordedFrame {
-            ops: std::mem::take(&mut self.ops),
-            solid_geometry: self.solid_geometry.take_recorded(),
-        }
-    }
-
-    /// Reclaims an executed frame's operation and triangle allocations.
-    pub(super) fn recycle(&mut self, mut frame: RecordedFrame) {
-        frame.ops.clear();
-        self.ops = frame.ops;
-        self.solid_geometry.recycle_recorded(frame.solid_geometry);
     }
 
     /// Appends one semantic rectangle operation.
@@ -268,6 +245,12 @@ impl DisplayList {
     pub(crate) fn debug_triangle_capacity(&self) -> usize {
         self.solid_geometry.triangle_capacity()
     }
+
+    /// Returns the polygon workspace allocation capacity retained by this list.
+    #[cfg(test)]
+    pub(crate) fn debug_polygon_capacity(&self) -> usize {
+        self.solid_geometry.polygon_capacity()
+    }
 }
 
 /// Compares rectangle components without requiring an equality implementation from `rs-math3d`.
@@ -339,43 +322,6 @@ mod tests {
         assert_eq!(list.ops.capacity(), operation_capacity);
         assert_eq!(list.solid_geometry.triangle_capacity(), triangle_capacity);
         assert_eq!(list.solid_geometry.polygon_capacity(), polygon_capacity);
-    }
-
-    #[test]
-    fn take_detaches_owned_storage_and_leaves_a_reusable_list() {
-        let mut list = DisplayList::new();
-        let clip = Recti::new(0, 0, 50, 50);
-        list.push_fill_rect(clip, Recti::new(1, 2, 3, 4), color(10, 20, 30, 40));
-        list.push_solid_triangles(clip, &[triangle_at(0.0)]);
-
-        let frame = list.take();
-
-        assert!(list.is_empty());
-        assert_eq!(frame.ops.len(), 2);
-        assert_eq!(frame.solid_geometry.triangles().len(), 1);
-
-        list.push_fill_rect(clip, Recti::new(5, 6, 7, 8), color(50, 60, 70, 80));
-        assert!(!list.is_empty());
-        assert_eq!(list.ops.len(), 1);
-    }
-
-    #[test]
-    fn recycle_restores_detached_operation_and_triangle_allocations() {
-        let mut list = DisplayList::new();
-        let clip = Recti::new(0, 0, 50, 50);
-        for offset in 0..32 {
-            list.push_fill_rect(clip, Recti::new(offset, offset, 1, 1), color(10, 20, 30, 255));
-            list.push_solid_triangles(clip, &[triangle_at(offset as f32)]);
-        }
-        let operation_capacity = list.ops.capacity();
-        let triangle_capacity = list.solid_geometry.triangle_capacity();
-
-        let frame = list.take();
-        list.recycle(frame);
-
-        assert!(list.is_empty());
-        assert_eq!(list.ops.capacity(), operation_capacity);
-        assert_eq!(list.solid_geometry.triangle_capacity(), triangle_capacity);
     }
 
     #[test]

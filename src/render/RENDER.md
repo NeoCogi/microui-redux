@@ -255,10 +255,17 @@ widget or container memory.
 The list is designed to be reused:
 
 - recording appends into retained operation and geometry allocations;
-- `Renderer::render` detaches and drains the current frame once;
-- drained storage is recycled into the list;
-- renderer-side glyph and clipping scratch buffers are retained between
-  frames.
+- `Renderer::render` preflights resource keys, then drains operations directly
+  from the list through one frame-owned executor;
+- the outer submission boundary clears operations and solid geometry after
+  success or a returned error while retaining their allocations;
+- glyph quads are submitted as the atlas visits them, without renderer-side
+  glyph scratch;
+- final triangle-clipping scratch is retained between frames.
+
+The frame-owned executor handles ordinary drawing, external-texture barriers,
+and custom-render barriers in one painter-order loop. Its backend frame is
+finalized when the executor leaves scope.
 
 Solid line and polygon tessellation appends into `SolidGeometry` workspace
 rather than returning temporary vectors in the rendering path. Final clipped
