@@ -31,7 +31,7 @@
 
 use super::backend::Vertex;
 use crate::style::Color;
-use rs_math3d::{color4b, Color4b, Dimensioni, FloatVector, Recti, Vec2f, Vec2i, Vector};
+use rs_math3d::{Color4b, FloatVector, Recti, Vec2f, Vec2i, Vector, color4b};
 use std::ops::Range;
 
 /// Floating-point tolerance shared by tessellation and clipping predicates.
@@ -39,14 +39,8 @@ pub(crate) const GEOM_EPS: f32 = 1.0e-5;
 /// Squared tolerance used for duplicate-position checks.
 const GEOM_EPS_SQ: f32 = GEOM_EPS * GEOM_EPS;
 
-/// Builds the four clockwise vertices for a textured rectangle draw.
-pub(super) fn textured_quad_vertices(dst: Recti, src: Recti, texture_dim: Dimensioni, color: Color) -> [Vertex; 4] {
-    let texture_size = Vec2f::new(texture_dim.width as f32, texture_dim.height as f32);
-    let src_min = Vec2f::new(src.x as f32, src.y as f32);
-    let src_extent = Vec2f::new(src.width as f32, src.height as f32);
-    let uv_min = src_min / texture_size;
-    let uv_max = (src_min + src_extent) / texture_size;
-
+/// Builds the four clockwise vertices for a textured rectangle draw using final normalized UVs.
+pub(super) fn textured_quad_from_uv(dst: Recti, uv_min: Vec2f, uv_max: Vec2f, color: Color) -> [Vertex; 4] {
     let dst_min = Vec2f::new(dst.x as f32, dst.y as f32);
     let dst_max = dst_min + Vec2f::new(dst.width as f32, dst.height as f32);
     let color = color4b(color.r, color.g, color.b, color.a);

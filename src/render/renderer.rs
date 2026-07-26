@@ -38,7 +38,7 @@ use super::{
         CustomRenderArgs, CustomRenderHandle, CustomRenderRegistry, CustomRenderRegistryError, FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex,
     },
     display_list::{DisplayList, DrawKind, DrawOp},
-    geometry::{textured_quad_vertices, ClipRect, SolidTriangle},
+    geometry::{ClipRect, SolidTriangle, textured_quad_from_uv},
 };
 use crate::{
     atlas::{AtlasHandle, FontId, IconId, WHITE_ICON},
@@ -400,10 +400,10 @@ impl<F: RendererFrame> Executor<'_, F> {
 
     /// Clips and submits one atlas-backed rectangle.
     fn push_atlas_rect(&mut self, dst: Recti, src: Recti, color: Color, clip: Recti) {
-        let Some((dst, src)) = clip_textured_rect(dst, src, clip) else {
+        let Some(vertices) = clipped_textured_quad(dst, src, self.atlas_dim, color, clip) else {
             return;
         };
-        self.frame.push_quad(textured_quad_vertices(dst, src, self.atlas_dim, color));
+        self.frame.push_quad(vertices);
     }
 
     /// Clips and submits one backend-owned external texture.
@@ -412,12 +412,11 @@ impl<F: RendererFrame> Executor<'_, F> {
             return;
         };
         let src = Recti::new(0, 0, info.width, info.height);
-        let Some((dst, src)) = clip_textured_rect(dst, src, clip) else {
+        let Some(vertices) = clipped_textured_quad(dst, src, Dimensioni::new(info.width, info.height), color, clip) else {
             return;
         };
         self.frame.flush();
-        self.frame
-            .draw_texture(id, textured_quad_vertices(dst, src, Dimensioni::new(info.width, info.height), color));
+        self.frame.draw_texture(id, vertices);
     }
 
     /// Converts and clips typed solid triangles immediately before backend submission.
@@ -484,47 +483,37 @@ fn execute_display_list<'frame, B: RendererBackend>(
     }
 }
 
-/// Projects clipping of a destination rectangle back into its texture source rectangle.
-fn clip_textured_rect(dst: Recti, src: Recti, clip: Recti) -> Option<(Recti, Recti)> {
-    if dst.width <= 0 || dst.height <= 0 || src.width <= 0 || src.height <= 0 {
+/// Clips a textured destination and preserves projected source coordinates through final UVs.
+fn clipped_textured_quad(dst: Recti, src: Recti, texture_dim: Dimensioni, color: Color, clip: Recti) -> Option<[Vertex; 4]> {
+    if dst.width <= 0 || dst.height <= 0 || src.width <= 0 || src.height <= 0 || texture_dim.width <= 0 || texture_dim.height <= 0 {
         return None;
     }
     let clipped = intersect_rects(dst, clip)?;
-    if same_rect(clipped, dst) {
-        return Some((dst, src));
-    }
 
     let dst_extent = Vec2f::new(dst.width as f32, dst.height as f32);
-    let clipped_offset_min = Vec2f::new((clipped.x - dst.x) as f32, (clipped.y - dst.y) as f32);
-    let clipped_offset_max = Vec2f::new((clipped.x + clipped.width - dst.x) as f32, (clipped.y + clipped.height - dst.y) as f32);
+    let dst_x0 = i64::from(dst.x);
+    let dst_y0 = i64::from(dst.y);
+    let clipped_offset_min = Vec2f::new((i64::from(clipped.x) - dst_x0) as f32, (i64::from(clipped.y) - dst_y0) as f32);
+    let clipped_offset_max = Vec2f::new(
+        (i64::from(clipped.x) + i64::from(clipped.width) - dst_x0) as f32,
+        (i64::from(clipped.y) + i64::from(clipped.height) - dst_y0) as f32,
+    );
     let t_min = clipped_offset_min / dst_extent;
     let t_max = clipped_offset_max / dst_extent;
 
     let src_min = Vec2f::new(src.x as f32, src.y as f32);
     let src_extent = Vec2f::new(src.width as f32, src.height as f32);
-    let projected_min = src_min + t_min * src_extent;
-    let projected_max = src_min + t_max * src_extent;
+    let texture_extent = Vec2f::new(texture_dim.width as f32, texture_dim.height as f32);
+    let uv_min = (src_min + t_min * src_extent) / texture_extent;
+    let uv_max = (src_min + t_max * src_extent) / texture_extent;
 
-    Some((
-        clipped,
-        Recti::new(
-            projected_min.x as i32,
-            projected_min.y as i32,
-            (projected_max.x - projected_min.x) as i32,
-            (projected_max.y - projected_min.y) as i32,
-        ),
-    ))
+    Some(textured_quad_from_uv(clipped, uv_min, uv_max, color))
 }
 
 /// Returns the positive-area intersection of two integer rectangles.
 fn intersect_rects(left: Recti, right: Recti) -> Option<Recti> {
     let intersection = left.intersect(&right)?;
     (intersection.width > 0 && intersection.height > 0).then_some(intersection)
-}
-
-/// Compares rectangle components without requiring an equality implementation.
-fn same_rect(left: Recti, right: Recti) -> bool {
-    (left.x, left.y, left.width, left.height) == (right.x, right.y, right.width, right.height)
 }
 
 impl<B: RendererBackend> Drop for Renderer<B> {

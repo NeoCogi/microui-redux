@@ -192,12 +192,78 @@ fn assert_uv(vertex: RecordedVertex, expected: [f32; 2]) {
     assert!((vertex.tex_coord[1] - expected[1]).abs() < 1.0e-6);
 }
 
+fn assert_vertex(vertex: Vertex, expected_position: [f32; 2], expected_uv: [f32; 2]) {
+    let position = vertex.position();
+    let uv = vertex.tex_coord();
+    assert!((position.x - expected_position[0]).abs() < 1.0e-6);
+    assert!((position.y - expected_position[1]).abs() < 1.0e-6);
+    assert!((uv.x - expected_uv[0]).abs() < 1.0e-6);
+    assert!((uv.y - expected_uv[1]).abs() < 1.0e-6);
+}
+
 #[test]
-fn textured_rectangle_clipping_projects_into_source_coordinates() {
-    let (dst, src) = clip_textured_rect(Recti::new(0, 0, 100, 100), Recti::new(0, 0, 50, 50), Recti::new(20, 20, 40, 40)).unwrap();
-    assert_eq!((dst.x, dst.y, dst.width, dst.height), (20, 20, 40, 40));
-    assert_eq!((src.x, src.y, src.width, src.height), (10, 10, 20, 20));
-    assert!(clip_textured_rect(Recti::new(0, 0, 10, 10), Recti::new(0, 0, 10, 10), Recti::new(50, 50, 10, 10)).is_none());
+fn one_texel_scaled_and_clipped_preserves_fractional_uvs() {
+    let vertices = clipped_textured_quad(
+        Recti::new(0, 0, 100, 100),
+        Recti::new(0, 0, 1, 1),
+        Dimensioni::new(1, 1),
+        color(255, 255, 255, 255),
+        Recti::new(20, 20, 40, 40),
+    )
+    .unwrap();
+
+    assert_vertex(vertices[0], [20.0, 20.0], [0.2, 0.2]);
+    assert_vertex(vertices[2], [60.0, 60.0], [0.6, 0.6]);
+}
+
+#[test]
+fn asymmetric_clipping_projects_u_and_v_independently() {
+    let vertices = clipped_textured_quad(
+        Recti::new(10, 20, 200, 100),
+        Recti::new(40, 20, 80, 40),
+        Dimensioni::new(200, 100),
+        color(255, 255, 255, 255),
+        Recti::new(50, 30, 120, 50),
+    )
+    .unwrap();
+
+    assert_vertex(vertices[0], [50.0, 30.0], [0.28, 0.24]);
+    assert_vertex(vertices[2], [170.0, 80.0], [0.52, 0.44]);
+}
+
+#[test]
+fn textured_quad_clipping_retains_visible_empty_and_disjoint_behavior() {
+    let vertices = clipped_textured_quad(
+        Recti::new(2, 3, 4, 5),
+        Recti::new(2, 4, 4, 5),
+        Dimensioni::new(16, 20),
+        color(255, 255, 255, 255),
+        Recti::new(0, 0, 20, 20),
+    )
+    .unwrap();
+    assert_vertex(vertices[0], [2.0, 3.0], [0.125, 0.2]);
+    assert_vertex(vertices[2], [6.0, 8.0], [0.375, 0.45]);
+
+    assert!(
+        clipped_textured_quad(
+            Recti::new(0, 0, 0, 10),
+            Recti::new(0, 0, 10, 10),
+            Dimensioni::new(10, 10),
+            color(255, 255, 255, 255),
+            Recti::new(0, 0, 10, 10),
+        )
+        .is_none()
+    );
+    assert!(
+        clipped_textured_quad(
+            Recti::new(0, 0, 10, 10),
+            Recti::new(0, 0, 10, 10),
+            Dimensioni::new(10, 10),
+            color(255, 255, 255, 255),
+            Recti::new(50, 50, 10, 10),
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -339,18 +405,41 @@ fn operation_clip_is_intersected_with_viewport_for_every_quad_kind() {
 }
 
 #[test]
+fn atlas_rectangle_clipping_preserves_fractional_uvs() {
+    let (backend, log) = recording_backend(make_atlas());
+    let mut renderer = Renderer::new(backend);
+    let mut list = DisplayList::new();
+    painter(&mut list, Recti::new(20, 20, 40, 40)).fill_rect(Recti::new(0, 0, 100, 100), color(255, 255, 255, 255));
+
+    renderer.render(frame_info(100, 100), &mut list).unwrap();
+
+    let vertices = log
+        .snapshot()
+        .into_iter()
+        .find_map(|event| match event {
+            RenderEvent::AtlasQuad(vertices) => Some(vertices),
+            _ => None,
+        })
+        .expect("the clipped atlas rectangle should be submitted");
+    assert_position(vertices[0], [20.0, 20.0]);
+    assert_position(vertices[2], [60.0, 60.0]);
+    assert_uv(vertices[0], [0.025, 0.025]);
+    assert_uv(vertices[2], [0.075, 0.075]);
+}
+
+#[test]
 fn external_texture_clipping_preserves_uv_mapping_and_stream_order() {
     let (backend, log) = recording_backend(make_atlas());
     let mut renderer = Renderer::new(backend);
-    let texture = renderer.try_load_texture_rgba(20, 20, &[0xFF; 20 * 20 * 4]).unwrap();
+    let texture = renderer.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
     log.clear();
     let white = color(255, 255, 255, 255);
     let mut list = DisplayList::new();
     painter(&mut list, viewport()).fill_rect(Recti::new(0, 0, 1, 1), white);
-    painter(&mut list, Recti::new(5, 5, 10, 10)).image(texture, Recti::new(0, 0, 20, 20), white);
+    painter(&mut list, Recti::new(20, 20, 40, 40)).image(texture, Recti::new(0, 0, 100, 100), white);
     painter(&mut list, viewport()).fill_rect(Recti::new(20, 0, 1, 1), white);
 
-    renderer.render(frame_info(32, 32), &mut list).unwrap();
+    renderer.render(frame_info(100, 100), &mut list).unwrap();
 
     let events = log.snapshot();
     assert!(matches!(events[0], RenderEvent::Begin { .. }));
@@ -360,10 +449,10 @@ fn external_texture_clipping_preserves_uv_mapping_and_stream_order() {
         panic!("external texture must remain between atlas operations");
     };
     assert_eq!(*id, texture);
-    assert_position(vertices[0], [5.0, 5.0]);
-    assert_position(vertices[2], [15.0, 15.0]);
-    assert_uv(vertices[0], [0.25, 0.25]);
-    assert_uv(vertices[2], [0.75, 0.75]);
+    assert_position(vertices[0], [20.0, 20.0]);
+    assert_position(vertices[2], [60.0, 60.0]);
+    assert_uv(vertices[0], [0.2, 0.2]);
+    assert_uv(vertices[2], [0.6, 0.6]);
     assert!(matches!(events[4], RenderEvent::AtlasQuad(_)));
 }
 
