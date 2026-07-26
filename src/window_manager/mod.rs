@@ -63,7 +63,7 @@ use std::io::Cursor;
 use png::{ColorType, Decoder};
 
 use crate::{
-    rect, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId,
+    rect, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId,
     UiRuntime,
 };
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, DisplayList, FrameInfo, RenderError, Renderer, RendererBackend};

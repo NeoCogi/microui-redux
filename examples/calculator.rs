@@ -73,7 +73,7 @@ impl CalcButton {
     fn new(label: &str, action: Action) -> Self {
         Self {
             action,
-            widget: widget_handle(Button::with_opt(label, WidgetOption::ALIGN_CENTER)),
+            widget: widget_handle(Button::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
             node_id: NodeId::default(),
         }
     }
@@ -319,7 +319,10 @@ struct State {
 fn main() {
     let atlas = atlas_assets::load_atlas();
     let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
-        let display = widget_handle(Textbox::with_opt("0", WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT));
+        let display = widget_handle(Textbox::with_opt(
+            "0",
+            WidgetOption::FRAME | WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT,
+        ));
         let mut buttons = [
             CalcButton::new("AC", Action::ClearAll),
             CalcButton::new("CE", Action::ClearEntry),
@@ -368,7 +371,7 @@ fn main() {
             button.node_id = node_id;
         }
         let root = ctx.create_window("Calculator", rect(0, 0, 320, 420), tree);
-        ctx.set_root_options(root, ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE);
+        ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE);
         State {
             _root: root,
             display,

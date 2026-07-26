@@ -112,7 +112,7 @@ impl Node {
         Self {
             label: label.into(),
             state,
-            config: WidgetConfig::default(),
+            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::NONE),
             kind: NodeKind::Header,
         }
     }
@@ -122,7 +122,7 @@ impl Node {
         Self {
             label: label.into(),
             state,
-            config: WidgetConfig::default(),
+            config: WidgetConfig::new(WidgetOption::NONE, ScrollBehavior::NONE),
             kind: NodeKind::Tree,
         }
     }
@@ -192,16 +192,16 @@ impl Node {
         let style = ctx.style();
         let padding = style.padding;
         let text_color = style.colors[ControlColor::Text as usize];
-        let mut r = ctx.screen_rect();
+        let mut r = ctx.screen_content_rect();
 
         match self.kind {
             NodeKind::Tree => {
                 if ctx.hovered() {
-                    ctx.draw_frame(r, ControlColor::ButtonHover);
+                    ctx.draw_rect(r, ctx.style().colors[ControlColor::ButtonHover as usize]);
                 }
             }
             NodeKind::Header => {
-                ctx.draw_widget_frame(r, ControlColor::Button, self.config.opt);
+                ctx.draw_widget_fill(r, ControlColor::Button);
             }
         }
 

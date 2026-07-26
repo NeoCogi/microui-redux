@@ -53,11 +53,15 @@ fn bind_default_named_fonts_replaces_unset_font_fields_only() {
 }
 
 #[test]
-fn frame_border_policy_keeps_flat_roles_borderless() {
-    let style = Style::default();
+fn frame_border_resolves_geometry_and_color_without_role_policy() {
+    let mut style = Style::default();
+    style.frame_border_width = -4;
+    let border = style.frame_border();
+    let expected = style.colors[crate::ControlColor::Border as usize];
 
-    assert!(style.frame_border_color(crate::ControlColor::Button).is_some());
-    assert!(style.frame_border_color(crate::ControlColor::ScrollBase).is_none());
-    assert!(style.frame_border_color(crate::ControlColor::ScrollThumb).is_none());
-    assert!(style.frame_border_color(crate::ControlColor::TitleBG).is_none());
+    assert_eq!(border.width, 0);
+    assert_eq!(
+        (border.color.r, border.color.g, border.color.b, border.color.a),
+        (expected.r, expected.g, expected.b, expected.a)
+    );
 }

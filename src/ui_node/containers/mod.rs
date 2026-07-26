@@ -4,7 +4,7 @@ use crate::widget_ctx::localize_events;
 use crate::window_manager::{erased_widget_state, WidgetStateHandleDyn};
 use crate::{Dimensioni, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
 
-use super::{measure_axis_available, resolve_allocated_size, resolve_size, NodeLayout, TraversalState, UiNode, UiNodeId, UiNodeState, UiRuntime, WidgetCtx};
+use super::{NodeLayout, TraversalState, UiNode, UiNodeId, UiNodeState, UiRuntime, WidgetCtx};
 
 mod column;
 mod disclosure;
@@ -24,6 +24,11 @@ pub(crate) use stack::Stack;
 
 /// Common internal behavior interface for retained nodes.
 pub(crate) trait Widget {
+    /// Returns whether the runtime owns an outer frame for this node.
+    fn is_framed(&self) -> bool {
+        false
+    }
+
     /// Measures the preferred size for a node.
     fn measure(&self, ctx: &MeasureCtx<'_>, state: &UiNodeState, available: Dimensioni) -> Dimensioni;
 
@@ -91,34 +96,18 @@ impl Clone for WidgetNode {
 }
 
 impl Widget for WidgetNode {
+    fn is_framed(&self) -> bool {
+        self.widget.effective_widget_opt().intersects(WidgetOption::FRAME)
+    }
+
     fn measure(&self, ctx: &MeasureCtx<'_>, state: &UiNodeState, available: Dimensioni) -> Dimensioni {
-        let policy = state.policy;
-        let measure_available = Dimensioni::new(
-            measure_axis_available(policy.width, available.width),
-            measure_axis_available(policy.height, available.height),
-        );
-        let preferred = self.widget.measure(ctx.style, ctx.atlas, measure_available);
-        Dimensioni::new(
-            resolve_size(policy.width, preferred.width, available.width, available.width, None),
-            resolve_size(policy.height, preferred.height, available.height, available.height, None),
-        )
+        let _ = state;
+        self.widget.measure(ctx.style, ctx.atlas, available)
     }
 
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, state: &mut UiNodeState, rect: Recti) {
-        let policy = state.policy;
-        let measure_available = Dimensioni::new(
-            measure_axis_available(policy.width, rect.width),
-            measure_axis_available(policy.height, rect.height),
-        );
-        let preferred = self.widget.measure(ctx.style, ctx.atlas, measure_available);
-        let rect = Recti::new(
-            rect.x,
-            rect.y,
-            resolve_allocated_size(policy.width, preferred.width, rect.width, rect.width, None),
-            resolve_allocated_size(policy.height, preferred.height, rect.height, rect.height, None),
-        );
-        let content_size = Dimensioni::new(rect.width.max(preferred.width), rect.height.max(preferred.height));
-        state.set_layout_from_rect(rect, content_size);
+        let preferred = self.widget.measure(ctx.style, ctx.atlas, Dimensioni::new(rect.width, rect.height));
+        ctx.set_widget_content_size(state, preferred);
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, state: &mut UiNodeState) -> bool {
@@ -142,10 +131,11 @@ impl Widget for WidgetNode {
         let mut focus_seen = ctx.runtime.updated_focus;
         let events = localize_events(rect, ctx.runtime.take_routed_events(id));
         let accepts_pointer_input = ctx.runtime.accepts_pointer_input();
-        let node_clip = ctx.node_clip();
-        let mut widget_ctx = WidgetCtx::new_with_interaction(
+        let node_clip = ctx.content_clip();
+        let mut widget_ctx = WidgetCtx::new_with_frame_geometry(
             id,
             rect,
+            ctx.content_rect,
             &mut *ctx.display_list,
             node_clip,
             ctx.style,
@@ -173,12 +163,13 @@ impl Widget for WidgetNode {
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, state: &mut UiNodeState) -> bool {
         let id = state.id();
-        let rect = ctx.node_rect(state);
+        let rect = ctx.node_content_rect(state);
         let (hovered, focused, clicked, active, scroll_delta) = (state.hovered, state.focused, state.clicked, state.active, state.scroll_delta);
         let mut focus_seen = ctx.runtime.updated_focus;
         let node_clip = ctx.node_clip();
-        let mut widget_ctx = WidgetCtx::new_with_interaction(
+        let mut widget_ctx = WidgetCtx::new_with_frame_geometry(
             id,
+            ctx.frame_rect,
             rect,
             &mut *ctx.display_list,
             node_clip,
@@ -430,6 +421,9 @@ pub(crate) struct LayoutCtx<'a> {
     pub(crate) runtime: &'a mut UiRuntime,
     pub(crate) style: &'a Style,
     pub(crate) atlas: &'a crate::AtlasHandle,
+    pub(crate) outer: Recti,
+    pub(crate) content: Recti,
+    pub(crate) border_width: i32,
 }
 
 impl LayoutCtx<'_> {
@@ -446,6 +440,17 @@ impl LayoutCtx<'_> {
         state.set_layout(layout);
     }
 
+    pub(crate) fn set_widget_content_size(&mut self, state: &mut UiNodeState, preferred_content: Dimensioni) {
+        let preferred_outer = crate::frame::outer_preferred(preferred_content, self.border_width);
+        self.set_content_size(
+            state,
+            Dimensioni::new(
+                self.outer.width.max(preferred_outer.width).max(0),
+                self.outer.height.max(preferred_outer.height).max(0),
+            ),
+        );
+    }
+
     pub(crate) fn set_child_overflow_propagation(&mut self, state: &mut UiNodeState, propagate_child_overflow: bool) {
         let layout = state.layout.with_child_overflow_propagation(propagate_child_overflow);
         state.set_layout(layout);
@@ -454,12 +459,15 @@ impl LayoutCtx<'_> {
     pub(crate) fn set_content_space_geometry(
         &mut self,
         state: &mut UiNodeState,
-        rect: Recti,
+        _rect: Recti,
         viewport: Recti,
         virtual_size: Dimensioni,
         content_to_parent_translation: Vec2i,
     ) {
-        let mut layout = NodeLayout::from_parts(rect, viewport, virtual_size, state.layout.content_size);
+        let viewport = viewport
+            .intersect(&self.content)
+            .unwrap_or_else(|| Recti::new(self.content.x, self.content.y, 0, 0));
+        let mut layout = NodeLayout::from_parts(self.outer, viewport, virtual_size, state.layout.content_size);
         layout.content.content_to_parent_translation = content_to_parent_translation;
         state.set_layout(layout);
     }
@@ -478,23 +486,33 @@ pub(crate) struct UpdateCtx<'a> {
     pub(crate) atlas: crate::AtlasHandle,
     pub(crate) input: &'a Input,
     pub(crate) results: &'a mut FrameResults,
+    pub(crate) frame_rect: Recti,
+    pub(crate) content_rect: Recti,
+    pub(crate) frame_clip: Recti,
+    pub(crate) parent_traversal: TraversalState,
     pub(crate) traversal: TraversalState,
 }
 
 impl UpdateCtx<'_> {
     pub(crate) fn node_rect(&self, state: &UiNodeState) -> Recti {
-        self.traversal.screen_frame(state.layout)
+        let _ = state;
+        self.frame_rect
     }
 
     pub(crate) fn node_clip(&self) -> Recti {
+        self.frame_clip
+    }
+
+    pub(crate) fn content_clip(&self) -> Recti {
         self.traversal.screen_clip
     }
 
     pub(crate) fn update_container_widget_in_rect(&mut self, state: &mut UiNodeState, local_rect: Recti, handle: WidgetHandle<Node>, label: &str) {
         let id = state.id();
-        let rect = self.traversal.screen_rect(local_rect);
+        let rect = self.parent_traversal.screen_rect(local_rect);
         let widget = erased_widget_state(handle.clone());
         let opt = widget.effective_widget_opt();
+        let content_rect = crate::frame::frame_geometry(rect, opt.intersects(WidgetOption::FRAME), self.style).content_or_empty();
         let scroll_behavior = widget.effective_scroll_behavior();
         let focus_policy = widget.focus_policy();
         let (hovered, focused, clicked, active, scroll_delta) =
@@ -510,9 +528,10 @@ impl UpdateCtx<'_> {
         let accepts_pointer_input = self.runtime.accepts_pointer_input();
         let events = localize_events(rect, self.runtime.take_routed_events(id));
         let node_clip = self.node_clip();
-        let mut ctx = WidgetCtx::new_with_interaction(
+        let mut ctx = WidgetCtx::new_with_frame_geometry(
             id,
             rect,
+            content_rect,
             &mut *self.display_list,
             node_clip,
             self.style,
@@ -541,20 +560,21 @@ pub(crate) struct InputCtx<'a> {
     pub(crate) runtime: &'a mut UiRuntime,
     pub(crate) style: &'a Style,
     pub(crate) input: &'a Input,
+    pub(crate) parent_traversal: TraversalState,
     pub(crate) traversal: TraversalState,
 }
 
 impl InputCtx<'_> {
     pub(crate) fn node_rect(&self, state: &UiNodeState) -> Recti {
-        self.traversal.screen_frame(state.layout)
+        self.parent_traversal.screen_frame(state.layout)
     }
 
     pub(crate) fn node_clip_and_rect(&self, local_rect: Recti) -> (Recti, Recti) {
-        (self.traversal.screen_clip, self.traversal.screen_rect(local_rect))
+        (self.traversal.screen_clip, self.parent_traversal.screen_rect(local_rect))
     }
 
     pub(crate) fn node_clip(&self) -> Recti {
-        self.traversal.screen_clip
+        self.parent_traversal.screen_clip
     }
 }
 
@@ -567,40 +587,62 @@ pub(crate) struct PaintCtx<'a> {
     pub(crate) display_list: &'a mut DisplayList,
     pub(crate) style: &'a Style,
     pub(crate) atlas: crate::AtlasHandle,
+    pub(crate) parent_traversal: TraversalState,
+    pub(crate) frame_rect: Recti,
+    pub(crate) content_rect: Recti,
     pub(crate) traversal: TraversalState,
 }
 
 impl PaintCtx<'_> {
     pub(crate) fn node_rect(&self, state: &UiNodeState) -> Recti {
-        self.traversal.screen_frame(state.layout)
+        let _ = state;
+        self.frame_rect
+    }
+
+    pub(crate) fn node_content_rect(&self, state: &UiNodeState) -> Recti {
+        let _ = state;
+        self.content_rect
     }
 
     pub(crate) fn node_clip(&self) -> Recti {
         self.traversal.screen_clip
     }
 
-    pub(crate) fn draw_frame(&mut self, rect: Recti, color: crate::ControlColor) {
+    pub(crate) fn draw_internal_frame(&mut self, rect: Recti, color: crate::ControlColor) -> Option<Recti> {
         let fill = self.style.colors[color as usize];
-        let border = self.style.frame_border_color(color);
         let local_bounds = Recti::new(0, 0, i32::MAX, i32::MAX);
         let node_clip = self.node_clip();
         let mut painter = Painter::new(&mut *self.display_list, Vec2i::default(), local_bounds, node_clip);
-        painter.fill_rect(rect, fill);
-        if let Some(border) = border {
-            painter.stroke_rect(crate::expand_rect(rect, 1), 1, border);
-        }
+        crate::frame::paint_internal_frame(&mut painter, rect, Some(fill), self.style.frame_border())
+    }
+
+    pub(crate) fn draw_flat_rect(&mut self, rect: Recti, color: crate::ControlColor) {
+        let fill = self.style.colors[color as usize];
+        let local_bounds = Recti::new(0, 0, i32::MAX, i32::MAX);
+        let node_clip = self.node_clip();
+        Painter::new(&mut *self.display_list, Vec2i::default(), local_bounds, node_clip).fill_rect(rect, fill);
     }
 
     pub(crate) fn paint_container_widget_in_rect(&mut self, state: &UiNodeState, local_rect: Recti, handle: WidgetHandle<Node>) {
         let id = state.id();
-        let rect = self.traversal.screen_rect(local_rect);
+        let rect = self.parent_traversal.screen_rect(local_rect);
         let (hovered, focused, clicked, active, scroll_delta) = (state.hovered, state.focused, state.clicked, state.active, state.scroll_delta);
         let widget = erased_widget_state(handle);
+        let framed = widget.effective_widget_opt().intersects(WidgetOption::FRAME);
+        let geometry = crate::frame::frame_geometry(rect, framed, self.style);
+        if framed {
+            let local_bounds = Recti::new(0, 0, i32::MAX, i32::MAX);
+            let node_clip = self.node_clip();
+            let mut painter = Painter::new(&mut *self.display_list, Vec2i::default(), local_bounds, node_clip);
+            crate::frame::paint_internal_frame(&mut painter, rect, None, self.style.frame_border());
+        }
+        let content_rect = geometry.content_or_empty();
         let mut focus_seen = self.runtime.updated_focus;
         let node_clip = self.node_clip();
-        let mut ctx = WidgetCtx::new_with_interaction(
+        let mut ctx = WidgetCtx::new_with_frame_geometry(
             id,
             rect,
+            content_rect,
             &mut *self.display_list,
             node_clip,
             self.style,

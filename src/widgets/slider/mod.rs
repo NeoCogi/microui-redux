@@ -135,7 +135,7 @@ impl Slider {
             high,
             step: 0.0,
             precision: 0,
-            config: WidgetConfig::new(WidgetOption::NONE, ScrollBehavior::GRAB_SCROLL),
+            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::GRAB_SCROLL),
             edit: NumberEditState::default(),
         }
     }
@@ -177,7 +177,7 @@ impl Slider {
     /// Updates slider value from shift-click text entry, scroll, or pointer drag.
     fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let base = ctx.screen_rect();
+        let base = ctx.screen_content_rect();
         let last = self.value;
         let mut v = last;
         let font = ctx.style().resolve_font_choice(self.config.font);
@@ -202,7 +202,8 @@ impl Slider {
         let range = self.high - self.low;
         if ctx.focused() && (!input.mouse_down().is_empty() || input.mouse_pressed().intersects(MouseButton::LEFT)) && base.width > 0 && range != 0.0 {
             // Mouse x maps linearly across the slider track.
-            v = self.low + input.mouse_pos().x as Real * range / base.width as Real;
+            let content_x = input.mouse_pos().x - ctx.frame_local_content_rect().x;
+            v = self.low + content_x as Real * range / base.width as Real;
             if self.step != 0. {
                 v = snap_slider_value(v, self.low, self.step);
             }
@@ -226,9 +227,9 @@ impl Slider {
             return;
         }
 
-        let base = ctx.screen_rect();
+        let base = ctx.screen_content_rect();
         let range = self.high - self.low;
-        ctx.draw_widget_frame(base, ControlColor::Base, self.config.opt);
+        ctx.draw_widget_fill(base, ControlColor::Base);
         let w = ctx.style().thumb_size;
         let available = (base.width - w).max(0);
         let x = if range != 0.0 && available > 0 {
@@ -237,7 +238,7 @@ impl Slider {
             0
         };
         let thumb = rect(base.x + x, base.y, w, base.height);
-        ctx.draw_widget_frame(thumb, ControlColor::Button, self.config.opt);
+        ctx.draw_widget_internal_frame(thumb, ControlColor::Button);
         let label = number_label(self.value, self.precision);
         ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.config.opt);
     }
@@ -372,7 +373,7 @@ impl Number {
             value: if value.is_finite() { value } else { 0.0 },
             step,
             precision,
-            config: WidgetConfig::default(),
+            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::NONE),
             edit: NumberEditState::default(),
         }
     }
@@ -437,8 +438,8 @@ impl Number {
             return;
         }
 
-        let base = ctx.screen_rect();
-        ctx.draw_widget_frame(base, ControlColor::Base, self.config.opt);
+        let base = ctx.screen_content_rect();
+        ctx.draw_widget_fill(base, ControlColor::Base);
         let label = number_label(self.value, self.precision);
         ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.config.opt);
     }

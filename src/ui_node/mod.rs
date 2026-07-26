@@ -375,7 +375,8 @@ mod tests {
         }
 
         fn node_screen_rect(&self, id: UiNodeId) -> Option<Recti> {
-            self.node(id).map(|node| self.traversal_state_for_node(id).screen_frame(node.state.layout))
+            self.node(id)
+                .map(|node| self.runtime.parent_traversal_state_for_node(&self.roots, id).screen_frame(node.state.layout))
         }
 
         fn replace_ui_nodes(&mut self, tree: UiNodeSet) {
@@ -506,6 +507,30 @@ mod tests {
         fn paint(&mut self, _ctx: &mut WidgetCtx<'_>) {}
     }
 
+    struct FrameToggle {
+        opt: WidgetOption,
+        painted: Rc<RefCell<Vec<(Recti, Recti)>>>,
+    }
+
+    impl crate::Widget for FrameToggle {
+        fn widget_opt(&self) -> &WidgetOption {
+            &self.opt
+        }
+
+        fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+            Dimensioni::new(10, 8)
+        }
+
+        fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+            self.opt.insert(WidgetOption::FRAME);
+            ResourceState::CHANGE
+        }
+
+        fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+            self.painted.borrow_mut().push((ctx.screen_frame_rect(), ctx.screen_content_rect()));
+        }
+    }
+
     #[test]
     fn ui_node_set_conversion_keeps_container_children_off_leaf_widgets() {
         let button = widget_handle(Button::new("child"));
@@ -522,6 +547,200 @@ mod tests {
         assert!(matches!(column_node.data, UiNodeData::Container(_)));
         assert!(matches!(child_node.data, UiNodeData::Widget(_)));
         assert!(child_node.children().is_empty());
+    }
+
+    #[test]
+    fn framed_widget_owns_inside_border_content_clip_and_outer_hit_box() {
+        let button = widget_handle(Button::new("framed"));
+        let mut button_id = Id::new(0);
+        let tree = UiNodeBuilder::build(|tree| {
+            button_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(&button);
+        });
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
+        let atlas = test_atlas();
+        let style = Style { padding: 0, ..Style::default() };
+        let body = rect(50, 60, 20, 12);
+        let mut input = Input::default();
+        input.mousemove(body.x, body.y + 5);
+        let mut results = FrameResults::default();
+        results.begin_frame();
+
+        runtime.runtime.begin_frame(true);
+        runtime.runtime.layout_frame_roots(&mut runtime.roots, &style, atlas.clone(), body);
+        runtime.route_input_events(&style, &input);
+        runtime.runtime.update_paint_frame(
+            &mut runtime.roots,
+            crate::RootId::from_raw(1),
+            "frame-test",
+            &mut runtime.display_list,
+            atlas,
+            &style,
+            &input,
+            &mut results,
+            body,
+        );
+
+        let node = runtime.node(button_id).expect("button node missing");
+        assert_eq!(rect_key(node.state.layout.frame), (0, 0, 20, 12));
+        assert_eq!(rect_key(node.state.layout.content.viewport), (1, 1, 18, 10));
+        assert!(node.state.hovered, "the inside border remains part of the hit target");
+
+        let border = style.colors[crate::ControlColor::Border as usize];
+        let border_ops: Vec<_> = runtime
+            .display_list
+            .debug_fill_rects()
+            .into_iter()
+            .filter(|(_, _, color)| color_key(*color) == color_key(border))
+            .collect();
+        assert_eq!(border_ops.len(), 4);
+        assert_eq!(
+            border_ops.iter().map(|(rect, _, _)| rect_key(*rect)).collect::<Vec<_>>(),
+            vec![(50, 60, 20, 1), (50, 71, 20, 1), (50, 61, 1, 10), (69, 61, 1, 10)]
+        );
+        assert!(border_ops.iter().all(|(_, clip, _)| rect_key(*clip) == rect_key(body)));
+    }
+
+    #[test]
+    fn frame_option_changes_preferred_outer_size_but_none_keeps_full_content() {
+        let framed = widget_handle(Button::with_opt("size", WidgetOption::FRAME));
+        let flat = widget_handle(Button::with_opt("size", WidgetOption::NONE));
+        let tree = UiNodeBuilder::build(|tree| {
+            tree.widget(&framed);
+            tree.widget(&flat);
+        });
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
+        let atlas = test_atlas();
+        let style = Style::default();
+        let available = Dimensioni::new(100, 100);
+        let framed_size = runtime.runtime.measure_node_ref(&runtime.roots[0], &style, &atlas, available);
+        let flat_size = runtime.runtime.measure_node_ref(&runtime.roots[1], &style, &atlas, available);
+        assert_eq!(framed_size.width, flat_size.width + style.frame_border_width * 2);
+        assert_eq!(framed_size.height, flat_size.height + style.frame_border_width * 2);
+
+        runtime.runtime.layout_node_ref(&mut runtime.roots[0], &style, &atlas, rect(7, 9, 30, 14));
+        runtime.runtime.layout_node_ref(&mut runtime.roots[1], &style, &atlas, rect(7, 30, 30, 14));
+        assert_eq!(rect_key(runtime.roots[0].state.layout.content.viewport), (8, 10, 28, 12));
+        assert_eq!(rect_key(runtime.roots[1].state.layout.content.viewport), (7, 30, 30, 14));
+    }
+
+    #[test]
+    fn framed_scroll_area_intersects_its_child_viewport_with_frame_content() {
+        let mut scroll_id = Id::new(0);
+        let tree = UiNodeBuilder::build(|tree| {
+            scroll_id = tree
+                .node(crate::NodeOptions::with_policy(Policy::fixed(40, 24)))
+                .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+                    tree.text("inside");
+                });
+        });
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
+        let atlas = test_atlas();
+        let style = Style::default();
+        runtime.runtime.layout_node_ref(&mut runtime.roots[0], &style, &atlas, rect(4, 6, 40, 24));
+
+        let scroll = runtime.node(scroll_id).expect("scroll area missing");
+        assert_eq!(rect_key(scroll.state.layout.frame), (4, 6, 40, 24));
+        assert_eq!(rect_key(scroll.state.layout.content.viewport), (5, 7, 38, 22));
+        let viewport = scroll.children().first().expect("scroll viewport missing");
+        assert!(viewport.state.layout.frame.x >= 5);
+        assert!(viewport.state.layout.frame.y >= 7);
+        assert!(viewport.state.layout.frame.x + viewport.state.layout.frame.width <= 43);
+        assert!(viewport.state.layout.frame.y + viewport.state.layout.frame.height <= 29);
+    }
+
+    #[test]
+    fn container_none_keeps_the_complete_allocation_as_content() {
+        let mut scroll_id = Id::new(0);
+        let tree = UiNodeBuilder::build(|tree| {
+            scroll_id = tree
+                .node(crate::NodeOptions::with_policy(Policy::fixed(40, 24)))
+                .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
+        });
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
+        let atlas = test_atlas();
+        let style = Style::default();
+        runtime.runtime.layout_node_ref(&mut runtime.roots[0], &style, &atlas, rect(4, 6, 40, 24));
+
+        let scroll = runtime.node(scroll_id).expect("scroll area missing");
+        assert_eq!(rect_key(scroll.state.layout.frame), (4, 6, 40, 24));
+        assert_eq!(rect_key(scroll.state.layout.content.viewport), (4, 6, 40, 24));
+    }
+
+    #[test]
+    fn framed_custom_renderer_receives_derived_content_area() {
+        let atlas = test_atlas();
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(120, 100));
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let callback_seen = seen.clone();
+        let custom_renderer = renderer
+            .register_custom_renderer(move |_frame, args| {
+                callback_seen.borrow_mut().push((rect_key(args.content_area), rect_key(args.view)));
+            })
+            .expect("custom renderer registration");
+        let state = widget_handle(Custom::with_opt("custom", WidgetOption::FRAME, ScrollBehavior::NONE));
+        let tree = UiNodeBuilder::build(|tree| {
+            tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12)))
+                .custom_render(&state, custom_renderer);
+        });
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
+        let style = Style { padding: 0, ..Style::default() };
+        let mut results = FrameResults::default();
+        results.begin_frame();
+        runtime.render_frame(
+            crate::RootId::from_raw(1),
+            "custom-frame-test",
+            &mut renderer,
+            &style,
+            &Input::default(),
+            &mut results,
+            rect(50, 60, 20, 12),
+            true,
+        );
+
+        assert_eq!(&*seen.borrow(), &[((51, 61, 18, 10), (51, 61, 18, 10))]);
+    }
+
+    #[test]
+    fn post_update_layout_observes_a_changed_frame_option_before_paint() {
+        let painted = Rc::new(RefCell::new(Vec::new()));
+        let state = widget_handle(FrameToggle {
+            opt: WidgetOption::NONE,
+            painted: painted.clone(),
+        });
+        let tree = UiNodeBuilder::build(|tree| {
+            tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(&state);
+        });
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
+        let atlas = test_atlas();
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(120, 100));
+        let style = Style { padding: 0, ..Style::default() };
+        let mut results = FrameResults::default();
+        results.begin_frame();
+        runtime.render_frame(
+            crate::RootId::from_raw(1),
+            "dynamic-frame-test",
+            &mut renderer,
+            &style,
+            &Input::default(),
+            &mut results,
+            rect(50, 60, 20, 12),
+            true,
+        );
+
+        let painted = painted.borrow();
+        assert_eq!(painted.len(), 1);
+        assert_eq!(rect_key(painted[0].0), (50, 60, 20, 12));
+        assert_eq!(rect_key(painted[0].1), (51, 61, 18, 10));
+    }
+
+    fn rect_key(rect: Recti) -> (i32, i32, i32, i32) {
+        (rect.x, rect.y, rect.width, rect.height)
+    }
+
+    fn color_key(color: crate::Color) -> (u8, u8, u8, u8) {
+        (color.r, color.g, color.b, color.a)
     }
 
     #[test]
@@ -704,7 +923,10 @@ mod tests {
 
     #[test]
     fn node_calculator_grid_uses_weighted_tracks() {
-        let display = widget_handle(Textbox::with_opt("0", WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT));
+        let display = widget_handle(Textbox::with_opt(
+            "0",
+            WidgetOption::FRAME | WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT,
+        ));
         let buttons: Vec<_> = (0..20).map(|_| widget_handle(Button::new("b"))).collect();
         let button_ids = std::cell::RefCell::new(Vec::new());
         let tree = UiNodeBuilder::build(|tree| {
@@ -754,9 +976,9 @@ mod tests {
 
     #[test]
     fn node_row_remainder_tracks_resolve_left_to_right() {
-        let label = widget_handle(ListItem::with_opt("Test buttons 2:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME));
-        let middle = widget_handle(Button::with_opt("Button 3", WidgetOption::ALIGN_CENTER));
-        let right = widget_handle(Button::with_opt("Popup", WidgetOption::ALIGN_CENTER));
+        let label = widget_handle(ListItem::with_opt("Test buttons 2:", WidgetOption::NO_INTERACT));
+        let middle = widget_handle(Button::with_opt("Button 3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
+        let right = widget_handle(Button::with_opt("Popup", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
         let mut middle_id = Id::new(0);
         let mut right_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
@@ -839,7 +1061,7 @@ mod tests {
         let tree = UiNodeBuilder::build(|tree| {
             scroll_area_id =
                 tree.node(crate::NodeOptions::with_policy(Policy::fixed(120, 48)))
-                    .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
                         tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(24), StackDirection::TopToBottom, |tree| {
                             first_id = tree.widget(&first);
                             for button in &rest {
@@ -1009,14 +1231,14 @@ mod tests {
             fonts: &fonts,
             format: SourceFormat::Raw,
         });
-        let icon_button = widget_handle(Button::with_icon("icon", crate::WHITE_ICON, WidgetOption::NONE, WidgetFillOption::ALL));
+        let icon_button = widget_handle(Button::with_icon("icon", crate::WHITE_ICON, WidgetOption::FRAME, WidgetFillOption::ALL));
         let filler = widget_handle(Button::new("filler"));
         let mut scroll_area_id = Id::new(0);
         let mut icon_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             scroll_area_id =
                 tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 70)))
-                    .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
                         tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 180))).widget(filler.clone());
                         icon_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 40))).widget(icon_button.clone());
                     });
@@ -1102,7 +1324,7 @@ mod tests {
         let backend = NoopRenderer { atlas };
         let mut renderer = Renderer::new_test(backend, Dimensioni::new(200, 140));
         let texture = renderer.try_load_texture_rgba(64, 64, &[255; 64 * 64 * 4]).unwrap();
-        let button = widget_handle(Button::with_scaled_image("image", Some(texture), WidgetOption::NONE, WidgetFillOption::ALL));
+        let button = widget_handle(Button::with_scaled_image("image", Some(texture), WidgetOption::FRAME, WidgetFillOption::ALL));
         let mut button_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
@@ -1162,7 +1384,7 @@ mod tests {
         let backend = NoopRenderer { atlas };
         let mut renderer = Renderer::new_test(backend, Dimensioni::new(300, 160));
         let texture = renderer.try_load_texture_rgba(64, 64, &[255; 64 * 64 * 4]).unwrap();
-        let button = widget_handle(Button::with_image("image", Some(texture), WidgetOption::NONE, WidgetFillOption::ALL));
+        let button = widget_handle(Button::with_image("image", Some(texture), WidgetOption::FRAME, WidgetFillOption::ALL));
         let mut button_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {

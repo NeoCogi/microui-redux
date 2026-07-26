@@ -11,7 +11,7 @@ fn image_widgets_measure_external_texture_dimensions() {
     let style = Style::default();
     let texture = TextureId::new(7, 13, 5);
 
-    let button = Button::with_image("aa", Some(texture), WidgetOption::NONE, WidgetFillOption::ALL);
+    let button = Button::with_image("aa", Some(texture), WidgetOption::FRAME, WidgetFillOption::ALL);
     let button_size = button.measure(&style, &atlas, Dimensioni::default());
 
     assert_eq!(button_size.width, style.padding * 2 + texture.width() + style.padding + 16);
@@ -97,4 +97,37 @@ fn combo_select_updates_label_and_closes_popup() {
     assert_eq!(selected.as_deref(), Some("Banana"));
     assert_eq!(combo.selected(), 1);
     assert!(!combo.is_open());
+}
+
+#[test]
+fn convenience_constructors_store_explicit_outer_frame_policy() {
+    assert!(Button::new("button").widget_opt().intersects(WidgetOption::FRAME));
+    assert!(Combo::new().widget_opt().intersects(WidgetOption::FRAME));
+    assert!(crate::Textbox::new("").widget_opt().intersects(WidgetOption::FRAME));
+    assert!(crate::TextArea::new("").widget_opt().intersects(WidgetOption::FRAME));
+    assert!(crate::Slider::new(0.0, 0.0, 1.0).widget_opt().intersects(WidgetOption::FRAME));
+    assert!(crate::Number::new(0.0, 1.0, 0).widget_opt().intersects(WidgetOption::FRAME));
+    assert!(crate::ColorSwatch::new(color(0, 0, 0, 255)).widget_opt().intersects(WidgetOption::FRAME));
+    assert!(
+        crate::Node::header("header", crate::NodeStateValue::Closed)
+            .widget_opt()
+            .intersects(WidgetOption::FRAME)
+    );
+
+    assert!(!Checkbox::new("checkbox", false).widget_opt().intersects(WidgetOption::FRAME));
+    assert!(!ListItem::new("item").widget_opt().intersects(WidgetOption::FRAME));
+    assert!(!ListBox::new("item", None).widget_opt().intersects(WidgetOption::FRAME));
+    assert!(!Custom::new("custom").widget_opt().intersects(WidgetOption::FRAME));
+    assert!(!crate::TextBlock::new("text").widget_opt().intersects(WidgetOption::FRAME));
+    assert!(
+        !crate::Node::tree("tree", crate::NodeStateValue::Closed)
+            .widget_opt()
+            .intersects(WidgetOption::FRAME)
+    );
+
+    assert!(
+        !Button::with_opt("flat", WidgetOption::ALIGN_CENTER)
+            .widget_opt()
+            .intersects(WidgetOption::FRAME)
+    );
 }

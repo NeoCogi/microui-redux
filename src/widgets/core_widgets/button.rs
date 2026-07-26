@@ -47,7 +47,7 @@ impl Button {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             content: ButtonContent::Text { label: label.into(), icon: None },
-            config: WidgetConfig::default(),
+            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::NONE),
             fill: WidgetFillOption::ALL,
         }
     }
@@ -117,11 +117,9 @@ impl Button {
 
     /// Paints the button frame, text, and optional visual payload.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
-        let rect = ctx.screen_rect();
-        if !self.config.opt.intersects(WidgetOption::NO_FRAME) {
-            if let Some(colorid) = widget_fill_color(ctx, ControlColor::Button, self.fill) {
-                ctx.draw_frame(rect, colorid);
-            }
+        let rect = ctx.screen_content_rect();
+        if let Some(colorid) = widget_fill_color(ctx, ControlColor::Button, self.fill) {
+            ctx.draw_rect(rect, ctx.style().colors[colorid as usize]);
         }
         let font = ctx.style().resolve_font_choice(self.config.font);
         match &self.content {

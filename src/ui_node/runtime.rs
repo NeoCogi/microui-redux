@@ -67,8 +67,14 @@ impl UiRuntime {
             root_titlebar_height(style, atlas)
         };
         let padding = style.padding.max(0);
+        let border_width = if opt.intersects(ContainerOption::FRAME) {
+            style.frame_border().width
+        } else {
+            0
+        };
+        let border_extent = border_width.checked_mul(2).expect("root frame extent overflowed i32");
         let horizontal_padding = padding.saturating_mul(2);
-        let available = Dimensioni::new(min_width.saturating_sub(horizontal_padding).max(1), 10_000);
+        let available = Dimensioni::new(min_width.saturating_sub(border_extent).saturating_sub(horizontal_padding).max(1), 10_000);
         let mut width: i32 = 0;
         let mut height: i32 = 0;
         for (index, root) in roots.iter().enumerate() {
@@ -79,10 +85,16 @@ impl UiRuntime {
                 height = height.saturating_add(style.spacing);
             }
         }
-        Dimensioni::new(
-            width.saturating_add(horizontal_padding).max(min_width).max(1),
-            height.saturating_add(padding.saturating_mul(2)).saturating_add(title_height).max(1),
-        )
+        let outer_width = width
+            .saturating_add(horizontal_padding)
+            .checked_add(border_extent)
+            .expect("auto-sized root width overflowed i32");
+        let outer_height = height
+            .saturating_add(padding.saturating_mul(2))
+            .saturating_add(title_height)
+            .checked_add(border_extent)
+            .expect("auto-sized root height overflowed i32");
+        Dimensioni::new(outer_width.max(min_width).max(1), outer_height.max(1))
     }
 
     /// Clears frame-local runtime state before layout/input/update/paint passes.
@@ -203,14 +215,14 @@ impl UiRuntime {
     /// Returns the current full rectangle for a retained node.
     #[cfg(test)]
     pub(crate) fn debug_node_rect(&self, roots: &[UiNode], id: UiNodeId) -> Option<Recti> {
-        find_node(roots, id).map(|node| self.traversal_state_for_node(roots, id).screen_frame(node.state.layout))
+        find_node(roots, id).map(|node| self.parent_traversal_state_for_node(roots, id).screen_frame(node.state.layout))
     }
 
     /// Returns a parent-content-local rectangle in screen coordinates for a retained node.
     #[cfg(test)]
     pub(crate) fn debug_node_local_rect(&self, roots: &[UiNode], id: UiNodeId, rect: Recti) -> Option<Recti> {
         let node = find_node(roots, id)?;
-        let screen_frame = self.traversal_state_for_node(roots, id).screen_frame(node.state.layout);
+        let screen_frame = self.parent_traversal_state_for_node(roots, id).screen_frame(node.state.layout);
         Some(Recti::new(
             rect.x + screen_frame.x - node.state.layout.frame.x,
             rect.y + screen_frame.y - node.state.layout.frame.y,
@@ -304,36 +316,85 @@ impl UiRuntime {
 
     /// Measures one already-borrowed node's preferred size.
     pub(super) fn measure_node_ref(&self, node: &UiNode, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+        let framed = match &node.data {
+            UiNodeData::Widget(widget) => widget.is_framed(),
+            UiNodeData::Container(container) => container.is_framed(),
+        };
+        let border_width = if framed { style.frame_border().width } else { 0 };
+        let policy = node.state.policy;
+        let outer_available = Dimensioni::new(
+            measure_axis_available(policy.width, available.width),
+            measure_axis_available(policy.height, available.height),
+        );
+        let content_available = crate::frame::content_available(outer_available, border_width);
         let ctx = MeasureCtx { runtime: self, style, atlas };
-        match &node.data {
-            UiNodeData::Widget(widget) => widget.measure(&ctx, node.state(), available),
-            UiNodeData::Container(container) => container.measure(&ctx, node.state(), available),
-        }
+        let preferred_content = match &node.data {
+            UiNodeData::Widget(widget) => widget.measure(&ctx, node.state(), content_available),
+            UiNodeData::Container(container) => container.measure(&ctx, node.state(), content_available),
+        };
+        let preferred_outer = crate::frame::outer_preferred(preferred_content, border_width);
+        Dimensioni::new(
+            resolve_size(policy.width, preferred_outer.width, available.width, available.width, None),
+            resolve_size(policy.height, preferred_outer.height, available.height, available.height, None),
+        )
     }
 
     /// Lays out one already-borrowed node through its behavior.
     pub(super) fn layout_node_ref(&mut self, node: &mut UiNode, style: &Style, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
+        let framed = match &node.data {
+            UiNodeData::Widget(widget) => widget.is_framed(),
+            UiNodeData::Container(container) => container.is_framed(),
+        };
+        let preferred = self.measure_node_ref(node, style, atlas, Dimensioni::new(rect.width, rect.height));
+        let policy = node.state.policy;
+        let outer = Recti::new(
+            rect.x,
+            rect.y,
+            resolve_allocated_size(policy.width, preferred.width, rect.width, rect.width, None),
+            resolve_allocated_size(policy.height, preferred.height, rect.height, rect.height, None),
+        );
+        let frame_geometry = crate::frame::frame_geometry(outer, framed, style);
+        let content = frame_geometry.content_or_empty();
         let is_branch = node.is_container();
-        if is_branch {
-            node.set_layout(NodeLayout::from_rect(rect, node.state.layout.content_size));
+        node.set_layout(NodeLayout::from_parts(
+            outer,
+            content,
+            Dimensioni::new(content.width.max(0), content.height.max(0)),
+            Dimensioni::new(outer.width.max(0), outer.height.max(0)),
+        ));
+
+        let mut ctx = LayoutCtx {
+            runtime: self,
+            style,
+            atlas,
+            outer,
+            content,
+            border_width: frame_geometry.border_width,
+        };
+        match &mut node.data {
+            UiNodeData::Widget(widget) => widget.layout(&mut ctx, &mut node.state, content),
+            UiNodeData::Container(container) => container.layout(&mut ctx, &mut node.state, content),
         }
 
-        let mut ctx = LayoutCtx { runtime: self, style, atlas };
-        match &mut node.data {
-            UiNodeData::Widget(widget) => widget.layout(&mut ctx, &mut node.state, rect),
-            UiNodeData::Container(container) => container.layout(&mut ctx, &mut node.state, rect),
-        }
+        node.state.layout.frame = outer;
+        node.state.layout.content.viewport = node
+            .state
+            .layout
+            .content
+            .viewport
+            .intersect(&content)
+            .unwrap_or_else(|| Recti::new(content.x, content.y, 0, 0));
 
         let propagate_child_overflow = node.state.layout.propagate_child_overflow;
         if is_branch && propagate_child_overflow {
-            let content_rect = child_content_bounds_from_children(node.children()).unwrap_or(rect);
+            let content_rect = child_content_bounds_from_children(node.children()).unwrap_or(content);
             let content_size = Dimensioni::new(
-                (content_rect.x + content_rect.width - rect.x).max(0),
-                (content_rect.y + content_rect.height - rect.y).max(0),
+                (content_rect.x + content_rect.width - outer.x).max(outer.width).max(0),
+                (content_rect.y + content_rect.height - outer.y).max(outer.height).max(0),
             );
             node.set_layout(node.state.layout.with_content_size(content_size));
         }
-        Dimensioni::new(rect.width, rect.height)
+        Dimensioni::new(outer.width, outer.height)
     }
 
     /// Updates one already-borrowed node and descendants.
@@ -349,6 +410,11 @@ impl UiRuntime {
         input: &Input,
         results: &mut FrameResults,
     ) {
+        let framed = node_is_framed(node);
+        let frame_geometry = crate::frame::frame_geometry(node.state.layout.frame, framed, style);
+        let frame_rect = parent_traversal.screen_frame(node.state.layout);
+        let content_rect = parent_traversal.screen_rect(frame_geometry.content_or_empty());
+        let frame_clip = parent_traversal.screen_clip.intersect(&frame_rect).unwrap_or_default();
         let traversal = parent_traversal.enter(node.state.layout);
         let traverse_children = {
             let mut ctx = UpdateCtx {
@@ -360,6 +426,10 @@ impl UiRuntime {
                 atlas: atlas.clone(),
                 input,
                 results,
+                frame_rect,
+                content_rect,
+                frame_clip,
+                parent_traversal,
                 traversal,
             };
             match &mut node.data {
@@ -443,8 +513,8 @@ impl UiRuntime {
     /// Routes one pointer event to the capturing node, if there is one.
     pub(crate) fn route_captured_pointer_input_event(&mut self, roots: &mut [UiNode], style: &Style, input: &Input, event: &UiInputEvent) -> Option<bool> {
         let capture = self.capture.filter(|id| contains_node_in(roots, *id))?;
-        let traversal = self.traversal_state_for_node(roots, capture);
-        let result = self.route_input_event_to_node_only(roots, capture, traversal, style, input, event);
+        let parent_traversal = self.parent_traversal_state_for_node(roots, capture);
+        let result = self.route_input_event_to_node_only(roots, capture, parent_traversal, style, input, event);
         self.update_pointer_capture(capture, result, event, input);
         Some(result.is_consumed())
     }
@@ -454,8 +524,9 @@ impl UiRuntime {
         let Some(focus) = self.focus.filter(|id| contains_node_in(roots, *id)) else {
             return false;
         };
-        let traversal = self.traversal_state_for_node(roots, focus);
-        self.route_input_event_to_node_only(roots, focus, traversal, style, input, event).is_consumed()
+        let parent_traversal = self.parent_traversal_state_for_node(roots, focus);
+        self.route_input_event_to_node_only(roots, focus, parent_traversal, style, input, event)
+            .is_consumed()
     }
 
     /// Applies runtime pointer-capture ownership from one routed event result.
@@ -488,7 +559,7 @@ impl UiRuntime {
             }
         }
 
-        let result = self.route_input_event_to_node_only_ref(node, traversal, style, input, event);
+        let result = self.route_input_event_to_node_only_ref(node, parent_traversal, style, input, event);
         result.is_consumed().then_some((id, result))
     }
 
@@ -497,13 +568,13 @@ impl UiRuntime {
         &mut self,
         roots: &mut [UiNode],
         id: UiNodeId,
-        traversal: TraversalState,
+        parent_traversal: TraversalState,
         style: &Style,
         input: &Input,
         event: &UiInputEvent,
     ) -> InputResult {
         find_node_mut(roots, id)
-            .map(|node| self.route_input_event_to_node_only_ref(node, traversal, style, input, event))
+            .map(|node| self.route_input_event_to_node_only_ref(node, parent_traversal, style, input, event))
             .unwrap_or(InputResult::Ignored)
     }
 
@@ -511,12 +582,18 @@ impl UiRuntime {
     fn route_input_event_to_node_only_ref(
         &mut self,
         node: &mut UiNode,
-        traversal: TraversalState,
+        parent_traversal: TraversalState,
         style: &Style,
         input: &Input,
         event: &UiInputEvent,
     ) -> InputResult {
-        let mut ctx = InputCtx { runtime: self, style, input, traversal };
+        let mut ctx = InputCtx {
+            runtime: self,
+            style,
+            input,
+            parent_traversal,
+            traversal: parent_traversal.enter(node.state.layout),
+        };
         match &mut node.data {
             UiNodeData::Widget(widget) => widget.update_on(&mut ctx, &mut node.state, event),
             UiNodeData::Container(container) => container.update_on(&mut ctx, &mut node.state, event),
@@ -532,6 +609,15 @@ impl UiRuntime {
         style: &Style,
         atlas: crate::AtlasHandle,
     ) {
+        let framed = node_is_framed(node);
+        let frame_geometry = crate::frame::frame_geometry(node.state.layout.frame, framed, style);
+        let frame_rect = parent_traversal.screen_frame(node.state.layout);
+        let content_rect = parent_traversal.screen_rect(frame_geometry.content_or_empty());
+        if framed {
+            let local_bounds = parent_traversal.screen_clip;
+            let mut painter = crate::render::Painter::new(display_list, Vec2i::default(), local_bounds, parent_traversal.screen_clip);
+            crate::frame::paint_internal_frame(&mut painter, frame_rect, None, style.frame_border());
+        }
         let traversal = parent_traversal.enter(node.state.layout);
         let traverse_children = {
             let mut ctx = PaintCtx {
@@ -539,6 +625,9 @@ impl UiRuntime {
                 display_list,
                 style,
                 atlas: atlas.clone(),
+                parent_traversal,
+                frame_rect,
+                content_rect,
                 traversal,
             };
             match &mut node.data {
@@ -562,13 +651,16 @@ impl UiRuntime {
 
     /// Derives traversal state for one node by walking parent links on the call stack.
     pub(super) fn traversal_state_for_node(&self, roots: &[UiNode], id: UiNodeId) -> TraversalState {
-        let parent_state = self
-            .contains_node(roots, id)
+        let parent_state = self.parent_traversal_state_for_node(roots, id);
+        self.node_traversal_state(roots, id, parent_state)
+    }
+
+    pub(super) fn parent_traversal_state_for_node(&self, roots: &[UiNode], id: UiNodeId) -> TraversalState {
+        self.contains_node(roots, id)
             .then(|| self.parent_of(roots, id))
             .flatten()
             .map(|parent| self.traversal_state_for_node(roots, parent))
-            .unwrap_or(self.root_traversal);
-        self.node_traversal_state(roots, id, parent_state)
+            .unwrap_or(self.root_traversal)
     }
 }
 
@@ -595,6 +687,13 @@ fn find_node_mut(roots: &mut [UiNode], id: UiNodeId) -> Option<&mut UiNode> {
 
 fn contains_node_in(roots: &[UiNode], id: UiNodeId) -> bool {
     find_node(roots, id).is_some()
+}
+
+fn node_is_framed(node: &UiNode) -> bool {
+    match &node.data {
+        UiNodeData::Widget(widget) => widget.is_framed(),
+        UiNodeData::Container(container) => container.is_framed(),
+    }
 }
 
 fn transfer_node_runtime_state(node: &mut UiNode, previous_roots: &[UiNode]) {

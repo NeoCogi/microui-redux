@@ -127,7 +127,7 @@ fn scroll_area_nodes_store_viewport_and_chrome_children() {
     let tree = UiNodeBuilder::build(|builder| {
         builder
             .node(NodeOptions::with_policy(Policy::fill()))
-            .scroll_area(crate::ContainerOption::NONE, crate::ScrollBehavior::NONE, |builder| {
+            .scroll_area(crate::ContainerOption::FRAME, crate::ScrollBehavior::NONE, |builder| {
                 builder.widget(leaf.clone());
             });
     });

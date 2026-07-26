@@ -95,7 +95,7 @@ impl TextArea {
             cursor,
             scroll: vec2(0, 0),
             wrap: TextWrap::None,
-            config: WidgetConfig::new(WidgetOption::NONE, ScrollBehavior::GRAB_SCROLL),
+            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::GRAB_SCROLL),
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
@@ -236,7 +236,7 @@ struct TextAreaLayout {
 
 /// Resolves wrapped lines, content size, scrollbar visibility, and scrollbar geometry.
 fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextAreaLayout {
-    let bounds = ctx.screen_rect();
+    let bounds = ctx.screen_content_rect();
     let style = ctx.style();
     let padding = style.padding;
     let scrollbar_size = style.scrollbar_size;
@@ -355,6 +355,8 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent], state: &mut 
     }
 
     let layout = textarea_layout(ctx, state, font);
+    let content_in_frame = ctx.frame_local_content_rect();
+    let content_mouse_pos = input.mouse_pos() - Vec2i::new(content_in_frame.x, content_in_frame.y);
 
     if let Some(delta) = input.scroll_delta() {
         // Wheel/trackpad scrolling only affects axes that actually overflow.
@@ -380,7 +382,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent], state: &mut 
             layout.vscroll_base.width,
             layout.vscroll_base.height,
         );
-        if input.mouse_pressed().intersects(MouseButton::LEFT) && vscroll_base_local.contains(&input.mouse_pos()) {
+        if input.mouse_pressed().intersects(MouseButton::LEFT) && vscroll_base_local.contains(&content_mouse_pos) {
             // Track scrollbar drag separately so text clicks do not also move the caret.
             state.dragging_y = true;
             clicked_scrollbar = true;
@@ -397,7 +399,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent], state: &mut 
             layout.hscroll_base.width,
             layout.hscroll_base.height,
         );
-        if input.mouse_pressed().intersects(MouseButton::LEFT) && hscroll_base_local.contains(&input.mouse_pos()) {
+        if input.mouse_pressed().intersects(MouseButton::LEFT) && hscroll_base_local.contains(&content_mouse_pos) {
             state.dragging_x = true;
             clicked_scrollbar = true;
         }
@@ -444,7 +446,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent], state: &mut 
 
     if ctx.focused() && input.mouse_pressed().intersects(MouseButton::LEFT) && ctx.mouse_over(layout.bounds, input.mouse_pos()) && !clicked_scrollbar {
         // Convert a widget-local click to content-local coordinates before resolving cursor.
-        let mouse_pos = input.mouse_pos();
+        let mouse_pos = content_mouse_pos;
         let local_x = mouse_pos.x - (layout.body_local.x + layout.padding) + state.scroll.x;
         let local_y = mouse_pos.y - (layout.body_local.y + layout.padding) + state.scroll.y;
         let line_idx = (local_y / layout.metrics.line_height).clamp(0, layout.lines.len().saturating_sub(1) as i32) as usize;
@@ -499,7 +501,7 @@ fn textarea_paint(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) {
     let cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
     let caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
-    ctx.draw_widget_frame(layout.bounds, ControlColor::Base, state.config.opt);
+    ctx.draw_widget_fill(layout.bounds, ControlColor::Base);
 
     let text_origin = vec2(layout.body.x + layout.padding - state.scroll.x, layout.body.y + layout.padding - state.scroll.y);
     let color = ctx.style().colors[ControlColor::Text as usize];
@@ -538,7 +540,7 @@ fn textarea_paint(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) {
     });
 
     if layout.needs_v && layout.maxscroll_y > 0 && layout.body.height > 0 {
-        ctx.draw_frame(layout.vscroll_base, ControlColor::ScrollBase);
+        ctx.draw_rect(layout.vscroll_base, ctx.style().colors[ControlColor::ScrollBase as usize]);
         let thumb = scrollbar_thumb(
             ScrollAxis::Vertical,
             layout.vscroll_base,
@@ -547,11 +549,11 @@ fn textarea_paint(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) {
             state.scroll.y,
             layout.thumb_size,
         );
-        ctx.draw_frame(thumb, ControlColor::ScrollThumb);
+        ctx.draw_rect(thumb, ctx.style().colors[ControlColor::ScrollThumb as usize]);
     }
 
     if layout.needs_h && layout.maxscroll_x > 0 && layout.body.width > 0 {
-        ctx.draw_frame(layout.hscroll_base, ControlColor::ScrollBase);
+        ctx.draw_rect(layout.hscroll_base, ctx.style().colors[ControlColor::ScrollBase as usize]);
         let thumb = scrollbar_thumb(
             ScrollAxis::Horizontal,
             layout.hscroll_base,
@@ -560,7 +562,7 @@ fn textarea_paint(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) {
             state.scroll.x,
             layout.thumb_size,
         );
-        ctx.draw_frame(thumb, ControlColor::ScrollThumb);
+        ctx.draw_rect(thumb, ctx.style().colors[ControlColor::ScrollThumb as usize]);
     }
 }
 

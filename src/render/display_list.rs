@@ -222,6 +222,18 @@ impl DisplayList {
             .collect()
     }
 
+    /// Returns fill rectangle, clip, and color snapshots for retained frame-geometry assertions.
+    #[cfg(test)]
+    pub(crate) fn debug_fill_rects(&self) -> Vec<(Recti, Recti, Color)> {
+        self.ops
+            .iter()
+            .filter_map(|operation| match operation.kind {
+                DrawKind::FillRect { rect, color } => Some((rect, operation.clip, color)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Returns the number of opaque operations for performance assertions.
     #[cfg(test)]
     pub(crate) fn debug_operation_count(&self) -> usize {

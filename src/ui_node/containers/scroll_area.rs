@@ -122,6 +122,10 @@ impl Scrollbars {
 }
 
 impl Widget for ScrollArea {
+    fn is_framed(&self) -> bool {
+        self.opt.intersects(ContainerOption::FRAME)
+    }
+
     fn measure(&self, ctx: &MeasureCtx<'_>, state: &UiNodeState, available: Dimensioni) -> Dimensioni {
         let id = state.id();
         child(&self.children, scroll_viewport_id(id))
@@ -496,10 +500,9 @@ fn update_scrollbar_on_input(
 }
 
 fn paint_scroll_area_panel(ctx: &mut PaintCtx<'_>, state: &UiNodeState, opt: ContainerOption) {
-    let rect = ctx.node_rect(state);
-    if !opt.intersects(ContainerOption::NO_FRAME) {
-        ctx.draw_frame(rect, ControlColor::PanelBG);
-    }
+    let _ = opt;
+    let rect = ctx.node_content_rect(state);
+    ctx.draw_flat_rect(rect, ControlColor::PanelBG);
 }
 
 fn paint_scrollbar_node(
@@ -531,13 +534,13 @@ fn paint_scrollbar_node(
     match state.axis {
         ScrollAxis::Vertical if content.height > body.height => {
             let thumb = scrollbar_thumb(ScrollAxis::Vertical, track, body.height, content.height, scroll_offset.y, scrollbar_size);
-            ctx.draw_frame(track, ControlColor::Base);
-            ctx.draw_frame(thumb, ControlColor::Button);
+            ctx.draw_flat_rect(track, ControlColor::ScrollBase);
+            ctx.draw_flat_rect(thumb, ControlColor::ScrollThumb);
         }
         ScrollAxis::Horizontal if content.width > body.width => {
             let thumb = scrollbar_thumb(ScrollAxis::Horizontal, track, body.width, content.width, scroll_offset.x, scrollbar_size);
-            ctx.draw_frame(track, ControlColor::Base);
-            ctx.draw_frame(thumb, ControlColor::Button);
+            ctx.draw_flat_rect(track, ControlColor::ScrollBase);
+            ctx.draw_flat_rect(thumb, ControlColor::ScrollThumb);
         }
         _ => {}
     }

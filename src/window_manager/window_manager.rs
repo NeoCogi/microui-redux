@@ -44,15 +44,22 @@ struct WindowChrome {
 
 impl WindowChrome {
     fn new(rect: Recti, style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption) -> Self {
-        let title = (!opt.intersects(ContainerOption::NO_TITLE)).then(|| Recti::new(rect.x, rect.y, rect.width, root_titlebar_height(style, atlas)));
+        let client = crate::frame::frame_geometry(rect, opt.intersects(ContainerOption::FRAME), style).content_or_empty();
+        let title = (!opt.intersects(ContainerOption::NO_TITLE))
+            .then(|| Recti::new(client.x, client.y, client.width, root_titlebar_height(style, atlas).min(client.height.max(0))));
         let close = title.and_then(|title| {
             (!opt.intersects(ContainerOption::NO_CLOSE)).then(|| Recti::new(title.x + title.width - title.height, title.y, title.height, title.height))
         });
         let resize = (!opt.intersects(ContainerOption::AUTO_SIZE) && !opt.intersects(ContainerOption::NO_RESIZE)).then(|| {
             let size = style.scrollbar_size.max(0);
-            Recti::new(rect.x + rect.width - size, rect.y + rect.height - size, size, size)
+            Recti::new(
+                rect.x.saturating_add(rect.width).saturating_sub(size),
+                rect.y.saturating_add(rect.height).saturating_sub(size),
+                size.min(rect.width.max(0)),
+                size.min(rect.height.max(0)),
+            )
         });
-        let mut body = rect;
+        let mut body = client;
         if let Some(title) = title {
             body.y += title.height;
             body.height = body.height.saturating_sub(title.height);
@@ -109,7 +116,7 @@ impl<B: RendererBackend> Context<B> {
 
     /// Registers an open retained window and returns its stable root identifier.
     pub fn create_window(&mut self, name: &str, rect: Recti, tree: UiNodeSet) -> RootId {
-        self.register_root(WindowKind::Window, name, rect, tree, ContainerOption::NONE, true)
+        self.register_root(WindowKind::Window, name, rect, tree, ContainerOption::FRAME, true)
     }
 
     /// Returns whether a registered root is currently visible.
@@ -179,7 +186,7 @@ impl<B: RendererBackend> Context<B> {
 
     /// Registers a hidden dialog root.
     pub fn create_dialog(&mut self, name: &str, rect: Recti, tree: UiNodeSet) -> RootId {
-        self.register_root(WindowKind::Dialog, name, rect, tree, ContainerOption::NONE, false)
+        self.register_root(WindowKind::Dialog, name, rect, tree, ContainerOption::FRAME, false)
     }
 
     /// Registers a hidden popup root.
@@ -342,13 +349,14 @@ impl<B: RendererBackend> Context<B> {
 
     /// Records the root background and border before retained contents.
     fn record_window_frame(&mut self, entry: &WindowEntry, dimensions: Dimensioni) {
-        if entry.opt.intersects(ContainerOption::NO_FRAME) {
-            return;
-        }
-
         let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
         let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);
-        record_root_frame(&mut painter, self.style.as_ref(), entry.rect, ControlColor::WindowBG);
+        let fill = self.style.colors[ControlColor::WindowBG as usize];
+        if entry.opt.intersects(ContainerOption::FRAME) {
+            crate::frame::paint_internal_frame(&mut painter, entry.rect, Some(fill), self.style.frame_border());
+        } else {
+            painter.fill_rect(entry.rect, fill);
+        }
     }
 
     /// Records title, close, and resize chrome after retained contents.
@@ -358,7 +366,7 @@ impl<B: RendererBackend> Context<B> {
         let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);
 
         if let Some(title) = chrome.title {
-            record_root_frame(&mut painter, self.style.as_ref(), title, ControlColor::TitleBG);
+            record_root_fill(&mut painter, self.style.as_ref(), title, ControlColor::TitleBG);
             let mut text = title;
             if let Some(close) = chrome.close {
                 text.width = (close.x.max(title.x) - title.x).max(0);
@@ -375,7 +383,11 @@ impl<B: RendererBackend> Context<B> {
             && resize.width > 0
             && resize.height > 0
         {
-            record_root_frame(&mut painter, self.style.as_ref(), resize, ControlColor::WindowBG);
+            let client = crate::frame::frame_geometry(entry.rect, entry.opt.intersects(ContainerOption::FRAME), self.style.as_ref()).content_or_empty();
+            if let Some(visual) = resize.intersect(&client) {
+                let fill = self.style.colors[ControlColor::WindowBG as usize];
+                crate::frame::paint_internal_frame(&mut painter, visual, Some(fill), self.style.frame_border());
+            }
         }
     }
 
@@ -436,7 +448,10 @@ impl<B: RendererBackend> Context<B> {
     }
 
     const fn default_popup_options() -> ContainerOption {
-        ContainerOption::AUTO_SIZE.union(ContainerOption::NO_RESIZE).union(ContainerOption::NO_TITLE)
+        ContainerOption::FRAME
+            .union(ContainerOption::AUTO_SIZE)
+            .union(ContainerOption::NO_RESIZE)
+            .union(ContainerOption::NO_TITLE)
     }
 
     #[cfg(test)]
@@ -527,15 +542,20 @@ fn root_min_size(style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption
         };
         height = height.max(title_min_height);
     }
-    Dimensioni::new(width, height)
+    let border = if opt.intersects(ContainerOption::FRAME) {
+        style.frame_border().width.checked_mul(2).expect("root frame extent overflowed i32")
+    } else {
+        0
+    };
+    Dimensioni::new(
+        width.checked_add(border).expect("root minimum width overflowed i32"),
+        height.checked_add(border).expect("root minimum height overflowed i32"),
+    )
 }
 
-/// Records a window frame through the retained screen-space painter.
-fn record_root_frame(painter: &mut Painter<'_>, style: &Style, rect: Recti, color: ControlColor) {
+/// Records a flat window-chrome fill through the retained screen-space painter.
+fn record_root_fill(painter: &mut Painter<'_>, style: &Style, rect: Recti, color: ControlColor) {
     painter.fill_rect(rect, style.colors[color as usize]);
-    if let Some(border) = style.frame_border_color(color) {
-        record_painter_box(painter, crate::expand_rect(rect, 1), border);
-    }
 }
 
 /// Records title text with an operation-local clip.
@@ -546,12 +566,4 @@ fn record_root_title_text(painter: &mut Painter<'_>, style: &Style, atlas: &crat
     let color = style.colors[ControlColor::TitleText as usize];
     let pos = crate::text_layout::control_text_position_with_font(style, atlas, style.title_font, title, rect, crate::WidgetOption::NONE);
     painter.with_clip(rect, |painter| painter.text(style.title_font, title, pos, color));
-}
-
-/// Records the historical one-pixel window border geometry.
-fn record_painter_box(painter: &mut Painter<'_>, r: Recti, color: Color) {
-    painter.fill_rect(rect(r.x + 1, r.y, r.width - 2, 1), color);
-    painter.fill_rect(rect(r.x + 1, r.y + r.height - 1, r.width - 2, 1), color);
-    painter.fill_rect(rect(r.x, r.y, 1, r.height), color);
-    painter.fill_rect(rect(r.x + r.width - 1, r.y, 1, r.height), color);
 }

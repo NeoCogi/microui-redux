@@ -816,7 +816,7 @@ impl Widget for SuzanneWidget {
 }
 
 fn static_label(text: impl Into<String>) -> WidgetHandle<ListItem> {
-    widget_handle(ListItem::with_opt(text, WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME))
+    widget_handle(ListItem::with_opt(text, WidgetOption::NO_INTERACT))
 }
 
 struct State {
@@ -996,25 +996,25 @@ impl State {
             widget_handle(Button::with_image(
                 "Texture 1 - Red",
                 Some(red_texture),
-                WidgetOption::NONE,
+                WidgetOption::FRAME,
                 WidgetFillOption::ALL,
             )),
             widget_handle(Button::with_image(
                 "Texture 2 - Green",
                 Some(green_texture),
-                WidgetOption::NONE,
+                WidgetOption::FRAME,
                 WidgetFillOption::ALL,
             )),
             widget_handle(Button::with_image(
                 "Texture 3 - Blue",
                 Some(blue_texture),
-                WidgetOption::NONE,
+                WidgetOption::FRAME,
                 WidgetFillOption::ALL,
             )),
             widget_handle(Button::with_image(
                 "Texture 4 - Noise",
                 Some(noise_texture),
-                WidgetOption::NONE,
+                WidgetOption::FRAME,
                 WidgetFillOption::ALL,
             )),
         ];
@@ -1022,20 +1022,21 @@ impl State {
             widget_handle(Button::with_scaled_image(
                 "External Image",
                 Some(texture),
-                WidgetOption::NONE,
+                WidgetOption::FRAME,
                 WidgetFillOption::ALL,
             ))
         });
-        let style_color_sliders = std::array::from_fn(|_| widget_handle(Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)));
+        let style_color_sliders =
+            std::array::from_fn(|_| widget_handle(Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)));
         let style_color_swatches = std::array::from_fn(|_| widget_handle(ColorSwatch::new(color(0, 0, 0, 0xFF))));
         let style_value_sliders = [
-            widget_handle(Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER)),
-            widget_handle(Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::ALIGN_CENTER)),
-            widget_handle(Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER)),
-            widget_handle(Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER)),
-            widget_handle(Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::ALIGN_CENTER)),
+            widget_handle(Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+            widget_handle(Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+            widget_handle(Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+            widget_handle(Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+            widget_handle(Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
         ];
-        let bg_sliders = std::array::from_fn(|_| widget_handle(Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::ALIGN_CENTER)));
+        let bg_sliders = std::array::from_fn(|_| widget_handle(Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)));
         let mut text_area =
             TextArea::new("This is a multi-line TextArea.\nYou can type, scroll, and resize the window.\n\nTry adding more lines to see the scrollbars.");
         text_area.wrap = TextWrap::Word;
@@ -1057,10 +1058,13 @@ impl State {
         let combo_popup_root = ctx.create_popup("Combo Box Popup", UiNodeSet::default());
         ctx.set_root_options(
             combo_popup_root,
-            ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
+            ContainerOption::FRAME | ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
         );
         let popup_root = ctx.create_popup("Test Popup", UiNodeSet::default());
-        ctx.set_root_options(popup_root, ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE);
+        ctx.set_root_options(
+            popup_root,
+            ContainerOption::FRAME | ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
+        );
         ctx.set_root_visible(popup_root, false);
         let typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), UiNodeSet::default());
         let triangle_root = ctx.create_window("Triangle Window", rect(200, 100, 200, 200), UiNodeSet::default());
@@ -1147,50 +1151,50 @@ impl State {
             test1b_tn: widget_handle(Node::tree("Test 1b", NodeStateValue::Closed)),
             test2_tn: widget_handle(Node::tree("Test 2", NodeStateValue::Closed)),
             test3_tn: widget_handle(Node::tree("Test 3", NodeStateValue::Closed)),
-            submit_button: widget_handle(Button::with_opt("Submit", WidgetOption::ALIGN_CENTER)),
+            submit_button: widget_handle(Button::with_opt("Submit", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
             log_text: widget_handle(log_text),
             typography_heading: widget_handle(typography_heading),
             typography_body: widget_handle(typography_body),
-            typography_button: widget_handle(Button::with_opt("Control Preview", WidgetOption::ALIGN_CENTER)),
+            typography_button: widget_handle(Button::with_opt("Control Preview", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
             test_buttons: [
-                widget_handle(Button::with_opt("Button 1", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 2", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 3", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Popup", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 4", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Dialog", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 1", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 2", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Popup", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 4", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Dialog", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
             ],
             tree_buttons: [
-                widget_handle(Button::with_opt("Button 1", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 2", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 3", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 4", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 5", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 6", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 1", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 2", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 4", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 5", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Button 6", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
             ],
             popup_buttons: [
-                widget_handle(Button::with_opt("Hello", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("World", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Hello", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("World", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
             ],
             texture_buttons,
             stack_direction_buttons: [
-                widget_handle(Button::with_opt("Call 1", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Call 2", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Call 3", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Call 1", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Call 2", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Call 3", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Call 1", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Call 2", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Call 3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Call 1", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Call 2", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("Call 3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
             ],
             weight_buttons: [
-                widget_handle(Button::with_opt("w1", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("w2", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("w3", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("g1", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("g2", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("g3", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("g4", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("g5", WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("g6", WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("w1", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("w2", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("w3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("g1", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("g2", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("g3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("g4", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("g5", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+                widget_handle(Button::with_opt("g6", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
             ],
             submit_buf_id: NodeId::default(),
             submit_button_id: NodeId::default(),
@@ -1321,7 +1325,7 @@ impl State {
             let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Remainder(0)];
 
             tree.node(NodeOptions::with_policy(Policy::fill()))
-                .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
                     for ((label, sliders), swatch) in style_color_labels
                         .iter()
                         .zip(style_color_sliders.chunks_exact(4))
@@ -1354,7 +1358,7 @@ impl State {
         self.log_tree = UiNodeBuilder::build(|tree| {
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
-                tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
                     tree.widget(&log_text);
                 });
             });
@@ -1551,7 +1555,7 @@ impl State {
             let [texture0, texture1, texture2, texture3] = texture_buttons.clone();
 
             tree.node(NodeOptions::with_policy(Policy::fill()))
-                .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
                 Self::section(tree, &window_header, |tree| {
                     tree.row(&window_info_row, SizePolicy::Auto, |tree| {
                         tree.widget(&label_pos);

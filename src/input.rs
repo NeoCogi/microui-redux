@@ -154,6 +154,8 @@ bitflags! {
     #[derive(Copy, Clone)]
     /// Options that control how a container behaves.
     pub struct ContainerOption : u32 {
+        /// Gives the container a Style-owned outer border and inset content area.
+        const FRAME = 1024;
         /// Automatically adapts the container size to its content.
         const AUTO_SIZE = 512;
         /// Hides the title bar.
@@ -162,8 +164,6 @@ bitflags! {
         const NO_CLOSE = 64;
         /// Prevents the user from resizing the window.
         const NO_RESIZE = 16;
-        /// Hides the outer frame.
-        const NO_FRAME = 8;
         /// No special options.
         const NONE = 0;
     }
@@ -171,10 +171,10 @@ bitflags! {
     #[derive(Copy, Clone)]
     /// Widget specific options that influence layout and interactivity.
     pub struct WidgetOption : u32 {
+        /// Gives the widget a Style-owned outer border and inset content rectangle.
+        const FRAME = 512;
         /// Keeps keyboard focus while the widget is held.
         const HOLD_FOCUS = 256;
-        /// Draws the widget without its frame/background.
-        const NO_FRAME = 128;
         /// Disables interaction for the widget.
         const NO_INTERACT = 4;
         /// Aligns the widget to the right side of the cell.

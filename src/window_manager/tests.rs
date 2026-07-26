@@ -212,12 +212,12 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
     let tree = UiNodeBuilder::build(|tree| {
         scroll_area = tree
             .node(NodeOptions::with_policy(Policy::fill()))
-            .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
                 tree.node(NodeOptions::with_policy(Policy::fixed(95, 200))).widget(child.clone());
             });
     });
     let root = ctx.create_window("window", rect(0, 0, 100, 100), tree);
-    ctx.set_root_options(root, ContainerOption::NO_TITLE);
+    ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::NO_TITLE);
 
     ctx.update_ui();
     ctx.update_ui();
@@ -255,7 +255,7 @@ fn title_drag_does_not_route_pointer_to_scroll_area() {
     let tree = UiNodeBuilder::build(|tree| {
         scroll_area = tree
             .node(NodeOptions::with_policy(Policy::fill()))
-            .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
                 tree.node(NodeOptions::with_policy(Policy::fixed(95, 220))).widget(child.clone());
             });
     });
@@ -387,7 +387,7 @@ fn reopening_dialog_replaces_old_commands_with_current_frame_commands() {
     let second_tree = UiNodeBuilder::build(|tree| {
         tree.text("after");
     });
-    let opt = ContainerOption::NO_TITLE | ContainerOption::NO_CLOSE | ContainerOption::NO_RESIZE;
+    let opt = ContainerOption::FRAME | ContainerOption::NO_TITLE | ContainerOption::NO_CLOSE | ContainerOption::NO_RESIZE;
     let root = ctx.create_dialog("dialog", rect(10, 10, 80, 40), first_tree);
     ctx.set_root_options(root, opt);
 
@@ -439,7 +439,7 @@ fn reshown_roots_drop_stale_scroll_area_state_after_a_gap() {
     let mut ctx = Context::new_test(backend, Dimensioni::new(200, 200));
     let mut scroll_area = NodeId::default();
     let tree_with_scroll_area = UiNodeBuilder::build(|tree| {
-        scroll_area = tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+        scroll_area = tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
             tree.text("scroll area child");
         });
     });
@@ -468,7 +468,7 @@ fn scroll_area_node_renders_scroll_area_node() {
     let mut ctx = Context::new_test(backend, Dimensioni::new(200, 200));
     let mut scroll_area = NodeId::default();
     let tree = UiNodeBuilder::build(|tree| {
-        scroll_area = tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+        scroll_area = tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
             tree.text("scroll area child");
         });
     });
@@ -488,7 +488,7 @@ fn scroll_area_paints_disclosure_headers_in_screen_space() {
     let tree_node = widget_handle(Node::tree("Visible Tree", NodeStateValue::Expanded));
     let tree = UiNodeBuilder::build(|tree| {
         tree.node(NodeOptions::with_policy(Policy::fixed(180, 100)))
-            .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
                 tree.header(&header, |tree| {
                     tree.tree_node(&tree_node, |tree| {
                         tree.text("Visible Child");
@@ -497,7 +497,7 @@ fn scroll_area_paints_disclosure_headers_in_screen_space() {
             });
     });
     let root = ctx.create_window("window", rect(0, 0, 200, 130), tree);
-    ctx.set_root_options(root, ContainerOption::NO_TITLE);
+    ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::NO_TITLE);
 
     ctx.update_ui();
 
@@ -537,7 +537,7 @@ fn auto_sized_titled_window_uses_current_frame_content_size() {
         tree.text("hello\nhello\nhello");
     });
     let root = ctx.create_window("window", rect(0, 0, 1, 1), tree);
-    ctx.set_root_options(root, ContainerOption::AUTO_SIZE);
+    ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::AUTO_SIZE);
 
     ctx.update_ui();
 
@@ -586,7 +586,7 @@ fn auto_sized_titled_window_body_fits_current_content_same_frame() {
         tree.text("hello\nhello\nhello\nhello");
     });
     let root = ctx.create_window("window", rect(0, 0, 1, 1), tree);
-    ctx.set_root_options(root, ContainerOption::AUTO_SIZE);
+    ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::AUTO_SIZE);
 
     ctx.update_ui();
 
@@ -606,7 +606,7 @@ fn title_option_controls_root_window_title_bar_geometry() {
     let mut ctx = Context::new_test(backend, Dimensioni::new(240, 120));
     let titled = ctx.create_window("titled", rect(0, 0, 80, 40), UiNodeBuilder::build(|_tree| {}));
     let plain = ctx.create_window("plain", rect(100, 0, 80, 40), UiNodeBuilder::build(|_tree| {}));
-    ctx.set_root_options(plain, ContainerOption::NO_TITLE);
+    ctx.set_root_options(plain, ContainerOption::FRAME | ContainerOption::NO_TITLE);
     ctx.update_ui();
 
     let titled_rect = ctx.root_rect(titled).unwrap();
@@ -616,10 +616,11 @@ fn title_option_controls_root_window_title_bar_geometry() {
 
     let plain_rect = ctx.root_rect(plain).unwrap();
     let plain_body = ctx.debug_root_body(plain).unwrap();
-    assert_eq!(plain_body.y, plain_rect.y);
-    assert_eq!(plain_body.height, plain_rect.height);
-    assert_eq!(plain_body.x, plain_rect.x);
-    assert_eq!(plain_body.width, plain_rect.width);
+    let border = Style::default().frame_border_width;
+    assert_eq!(plain_body.y, plain_rect.y + border);
+    assert_eq!(plain_body.height, plain_rect.height - border * 2);
+    assert_eq!(plain_body.x, plain_rect.x + border);
+    assert_eq!(plain_body.width, plain_rect.width - border * 2);
     let plain_texts = root_texts(&ctx, plain);
     assert!(!plain_texts.iter().any(|text| text == "plain"));
 }
@@ -1090,9 +1091,10 @@ fn retained_chrome_nodes_are_recorded_in_root_cache() {
     let resize = resize.expect("resize chrome rect missing");
     let root_rect = ctx.root_rect(root).unwrap();
 
-    assert_eq!(title.x, 10);
-    assert_eq!(title.y, 12);
-    assert_eq!(title.width, root_rect.width);
+    let border = Style::default().frame_border_width;
+    assert_eq!(title.x, 10 + border);
+    assert_eq!(title.y, 12 + border);
+    assert_eq!(title.width, root_rect.width - border * 2);
     assert!(title.width > 96);
     assert!(title.height > 0);
     assert!(close.x >= title.x);
@@ -1268,7 +1270,10 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     let backend = NoopRenderer { atlas };
     let mut ctx = Context::new_test(backend, Dimensioni::new(240, 120));
     let popup_root = ctx.create_popup("combo popup", UiNodeSet::default());
-    ctx.set_root_options(popup_root, ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE);
+    ctx.set_root_options(
+        popup_root,
+        ContainerOption::FRAME | ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
+    );
     let combo = widget_handle(Combo::new());
     let items = [widget_handle(ListItem::new("Apple")), widget_handle(ListItem::new("Banana"))];
     let mut item_ids = [NodeId::default(); 2];
@@ -1284,7 +1289,7 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
             }
         }),
     );
-    ctx.set_root_options(main_root, ContainerOption::NO_TITLE | ContainerOption::NO_RESIZE);
+    ctx.set_root_options(main_root, ContainerOption::FRAME | ContainerOption::NO_TITLE | ContainerOption::NO_RESIZE);
     let popup_items = items.clone();
     ctx.set_root_nodes(
         popup_root,
@@ -1362,8 +1367,8 @@ fn node_popup_auto_size_fits_stacked_buttons() {
     let atlas = make_test_atlas();
     let backend = NoopRenderer { atlas };
     let mut ctx = Context::new_test(backend, Dimensioni::new(240, 120));
-    let hello = widget_handle(Button::with_opt("Hello", WidgetOption::ALIGN_CENTER));
-    let world = widget_handle(Button::with_opt("World", WidgetOption::ALIGN_CENTER));
+    let hello = widget_handle(Button::with_opt("Hello", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
+    let world = widget_handle(Button::with_opt("World", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
     let mut hello_id = NodeId::default();
     let mut world_id = NodeId::default();
     let popup = ctx.create_popup(
@@ -1461,13 +1466,13 @@ fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
     let tree = UiNodeBuilder::build(|tree| {
         scroll_area = tree
             .node(NodeOptions::with_policy(Policy::fixed(90, 40)))
-            .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
                 tree.node(NodeOptions::with_policy(Policy::fixed(180, 140))).widget(inner.clone());
             });
         tree.node(NodeOptions::with_policy(Policy::fixed(90, 180))).widget(bottom.clone());
     });
     let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
-    ctx.set_root_options(root, ContainerOption::NO_TITLE);
+    ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::NO_TITLE);
 
     ctx.update_ui();
     ctx.update_ui();
@@ -1505,12 +1510,12 @@ fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
     let tree = UiNodeBuilder::build(|tree| {
         scroll_area = tree
             .node(NodeOptions::with_policy(Policy::fixed(90, 40)))
-            .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+            .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
                 tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner.clone());
             });
     });
     let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
-    ctx.set_root_options(root, ContainerOption::NO_TITLE);
+    ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::NO_TITLE);
 
     ctx.update_ui();
     ctx.update_ui();

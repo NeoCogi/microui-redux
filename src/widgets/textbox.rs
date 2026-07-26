@@ -78,7 +78,7 @@ impl Textbox {
         Self {
             buf,
             cursor,
-            config: WidgetConfig::default(),
+            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::NONE),
         }
     }
 
@@ -167,7 +167,7 @@ pub(crate) fn textbox_update(
     font: FontId,
 ) -> ResourceState {
     let mut res = ResourceState::NONE;
-    let r = ctx.screen_rect();
+    let r = ctx.screen_content_rect();
     if !ctx.focused() {
         // Reset to end when blurred so refocusing starts from a predictable position.
         *cursor = buf.len();
@@ -226,7 +226,7 @@ pub(crate) fn textbox_update(
 
     if ctx.focused() && mouse_pressed.intersects(MouseButton::LEFT) && ctx.mouse_over(r, mouse_pos) {
         // Convert local click x into a UTF-8 boundary cursor position.
-        let click_x = mouse_pos.x - (textx - r.x);
+        let click_x = mouse_pos.x - ctx.frame_local_content_rect().x - (textx - r.x);
         cursor_pos = cursor_from_text_x(buf, click_x, font, ctx.atlas());
     }
 
@@ -237,8 +237,9 @@ pub(crate) fn textbox_update(
 
 /// Shared single-line textbox painting used by textbox and numeric inline editors.
 pub(crate) fn textbox_paint(ctx: &mut WidgetCtx<'_>, buf: &str, cursor: usize, opt: WidgetOption, font: FontId) {
-    let r = ctx.screen_rect();
-    ctx.draw_widget_frame(r, ControlColor::Base, opt);
+    let r = ctx.screen_content_rect();
+    let _ = opt;
+    ctx.draw_widget_fill(r, ControlColor::Base);
 
     let metrics = font_line_metrics(font, ctx.atlas());
     let texty = centered_line_top(r, metrics.line_height);

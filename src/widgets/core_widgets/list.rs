@@ -77,7 +77,7 @@ impl ListItem {
 
     /// Paints row highlight, optional icon, and label.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
-        let bounds = ctx.screen_rect();
+        let bounds = ctx.screen_content_rect();
 
         if ctx.focused() || ctx.hovered() {
             let mut color = ControlColor::Button;
@@ -157,11 +157,9 @@ impl ListBox {
 
     /// Paints list-box frame, label, and optional image.
     fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
-        let rect = ctx.screen_rect();
-        if !self.config.opt.intersects(WidgetOption::NO_FRAME) {
-            if let Some(colorid) = widget_fill_color(ctx, ControlColor::Button, WidgetFillOption::HOVER | WidgetFillOption::CLICK) {
-                ctx.draw_frame(rect, colorid);
-            }
+        let rect = ctx.screen_content_rect();
+        if let Some(colorid) = widget_fill_color(ctx, ControlColor::Button, WidgetFillOption::HOVER | WidgetFillOption::CLICK) {
+            ctx.draw_rect(rect, ctx.style().colors[colorid as usize]);
         }
         let visual_size = self.image.map(TextureId::size);
         let layout = layout_inline_content(rect, ctx.style(), &self.label, visual_size);

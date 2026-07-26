@@ -107,6 +107,7 @@
 
 pub mod atlas;
 mod file_dialog;
+mod frame;
 mod id;
 mod input;
 mod rect_packer;

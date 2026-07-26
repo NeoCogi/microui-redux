@@ -273,7 +273,7 @@ impl FileDialogState {
 
                 // Main pane: folders on the left, files on the right, both scrollable through scroll areas.
                 tree.row(&pane_widths, SizePolicy::Remainder(footer_reserved), |tree| {
-                    tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
                         tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                             tree.widget(folders_label);
                             for item in folder_items {
@@ -285,7 +285,7 @@ impl FileDialogState {
                         });
                     });
 
-                    tree.scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
+                    tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
                         tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                             tree.widget(files_label);
                             for item in file_items {
@@ -461,7 +461,7 @@ impl FileDialogState {
             .to_string_lossy()
             .to_string();
         let root = ctx.create_dialog("Open File", Recti::new(50, 50, 720, 520), UiNodeSet::default());
-        ctx.set_root_options(root, ContainerOption::NONE);
+        ctx.set_root_options(root, ContainerOption::FRAME);
         let mut dialog = Self {
             current_working_directory,
             file_name: None,
@@ -488,12 +488,12 @@ impl FileDialogState {
             go_button_id: NodeId::default(),
             ok_button_id: NodeId::default(),
             cancel_button_id: NodeId::default(),
-            folders_label: widget_handle(ListItem::with_opt("Folders", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),
-            no_folders_label: widget_handle(ListItem::with_opt("No folders", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),
-            files_label: widget_handle(ListItem::with_opt("Files", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),
-            no_files_label: widget_handle(ListItem::with_opt("No Files", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),
-            file_name_label: widget_handle(ListItem::with_opt("File name:", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),
-            spacer_label: widget_handle(ListItem::with_opt("", WidgetOption::NO_INTERACT | WidgetOption::NO_FRAME)),
+            folders_label: widget_handle(ListItem::with_opt("Folders", WidgetOption::NO_INTERACT)),
+            no_folders_label: widget_handle(ListItem::with_opt("No folders", WidgetOption::NO_INTERACT)),
+            files_label: widget_handle(ListItem::with_opt("Files", WidgetOption::NO_INTERACT)),
+            no_files_label: widget_handle(ListItem::with_opt("No Files", WidgetOption::NO_INTERACT)),
+            file_name_label: widget_handle(ListItem::with_opt("File name:", WidgetOption::NO_INTERACT)),
+            spacer_label: widget_handle(ListItem::with_opt("", WidgetOption::NO_INTERACT)),
             tree: UiNodeSet::default(),
         };
         dialog.path_box.update(|path_box| {

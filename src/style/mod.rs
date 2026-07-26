@@ -163,6 +163,8 @@ pub struct Style {
     pub scrollbar_size: i32,
     /// Size of slider thumbs.
     pub thumb_size: i32,
+    /// Width of inside-aligned widget and container borders.
+    pub frame_border_width: i32,
     /// Palette of [`crate::ControlColor`] entries.
     pub colors: [Color; 14],
 }
@@ -252,6 +254,7 @@ impl Default for Style {
             title_height: 24,
             scrollbar_size: 12,
             thumb_size: 8,
+            frame_border_width: 1,
             colors: [
                 Color { r: 230, g: 230, b: 230, a: 255 },
                 Color { r: 25, g: 25, b: 25, a: 255 },
@@ -290,18 +293,10 @@ impl FontChoice {
 }
 
 impl Style {
-    /// Returns the border color used when a frame painted with `fill` should receive an outline.
-    ///
-    /// Some built-in color roles, such as scrollbars and title bars, are deliberately flat. Keeping
-    /// that frame metadata on the style keeps generic draw code from knowing which widget emitted
-    /// the frame.
-    pub fn frame_border_color(&self, fill: crate::ControlColor) -> Option<Color> {
-        match fill {
-            crate::ControlColor::ScrollBase | crate::ControlColor::ScrollThumb | crate::ControlColor::TitleBG => None,
-            _ => {
-                let color = self.colors[crate::ControlColor::Border as usize];
-                if color.a == 0 { None } else { Some(color) }
-            }
+    pub(crate) fn frame_border(&self) -> crate::frame::FrameBorder {
+        crate::frame::FrameBorder {
+            width: self.frame_border_width.max(0),
+            color: self.colors[crate::ControlColor::Border as usize],
         }
     }
 

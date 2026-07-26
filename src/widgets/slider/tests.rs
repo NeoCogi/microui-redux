@@ -89,7 +89,7 @@ fn slider_zero_range_keeps_value() {
 
 #[test]
 fn slider_wheel_snaps_fractional_step_from_lower_bound() {
-    let mut slider = Slider::with_opt(1.15, 1.0, 2.0, 0.2, 2, WidgetOption::NONE);
+    let mut slider = Slider::with_opt(1.15, 1.0, 2.0, 0.2, 2, WidgetOption::FRAME);
     let res = run_slider_once(&mut slider, rect(0, 0, 100, 20), Vec::new(), true, false, false, Some(vec2(0, 1)));
 
     assert!(res.is_changed());
@@ -98,7 +98,7 @@ fn slider_wheel_snaps_fractional_step_from_lower_bound() {
 
 #[test]
 fn slider_drag_snaps_fractional_step_from_lower_bound() {
-    let mut slider = Slider::with_opt(10.0, 10.0, 20.0, 0.25, 2, WidgetOption::NONE);
+    let mut slider = Slider::with_opt(10.0, 10.0, 20.0, 0.25, 2, WidgetOption::FRAME);
     let input = vec![UiInputEvent::MouseDrag {
         pos: vec2(33, 10),
         delta: Vec2i::default(),
