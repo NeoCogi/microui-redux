@@ -71,7 +71,6 @@ pub(crate) fn test_atlas_with_font_sizes(fonts: &[(&str, usize)]) -> AtlasHandle
         icons: &icons,
         fonts: &fonts,
         format: SourceFormat::Raw,
-        slots: &[],
     };
     AtlasHandle::from(&source)
 }

@@ -10,7 +10,7 @@ use std::{
     path::Path,
 };
 
-/// Incrementally constructs an atlas by packing fonts, icons, and slots.
+/// Incrementally constructs an atlas by packing fonts and semantic icons.
 pub struct Builder {
     /// Rectangle packer used to reserve atlas regions.
     packer: Packer,
@@ -65,8 +65,6 @@ pub struct Config<'a> {
     /// When this slice is empty, [`Config::default_font`] and
     /// [`Config::default_font_size`] are used instead for single-font atlases.
     pub fonts: &'a [FontAsset<'a>],
-    /// Dimensions of additional slots to reserve in the atlas.
-    pub slots: &'a [Dimensioni],
 }
 
 impl Builder {
@@ -87,8 +85,6 @@ impl Builder {
             pixels: vec![Color4b::default(); config.texture_height * config.texture_width],
             fonts: Vec::new(),
             icons: Vec::new(),
-            slots: Vec::new(),
-            last_update_id: 0,
         };
 
         let mut builder = Builder { atlas, packer: Packer::new(rp_config) };
@@ -111,10 +107,6 @@ impl Builder {
             for font in config.fonts {
                 builder.add_font_named(font.name, font.path, font.size)?;
             }
-        }
-
-        for slot in config.slots {
-            builder.add_slot(*slot)?;
         }
 
         Ok(builder)
@@ -192,17 +184,7 @@ impl Builder {
 
             let mut writer = encoder.write_header()?;
 
-            writer.write_image_data(
-                atlas
-                    .0
-                    .borrow()
-                    .pixels
-                    .iter()
-                    .map(|c| [c.x, c.y, c.z, c.w])
-                    .flatten()
-                    .collect::<Vec<u8>>()
-                    .as_slice(),
-            )?;
+            writer.write_image_data(atlas.0.pixels.iter().map(|c| [c.x, c.y, c.z, c.w]).flatten().collect::<Vec<u8>>().as_slice())?;
         }
         cursor.seek(std::io::SeekFrom::Start(0))?;
         cursor.read_to_end(&mut w)?;
@@ -225,24 +207,6 @@ impl Builder {
         let mut bytes = Vec::new();
         f.read_to_end(&mut bytes)?;
         load_image_bytes(ImageSource::Png { bytes: bytes.as_slice() })
-    }
-
-    /// Reserves an empty atlas slot for later runtime-owned content.
-    fn add_slot(&mut self, slot: Dimensioni) -> Result<Recti> {
-        let rect = self.packer.pack(slot.width, slot.height, false);
-        match rect {
-            Some(r) => {
-                self.atlas.slots.push(r);
-                Ok(r)
-            }
-            None => {
-                let error = format!(
-                    "Bitmap size of {}x{} is not enough to hold the atlas, please resize",
-                    self.atlas.width, self.atlas.height
-                );
-                Err(Error::new(ErrorKind::Other, error))
-            }
-        }
     }
 
     /// Packs a populated bitmap into the atlas and copies its pixels into the texture buffer.
@@ -301,9 +265,6 @@ impl Builder {
 
     /// Consumes the builder and returns an [`AtlasHandle`].
     pub fn to_atlas(self) -> AtlasHandle {
-        AtlasHandle(Rc::new(AtlasShared {
-            active_frame_readers: Cell::new(0),
-            data: RefCell::new(self.atlas),
-        }))
+        AtlasHandle(Rc::new(self.atlas))
     }
 }

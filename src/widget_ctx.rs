@@ -58,7 +58,7 @@ use crate::atlas::{AtlasHandle, FontId, IconId};
 use crate::render::{DisplayList, Painter};
 use crate::input::{ControlColor, KeyCode, KeyMode, MouseButton, WidgetOption};
 use crate::ui_node::UiInputEvent;
-use crate::style::{Color, Image, Style};
+use crate::style::{Color, Style, TextureId};
 use crate::text_layout::control_text_position_with_font;
 use crate::ui_node::UiNodeId;
 
@@ -373,8 +373,8 @@ impl<'a> WidgetCtx<'a> {
         self.painter().icon(id, rect, color);
     }
 
-    /// Draws an atlas slot or external image through a widget-local painter.
-    pub(crate) fn push_image(&mut self, image: Image, rect: Recti, color: Color) {
+    /// Draws an external texture through a widget-local painter.
+    pub(crate) fn push_image(&mut self, image: TextureId, rect: Recti, color: Color) {
         let rect = self.local_rect_for(rect);
         self.painter().image(image, rect, color);
     }

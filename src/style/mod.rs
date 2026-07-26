@@ -54,7 +54,7 @@
 
 use rs_math3d::{Dimensioni, Recti, Vec2i};
 
-use crate::atlas::{AtlasHandle, FontId, SlotId};
+use crate::atlas::{AtlasHandle, FontId};
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
@@ -205,25 +205,6 @@ impl TextureId {
     /// Returns the texture dimensions in pixels.
     pub fn size(self) -> Dimensioni {
         Dimensioni::new(self.width, self.height)
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-/// Either a slot stored inside the atlas or a standalone texture.
-pub enum Image {
-    /// Reference to an atlas slot.
-    Slot(SlotId),
-    /// Reference to an external texture ID.
-    Texture(TextureId),
-}
-
-impl Image {
-    /// Returns the intrinsic pixel dimensions for the image.
-    pub fn size(self, atlas: &AtlasHandle) -> Dimensioni {
-        match self {
-            Self::Slot(slot) => atlas.get_slot_size(slot),
-            Self::Texture(texture) => texture.size(),
-        }
     }
 }
 

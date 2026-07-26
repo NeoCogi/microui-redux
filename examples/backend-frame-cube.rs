@@ -184,8 +184,7 @@ struct State {
 }
 
 fn main() {
-    let slots = atlas_assets::default_slots();
-    let atlas = atlas_assets::load_atlas(&slots);
+    let atlas = atlas_assets::load_atlas();
 
     let mut app = Application::new(atlas, |_backend, ctx| {
         let angle = Rc::new(Cell::new(0.0_f32));

@@ -47,7 +47,7 @@ use super::mesh::{CustomRenderArea, MeshSubmission};
 // - UI/custom draws are described as `RenderCommand`s while building the frame.
 // - `end` packs all vertex payloads into one upload buffer, then replays the commands in a single
 //   render pass while switching bind groups/scissor state between draws.
-// - The swapchain surface is reconfigured on resize and the atlas texture is kept in sync lazily.
+// - The swapchain surface is reconfigured on resize; the immutable atlas is uploaded once.
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -99,7 +99,6 @@ struct GpuTexture {
 /// replays a lightweight command list (`RenderCommand`) to switch texture/scissor state.
 pub struct WgpuRenderer {
     atlas: AtlasHandle,
-    atlas_last_update_id: u64,
     textures: HashMap<TextureId, GpuTexture>,
 
     _instance: wgpu::Instance,
@@ -205,7 +204,7 @@ impl WgpuRenderer {
         });
 
         if let Some(bytes) = pixels {
-            // Upload initial texel payload when provided; atlas bootstrap uses None then sync.
+            // Upload the initial texel payload during texture construction.
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &texture,
@@ -256,41 +255,6 @@ impl WgpuRenderer {
             self.commands.push(RenderCommand::DrawUiTo(end));
             self.current_batch_end = end;
         }
-    }
-
-    /// Uploads atlas pixels into the GPU atlas texture when the atlas change id advanced.
-    fn sync_atlas(&mut self) {
-        // Atlas updates are tracked by monotonic id; skip GPU upload when unchanged.
-        if self.atlas_last_update_id == self.atlas.get_last_update_id() {
-            return;
-        }
-
-        self.atlas.apply_pixels(|width, height, pixels| {
-            let pixel_ptr = pixels.as_ptr() as *const u8;
-            // Atlas stores `Color`; reinterpret as packed RGBA bytes for write_texture.
-            let pixel_slice: &[u8] = unsafe { slice::from_raw_parts(pixel_ptr, pixels.len() * 4) };
-            self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.atlas_texture._texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                pixel_slice,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some((width as u32).saturating_mul(4)),
-                    rows_per_image: Some(height as u32),
-                },
-                wgpu::Extent3d {
-                    width: width as u32,
-                    height: height as u32,
-                    depth_or_array_layers: 1,
-                },
-            );
-        });
-
-        self.atlas_last_update_id = self.atlas.get_last_update_id();
     }
 
     /// Reconfigures the surface when the requested frame size changes.
@@ -534,6 +498,7 @@ impl WgpuRenderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let atlas_pixels = atlas.pixels_clone();
         let atlas_texture = Self::create_gpu_texture(
             &device,
             &queue,
@@ -542,7 +507,7 @@ impl WgpuRenderer {
             &uniform_buffer,
             atlas.width() as u32,
             atlas.height() as u32,
-            None,
+            Some(Self::slice_as_bytes(&atlas_pixels)),
         )?;
 
         let initial_capacity = 64 * 1024;
@@ -553,9 +518,8 @@ impl WgpuRenderer {
             mapped_at_creation: false,
         });
 
-        let mut renderer = Self {
+        let renderer = Self {
             atlas,
-            atlas_last_update_id: u64::MAX,
             textures: HashMap::new(),
 
             _instance: instance,
@@ -582,9 +546,6 @@ impl WgpuRenderer {
             height,
             clear_color: color(0, 0, 0, 255),
         };
-        // Force first atlas upload.
-        renderer.sync_atlas();
-
         Ok(renderer)
     }
 
@@ -696,8 +657,6 @@ impl WgpuFrameOps for WgpuRenderer {
         self.current_batch_end = 0;
 
         self.configure_surface(self.width.max(1), self.height.max(1));
-        self.sync_atlas();
-
         // Keep screen-size uniform in sync for pixel->NDC conversion in vertex shader.
         let uniforms = Uniforms {
             screen_size: [self.width.max(1) as f32, self.height.max(1) as f32],
@@ -725,8 +684,6 @@ impl WgpuFrameOps for WgpuRenderer {
     /// Uploads all queued vertices, records the render pass, and presents an acquired surface frame.
     fn finish(&mut self, frame: wgpu::SurfaceTexture) {
         self.flush_ui_batch();
-        self.sync_atlas();
-
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self
             .device

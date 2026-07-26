@@ -311,7 +311,7 @@ mod tests {
 
     use crate::render::Renderer;
     use crate::{
-        rect, AtlasHandle, AtlasSource, Button, CharEntry, Custom, FontEntry, Id, Image, Input, KeyMode, ListItem, Policy, ResourceState, SourceFormat,
+        rect, AtlasHandle, AtlasSource, Button, CharEntry, Custom, FontEntry, Id, Input, KeyMode, ListItem, Policy, ResourceState, SourceFormat,
         StackDirection, Textbox, WidgetFillOption, WidgetOption, UiNodeBuilder, widget_handle,
     };
     use crate::test_support::{test_atlas, NoopRenderer};
@@ -981,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn scroll_area_reveals_slot_button_after_scrolling_to_slot_section() {
+    fn scroll_area_reveals_icon_button_after_scrolling_to_icon_section() {
         let pixels = [255, 255, 255, 255];
         let chars = [(
             'a',
@@ -1001,7 +1001,6 @@ mod tests {
             },
         )];
         let icons = [("white", Recti::new(0, 0, 1, 1))];
-        let slots = [Recti::new(0, 0, 1, 1)];
         let atlas = AtlasHandle::from(&AtlasSource {
             width: 1,
             height: 1,
@@ -1009,19 +1008,17 @@ mod tests {
             icons: &icons,
             fonts: &fonts,
             format: SourceFormat::Raw,
-            slots: &slots,
         });
-        let slot = atlas.clone_slot_table()[0];
-        let slot_button = widget_handle(Button::with_slot("slot", slot, WidgetOption::NONE, WidgetFillOption::ALL));
+        let icon_button = widget_handle(Button::with_icon("icon", crate::WHITE_ICON, WidgetOption::NONE, WidgetFillOption::ALL));
         let filler = widget_handle(Button::new("filler"));
         let mut scroll_area_id = Id::new(0);
-        let mut slot_id = Id::new(0);
+        let mut icon_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             scroll_area_id =
                 tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 70)))
                     .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
                         tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 180))).widget(filler.clone());
-                        slot_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 40))).widget(slot_button.clone());
+                        icon_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 40))).widget(icon_button.clone());
                     });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
@@ -1057,19 +1054,19 @@ mod tests {
             true,
         );
         let root = &runtime.roots[0];
-        let slot_node = runtime.node(slot_id).unwrap();
-        let slot_rect = runtime.node_screen_rect(slot_id).unwrap();
+        let icon_node = runtime.node(icon_id).unwrap();
+        let icon_rect = runtime.node_screen_rect(icon_id).unwrap();
         let scroll_state = scroll_area_state(&runtime.roots, scroll_area_id).unwrap();
         let body = scroll_state.body;
         let scroll = scroll_state.scroll;
-        let slot_is_visible = slot_rect.x < body.x + body.width
-            && slot_rect.x + slot_rect.width > body.x
-            && slot_rect.y < body.y + body.height
-            && slot_rect.y + slot_rect.height > body.y;
+        let icon_is_visible = icon_rect.x < body.x + body.width
+            && icon_rect.x + icon_rect.width > body.x
+            && icon_rect.y < body.y + body.height
+            && icon_rect.y + icon_rect.height > body.y;
         assert!(
-            slot_is_visible,
-            "slot not visible; root client {:?} content {:?} scroll body {:?} scroll {:?} slot rect {:?} clip {:?}",
-            root.state.layout.frame, root.state.layout.content_size, body, scroll, slot_rect, slot_node.state.layout.content.viewport
+            icon_is_visible,
+            "icon not visible; root client {:?} content {:?} scroll body {:?} scroll {:?} icon rect {:?} clip {:?}",
+            root.state.layout.frame, root.state.layout.content_size, body, scroll, icon_rect, icon_node.state.layout.content.viewport
         );
     }
 
@@ -1094,7 +1091,6 @@ mod tests {
             },
         )];
         let icons = [("white", Recti::new(0, 0, 1, 1))];
-        let slots = [Recti::new(0, 0, 64, 64)];
         let atlas = AtlasHandle::from(&AtlasSource {
             width: 80,
             height: 80,
@@ -1102,15 +1098,11 @@ mod tests {
             icons: &icons,
             fonts: &fonts,
             format: SourceFormat::Raw,
-            slots: &slots,
         });
-        let slot = atlas.clone_slot_table()[0];
-        let button = widget_handle(Button::with_scaled_image(
-            "image",
-            Some(Image::Slot(slot)),
-            WidgetOption::NONE,
-            WidgetFillOption::ALL,
-        ));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(200, 140));
+        let texture = renderer.try_load_texture_rgba(64, 64, &[255; 64 * 64 * 4]).unwrap();
+        let button = widget_handle(Button::with_scaled_image("image", Some(texture), WidgetOption::NONE, WidgetFillOption::ALL));
         let mut button_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
@@ -1118,8 +1110,6 @@ mod tests {
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
-        let backend = NoopRenderer { atlas };
-        let mut renderer = Renderer::new_test(backend, Dimensioni::new(200, 140));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -1141,7 +1131,7 @@ mod tests {
     }
 
     #[test]
-    fn node_fixed_width_regular_slot_button_keeps_inline_height() {
+    fn node_fixed_width_regular_texture_button_keeps_inline_height() {
         let pixels = vec![255; 80 * 80 * 4];
         let chars = [(
             'a',
@@ -1161,7 +1151,6 @@ mod tests {
             },
         )];
         let icons = [("white", Recti::new(0, 0, 1, 1))];
-        let slots = [Recti::new(0, 0, 64, 64)];
         let atlas = AtlasHandle::from(&AtlasSource {
             width: 80,
             height: 80,
@@ -1169,10 +1158,11 @@ mod tests {
             icons: &icons,
             fonts: &fonts,
             format: SourceFormat::Raw,
-            slots: &slots,
         });
-        let slot = atlas.clone_slot_table()[0];
-        let button = widget_handle(Button::with_image("image", Some(Image::Slot(slot)), WidgetOption::NONE, WidgetFillOption::ALL));
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(300, 160));
+        let texture = renderer.try_load_texture_rgba(64, 64, &[255; 64 * 64 * 4]).unwrap();
+        let button = widget_handle(Button::with_image("image", Some(texture), WidgetOption::NONE, WidgetFillOption::ALL));
         let mut button_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
@@ -1180,8 +1170,6 @@ mod tests {
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
-        let backend = NoopRenderer { atlas };
-        let mut renderer = Renderer::new_test(backend, Dimensioni::new(300, 160));
         let style = Style::default();
         let mut results = FrameResults::default();
         results.begin_frame();
@@ -1199,7 +1187,11 @@ mod tests {
 
         let button_rect = runtime.node_screen_rect(button_id).unwrap();
         assert_eq!(button_rect.width, 256);
-        assert!(button_rect.height < 100, "regular slot button should stay inline-sized, got {:?}", button_rect);
+        assert!(
+            button_rect.height < 100,
+            "regular texture button should stay inline-sized, got {:?}",
+            button_rect
+        );
     }
 
     #[test]

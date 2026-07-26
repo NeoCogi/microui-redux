@@ -41,8 +41,8 @@ use super::{
     geometry::{textured_quad_vertices, ClipRect, SolidTriangle},
 };
 use crate::{
-    atlas::{AtlasFrameError, AtlasHandle, FontId, IconId, SlotId, WHITE_ICON},
-    style::{Color, Image, TextureId},
+    atlas::{AtlasHandle, FontId, IconId, WHITE_ICON},
+    style::{Color, TextureId},
 };
 use rs_math3d::{Dimensioni, Recti, Vec2f, Vec2i};
 use std::collections::HashMap;
@@ -53,8 +53,6 @@ use std::{error::Error, fmt};
 pub enum RenderError {
     /// The backend could not acquire per-frame resources.
     Frame(FrameError),
-    /// The renderer could not freeze its atlas for synchronous execution.
-    Atlas(AtlasFrameError),
     /// An external texture operation references a texture not owned by this Renderer.
     UnknownTexture {
         /// Unknown texture identifier.
@@ -73,7 +71,6 @@ impl fmt::Display for RenderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Frame(error) => write!(f, "backend frame acquisition failed: {error}"),
-            Self::Atlas(error) => write!(f, "atlas frame freeze failed: {error}"),
             Self::UnknownTexture { id, operation_index } => {
                 write!(f, "unknown texture {:?} in display-list operation {operation_index}", id)
             }
@@ -89,12 +86,6 @@ impl Error for RenderError {}
 impl From<FrameError> for RenderError {
     fn from(error: FrameError) -> Self {
         Self::Frame(error)
-    }
-}
-
-impl From<AtlasFrameError> for RenderError {
-    fn from(error: AtlasFrameError) -> Self {
-        Self::Atlas(error)
     }
 }
 
@@ -223,7 +214,6 @@ impl<B: RendererBackend> Renderer<B> {
 
     fn render_recorded(&mut self, info: FrameInfo, recorded: &mut super::display_list::RecordedFrame) -> Result<(), RenderError> {
         self.validate_recorded(recorded)?;
-        let _atlas_guard = self.atlas.freeze_for_frame()?;
         let viewport = Recti::new(0, 0, info.dimensions().width, info.dimensions().height);
         let backend = &mut self.backend;
         let custom_renderers = &mut self.custom_renderers;
@@ -248,7 +238,7 @@ impl<B: RendererBackend> Renderer<B> {
     fn validate_recorded(&self, recorded: &super::display_list::RecordedFrame) -> Result<(), RenderError> {
         for (operation_index, operation) in recorded.ops.iter().enumerate() {
             match &operation.kind {
-                DrawKind::Image { image: Image::Texture(id), .. } if !self.textures.contains_key(id) => {
+                DrawKind::Image { id, .. } if !self.textures.contains_key(id) => {
                     return Err(RenderError::UnknownTexture { id: *id, operation_index });
                 }
                 DrawKind::Custom { renderer, .. } if !self.custom_renderers.contains(*renderer) => {
@@ -336,7 +326,7 @@ impl<B: RendererBackend> Renderer<B> {
 struct Executor<'a, F: RendererFrame> {
     /// Mutably borrowed active backend frame.
     frame: &'a mut F,
-    /// Cached atlas used for glyph, icon, and slot expansion.
+    /// Cached atlas used for glyph and icon expansion.
     atlas: &'a AtlasHandle,
     /// Atlas dimensions used to normalize texture coordinates.
     atlas_dim: Dimensioni,
@@ -366,7 +356,7 @@ impl<F: RendererFrame> Executor<'_, F> {
             DrawKind::FillRect { rect, color } => self.push_atlas_rect(rect, self.white_icon_rect, color, clip),
             DrawKind::Text { font, pos, color, text } => self.draw_text(font, &text, pos, color, clip),
             DrawKind::Icon { id, rect, color } => self.draw_icon(id, rect, color, clip),
-            DrawKind::Image { image, rect, color } => self.draw_image(image, rect, color, clip),
+            DrawKind::Image { id, rect, color } => self.draw_texture(id, rect, color, clip),
             DrawKind::SolidTriangles { triangles } => {
                 let Some(triangles) = self.solid_triangles.get(triangles.as_range()) else {
                     debug_assert!(false, "DisplayList contained an invalid solid-triangle range");
@@ -395,20 +385,6 @@ impl<F: RendererFrame> Executor<'_, F> {
     fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color, clip: Recti) {
         let src = self.atlas.get_icon_rect(id);
         self.push_centered_atlas_rect(rect, src, color, clip);
-    }
-
-    /// Centers an atlas slot inside its semantic destination and submits it.
-    fn draw_slot(&mut self, id: SlotId, rect: Recti, color: Color, clip: Recti) {
-        let src = self.atlas.get_slot_rect(id);
-        self.push_centered_atlas_rect(rect, src, color, clip);
-    }
-
-    /// Dispatches an image to either its atlas slot or external texture.
-    fn draw_image(&mut self, image: Image, rect: Recti, color: Color, clip: Recti) {
-        match image {
-            Image::Slot(id) => self.draw_slot(id, rect, color, clip),
-            Image::Texture(id) => self.draw_texture(id, rect, color, clip),
-        }
     }
 
     /// Centers and submits one atlas source rectangle.

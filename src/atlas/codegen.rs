@@ -18,7 +18,7 @@ impl AtlasHandle {
         );
         font_meta.push_str(format!("width: {}, height: {},\n", self.width(), self.height()).as_str());
         let mut icons = String::from_str("&[\n").unwrap();
-        for (i, r) in &self.0.borrow().icons {
+        for (i, r) in &self.0.icons {
             icons.push_str(
                 format!(
                     "(\"{}\", Rect {{ x: {}, y: {}, width: {}, height: {} }}),",
@@ -28,13 +28,8 @@ impl AtlasHandle {
             );
         }
         icons.push_str("]");
-        let mut slots = String::from_str("&[\n").unwrap();
-        for r in &self.0.borrow().slots {
-            slots.push_str(format!("Rect {{ x: {}, y: {}, width: {}, height: {} }},", r.x, r.y, r.width, r.height,).as_str());
-        }
-        slots.push_str("]");
         let mut fonts = String::from_str("&[\n").unwrap();
-        for (n, f) in &self.0.borrow().fonts {
+        for (n, f) in &self.0.fonts {
             let mut char_entries = String::from_str("&[\n").unwrap();
             for (ch, entry) in &f.entries {
                 let str = match ch {
@@ -62,10 +57,9 @@ impl AtlasHandle {
         fonts.push_str("]");
         font_meta.push_str(format!("icons: {},\n", icons).as_str());
         font_meta.push_str(format!("fonts: {},\n", fonts).as_str());
-        font_meta.push_str(format!("slots: {},\n", slots).as_str());
         let (source_pixels, source_format) = match format {
             SourceFormat::Raw => (
-                self.0.borrow().pixels.iter().map(|p| [p.x, p.y, p.z, p.w]).flatten().collect::<Vec<_>>(),
+                self.0.pixels.iter().map(|p| [p.x, p.y, p.z, p.w]).flatten().collect::<Vec<_>>(),
                 "SourceFormat::Raw",
             ),
             #[cfg(feature = "png_source")]
@@ -87,7 +81,7 @@ impl AtlasHandle {
     #[cfg(feature = "png_source")]
     fn png_image_bytes(&self) -> Result<Vec<u8>> {
         let mut bytes = Vec::new();
-        let pixels = self.0.borrow().pixels.iter().map(|c| [c.x, c.y, c.z, c.w]).flatten().collect::<Vec<_>>();
+        let pixels = self.0.pixels.iter().map(|c| [c.x, c.y, c.z, c.w]).flatten().collect::<Vec<_>>();
         {
             let mut encoder = png::Encoder::new(&mut bytes, self.width() as _, self.height() as _);
             encoder.set_color(ColorType::Rgba);

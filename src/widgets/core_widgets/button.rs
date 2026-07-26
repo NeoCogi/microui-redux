@@ -1,7 +1,7 @@
 //! Button widget state and rendering.
 //!
-//! Buttons support text, atlas icons, external images, and prepared atlas slots through one shared
-//! layout path.
+//! Buttons support text, semantic atlas icons, and external textures through one shared layout
+//! path.
 
 use super::*;
 
@@ -20,21 +20,14 @@ pub enum ButtonContent {
         /// Text displayed on the button.
         label: String,
         /// Optional image rendered on the button.
-        image: Option<Image>,
+        image: Option<TextureId>,
     },
     /// An optional image scaled to the allocated button width while preserving aspect ratio.
     ScaledImage {
         /// Text displayed on the button.
         label: String,
         /// Optional image rendered on the button.
-        image: Option<Image>,
-    },
-    /// A text label and a pre-rendered atlas slot.
-    Slot {
-        /// Text displayed on the button.
-        label: String,
-        /// Slot rendered on the button.
-        slot: SlotId,
+        image: Option<TextureId>,
     },
 }
 
@@ -68,8 +61,17 @@ impl Button {
         }
     }
 
+    /// Creates a button with a semantic icon baked into the atlas.
+    pub fn with_icon(label: impl Into<String>, icon: IconId, opt: WidgetOption, fill: WidgetFillOption) -> Self {
+        Self {
+            content: ButtonContent::Text { label: label.into(), icon: Some(icon) },
+            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
+            fill,
+        }
+    }
+
     /// Creates an image button with explicit widget options and fill behavior.
-    pub fn with_image(label: impl Into<String>, image: Option<Image>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
+    pub fn with_image(label: impl Into<String>, image: Option<TextureId>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::Image { label: label.into(), image },
             config: WidgetConfig::new(opt, ScrollBehavior::NONE),
@@ -78,18 +80,9 @@ impl Button {
     }
 
     /// Creates an image button that scales its image to the allocated width and preserves aspect ratio.
-    pub fn with_scaled_image(label: impl Into<String>, image: Option<Image>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
+    pub fn with_scaled_image(label: impl Into<String>, image: Option<TextureId>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::ScaledImage { label: label.into(), image },
-            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
-            fill,
-        }
-    }
-
-    /// Creates a button backed by a slot prepared before the frame begins.
-    pub fn with_slot(label: impl Into<String>, slot: SlotId, opt: WidgetOption, fill: WidgetFillOption) -> Self {
-        Self {
-            content: ButtonContent::Slot { label: label.into(), slot },
             config: WidgetConfig::new(opt, ScrollBehavior::NONE),
             fill,
         }
@@ -103,20 +96,16 @@ impl Button {
                 inline_content_size(style, atlas, self.config.font, label, visual)
             }
             ButtonContent::Image { label, image } => {
-                let visual = image.map(|image| image.size(atlas));
+                let visual = image.map(TextureId::size);
                 inline_content_size(style, atlas, self.config.font, label, visual)
             }
             ButtonContent::ScaledImage { label, image } => {
-                let visual = image.map(|image| image.size(atlas));
+                let visual = image.map(TextureId::size);
                 if visual.is_some() && _avail.width > 0 {
                     scaled_visual_content_size(_avail, visual)
                 } else {
                     inline_content_size(style, atlas, self.config.font, label, visual)
                 }
-            }
-            ButtonContent::Slot { label, slot, .. } => {
-                let visual = Some(atlas.get_slot_size(*slot));
-                inline_content_size(style, atlas, self.config.font, label, visual)
             }
         }
     }
@@ -149,8 +138,7 @@ impl Button {
                 }
             }
             ButtonContent::Image { label, image } => {
-                // External textures and atlas slots both report dimensions through `Image::size`.
-                let visual_size = image.map(|image| image.size(ctx.atlas()));
+                let visual_size = image.map(TextureId::size);
                 let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
                     ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.config.opt);
@@ -161,7 +149,7 @@ impl Button {
                 }
             }
             ButtonContent::ScaledImage { label, image } => {
-                let visual_size = image.map(|image| image.size(ctx.atlas()));
+                let visual_size = image.map(TextureId::size);
                 let layout = if visual_size.is_some() {
                     layout_scaled_visual_content(rect, visual_size)
                 } else {
@@ -173,18 +161,6 @@ impl Button {
                 if let (Some(image), Some(visual)) = (*image, layout.visual) {
                     let color = ctx.style().colors[ControlColor::Text as usize];
                     ctx.push_image(image, visual, color);
-                }
-            }
-            ButtonContent::Slot { label, slot } => {
-                // Slot pixels are prepared before the logical frame begins.
-                let visual_size = Some(ctx.atlas().get_slot_size(*slot));
-                let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
-                if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.config.opt);
-                }
-                if let Some(visual) = layout.visual {
-                    let color = ctx.style().colors[ControlColor::Text as usize];
-                    ctx.push_image(Image::Slot(*slot), visual, color);
                 }
             }
         }

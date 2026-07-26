@@ -52,24 +52,15 @@
 //
 //! Default atlas asset configuration shared by examples and the build-time atlas exporter.
 
-use microui_redux::prelude::{AtlasHandle, Dimensioni};
+use microui_redux::prelude::AtlasHandle;
 #[cfg(feature = "external-atlas")]
 use std::fs;
 
-#[cfg(feature = "builder")]
+#[cfg(all(not(feature = "prebuilt-atlas"), not(feature = "external-atlas"), feature = "builder"))]
 use microui_redux::atlas::builder;
 
-pub fn default_slots() -> Vec<Dimensioni> {
-    vec![
-        Dimensioni::new(64, 64),
-        Dimensioni::new(24, 32),
-        Dimensioni::new(64, 24),
-        Dimensioni::new(24, 32),
-    ]
-}
-
 #[cfg(all(not(feature = "prebuilt-atlas"), not(feature = "external-atlas"), feature = "builder"))]
-pub fn atlas_config<'a>(slots: &'a [Dimensioni]) -> builder::Config<'a> {
+pub fn atlas_config() -> builder::Config<'static> {
     const FONTS: &[builder::FontAsset<'static>] = &[
         builder::FontAsset {
             name: "body",
@@ -113,13 +104,12 @@ pub fn atlas_config<'a>(slots: &'a [Dimensioni]) -> builder::Config<'a> {
         default_font: String::from("assets/NORMAL.ttf"),
         default_font_size: 12,
         fonts: FONTS,
-        slots,
     }
 }
 
 #[cfg(all(not(feature = "prebuilt-atlas"), not(feature = "external-atlas"), feature = "builder"))]
-pub fn load_atlas(slots: &[Dimensioni]) -> AtlasHandle {
-    builder::Builder::from_config(&atlas_config(slots)).expect("valid atlas config").to_atlas()
+pub fn load_atlas() -> AtlasHandle {
+    builder::Builder::from_config(&atlas_config()).expect("valid atlas config").to_atlas()
 }
 
 #[cfg(feature = "prebuilt-atlas")]
@@ -133,7 +123,7 @@ mod prebuilt {
 }
 
 #[cfg(feature = "prebuilt-atlas")]
-pub fn load_atlas(_slots: &[Dimensioni]) -> AtlasHandle {
+pub fn load_atlas() -> AtlasHandle {
     prebuilt::load()
 }
 
@@ -143,7 +133,7 @@ mod external {
 }
 
 #[cfg(all(feature = "external-atlas", not(feature = "prebuilt-atlas")))]
-pub fn load_atlas(_slots: &[Dimensioni]) -> AtlasHandle {
+pub fn load_atlas() -> AtlasHandle {
     let atlas_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("atlas.png");
     let pixels = fs::read(&atlas_path).unwrap_or_else(|err| panic!("Failed to read {}: {err}", atlas_path.display()));
     let source = external::external_atlas_source(&pixels);

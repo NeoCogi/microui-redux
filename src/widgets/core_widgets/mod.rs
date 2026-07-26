@@ -68,7 +68,7 @@ fn content_height(style: &Style, atlas: &AtlasHandle, font: FontChoice, visual_h
     (font_height.max(visual_height) + vertical_pad * 2).max(0)
 }
 
-/// Computes preferred size for a single-line label plus optional icon/image/slot.
+/// Computes preferred size for a single-line label plus an optional icon or texture.
 fn inline_content_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, label: &str, visual_size: Option<Dimensioni>) -> Dimensioni {
     let padding = style.padding.max(0);
     let text_size = if label.is_empty() {

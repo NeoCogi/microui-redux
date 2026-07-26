@@ -88,8 +88,7 @@ fn parse_output_arg() -> Result<PathBuf, Box<dyn Error>> {
 
 /// Builds the default atlas and emits it as PNG-compressed Rust bytes.
 fn export_atlas(path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    let slots = atlas_assets::default_slots();
-    let atlas = atlas_assets::load_atlas(&slots);
+    let atlas = atlas_assets::load_atlas();
     // PNG source keeps the embedded atlas self-contained without storing raw RGBA in `.rodata`.
     atlas.to_rust_files("PREBUILT_ATLAS", SourceFormat::Png, path.to_str().unwrap())?;
     Ok(())

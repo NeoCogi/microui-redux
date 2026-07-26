@@ -3,14 +3,13 @@
 use std::{
     any::Any,
     panic::{catch_unwind, AssertUnwindSafe},
-    rc::Rc,
 };
 
 use super::*;
 use crate::{
     test_support::{recording_backend, test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer, RenderEvent},
     color, widget_handle, AtlasHandle, Button, Combo, Custom, ListItem, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId,
-    SizePolicy, SlotId, ScrollBehavior, StackDirection, TextBlock, UiInputEvent, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
+    SizePolicy, ScrollBehavior, StackDirection, TextBlock, UiInputEvent, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
@@ -82,24 +81,15 @@ impl Widget for AlwaysSubmitWidget {
 }
 
 #[test]
-fn dropping_context_frame_cancels_without_backend_acquisition_and_releases_atlas_guard() {
-    let atlas = make_test_atlas();
-    let (backend, log) = recording_backend(atlas.clone());
+fn dropping_context_frame_cancels_without_backend_acquisition() {
+    let (backend, log) = recording_backend(make_test_atlas());
     let mut ctx = Context::new(backend);
     let info = FrameInfo::try_new(Dimensioni::new(80, 60), color(1, 2, 3, 4)).unwrap();
 
-    let frame = ctx.frame(info).unwrap();
-    assert_eq!(
-        atlas.render_slot(SlotId::default(), Rc::new(|_, _| crate::color4b(1, 2, 3, 4))),
-        Err(crate::atlas::AtlasMutationError::FrameActive)
-    );
+    let frame = ctx.frame(info);
     drop(frame);
 
     assert!(log.snapshot().is_empty());
-    assert_eq!(
-        atlas.render_slot(SlotId::default(), Rc::new(|_, _| crate::color4b(1, 2, 3, 4))),
-        Err(crate::atlas::AtlasMutationError::UnknownSlot(SlotId::default()))
-    );
 }
 
 #[test]
@@ -108,7 +98,7 @@ fn completed_empty_context_frame_acquires_and_drops_exactly_one_backend_frame() 
     let mut ctx = Context::new(backend);
     let info = FrameInfo::try_new(Dimensioni::new(80, 60), color(1, 2, 3, 4)).unwrap();
 
-    ctx.frame(info).unwrap().render_ui().unwrap();
+    ctx.frame(info).render_ui().unwrap();
 
     assert_eq!(
         log.snapshot(),

@@ -21,6 +21,7 @@ struct CountingRenderer {
 struct CountingStats {
     atlas_reads: Cell<usize>,
     quads: Cell<usize>,
+    texture_quads: Cell<usize>,
     frames: Cell<usize>,
     drops: Cell<usize>,
 }
@@ -39,7 +40,9 @@ impl RendererFrame for CountingFrame<'_> {
 
     fn flush(&mut self) {}
 
-    fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
+    fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {
+        self.backend.stats.texture_quads.set(self.backend.stats.texture_quads.get() + 1);
+    }
 }
 
 impl Drop for CountingFrame<'_> {
@@ -140,7 +143,6 @@ fn make_atlas() -> AtlasHandle {
             entries: &entries,
         },
     )];
-    let slots = [Recti::new(4, 4, 4, 4)];
     AtlasHandle::from(&AtlasSource {
         width: 8,
         height: 8,
@@ -148,7 +150,6 @@ fn make_atlas() -> AtlasHandle {
         icons: &icons,
         fonts: &fonts,
         format: SourceFormat::Raw,
-        slots: &slots,
     })
 }
 
@@ -214,14 +215,14 @@ fn semantic_atlas_operations_use_the_cached_atlas_and_one_executor() {
         painter.fill_rect(Recti::new(0, 0, 1, 1), white);
         painter.text(FontId::default(), "aa", Vec2i::new(0, 0), white);
         painter.icon(WHITE_ICON, Recti::new(0, 0, 3, 3), white);
-        painter.image(Image::Slot(SlotId::default()), Recti::new(0, 0, 4, 4), white);
     }
 
     renderer.render(frame_info(32, 32), &mut list).unwrap();
 
     assert!(list.is_empty());
     assert_eq!(stats.atlas_reads.get(), 1);
-    assert_eq!(stats.quads.get(), 5);
+    assert_eq!(stats.quads.get(), 4);
+    assert_eq!(stats.texture_quads.get(), 0);
     assert_eq!(stats.frames.get(), 1);
     assert_eq!(stats.drops.get(), 1);
 }
@@ -316,7 +317,6 @@ fn operation_clip_is_intersected_with_viewport_for_every_quad_kind() {
         painter.fill_rect(Recti::new(0, 0, 10, 4), white);
         painter.text(FontId::default(), "a", Vec2i::new(0, 0), white);
         painter.icon(CLOSE_ICON, Recti::new(0, 0, 4, 4), white);
-        painter.image(Image::Slot(SlotId::default()), Recti::new(0, 0, 4, 4), white);
     }
 
     renderer.render(frame_info(8, 8), &mut list).unwrap();
@@ -329,7 +329,7 @@ fn operation_clip_is_intersected_with_viewport_for_every_quad_kind() {
             _ => None,
         })
         .collect();
-    assert_eq!(quads.len(), 4);
+    assert_eq!(quads.len(), 3);
     for quad in &quads {
         assert!(
             quad.iter()
@@ -347,7 +347,7 @@ fn external_texture_clipping_preserves_uv_mapping_and_stream_order() {
     let white = color(255, 255, 255, 255);
     let mut list = DisplayList::new();
     painter(&mut list, viewport()).fill_rect(Recti::new(0, 0, 1, 1), white);
-    painter(&mut list, Recti::new(5, 5, 10, 10)).image(Image::Texture(texture), Recti::new(0, 0, 20, 20), white);
+    painter(&mut list, Recti::new(5, 5, 10, 10)).image(texture, Recti::new(0, 0, 20, 20), white);
     painter(&mut list, viewport()).fill_rect(Recti::new(20, 0, 1, 1), white);
 
     renderer.render(frame_info(32, 32), &mut list).unwrap();
@@ -447,17 +447,6 @@ fn custom_barrier_flushes_releases_lock_clips_and_preserves_order() {
 }
 
 #[test]
-fn atlas_slot_mutation_is_rejected_while_a_frame_guard_is_live() {
-    let atlas = make_atlas();
-    let update_before = atlas.get_last_update_id();
-    let guard = atlas.freeze_for_frame().unwrap();
-    let error = atlas.render_slot(SlotId::default(), Rc::new(|_, _| color4b(7, 8, 9, 255))).unwrap_err();
-    assert_eq!(error, crate::atlas::AtlasMutationError::FrameActive);
-    assert_eq!(atlas.get_last_update_id(), update_before);
-    drop(guard);
-}
-
-#[test]
 fn texture_upload_validation_and_backend_failure_do_not_consume_ids() {
     let create_calls = Rc::new(Cell::new(0));
     let destroy_calls = Rc::new(Cell::new(0));
@@ -494,8 +483,8 @@ fn unknown_and_freed_textures_fail_preflight_and_drop_destroys_owned_textures_on
     renderer.free_texture(first);
     renderer.free_texture(first);
     let mut list = DisplayList::new();
-    painter(&mut list, viewport()).image(Image::Texture(first), Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
-    painter(&mut list, viewport()).image(Image::Texture(TextureId::new(999, 1, 1)), Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+    painter(&mut list, viewport()).image(first, Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+    painter(&mut list, viewport()).image(TextureId::new(999, 1, 1), Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
     let error = renderer.render(frame_info(32, 32), &mut list).unwrap_err();
     assert!(matches!(error, RenderError::UnknownTexture { id, operation_index: 0 } if id == first));
     assert!(list.is_empty());
@@ -538,7 +527,7 @@ fn frame_lifecycle_is_forwarded_in_order() {
 }
 
 #[test]
-fn frame_acquisition_failure_discards_the_list_without_finalization_and_releases_atlas() {
+fn frame_acquisition_failure_discards_the_list_without_finalization() {
     struct FailingBackend {
         atlas: AtlasHandle,
         attempts: Rc<Cell<usize>>,
@@ -578,7 +567,6 @@ fn frame_acquisition_failure_discards_the_list_without_finalization_and_releases
     );
     assert_eq!(attempts.get(), 1);
     assert!(list.is_empty());
-    atlas.render_slot(SlotId::default(), Rc::new(|_, _| color4b(1, 2, 3, 4))).unwrap();
 }
 
 #[test]
@@ -613,5 +601,4 @@ fn panicking_custom_callback_still_drops_the_backend_frame_without_double_panick
     assert!(panic.is_err());
     assert!(list.is_empty());
     assert!(log.snapshot().iter().any(|event| matches!(event, RenderEvent::End)));
-    atlas.render_slot(SlotId::default(), Rc::new(|_, _| color4b(1, 2, 3, 4))).unwrap();
 }

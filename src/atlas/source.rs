@@ -39,8 +39,6 @@ pub struct AtlasSource<'a> {
     pub fonts: &'a [(&'a str, FontEntry<'a>)],
     /// Encoding of [`AtlasSource::pixels`].
     pub format: SourceFormat,
-    /// Slot rectangles reserved in the atlas.
-    pub slots: &'a [Recti],
 }
 
 impl AtlasHandle {
@@ -60,19 +58,12 @@ impl AtlasHandle {
                 (name.to_string(), font)
             })
             .collect();
-        let slots: Vec<Recti> = source.slots.iter().copied().collect();
-
-        Self(Rc::new(AtlasShared {
-            active_frame_readers: Cell::new(0),
-            data: RefCell::new(Atlas {
-                width: source.width,
-                height: source.height,
-                icons,
-                fonts,
-                slots,
-                pixels,
-                last_update_id: 0,
-            }),
+        Self(Rc::new(Atlas {
+            width: source.width,
+            height: source.height,
+            icons,
+            fonts,
+            pixels,
         }))
     }
 

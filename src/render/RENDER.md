@@ -61,7 +61,6 @@ The normal `Context` path is:
 
 ```text
 Context::frame(validated FrameInfo)
-    -> freezes atlas mutation
     -> returns an exclusively borrowed ContextFrame
 
 ContextFrame::render_ui(self)
@@ -185,7 +184,7 @@ The main primitives are:
 | `stroke_rect` | Inside-aligned rectangle border recorded as fills |
 | `text` | UTF-8 text run expanded through the atlas during execution |
 | `icon` | Atlas icon |
-| `image` | Atlas slot or external texture |
+| `image` | External texture identified by `TextureId` |
 | `stroke_line` | Tessellated solid line |
 | `fill_polygon` | Tessellated solid polygon |
 | `with_clip` | Child painter with an intersected local clip |
@@ -267,11 +266,12 @@ vertices likewise append into renderer-owned scratch storage.
 
 ## Images and textures
 
-`Image::Slot` references an atlas slot and participates in normal atlas
-batching. `Image::Texture` references an external texture owned through
-`Renderer`.
+The atlas is immutable after construction and contains only fonts plus semantic
+icons addressed by `IconId`. General images are external textures owned through
+`Renderer` and addressed directly by `TextureId`; there is no image wrapper or
+atlas-slot path.
 
-Image-bearing widgets accept either variant. `WidgetFillOption` controls which
+Image-bearing widgets accept `TextureId`. `WidgetFillOption` controls which
 interaction states draw the widget's filled background; use
 `WidgetFillOption::ALL` to retain the normal, hover, and click fills around an
 image.
@@ -280,7 +280,7 @@ Normal applications should manage texture lifetime through `Context`:
 
 ```rust
 use microui_redux::{
-    prelude::{Context, Image, RendererBackend},
+    prelude::{Context, RendererBackend, TextureId},
 };
 
 fn upload_image<B: RendererBackend>(
@@ -288,9 +288,8 @@ fn upload_image<B: RendererBackend>(
     width: i32,
     height: i32,
     rgba: &[u8],
-) -> Result<Image, String> {
-    let texture = context.try_load_image_rgba(width, height, rgba)?;
-    Ok(Image::Texture(texture))
+) -> Result<TextureId, String> {
+    context.try_load_image_rgba(width, height, rgba)
 }
 ```
 

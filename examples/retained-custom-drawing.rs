@@ -151,7 +151,6 @@ fn make_atlas() -> AtlasHandle {
         icons: &icons,
         fonts: &fonts,
         format: SourceFormat::Raw,
-        slots: &[],
     };
     AtlasHandle::from(&source)
 }
@@ -166,9 +165,6 @@ fn main() -> Result<(), String> {
     ctx.create_window("retained custom drawing", rect(12, 12, 132, 84), tree);
 
     let info = FrameInfo::try_new(Dimensioni::new(160, 100), color(18, 20, 22, 255)).map_err(|error| error.to_string())?;
-    ctx.frame(info)
-        .map_err(|error| error.to_string())?
-        .render_ui()
-        .map_err(|error| error.to_string())?;
+    ctx.frame(info).render_ui().map_err(|error| error.to_string())?;
     Ok(())
 }

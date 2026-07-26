@@ -11,13 +11,13 @@ fn image_widgets_measure_external_texture_dimensions() {
     let style = Style::default();
     let texture = TextureId::new(7, 13, 5);
 
-    let button = Button::with_image("aa", Some(Image::Texture(texture)), WidgetOption::NONE, WidgetFillOption::ALL);
+    let button = Button::with_image("aa", Some(texture), WidgetOption::NONE, WidgetFillOption::ALL);
     let button_size = button.measure(&style, &atlas, Dimensioni::default());
 
     assert_eq!(button_size.width, style.padding * 2 + texture.width() + style.padding + 16);
     assert_eq!(button_size.height, 14);
 
-    let list_box = ListBox::new("a", Some(Image::Texture(texture)));
+    let list_box = ListBox::new("a", Some(texture));
     let list_size = list_box.measure(&style, &atlas, Dimensioni::default());
 
     assert_eq!(list_size.width, style.padding * 2 + texture.width() + style.padding + 8);

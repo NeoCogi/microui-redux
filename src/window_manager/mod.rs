@@ -66,7 +66,6 @@ use crate::{
     rect, Color, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId,
     UiRuntime,
 };
-use crate::atlas::{AtlasFrameError, AtlasFrameGuard};
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, DisplayList, FrameInfo, RenderError, Renderer, RendererBackend};
 use crate::ui_node::{pointer_events_from_input, UiNode, UiNodeId};
 use window_manager::WindowEntry;
@@ -105,7 +104,7 @@ impl RootId {
 /// use microui_redux::render::{FrameInfo, RendererBackend};
 ///
 /// fn mutate_during_frame<B: RendererBackend>(context: &mut Context<B>, info: FrameInfo) {
-///     let frame = context.frame(info).unwrap();
+///     let frame = context.frame(info);
 ///     context.mousemove(10, 20);
 ///     drop(frame);
 /// }
@@ -170,10 +169,7 @@ impl<B: RendererBackend> Context<B> {
     #[cfg(test)]
     pub(crate) fn update_ui(&mut self) {
         let info = FrameInfo::try_new(self.test_dimensions, crate::color(0, 0, 0, 0)).expect("test Context dimensions must be positive");
-        self.frame(info)
-            .expect("test atlas should be available")
-            .render_ui()
-            .expect("test backend frame should render");
+        self.frame(info).render_ui().expect("test backend frame should render");
     }
 }
 
@@ -186,7 +182,7 @@ impl<B: RendererBackend> Context<B> {
 /// use microui_redux::render::{FrameInfo, RendererBackend};
 ///
 /// fn submit_twice<B: RendererBackend>(context: &mut Context<B>, info: FrameInfo) {
-///     let frame = context.frame(info).unwrap();
+///     let frame = context.frame(info);
 ///     frame.render_ui().unwrap();
 ///     frame.render_ui().unwrap();
 /// }
@@ -195,7 +191,6 @@ impl<B: RendererBackend> Context<B> {
 pub struct ContextFrame<'a, B: RendererBackend> {
     context: &'a mut Context<B>,
     info: FrameInfo,
-    _atlas_guard: AtlasFrameGuard,
     completed: bool,
 }
 
@@ -206,14 +201,8 @@ mod tests;
 
 impl<B: RendererBackend> Context<B> {
     /// Starts one logical UI frame after application input/resource mutation is complete.
-    pub fn frame(&mut self, info: FrameInfo) -> Result<ContextFrame<'_, B>, AtlasFrameError> {
-        let atlas_guard = self.renderer.atlas().freeze_for_frame()?;
-        Ok(ContextFrame {
-            context: self,
-            info,
-            _atlas_guard: atlas_guard,
-            completed: false,
-        })
+    pub fn frame(&mut self, info: FrameInfo) -> ContextFrame<'_, B> {
+        ContextFrame { context: self, info, completed: false }
     }
 
     #[inline(never)]

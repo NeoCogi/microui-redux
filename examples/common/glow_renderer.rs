@@ -48,7 +48,7 @@ use super::mesh::{CustomRenderArea, MeshSubmission};
 // - Special-case draws (external textures, solid custom vertices, mesh demos) flush the UI batch
 //   first, then issue immediate GL commands so ordering stays correct without a larger command
 //   graph.
-// - The atlas texture is updated lazily whenever its change id advances.
+// - The immutable atlas texture is uploaded once while constructing the renderer.
 
 pub(crate) trait GLCustomRenderer {
     /// Records backend-specific GL commands inside the supplied logical/clip area.
@@ -98,7 +98,6 @@ pub struct GLRenderer {
     height: u32,
 
     atlas: AtlasHandle,
-    last_update_id: u64,
     textures: HashMap<TextureId, NativeTexture>,
 }
 
@@ -135,44 +134,7 @@ impl GLRenderer {
         Some((x, y, clip.width, clip.height))
     }
 
-    /// Uploads atlas pixels to the GL texture when the atlas change id advanced.
-    fn update_atlas(&mut self) {
-        let gl = &self.gl;
-        if self.last_update_id != self.atlas.get_last_update_id() {
-            unsafe {
-                gl.bind_texture(glow::TEXTURE_2D, Some(self.tex_o));
-                gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
-                gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
-                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-                debug_assert!(gl.get_error() == 0);
-                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
-                debug_assert!(gl.get_error() == 0);
-                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
-                debug_assert!(gl.get_error() == 0);
-
-                // we are going to pass a pointer, hold the atlas pixels in memory since it returns a copy
-                self.atlas.apply_pixels(|width, height, pixels| {
-                    let pixel_ptr = pixels.as_ptr() as *const u8;
-                    let pixel_slice: &[u8] = slice::from_raw_parts(pixel_ptr, pixels.len() * 4);
-                    gl.tex_image_2d(
-                        glow::TEXTURE_2D,
-                        0,
-                        glow::RGBA as i32,
-                        width as i32,
-                        height as i32,
-                        0,
-                        glow::RGBA,
-                        glow::UNSIGNED_BYTE,
-                        PixelUnpackData::Slice(Some(pixel_slice)),
-                    );
-                    debug_assert!(gl.get_error() == 0);
-                });
-            }
-            self.last_update_id = self.atlas.get_last_update_id()
-        }
-    }
-
-    pub fn new(gl: Arc<glow::Context>, atlas: AtlasHandle, width: u32, height: u32) -> Self {
+    pub fn new(gl: Arc<glow::Context>, atlas: AtlasHandle, width: u32, height: u32) -> Result<Self, String> {
         assert_eq!(core::mem::size_of::<Vertex>(), 20);
         unsafe {
             // Bootstrap the persistent atlas texture and the shared buffers/program used by the
@@ -188,18 +150,25 @@ impl GLRenderer {
             gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
             gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
 
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGBA as i32,
-                atlas.width() as i32,
-                atlas.height() as i32,
-                0,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                PixelUnpackData::Slice(None),
-            );
-            debug_assert!(gl.get_error() == 0);
+            atlas.apply_pixels(|width, height, pixels| {
+                let pixel_slice = slice::from_raw_parts(pixels.as_ptr().cast::<u8>(), pixels.len() * 4);
+                gl.tex_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    glow::RGBA as i32,
+                    width as i32,
+                    height as i32,
+                    0,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    PixelUnpackData::Slice(Some(pixel_slice)),
+                );
+            });
+            let atlas_error = gl.get_error();
+            if atlas_error != glow::NO_ERROR {
+                gl.delete_texture(tex_o);
+                return Err(format!("failed to upload immutable atlas texture: GL error 0x{atlas_error:04X}"));
+            }
             gl.bind_texture(glow::TEXTURE_2D, None);
 
             let vbo = gl.create_buffer().unwrap();
@@ -207,7 +176,7 @@ impl GLRenderer {
 
             let program = create_program(&gl, VERTEX_SHADER, FRAGMENT_SHADER).unwrap();
 
-            Self {
+            Ok(Self {
                 gl,
                 verts: Vec::new(),
                 indices: Vec::new(),
@@ -220,9 +189,8 @@ impl GLRenderer {
                 width,
                 height,
                 atlas,
-                last_update_id: u64::MAX,
                 textures: HashMap::new(),
-            }
+            })
         }
     }
 }
@@ -230,7 +198,6 @@ impl GLRenderer {
 impl GlFrameOps for GLRenderer {
     /// Flushes the accumulated UI quad batch through the shared atlas pipeline.
     fn flush(&mut self) {
-        self.update_atlas();
         if self.verts.len() == 0 || self.indices.len() == 0 {
             return;
         }
@@ -334,12 +301,6 @@ impl GlFrameOps for GLRenderer {
         self.verts.push(v1.clone());
         self.verts.push(v2.clone());
         self.verts.push(v3.clone());
-
-        // Atlas mutations need to become visible before more draws are appended, otherwise later
-        // quads would sample stale atlas pixels.
-        if self.last_update_id != self.atlas.get_last_update_id() {
-            self.flush()
-        }
     }
 
     /// Appends one triangle to the normal indexed UI batch, flushing first if the `u16` budget
@@ -357,10 +318,6 @@ impl GlFrameOps for GLRenderer {
         self.verts.push(*v0);
         self.verts.push(*v1);
         self.verts.push(*v2);
-
-        if self.last_update_id != self.atlas.get_last_update_id() {
-            self.flush()
-        }
     }
 
     /// Starts a new GL frame by clearing the backbuffer and updating cached size.

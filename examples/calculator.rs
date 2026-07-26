@@ -317,8 +317,7 @@ struct State {
 }
 
 fn main() {
-    let slots = atlas_assets::default_slots();
-    let atlas = atlas_assets::load_atlas(&slots);
+    let atlas = atlas_assets::load_atlas();
     let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
         let display = widget_handle(Textbox::with_opt("0", WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT));
         let mut buttons = [

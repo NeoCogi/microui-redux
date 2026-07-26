@@ -498,8 +498,6 @@ fonts: &[
 ]
  }),
 ],
-slots: &[
-Rect { x: 411, y: 90, width: 64, height: 64 },Rect { x: 54, y: 87, width: 24, height: 32 },Rect { x: 121, y: 91, width: 64, height: 24 },Rect { x: 240, y: 88, width: 24, height: 32 },],
 format: SourceFormat::Png,
 pixels,
     }

@@ -143,7 +143,6 @@ fn make_smoke_atlas() -> AtlasHandle {
         icons: &icons,
         fonts: &[],
         format: SourceFormat::Raw,
-        slots: &[],
     };
     AtlasHandle::from(&source)
 }
@@ -162,11 +161,7 @@ fn main() -> Result<(), String> {
     let viewport = Recti::new(0, 0, 64, 64);
     let mut list = DisplayList::new();
     Painter::new(&mut list, Vec2i::new(0, 0), viewport, viewport).icon(WHITE_ICON, Recti::new(0, 0, 4, 4), color(255, 255, 255, 255));
-    Painter::new(&mut list, Vec2i::new(0, 0), viewport, Recti::new(10, 12, 8, 6)).image(
-        Image::Texture(texture),
-        Recti::new(6, 9, 16, 12),
-        color(255, 255, 255, 255),
-    );
+    Painter::new(&mut list, Vec2i::new(0, 0), viewport, Recti::new(10, 12, 8, 6)).image(texture, Recti::new(6, 9, 16, 12), color(255, 255, 255, 255));
     Painter::new(&mut list, Vec2i::new(0, 0), viewport, viewport).icon(WHITE_ICON, Recti::new(30, 0, 4, 4), color(255, 255, 255, 255));
     let info = FrameInfo::try_new(Dimensioni::new(64, 64), color(0, 0, 0, 255)).map_err(|error| error.to_string())?;
     renderer.render(info, &mut list).map_err(|error| error.to_string())?;

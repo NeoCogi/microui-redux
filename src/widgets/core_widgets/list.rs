@@ -120,14 +120,14 @@ pub struct ListBox {
     /// Label displayed for the list box.
     pub label: String,
     /// Optional image rendered alongside the label.
-    pub image: Option<Image>,
+    pub image: Option<TextureId>,
     /// Shared widget configuration.
     pub config: WidgetConfig,
 }
 
 impl ListBox {
     /// Creates a list box with default widget options.
-    pub fn new(label: impl Into<String>, image: Option<Image>) -> Self {
+    pub fn new(label: impl Into<String>, image: Option<TextureId>) -> Self {
         Self {
             label: label.into(),
             image,
@@ -136,7 +136,7 @@ impl ListBox {
     }
 
     /// Creates a list box with explicit widget options.
-    pub fn with_opt(label: impl Into<String>, image: Option<Image>, opt: WidgetOption) -> Self {
+    pub fn with_opt(label: impl Into<String>, image: Option<TextureId>, opt: WidgetOption) -> Self {
         Self {
             label: label.into(),
             image,
@@ -146,7 +146,7 @@ impl ListBox {
 
     /// Measures list-box inline label and optional image.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        let visual = self.image.map(|image| image.size(atlas));
+        let visual = self.image.map(TextureId::size);
         inline_content_size(style, atlas, self.config.font, &self.label, visual)
     }
 
@@ -163,7 +163,7 @@ impl ListBox {
                 ctx.draw_frame(rect, colorid);
             }
         }
-        let visual_size = self.image.map(|image| image.size(ctx.atlas()));
+        let visual_size = self.image.map(TextureId::size);
         let layout = layout_inline_content(rect, ctx.style(), &self.label, visual_size);
         if !self.label.is_empty() {
             let font = ctx.style().resolve_font_choice(self.config.font);

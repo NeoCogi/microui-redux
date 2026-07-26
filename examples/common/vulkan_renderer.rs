@@ -38,9 +38,8 @@
 // - Custom draw uploads share the same staging path as UI vertices so we issue one batched
 //   transfer stream per frame.
 // - Mesh vertex/index data lives in device-local memory and is refreshed via staging uploads.
-// - Texture descriptors are recreated automatically after swapchain rebuilds, and atlas uploads
-//   are retriggered whenever UI resources lose their backing image, keeping rendering seamless
-//   across window resizes.
+// - Texture descriptors are recreated automatically after swapchain rebuilds. The immutable atlas
+//   image survives those rebuilds and is rebound without another pixel upload.
 //
 //! Vulkan renderer backend used by examples.
 //!
@@ -168,7 +167,6 @@ pub struct VulkanRenderer {
     // into `vertices`, records custom render jobs into `commands`, and delegates all Vulkan object
     // lifetime and frame submission concerns to `VulkanContext`.
     atlas: AtlasHandle,
-    last_atlas_update_id: u64,
     textures: HashMap<TextureId, VulkanTexture>,
     context: VulkanContext,
     last_swapchain_generation: u64,
@@ -207,12 +205,12 @@ impl VulkanRenderer {
 
     /// Creates the high-level Vulkan renderer and its backing Vulkan context.
     pub fn new(window: &Window, atlas: AtlasHandle, width: u32, height: u32) -> Result<Self> {
-        let context = VulkanContext::new(window, width, height)?;
+        let mut context = VulkanContext::new(window, width, height)?;
+        context.upload_atlas(&atlas)?;
         let swapchain_generation = context.swapchain_generation();
 
         Ok(Self {
             atlas,
-            last_atlas_update_id: u64::MAX,
             textures: HashMap::new(),
             context,
             last_swapchain_generation: swapchain_generation,
@@ -248,7 +246,6 @@ impl VulkanRenderer {
         let generation = self.context.swapchain_generation();
         if self.last_swapchain_generation != generation {
             self.last_swapchain_generation = generation;
-            self.last_atlas_update_id = u64::MAX;
             // Texture descriptor sets belong to the UI descriptor pool, so a swapchain/UI rebuild
             // invalidates them even though the logical texture map stays the same.
             if let Err(err) = self.rebind_texture_descriptors() {
@@ -286,30 +283,13 @@ impl VulkanRenderer {
             },
         }
     }
-
-    /// Uploads the atlas when its pixels changed or when UI resources were recreated.
-    fn sync_atlas(&mut self) {
-        if self.device_lost {
-            return;
-        }
-        // The atlas is treated like another backend-owned texture: if the atlas pixels changed or
-        // the UI resources were recreated, upload it before the frame records any draw commands.
-        let needs_upload = self.last_atlas_update_id != self.atlas.get_last_update_id() || !self.context.ui_has_atlas();
-        if needs_upload {
-            if let Err(err) = self.context.upload_atlas(&self.atlas) {
-                eprintln!("[microui-redux][vulkan] failed to upload atlas: {err}");
-                return;
-            }
-            self.last_atlas_update_id = self.atlas.get_last_update_id();
-        }
-    }
 }
 
 impl VulkanFrameOps for VulkanRenderer {
-    /// Starts a new frame, syncing window size, swapchain generation, and atlas state.
+    /// Starts a new frame, syncing window size and swapchain generation.
     fn begin(&mut self, width: i32, height: i32, clr: Color) -> Result<()> {
         // `begin` only resets CPU-side batching state and keeps the GPU-side context synchronized
-        // with window size / atlas changes. Actual command buffer recording happens in `end`.
+        // with window size changes. Actual command buffer recording happens in `end`.
         self.frame_index = self.frame_index.wrapping_add(1);
         self.width = width as u32;
         self.height = height as u32;
@@ -323,7 +303,6 @@ impl VulkanFrameOps for VulkanRenderer {
 
         self.ensure_swapchain_extent(self.width, self.height)?;
         self.handle_swapchain_updates();
-        self.sync_atlas();
         Ok(())
     }
 
@@ -1100,6 +1079,7 @@ impl UiResources {
         unsafe { device.create_shader_module(&info, None) }.map_err(|err| format!("create_shader_module failed: {err:?}"))
     }
 
+    /// Creates and uploads the immutable atlas image during renderer construction.
     fn upload_atlas(&mut self, ctx: &mut VulkanContext, atlas: &AtlasHandle) -> Result<()> {
         let mut width = 0;
         let mut height = 0;
@@ -1118,17 +1098,8 @@ impl UiResources {
         let width_u32 = u32::try_from(width).map_err(|_| "atlas width exceeds u32 range")?;
         let height_u32 = u32::try_from(height).map_err(|_| "atlas height exceeds u32 range")?;
 
-        if self
-            .atlas
-            .as_ref()
-            .map(|img| img.extent.width != width_u32 || img.extent.height != height_u32)
-            .unwrap_or(true)
-        {
-            if let Some(mut old) = self.atlas.take() {
-                old.destroy(&ctx.device);
-            }
-            self.atlas = Some(ctx.create_image_resource(width_u32, height_u32)?);
-        }
+        debug_assert!(self.atlas.is_none());
+        self.atlas = Some(ctx.create_image_resource(width_u32, height_u32)?);
 
         let staging = ctx.create_buffer(
             data.len() as u64,
@@ -1960,9 +1931,6 @@ impl VulkanContext {
         ctx.recreate_swapchain(width, height)?;
         ctx.create_sync_objects()?;
         ctx.allocate_transfer_command_buffers()?;
-        // UI resources depend on the render pass and swapchain format, so they are initialized only
-        // after the first swapchain build succeeded.
-        ctx.ui = Some(UiResources::new(&ctx)?);
 
         Ok(ctx)
     }
@@ -2070,12 +2038,22 @@ impl VulkanContext {
         self.render_pass = self.create_render_pass()?;
         self.framebuffers = self.create_framebuffers()?;
         self.allocate_command_buffers()?;
-        if let Some(mut ui) = self.ui.take() {
+        let preserved_atlas = if let Some(mut ui) = self.ui.take() {
             // The UI pipeline references the old render pass / descriptor pool, so it must be
-            // recreated after any swapchain rebuild as well.
+            // recreated after any swapchain rebuild as well. The atlas image itself is independent
+            // of the swapchain, so preserve it across the rebuild.
+            let atlas = ui.atlas.take();
             ui.destroy(&self.device);
+            atlas
+        } else {
+            None
+        };
+        let mut ui = UiResources::new(self)?;
+        if let Some(atlas) = preserved_atlas {
+            ui.update_descriptor(&self.device, ui.descriptor_set, &atlas);
+            ui.atlas = Some(atlas);
         }
-        self.ui = Some(UiResources::new(self)?);
+        self.ui = Some(ui);
         self.swapchain_generation = self.swapchain_generation.wrapping_add(1);
 
         Ok(())
@@ -2704,12 +2682,7 @@ impl VulkanContext {
     fn swapchain_generation(&self) -> u64 {
         self.swapchain_generation
     }
-    /// Returns whether UI resources currently own a live atlas image.
-    fn ui_has_atlas(&self) -> bool {
-        self.ui.as_ref().map(|ui| ui.atlas.is_some()).unwrap_or(false)
-    }
-
-    /// Uploads the shared microui atlas into the current UI resources.
+    /// Uploads the shared immutable microui atlas into the current UI resources.
     fn upload_atlas(&mut self, atlas: &AtlasHandle) -> Result<()> {
         if let Some(mut ui) = self.ui.take() {
             let result = ui.upload_atlas(self, atlas);
@@ -3279,6 +3252,9 @@ impl Drop for VulkanContext {
                 self.device.destroy_semaphore(semaphore, None);
             }
 
+            if let Some(mut ui) = self.ui.take() {
+                ui.destroy(&self.device);
+            }
             self.cleanup_swapchain();
 
             if self.command_pool != vk::CommandPool::null() {

@@ -65,8 +65,7 @@ struct State {
 }
 
 fn main() {
-    let slots = atlas_assets::default_slots();
-    let atlas = atlas_assets::load_atlas(&slots);
+    let atlas = atlas_assets::load_atlas();
     let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
         let hello_button = widget_handle(Button::with_opt("Hello World!", WidgetOption::ALIGN_CENTER));
         let tree = UiNodeBuilder::build({

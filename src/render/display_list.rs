@@ -36,7 +36,7 @@ use super::{
     geometry::{SolidGeometry, SolidTriangle, SolidTriangleRange},
 };
 use crate::atlas::{FontId, IconId};
-use crate::style::{Color, Image};
+use crate::style::{Color, TextureId};
 use rs_math3d::{Color4b, Recti, Vec2f, Vec2i};
 
 /// An owned sequence of rendering operations and their solid geometry.
@@ -88,10 +88,10 @@ pub(super) enum DrawKind {
         /// Icon tint.
         color: Color,
     },
-    /// Draws one atlas slot or external texture.
+    /// Draws one backend-owned external texture.
     Image {
-        /// Image identifier.
-        image: Image,
+        /// External texture identifier.
+        id: TextureId,
         /// Destination rectangle in screen space.
         rect: Recti,
         /// Image tint.
@@ -170,8 +170,8 @@ impl DisplayList {
     }
 
     /// Appends one image operation.
-    pub(super) fn push_image(&mut self, clip: Recti, image: Image, rect: Recti, color: Color) {
-        self.push(clip, DrawKind::Image { image, rect, color });
+    pub(super) fn push_image(&mut self, clip: Recti, id: TextureId, rect: Recti, color: Color) {
+        self.push(clip, DrawKind::Image { id, rect, color });
     }
 
     /// Appends one backend-specific custom drawing barrier.
@@ -278,7 +278,7 @@ fn same_rect(left: Recti, right: Recti) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{color, color4b, SlotId};
+    use crate::{color, color4b, TextureId};
 
     fn triangle_at(offset: f32) -> SolidTriangle {
         SolidTriangle::new(
@@ -304,7 +304,7 @@ mod tests {
         list.push_fill_rect(clips[0], Recti::new(0, 0, 2, 2), color(1, 2, 3, 4));
         list.push_text(clips[1], FontId::default(), Vec2i::new(4, 5), color(5, 6, 7, 8), "text");
         list.push_icon(clips[2], IconId::default(), Recti::new(6, 7, 8, 9), color(9, 10, 11, 12));
-        list.push_image(clips[3], Image::Slot(SlotId::default()), Recti::new(10, 11, 12, 13), color(13, 14, 15, 16));
+        list.push_image(clips[3], TextureId::new(1, 12, 13), Recti::new(10, 11, 12, 13), color(13, 14, 15, 16));
 
         assert_eq!(list.ops.len(), clips.len());
         for (operation, expected) in list.ops.iter().zip(clips) {

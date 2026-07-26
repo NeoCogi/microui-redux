@@ -35,7 +35,7 @@ use super::{
 };
 use crate::{
     atlas::{FontId, IconId},
-    style::{Color, Image},
+    style::{Color, TextureId},
 };
 use rs_math3d::{Color4b, Recti, Vec2f, Vec2i, color4b};
 
@@ -186,14 +186,14 @@ impl<'a> Painter<'a> {
         }
     }
 
-    /// Records one atlas slot or external image in a local rectangle.
-    pub fn image(&mut self, image: Image, rect: Recti, color: Color) {
+    /// Records one backend-owned external texture in a local rectangle.
+    pub fn image(&mut self, id: TextureId, rect: Recti, color: Color) {
         if !drawable_rect(rect, color) {
             return;
         }
         let screen_rect = self.screen_rect(rect);
         if rects_overlap(screen_rect, self.clip) {
-            self.list.push_image(self.clip, image, screen_rect, color);
+            self.list.push_image(self.clip, id, screen_rect, color);
         }
     }
 
@@ -314,7 +314,7 @@ fn intersect_rects(left: Recti, right: Recti) -> Option<Recti> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{color, SlotId};
+    use crate::{color, TextureId};
     use super::super::display_list::DrawKind;
 
     fn rect_tuple(rect: Recti) -> (i32, i32, i32, i32) {
@@ -451,7 +451,7 @@ mod tests {
             let mut painter = Painter::new(&mut list, Vec2i::new(10, 20), Recti::new(0, 0, 100, 100), Recti::new(10, 20, 20, 20));
             painter.text(FontId::default(), "label", Vec2i::new(1, 2), color(255, 255, 255, 255));
             painter.icon(IconId::default(), Recti::new(2, 3, 4, 5), color(255, 255, 255, 255));
-            painter.image(Image::Slot(SlotId::default()), Recti::new(100, 100, 10, 10), color(255, 255, 255, 255));
+            painter.image(TextureId::new(1, 10, 10), Recti::new(100, 100, 10, 10), color(255, 255, 255, 255));
         }
 
         let frame = list.take();

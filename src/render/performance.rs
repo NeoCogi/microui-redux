@@ -5,7 +5,7 @@
 //! `cargo test --release render_performance_baseline -- --ignored --nocapture --test-threads=1`
 
 use super::{CustomRenderHandle, DisplayList, FrameError, FrameInfo, Painter, Renderer, RendererBackend, RendererFrame, Vertex};
-use crate::{AtlasSource, CharEntry, FontEntry, FontId, Image, SourceFormat, TextureId, color};
+use crate::{AtlasSource, CharEntry, FontEntry, FontId, SourceFormat, TextureId, color};
 use rs_math3d::{Dimensioni, Recti, Vec2f, Vec2i};
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -270,7 +270,6 @@ fn make_atlas() -> crate::AtlasHandle {
         icons: &icons,
         fonts: &fonts,
         format: SourceFormat::Raw,
-        slots: &[],
     })
 }
 
@@ -334,7 +333,7 @@ fn record_scenario(
             for index in 0..EXTERNAL_TEXTURE_PAIR_COUNT {
                 let rect = item_rect(index);
                 painter.fill_rect(rect, white);
-                painter.image(Image::Texture(texture), rect, white);
+                painter.image(texture, rect, white);
             }
         }
         Scenario::CustomBarriers => {

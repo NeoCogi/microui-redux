@@ -31,8 +31,6 @@
 //! Texture atlas handles, baked icon/font metadata, and atlas construction helpers.
 
 use std::collections::HashMap;
-use std::cell::{Cell, Ref, RefCell};
-use std::error::Error;
 use std::fmt::{Debug, Formatter};
 
 use super::*;
@@ -83,17 +81,7 @@ pub struct FontId(usize);
 /// Handle referencing a bitmap icon stored in the atlas.
 pub struct IconId(usize);
 
-#[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
-/// Handle referencing an arbitrary image slot stored in the atlas.
-pub struct SlotId(usize);
-
 impl Into<u32> for IconId {
-    fn into(self) -> u32 {
-        self.0 as _
-    }
-}
-
-impl Into<u32> for SlotId {
     fn into(self) -> u32 {
         self.0 as _
     }
@@ -106,7 +94,7 @@ struct Icon {
     rect: Recti,
 }
 
-/// Mutable atlas storage shared through [`AtlasHandle`].
+/// Immutable atlas storage shared through [`AtlasHandle`].
 struct Atlas {
     /// Width of the atlas texture in pixels.
     width: usize,
@@ -118,107 +106,11 @@ struct Atlas {
     fonts: Vec<(String, Font)>,
     /// Named icons available to widgets.
     icons: Vec<(String, Icon)>,
-    /// User-reserved atlas rectangles for external drawing needs.
-    slots: Vec<Recti>,
-    /// Monotonic version reserved before mutable pixel/slot updates.
-    last_update_id: u64,
-}
-
-/// Interior state shared by every clone of an [`AtlasHandle`].
-struct AtlasShared {
-    /// Number of overlapping logical/backend frames reading this atlas.
-    active_frame_readers: Cell<usize>,
-    /// Atlas metadata and pixels.
-    data: RefCell<Atlas>,
-}
-
-impl AtlasShared {
-    fn borrow(&self) -> Ref<'_, Atlas> {
-        self.data.borrow()
-    }
 }
 
 #[derive(Clone)]
-/// Shared handle exposing read/write access to the atlas.
-pub struct AtlasHandle(Rc<AtlasShared>);
-
-/// Failure to freeze an atlas for another overlapping frame.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum AtlasFrameError {
-    /// The active-reader counter cannot represent another guard.
-    TooManyReaders,
-    /// Atlas data was already mutably borrowed by a reentrant caller.
-    BorrowConflict,
-}
-
-impl std::fmt::Display for AtlasFrameError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TooManyReaders => f.write_str("atlas frame-reader counter exhausted"),
-            Self::BorrowConflict => f.write_str("atlas is already mutably borrowed"),
-        }
-    }
-}
-
-impl Error for AtlasFrameError {}
-
-/// Failure to mutate atlas pixels or slot state.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum AtlasMutationError {
-    /// Atlas mutation is forbidden while any frame guard is alive.
-    FrameActive,
-    /// The supplied slot identifier is not present in this atlas.
-    UnknownSlot(SlotId),
-    /// The atlas version counter cannot advance without wrapping.
-    VersionExhausted,
-    /// Atlas data is already borrowed by a reentrant operation.
-    BorrowConflict,
-}
-
-impl std::fmt::Display for AtlasMutationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::FrameActive => f.write_str("atlas mutation is forbidden while a frame is active"),
-            Self::UnknownSlot(slot) => write!(f, "unknown atlas slot {}", slot.0),
-            Self::VersionExhausted => f.write_str("atlas version counter exhausted"),
-            Self::BorrowConflict => f.write_str("atlas is already borrowed"),
-        }
-    }
-}
-
-impl Error for AtlasMutationError {}
-
-/// RAII guard that prevents atlas mutation throughout a logical/backend frame.
-#[must_use = "dropping the guard unfreezes atlas mutation"]
-pub(crate) struct AtlasFrameGuard {
-    atlas: AtlasHandle,
-    version_at_begin: u64,
-}
-
-impl AtlasHandle {
-    /// Freezes mutation until the returned guard is dropped.
-    pub(crate) fn freeze_for_frame(&self) -> Result<AtlasFrameGuard, AtlasFrameError> {
-        let version_at_begin = self.0.data.try_borrow().map_err(|_| AtlasFrameError::BorrowConflict)?.last_update_id;
-        let readers = self.0.active_frame_readers.get().checked_add(1).ok_or(AtlasFrameError::TooManyReaders)?;
-        self.0.active_frame_readers.set(readers);
-        Ok(AtlasFrameGuard { atlas: self.clone(), version_at_begin })
-    }
-}
-
-impl Drop for AtlasFrameGuard {
-    fn drop(&mut self) {
-        let readers = self.atlas.0.active_frame_readers.get();
-        if readers == 0 {
-            eprintln!("[microui-redux][atlas] unbalanced atlas frame guard");
-            return;
-        }
-        self.atlas.0.active_frame_readers.set(readers - 1);
-
-        if self.atlas.0.data.try_borrow().is_ok_and(|atlas| atlas.last_update_id != self.version_at_begin) {
-            eprintln!("[microui-redux][atlas] atlas changed while frozen");
-        }
-    }
-}
+/// Shared read-only handle to a fully constructed atlas.
+pub struct AtlasHandle(Rc<Atlas>);
 
 /// Identifier of the solid white icon baked into the default atlas.
 pub const WHITE_ICON: IconId = IconId(0);

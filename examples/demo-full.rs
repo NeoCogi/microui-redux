@@ -76,7 +76,6 @@ use common::wgpu_renderer::WgpuRenderer as SelectedBackend;
 #[cfg(feature = "builder")]
 use microui_redux::atlas::builder;
 use microui_redux::{prelude::*, render::Vertex};
-use rand::{RngExt, rng};
 use std::{
     cell::RefCell,
     f32::consts::PI,
@@ -865,7 +864,7 @@ struct State {
     background_header: WidgetHandle<Node>,
     tree_and_text_header: WidgetHandle<Node>,
     text_area_header: WidgetHandle<Node>,
-    slot_header: WidgetHandle<Node>,
+    texture_header: WidgetHandle<Node>,
     combo_header: WidgetHandle<Node>,
     test1_tn: WidgetHandle<Node>,
     test1a_tn: WidgetHandle<Node>,
@@ -880,10 +879,7 @@ struct State {
     test_buttons: [WidgetHandle<Button>; 6],
     tree_buttons: [WidgetHandle<Button>; 6],
     popup_buttons: [WidgetHandle<Button>; 2],
-    slot_buttons: [WidgetHandle<Button>; 4],
-    atlas: AtlasHandle,
-    random_slot: SlotId,
-    random_paint: Rc<dyn Fn(usize, usize) -> Color4b>,
+    texture_buttons: [WidgetHandle<Button>; 4],
     stack_direction_buttons: [WidgetHandle<Button>; 6],
     weight_buttons: [WidgetHandle<Button>; 9],
     submit_buf_id: NodeId,
@@ -921,7 +917,7 @@ struct State {
 }
 
 impl State {
-    pub fn new(_backend: BackendInitContext, slots: Vec<SlotId>, ctx: &mut Context<SelectedBackend>) -> Self {
+    pub fn new(_backend: BackendInitContext, ctx: &mut Context<SelectedBackend>) -> Self {
         #[cfg(any(feature = "builder", feature = "png_source"))]
         let image_texture = load_external_image_texture(ctx);
         #[cfg(not(any(feature = "builder", feature = "png_source")))]
@@ -992,34 +988,40 @@ impl State {
             })
             .expect("register Suzanne renderer")
         };
-        let random_slot = slots[3];
-        let random_paint: Rc<dyn Fn(usize, usize) -> Color4b> = {
-            let rng = Rc::new(RefCell::new(rng()));
-            Rc::new(move |_x, _y| {
-                let mut rng = rng.borrow_mut();
-                color4b(rng.random(), rng.random(), rng.random(), rng.random())
-            })
-        };
-        let slot_buttons = [
+        let red_texture = upload_solid_texture(ctx, 64, 64, [0xFF, 0, 0, 0xFF]);
+        let green_texture = upload_solid_texture(ctx, 24, 32, [0, 0xFF, 0, 0xFF]);
+        let blue_texture = upload_solid_texture(ctx, 64, 24, [0, 0, 0xFF, 0xFF]);
+        let noise_texture = upload_noise_texture(ctx, 24, 32);
+        let texture_buttons = [
             widget_handle(Button::with_image(
-                "Slot 1",
-                Some(Image::Slot(slots[0])),
+                "Texture 1 - Red",
+                Some(red_texture),
                 WidgetOption::NONE,
                 WidgetFillOption::ALL,
             )),
-            widget_handle(Button::with_slot("Slot 2 - Green", slots[1], WidgetOption::NONE, WidgetFillOption::ALL)),
             widget_handle(Button::with_image(
-                "Slot 3",
-                Some(Image::Slot(slots[2])),
+                "Texture 2 - Green",
+                Some(green_texture),
                 WidgetOption::NONE,
                 WidgetFillOption::ALL,
             )),
-            widget_handle(Button::with_slot("Slot 4 - Random", random_slot, WidgetOption::NONE, WidgetFillOption::ALL)),
+            widget_handle(Button::with_image(
+                "Texture 3 - Blue",
+                Some(blue_texture),
+                WidgetOption::NONE,
+                WidgetFillOption::ALL,
+            )),
+            widget_handle(Button::with_image(
+                "Texture 4 - Noise",
+                Some(noise_texture),
+                WidgetOption::NONE,
+                WidgetFillOption::ALL,
+            )),
         ];
         let external_image_button = image_texture.map(|texture| {
             widget_handle(Button::with_scaled_image(
                 "External Image",
-                Some(Image::Texture(texture)),
+                Some(texture),
                 WidgetOption::NONE,
                 WidgetFillOption::ALL,
             ))
@@ -1138,7 +1140,7 @@ impl State {
             background_header: widget_handle(Node::header("Background Color", NodeStateValue::Expanded)),
             tree_and_text_header: widget_handle(Node::header("Tree and Text", NodeStateValue::Expanded)),
             text_area_header: widget_handle(Node::header("TextArea", NodeStateValue::Expanded)),
-            slot_header: widget_handle(Node::header("Slots", NodeStateValue::Expanded)),
+            texture_header: widget_handle(Node::header("Textures", NodeStateValue::Expanded)),
             combo_header: widget_handle(Node::header("Combo Box", NodeStateValue::Expanded)),
             test1_tn: widget_handle(Node::tree("Test 1", NodeStateValue::Closed)),
             test1a_tn: widget_handle(Node::tree("Test 1a", NodeStateValue::Closed)),
@@ -1170,10 +1172,7 @@ impl State {
                 widget_handle(Button::with_opt("Hello", WidgetOption::ALIGN_CENTER)),
                 widget_handle(Button::with_opt("World", WidgetOption::ALIGN_CENTER)),
             ],
-            slot_buttons,
-            atlas: ctx.renderer().atlas(),
-            random_slot,
-            random_paint,
+            texture_buttons,
             stack_direction_buttons: [
                 widget_handle(Button::with_opt("Call 1", WidgetOption::ALIGN_CENTER)),
                 widget_handle(Button::with_opt("Call 2", WidgetOption::ALIGN_CENTER)),
@@ -1510,7 +1509,7 @@ impl State {
         let background_header = self.background_header.clone();
         let tree_and_text_header = self.tree_and_text_header.clone();
         let text_area_header = self.text_area_header.clone();
-        let slot_header = self.slot_header.clone();
+        let texture_header = self.texture_header.clone();
         let combo_header = self.combo_header.clone();
         let test1_tn = self.test1_tn.clone();
         let test1a_tn = self.test1a_tn.clone();
@@ -1529,7 +1528,7 @@ impl State {
         let bg_sliders = self.bg_sliders.clone();
         let background_labels = self.background_labels.clone();
         let background_swatch = self.background_swatch.clone();
-        let slot_buttons = self.slot_buttons.clone();
+        let texture_buttons = self.texture_buttons.clone();
         let external_image_button = self.external_image_button.clone();
         let mut test_button_ids = [NodeId::default(); 6];
         let mut tree_button_ids = [NodeId::default(); 6];
@@ -1549,7 +1548,7 @@ impl State {
             let [tree_label_hello, tree_label_world] = tree_labels.clone();
             let [slider_red, slider_green, slider_blue] = bg_sliders.clone();
             let [label_red, label_green, label_blue] = background_labels.clone();
-            let [slot0, slot1, slot2, slot3] = slot_buttons.clone();
+            let [texture0, texture1, texture2, texture3] = texture_buttons.clone();
 
             tree.node(NodeOptions::with_policy(Policy::fill()))
                 .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |tree| {
@@ -1658,17 +1657,17 @@ impl State {
                     });
                 });
 
-                Self::section(tree, &slot_header, |tree| {
+                Self::section(tree, &texture_header, |tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                        tree.widget(&slot0);
-                        tree.widget(&slot1);
-                        tree.widget(&slot2);
+                        tree.widget(&texture0);
+                        tree.widget(&texture1);
+                        tree.widget(&texture2);
                         if let Some(button) = &external_image_button {
                             tree.node(NodeOptions::with_policy(Policy::fixed_width(256))).widget(button);
                         }
                     });
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                        tree.widget(&slot3);
+                        tree.widget(&texture3);
                     });
                 });
                 });
@@ -1942,10 +1941,6 @@ impl State {
     }
 
     fn process_frame(&mut self, ctx: &mut Context<SelectedBackend>) {
-        if let Err(error) = self.atlas.render_slot(self.random_slot, self.random_paint.clone()) {
-            eprintln!("[microui-redux][demo-full] random slot update failed: {error}");
-        }
-
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
@@ -1970,23 +1965,33 @@ impl State {
     }
 }
 
+fn upload_solid_texture(ctx: &mut Context<SelectedBackend>, width: i32, height: i32, rgba: [u8; 4]) -> TextureId {
+    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+    for _ in 0..width * height {
+        pixels.extend_from_slice(&rgba);
+    }
+    ctx.load_image_rgba(width, height, &pixels)
+}
+
+fn upload_noise_texture(ctx: &mut Context<SelectedBackend>, width: i32, height: i32) -> TextureId {
+    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height {
+        for x in 0..width {
+            let value = ((x * 73 + y * 151 + x * y * 19) & 0xFF) as u8;
+            pixels.extend_from_slice(&[value, value.rotate_left(2), value.rotate_left(5), 0xFF]);
+        }
+    }
+    ctx.load_image_rgba(width, height, &pixels)
+}
+
 fn main() {
-    let slots_orig = atlas_assets::default_slots();
-    let atlas = atlas_assets::load_atlas(&slots_orig);
-    let slots = atlas.clone_slot_table();
-    atlas.render_slot(slots[0], Rc::new(|_x, _y| color4b(0xFF, 0, 0, 0xFF))).unwrap();
-    atlas.render_slot(slots[1], Rc::new(|_x, _y| color4b(0, 0xFF, 0, 0xFF))).unwrap();
-    atlas.render_slot(slots[2], Rc::new(|_x, _y| color4b(0, 0, 0xFF, 0xFF))).unwrap();
+    let atlas = atlas_assets::load_atlas();
     #[cfg(feature = "builder")]
     {
         builder::Builder::save_png_image(atlas.clone(), "atlas.png").unwrap();
     }
 
-    let mut app = Application::new(atlas.clone(), move |backend: BackendInitContext, ctx| {
-        let slots = atlas.clone_slot_table();
-        State::new(backend, slots, ctx)
-    })
-    .unwrap();
+    let mut app = Application::new(atlas, |backend: BackendInitContext, ctx| State::new(backend, ctx)).unwrap();
 
     app.event_loop(|ctx, state, _dimensions| {
         state.process_frame(ctx);

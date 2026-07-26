@@ -225,7 +225,7 @@ cargo run --example backend-frame-cube --features example-wgpu
 
 ### Retained-mode migration status
 
-The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate retained widget handle state over time, and drive frames with `Context::frame(FrameInfo)?.render_ui()?`.
+The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate retained widget handle state over time, and drive frames with `Context::frame(FrameInfo).render_ui()?`.
 
 Per-frame root submission APIs have been removed from the public surface. Root trees are registered or replaced explicitly with `create_window`, `create_dialog`, `create_popup`, and `set_root_tree`; visibility is controlled with `set_root_visible`.
 
@@ -241,7 +241,7 @@ let tree = WidgetTreeBuilder::build(|tree| {
 
 let root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
 let info = FrameInfo::try_new(Dimensioni::new(800, 600), color(20, 22, 26, 255))?;
-ctx.frame(info)?.render_ui()?;
+ctx.frame(info).render_ui()?;
 
 if ctx.committed_results().state_of_retained(RetainedId::root_node(root, name_node)).is_submitted() {
     // react to the textbox submission here
@@ -252,7 +252,7 @@ Retained trees are the supported public authoring path. Post-render business log
 
 ```rust
 let info = FrameInfo::try_new(Dimensioni::new(800, 600), color(20, 22, 26, 255))?;
-ctx.frame(info)?.render_ui()?;
+ctx.frame(info).render_ui()?;
 
 let results = ctx.committed_results();
 if results.state_of_retained(RetainedId::root_node(root, submit_button_node)).is_submitted() {
@@ -333,7 +333,6 @@ let config = builder::Config {
     default_font: "assets/NORMAL.ttf".into(),
     default_font_size: 12,
     fonts: FONTS,
-    slots: &[],
 };
 
 let mut title = TextBlock::new("Inspector");

@@ -203,13 +203,8 @@ impl<S> Application<S> {
             let dimensions = Dimensioni::new(width as i32, height as i32);
             f(&mut self.ctx, &mut self.state, dimensions);
             if let Ok(info) = FrameInfo::try_new(dimensions, color(0x7F, 0x7F, 0x7F, 255)) {
-                match self.ctx.frame(info) {
-                    Ok(frame) => {
-                        if let Err(error) = frame.render_ui() {
-                            eprintln!("[microui-redux][example] frame failed: {error}");
-                        }
-                    }
-                    Err(error) => eprintln!("[microui-redux][example] atlas frame failed: {error}"),
+                if let Err(error) = self.ctx.frame(info).render_ui() {
+                    eprintln!("[microui-redux][example] frame failed: {error}");
                 }
             }
             #[cfg(feature = "example-glow")]
@@ -239,7 +234,7 @@ fn init_backend(video: &VideoSubsystem, atlas: AtlasHandle) -> Result<(BackendBu
 
     let (width, height) = window.size();
     let gl = Arc::new(gl);
-    let renderer = glow_renderer::GLRenderer::new(gl.clone(), atlas, width, height);
+    let renderer = glow_renderer::GLRenderer::new(gl.clone(), atlas, width, height)?;
 
     Ok((
         BackendBundle {
