@@ -2,6 +2,24 @@
 
 use super::*;
 use crate::test_support::test_atlas_with_font_sizes as make_test_atlas;
+use std::collections::HashSet;
+
+#[test]
+fn texture_id_identity_includes_immutable_dimensions() {
+    let texture = TextureId::new(7, 32, 16);
+    let same = TextureId::new(7, 32, 16);
+    let different_width = TextureId::new(7, 64, 16);
+    let different_height = TextureId::new(7, 32, 8);
+
+    assert_eq!(texture, same);
+    assert_ne!(texture, different_width);
+    assert_ne!(texture, different_height);
+
+    let textures = HashSet::from([texture]);
+    assert!(textures.contains(&same));
+    assert!(!textures.contains(&different_width));
+    assert!(!textures.contains(&different_height));
+}
 
 #[test]
 fn font_choice_conversions_preserve_selected_font() {

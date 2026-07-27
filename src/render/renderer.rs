@@ -40,14 +40,14 @@ use super::{
         RendererFrame, Vertex,
     },
     display_list::{DisplayList, DrawKind, DrawOp},
-    geometry::{ClipRect, SolidTriangle, textured_quad_from_uv},
+    geometry::{ClipRect, SolidTriangle, positive_intersection, rect_has_area, textured_quad_from_uv},
 };
 use crate::{
     atlas::{AtlasHandle, FontId, IconId, WHITE_ICON},
     style::{Color, TextureId},
 };
 use rs_math3d::{Dimensioni, Recti, Vec2f, Vec2i};
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::{error::Error, fmt};
 
 /// Failure to validate, acquire, or execute one destructive display-list submission.
@@ -114,8 +114,8 @@ pub struct Renderer<B: RendererBackend> {
     white_uv: Vec2f,
     /// Next external texture id allocated by this renderer.
     next_texture_id: u32,
-    /// Dimensions of backend-owned external textures.
-    textures: HashMap<TextureId, TextureInfo>,
+    /// Complete handles for backend-owned external textures.
+    textures: HashSet<TextureId>,
     /// Backend-specialized persistent custom callbacks.
     custom_renderers: CustomRenderRegistry<B>,
     /// Scratch output reused by final rectangular triangle clipping.
@@ -126,15 +126,6 @@ pub struct Renderer<B: RendererBackend> {
     /// Drawable size used by low-level retained-runtime tests.
     #[cfg(test)]
     test_dimensions: Dimensioni,
-}
-
-#[derive(Clone, Copy)]
-/// Dimensions tracked for an uploaded external texture.
-struct TextureInfo {
-    /// Texture width in pixels.
-    width: i32,
-    /// Texture height in pixels.
-    height: i32,
 }
 
 impl<B: RendererBackend> Renderer<B> {
@@ -154,7 +145,7 @@ impl<B: RendererBackend> Renderer<B> {
             white_icon_rect,
             white_uv,
             next_texture_id: 1,
-            textures: HashMap::new(),
+            textures: HashSet::new(),
             custom_renderers: CustomRenderRegistry::new(),
             clipped_triangles: Vec::new(),
             #[cfg(test)]
@@ -205,7 +196,6 @@ impl<B: RendererBackend> Renderer<B> {
             white_icon_rect: self.white_icon_rect,
             white_uv: self.white_uv,
             viewport,
-            textures: &self.textures,
             clipped_triangles: &mut self.clipped_triangles,
             solid_triangles,
         };
@@ -217,7 +207,7 @@ impl<B: RendererBackend> Renderer<B> {
     fn validate_display_list(&self, list: &DisplayList) -> Result<(), RenderError> {
         for (operation_index, operation) in list.ops.iter().enumerate() {
             match &operation.kind {
-                DrawKind::Image { id, .. } if !self.textures.contains_key(id) => {
+                DrawKind::Image { id, .. } if !self.textures.contains(id) => {
                     return Err(RenderError::UnknownTexture { id: *id, operation_index });
                 }
                 DrawKind::Custom { renderer, .. } if !self.custom_renderers.contains(*renderer) => {
@@ -280,7 +270,7 @@ impl<B: RendererBackend> Renderer<B> {
         let id = TextureId::new(self.next_texture_id, width, height);
         self.backend.create_texture(id, width, height, pixels)?;
         self.next_texture_id = next_texture_id;
-        self.textures.insert(id, TextureInfo { width, height });
+        self.textures.insert(id);
         Ok(id)
     }
 
@@ -294,8 +284,14 @@ impl<B: RendererBackend> Renderer<B> {
     }
 
     /// Destroys a texture allocated via [`Renderer::load_texture_rgba`].
+    ///
+    /// Destroying an unknown or already-freed handle triggers a debug assertion. In release builds
+    /// the repeated operation is an idempotent no-op. The backend is never called more than once
+    /// for the same live handle.
     pub fn free_texture(&mut self, id: TextureId) {
-        if self.textures.remove(&id).is_some() {
+        let removed = self.textures.remove(&id);
+        debug_assert!(removed, "attempted to destroy an unknown or already-freed texture: {id:?}");
+        if removed {
             self.backend.destroy_texture(id);
         }
     }
@@ -317,8 +313,6 @@ struct DisplayListExecutor<'frame, 'resources, B: RendererBackend> {
     white_uv: Vec2f,
     /// Final viewport clip.
     viewport: Recti,
-    /// Backend-owned texture dimensions.
-    textures: &'resources HashMap<TextureId, TextureInfo>,
     /// Reusable triangle clipping output.
     clipped_triangles: &'resources mut Vec<Vertex>,
     /// Complete typed triangle arena referenced by operation ranges.
@@ -335,7 +329,7 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
 
     /// Executes one operation after resolving its final viewport clip.
     fn execute(&mut self, DrawOp { clip, kind }: DrawOp) {
-        let Some(clip) = intersect_rects(clip, self.viewport) else {
+        let Some(clip) = positive_intersection(clip, self.viewport) else {
             return;
         };
         match kind {
@@ -380,13 +374,9 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
 
     /// Clips and submits one backend-owned external texture.
     fn draw_texture(&mut self, id: TextureId, dst: Recti, color: Color, clip: Recti) {
-        let info = self
-            .textures
-            .get(&id)
-            .copied()
-            .expect("texture IDs were validated before backend-frame acquisition");
-        let src = Recti::new(0, 0, info.width, info.height);
-        let Some(vertices) = clipped_textured_quad(dst, src, Dimensioni::new(info.width, info.height), color, clip) else {
+        let size = id.size();
+        let src = Recti::new(0, 0, size.width, size.height);
+        let Some(vertices) = clipped_textured_quad(dst, src, size, color, clip) else {
             return;
         };
         self.frame.flush();
@@ -410,7 +400,7 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
 
     /// Flushes atlas work and invokes one visible custom callback in painter order.
     fn draw_custom(&mut self, renderer: CustomRenderKey, content_area: Recti, clip: Recti) {
-        let Some(view) = intersect_rects(clip, content_area) else {
+        let Some(view) = positive_intersection(clip, content_area) else {
             return;
         };
         let callback = self
@@ -439,10 +429,10 @@ fn submit_atlas_rect<F: RendererFrame>(frame: &mut F, atlas_dim: Dimensioni, dst
 
 /// Clips a textured destination and preserves projected source coordinates through final UVs.
 fn clipped_textured_quad(dst: Recti, src: Recti, texture_dim: Dimensioni, color: Color, clip: Recti) -> Option<[Vertex; 4]> {
-    if dst.width <= 0 || dst.height <= 0 || src.width <= 0 || src.height <= 0 || texture_dim.width <= 0 || texture_dim.height <= 0 {
+    if !rect_has_area(dst) || !rect_has_area(src) || texture_dim.width <= 0 || texture_dim.height <= 0 {
         return None;
     }
-    let clipped = intersect_rects(dst, clip)?;
+    let clipped = positive_intersection(dst, clip)?;
 
     let dst_extent = Vec2f::new(dst.width as f32, dst.height as f32);
     let dst_x0 = i64::from(dst.x);
@@ -464,20 +454,12 @@ fn clipped_textured_quad(dst: Recti, src: Recti, texture_dim: Dimensioni, color:
     Some(textured_quad_from_uv(clipped, uv_min, uv_max, color))
 }
 
-/// Returns the positive-area intersection of two integer rectangles.
-fn intersect_rects(left: Recti, right: Recti) -> Option<Recti> {
-    let intersection = left.intersect(&right)?;
-    (intersection.width > 0 && intersection.height > 0).then_some(intersection)
-}
-
 impl<B: RendererBackend> Drop for Renderer<B> {
     /// Releases all backend-owned textures allocated through the renderer.
     fn drop(&mut self) {
-        let ids: Vec<_> = self.textures.keys().copied().collect();
-        for id in ids {
+        for id in self.textures.drain() {
             self.backend.destroy_texture(id);
         }
-        self.textures.clear();
     }
 }
 

@@ -172,8 +172,12 @@ pub struct Style {
 /// Floating-point type used by widgets and layout calculations.
 pub type Real = f32;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 /// Handle referencing an external texture managed by the renderer.
+///
+/// Equality and hashing include the renderer-issued numeric identifier and the immutable width and
+/// height carried by the handle. Renderer validation therefore accepts only the exact handle whose
+/// dimensions will be used for texture-coordinate projection.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TextureId {
     /// Backend-local texture identifier.
     raw: u32,

@@ -583,7 +583,7 @@ pub(crate) struct ClipRect {
 impl ClipRect {
     /// Creates a non-empty clipping rectangle and precomputes its four edge objects.
     pub(crate) fn new(rect: Recti) -> Option<Self> {
-        if rect.width <= 0 || rect.height <= 0 {
+        if !rect_has_area(rect) {
             return None;
         }
 
@@ -628,6 +628,27 @@ impl ClipRect {
 /// Applies an integer translation without changing rectangle extents.
 pub(crate) fn translate_rect(rect: Recti, offset: Vec2i) -> Recti {
     Recti::new(rect.x.saturating_add(offset.x), rect.y.saturating_add(offset.y), rect.width, rect.height)
+}
+
+/// Returns whether an integer rectangle contains positive area.
+pub(super) fn rect_has_area(rect: Recti) -> bool {
+    rect.width > 0 && rect.height > 0
+}
+
+/// Returns the positive-area portion shared by two rectangles.
+///
+/// `Recti::intersect` treats touching edges as a zero-area intersection. Rendering treats that as
+/// empty, so this adapter applies the module's positive-area policy to the library operation.
+pub(super) fn positive_intersection(left: Recti, right: Recti) -> Option<Recti> {
+    if !rect_has_area(left) || !rect_has_area(right) {
+        return None;
+    }
+    left.intersect(&right).filter(|intersection| rect_has_area(*intersection))
+}
+
+/// Returns whether two positive-area integer rectangles overlap.
+pub(super) fn rects_overlap(left: Recti, right: Recti) -> bool {
+    positive_intersection(left, right).is_some()
 }
 
 /// Computes a conservative integer bounding rectangle for finite floating-point positions.

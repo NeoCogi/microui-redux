@@ -31,13 +31,13 @@
 
 use super::{
     display_list::DisplayList,
-    geometry::{bounds_for_line, bounds_for_points, translate_rect},
+    geometry::{bounds_for_line, bounds_for_points, positive_intersection, rect_has_area, rects_overlap, translate_rect},
 };
 use crate::{
     atlas::{FontId, IconId},
     style::{Color, TextureId},
 };
-use rs_math3d::{Color4b, Recti, Vec2f, Vec2i, color4b};
+use rs_math3d::{Recti, Vec2f, Vec2i, color4b};
 
 /// Records backend-neutral drawing operations in local coordinates.
 ///
@@ -141,18 +141,12 @@ impl<'a> Painter<'a> {
 
     /// Records a semantic filled rectangle.
     pub fn fill_rect(&mut self, rect: Recti, color: Color) {
-        if !drawable_rect(rect, color) {
-            return;
-        }
-        let screen_rect = self.screen_rect(rect);
-        if rects_overlap(screen_rect, self.clip) {
-            self.list.push_fill_rect(self.clip, screen_rect, color);
-        }
+        self.record_rect(rect, color, |list, clip, screen_rect| list.push_fill_rect(clip, screen_rect, color));
     }
 
     /// Records an inside-aligned rectangle outline with the requested integer width.
     pub fn stroke_rect(&mut self, rect: Recti, width: i32, color: Color) {
-        if !drawable_rect(rect, color) || width <= 0 {
+        if !rect_has_area(rect) || color.a == 0 || width <= 0 {
             return;
         }
         if width.saturating_mul(2) >= rect.width || width.saturating_mul(2) >= rect.height {
@@ -182,7 +176,7 @@ impl<'a> Painter<'a> {
     ///
     /// Text measurement remains outside Painter; final glyph clipping is performed by Renderer.
     pub fn text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
-        if text.is_empty() || color.a == 0 || !clip_has_area(self.clip) {
+        if text.is_empty() || color.a == 0 || !rect_has_area(self.clip) {
             return;
         }
         self.list.push_text(self.clip, font, self.screen_pos(pos), color, text);
@@ -190,29 +184,17 @@ impl<'a> Painter<'a> {
 
     /// Records one atlas icon in a local rectangle.
     pub fn icon(&mut self, id: IconId, rect: Recti, color: Color) {
-        if !drawable_rect(rect, color) {
-            return;
-        }
-        let screen_rect = self.screen_rect(rect);
-        if rects_overlap(screen_rect, self.clip) {
-            self.list.push_icon(self.clip, id, screen_rect, color);
-        }
+        self.record_rect(rect, color, |list, clip, screen_rect| list.push_icon(clip, id, screen_rect, color));
     }
 
     /// Records one backend-owned external texture in a local rectangle.
     pub fn image(&mut self, id: TextureId, rect: Recti, color: Color) {
-        if !drawable_rect(rect, color) {
-            return;
-        }
-        let screen_rect = self.screen_rect(rect);
-        if rects_overlap(screen_rect, self.clip) {
-            self.list.push_image(self.clip, id, screen_rect, color);
-        }
+        self.record_rect(rect, color, |list, clip, screen_rect| list.push_image(clip, id, screen_rect, color));
     }
 
     /// Tessellates and records one thick local line without clipping its generated triangles.
     pub fn stroke_line(&mut self, from: Vec2f, to: Vec2f, width: f32, color: Color) {
-        if color.a == 0 || !clip_has_area(self.clip) {
+        if color.a == 0 || !rect_has_area(self.clip) {
             return;
         }
 
@@ -223,7 +205,8 @@ impl<'a> Painter<'a> {
             return;
         }
         let offset = Vec2f::new(self.origin.x as f32, self.origin.y as f32);
-        self.list.push_line(self.clip, from, to, width, packed_color(color), offset);
+        self.list
+            .push_line(self.clip, from, to, width, color4b(color.r, color.g, color.b, color.a), offset);
     }
 
     /// Tessellates and records one simple local polygon without clipping its generated triangles.
@@ -231,7 +214,7 @@ impl<'a> Painter<'a> {
     /// Convex polygons use a triangle fan; concave polygons use ear clipping. Degenerate,
     /// non-finite, and self-invalidating inputs safely emit no operation.
     pub fn fill_polygon(&mut self, points: &[Vec2f], color: Color) {
-        if points.len() < 3 || color.a == 0 || !clip_has_area(self.clip) {
+        if points.len() < 3 || color.a == 0 || !rect_has_area(self.clip) {
             return;
         }
         let Some(local_bounds) = bounds_for_points(points) else {
@@ -242,7 +225,7 @@ impl<'a> Painter<'a> {
         }
 
         let offset = Vec2f::new(self.origin.x as f32, self.origin.y as f32);
-        self.list.push_polygon(self.clip, points, packed_color(color), offset);
+        self.list.push_polygon(self.clip, points, color4b(color.r, color.g, color.b, color.a), offset);
     }
 
     /// Executes `paint` with a clip narrowed by a local rectangle.
@@ -252,7 +235,7 @@ impl<'a> Painter<'a> {
     pub fn with_clip(&mut self, rect: Recti, paint: impl FnOnce(&mut Painter<'_>)) {
         let screen_clip = self.screen_rect(rect);
         let effective =
-            intersect_rects(self.clip, screen_clip).unwrap_or_else(|| Recti::new(self.clip.x.max(screen_clip.x), self.clip.y.max(screen_clip.y), 0, 0));
+            positive_intersection(self.clip, screen_clip).unwrap_or_else(|| Recti::new(self.clip.x.max(screen_clip.x), self.clip.y.max(screen_clip.y), 0, 0));
         let mut child = Painter {
             list: &mut *self.list,
             origin: self.origin,
@@ -271,57 +254,17 @@ impl<'a> Painter<'a> {
     fn screen_rect(&self, rect: Recti) -> Recti {
         translate_rect(rect, self.origin)
     }
-}
 
-/// Returns a packed color for solid geometry.
-fn packed_color(color: Color) -> Color4b {
-    color4b(color.r, color.g, color.b, color.a)
-}
-
-/// Returns whether a rectangle and color describe visible geometry.
-fn drawable_rect(rect: Recti, color: Color) -> bool {
-    rect.width > 0 && rect.height > 0 && color.a > 0
-}
-
-/// Returns whether a clip contains positive area.
-fn clip_has_area(clip: Recti) -> bool {
-    clip.width > 0 && clip.height > 0
-}
-
-/// Returns whether two positive-area integer rectangles overlap.
-fn rects_overlap(left: Recti, right: Recti) -> bool {
-    if !clip_has_area(left) || !clip_has_area(right) {
-        return false;
+    /// Applies the common rectangle visibility policy and records one semantic rectangle operation.
+    fn record_rect(&mut self, rect: Recti, color: Color, record: impl FnOnce(&mut DisplayList, Recti, Recti)) {
+        if !rect_has_area(rect) || color.a == 0 {
+            return;
+        }
+        let screen_rect = self.screen_rect(rect);
+        if rects_overlap(screen_rect, self.clip) {
+            record(self.list, self.clip, screen_rect);
+        }
     }
-    let left_x0 = left.x as i64;
-    let left_y0 = left.y as i64;
-    let left_x1 = left_x0 + left.width as i64;
-    let left_y1 = left_y0 + left.height as i64;
-    let right_x0 = right.x as i64;
-    let right_y0 = right.y as i64;
-    let right_x1 = right_x0 + right.width as i64;
-    let right_y1 = right_y0 + right.height as i64;
-    left_x0 < right_x1 && left_x1 > right_x0 && left_y0 < right_y1 && left_y1 > right_y0
-}
-
-/// Returns the positive-area intersection of two rectangles using overflow-safe edge arithmetic.
-fn intersect_rects(left: Recti, right: Recti) -> Option<Recti> {
-    if !clip_has_area(left) || !clip_has_area(right) {
-        return None;
-    }
-    let x0 = (left.x as i64).max(right.x as i64);
-    let y0 = (left.y as i64).max(right.y as i64);
-    let x1 = (left.x as i64 + left.width as i64).min(right.x as i64 + right.width as i64);
-    let y1 = (left.y as i64 + left.height as i64).min(right.y as i64 + right.height as i64);
-    if x0 >= x1 || y0 >= y1 {
-        return None;
-    }
-    Some(Recti::new(
-        x0 as i32,
-        y0 as i32,
-        (x1 - x0).min(i32::MAX as i64) as i32,
-        (y1 - y0).min(i32::MAX as i64) as i32,
-    ))
 }
 
 #[cfg(test)]

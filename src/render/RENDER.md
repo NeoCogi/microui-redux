@@ -319,7 +319,13 @@ fn upload_checkerboard<B: RendererBackend>(
 
 Texture dimensions and RGBA byte length are validated before a texture ID is
 consumed. Failed backend creation does not leave a tracked texture behind.
-Dropping `Renderer` destroys every external texture it still owns.
+`TextureId` carries its immutable dimensions, and equality and hashing cover
+both those dimensions and its renderer-issued numeric identifier. Renderer
+tracks the complete live handles without storing a second copy of their
+dimensions. Repeated `free_image`/`free_texture` calls for the same handle are
+debug-asserted as lifecycle mistakes and become idempotent no-ops in release
+builds; they notify the backend only once. Dropping `Renderer` destroys every
+external texture it still owns.
 
 ## Custom-render callbacks
 

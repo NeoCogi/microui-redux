@@ -600,6 +600,27 @@ fn texture_upload_validation_and_backend_failure_do_not_consume_ids() {
     assert_eq!(create_calls.get(), 1);
 }
 
+#[cfg(debug_assertions)]
+#[test]
+fn repeated_texture_destruction_debug_asserts_before_a_second_backend_call() {
+    let create_calls = Rc::new(Cell::new(0));
+    let destroy_calls = Rc::new(Cell::new(0));
+    let backend = TextureUploadRenderer {
+        atlas: make_atlas(),
+        create_calls,
+        destroy_calls: destroy_calls.clone(),
+        fail_upload: Rc::new(Cell::new(false)),
+    };
+    let mut renderer = Renderer::new(backend);
+    let texture = renderer.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
+
+    renderer.free_texture(texture);
+    let repeated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| renderer.free_texture(texture)));
+
+    assert!(repeated.is_err());
+    assert_eq!(destroy_calls.get(), 1);
+}
+
 #[test]
 fn unknown_and_freed_textures_fail_preflight_and_drop_destroys_owned_textures_once() {
     let (backend, log) = recording_backend(make_atlas());
@@ -608,7 +629,6 @@ fn unknown_and_freed_textures_fail_preflight_and_drop_destroys_owned_textures_on
     let second = renderer.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
     let third = renderer.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
     log.clear();
-    renderer.free_texture(first);
     renderer.free_texture(first);
     let mut list = DisplayList::new();
     painter(&mut list, viewport()).image(first, Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));

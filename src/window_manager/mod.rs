@@ -332,6 +332,9 @@ impl<B: RendererBackend> Context<B> {
     }
 
     /// Deletes a previously uploaded texture.
+    ///
+    /// Deleting an unknown or already-freed handle triggers a debug assertion and is an idempotent
+    /// no-op in release builds.
     pub fn free_image(&mut self, id: TextureId) {
         self.renderer.free_texture(id);
     }
