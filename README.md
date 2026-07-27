@@ -136,12 +136,17 @@ backend's exclusive mutable borrow. Safe Rust therefore prevents acquiring a sec
 retaining the frame after rendering, and the API exposes no parallel mutable backend handle. This
 is the ownership guarantee that replaces a stateful `begin`/`end` protocol.
 
+`Context`, the selected backend, its frames, and registered render callbacks stay on their owning
+thread. The rendering traits intentionally have no `Send` or `Sync` requirement. Cross-thread work
+should deliver owned application data before `Context::frame`; custom callbacks execute
+synchronously during display-list execution.
+
 The complete sequence is:
 
 ```text
 application/resource updates
         |
-Context::frame(FrameInfo)             logical ContextFrame + atlas freeze
+Context::frame(FrameInfo)             logical ContextFrame
         |
 ContextFrame::render_ui(self)         retained update, paint, DisplayList recording
         |
@@ -153,7 +158,7 @@ DisplayList execution                 RendererFrame calls + typed custom callbac
         |
 drop backend frame                    finalize/submit/present as applicable; release borrow
         |
-drop logical frame                    release the outer atlas freeze
+drop logical frame                    release the exclusive Context borrow
 ```
 
 The renderer acquires the backend frame only after resource preflight succeeds. Normal UI
@@ -394,7 +399,7 @@ Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`,
     - [x] Glow, Vulkan, and WGPU examples share retained root handling, and `examples/retained-custom-drawing` documents the custom painting path.
 - [x] Unified rendering behind `Painter`, `DisplayList`, `Renderer`, and `RendererBackend`.
     - [x] Removed the old immediate drawing and mutable clipping facades in favor of scoped recording and single-pass execution.
-    - [x] Renamed the backend contract and shared handle to separate backend submission from high-level frame execution.
+    - [x] Removed the shared backend handle; Renderer now uniquely owns its backend and lends one typed frame to synchronous execution.
     - [x] Added a complete [rendering migration guide](MIGRATION.md) for the clean break.
 - [x] Reduced migration surface and documented internals.
     - [x] Public imports are grouped around `prelude`, `retained`, and the `render` subsystem.

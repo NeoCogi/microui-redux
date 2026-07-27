@@ -76,15 +76,7 @@ use common::wgpu_renderer::WgpuRenderer as SelectedBackend;
 #[cfg(feature = "builder")]
 use microui_redux::atlas::builder;
 use microui_redux::{prelude::*, render::Vertex};
-use std::{
-    cell::RefCell,
-    f32::consts::PI,
-    fs, mem,
-    path::PathBuf,
-    rc::Rc,
-    sync::{Arc, RwLock},
-    time::Instant,
-};
+use std::{cell::RefCell, f32::consts::PI, fs, mem, path::PathBuf, rc::Rc, time::Instant};
 
 type SelectedFrame<'a> = <SelectedBackend as RendererBackend>::Frame<'a>;
 
@@ -721,12 +713,12 @@ struct SuzanneData {
 
 #[derive(Clone)]
 struct SuzanneWidget {
-    data: Arc<RwLock<SuzanneData>>,
+    data: Rc<RefCell<SuzanneData>>,
     config: WidgetConfig,
 }
 
 impl SuzanneWidget {
-    fn new(data: Arc<RwLock<SuzanneData>>) -> Self {
+    fn new(data: Rc<RefCell<SuzanneData>>) -> Self {
         Self {
             data,
             config: WidgetConfig::new(WidgetOption::HOLD_FOCUS, ScrollBehavior::GRAB_SCROLL),
@@ -753,9 +745,7 @@ impl Widget for SuzanneWidget {
             return ResourceState::NONE;
         }
 
-        let Ok(mut suzanne) = self.data.write() else {
-            return ResourceState::NONE;
-        };
+        let mut suzanne = self.data.borrow_mut();
 
         suzanne.view_3d.set_dimension(Dimensioni::new(bounds.width, bounds.height));
         let mut handled_drag = false;
@@ -894,7 +884,7 @@ struct State {
     checkboxes: [WidgetHandle<Checkbox>; 3],
     open_popup: bool,
     open_dialog: bool,
-    triangle_data: Arc<RwLock<TriangleState>>,
+    triangle_data: Rc<RefCell<TriangleState>>,
     triangle_renderer: CustomRenderHandle<SelectedBackend>,
     suzanne_renderer: CustomRenderHandle<SelectedBackend>,
     triangle_widget: WidgetHandle<Custom>,
@@ -932,7 +922,7 @@ impl State {
             (rect_min + rect_extent * 0.5) / texture_extent
         };
 
-        let triangle_data = Arc::new(RwLock::new(TriangleState { angle: 0.0 }));
+        let triangle_data = Rc::new(RefCell::new(TriangleState { angle: 0.0 }));
         let suzanne_path = demo_asset_path("assets/suzanne.obj");
         let suzanne_bytes = fs::read(&suzanne_path).unwrap_or_else(|err| panic!("Failed to read {}: {err}", suzanne_path.display()));
         let pm_suzanne = Obj::from_byte_stream(suzanne_bytes.as_slice())
@@ -953,7 +943,7 @@ impl State {
             Dimension::new(600, 600),
             bounds,
         );
-        let suzanne_data = Arc::new(RwLock::new(SuzanneData { view_3d, mesh: mesh_buffers }));
+        let suzanne_data = Rc::new(RefCell::new(SuzanneData { view_3d, mesh: mesh_buffers }));
 
         let triangle_renderer = {
             let triangle_data = triangle_data.clone();
@@ -961,10 +951,9 @@ impl State {
                 if args.content_area.width <= 0 || args.content_area.height <= 0 {
                     return;
                 }
-                if let Ok(triangle) = triangle_data.read() {
-                    let area = area_from_args(&args);
-                    frame.enqueue_colored_vertices(area, build_triangle_vertices(area.rect, white_uv, triangle.angle));
-                }
+                let triangle = triangle_data.borrow();
+                let area = area_from_args(&args);
+                frame.enqueue_colored_vertices(area, build_triangle_vertices(area.rect, white_uv, triangle.angle));
             })
             .expect("register triangle renderer")
         };
@@ -974,17 +963,16 @@ impl State {
                 if args.content_area.width <= 0 || args.content_area.height <= 0 {
                     return;
                 }
-                if let Ok(suzanne) = suzanne_data.read() {
-                    let area = area_from_args(&args);
-                    frame.enqueue_mesh_draw(
-                        area,
-                        MeshSubmission {
-                            mesh: suzanne.mesh.clone(),
-                            pvm: suzanne.view_3d.pvm(),
-                            view_model: suzanne.view_3d.view_matrix(),
-                        },
-                    );
-                }
+                let suzanne = suzanne_data.borrow();
+                let area = area_from_args(&args);
+                frame.enqueue_mesh_draw(
+                    area,
+                    MeshSubmission {
+                        mesh: suzanne.mesh.clone(),
+                        pvm: suzanne.view_3d.pvm(),
+                        view_model: suzanne.view_3d.view_matrix(),
+                    },
+                );
             })
             .expect("register Suzanne renderer")
         };
@@ -1952,9 +1940,9 @@ impl State {
             let inst_fps = 1.0 / dt;
             self.fps = if self.fps == 0.0 { inst_fps } else { self.fps * 0.9 + inst_fps * 0.1 };
         }
-        if let Ok(mut triangle) = self.triangle_data.write() {
-            triangle.angle = (triangle.angle + 0.02) % (std::f32::consts::PI * 2.0);
-        }
+        let mut triangle = self.triangle_data.borrow_mut();
+        triangle.angle = (triangle.angle + 0.02) % (std::f32::consts::PI * 2.0);
+        drop(triangle);
 
         self.style_window(ctx);
         self.log_window(ctx);

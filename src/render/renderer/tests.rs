@@ -541,7 +541,7 @@ fn solid_triangles_are_clipped_only_during_execution_and_interpolate_color() {
 }
 
 #[test]
-fn custom_barrier_flushes_releases_lock_clips_and_preserves_order() {
+fn custom_barrier_flushes_clips_and_preserves_order() {
     let (backend, log) = recording_backend(make_atlas());
     let mut renderer = Renderer::new(backend);
     let observed = Rc::new(RefCell::new(Vec::new()));

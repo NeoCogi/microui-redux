@@ -96,6 +96,10 @@ impl RootId {
 
 /// Primary entry point used to drive the UI over a rendering backend.
 ///
+/// `Context`, its retained state, and its registered custom-render callbacks stay on the thread
+/// that owns the context. The rendering contracts intentionally do not require `Send` or `Sync`;
+/// applications should deliver any cross-thread results before starting a [`ContextFrame`].
+///
 /// A live [`ContextFrame`] exclusively owns the Context borrow, preventing input/resource
 /// mutation or another logical frame until it is rendered or cancelled:
 ///

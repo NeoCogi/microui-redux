@@ -45,7 +45,7 @@ src/render/
 ├── display_list.rs  owned operations and recording storage
 ├── geometry.rs      internal tessellation and final clipping geometry
 ├── painter.rs       public widget-local recorder
-├── performance.rs   test-only timing, allocation, lock, and submission benchmark
+├── performance.rs   test-only timing, allocation, and submission benchmark
 ├── renderer.rs      public frame/resource owner and operation executor
 └── RENDER.md        architecture and integration guide
 ```
@@ -451,6 +451,17 @@ Backend rules:
 
 `Renderer` uniquely owns the backend. Safe Rust therefore prevents persistent
 resource mutation or another frame acquisition while a backend frame exists.
+
+`Context`, `Renderer`, backend frames, and custom-render callbacks remain on
+their owning thread. `RendererBackend` and `CustomRender` intentionally have
+no `Send` or `Sync` bounds, and the retained tree and immutable atlas use
+single-threaded shared ownership. Cross-thread application work should produce
+owned results and deliver them to Context before `Context::frame`; callbacks
+then execute synchronously while Renderer interprets that frame's display
+list.
+
+Tests that need to inspect backend work keep a separate `Rc<RefCell<_>>`
+recording log. They do not clone, lock, or expose the backend itself.
 
 ## Performance validation
 

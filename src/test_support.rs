@@ -217,7 +217,7 @@ pub(crate) struct RecordingRenderer {
 }
 
 impl RecordingRenderer {
-    /// Records a named boundary while the renderer is accessed through its handle.
+    /// Records a named boundary through the active typed frame.
     pub(crate) fn record_marker(&mut self, marker: impl Into<String>) {
         self.log.record_marker(marker);
     }

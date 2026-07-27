@@ -247,6 +247,9 @@ pub trait RendererFrame {
 
 /// Trait implemented by render backends used by the UI context.
 ///
+/// Backends and their frames execute on the owning Renderer thread. This trait deliberately has no
+/// `Send` or `Sync` bound.
+///
 /// Backends consume final [`Vertex`] values from the [`crate::render::Renderer`]:
 ///
 /// ```
@@ -325,7 +328,10 @@ pub trait RendererBackend: 'static {
     fn destroy_texture(&mut self, id: TextureId);
 }
 
-/// Backend-specific callback invoked with the statically typed active frame.
+/// Backend-specific callback invoked synchronously with the statically typed active frame.
+///
+/// Callbacks stay on the owning Context/Renderer thread. This trait deliberately has no `Send` or
+/// `Sync` bound.
 pub trait CustomRender<B: RendererBackend>: 'static {
     /// Records backend-specific work at the current painter-order position.
     fn render<'frame>(&mut self, frame: &mut B::Frame<'frame>, args: CustomRenderArgs);

@@ -93,6 +93,9 @@ impl From<FrameError> for RenderError {
 
 /// High-level UI renderer that executes display lists and owns frame resources.
 ///
+/// A Renderer uniquely owns its backend and is intended to remain on its owning thread. Backend
+/// frames and registered custom-render callbacks execute synchronously during [`Renderer::render`].
+///
 /// Renderer has no mutable drawing clip and exposes no clip stack. Clips belong to operations in a
 /// [`DisplayList`], making execution deterministic and independent of prior draw calls.
 ///
