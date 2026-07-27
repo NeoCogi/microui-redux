@@ -98,7 +98,7 @@
 //! (records)         (owns ops)        (executes)       (submits/presents)
 //! ```
 //!
-//! Widgets obtain a [`render::Painter`] from [`WidgetCtx::painter`] and record
+//! Widgets obtain a [`render::Painter`] from [`WidgetPaintCtx::painter`] and record
 //! backend-neutral operations. [`render::Renderer`] executes the resulting
 //! [`render::DisplayList`], performs final clipping and tessellation, and submits final
 //! [`render::Vertex`] values through [`render::RendererBackend`]. Applications normally import
@@ -135,7 +135,7 @@ pub mod retained {
     pub use crate::text_layout::TextWrap;
     pub use crate::window_manager::{Context, ContextFrame, RootId};
     pub use crate::ui_node::UiInputEvent;
-    pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetInputEvents};
+    pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetInputEvents, WidgetPaintCtx, WidgetUpdateCtx};
     pub use crate::window_manager::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, UiNodeSet, UiNodeBuilder};
 }
 
@@ -154,7 +154,7 @@ pub mod prelude {
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame};
     pub use crate::retained::{
         Context, ContextFrame, CustomRenderArgs, CustomRenderHandle, FocusPolicy, FrameResultGeneration, NodeBuilder, NodeId, NodeOptions, Policy, RetainedId,
-        RootId, TextWrap, UiInputEvent, Widget, WidgetCtx, WidgetHandle, WidgetInputEvents, UiNodeSet, UiNodeBuilder, widget_handle,
+        RootId, TextWrap, UiInputEvent, Widget, WidgetHandle, WidgetInputEvents, WidgetPaintCtx, WidgetUpdateCtx, UiNodeSet, UiNodeBuilder, widget_handle,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
@@ -178,7 +178,7 @@ pub use input::{ContainerOption, ControlColor, Input, KeyCode, KeyMode, MouseBut
 pub use text_layout::TextWrap;
 pub use sizing::{SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
-pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetCtx, WidgetInputEvents};
+pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetInputEvents, WidgetPaintCtx, WidgetUpdateCtx};
 pub use ui_node::UiInputEvent;
 pub use widgets::{
     Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, Slider, TextArea, TextBlock, Textbox,

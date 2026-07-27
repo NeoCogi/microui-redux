@@ -1,7 +1,6 @@
 //! Tests for basic widget sizing and state behavior.
 
 use super::*;
-use crate::render::DisplayList;
 use crate::test_support::test_atlas as make_test_atlas;
 use std::rc::Rc;
 
@@ -41,14 +40,12 @@ fn combo_run_toggles_open_state() {
     let atlas = make_test_atlas();
     let style = Rc::new(Style::default());
     let mut combo = Combo::new();
-    let mut display_list = DisplayList::new();
     let mut focus = None;
     let mut updated_focus = false;
     let rect = rect(0, 0, 100, 20);
-    let mut ctx = WidgetCtx::new_with_interaction(
+    let mut ctx = WidgetUpdateCtx::new_with_interaction(
         Id::new(1),
         rect,
-        &mut display_list,
         rect,
         style.as_ref(),
         &atlas,
@@ -66,10 +63,9 @@ fn combo_run_toggles_open_state() {
     assert!(combo.is_open());
 
     combo.open_popup();
-    let mut ctx = WidgetCtx::new_with_interaction(
+    let mut ctx = WidgetUpdateCtx::new_with_interaction(
         Id::new(1),
         rect,
-        &mut display_list,
         rect,
         style.as_ref(),
         &atlas,

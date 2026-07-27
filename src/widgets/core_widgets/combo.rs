@@ -128,7 +128,7 @@ impl Combo {
     }
 
     /// Updates popup open state and reports submit/active transitions.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
         let mut res = ResourceState::NONE;
         if self.clamped {
             res |= ResourceState::CHANGE;
@@ -152,7 +152,7 @@ impl Combo {
     }
 
     /// Paints the combo header and records the popup anchor below it.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let header = ctx.screen_content_rect();
         self.last_anchor = rect(header.x, header.y + header.height, header.width, 1);
         ctx.draw_widget_fill(header, ControlColor::Button);
@@ -190,11 +190,11 @@ impl Widget for Combo {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         self.update_widget(ctx, &input)
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(ctx);
     }
 }

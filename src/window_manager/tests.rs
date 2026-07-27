@@ -9,7 +9,7 @@ use super::*;
 use crate::{
     test_support::{recording_backend, test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer, RenderEvent},
     color, widget_handle, AtlasHandle, Button, Combo, Custom, ListItem, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId,
-    SizePolicy, ScrollBehavior, StackDirection, TextBlock, UiInputEvent, Widget, WidgetCtx, WidgetHandle, WidgetOption, UiNodeBuilder,
+    SizePolicy, ScrollBehavior, StackDirection, TextBlock, UiInputEvent, Widget, WidgetHandle, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, UiNodeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
@@ -73,11 +73,11 @@ impl Widget for AlwaysSubmitWidget {
         Dimensioni::new((self.label.len() as i32 * 8).max(8), 12)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
         ResourceState::SUBMIT
     }
 
-    fn paint(&mut self, _ctx: &mut WidgetCtx<'_>) {}
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
 #[test]

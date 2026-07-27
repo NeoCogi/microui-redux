@@ -5,7 +5,7 @@ GPU or software backend. Widgets record backend-neutral operations; the
 renderer expands and clips those operations; the backend receives final
 vertices and texture commands.
 
-Most application code only needs `WidgetCtx::painter()` and the rendering types
+Most application code only needs `WidgetPaintCtx::painter()` and the rendering types
 re-exported by `microui_redux::prelude`. Low-level integrations and backend
 implementations import the remaining types explicitly:
 
@@ -115,9 +115,10 @@ normal atlas work is flushed immediately before each barrier.
 
 ## Painting custom widgets
 
-`WidgetCtx::painter()` creates a recorder in widget-local coordinates. A
+`WidgetPaintCtx::painter()` creates a recorder in widget-local coordinates. A
 custom widget can draw without knowing its screen position or the concrete
-backend:
+backend. `WidgetUpdateCtx` deliberately has no painter or display-list access,
+so visual ordering cannot depend on work recorded during update:
 
 ```rust
 use microui_redux::prelude::*;
@@ -143,13 +144,13 @@ impl Widget for PaintedSwatch {
 
     fn update(
         &mut self,
-        _ctx: &mut WidgetCtx<'_>,
+        _ctx: &mut WidgetUpdateCtx<'_>,
         _events: Vec<UiInputEvent>,
     ) -> ResourceState {
         ResourceState::NONE
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let hovered = ctx.hovered();
         let mut painter = ctx.painter();
         let bounds = painter.local_rect();
@@ -534,7 +535,7 @@ recording-time software triangle clipping are introduced for benchmark gains.
 ## Working examples
 
 - [`examples/retained-custom-drawing.rs`](../../examples/retained-custom-drawing.rs)
-  implements a retained custom widget using `WidgetCtx::painter`.
+  implements a retained custom widget using `WidgetPaintCtx::painter`.
 - [`examples/texture-clipping-smoke.rs`](../../examples/texture-clipping-smoke.rs)
   exercises low-level display-list execution, texture upload, clipping, and
   final vertices.

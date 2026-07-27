@@ -1,10 +1,10 @@
 use crate::input::{ScrollBehavior, WidgetOption};
 use crate::render::{CustomRenderKey, DisplayList, Painter};
-use crate::widget_ctx::localize_events;
+use crate::widget_ctx::{localize_events, WidgetPaintCtx, WidgetUpdateCtx};
 use crate::window_manager::{erased_widget_state, WidgetStateHandleDyn};
 use crate::{Dimensioni, FocusPolicy, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
 
-use super::{NodeLayout, UiNode, UiNodeId, UiNodeState, UiRuntime, WidgetCtx};
+use super::{NodeLayout, UiNode, UiNodeId, UiNodeState, UiRuntime};
 
 mod column;
 mod disclosure;
@@ -130,10 +130,9 @@ impl NodeBehavior for WidgetNode {
         let accepts_pointer_input = ctx.runtime.accepts_pointer_input();
         let content_rect = ctx.screen_rect(ctx.content_rect);
         let content_clip = ctx.screen_clip();
-        let mut widget_ctx = WidgetCtx::new_with_content_geometry(
+        let mut widget_ctx = WidgetUpdateCtx::new_with_content_geometry(
             id,
             content_rect,
-            &mut *ctx.display_list,
             content_clip,
             ctx.style,
             &ctx.atlas,
@@ -159,21 +158,15 @@ impl NodeBehavior for WidgetNode {
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, state: &mut UiNodeState) -> bool {
-        let id = state.id();
         let rect = ctx.screen_rect(ctx.content_rect);
         let (hovered, focused, clicked, active, scroll_delta) = (state.hovered, state.focused, state.clicked, state.active, state.scroll_delta);
-        let mut focus_seen = ctx.runtime.updated_focus;
         let content_clip = ctx.screen_clip();
-        let mut widget_ctx = WidgetCtx::new_with_content_geometry(
-            id,
+        let mut widget_ctx = WidgetPaintCtx::new_with_content_geometry(
             rect,
             &mut *ctx.display_list,
             content_clip,
             ctx.style,
             &ctx.atlas,
-            &mut ctx.runtime.focus,
-            &mut focus_seen,
-            true,
             hovered,
             focused,
             clicked,
@@ -181,7 +174,6 @@ impl NodeBehavior for WidgetNode {
             scroll_delta,
         );
         self.widget.paint(&mut widget_ctx);
-        ctx.runtime.updated_focus = focus_seen;
 
         if let Some(renderer) = self.custom_render {
             ctx.display_list.push_custom(content_clip, renderer, rect);
@@ -452,10 +444,10 @@ impl LayoutCtx<'_> {
 /// Services available while a container updates its own interactive state.
 ///
 /// `UpdateCtx` may mutate runtime interaction state and frame results. Child topology is owned by
-/// the window-manager/builder path and remains stable during runtime traversal.
+/// the window-manager/builder path and remains stable during runtime traversal. It intentionally
+/// contains no display list, making the update traversal structurally unable to record paint work.
 pub(crate) struct UpdateCtx<'a> {
     pub(crate) runtime: &'a mut UiRuntime,
-    pub(super) display_list: &'a mut DisplayList,
     pub(super) root_id: crate::RootId,
     pub(super) root_name: &'a str,
     pub(super) style: &'a Style,
@@ -506,10 +498,9 @@ impl UpdateCtx<'_> {
         let mut focus_seen = self.runtime.updated_focus;
         let accepts_pointer_input = self.runtime.accepts_pointer_input();
         let events = localize_events(local_content_rect, self.runtime.take_routed_events(id));
-        let mut ctx = WidgetCtx::new_with_content_geometry(
+        let mut ctx = WidgetUpdateCtx::new_with_content_geometry(
             id,
             content_rect,
-            &mut *self.display_list,
             content_clip,
             self.style,
             &self.atlas,
@@ -568,7 +559,6 @@ impl InputCtx<'_> {
 /// Painting appends display-list operations under the traversal-derived clip; child topology is
 /// read-only.
 pub(crate) struct PaintCtx<'a> {
-    pub(crate) runtime: &'a mut UiRuntime,
     pub(super) display_list: &'a mut DisplayList,
     pub(crate) style: &'a Style,
     pub(super) atlas: crate::AtlasHandle,
@@ -618,7 +608,6 @@ impl PaintCtx<'_> {
     }
 
     pub(crate) fn paint_container_widget_in_rect(&mut self, state: &UiNodeState, local_rect: Recti, handle: WidgetHandle<Node>) {
-        let id = state.id();
         let (hovered, focused, clicked, active, scroll_delta) = (state.hovered, state.focused, state.clicked, state.active, state.scroll_delta);
         let widget = erased_widget_state(handle);
         let framed = widget.effective_widget_opt().intersects(WidgetOption::FRAME);
@@ -629,18 +618,13 @@ impl PaintCtx<'_> {
             crate::frame::paint_internal_frame(&mut painter, local_rect, None, border);
         }
         let content_rect = self.screen_rect(geometry.content_or_empty());
-        let mut focus_seen = self.runtime.updated_focus;
         let content_clip = self.screen_clip();
-        let mut ctx = WidgetCtx::new_with_content_geometry(
-            id,
+        let mut ctx = WidgetPaintCtx::new_with_content_geometry(
             content_rect,
             &mut *self.display_list,
             content_clip,
             self.style,
             &self.atlas,
-            &mut self.runtime.focus,
-            &mut focus_seen,
-            true,
             hovered,
             focused,
             clicked,
@@ -648,6 +632,5 @@ impl PaintCtx<'_> {
             scroll_delta,
         );
         widget.paint(&mut ctx);
-        self.runtime.updated_focus = focus_seen;
     }
 }

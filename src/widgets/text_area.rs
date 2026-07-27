@@ -190,13 +190,13 @@ impl TextArea {
     }
 
     /// Applies multiline editing, scrolling, and scrollbar dragging.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
         let font = ctx.style().resolve_font_choice(self.config.font);
         textarea_update(ctx, input, self, font)
     }
 
     /// Paints the multiline editor and scrollbars.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let font = ctx.style().resolve_font_choice(self.config.font);
         textarea_paint(ctx, self, font);
     }
@@ -235,13 +235,15 @@ struct TextAreaLayout {
 }
 
 /// Resolves wrapped lines, content size, scrollbar visibility, and scrollbar geometry.
-fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextAreaLayout {
-    let bounds = ctx.screen_content_rect();
-    let style = ctx.style();
+///
+/// Raw read-only inputs keep this calculation phase-neutral: update and paint derive the same
+/// geometry without either context borrowing capabilities from the other.
+fn textarea_layout(content_rect: Recti, style: &Style, atlas: &AtlasHandle, state: &TextArea, font: FontId) -> TextAreaLayout {
+    let bounds = content_rect;
     let padding = style.padding;
     let scrollbar_size = style.scrollbar_size;
     let thumb_size = style.thumb_size;
-    let metrics = font_line_metrics(font, ctx.atlas());
+    let metrics = font_line_metrics(font, atlas);
     let line_height = metrics.line_height;
 
     let base_body = bounds;
@@ -256,7 +258,7 @@ fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextA
         // Vertical and horizontal scrollbars can force each other to appear. Iterate a few times
         // until the body stabilizes without making the layout solver recursive.
         let available_width = (body.width - padding * 2).max(0);
-        lines = build_text_lines(state.buf.as_str(), state.wrap, available_width, font, ctx.atlas());
+        lines = build_text_lines(state.buf.as_str(), state.wrap, available_width, font, atlas);
         content_width = lines.iter().map(|line| line.width).max().unwrap_or(0);
         content_height = line_height * lines.len() as i32;
         let cs = vec2(content_width + padding * 2, content_height + padding * 2);
@@ -313,7 +315,7 @@ fn textarea_layout(ctx: &WidgetCtx<'_>, state: &TextArea, font: FontId) -> TextA
 }
 
 /// Updates text-area buffer, cursor, scroll position, and scrollbar drag state.
-fn textarea_update(ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent], state: &mut TextArea, font: FontId) -> ResourceState {
+fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent], state: &mut TextArea, font: FontId) -> ResourceState {
     let mut res = ResourceState::NONE;
     if !ctx.focused() {
         // Blurred text areas park the cursor at the end and forget vertical cursor preference.
@@ -354,7 +356,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent], state: &mut 
         }
     }
 
-    let layout = textarea_layout(ctx, state, font);
+    let layout = textarea_layout(ctx.screen_content_rect(), ctx.style(), ctx.atlas(), state, font);
     let content_mouse_pos = input.mouse_pos();
 
     if let Some(delta) = input.scroll_delta() {
@@ -494,8 +496,8 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent], state: &mut 
 }
 
 /// Paints text-area frame, visible text lines, caret, and scrollbars.
-fn textarea_paint(ctx: &mut WidgetCtx<'_>, state: &mut TextArea, font: FontId) {
-    let layout = textarea_layout(ctx, state, font);
+fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &mut TextArea, font: FontId) {
+    let layout = textarea_layout(ctx.screen_content_rect(), ctx.style(), ctx.atlas(), state, font);
     let cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
     let cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
     let caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
@@ -578,7 +580,7 @@ impl Widget for TextArea {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let old_buf = self.buf.clone();
         let old_cursor = self.cursor;
         let old_scroll = self.scroll;
@@ -599,7 +601,7 @@ impl Widget for TextArea {
         res
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(ctx);
     }
 

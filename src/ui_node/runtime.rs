@@ -147,17 +147,7 @@ impl UiRuntime {
         let mut root_index = 0;
         while root_index < roots.len() {
             let root = &mut roots[root_index];
-            self.update_node_ref(
-                root_id,
-                root_name,
-                root,
-                self.root_transform,
-                display_list,
-                style,
-                atlas.clone(),
-                input,
-                results,
-            );
+            self.update_node_ref(root_id, root_name, root, self.root_transform, style, atlas.clone(), input, results);
             root_index += 1;
         }
 
@@ -280,16 +270,13 @@ impl UiRuntime {
     pub(super) fn layout_roots_in_view(&mut self, roots: &mut [UiNode], style: &Style, atlas: crate::AtlasHandle, client: Recti) -> Dimensioni {
         let mut y = client.y;
         let mut content_bounds = None;
-        let root_count = roots.len();
-        for (index, root_node) in roots.iter_mut().enumerate() {
+        for root_node in roots.iter_mut() {
             let remaining_height = (client.y + client.height - y).max(0);
             let preferred = self.measure_node_ref(root_node, style, &atlas, Dimensioni::new(client.width, remaining_height));
-            let height = if index + 1 == root_count {
-                remaining_height
-            } else {
-                let policy = root_node.state.policy.height;
-                resolve_size(policy, preferred.height, remaining_height, remaining_height, None).max(0)
-            };
+            // Root position must not change sizing semantics: `Auto` keeps its measured height,
+            // while callers that want the remaining client height request `Remainder` explicitly.
+            let policy = root_node.state.policy.height;
+            let height = resolve_size(policy, preferred.height, remaining_height, remaining_height, None).max(0);
             let rect = Recti::new(client.x, y, client.width, height);
             self.layout_node_ref(root_node, style, &atlas, rect);
             let allocation = root_node.state.layout.allocation;
@@ -400,7 +387,6 @@ impl UiRuntime {
         root_name: &str,
         node: &mut UiNode,
         parent_transform: Transform,
-        display_list: &mut DisplayList,
         style: &Style,
         atlas: crate::AtlasHandle,
         input: &Input,
@@ -430,7 +416,6 @@ impl UiRuntime {
         let traverse_children = {
             let mut ctx = UpdateCtx {
                 runtime: self,
-                display_list,
                 root_id,
                 root_name,
                 style,
@@ -449,7 +434,9 @@ impl UiRuntime {
         if traverse_children {
             if let Some(children) = node.children_mut() {
                 for child in children {
-                    self.update_node_ref(root_id, root_name, child, child_transform, display_list, style, atlas.clone(), input, results);
+                    // Update recursion carries interaction and layout state only. Rendering enters
+                    // the tree later through the distinct paint traversal below.
+                    self.update_node_ref(root_id, root_name, child, child_transform, style, atlas.clone(), input, results);
                 }
             }
         }
@@ -637,7 +624,6 @@ impl UiRuntime {
         let content_clip = rect_relative_to(child_transform.clip, screen_origin);
         let traverse_children = {
             let mut ctx = PaintCtx {
-                runtime: self,
                 display_list,
                 style,
                 atlas: atlas.clone(),

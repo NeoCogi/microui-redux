@@ -63,7 +63,7 @@ use crate::id::Id;
 use crate::input::{ResourceState, ScrollBehavior, WidgetOption};
 use crate::style::Style;
 use crate::ui_node::UiInputEvent;
-pub use crate::widget_ctx::{WidgetCtx, WidgetInputEvents};
+pub use crate::widget_ctx::{WidgetInputEvents, WidgetPaintCtx, WidgetUpdateCtx};
 
 /// High-level focus behavior requested by a widget.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -114,12 +114,12 @@ pub trait Widget {
     /// Updates retained widget state for the current frame and returns its interaction result.
     ///
     /// Pointer positions in `input` are relative to the widget's derived content rectangle, using
-    /// the same origin as [`WidgetCtx::local_rect`] and [`WidgetCtx::painter`]. Outer frame pixels
-    /// remain part of the runtime hit target, so a pointer event on the border may lie just outside
-    /// the local content bounds.
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState;
-    /// Records paint commands for the current frame.
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>);
+    /// the same origin as [`WidgetUpdateCtx::local_rect`]. Outer frame pixels remain part of the
+    /// runtime hit target, so a pointer event on the border may lie just outside the local content
+    /// bounds. The update context intentionally cannot record drawing commands.
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState;
+    /// Records paint commands for the current frame through paint-only capabilities.
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>);
     /// Returns the effective widget options used by generic dispatch.
     ///
     /// Widgets can override this to apply dynamic option adjustments.
@@ -358,9 +358,9 @@ impl Widget for (WidgetOption, ScrollBehavior) {
         Dimensioni::new(width, height)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
         ResourceState::NONE
     }
 
-    fn paint(&mut self, _ctx: &mut WidgetCtx<'_>) {}
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }

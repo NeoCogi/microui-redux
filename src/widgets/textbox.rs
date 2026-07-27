@@ -145,13 +145,13 @@ impl Textbox {
     }
 
     /// Applies input and cursor movement for this textbox.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
         let font = ctx.style().resolve_font_choice(self.config.font);
         textbox_update(ctx, input, &mut self.buf, &mut self.cursor, self.config.opt, font)
     }
 
     /// Paints the textbox frame, text, and caret.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let font = ctx.style().resolve_font_choice(self.config.font);
         textbox_paint(ctx, self.buf.as_str(), self.cursor, self.config.opt, font);
     }
@@ -159,7 +159,7 @@ impl Textbox {
 
 /// Shared single-line text editing update used by textbox and numeric inline editors.
 pub(crate) fn textbox_update(
-    ctx: &mut WidgetCtx<'_>,
+    ctx: &mut WidgetUpdateCtx<'_>,
     input: &[UiInputEvent],
     buf: &mut String,
     cursor: &mut usize,
@@ -236,7 +236,7 @@ pub(crate) fn textbox_update(
 }
 
 /// Shared single-line textbox painting used by textbox and numeric inline editors.
-pub(crate) fn textbox_paint(ctx: &mut WidgetCtx<'_>, buf: &str, cursor: usize, opt: WidgetOption, font: FontId) {
+pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usize, opt: WidgetOption, font: FontId) {
     let r = ctx.screen_content_rect();
     let _ = opt;
     ctx.draw_widget_fill(r, ControlColor::Base);
@@ -285,7 +285,7 @@ impl Widget for Textbox {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let old_buf = self.buf.clone();
         let old_cursor = self.cursor;
         let mut res = self.update_widget(ctx, &input);
@@ -296,7 +296,7 @@ impl Widget for Textbox {
         res
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(ctx);
     }
 

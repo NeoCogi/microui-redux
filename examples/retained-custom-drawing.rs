@@ -30,7 +30,7 @@
 //! Retained custom drawing example.
 //!
 //! This example demonstrates implementing a custom widget that records widget-local geometry
-//! through `WidgetCtx::painter`.
+//! through `WidgetPaintCtx::painter`.
 
 use microui_redux::{prelude::*, render::Vertex, AtlasSource};
 
@@ -92,11 +92,11 @@ impl Widget for RetainedPaint {
         Dimensioni::new(96, 48)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
         ResourceState::NONE
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let hovered = ctx.hovered();
         let mut painter = ctx.painter();
         let bounds = painter.local_rect();

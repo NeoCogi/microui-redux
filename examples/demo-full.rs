@@ -137,7 +137,7 @@ impl Widget for PainterDemo {
         Dimensioni::new(240, 200)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let bounds = ctx.local_rect();
         let local_width = bounds.width.max(0) as f32;
         let local_height = bounds.height.max(0) as f32;
@@ -165,7 +165,7 @@ impl Widget for PainterDemo {
         ResourceState::NONE
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let bounds = ctx.local_rect();
         let local_width = bounds.width.max(0) as f32;
         let local_height = bounds.height.max(0) as f32;
@@ -538,7 +538,7 @@ impl Widget for FalloffEditor {
         Dimensioni::new(300, 220)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let bounds = ctx.local_rect();
         let graph = Self::graph_rect(bounds);
         if graph.width <= 0 || graph.height <= 0 {
@@ -587,7 +587,7 @@ impl Widget for FalloffEditor {
         }
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let bounds = ctx.local_rect();
         let graph = Self::graph_rect(bounds);
         if graph.width <= 0 || graph.height <= 0 {
@@ -739,7 +739,7 @@ impl Widget for SuzanneWidget {
         Dimensioni::new(80, 24)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let bounds = ctx.local_rect();
         if bounds.width <= 0 || bounds.height <= 0 {
             return ResourceState::NONE;
@@ -802,7 +802,7 @@ impl Widget for SuzanneWidget {
         ResourceState::ACTIVE
     }
 
-    fn paint(&mut self, _ctx: &mut WidgetCtx<'_>) {}
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
 fn static_label(text: impl Into<String>) -> WidgetHandle<ListItem> {

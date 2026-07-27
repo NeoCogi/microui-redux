@@ -111,12 +111,12 @@ impl Button {
     }
 
     /// Buttons submit on click and do not keep extra transient state.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
         submit_on_click(ctx)
     }
 
     /// Paints the button frame, text, and optional visual payload.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let rect = ctx.screen_content_rect();
         if let Some(colorid) = widget_fill_color(ctx, ControlColor::Button, self.fill) {
             ctx.draw_rect(rect, ctx.style().colors[colorid as usize]);

@@ -172,7 +172,7 @@ fn layout_scaled_visual_content(bounds: Recti, visual_size: Option<Dimensioni>) 
 }
 
 /// Selects which control color should be painted for a widget's fill policy and state.
-fn widget_fill_color(ctx: &WidgetCtx<'_>, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
+fn widget_fill_color(ctx: &WidgetPaintCtx<'_>, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
     if ctx.focused() && fill.intersects(WidgetFillOption::CLICK) {
         let mut color = base;
         color.focus();
@@ -189,7 +189,7 @@ fn widget_fill_color(ctx: &WidgetCtx<'_>, base: ControlColor, fill: WidgetFillOp
 }
 
 /// Converts a click state into the standard submit result.
-fn submit_on_click(ctx: &WidgetCtx<'_>) -> ResourceState {
+fn submit_on_click(ctx: &WidgetUpdateCtx<'_>) -> ResourceState {
     if ctx.clicked() { ResourceState::SUBMIT } else { ResourceState::NONE }
 }
 

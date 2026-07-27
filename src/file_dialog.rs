@@ -564,6 +564,30 @@ mod tests {
     }
 
     #[test]
+    fn action_buttons_keep_the_standard_control_height() {
+        let atlas = test_atlas();
+        let backend = NoopRenderer { atlas };
+        let mut ctx = Context::new_test(backend, Dimensioni::new(800, 600));
+        let mut dialog = FileDialogState::new(&mut ctx);
+        dialog.open(&mut ctx);
+        dialog.eval(&mut ctx);
+        ctx.update_ui();
+
+        let toolbar = ctx
+            .debug_root_node_rect(dialog.root, dialog.up_button_id)
+            .expect("toolbar button should be laid out");
+        let cancel = ctx
+            .debug_root_node_rect(dialog.root, dialog.cancel_button_id)
+            .expect("cancel button should be laid out");
+        let open = ctx
+            .debug_root_node_rect(dialog.root, dialog.ok_button_id)
+            .expect("open button should be laid out");
+
+        assert_eq!(cancel.height, toolbar.height);
+        assert_eq!(open.height, toolbar.height);
+    }
+
+    #[test]
     fn selecting_file_row_then_open_returns_selected_path() {
         let dir = unique_temp_dir("file-dialog-select");
         fs::create_dir_all(&dir).unwrap();

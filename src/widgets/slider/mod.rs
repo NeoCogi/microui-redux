@@ -89,7 +89,7 @@ fn number_preferred_size(
 }
 
 /// Keeps numeric widgets active while dragging, editing, or after local state changes.
-fn number_active_result(ctx: &WidgetCtx<'_>, editing: bool, changed: bool) -> ResourceState {
+fn number_active_result(ctx: &WidgetUpdateCtx<'_>, editing: bool, changed: bool) -> ResourceState {
     if ctx.active() || editing || changed {
         ResourceState::ACTIVE
     } else {
@@ -175,7 +175,7 @@ impl Slider {
     }
 
     /// Updates slider value from shift-click text entry, scroll, or pointer drag.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
         let mut res = ResourceState::NONE;
         let base = ctx.screen_content_rect();
         let last = self.value;
@@ -220,7 +220,7 @@ impl Slider {
     }
 
     /// Paints either the inline numeric editor or the slider track/thumb/value label.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let font = ctx.style().resolve_font_choice(self.config.font);
         if self.edit.editing {
             number_textbox_paint(ctx, &self.edit, font);
@@ -267,7 +267,7 @@ fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
 
 /// Runs the shared textbox editor for shift-click numeric input.
 fn number_textbox_update(
-    ctx: &mut WidgetCtx<'_>,
+    ctx: &mut WidgetUpdateCtx<'_>,
     input: &[UiInputEvent],
     edit: &mut NumberEditState,
     precision: usize,
@@ -301,7 +301,7 @@ fn number_textbox_update(
 }
 
 /// Paints the shared textbox editor for a numeric widget.
-fn number_textbox_paint(ctx: &mut WidgetCtx<'_>, edit: &NumberEditState, font: FontId) {
+fn number_textbox_paint(ctx: &mut WidgetPaintCtx<'_>, edit: &NumberEditState, font: FontId) {
     textbox_paint(ctx, edit.buf.as_str(), edit.cursor, WidgetOption::NONE, font);
 }
 
@@ -318,7 +318,7 @@ impl Widget for Slider {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let old_value = self.value;
         let old_edit = self.edit.clone();
         let mut res = self.update_widget(ctx, &input);
@@ -327,7 +327,7 @@ impl Widget for Slider {
         res
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(ctx);
     }
 
@@ -410,7 +410,7 @@ impl Number {
     }
 
     /// Updates number value from shift-click text entry or horizontal drag.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
         let mut res = ResourceState::NONE;
         let last = self.value;
         let font = ctx.style().resolve_font_choice(self.config.font);
@@ -431,7 +431,7 @@ impl Number {
     }
 
     /// Paints either the inline numeric editor or the formatted value.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let font = ctx.style().resolve_font_choice(self.config.font);
         if self.edit.editing {
             number_textbox_paint(ctx, &self.edit, font);
@@ -458,7 +458,7 @@ impl Widget for Number {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         let old_value = self.value;
         let old_edit = self.edit.clone();
         let mut res = self.update_widget(ctx, &input);
@@ -467,7 +467,7 @@ impl Widget for Number {
         res
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(ctx);
     }
 

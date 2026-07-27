@@ -172,7 +172,7 @@ impl Node {
     }
 
     /// Toggles expanded/closed state on click.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
         let mut res = ResourceState::NONE;
         if ctx.clicked() {
             // The node owns expansion state; container traversal reads it to decide child passes.
@@ -187,7 +187,7 @@ impl Node {
     }
 
     /// Paints header/tree frame, disclosure icon, and label.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let expanded = self.state.is_expanded();
         let style = ctx.style();
         let padding = style.padding;
@@ -231,11 +231,11 @@ impl Widget for Node {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         self.update_widget(ctx, &input)
     }
 
-    fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(ctx);
     }
 }

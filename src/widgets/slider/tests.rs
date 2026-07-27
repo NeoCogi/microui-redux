@@ -1,7 +1,6 @@
 //! Tests for slider and numeric editing behavior.
 
 use super::*;
-use crate::render::DisplayList;
 use crate::test_support::test_atlas as make_test_atlas;
 use crate::ui_node::UiInputEvent;
 use crate::widget_ctx::localize_events;
@@ -17,13 +16,11 @@ fn run_slider_once(
 ) -> ResourceState {
     let atlas = make_test_atlas();
     let style = Style::default();
-    let mut display_list = DisplayList::new();
     let mut focus = None;
     let mut updated_focus = false;
-    let mut ctx = WidgetCtx::new_with_interaction(
+    let mut ctx = WidgetUpdateCtx::new_with_interaction(
         Id::new(1),
         rect,
-        &mut display_list,
         rect,
         &style,
         &atlas,
@@ -51,7 +48,6 @@ fn assert_real_close(actual: Real, expected: Real) {
 fn slider_zero_range_keeps_value() {
     let atlas = make_test_atlas();
     let style = Style::default();
-    let mut display_list = DisplayList::new();
     let mut focus = None;
     let mut updated_focus = false;
 
@@ -62,10 +58,9 @@ fn slider_zero_range_keeps_value() {
         delta: vec2(5, 0),
         buttons: MouseButton::LEFT,
     }];
-    let mut ctx = WidgetCtx::new_with_interaction(
+    let mut ctx = WidgetUpdateCtx::new_with_interaction(
         Id::new(2),
         rect,
-        &mut display_list,
         rect,
         &style,
         &atlas,
@@ -114,7 +109,6 @@ fn slider_drag_snaps_fractional_step_from_lower_bound() {
 fn slider_uses_widget_local_mouse_position() {
     let atlas = make_test_atlas();
     let style = Style::default();
-    let mut display_list = DisplayList::new();
     let mut focus = None;
     let mut updated_focus = false;
 
@@ -125,10 +119,9 @@ fn slider_uses_widget_local_mouse_position() {
         delta: Vec2i::default(),
         buttons: MouseButton::LEFT,
     }];
-    let mut ctx = WidgetCtx::new_with_interaction(
+    let mut ctx = WidgetUpdateCtx::new_with_interaction(
         Id::new(3),
         rect,
-        &mut display_list,
         rect,
         &style,
         &atlas,

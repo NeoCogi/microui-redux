@@ -101,11 +101,11 @@ impl Widget for CubeWidget {
         Dimensioni::new(300, 300)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
         ResourceState::NONE
     }
 
-    fn paint(&mut self, _ctx: &mut WidgetCtx<'_>) {
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {
         // The custom-render callback is the paint path for this node.
     }
 }

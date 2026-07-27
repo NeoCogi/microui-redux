@@ -278,7 +278,7 @@ For retained focus, keep the `NodeId` returned by `WidgetTreeBuilder` and use `s
 my_window.set_focus_node(textbox_node_id);
 ```
 
-Registered roots can be configured with `Context::set_root_options(...)` to control chrome/container options. Root overflow does not scroll implicitly; wrap overflowing retained content in `WidgetTreeBuilder::scroll_area(...)`. Custom widgets can still use widget-level `ScrollBehavior` and receive consumed scroll through `WidgetCtx` during their update phase.
+Registered roots can be configured with `Context::set_root_options(...)` to control chrome/container options. Root overflow does not scroll implicitly; wrap overflowing retained content in `WidgetTreeBuilder::scroll_area(...)`. Custom widgets can still use widget-level `ScrollBehavior` and receive consumed scroll through `WidgetUpdateCtx` during their update phase.
 
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
@@ -417,7 +417,7 @@ Version `0.6.0` introduced retained `WidgetTree` authoring on top of the older p
 - [x] `WidgetTreeBuilder` introduced reusable widget/layout hierarchies with widgets, panels, headers/tree nodes, row/grid/column/stack groups, and custom-render leaves.
 - [x] Widgets reported intrinsic sizes through `measure` and updated persistent state through the retained traversal.
 - [x] `Context::committed_results()` became the public business-logic view of the previous frame's interaction results.
-- [x] `WidgetCtx` gained widget-local custom painting for rectangles, text/icons/images, line strokes, polygon fills, and scoped clips.
+- [x] The widget paint context gained widget-local custom painting for rectangles, text/icons/images, line strokes, polygon fills, and scoped clips.
 - [x] Runtime atlas building and offline/prebuilt atlas export gained shared multi-font configuration.
 - [x] Version `0.6.1` switched demos to runtime atlas construction by default and made prebuilt atlas embedding opt-in.
 
@@ -443,7 +443,7 @@ Version `0.6.0` introduced retained `WidgetTree` authoring on top of the older p
     - [x] Widget API redesign requires stateful widget instances; trait/type renames applied.
     - [x] Legacy `button_ex*` shims removed.
     - [x] Drawing state was extracted into the shared widget execution context.
-    - [x] WidgetState/WidgetCtx pipeline with ControlState returned from `update_control`.
+    - [x] Widget state/context pipeline with ControlState returned from `update_control`.
 - [x] File dialog UX fixes (close on OK/cancel, path-aware browsing).
 - [x] Expanded unit tests for scrollbars, sliders, and PNG decoding paths.
 - [x] Style shared via `Rc<Style>` across containers/panels; window chrome state moved into `Window`.

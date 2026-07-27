@@ -63,7 +63,7 @@ use crate::{
     style::Style,
     ui_node::UiInputEvent,
     widget::{FocusPolicy, Widget},
-    widget_ctx::WidgetCtx,
+    widget_ctx::{WidgetPaintCtx, WidgetUpdateCtx},
 };
 
 /// Shared ownership handle for retained widget state.
@@ -147,9 +147,9 @@ pub(crate) trait WidgetStateHandleDyn {
     /// Measures the widget without mutating it.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     /// Updates the widget through interior mutability.
-    fn update(&self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState;
+    fn update(&self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState;
     /// Paints the widget through interior mutability.
-    fn paint(&self, ctx: &mut WidgetCtx<'_>);
+    fn paint(&self, ctx: &mut WidgetPaintCtx<'_>);
 }
 
 /// Concrete erased adapter around a strongly typed widget handle.
@@ -183,12 +183,12 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
         self.handle.read(|widget| widget.measure(style, atlas, avail))
     }
 
-    fn update(&self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
         // Borrow only for the duration of dispatch so later result recording cannot hold state.
         self.handle.update(|widget| widget.update(ctx, input))
     }
 
-    fn paint(&self, ctx: &mut WidgetCtx<'_>) {
+    fn paint(&self, ctx: &mut WidgetPaintCtx<'_>) {
         // Paint may mutate retained widget state for caches such as text layout.
         self.handle.update(|widget| widget.paint(ctx));
     }

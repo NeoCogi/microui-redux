@@ -45,7 +45,7 @@ use rs_math3d::{Color4b, Recti, Vec2f, Vec2i, color4b};
 /// space, attaches the current effective screen-space clip to every operation, and tessellates
 /// custom solid geometry without consulting style, input, atlas, Renderer, or RendererBackend state.
 ///
-/// Custom widgets obtain a painter from their [`WidgetCtx`](crate::WidgetCtx):
+/// Custom widgets obtain a painter from their [`WidgetPaintCtx`](crate::WidgetPaintCtx):
 ///
 /// ```
 /// use microui_redux::prelude::*;
@@ -71,13 +71,13 @@ use rs_math3d::{Color4b, Recti, Vec2f, Vec2i, color4b};
 ///
 ///     fn update(
 ///         &mut self,
-///         _ctx: &mut WidgetCtx<'_>,
+///         _ctx: &mut WidgetUpdateCtx<'_>,
 ///         _events: Vec<UiInputEvent>,
 ///     ) -> ResourceState {
 ///         ResourceState::NONE
 ///     }
 ///
-///     fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+///     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
 ///         let mut painter = ctx.painter();
 ///         let bounds = painter.local_rect();
 ///         painter.fill_rect(bounds, color(42, 48, 60, 255));

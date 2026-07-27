@@ -23,7 +23,6 @@ use crate::UiNodeSet;
 use crate::input::{ContainerOption, ScrollBehavior, WidgetOption};
 use crate::sizing::SizePolicy;
 use crate::widget::FocusPolicy;
-use crate::widget_ctx::WidgetCtx;
 
 mod node;
 pub(crate) use node::{NodeLayout, Transform, UiNode, UiNodeData, UiNodeId, UiNodeState};
@@ -322,8 +321,8 @@ mod tests {
 
     use crate::render::Renderer;
     use crate::{
-        rect, AtlasHandle, AtlasSource, Button, CharEntry, Custom, FontEntry, Id, Input, KeyMode, ListItem, Policy, ResourceState, SourceFormat,
-        StackDirection, Textbox, WidgetFillOption, WidgetOption, UiNodeBuilder, widget_handle,
+        rect, AtlasHandle, AtlasSource, Button, CharEntry, Custom, FontEntry, Id, Input, KeyMode, ListItem, NodeOptions, Policy, ResourceState, SourceFormat,
+        StackDirection, Textbox, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, UiNodeBuilder, widget_handle,
     };
     use crate::test_support::{test_atlas, NoopRenderer};
 
@@ -514,12 +513,12 @@ mod tests {
             Dimensioni::new(10, 10)
         }
 
-        fn update(&mut self, _ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
             self.seen.borrow_mut().push(input);
             ResourceState::NONE
         }
 
-        fn paint(&mut self, _ctx: &mut WidgetCtx<'_>) {}
+        fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
     }
 
     struct FrameToggle {
@@ -536,12 +535,12 @@ mod tests {
             Dimensioni::new(10, 8)
         }
 
-        fn update(&mut self, _ctx: &mut WidgetCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
             self.opt.insert(WidgetOption::FRAME);
             ResourceState::CHANGE
         }
 
-        fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
+        fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
             self.painted.borrow_mut().push(ctx.screen_content_rect());
         }
     }
@@ -938,6 +937,41 @@ mod tests {
     }
 
     #[test]
+    fn final_root_honors_auto_and_remainder_height_policies() {
+        let style = Style::default();
+        let atlas = test_atlas();
+        let client = rect(7, 11, 180, 120);
+
+        let auto_button = widget_handle(Button::new("auto"));
+        let auto_tree = UiNodeBuilder::build(|tree| {
+            tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
+                tree.widget(&auto_button);
+            });
+        });
+        let mut auto_runtime = TestRuntime::from_ui_nodes(auto_tree);
+        let auto_preferred = auto_runtime
+            .runtime
+            .measure_node_ref(&auto_runtime.roots[0], &style, &atlas, Dimensioni::new(client.width, client.height));
+        auto_runtime
+            .runtime
+            .layout_roots_in_view(&mut auto_runtime.roots, &style, atlas.clone(), client);
+
+        assert!(auto_preferred.height < client.height, "test requires spare client height");
+        assert_eq!(auto_runtime.roots[0].state.layout.allocation.height, auto_preferred.height);
+
+        let fill_button = widget_handle(Button::new("fill"));
+        let fill_tree = UiNodeBuilder::build(|tree| {
+            tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
+                tree.widget(&fill_button);
+            });
+        });
+        let mut fill_runtime = TestRuntime::from_ui_nodes(fill_tree);
+        fill_runtime.runtime.layout_roots_in_view(&mut fill_runtime.roots, &style, atlas, client);
+
+        assert_eq!(fill_runtime.roots[0].state.layout.allocation.height, client.height);
+    }
+
+    #[test]
     fn node_window_chrome_offsets_layout_body() {
         let button = widget_handle(Button::new("bbbb"));
         let mut button_id = Id::default();
@@ -1161,11 +1195,12 @@ mod tests {
     fn root_body_view_is_stable_for_identical_size_without_root_scrollbars() {
         let buttons: Vec<_> = (0..6).map(|_| widget_handle(Button::new("wide row"))).collect();
         let tree = UiNodeBuilder::build(|tree| {
-            tree.stack(SizePolicy::Fixed(150), SizePolicy::Fixed(24), StackDirection::TopToBottom, |tree| {
-                for button in &buttons {
-                    tree.widget(button);
-                }
-            });
+            tree.node(NodeOptions::with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Remainder(0))))
+                .stack(SizePolicy::Fixed(150), SizePolicy::Fixed(24), StackDirection::TopToBottom, |tree| {
+                    for button in &buttons {
+                        tree.widget(button);
+                    }
+                });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();

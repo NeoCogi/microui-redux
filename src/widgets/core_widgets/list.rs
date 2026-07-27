@@ -71,12 +71,12 @@ impl ListItem {
     }
 
     /// List items submit on click and otherwise keep no local transient state.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
         submit_on_click(ctx)
     }
 
     /// Paints row highlight, optional icon, and label.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let bounds = ctx.screen_content_rect();
 
         if ctx.focused() || ctx.hovered() {
@@ -151,12 +151,12 @@ impl ListBox {
     }
 
     /// List boxes submit on click and otherwise keep no local transient state.
-    fn update_widget(&mut self, ctx: &mut WidgetCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: &[UiInputEvent]) -> ResourceState {
         submit_on_click(ctx)
     }
 
     /// Paints list-box frame, label, and optional image.
-    fn paint_widget(&mut self, ctx: &mut WidgetCtx<'_>) {
+    fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let rect = ctx.screen_content_rect();
         if let Some(colorid) = widget_fill_color(ctx, ControlColor::Button, WidgetFillOption::HOVER | WidgetFillOption::CLICK) {
             ctx.draw_rect(rect, ctx.style().colors[colorid as usize]);

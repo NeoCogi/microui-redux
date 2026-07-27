@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Shared widget execution context with direct display-list painting.
+//! Phase-specific widget execution contexts.
 
 use rs_math3d::{Recti, Vec2i};
 
@@ -177,26 +177,20 @@ pub(crate) fn localize_event(origin: Vec2i, event: UiInputEvent) -> UiInputEvent
     }
 }
 
-/// Shared context passed to widget handlers.
-pub struct WidgetCtx<'a> {
-    /// Runtime node identity used for focus operations.
-    interaction_id: UiNodeId,
-    /// Derived content allocation used for widget painting.
+/// Read-only state shared by update and paint without sharing their capabilities.
+///
+/// Keeping this type private is intentional: public widgets receive one phase-specific wrapper,
+/// while the runtime has one authoritative place for derived content geometry and interaction
+/// snapshots.
+struct WidgetContextData<'a> {
+    /// Derived content allocation; the parent-owned outer border box is never stored here.
     content_rect: Recti,
-    /// Display list receiving this widget's paint operations.
-    display_list: &'a mut DisplayList,
     /// Effective screen-space clip derived by retained traversal.
     screen_clip: Recti,
-    /// Style used by built-in widget paint helpers.
+    /// Style used by built-in widget layout and paint helpers.
     style: &'a Style,
     /// Atlas used for text and icon metrics.
     atlas: &'a AtlasHandle,
-    /// Focus slot owned by the active container.
-    focus: &'a mut Option<UiNodeId>,
-    /// Flag indicating whether focus was refreshed or changed this frame.
-    updated_focus: &'a mut bool,
-    /// Whether this widget is inside the current hover root.
-    in_hover_root: bool,
     /// Whether the routed pointer is currently over this widget.
     hovered: bool,
     /// Whether this widget currently owns focus.
@@ -209,23 +203,86 @@ pub struct WidgetCtx<'a> {
     scroll_delta: Option<Vec2i>,
 }
 
-impl<'a> WidgetCtx<'a> {
-    /// Converts a screen/container-space rectangle into widget-local space.
+impl<'a> WidgetContextData<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        content_rect: Recti,
+        screen_clip: Recti,
+        style: &'a Style,
+        atlas: &'a AtlasHandle,
+        hovered: bool,
+        focused: bool,
+        clicked: bool,
+        active: bool,
+        scroll_delta: Option<Vec2i>,
+    ) -> Self {
+        Self {
+            content_rect,
+            screen_clip,
+            style,
+            atlas,
+            hovered,
+            focused,
+            clicked,
+            active,
+            scroll_delta,
+        }
+    }
+
+    fn local_rect(&self) -> Recti {
+        Recti::new(0, 0, self.content_rect.width, self.content_rect.height)
+    }
+
     fn local_rect_for(&self, rect: Recti) -> Recti {
         Recti::new(rect.x - self.content_rect.x, rect.y - self.content_rect.y, rect.width, rect.height)
     }
 
-    /// Converts a screen/container-space point into widget-local space.
     fn local_pos_for(&self, pos: Vec2i) -> Vec2i {
         pos - Vec2i::new(self.content_rect.x, self.content_rect.y)
     }
 
-    /// Creates a widget context with a stable runtime interaction identity.
+    fn screen_pos_for(&self, pos: Vec2i) -> Vec2i {
+        pos + Vec2i::new(self.content_rect.x, self.content_rect.y)
+    }
+
+    fn screen_rect_for(&self, rect: Recti) -> Recti {
+        Recti::new(rect.x + self.content_rect.x, rect.y + self.content_rect.y, rect.width, rect.height)
+    }
+}
+
+/// Interaction and state-mutation services available during [`Widget::update`](crate::Widget::update).
+///
+/// This context deliberately has no `DisplayList`, [`Painter`], or drawing helpers. Consequently
+/// an update implementation cannot record visual work, and retained traversal does not need to
+/// carry rendering state through the update pass.
+///
+/// ```compile_fail
+/// use microui_redux::prelude::WidgetUpdateCtx;
+///
+/// fn painting_is_not_an_update_capability(ctx: &mut WidgetUpdateCtx<'_>) {
+///     let _ = ctx.painter();
+/// }
+/// ```
+pub struct WidgetUpdateCtx<'a> {
+    /// Runtime node identity used for focus operations.
+    interaction_id: UiNodeId,
+    /// Common read-only data, intentionally separated from phase capabilities.
+    common: WidgetContextData<'a>,
+    /// Focus slot owned by the active container.
+    focus: &'a mut Option<UiNodeId>,
+    /// Flag indicating whether focus was refreshed or changed this frame.
+    updated_focus: &'a mut bool,
+    /// Whether this widget is inside the current hover root.
+    in_hover_root: bool,
+}
+
+impl<'a> WidgetUpdateCtx<'a> {
+    /// Creates an update context with a stable runtime interaction identity.
     #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_interaction(
         interaction_id: UiNodeId,
         rect: Recti,
-        display_list: &'a mut DisplayList,
         screen_clip: Recti,
         style: &'a Style,
         atlas: &'a AtlasHandle,
@@ -241,7 +298,6 @@ impl<'a> WidgetCtx<'a> {
         Self::new_with_content_geometry(
             interaction_id,
             rect,
-            display_list,
             screen_clip,
             style,
             atlas,
@@ -256,11 +312,11 @@ impl<'a> WidgetCtx<'a> {
         )
     }
 
-    /// Creates a widget context for one resolved content surface.
+    /// Creates update services for one traversal-derived content surface.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_content_geometry(
         interaction_id: UiNodeId,
         content_rect: Recti,
-        display_list: &'a mut DisplayList,
         screen_clip: Recti,
         style: &'a Style,
         atlas: &'a AtlasHandle,
@@ -275,38 +331,27 @@ impl<'a> WidgetCtx<'a> {
     ) -> Self {
         Self {
             interaction_id,
-            content_rect,
-            display_list,
-            screen_clip,
-            style,
-            atlas,
+            common: WidgetContextData::new(content_rect, screen_clip, style, atlas, hovered, focused, clicked, active, scroll_delta),
             focus,
             updated_focus,
             in_hover_root,
-            hovered,
-            focused,
-            clicked,
-            active,
-            scroll_delta,
         }
     }
 
-    /// Returns the widget-local rectangle for this context.
+    /// Returns the derived content rectangle in widget-local coordinates.
     ///
-    /// The top-left corner is always `(0, 0)`, and the size is the derived content size used by
-    /// [`Self::painter`]. Routed pointer positions use this same content-local coordinate space.
+    /// Routed pointer positions use this same `(0, 0)`-origin coordinate space. The runtime-owned
+    /// outer border and hit rectangle is not exposed.
     pub fn local_rect(&self) -> Recti {
-        Recti::new(0, 0, self.content_rect.width, self.content_rect.height)
+        self.common.local_rect()
     }
 
     /// Returns the widget's derived content allocation in screen coordinates.
     pub fn screen_content_rect(&self) -> Recti {
-        self.content_rect
+        self.common.content_rect
     }
 
     /// Returns the derived content rectangle in screen coordinates.
-    ///
-    /// Built-in paint helpers and backend-facing callbacks use this coordinate space.
     #[deprecated(note = "use screen_content_rect() to name the intended geometry")]
     pub fn screen_rect(&self) -> Recti {
         self.screen_content_rect()
@@ -314,55 +359,52 @@ impl<'a> WidgetCtx<'a> {
 
     /// Converts a screen-space point into this widget's local coordinate space.
     pub fn screen_to_local_pos(&self, pos: Vec2i) -> Vec2i {
-        self.local_pos_for(pos)
+        self.common.local_pos_for(pos)
     }
 
     /// Converts a widget-local point into screen space.
     pub fn local_to_screen_pos(&self, pos: Vec2i) -> Vec2i {
-        pos + Vec2i::new(self.content_rect.x, self.content_rect.y)
+        self.common.screen_pos_for(pos)
     }
 
     /// Converts a screen-space rectangle into this widget's local coordinate space.
     pub fn screen_to_local_rect(&self, rect: Recti) -> Recti {
-        self.local_rect_for(rect)
+        self.common.local_rect_for(rect)
     }
 
     /// Converts a widget-local rectangle into screen space.
     pub fn local_to_screen_rect(&self, rect: Recti) -> Recti {
-        Recti::new(rect.x + self.content_rect.x, rect.y + self.content_rect.y, rect.width, rect.height)
+        self.common.screen_rect_for(rect)
     }
 
     /// Returns the widget-local content rectangle for this context.
-    ///
-    /// This is kept as the short geometry accessor for custom widgets. Code that needs absolute
-    /// coordinates should call [`Self::screen_content_rect`] explicitly.
     pub fn rect(&self) -> Recti {
         self.local_rect()
     }
 
     /// Returns whether the pointer is currently over this widget.
     pub fn hovered(&self) -> bool {
-        self.hovered
+        self.common.hovered
     }
 
     /// Returns whether this widget currently owns focus.
     pub fn focused(&self) -> bool {
-        self.focused
+        self.common.focused
     }
 
     /// Returns whether this widget received the current click transition.
     pub fn clicked(&self) -> bool {
-        self.clicked
+        self.common.clicked
     }
 
     /// Returns whether this widget is in an active pointer interaction.
     pub fn active(&self) -> bool {
-        self.active
+        self.common.active
     }
 
     /// Returns scroll delta routed to this widget for this frame.
     pub fn scroll_delta(&self) -> Option<Vec2i> {
-        self.scroll_delta
+        self.common.scroll_delta
     }
 
     /// Sets focus to this widget for the current frame.
@@ -377,82 +419,14 @@ impl<'a> WidgetCtx<'a> {
         *self.updated_focus = true;
     }
 
-    /// Returns a widget-local painter that records directly into the current frame display list.
-    ///
-    /// The painter receives the widget origin, local bounds, and the traversal-derived effective
-    /// clip. Custom widgets can narrow that clip with [`Painter::with_clip`] without mutating
-    /// shared rendering state.
-    pub fn painter(&mut self) -> Painter<'_> {
-        let origin = Vec2i::new(self.content_rect.x, self.content_rect.y);
-        let local_bounds = Recti::new(0, 0, self.content_rect.width, self.content_rect.height);
-        let screen_clip = self.screen_clip;
-        Painter::new(&mut *self.display_list, origin, local_bounds, screen_clip)
-    }
-
-    /// Returns the active style.
+    /// Returns the active style for built-in update logic.
     pub(crate) fn style(&self) -> &Style {
-        self.style
+        self.common.style
     }
 
-    /// Returns the active atlas.
+    /// Returns the active atlas for built-in metric queries.
     pub(crate) fn atlas(&self) -> &AtlasHandle {
-        self.atlas
-    }
-
-    /// Draws a filled rectangle through a widget-local painter.
-    pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
-        let rect = self.local_rect_for(rect);
-        self.painter().fill_rect(rect, color);
-    }
-
-    /// Draws an atlas icon through a widget-local painter.
-    pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
-        let rect = self.local_rect_for(rect);
-        self.painter().icon(id, rect, color);
-    }
-
-    /// Draws an external texture through a widget-local painter.
-    pub(crate) fn push_image(&mut self, image: TextureId, rect: Recti, color: Color) {
-        let rect = self.local_rect_for(rect);
-        self.painter().image(image, rect, color);
-    }
-
-    /// Draws an explicit widget-owned internal frame.
-    pub(crate) fn draw_internal_frame(&mut self, rect: Recti, colorid: ControlColor) -> Option<Recti> {
-        let rect = self.local_rect_for(rect);
-        let color = self.style.colors[colorid as usize];
-        let border = self.style.frame_border();
-        let mut painter = self.painter();
-        crate::frame::paint_internal_frame(&mut painter, rect, Some(color), border)
-    }
-
-    /// Draws an explicit widget-owned internal frame with interaction fill coloring.
-    pub(crate) fn draw_widget_internal_frame(&mut self, rect: Recti, mut colorid: ControlColor) -> Option<Recti> {
-        if self.focused {
-            colorid.focus();
-        } else if self.hovered {
-            colorid.hover();
-        }
-        self.draw_internal_frame(rect, colorid)
-    }
-
-    /// Fills derived outer-frame content with interaction coloring.
-    pub(crate) fn draw_widget_fill(&mut self, rect: Recti, mut colorid: ControlColor) {
-        if self.focused {
-            colorid.focus();
-        } else if self.hovered {
-            colorid.hover();
-        }
-        self.draw_rect(rect, self.style.colors[colorid as usize]);
-    }
-
-    /// Draws aligned control text with an explicit font.
-    pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let rect = self.local_rect_for(rect);
-        let color = self.style.colors[colorid as usize];
-        let pos = control_text_position_with_font(self.style, self.atlas, font, text, rect, opt);
-        let mut painter = self.painter();
-        painter.with_clip(rect, |painter| painter.text(font, text, pos, color));
+        self.common.atlas
     }
 
     /// Hit-tests a screen-space rect against a widget-local mouse position and the active clip.
@@ -460,15 +434,188 @@ impl<'a> WidgetCtx<'a> {
         if !self.in_hover_root {
             return false;
         }
-        // Both the target rect and current clip are translated into content-local coordinates.
-        let content_origin = Vec2i::new(self.content_rect.x, self.content_rect.y);
-        let local_rect = Recti::new(rect.x - content_origin.x, rect.y - content_origin.y, rect.width, rect.height);
-        let clip_rect = Recti::new(
-            self.screen_clip.x - content_origin.x,
-            self.screen_clip.y - content_origin.y,
-            self.screen_clip.width,
-            self.screen_clip.height,
-        );
+        // Both the target and clip become content-local before testing the routed local position.
+        let local_rect = self.common.local_rect_for(rect);
+        let clip_rect = self.common.local_rect_for(self.common.screen_clip);
         local_rect.contains(&mouse_pos) && clip_rect.contains(&mouse_pos)
+    }
+}
+
+/// Geometry and recording services available during [`Widget::paint`](crate::Widget::paint).
+///
+/// Interaction values are immutable snapshots produced by update. Painting may inspect them to
+/// choose visuals, but it cannot mutate focus or consume input.
+pub struct WidgetPaintCtx<'a> {
+    /// Common read-only data, intentionally separated from phase capabilities.
+    common: WidgetContextData<'a>,
+    /// Display list receiving this widget's paint operations.
+    display_list: &'a mut DisplayList,
+}
+
+impl<'a> WidgetPaintCtx<'a> {
+    /// Creates paint services for one traversal-derived content surface.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_content_geometry(
+        content_rect: Recti,
+        display_list: &'a mut DisplayList,
+        screen_clip: Recti,
+        style: &'a Style,
+        atlas: &'a AtlasHandle,
+        hovered: bool,
+        focused: bool,
+        clicked: bool,
+        active: bool,
+        scroll_delta: Option<Vec2i>,
+    ) -> Self {
+        Self {
+            common: WidgetContextData::new(content_rect, screen_clip, style, atlas, hovered, focused, clicked, active, scroll_delta),
+            display_list,
+        }
+    }
+
+    /// Returns the derived content rectangle in widget-local coordinates.
+    ///
+    /// Its top-left corner is always `(0, 0)`, and its size is the bounds used by [`Self::painter`].
+    pub fn local_rect(&self) -> Recti {
+        self.common.local_rect()
+    }
+
+    /// Returns the widget's derived content allocation in screen coordinates.
+    pub fn screen_content_rect(&self) -> Recti {
+        self.common.content_rect
+    }
+
+    /// Returns the derived content rectangle in screen coordinates.
+    #[deprecated(note = "use screen_content_rect() to name the intended geometry")]
+    pub fn screen_rect(&self) -> Recti {
+        self.screen_content_rect()
+    }
+
+    /// Converts a screen-space point into this widget's local coordinate space.
+    pub fn screen_to_local_pos(&self, pos: Vec2i) -> Vec2i {
+        self.common.local_pos_for(pos)
+    }
+
+    /// Converts a widget-local point into screen space.
+    pub fn local_to_screen_pos(&self, pos: Vec2i) -> Vec2i {
+        self.common.screen_pos_for(pos)
+    }
+
+    /// Converts a screen-space rectangle into this widget's local coordinate space.
+    pub fn screen_to_local_rect(&self, rect: Recti) -> Recti {
+        self.common.local_rect_for(rect)
+    }
+
+    /// Converts a widget-local rectangle into screen space.
+    pub fn local_to_screen_rect(&self, rect: Recti) -> Recti {
+        self.common.screen_rect_for(rect)
+    }
+
+    /// Returns the widget-local content rectangle for this context.
+    pub fn rect(&self) -> Recti {
+        self.local_rect()
+    }
+
+    /// Returns whether the pointer is currently over this widget.
+    pub fn hovered(&self) -> bool {
+        self.common.hovered
+    }
+
+    /// Returns whether this widget currently owns focus.
+    pub fn focused(&self) -> bool {
+        self.common.focused
+    }
+
+    /// Returns whether this widget received the current click transition.
+    pub fn clicked(&self) -> bool {
+        self.common.clicked
+    }
+
+    /// Returns whether this widget is in an active pointer interaction.
+    pub fn active(&self) -> bool {
+        self.common.active
+    }
+
+    /// Returns scroll delta routed to this widget for this frame.
+    pub fn scroll_delta(&self) -> Option<Vec2i> {
+        self.common.scroll_delta
+    }
+
+    /// Returns a widget-local painter that records directly into the current frame display list.
+    ///
+    /// The painter receives the widget origin, local bounds, and traversal-derived effective clip.
+    /// Custom widgets can narrow that clip with [`Painter::with_clip`] without mutating traversal
+    /// state.
+    pub fn painter(&mut self) -> Painter<'_> {
+        let origin = Vec2i::new(self.common.content_rect.x, self.common.content_rect.y);
+        let local_bounds = self.common.local_rect();
+        let screen_clip = self.common.screen_clip;
+        Painter::new(&mut *self.display_list, origin, local_bounds, screen_clip)
+    }
+
+    /// Returns the active style.
+    pub(crate) fn style(&self) -> &Style {
+        self.common.style
+    }
+
+    /// Returns the active atlas.
+    pub(crate) fn atlas(&self) -> &AtlasHandle {
+        self.common.atlas
+    }
+
+    /// Draws a filled rectangle through a widget-local painter.
+    pub(crate) fn draw_rect(&mut self, rect: Recti, color: Color) {
+        let rect = self.common.local_rect_for(rect);
+        self.painter().fill_rect(rect, color);
+    }
+
+    /// Draws an atlas icon through a widget-local painter.
+    pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
+        let rect = self.common.local_rect_for(rect);
+        self.painter().icon(id, rect, color);
+    }
+
+    /// Draws an external texture through a widget-local painter.
+    pub(crate) fn push_image(&mut self, image: TextureId, rect: Recti, color: Color) {
+        let rect = self.common.local_rect_for(rect);
+        self.painter().image(image, rect, color);
+    }
+
+    /// Draws an explicit widget-owned internal frame.
+    pub(crate) fn draw_internal_frame(&mut self, rect: Recti, colorid: ControlColor) -> Option<Recti> {
+        let rect = self.common.local_rect_for(rect);
+        let color = self.common.style.colors[colorid as usize];
+        let border = self.common.style.frame_border();
+        let mut painter = self.painter();
+        crate::frame::paint_internal_frame(&mut painter, rect, Some(color), border)
+    }
+
+    /// Draws an explicit widget-owned internal frame with interaction fill coloring.
+    pub(crate) fn draw_widget_internal_frame(&mut self, rect: Recti, mut colorid: ControlColor) -> Option<Recti> {
+        if self.common.focused {
+            colorid.focus();
+        } else if self.common.hovered {
+            colorid.hover();
+        }
+        self.draw_internal_frame(rect, colorid)
+    }
+
+    /// Fills derived outer-frame content with interaction coloring.
+    pub(crate) fn draw_widget_fill(&mut self, rect: Recti, mut colorid: ControlColor) {
+        if self.common.focused {
+            colorid.focus();
+        } else if self.common.hovered {
+            colorid.hover();
+        }
+        self.draw_rect(rect, self.common.style.colors[colorid as usize]);
+    }
+
+    /// Draws aligned control text with an explicit font.
+    pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
+        let rect = self.common.local_rect_for(rect);
+        let color = self.common.style.colors[colorid as usize];
+        let pos = control_text_position_with_font(self.common.style, self.common.atlas, font, text, rect, opt);
+        let mut painter = self.painter();
+        painter.with_clip(rect, |painter| painter.text(font, text, pos, color));
     }
 }
