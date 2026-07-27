@@ -224,7 +224,7 @@ impl FileDialogState {
     }
 
     /// Rebuilds the retained UI node set and records the node ids used for result lookup.
-    fn rebuild_tree(&mut self, control_height: i32, spacing: i32) {
+    fn rebuild_tree(&mut self, spacing: i32) {
         let mut folder_item_ids = Vec::with_capacity(self.folder_items.len());
         let mut file_item_ids = Vec::with_capacity(self.file_items.len());
         let mut up_button_id = NodeId::default();
@@ -262,52 +262,55 @@ impl FileDialogState {
                 let pane_widths = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
                 let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
                 let action_widths = [SizePolicy::Remainder(96 * 2 + spacing * 2), SizePolicy::Fixed(96), SizePolicy::Fixed(96)];
-                let footer_reserved = control_height * 2 + spacing * 2;
-                // Toolbar: up/home/path/go.
-                tree.row(&toolbar_widths, SizePolicy::Auto, |tree| {
-                    up_button_id = tree.widget(up_button);
-                    home_button_id = tree.widget(home_button);
-                    path_box_id = tree.widget(path_box);
-                    go_button_id = tree.widget(go_button);
-                });
+                // The column owns the complete dialog body. Natural-height controls reserve only
+                // what they measure, and the weighted browser row receives every remaining pixel.
+                tree.node(NodeOptions::with_policy(Policy::fill())).column(|tree| {
+                    // Toolbar: up/home/path/go.
+                    tree.row(&toolbar_widths, SizePolicy::Auto, |tree| {
+                        up_button_id = tree.widget(up_button);
+                        home_button_id = tree.widget(home_button);
+                        path_box_id = tree.widget(path_box);
+                        go_button_id = tree.widget(go_button);
+                    });
 
-                // Main pane: folders on the left, files on the right, both scrollable through scroll areas.
-                tree.row(&pane_widths, SizePolicy::Remainder(footer_reserved), |tree| {
-                    tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
-                        tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                            tree.widget(folders_label);
-                            for item in folder_items {
-                                folder_item_ids.push(tree.widget(item));
-                            }
-                            if no_folder_items {
-                                tree.widget(no_folders_label);
-                            }
+                    // Main pane: folders on the left, files on the right, both scrollable through scroll areas.
+                    tree.row(&pane_widths, SizePolicy::Weight(1.0), |tree| {
+                        tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                                tree.widget(folders_label);
+                                for item in folder_items {
+                                    folder_item_ids.push(tree.widget(item));
+                                }
+                                if no_folder_items {
+                                    tree.widget(no_folders_label);
+                                }
+                            });
+                        });
+
+                        tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                                tree.widget(files_label);
+                                for item in file_items {
+                                    file_item_ids.push(tree.widget(item));
+                                }
+                                if no_file_items {
+                                    tree.widget(no_files_label);
+                                }
+                            });
                         });
                     });
 
-                    tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
-                        tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                            tree.widget(files_label);
-                            for item in file_items {
-                                file_item_ids.push(tree.widget(item));
-                            }
-                            if no_file_items {
-                                tree.widget(no_files_label);
-                            }
-                        });
+                    // Filename row and action buttons remain at their natural control height.
+                    tree.row(&filename_widths, SizePolicy::Auto, |tree| {
+                        tree.widget(file_name_label);
+                        tree.widget(tmp_file_name);
                     });
-                });
 
-                // Filename row and action buttons.
-                tree.row(&filename_widths, SizePolicy::Auto, |tree| {
-                    tree.widget(file_name_label);
-                    tree.widget(tmp_file_name);
-                });
-
-                tree.row(&action_widths, SizePolicy::Auto, |tree| {
-                    tree.widget(spacer_label);
-                    cancel_button_id = tree.widget(cancel_button);
-                    ok_button_id = tree.widget(ok_button);
+                    tree.row(&action_widths, SizePolicy::Auto, |tree| {
+                        tree.widget(spacer_label);
+                        cancel_button_id = tree.widget(cancel_button);
+                        ok_button_id = tree.widget(ok_button);
+                    });
                 });
             })
         };
@@ -323,13 +326,13 @@ impl FileDialogState {
     }
 
     /// Synchronizes text boxes and tree structure with the current dialog state.
-    fn sync_retained_view(&mut self, control_height: i32, spacing: i32) {
+    fn sync_retained_view(&mut self, spacing: i32) {
         if self.path_box.read(|path_box| path_box.text() != self.current_working_directory) {
             self.path_box.update(|path_box| {
                 path_box.set_text(self.current_working_directory.clone());
             });
         }
-        self.rebuild_tree(control_height, spacing);
+        self.rebuild_tree(spacing);
     }
 
     /// Changes the working directory and resets folder selection.
@@ -350,8 +353,7 @@ impl FileDialogState {
 
     /// Pushes the current retained nodes/options into the registered context root.
     fn sync_retained_root<B: RendererBackend>(&mut self, ctx: &mut Context<B>) {
-        let (control_height, spacing) = ctx.root_control_metrics();
-        self.sync_retained_view(control_height, spacing);
+        self.sync_retained_view(ctx.root_spacing());
         ctx.set_root_nodes(self.root, std::mem::take(&mut self.tree));
         self.open = ctx.root_visible(self.root).unwrap_or(false);
     }
@@ -585,6 +587,47 @@ mod tests {
 
         assert_eq!(cancel.height, toolbar.height);
         assert_eq!(open.height, toolbar.height);
+    }
+
+    #[test]
+    fn browser_pane_absorbs_dialog_height_while_footer_stays_compact() {
+        let atlas = test_atlas();
+        let backend = NoopRenderer { atlas };
+        let mut ctx = Context::new_test(backend, Dimensioni::new(900, 800));
+        let mut dialog = FileDialogState::new(&mut ctx);
+        dialog.open(&mut ctx);
+        dialog.eval(&mut ctx);
+        ctx.update_ui();
+
+        let toolbar_before = ctx
+            .debug_root_node_rect(dialog.root, dialog.up_button_id)
+            .expect("toolbar button should be laid out");
+        let open_before = ctx
+            .debug_root_node_rect(dialog.root, dialog.ok_button_id)
+            .expect("open button should be laid out");
+        let body_before = ctx.debug_root_body(dialog.root).expect("dialog body should exist");
+        let trailing_gap = body_before.y + body_before.height - (open_before.y + open_before.height);
+        assert!(trailing_gap >= 0 && trailing_gap < toolbar_before.height);
+
+        let mut resized = ctx.root_rect(dialog.root).expect("dialog root should exist");
+        resized.height += 80;
+        ctx.set_root_rect(dialog.root, resized);
+        dialog.eval(&mut ctx);
+        ctx.update_ui();
+
+        let toolbar_after = ctx
+            .debug_root_node_rect(dialog.root, dialog.up_button_id)
+            .expect("toolbar button should remain laid out");
+        let open_after = ctx
+            .debug_root_node_rect(dialog.root, dialog.ok_button_id)
+            .expect("open button should remain laid out");
+
+        assert_eq!(
+            (toolbar_after.x, toolbar_after.y, toolbar_after.width, toolbar_after.height),
+            (toolbar_before.x, toolbar_before.y, toolbar_before.width, toolbar_before.height),
+        );
+        assert_eq!(open_after.height, open_before.height);
+        assert_eq!(open_after.y - open_before.y, 80);
     }
 
     #[test]

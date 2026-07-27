@@ -176,12 +176,8 @@ impl<B: RendererBackend> Context<B> {
             .map(|state| state.content_size)
     }
 
-    pub(crate) fn root_control_metrics(&self) -> (i32, i32) {
-        let padding = self.style.padding.max(0);
-        let font_height = self.renderer.atlas().get_font_height(self.style.font) as i32;
-        let vertical_pad = std::cmp::max(1, padding / 2);
-        let icon_height = self.renderer.atlas().get_icon_size(crate::EXPAND_DOWN_ICON).height;
-        (std::cmp::max(font_height + vertical_pad * 2, icon_height), self.style.spacing.max(0))
+    pub(crate) fn root_spacing(&self) -> i32 {
+        self.style.spacing.max(0)
     }
 
     /// Registers a hidden dialog root.
