@@ -75,7 +75,7 @@ The public API is intentionally centered on `microui_redux::prelude` for applica
 
 ### Rendering
 
-Widgets record backend-neutral drawing through `Painter`; `Renderer` executes the owned `DisplayList` and submits final geometry through `RendererBackend`. The [render subsystem guide](src/render/RENDER.md) covers architecture, clipping, textures, custom callbacks, backend implementation, and compiling code examples. For the clean breaking change from the former API, see the [rendering migration guide](MIGRATION.md).
+Widgets record backend-neutral drawing through `Painter`; `Renderer` executes the owned `DisplayList` and submits final geometry through `RendererBackend`. The [render subsystem guide](src/render/RENDER.md) covers architecture, clipping, textures, custom callbacks, backend implementation, and compiling code examples.
 
 ### How `SelectedBackend::Frame<'a>` works
 
@@ -404,7 +404,7 @@ Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`,
 - [x] Unified rendering behind `Painter`, `DisplayList`, `Renderer`, and `RendererBackend`.
     - [x] Removed the old immediate drawing and mutable clipping facades in favor of scoped recording and single-pass execution.
     - [x] Removed the shared backend handle; Renderer now uniquely owns its backend and lends one typed frame to synchronous execution.
-    - [x] Added a complete [rendering migration guide](MIGRATION.md) for the clean break.
+    - [x] Documented the clean rendering break in the subsystem guide and compiling examples.
 - [x] Reduced migration surface and documented internals.
     - [x] Public imports are grouped around `prelude`, `retained`, and the `render` subsystem.
     - [x] Direct container drawing is no longer part of the application authoring path.

@@ -544,5 +544,5 @@ recording-time software triangle clipping are introduced for benchmark gains.
 - `examples/demo-full.rs` demonstrates retained UI, custom painting, external
   textures, and custom backend rendering together.
 
-The rendering API is a clean break from the former layout. See
-[`MIGRATION.md`](../../MIGRATION.md) for the complete path and method mapping.
+The rendering API is a clean break from the former layout. This guide and the
+compiling examples above define the supported integration paths.
