@@ -246,6 +246,26 @@ Final clipping has one authority:
 Backends therefore never receive UI clip rectangles. They consume final
 screen-space vertices.
 
+### Supported coordinate domain
+
+The portable rendering target is a positive drawable no larger than
+8192x8192 pixels. Screen-space geometry may extend up to four maximum
+drawable spans beyond each viewport edge, giving a supported logical edge
+range of `-32768..=40960`. Widget layout, scrolling, custom painting, and
+direct `Painter` use must keep translated rectangle edges and accumulated
+positions within that range.
+
+This bound leaves substantial `i32` headroom while covering ordinary
+off-screen layout and clipping. Values outside the range are unsupported
+rendering input even when their individual components fit in `Recti`.
+`FrameInfo::try_new` validates positive dimensions but does not enforce the
+portable 8192-pixel limit; a larger surface may work on a particular backend,
+but it is not a cross-backend guarantee.
+
+The renderer deliberately retains `Recti` and `Vec2i` rather than maintaining
+a second large-coordinate geometry model. Empty and negative-extent
+rectangles continue to produce no geometry.
+
 ## Display-list ownership and reuse
 
 `DisplayList` owns all data required after recording, including strings,
