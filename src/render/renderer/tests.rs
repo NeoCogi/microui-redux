@@ -724,6 +724,67 @@ fn removed_custom_renderer_fails_preflight_before_backend_acquisition() {
 }
 
 #[test]
+fn foreign_custom_renderer_fails_preflight_before_backend_acquisition() {
+    let callback_calls = Rc::new(Cell::new(0));
+    let callback_counter = callback_calls.clone();
+    let (foreign_backend, foreign_log) = recording_backend(make_atlas());
+    let mut foreign_renderer = Renderer::new(foreign_backend);
+    let foreign_callback = foreign_renderer
+        .register_custom_renderer(move |_frame, _args| callback_counter.set(callback_counter.get() + 1))
+        .unwrap();
+
+    let (backend, log) = recording_backend(make_atlas());
+    let mut renderer = Renderer::new(backend);
+    let mut list = DisplayList::new();
+    list.push_custom(viewport(), foreign_callback.key, viewport());
+    painter(&mut list, viewport()).fill_rect(Recti::new(0, 0, 4, 4), color(255, 255, 255, 255));
+    let capacities = list_capacities(&list);
+
+    assert_eq!(
+        renderer.render(frame_info(32, 32), &mut list),
+        Err(RenderError::UnknownCustomRenderer { operation_index: 0 })
+    );
+    assert_eq!(callback_calls.get(), 0);
+    assert!(list.is_empty());
+    assert_eq!(list_capacities(&list), capacities);
+    assert!(foreign_log.snapshot().is_empty());
+    assert!(log.snapshot().is_empty());
+}
+
+#[test]
+fn invisible_custom_operations_do_not_invoke_callbacks() {
+    let (backend, log) = recording_backend(make_atlas());
+    let mut renderer = Renderer::new(backend);
+    let callback_calls = Rc::new(Cell::new(0));
+    let callback_counter = callback_calls.clone();
+    let callback = renderer
+        .register_custom_renderer(move |_frame, _args| callback_counter.set(callback_counter.get() + 1))
+        .unwrap();
+
+    let cases = [
+        // Content is fully outside the operation clip.
+        (Recti::new(0, 0, 4, 4), Recti::new(8, 8, 4, 4)),
+        // Both rectangles are outside the backend viewport.
+        (Recti::new(40, 40, 4, 4), Recti::new(40, 40, 4, 4)),
+        (viewport(), Recti::new(4, 4, 0, 8)),
+        (viewport(), Recti::new(4, 4, 8, 0)),
+    ];
+
+    for (clip, content_area) in cases {
+        let mut list = DisplayList::new();
+        list.push_custom(clip, callback.key, content_area);
+        renderer.render(frame_info(32, 32), &mut list).unwrap();
+        assert!(list.is_empty());
+    }
+
+    assert_eq!(callback_calls.get(), 0);
+    assert_eq!(
+        log.snapshot().iter().filter(|event| matches!(event, RenderEvent::Begin { .. })).count(),
+        cases.len()
+    );
+}
+
+#[test]
 fn panicking_custom_callback_still_drops_the_backend_frame_without_double_panicking() {
     let atlas = make_atlas();
     let (backend, log) = recording_backend(atlas.clone());

@@ -948,9 +948,6 @@ impl State {
         let triangle_renderer = {
             let triangle_data = triangle_data.clone();
             ctx.register_custom_renderer(move |frame: &mut SelectedFrame<'_>, args: CustomRenderArgs| {
-                if args.content_area.width <= 0 || args.content_area.height <= 0 {
-                    return;
-                }
                 let triangle = triangle_data.borrow();
                 let area = area_from_args(&args);
                 frame.enqueue_colored_vertices(area, build_triangle_vertices(area.rect, white_uv, triangle.angle));
@@ -960,9 +957,6 @@ impl State {
         let suzanne_renderer = {
             let suzanne_data = suzanne_data.clone();
             ctx.register_custom_renderer(move |frame: &mut SelectedFrame<'_>, args: CustomRenderArgs| {
-                if args.content_area.width <= 0 || args.content_area.height <= 0 {
-                    return;
-                }
                 let suzanne = suzanne_data.borrow();
                 let area = area_from_args(&args);
                 frame.enqueue_mesh_draw(
@@ -1991,11 +1985,7 @@ fn main() {
 }
 
 fn area_from_args(args: &CustomRenderArgs) -> CustomRenderArea {
-    let clip = args
-        .content_area
-        .intersect(&args.view)
-        .unwrap_or_else(|| rect(args.content_area.x, args.content_area.y, 0, 0));
-    CustomRenderArea { rect: args.content_area, clip }
+    CustomRenderArea { rect: args.content_area, clip: args.view }
 }
 
 fn rect_edges(rect: Recti) -> Option<[(Vec2f, Vec2f); 4]> {

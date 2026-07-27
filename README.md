@@ -178,10 +178,10 @@ another backend-specific command recorder. The example backends all provide
 let cube_renderer = ctx.register_custom_renderer({
     let angle = angle.clone();
     move |frame: &mut SelectedFrame<'_>, args: CustomRenderArgs| {
-        let Some(clip) = args.content_area.intersect(&args.view) else {
-            return;
+        let area = CustomRenderArea {
+            rect: args.content_area,
+            clip: args.view,
         };
-        let area = CustomRenderArea { rect: args.content_area, clip };
         let vertices = build_cube_vertices(args.content_area, white_uv, angle.get());
 
         // This is an inherent SelectedFrame method, not part of RendererFrame.
@@ -200,17 +200,21 @@ ctx.create_window("Cube", rect(40, 40, 360, 360), tree);
 `register_custom_renderer` accepts a callback valid for every frame borrow lifetime. In expanded
 form its important bound is `for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs)`. That
 higher-ranked lifetime means the callback can use the active frame but cannot save it in captured
-state. The returned `CustomRenderHandle<B>` is also tagged with `B`, so inserting it into a tree for
-a different backend type is a compile-time error. The UI tree stores this typed registry handle,
-not a backend pointer. A handle from a different context using the same backend type has the same
-Rust type, but its foreign registry namespace is rejected during renderer preflight before any
+state. The returned `CustomRenderHandle<B>` is tagged with `B`, so registration and removal through
+a Context using another backend type fail at compile time. `UiNodeBuilder` deliberately erases the
+handle to its backend-neutral registry key when constructing a tree; a key originating from any
+other Context is rejected by its foreign registry namespace during renderer preflight before a
 backend frame is acquired.
 
 `CustomRenderArgs` carries the geometry needed at execution time:
 
 - `content_area` is the full screen-space rectangle allocated to the custom widget;
-- `view` is the final visible rectangle after window and scroll clipping;
+- `view` is the authoritative final visible rectangle after operation, content-area, viewport,
+  window, and scroll clipping;
 - `dimensions` is the validated drawable size of the active frame.
+
+Renderer does not invoke the callback when that intersection is empty. Do not intersect
+`content_area` and `view` again inside the callback.
 
 Custom callbacks receive no input and should not acquire another frame, mutate the atlas, or
 finalize/present the backend frame. Update application/widget state before `Context::frame`; inside

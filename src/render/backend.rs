@@ -130,7 +130,10 @@ pub struct CustomRenderArgs {
     pub dimensions: Dimensioni,
     /// Rectangle describing the widget's content area.
     pub content_area: Rect<i32>,
-    /// Final clipped region that is visible.
+    /// Final visible region after operation, content-area, and viewport clipping.
+    ///
+    /// This value is authoritative; callbacks do not need to intersect it with `content_area`
+    /// again.
     pub view: Rect<i32>,
 }
 

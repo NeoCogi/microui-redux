@@ -232,6 +232,38 @@ impl<B: RendererBackend> Context<B> {
     }
 
     /// Registers one backend-specific callback for retained custom-render nodes.
+    ///
+    /// A callback written for another backend frame type cannot be registered:
+    ///
+    /// ```compile_fail
+    /// use microui_redux::{Context, CustomRenderArgs};
+    /// use microui_redux::render::RendererBackend;
+    ///
+    /// fn register_for_wrong_backend<A, B, F>(context: &mut Context<A>, callback: F)
+    /// where
+    ///     A: RendererBackend,
+    ///     B: RendererBackend,
+    ///     F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,
+    /// {
+    ///     context.register_custom_renderer(callback).unwrap();
+    /// }
+    /// ```
+    ///
+    /// The active frame borrow cannot escape the callback invocation:
+    ///
+    /// ```compile_fail
+    /// use microui_redux::{Context, CustomRenderArgs};
+    /// use microui_redux::render::RendererBackend;
+    ///
+    /// fn retain_frame<B: RendererBackend>(context: &mut Context<B>) {
+    ///     let mut retained = None;
+    ///     context.register_custom_renderer(
+    ///         move |frame: &mut B::Frame<'_>, _args: CustomRenderArgs| {
+    ///             retained = Some(frame);
+    ///         },
+    ///     ).unwrap();
+    /// }
+    /// ```
     pub fn register_custom_renderer<F>(&mut self, callback: F) -> Result<CustomRenderHandle<B>, CustomRenderRegistryError>
     where
         F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,

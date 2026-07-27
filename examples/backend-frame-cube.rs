@@ -193,15 +193,8 @@ fn main() {
 
         let cube_renderer = ctx
             .register_custom_renderer(move |frame: &mut SelectedFrame<'_>, args: CustomRenderArgs| {
-                // An empty intersection means retained clipping made this widget invisible.
-                let Some(clip) = args.content_area.intersect(&args.view) else {
-                    return;
-                };
-                if args.content_area.width <= 0 || args.content_area.height <= 0 {
-                    return;
-                }
-
-                let area = CustomRenderArea { rect: args.content_area, clip };
+                // Renderer invokes this callback only for the authoritative visible view.
+                let area = CustomRenderArea { rect: args.content_area, clip: args.view };
                 let vertices = build_cube_vertices(args.content_area, white_uv, callback_angle.get());
 
                 // This method is specific to the concrete example frame types. It is available

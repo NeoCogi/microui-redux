@@ -376,10 +376,13 @@ fn register_custom<B: RendererBackend>(
 The callback receives:
 
 - `content_area`: the custom node's full content rectangle;
-- `view`: the final visible rectangle after retained clipping;
+- `view`: the authoritative final visible rectangle after operation, content-area, viewport, and
+  retained clipping;
 - `dimensions`: the validated active-frame dimensions.
 
-It deliberately receives no input. Interaction remains in widget update.
+Renderer skips the callback when that intersection is empty; callbacks must not intersect
+`content_area` and `view` again. The callback deliberately receives no input. Interaction remains
+in widget update.
 The first callback argument is `&mut B::Frame<'_>`, so backend-specific methods
 can be called without raw backend exposure or a second frame acquisition.
 Retained custom nodes store the returned `CustomRenderHandle<B>`.
