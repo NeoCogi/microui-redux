@@ -617,8 +617,8 @@ impl UiRuntime {
         let content_rect = frame_geometry.content_or_empty();
         let screen_clip = parent_transform.clip.intersect(&screen_rect).unwrap_or_default();
         if framed {
-            let mut painter = crate::render::Painter::new(display_list, screen_origin, local_rect, screen_clip);
-            crate::frame::paint_internal_frame(&mut painter, local_rect, None, style.frame_border());
+            let mut painter = crate::render::Painter::screen_space(display_list, screen_clip);
+            crate::frame::paint_internal_frame(&mut painter, screen_rect, None, style.frame_border());
         }
         let child_transform = parent_transform.push(node.state.layout);
         let content_clip = rect_relative_to(child_transform.clip, screen_origin);

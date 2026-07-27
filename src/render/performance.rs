@@ -297,16 +297,16 @@ fn record_scenario(
 
     match scenario {
         Scenario::Rectangles => {
-            let mut painter = Painter::new(list, Vec2i::default(), clip, clip);
+            let mut painter = Painter::screen_space(list, clip);
             for index in 0..RECTANGLE_COUNT {
                 painter.fill_rect(item_rect(index), white);
             }
         }
         Scenario::GlyphText => {
-            Painter::new(list, Vec2i::default(), clip, clip).text(font, text, Vec2i::default(), white);
+            Painter::screen_space(list, clip).text(font, text, Vec2i::default(), white);
         }
         Scenario::MixedGeometry => {
-            let mut painter = Painter::new(list, Vec2i::default(), clip, clip);
+            let mut painter = Painter::screen_space(list, clip);
             for index in 0..MIXED_PAIR_COUNT {
                 let rect = item_rect(index);
                 painter.fill_rect(rect, white);
@@ -325,11 +325,11 @@ fn record_scenario(
             }
         }
         Scenario::NestedClipping => {
-            let mut painter = Painter::new(list, Vec2i::default(), clip, clip);
+            let mut painter = Painter::screen_space(list, clip);
             record_nested_rectangles(&mut painter, NESTED_CLIP_DEPTH, white);
         }
         Scenario::ExternalTextures => {
-            let mut painter = Painter::new(list, Vec2i::default(), clip, clip);
+            let mut painter = Painter::screen_space(list, clip);
             for index in 0..EXTERNAL_TEXTURE_PAIR_COUNT {
                 let rect = item_rect(index);
                 painter.fill_rect(rect, white);
@@ -341,7 +341,7 @@ fn record_scenario(
                 let start = segment * RECTANGLE_COUNT / (CUSTOM_BARRIER_COUNT + 1);
                 let end = (segment + 1) * RECTANGLE_COUNT / (CUSTOM_BARRIER_COUNT + 1);
                 {
-                    let mut painter = Painter::new(list, Vec2i::default(), clip, clip);
+                    let mut painter = Painter::screen_space(list, clip);
                     for index in start..end {
                         painter.fill_rect(item_rect(index), white);
                     }

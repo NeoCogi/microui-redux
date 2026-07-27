@@ -113,7 +113,7 @@ impl TextBlock {
             return;
         }
 
-        let bounds = ctx.screen_content_rect();
+        let bounds = ctx.local_rect();
         let font = ctx.style().resolve_font_choice(self.config.font);
         let color = ctx.style().colors[ControlColor::Text as usize];
         let line_height = ctx.atlas().get_font_height(font) as i32;
@@ -121,11 +121,10 @@ impl TextBlock {
         let max_width = if self.wrap == TextWrap::Word { bounds.width.max(1) } else { i32::MAX / 4 };
         let lines = build_display_text_lines(self.text.as_str(), self.wrap, max_width, font, ctx.atlas());
 
-        let local_bounds = ctx.screen_to_local_rect(bounds);
         let mut painter = ctx.painter();
-        painter.with_clip(local_bounds, |painter| {
+        painter.with_clip(bounds, |painter| {
             for (idx, line) in lines.iter().enumerate() {
-                let line_rect = rect(local_bounds.x, local_bounds.y + idx as i32 * line_height, local_bounds.width, line_height);
+                let line_rect = rect(bounds.x, bounds.y + idx as i32 * line_height, bounds.width, line_height);
                 let line_top = baseline_aligned_top(line_rect, line_height, baseline);
                 // Lines keep byte ranges into the source string, so slicing remains allocation-free.
                 let slice = &self.text[line.start..line.end];
@@ -183,7 +182,7 @@ impl ColorSwatch {
 
     /// Paints the swatch fill, border, and optional label.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let rect = ctx.screen_content_rect();
+        let rect = ctx.local_rect();
         ctx.draw_rect(rect, self.fill);
         if !self.label.is_empty() {
             let font = ctx.style().resolve_font_choice(self.config.font);

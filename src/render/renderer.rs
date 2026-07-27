@@ -91,39 +91,16 @@ impl From<FrameError> for RenderError {
     }
 }
 
-/// High-level UI renderer that executes display lists and owns frame resources.
+/// High-level UI renderer that owns backend resources and executes crate-recorded UI frames.
 ///
 /// A Renderer uniquely owns its backend and is intended to remain on its owning thread. Backend
-/// frames and registered custom-render callbacks execute synchronously during [`Renderer::render`].
+/// frames and registered custom-render callbacks execute synchronously during
+/// [`ContextFrame::render_ui`](crate::ContextFrame::render_ui).
 ///
-/// Renderer has no mutable drawing clip and exposes no clip stack. Clips belong to operations in a
-/// [`DisplayList`], making execution deterministic and independent of prior draw calls.
-///
-/// A low-level integration can record and execute a display list directly:
-///
-/// ```
-/// use microui_redux::{
-///     prelude::{color, Dimensioni, Recti, Vec2i},
-///     render::{DisplayList, FrameInfo, Painter, Renderer, RendererBackend},
-/// };
-///
-/// fn render_frame<B: RendererBackend>(
-///     renderer: &mut Renderer<B>,
-///     display_list: &mut DisplayList,
-/// ) -> Result<(), Box<dyn std::error::Error>> {
-///     let dimensions = Dimensioni::new(640, 480);
-///     let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
-///
-///     {
-///         let mut painter =
-///             Painter::new(display_list, Vec2i::default(), viewport, viewport);
-///         painter.fill_rect(Recti::new(8, 8, 80, 24), color(70, 110, 180, 255));
-///     }
-///     let info = FrameInfo::try_new(dimensions, color(18, 20, 24, 255))?;
-///     renderer.render(info, display_list)?;
-///     Ok(())
-/// }
-/// ```
+/// Renderer has no mutable drawing clip and exposes no clip stack. Clips belong to internal
+/// display-list operations, making execution deterministic and independent of prior draw calls.
+/// Applications paint through [`WidgetPaintCtx::painter`](crate::WidgetPaintCtx::painter); display
+/// list construction and submission remain crate-owned.
 pub struct Renderer<B: RendererBackend> {
     /// Uniquely owned backend.
     backend: B,
@@ -203,7 +180,7 @@ impl<B: RendererBackend> Renderer<B> {
     }
 
     /// Executes one destructive display-list submission and leaves the list empty for reuse.
-    pub fn render(&mut self, info: FrameInfo, list: &mut DisplayList) -> Result<(), RenderError> {
+    pub(crate) fn render(&mut self, info: FrameInfo, list: &mut DisplayList) -> Result<(), RenderError> {
         #[cfg(test)]
         {
             self.render_count += 1;

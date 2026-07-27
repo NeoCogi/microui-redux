@@ -60,13 +60,12 @@ impl Checkbox {
 
     /// Paints the checkbox square, check mark, and label.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let bounds = ctx.screen_content_rect();
+        let bounds = ctx.local_rect();
         let box_rect = rect(bounds.x, bounds.y, bounds.height, bounds.height);
         let box_content = ctx.draw_widget_internal_frame(box_rect, ControlColor::Base);
         if self.value {
             let color = ctx.style().colors[ControlColor::Text as usize];
             if let Some(box_content) = box_content {
-                let box_content = ctx.local_to_screen_rect(box_content);
                 ctx.draw_icon(CHECK_ICON, box_content, color);
             }
         }

@@ -117,7 +117,7 @@ impl Button {
 
     /// Paints the button frame, text, and optional visual payload.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let rect = ctx.screen_content_rect();
+        let rect = ctx.local_rect();
         if let Some(colorid) = widget_fill_color(ctx, ControlColor::Button, self.fill) {
             ctx.draw_rect(rect, ctx.style().colors[colorid as usize]);
         }

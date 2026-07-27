@@ -177,7 +177,7 @@ impl Slider {
     /// Updates slider value from shift-click text entry, scroll, or pointer drag.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
         let mut res = ResourceState::NONE;
-        let base = ctx.screen_content_rect();
+        let base = ctx.local_rect();
         let last = self.value;
         let mut v = last;
         let font = ctx.style().resolve_font_choice(self.config.font);
@@ -227,7 +227,7 @@ impl Slider {
             return;
         }
 
-        let base = ctx.screen_content_rect();
+        let base = ctx.local_rect();
         let range = self.high - self.low;
         ctx.draw_widget_fill(base, ControlColor::Base);
         let w = ctx.style().thumb_size;
@@ -438,7 +438,7 @@ impl Number {
             return;
         }
 
-        let base = ctx.screen_content_rect();
+        let base = ctx.local_rect();
         ctx.draw_widget_fill(base, ControlColor::Base);
         let label = number_label(self.value, self.precision);
         ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.config.opt);

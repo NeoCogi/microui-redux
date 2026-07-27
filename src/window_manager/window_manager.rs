@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::render::Painter;
-use crate::{ControlColor, Vec2i};
+use crate::ControlColor;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(super) enum WindowKind {
@@ -346,7 +346,7 @@ impl<B: RendererBackend> Context<B> {
     /// Records the root background and border before retained contents.
     fn record_window_frame(&mut self, entry: &WindowEntry, dimensions: Dimensioni) {
         let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
-        let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);
+        let mut painter = Painter::screen_space(&mut self.display_list, viewport);
         let fill = self.style.colors[ControlColor::WindowBG as usize];
         if entry.opt.intersects(ContainerOption::FRAME) {
             crate::frame::paint_internal_frame(&mut painter, entry.rect, Some(fill), self.style.frame_border());
@@ -359,7 +359,7 @@ impl<B: RendererBackend> Context<B> {
     fn record_window_chrome(&mut self, entry: &WindowEntry, chrome: WindowChrome, dimensions: Dimensioni) {
         let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
         let atlas = self.renderer.atlas();
-        let mut painter = Painter::new(&mut self.display_list, Vec2i::new(0, 0), viewport, viewport);
+        let mut painter = Painter::screen_space(&mut self.display_list, viewport);
 
         if let Some(title) = chrome.title {
             record_root_fill(&mut painter, self.style.as_ref(), title, ControlColor::TitleBG);

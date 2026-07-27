@@ -589,20 +589,22 @@ impl PaintCtx<'_> {
     }
 
     fn painter(&mut self) -> Painter<'_> {
-        let screen_origin = self.screen_origin;
-        let content_rect = self.content_rect;
         let screen_clip = self.screen_clip();
-        Painter::new(&mut *self.display_list, screen_origin, content_rect, screen_clip)
+        Painter::screen_space(&mut *self.display_list, screen_clip)
     }
 
     pub(crate) fn draw_internal_frame(&mut self, rect: Recti, color: crate::ControlColor) -> Option<Recti> {
+        let screen_origin = self.screen_origin;
+        let rect = self.screen_rect(rect);
         let fill = self.style.colors[color as usize];
         let border = self.style.frame_border();
         let mut painter = self.painter();
         crate::frame::paint_internal_frame(&mut painter, rect, Some(fill), border)
+            .map(|content| Recti::new(content.x - screen_origin.x, content.y - screen_origin.y, content.width, content.height))
     }
 
     pub(crate) fn draw_flat_rect(&mut self, rect: Recti, color: crate::ControlColor) {
+        let rect = self.screen_rect(rect);
         let fill = self.style.colors[color as usize];
         self.painter().fill_rect(rect, fill);
     }
@@ -613,9 +615,10 @@ impl PaintCtx<'_> {
         let framed = widget.effective_widget_opt().intersects(WidgetOption::FRAME);
         let geometry = crate::frame::frame_geometry(local_rect, framed, self.style);
         if framed {
+            let screen_rect = self.screen_rect(local_rect);
             let border = self.style.frame_border();
             let mut painter = self.painter();
-            crate::frame::paint_internal_frame(&mut painter, local_rect, None, border);
+            crate::frame::paint_internal_frame(&mut painter, screen_rect, None, border);
         }
         let content_rect = self.screen_rect(geometry.content_or_empty());
         let content_clip = self.screen_clip();

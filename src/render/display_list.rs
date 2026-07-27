@@ -41,10 +41,10 @@ use rs_math3d::{Color4b, Recti, Vec2f, Vec2i};
 
 /// An owned sequence of rendering operations and their solid geometry.
 ///
-/// Operations are intentionally opaque. Rendering primitives are appended through the rendering
-/// subsystem, while callers own the list lifecycle and may clear and reuse its allocations.
+/// Operations are intentionally opaque. Framework traversal owns the list lifecycle and reuses its
+/// allocations between submitted frames.
 #[derive(Default)]
-pub struct DisplayList {
+pub(crate) struct DisplayList {
     /// Operations in final painter order.
     pub(super) ops: Vec<DrawOp>,
     /// Retained solid geometry and its reusable tessellation workspace.
@@ -113,7 +113,7 @@ pub(super) enum DrawKind {
 
 impl DisplayList {
     /// Creates an empty display list.
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             ops: Vec::new(),
             solid_geometry: SolidGeometry::new(),
@@ -121,13 +121,14 @@ impl DisplayList {
     }
 
     /// Removes every recorded operation and triangle while retaining allocated storage for reuse.
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.ops.clear();
         self.solid_geometry.clear();
     }
 
     /// Returns `true` when the list contains no operations or solid geometry.
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.ops.is_empty() && self.solid_geometry.is_empty()
     }
 

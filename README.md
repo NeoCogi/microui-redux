@@ -68,14 +68,14 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 - **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
 - **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). Retained traversal keys widget interaction by stable retained node IDs.
 - **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and stored in retained roots through `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)`. Tree nodes cover widgets, scroll areas, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
-- **Rendering**: widgets record local primitives through `Painter`; `Renderer` executes the resulting `DisplayList` through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](src/render/RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
+- **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and `Renderer` executes it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](src/render/RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override `config.font`.
 
 The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `ScrollAreaHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. Low-level rendering lives under `microui_redux::render`, and atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, rect-packing details, and container-level manual drawing are not part of the application authoring surface.
 
 ### Rendering
 
-Widgets record backend-neutral drawing through `Painter`; `Renderer` executes the owned `DisplayList` and submits final geometry through `RendererBackend`. The [render subsystem guide](src/render/RENDER.md) covers architecture, clipping, textures, custom callbacks, backend implementation, and compiling code examples.
+Widgets record backend-neutral drawing through a framework-created `Painter`; `Renderer` executes the crate-owned display list and submits final geometry through `RendererBackend`. The [render subsystem guide](src/render/RENDER.md) covers architecture, clipping, textures, custom callbacks, backend implementation, and compiling code examples.
 
 ### How `SelectedBackend::Frame<'a>` works
 
@@ -148,13 +148,13 @@ application/resource updates
         |
 Context::frame(FrameInfo)             logical ContextFrame
         |
-ContextFrame::render_ui(self)         retained update, paint, DisplayList recording
+ContextFrame::render_ui(self)         retained update, paint, internal display-list recording
         |
 Renderer preflight                    validate texture/custom-render keys
         |
 RendererBackend::frame(&mut backend)  acquire SelectedBackend::Frame<'_>
         |
-DisplayList execution                 RendererFrame calls + typed custom callbacks
+Internal display-list execution       RendererFrame calls + typed custom callbacks
         |
 drop backend frame                    finalize/submit/present as applicable; release borrow
         |

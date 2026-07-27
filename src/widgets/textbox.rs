@@ -167,7 +167,7 @@ pub(crate) fn textbox_update(
     font: FontId,
 ) -> ResourceState {
     let mut res = ResourceState::NONE;
-    let r = ctx.screen_content_rect();
+    let r = ctx.local_rect();
     if !ctx.focused() {
         // Reset to end when blurred so refocusing starts from a predictable position.
         *cursor = buf.len();
@@ -237,7 +237,7 @@ pub(crate) fn textbox_update(
 
 /// Shared single-line textbox painting used by textbox and numeric inline editors.
 pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usize, opt: WidgetOption, font: FontId) {
-    let r = ctx.screen_content_rect();
+    let r = ctx.local_rect();
     let _ = opt;
     ctx.draw_widget_fill(r, ControlColor::Base);
 
@@ -259,13 +259,11 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
     if ctx.focused() {
         // Focused editing path clips text/caret to the textbox bounds.
         let color = ctx.style().colors[ControlColor::Text as usize];
-        let local_rect = ctx.screen_to_local_rect(r);
-        let local_text_pos = ctx.screen_to_local_pos(vec2(textx, texty));
-        let local_caret = ctx.screen_to_local_rect(caret_rect(textx + caret_offset, baseline_y, metrics, r));
+        let caret = caret_rect(textx + caret_offset, baseline_y, metrics, r);
         let mut painter = ctx.painter();
-        painter.with_clip(local_rect, |painter| {
-            painter.text(font, buf, local_text_pos, color);
-            painter.fill_rect(local_caret, color);
+        painter.with_clip(r, |painter| {
+            painter.text(font, buf, vec2(textx, texty), color);
+            painter.fill_rect(caret, color);
         });
     } else {
         ctx.draw_control_text_with_font(font, buf, r, ControlColor::Text, opt);

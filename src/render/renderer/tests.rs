@@ -183,7 +183,7 @@ fn frame_info_rejects_every_non_positive_dimension() {
 }
 
 fn painter<'a>(list: &'a mut DisplayList, clip: Recti) -> Painter<'a> {
-    Painter::new(list, Vec2i::new(0, 0), viewport(), clip)
+    Painter::screen_space(list, clip)
 }
 
 fn assert_position(vertex: RecordedVertex, expected: [f32; 2]) {
@@ -418,7 +418,7 @@ fn operation_clip_is_intersected_with_viewport_for_every_quad_kind() {
     let clip = Recti::new(2, 0, 20, 4);
     let mut list = DisplayList::new();
     {
-        let mut painter = Painter::new(&mut list, Vec2i::new(0, 0), viewport(), clip);
+        let mut painter = Painter::screen_space(&mut list, clip);
         painter.fill_rect(Recti::new(0, 0, 10, 4), white);
         painter.text(FontId::default(), "a", Vec2i::new(0, 0), white);
         painter.icon(CLOSE_ICON, Recti::new(0, 0, 4, 4), white);

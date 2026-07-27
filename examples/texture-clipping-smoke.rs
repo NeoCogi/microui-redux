@@ -31,11 +31,7 @@
 //!
 //! This standalone example validates that external texture drawing respects UI clipping.
 
-use microui_redux::{
-    prelude::*,
-    render::{Renderer, DisplayList, Painter, Vertex},
-    AtlasSource,
-};
+use microui_redux::{prelude::*, render::Vertex, AtlasSource};
 use std::{cell::RefCell, rc::Rc};
 
 enum SmokeEvent {
@@ -152,22 +148,67 @@ fn assert_vec2f_eq(actual: Vec2f, expected: Vec2f) {
     assert!((actual.y - expected.y).abs() < 1.0e-6, "expected y {}, got {}", expected.y, actual.y);
 }
 
+#[derive(Clone)]
+struct TextureClippingProbe {
+    texture: TextureId,
+    options: WidgetOption,
+    screen_content: Rc<RefCell<Option<Recti>>>,
+}
+
+impl Widget for TextureClippingProbe {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.options
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(64, 64)
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _events: Vec<UiInputEvent>) -> ResourceState {
+        ResourceState::NONE
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        *self.screen_content.borrow_mut() = Some(ctx.screen_content_rect());
+        let white = color(255, 255, 255, 255);
+        let mut painter = ctx.painter();
+        painter.icon(WHITE_ICON, rect(0, 0, 4, 4), white);
+        painter.with_clip(rect(10, 12, 8, 6), |painter| {
+            painter.image(self.texture, rect(6, 9, 16, 12), white);
+        });
+        painter.icon(WHITE_ICON, rect(30, 0, 4, 4), white);
+    }
+}
+
 fn main() -> Result<(), String> {
     let events = Rc::new(RefCell::new(Vec::new()));
     let backend = SmokeRenderer::new(make_smoke_atlas(), events.clone());
-    let mut renderer = Renderer::new(backend);
-    let texture = renderer.try_load_texture_rgba(16, 12, &[0xFF; 16 * 12 * 4])?;
+    let mut ctx = Context::new(backend);
+    let texture = ctx.try_load_image_rgba(16, 12, &[0xFF; 16 * 12 * 4])?;
+    let screen_content = Rc::new(RefCell::new(None));
+    let probe = widget_handle(TextureClippingProbe {
+        texture,
+        options: WidgetOption::NO_INTERACT,
+        screen_content: screen_content.clone(),
+    });
+    let tree = UiNodeBuilder::build(move |tree| {
+        tree.node(NodeOptions::with_policy(Policy::fixed(64, 64))).widget(&probe);
+    });
+    let root = ctx.create_window("texture clipping smoke", rect(0, 0, 64, 64), tree);
+    ctx.set_root_options(root, ContainerOption::NO_TITLE | ContainerOption::NO_CLOSE | ContainerOption::NO_RESIZE);
 
-    let viewport = Recti::new(0, 0, 64, 64);
-    let mut list = DisplayList::new();
-    Painter::new(&mut list, Vec2i::new(0, 0), viewport, viewport).icon(WHITE_ICON, Recti::new(0, 0, 4, 4), color(255, 255, 255, 255));
-    Painter::new(&mut list, Vec2i::new(0, 0), viewport, Recti::new(10, 12, 8, 6)).image(texture, Recti::new(6, 9, 16, 12), color(255, 255, 255, 255));
-    Painter::new(&mut list, Vec2i::new(0, 0), viewport, viewport).icon(WHITE_ICON, Recti::new(30, 0, 4, 4), color(255, 255, 255, 255));
+    // Keep the root background out of the recording log so the assertions isolate the widget's
+    // atlas/texture ordering while still exercising the retained public rendering path.
+    let mut style = Style::default();
+    style.colors[ControlColor::WindowBG as usize] = color(0, 0, 0, 0);
+    ctx.set_style(&style);
+
     let info = FrameInfo::try_new(Dimensioni::new(64, 64), color(0, 0, 0, 255)).map_err(|error| error.to_string())?;
-    renderer.render(info, &mut list).map_err(|error| error.to_string())?;
+    ctx.frame(info).render_ui().map_err(|error| error.to_string())?;
 
     {
         let events = events.borrow();
+        let content = screen_content.borrow().expect("the retained probe should be painted");
         assert_eq!(events.len(), 3);
 
         match &events[0] {
@@ -178,10 +219,12 @@ fn main() -> Result<(), String> {
         match &events[1] {
             SmokeEvent::Texture { id, vertices } => {
                 assert_eq!(*id, texture);
-                assert_vec2f_eq(vertices[0].position(), Vec2f::new(10.0, 12.0));
-                assert_vec2f_eq(vertices[1].position(), Vec2f::new(18.0, 12.0));
-                assert_vec2f_eq(vertices[2].position(), Vec2f::new(18.0, 18.0));
-                assert_vec2f_eq(vertices[3].position(), Vec2f::new(10.0, 18.0));
+                let x0 = content.x as f32 + 10.0;
+                let y0 = content.y as f32 + 12.0;
+                assert_vec2f_eq(vertices[0].position(), Vec2f::new(x0, y0));
+                assert_vec2f_eq(vertices[1].position(), Vec2f::new(x0 + 8.0, y0));
+                assert_vec2f_eq(vertices[2].position(), Vec2f::new(x0 + 8.0, y0 + 6.0));
+                assert_vec2f_eq(vertices[3].position(), Vec2f::new(x0, y0 + 6.0));
                 assert_vec2f_eq(vertices[0].tex_coord(), Vec2f::new(0.25, 0.25));
                 assert_vec2f_eq(vertices[2].tex_coord(), Vec2f::new(0.75, 0.75));
             }

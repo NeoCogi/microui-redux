@@ -192,7 +192,7 @@ impl Node {
         let style = ctx.style();
         let padding = style.padding;
         let text_color = style.colors[ControlColor::Text as usize];
-        let mut r = ctx.screen_content_rect();
+        let mut r = ctx.local_rect();
 
         match self.kind {
             NodeKind::Tree => {

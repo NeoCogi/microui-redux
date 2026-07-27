@@ -41,9 +41,10 @@ use rs_math3d::{Color4b, Recti, Vec2f, Vec2i, color4b};
 
 /// Records backend-neutral drawing operations in local coordinates.
 ///
-/// A Painter borrows exactly one [`DisplayList`]. It translates local primitives into screen
-/// space, attaches the current effective screen-space clip to every operation, and tessellates
-/// custom solid geometry without consulting style, input, atlas, Renderer, or RendererBackend state.
+/// A Painter borrows the crate-owned display list for the current frame. It translates local
+/// primitives into screen space, attaches the current effective screen-space clip to every
+/// operation, and tessellates custom solid geometry without consulting style, input, atlas,
+/// Renderer, or RendererBackend state.
 ///
 /// Custom widgets obtain a painter from their [`WidgetPaintCtx`](crate::WidgetPaintCtx):
 ///
@@ -106,8 +107,10 @@ pub struct Painter<'a> {
 }
 
 impl<'a> Painter<'a> {
-    /// Creates a Painter with an explicit local-to-screen origin and effective screen-space clip.
-    pub fn new(list: &'a mut DisplayList, origin: Vec2i, local_bounds: Recti, screen_clip: Recti) -> Self {
+    /// Creates a widget-local Painter from one authoritative screen-space content rectangle.
+    pub(crate) fn for_widget(list: &'a mut DisplayList, screen_content_bounds: Recti, screen_clip: Recti) -> Self {
+        let origin = Vec2i::new(screen_content_bounds.x, screen_content_bounds.y);
+        let local_bounds = Recti::new(0, 0, screen_content_bounds.width, screen_content_bounds.height);
         Self {
             list,
             origin,
@@ -116,7 +119,17 @@ impl<'a> Painter<'a> {
         }
     }
 
-    /// Returns the local drawable rectangle supplied at construction.
+    /// Creates an internal Painter whose input coordinates are already in screen space.
+    pub(crate) fn screen_space(list: &'a mut DisplayList, screen_clip: Recti) -> Self {
+        Self {
+            list,
+            origin: Vec2i::default(),
+            local_bounds: screen_clip,
+            clip: screen_clip,
+        }
+    }
+
+    /// Returns the drawable rectangle in this Painter's coordinate space.
     pub fn local_rect(&self) -> Recti {
         self.local_bounds
     }
@@ -325,7 +338,7 @@ mod tests {
     fn fill_rect_records_a_translated_semantic_operation() {
         let mut list = DisplayList::new();
         {
-            let mut painter = Painter::new(&mut list, Vec2i::new(10, 20), Recti::new(0, 0, 100, 80), Recti::new(12, 22, 50, 40));
+            let mut painter = Painter::for_widget(&mut list, Recti::new(10, 20, 100, 80), Recti::new(12, 22, 50, 40));
             painter.fill_rect(Recti::new(1, 2, 10, 12), color(1, 2, 3, 255));
         }
 
@@ -343,7 +356,7 @@ mod tests {
     fn scoped_nested_clips_narrow_without_mutating_the_parent() {
         let mut list = DisplayList::new();
         {
-            let mut painter = Painter::new(&mut list, Vec2i::new(10, 20), Recti::new(0, 0, 50, 50), Recti::new(10, 20, 50, 50));
+            let mut painter = Painter::for_widget(&mut list, Recti::new(10, 20, 50, 50), Recti::new(10, 20, 50, 50));
             assert_eq!(rect_tuple(painter.current_clip_rect()), (0, 0, 50, 50));
             painter.with_clip(Recti::new(5, 5, 20, 20), |painter| {
                 assert_eq!(rect_tuple(painter.current_clip_rect()), (5, 5, 20, 20));
@@ -365,7 +378,7 @@ mod tests {
     fn disjoint_clip_scope_cannot_expand_visibility() {
         let mut list = DisplayList::new();
         {
-            let mut painter = Painter::new(&mut list, Vec2i::new(10, 20), Recti::new(0, 0, 50, 50), Recti::new(10, 20, 50, 50));
+            let mut painter = Painter::for_widget(&mut list, Recti::new(10, 20, 50, 50), Recti::new(10, 20, 50, 50));
             painter.with_clip(Recti::new(100, 100, 10, 10), |painter| {
                 assert_eq!(painter.current_clip_rect().width, 0);
                 painter.with_clip(Recti::new(0, 0, 500, 500), |painter| {
@@ -381,7 +394,7 @@ mod tests {
     fn line_triangles_remain_unclipped_and_carry_the_effective_clip() {
         let mut list = DisplayList::new();
         {
-            let mut painter = Painter::new(&mut list, Vec2i::new(0, 0), Recti::new(0, 0, 20, 20), Recti::new(0, 0, 5, 5));
+            let mut painter = Painter::for_widget(&mut list, Recti::new(0, 0, 20, 20), Recti::new(0, 0, 5, 5));
             painter.stroke_line(Vec2f::new(-10.0, 2.0), Vec2f::new(20.0, 2.0), 2.0, color(255, 0, 0, 255));
         }
 
@@ -403,7 +416,7 @@ mod tests {
     fn polygon_and_line_geometry_use_triangle_ranges() {
         let mut list = DisplayList::new();
         {
-            let mut painter = Painter::new(&mut list, Vec2i::new(5, 7), Recti::new(0, 0, 100, 100), Recti::new(0, 0, 200, 200));
+            let mut painter = Painter::for_widget(&mut list, Recti::new(5, 7, 100, 100), Recti::new(0, 0, 200, 200));
             painter.fill_polygon(
                 &[Vec2f::new(0.0, 0.0), Vec2f::new(10.0, 0.0), Vec2f::new(10.0, 10.0), Vec2f::new(0.0, 10.0)],
                 color(255, 255, 255, 255),
@@ -430,7 +443,7 @@ mod tests {
     fn stroke_rect_records_fill_rectangles_not_triangle_geometry() {
         let mut list = DisplayList::new();
         {
-            let mut painter = Painter::new(&mut list, Vec2i::new(0, 0), Recti::new(0, 0, 20, 20), Recti::new(0, 0, 20, 20));
+            let mut painter = Painter::screen_space(&mut list, Recti::new(0, 0, 20, 20));
             painter.stroke_rect(Recti::new(2, 2, 10, 10), 2, color(255, 255, 255, 255));
         }
         assert_eq!(list.ops.len(), 4);
@@ -442,7 +455,7 @@ mod tests {
     fn semantic_primitives_translate_and_reject_fully_hidden_bounds() {
         let mut list = DisplayList::new();
         {
-            let mut painter = Painter::new(&mut list, Vec2i::new(10, 20), Recti::new(0, 0, 100, 100), Recti::new(10, 20, 20, 20));
+            let mut painter = Painter::for_widget(&mut list, Recti::new(10, 20, 100, 100), Recti::new(10, 20, 20, 20));
             painter.text(FontId::default(), "label", Vec2i::new(1, 2), color(255, 255, 255, 255));
             painter.icon(IconId::default(), Recti::new(2, 3, 4, 5), color(255, 255, 255, 255));
             painter.image(TextureId::new(1, 10, 10), Recti::new(100, 100, 10, 10), color(255, 255, 255, 255));
@@ -463,7 +476,7 @@ mod tests {
     fn fully_hidden_and_degenerate_solid_geometry_is_rejected() {
         let mut list = DisplayList::new();
         {
-            let mut painter = Painter::new(&mut list, Vec2i::new(0, 0), Recti::new(0, 0, 20, 20), Recti::new(0, 0, 20, 20));
+            let mut painter = Painter::screen_space(&mut list, Recti::new(0, 0, 20, 20));
             assert_eq!(rect_tuple(painter.local_rect()), (0, 0, 20, 20));
             painter.stroke_line(Vec2f::new(100.0, 100.0), Vec2f::new(120.0, 100.0), 2.0, color(255, 255, 255, 255));
             painter.fill_polygon(

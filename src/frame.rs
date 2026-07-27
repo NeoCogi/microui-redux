@@ -142,7 +142,6 @@ mod tests {
     use super::*;
     use crate::color;
     use crate::render::DisplayList;
-    use crate::Vec2i;
 
     #[test]
     fn frame_geometry_derives_inside_content() {
@@ -193,7 +192,7 @@ mod tests {
         let border = color(1, 2, 3, 255);
         let fill = color(4, 5, 6, 255);
         let mut list = DisplayList::new();
-        let mut painter = Painter::new(&mut list, Vec2i::default(), viewport, viewport);
+        let mut painter = Painter::screen_space(&mut list, viewport);
 
         let content = paint_internal_frame(&mut painter, outer, Some(fill), FrameBorder { width: 1, color: border });
         assert_eq!(content.map(rect_tuple), Some((11, 21, 6, 5)));
@@ -214,7 +213,7 @@ mod tests {
         let viewport = Recti::new(0, 0, 100, 100);
         let border = color(7, 8, 9, 255);
         let mut list = DisplayList::new();
-        let mut painter = Painter::new(&mut list, Vec2i::default(), viewport, viewport);
+        let mut painter = Painter::screen_space(&mut list, viewport);
 
         assert!(paint_internal_frame(&mut painter, outer, Some(color(10, 11, 12, 255)), FrameBorder { width: 1, color: border }).is_none());
         let recorded = list.debug_fill_rects();
@@ -229,7 +228,7 @@ mod tests {
         let viewport = Recti::new(0, 0, 100, 100);
         let fill = color(20, 30, 40, 255);
         let mut list = DisplayList::new();
-        let mut painter = Painter::new(&mut list, Vec2i::default(), viewport, viewport);
+        let mut painter = Painter::screen_space(&mut list, viewport);
 
         let content = paint_internal_frame(&mut painter, outer, Some(fill), FrameBorder { width: 2, color: color(0, 0, 0, 0) });
         assert_eq!(content.map(rect_tuple), Some((7, 8, 5, 4)));

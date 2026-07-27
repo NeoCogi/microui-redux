@@ -204,12 +204,10 @@ impl TextArea {
 
 /// Complete derived layout for one text-area frame.
 struct TextAreaLayout {
-    /// Outer text-area rectangle in screen coordinates.
+    /// Outer text-area rectangle in widget-local coordinates.
     bounds: Recti,
     /// Text body after padding and scrollbars.
     body: Recti,
-    /// Text body expressed in widget-local coordinates.
-    body_local: Recti,
     /// Wrapped display lines.
     lines: Vec<TextLine>,
     /// Text content dimensions.
@@ -294,12 +292,9 @@ fn textarea_layout(content_rect: Recti, style: &Style, atlas: &AtlasHandle, stat
     } else {
         bounds
     };
-    let body_local = rect(body.x - bounds.x, body.y - bounds.y, body.width, body.height);
-
     TextAreaLayout {
         bounds,
         body,
-        body_local,
         lines,
         content_size,
         maxscroll_y,
@@ -356,7 +351,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent], state:
         }
     }
 
-    let layout = textarea_layout(ctx.screen_content_rect(), ctx.style(), ctx.atlas(), state, font);
+    let layout = textarea_layout(ctx.local_rect(), ctx.style(), ctx.atlas(), state, font);
     let content_mouse_pos = input.mouse_pos();
 
     if let Some(delta) = input.scroll_delta() {
@@ -377,13 +372,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent], state:
     let mut clicked_scrollbar = false;
 
     if layout.needs_v && layout.maxscroll_y > 0 && layout.body.height > 0 {
-        let vscroll_base_local = rect(
-            layout.vscroll_base.x - layout.bounds.x,
-            layout.vscroll_base.y - layout.bounds.y,
-            layout.vscroll_base.width,
-            layout.vscroll_base.height,
-        );
-        if input.mouse_pressed().intersects(MouseButton::LEFT) && vscroll_base_local.contains(&content_mouse_pos) {
+        if input.mouse_pressed().intersects(MouseButton::LEFT) && layout.vscroll_base.contains(&content_mouse_pos) {
             // Track scrollbar drag separately so text clicks do not also move the caret.
             state.dragging_y = true;
             clicked_scrollbar = true;
@@ -394,13 +383,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent], state:
     }
 
     if layout.needs_h && layout.maxscroll_x > 0 && layout.body.width > 0 {
-        let hscroll_base_local = rect(
-            layout.hscroll_base.x - layout.bounds.x,
-            layout.hscroll_base.y - layout.bounds.y,
-            layout.hscroll_base.width,
-            layout.hscroll_base.height,
-        );
-        if input.mouse_pressed().intersects(MouseButton::LEFT) && hscroll_base_local.contains(&content_mouse_pos) {
+        if input.mouse_pressed().intersects(MouseButton::LEFT) && layout.hscroll_base.contains(&content_mouse_pos) {
             state.dragging_x = true;
             clicked_scrollbar = true;
         }
@@ -448,8 +431,8 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent], state:
     if ctx.focused() && input.mouse_pressed().intersects(MouseButton::LEFT) && ctx.mouse_over(layout.bounds, input.mouse_pos()) && !clicked_scrollbar {
         // Convert a widget-local click to content-local coordinates before resolving cursor.
         let mouse_pos = content_mouse_pos;
-        let local_x = mouse_pos.x - (layout.body_local.x + layout.padding) + state.scroll.x;
-        let local_y = mouse_pos.y - (layout.body_local.y + layout.padding) + state.scroll.y;
+        let local_x = mouse_pos.x - (layout.body.x + layout.padding) + state.scroll.x;
+        let local_y = mouse_pos.y - (layout.body.y + layout.padding) + state.scroll.y;
         let line_idx = (local_y / layout.metrics.line_height).clamp(0, layout.lines.len().saturating_sub(1) as i32) as usize;
         cursor_pos = cursor_from_x(&layout.lines[line_idx], state.buf.as_str(), local_x, font, ctx.atlas());
         ensure_visible = true;
@@ -497,7 +480,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent], state:
 
 /// Paints text-area frame, visible text lines, caret, and scrollbars.
 fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &mut TextArea, font: FontId) {
-    let layout = textarea_layout(ctx.screen_content_rect(), ctx.style(), ctx.atlas(), state, font);
+    let layout = textarea_layout(ctx.local_rect(), ctx.style(), ctx.atlas(), state, font);
     let cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
     let cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
     let caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
@@ -506,17 +489,15 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &mut TextArea, font: Font
 
     let text_origin = vec2(layout.body.x + layout.padding - state.scroll.x, layout.body.y + layout.padding - state.scroll.y);
     let color = ctx.style().colors[ControlColor::Text as usize];
-    let local_body = ctx.screen_to_local_rect(layout.body);
-    let local_text_origin = ctx.screen_to_local_pos(text_origin);
-    let local_caret = if ctx.focused() {
+    let caret = if ctx.focused() {
         let caret_line_top = text_origin.y + cursor_line as i32 * layout.metrics.line_height;
         let baseline_y = caret_line_top + layout.metrics.baseline;
-        Some(ctx.screen_to_local_rect(caret_rect(text_origin.x + caret_x, baseline_y, layout.metrics, layout.body)))
+        Some(caret_rect(text_origin.x + caret_x, baseline_y, layout.metrics, layout.body))
     } else {
         None
     };
     let mut painter = ctx.painter();
-    painter.with_clip(local_body, |painter| {
+    painter.with_clip(layout.body, |painter| {
         for (idx, line) in layout.lines.iter().enumerate() {
             let line_top = text_origin.y + idx as i32 * layout.metrics.line_height;
             let line_bottom = line_top + layout.metrics.line_height;
@@ -526,16 +507,11 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &mut TextArea, font: Font
             }
             let text = &state.buf[line.start..line.end];
             if !text.is_empty() {
-                painter.text(
-                    font,
-                    text,
-                    vec2(local_text_origin.x, local_text_origin.y + idx as i32 * layout.metrics.line_height),
-                    color,
-                );
+                painter.text(font, text, vec2(text_origin.x, text_origin.y + idx as i32 * layout.metrics.line_height), color);
             }
         }
 
-        if let Some(caret) = local_caret {
+        if let Some(caret) = caret {
             painter.fill_rect(caret, color);
         }
     });

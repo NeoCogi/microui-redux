@@ -99,10 +99,10 @@
 //! ```
 //!
 //! Widgets obtain a [`render::Painter`] from [`WidgetPaintCtx::painter`] and record
-//! backend-neutral operations. [`render::Renderer`] executes the resulting
-//! [`render::DisplayList`], performs final clipping and tessellation, and submits final
+//! backend-neutral operations. [`render::Renderer`] executes the resulting crate-owned display
+//! list, performs final clipping and tessellation, and submits final
 //! [`render::Vertex`] values through [`render::RendererBackend`]. Applications normally import
-//! retained UI types from [`prelude`], while backend integrations import low-level types from
+//! retained UI types from [`prelude`], while backend integrations import frame contracts from
 //! [`render`].
 
 pub mod atlas;

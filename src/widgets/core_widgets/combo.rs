@@ -153,8 +153,9 @@ impl Combo {
 
     /// Paints the combo header and records the popup anchor below it.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let header = ctx.screen_content_rect();
-        self.last_anchor = rect(header.x, header.y + header.height, header.width, 1);
+        let header = ctx.local_rect();
+        let screen_header = ctx.screen_content_rect();
+        self.last_anchor = rect(screen_header.x, screen_header.y + screen_header.height, screen_header.width, 1);
         ctx.draw_widget_fill(header, ControlColor::Button);
 
         let indicator_size = ctx.atlas().get_icon_size(EXPAND_DOWN_ICON);
@@ -171,7 +172,6 @@ impl Combo {
         let indicator_content = ctx.draw_widget_internal_frame(indicator, ControlColor::Button);
         let icon_color = ctx.style().colors[ControlColor::Text as usize];
         if let Some(indicator_content) = indicator_content {
-            let indicator_content = ctx.local_to_screen_rect(indicator_content);
             ctx.draw_icon(EXPAND_DOWN_ICON, indicator_content, icon_color);
         }
     }

@@ -151,6 +151,7 @@ impl SolidGeometry {
     }
 
     /// Returns whether no solid triangles are retained.
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.triangles.is_empty()
     }

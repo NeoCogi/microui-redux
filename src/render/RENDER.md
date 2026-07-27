@@ -6,13 +6,13 @@ renderer expands and clips those operations; the backend receives final
 vertices and texture commands.
 
 Most application code only needs `WidgetPaintCtx::painter()` and the rendering types
-re-exported by `microui_redux::prelude`. Low-level integrations and backend
-implementations import the remaining types explicitly:
+re-exported by `microui_redux::prelude`. Backend implementations import their frame contracts
+explicitly:
 
 ```rust
 use microui_redux::{
     prelude::RendererBackend,
-    render::{DisplayList, FrameInfo, Painter, Renderer, RendererFrame, Vertex},
+    render::{FrameInfo, RendererFrame, Vertex},
 };
 ```
 
@@ -32,7 +32,7 @@ Each layer has one responsibility:
 | Layer | Owns | Does not own |
 | --- | --- | --- |
 | `Painter` | Local-to-screen translation, operation recording, scoped clip intersection, solid-shape tessellation | Backend state, frame lifecycle, atlas lookup, input, style policy |
-| `DisplayList` | Ordered operations, operation clips, owned text, custom-render keys, solid triangles, reusable recording storage | Execution, backend access, textures |
+| Internal display list | Ordered operations, operation clips, owned text, custom-render keys, solid triangles, reusable recording storage | Execution, backend access, textures |
 | `Renderer` | Unique backend ownership, atlas expansion, final clipping, texture lifetime, display-list execution, reusable execution scratch | Widget input, widget layout, mutable drawing state |
 | `RendererBackend` | Persistent GPU/software and texture resources | UI input, widget state, clipping decisions |
 | `RendererBackend::Frame` | One acquired frame, batching, texture binding, final submission/presentation | Persistent application ownership |
@@ -42,7 +42,7 @@ The source layout follows those boundaries:
 ```text
 src/render/
 ├── backend.rs       public backend/frame contracts, vertices, typed custom callbacks
-├── display_list.rs  owned operations and recording storage
+├── display_list.rs  crate-owned operations and recording storage
 ├── geometry.rs      internal tessellation and final clipping geometry
 ├── painter.rs       public widget-local recorder
 ├── performance.rs   test-only timing, allocation, and submission benchmark
@@ -50,9 +50,13 @@ src/render/
 └── RENDER.md        architecture and integration guide
 ```
 
-`display_list` and `geometry` are private implementation modules even though
-`DisplayList` itself is public. Their internals can change without growing the
-public API.
+`display_list` and `geometry` are private implementation modules. Applications cannot construct a
+display list or submit one directly; retained traversal owns recording and submission so every
+public `Painter` comes from a traversal-derived `WidgetPaintCtx`.
+
+```compile_fail
+use microui_redux::render::DisplayList;
+```
 
 ## Frame execution
 
@@ -76,38 +80,7 @@ ContextFrame::render_ui(self)
 Input belongs to widget update and never enters the rendering subsystem. By the
 time painting starts, widgets record only visual state.
 
-A low-level integration can own the list and renderer directly:
-
-```rust
-use microui_redux::{
-    prelude::{color, Dimensioni, Recti, Vec2i},
-    render::{DisplayList, FrameInfo, Painter, RenderError, Renderer, RendererBackend},
-};
-
-fn render_frame<B: RendererBackend>(
-    renderer: &mut Renderer<B>,
-    display_list: &mut DisplayList,
-) -> Result<(), RenderError> {
-    let dimensions = Dimensioni::new(640, 480);
-    let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
-
-    {
-        let mut painter =
-            Painter::new(display_list, Vec2i::default(), viewport, viewport);
-        painter.fill_rect(
-            Recti::new(8, 8, 80, 24),
-            color(70, 110, 180, 255),
-        );
-    }
-    let info = FrameInfo::try_new(
-        dimensions,
-        color(18, 20, 24, 255),
-    ).expect("fixed dimensions are positive");
-    renderer.render(info, display_list)
-}
-```
-
-`Renderer::render` consumes every operation in painter order and leaves the
+The crate-owned submission path consumes every operation in painter order and leaves its internal
 list empty for reuse, including validation or frame-acquisition failures.
 Ordinary adjacent operations execute through one exclusively borrowed backend
 frame. External textures and custom-render operations are ordering barriers:
@@ -252,8 +225,8 @@ screen-space vertices.
 The portable rendering target is a positive drawable no larger than
 8192x8192 pixels. Screen-space geometry may extend up to four maximum
 drawable spans beyond each viewport edge, giving a supported logical edge
-range of `-32768..=40960`. Widget layout, scrolling, custom painting, and
-direct `Painter` use must keep translated rectangle edges and accumulated
+range of `-32768..=40960`. Widget layout, scrolling, and custom painting must keep translated
+rectangle edges and accumulated
 positions within that range.
 
 This bound leaves substantial `i32` headroom while covering ordinary
@@ -267,16 +240,15 @@ The renderer deliberately retains `Recti` and `Vec2i` rather than maintaining
 a second large-coordinate geometry model. Empty and negative-extent
 rectangles continue to produce no geometry.
 
-## Display-list ownership and reuse
+## Internal display-list ownership and reuse
 
-`DisplayList` owns all data required after recording, including strings,
-typed custom-render registry keys, and solid geometry. No operation borrows
-widget or container memory.
+The crate-owned display list contains all data required after recording, including strings, typed
+custom-render registry keys, and solid geometry. No operation borrows widget or container memory.
 
 The list is designed to be reused:
 
 - recording appends into retained operation and geometry allocations;
-- `Renderer::render` preflights resource keys, then drains operations directly
+- Renderer submission preflights resource keys, then drains operations directly
   from the list through one frame-owned executor;
 - the outer submission boundary clears operations and solid geometry after
   success or a returned error while retaining their allocations;

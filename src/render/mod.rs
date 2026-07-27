@@ -13,6 +13,6 @@ pub use backend::{
     Vertex,
 };
 pub(crate) use backend::CustomRenderKey;
-pub use display_list::DisplayList;
+pub(crate) use display_list::DisplayList;
 pub use painter::Painter;
 pub use renderer::{RenderError, Renderer};
