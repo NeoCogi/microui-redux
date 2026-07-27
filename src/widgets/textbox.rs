@@ -226,7 +226,7 @@ pub(crate) fn textbox_update(
 
     if ctx.focused() && mouse_pressed.intersects(MouseButton::LEFT) && ctx.mouse_over(r, mouse_pos) {
         // Convert local click x into a UTF-8 boundary cursor position.
-        let click_x = mouse_pos.x - ctx.frame_local_content_rect().x - (textx - r.x);
+        let click_x = mouse_pos.x - (textx - r.x);
         cursor_pos = cursor_from_text_x(buf, click_x, font, ctx.atlas());
     }
 

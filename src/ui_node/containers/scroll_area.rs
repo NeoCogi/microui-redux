@@ -5,7 +5,7 @@ use crate::id::IdNamespace;
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, scrollbar_viewport_body, ScrollAxis};
 use crate::{ControlColor, Dimensioni, Policy, Recti, Vec2i};
 
-use super::{Column, Container, InputCtx, InputResult, LayoutCtx, MeasureCtx, PaintCtx, UiInputEvent, Widget};
+use super::{Column, Container, InputCtx, InputResult, LayoutCtx, MeasureCtx, NodeBehavior, PaintCtx, UiInputEvent};
 use crate::ui_node::{UiNode, UiNodeData, UiNodeId, UiNodeState};
 
 /// Shared state owned by a scroll-area composition.
@@ -121,7 +121,7 @@ impl Scrollbars {
     }
 }
 
-impl Widget for ScrollArea {
+impl NodeBehavior for ScrollArea {
     fn is_framed(&self) -> bool {
         self.opt.intersects(ContainerOption::FRAME)
     }
@@ -138,7 +138,7 @@ impl Widget for ScrollArea {
         let viewport_id = scroll_viewport_id(id);
         let content_hint = self.state.borrow().content_size;
         let mut body = viewport_body_for_scroll_behavior(rect, content_hint, ctx.style.padding, ctx.style.scrollbar_size, self.scroll_behavior);
-        ctx.set_content_space_geometry(state, rect, rect, Dimensioni::new(rect.width.max(0), rect.height.max(0)), Vec2i::default());
+        ctx.set_content_space_geometry(state, rect, rect, Vec2i::default());
         ctx.set_content_size(state, Dimensioni::new(rect.width.max(0), rect.height.max(0)));
         ctx.set_child_overflow_propagation(state, false);
         if let Some(viewport) = child_mut(&mut self.children, viewport_id) {
@@ -148,7 +148,7 @@ impl Widget for ScrollArea {
         let next_body = viewport_body_for_scroll_behavior(rect, content_size, ctx.style.padding, ctx.style.scrollbar_size, self.scroll_behavior);
         if !super::super::same_rect(next_body, body) {
             body = next_body;
-            ctx.set_content_space_geometry(state, rect, rect, Dimensioni::new(rect.width.max(0), rect.height.max(0)), Vec2i::default());
+            ctx.set_content_space_geometry(state, rect, rect, Vec2i::default());
             if let Some(viewport) = child_mut(&mut self.children, viewport_id) {
                 ctx.layout_node_ref(viewport, body);
             }
@@ -189,7 +189,7 @@ impl Container for ScrollArea {
     }
 }
 
-impl Widget for ScrollViewport {
+impl NodeBehavior for ScrollViewport {
     fn measure(&self, ctx: &MeasureCtx<'_>, state: &UiNodeState, available: Dimensioni) -> Dimensioni {
         self.content.measure(ctx, state, available)
     }
@@ -237,7 +237,7 @@ struct ScrollAxisState {
     axis: ScrollAxis,
 }
 
-impl Widget for ScrollbarNode {
+impl NodeBehavior for ScrollbarNode {
     fn measure(&self, _ctx: &MeasureCtx<'_>, _state: &UiNodeState, _available: Dimensioni) -> Dimensioni {
         Dimensioni::default()
     }
@@ -340,9 +340,8 @@ fn layout_viewport_content_once(
     let scroll = clamp_scroll_for_padded_content(scroll, padded_hint, viewport);
     let padding = ctx.style.padding.max(0);
     let child_rect = crate::expand_rect(Recti::new(0, 0, viewport.width, viewport.height), -padding);
-    let content_to_parent_translation = Vec2i::new(viewport.x.saturating_sub(scroll.x), viewport.y.saturating_sub(scroll.y));
-    let padded_virtual_size = super::super::add_padding(content_hint, ctx.style.padding.max(0));
-    ctx.set_content_space_geometry(state, viewport, viewport, padded_virtual_size, content_to_parent_translation);
+    let child_offset = Vec2i::new(viewport.x.saturating_sub(scroll.x), viewport.y.saturating_sub(scroll.y));
+    ctx.set_content_space_geometry(state, viewport, viewport, child_offset);
 
     content.layout(ctx, state, child_rect);
     let content_size = child_content_bounds(&content.children)
@@ -409,7 +408,7 @@ fn update_scroll_area_viewport_on_input(
     event: &UiInputEvent,
 ) -> InputResult {
     let state_snapshot = *state.borrow();
-    let (clip, body) = ctx.node_clip_and_rect(state_snapshot.body);
+    let body = state_snapshot.body;
     if scroll_behavior.is_no_scroll() {
         return InputResult::Ignored;
     }
@@ -422,7 +421,7 @@ fn update_scroll_area_viewport_on_input(
 
     let result = match event {
         UiInputEvent::Scroll { pos, delta } => {
-            let hovered_body = body.contains(&pos) && clip.contains(&pos);
+            let hovered_body = ctx.contains(body, *pos);
             if hovered_body && (delta.x != 0 || delta.y != 0) {
                 scroll.x = scroll.x.saturating_sub(delta.x);
                 scroll.y = scroll.y.saturating_sub(delta.y);
@@ -449,7 +448,8 @@ fn update_scrollbar_on_input(
     scroll_behavior: ScrollBehavior,
     event: &UiInputEvent,
 ) -> InputResult {
-    let track = ctx.node_rect(node_state);
+    let _ = node_state;
+    let track = ctx.content_rect();
     if scroll_behavior.is_no_scroll() || ctx.style.scrollbar_size.max(0) <= 0 {
         return InputResult::Ignored;
     }
@@ -462,9 +462,7 @@ fn update_scrollbar_on_input(
     let mut scroll = viewport_state.scroll;
 
     let result = match event {
-        UiInputEvent::MouseDown { pos, button } if button.intersects(crate::MouseButton::LEFT) && track.contains(&pos) && ctx.node_clip().contains(&pos) => {
-            InputResult::Captured
-        }
+        UiInputEvent::MouseDown { pos, button } if button.intersects(crate::MouseButton::LEFT) && ctx.contains(track, *pos) => InputResult::Captured,
         UiInputEvent::MouseDrag { delta, buttons, .. } if buttons.intersects(crate::MouseButton::LEFT) => {
             match axis_state.axis {
                 ScrollAxis::Vertical if max_y > 0 => {
@@ -482,7 +480,7 @@ fn update_scrollbar_on_input(
             InputResult::Captured
         }
         UiInputEvent::MouseUp { button, .. } if button.intersects(crate::MouseButton::LEFT) => InputResult::Captured,
-        UiInputEvent::Scroll { pos, delta } if track.contains(&pos) && ctx.node_clip().contains(&pos) => {
+        UiInputEvent::Scroll { pos, delta } if ctx.contains(track, *pos) => {
             match axis_state.axis {
                 ScrollAxis::Vertical if delta.y != 0 => scroll.y = scroll.y.saturating_sub(delta.y),
                 ScrollAxis::Horizontal if delta.x != 0 => scroll.x = scroll.x.saturating_sub(delta.x),
@@ -501,7 +499,8 @@ fn update_scrollbar_on_input(
 
 fn paint_scroll_area_panel(ctx: &mut PaintCtx<'_>, state: &UiNodeState, opt: ContainerOption) {
     let _ = opt;
-    let rect = ctx.node_content_rect(state);
+    let _ = state;
+    let rect = ctx.content_rect();
     ctx.draw_flat_rect(rect, ControlColor::PanelBG);
 }
 
@@ -519,7 +518,8 @@ fn paint_scrollbar_node(
     if scrollbar_size <= 0 {
         return;
     }
-    let track = ctx.node_rect(state);
+    let _ = state;
+    let track = ctx.content_rect();
     if track.width <= 0 || track.height <= 0 {
         return;
     }

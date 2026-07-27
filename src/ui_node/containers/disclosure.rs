@@ -1,6 +1,6 @@
 use crate::{Dimensioni, Node, Recti, WidgetHandle};
 
-use super::{route_public_widget_input, Column, Container, InputCtx, InputResult, LayoutCtx, MeasureCtx, PaintCtx, UiInputEvent, UpdateCtx, Widget};
+use super::{Column, Container, InputCtx, InputResult, LayoutCtx, MeasureCtx, NodeBehavior, PaintCtx, UiInputEvent, UpdateCtx};
 use crate::ui_node::{UiNode, UiNodeState};
 
 /// Header/tree disclosure container.
@@ -9,13 +9,13 @@ pub(crate) struct Disclosure {
     pub(crate) state: WidgetHandle<Node>,
     /// Whether child layout should be indented when expanded.
     pub(crate) indent_children: bool,
-    /// Disclosure-row rectangle in parent content coordinates.
+    /// Disclosure-row rectangle in this node's local coordinates.
     pub(crate) header_rect: Recti,
     /// Child content layout used when expanded.
     pub(crate) content_layout: Column,
 }
 
-impl Widget for Disclosure {
+impl NodeBehavior for Disclosure {
     fn measure(&self, ctx: &MeasureCtx<'_>, state: &UiNodeState, available: Dimensioni) -> Dimensioni {
         let widget = crate::window_manager::erased_widget_state(self.state.clone());
         let framed = widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME);
@@ -89,11 +89,9 @@ impl Widget for Disclosure {
 
     fn update_on(&mut self, ctx: &mut InputCtx<'_>, state: &mut UiNodeState, event: &UiInputEvent) -> InputResult {
         let widget = crate::window_manager::erased_widget_state(self.state.clone());
-        let (_, header_rect) = ctx.node_clip_and_rect(self.header_rect);
-        route_public_widget_input(
-            ctx,
+        ctx.route_widget_input(
             state,
-            header_rect,
+            self.header_rect,
             widget.effective_widget_opt(),
             widget.effective_scroll_behavior(),
             event,

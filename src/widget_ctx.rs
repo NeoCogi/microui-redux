@@ -159,28 +159,28 @@ impl WidgetInputEvents for [UiInputEvent] {
     }
 }
 
-/// Converts routed events from container coordinates into widget-local coordinates.
+/// Converts routed events from the enclosing local surface into widget content-local coordinates.
 pub(crate) fn localize_events(rect: Recti, events: Vec<UiInputEvent>) -> Vec<UiInputEvent> {
     let origin = Vec2i::new(rect.x, rect.y);
-    events
-        .into_iter()
-        .map(|event| match event {
-            UiInputEvent::MouseMove { pos, delta } => UiInputEvent::MouseMove { pos: pos - origin, delta },
-            UiInputEvent::MouseDrag { pos, delta, buttons } => UiInputEvent::MouseDrag { pos: pos - origin, delta, buttons },
-            UiInputEvent::MouseDown { pos, button } => UiInputEvent::MouseDown { pos: pos - origin, button },
-            UiInputEvent::MouseUp { pos, button } => UiInputEvent::MouseUp { pos: pos - origin, button },
-            UiInputEvent::Scroll { pos, delta } => UiInputEvent::Scroll { pos: pos - origin, delta },
-            event => event,
-        })
-        .collect()
+    events.into_iter().map(|event| localize_event(origin, event)).collect()
+}
+
+/// Converts one routed event into coordinates relative to `origin`.
+pub(crate) fn localize_event(origin: Vec2i, event: UiInputEvent) -> UiInputEvent {
+    match event {
+        UiInputEvent::MouseMove { pos, delta } => UiInputEvent::MouseMove { pos: pos - origin, delta },
+        UiInputEvent::MouseDrag { pos, delta, buttons } => UiInputEvent::MouseDrag { pos: pos - origin, delta, buttons },
+        UiInputEvent::MouseDown { pos, button } => UiInputEvent::MouseDown { pos: pos - origin, button },
+        UiInputEvent::MouseUp { pos, button } => UiInputEvent::MouseUp { pos: pos - origin, button },
+        UiInputEvent::Scroll { pos, delta } => UiInputEvent::Scroll { pos: pos - origin, delta },
+        event => event,
+    }
 }
 
 /// Shared context passed to widget handlers.
 pub struct WidgetCtx<'a> {
     /// Runtime node identity used for focus operations.
     interaction_id: UiNodeId,
-    /// Complete outer allocation used for hit testing and outer-local input.
-    frame_rect: Recti,
     /// Derived content allocation used for widget painting.
     content_rect: Recti,
     /// Display list receiving this widget's paint operations.
@@ -238,9 +238,8 @@ impl<'a> WidgetCtx<'a> {
         active: bool,
         scroll_delta: Option<Vec2i>,
     ) -> Self {
-        Self::new_with_frame_geometry(
+        Self::new_with_content_geometry(
             interaction_id,
-            rect,
             rect,
             display_list,
             screen_clip,
@@ -257,10 +256,9 @@ impl<'a> WidgetCtx<'a> {
         )
     }
 
-    /// Creates a widget context with distinct outer and derived content geometry.
-    pub(crate) fn new_with_frame_geometry(
+    /// Creates a widget context for one resolved content surface.
+    pub(crate) fn new_with_content_geometry(
         interaction_id: UiNodeId,
-        frame_rect: Recti,
         content_rect: Recti,
         display_list: &'a mut DisplayList,
         screen_clip: Recti,
@@ -277,7 +275,6 @@ impl<'a> WidgetCtx<'a> {
     ) -> Self {
         Self {
             interaction_id,
-            frame_rect,
             content_rect,
             display_list,
             screen_clip,
@@ -297,15 +294,9 @@ impl<'a> WidgetCtx<'a> {
     /// Returns the widget-local rectangle for this context.
     ///
     /// The top-left corner is always `(0, 0)`, and the size is the derived content size used by
-    /// [`Self::painter`]. Routed pointer positions remain outer-frame-local during the transitional
-    /// combined update/paint API; use [`Self::frame_local_content_rect`] to convert them.
+    /// [`Self::painter`]. Routed pointer positions use this same content-local coordinate space.
     pub fn local_rect(&self) -> Recti {
         Recti::new(0, 0, self.content_rect.width, self.content_rect.height)
-    }
-
-    /// Returns the widget's complete outer allocation in screen coordinates.
-    pub fn screen_frame_rect(&self) -> Recti {
-        self.frame_rect
     }
 
     /// Returns the widget's derived content allocation in screen coordinates.
@@ -313,20 +304,10 @@ impl<'a> WidgetCtx<'a> {
         self.content_rect
     }
 
-    /// Returns the derived content rectangle in outer-frame-local coordinates.
-    pub fn frame_local_content_rect(&self) -> Recti {
-        Recti::new(
-            self.content_rect.x - self.frame_rect.x,
-            self.content_rect.y - self.frame_rect.y,
-            self.content_rect.width,
-            self.content_rect.height,
-        )
-    }
-
     /// Returns the derived content rectangle in screen coordinates.
     ///
     /// Built-in paint helpers and backend-facing callbacks use this coordinate space.
-    #[deprecated(note = "use screen_content_rect() or screen_frame_rect() to name the intended geometry")]
+    #[deprecated(note = "use screen_content_rect() to name the intended geometry")]
     pub fn screen_rect(&self) -> Recti {
         self.screen_content_rect()
     }
@@ -346,11 +327,6 @@ impl<'a> WidgetCtx<'a> {
         self.local_rect_for(rect)
     }
 
-    /// Converts a screen-space rectangle into outer-frame-local coordinates.
-    pub fn screen_to_frame_local_rect(&self, rect: Recti) -> Recti {
-        Recti::new(rect.x - self.frame_rect.x, rect.y - self.frame_rect.y, rect.width, rect.height)
-    }
-
     /// Converts a widget-local rectangle into screen space.
     pub fn local_to_screen_rect(&self, rect: Recti) -> Recti {
         Recti::new(rect.x + self.content_rect.x, rect.y + self.content_rect.y, rect.width, rect.height)
@@ -359,8 +335,7 @@ impl<'a> WidgetCtx<'a> {
     /// Returns the widget-local content rectangle for this context.
     ///
     /// This is kept as the short geometry accessor for custom widgets. Code that needs absolute
-    /// coordinates should call [`Self::screen_content_rect`] or [`Self::screen_frame_rect`]
-    /// explicitly.
+    /// coordinates should call [`Self::screen_content_rect`] explicitly.
     pub fn rect(&self) -> Recti {
         self.local_rect()
     }
@@ -485,12 +460,12 @@ impl<'a> WidgetCtx<'a> {
         if !self.in_hover_root {
             return false;
         }
-        // Both the target rect and current clip are translated so the localized input can be used.
-        let frame_origin = Vec2i::new(self.frame_rect.x, self.frame_rect.y);
-        let local_rect = Recti::new(rect.x - frame_origin.x, rect.y - frame_origin.y, rect.width, rect.height);
+        // Both the target rect and current clip are translated into content-local coordinates.
+        let content_origin = Vec2i::new(self.content_rect.x, self.content_rect.y);
+        let local_rect = Recti::new(rect.x - content_origin.x, rect.y - content_origin.y, rect.width, rect.height);
         let clip_rect = Recti::new(
-            self.screen_clip.x - frame_origin.x,
-            self.screen_clip.y - frame_origin.y,
+            self.screen_clip.x - content_origin.x,
+            self.screen_clip.y - content_origin.y,
             self.screen_clip.width,
             self.screen_clip.height,
         );

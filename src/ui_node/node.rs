@@ -1,6 +1,6 @@
 use crate::{Dimensioni, Id, Recti, Vec2i};
 
-use super::{Container, Widget};
+use super::{Container, NodeBehavior};
 
 /// Stable runtime node identifier.
 pub(crate) type UiNodeId = Id;
@@ -8,10 +8,10 @@ pub(crate) type UiNodeId = Id;
 /// Persistent layout result for one runtime node.
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct NodeLayout {
-    /// Node allocation in the parent content coordinate space.
-    pub(crate) frame: Recti,
-    /// Child content coordinate space exposed by this node.
-    pub(crate) content: ContentSpace,
+    /// Allocation assigned by the parent, in the parent's content coordinate space.
+    pub(crate) allocation: Recti,
+    /// Node-local transform and viewport exposed to children.
+    pub(crate) children: ChildLayout,
     /// Measured/assigned virtual content size in content coordinates.
     pub(crate) content_size: Dimensioni,
     /// Whether child overflow contributes to this node's parent-visible content size.
@@ -21,8 +21,8 @@ pub(crate) struct NodeLayout {
 impl Default for NodeLayout {
     fn default() -> Self {
         Self {
-            frame: Recti::default(),
-            content: ContentSpace::default(),
+            allocation: Recti::default(),
+            children: ChildLayout::default(),
             content_size: Dimensioni::default(),
             propagate_child_overflow: true,
         }
@@ -32,14 +32,14 @@ impl Default for NodeLayout {
 impl NodeLayout {
     /// Builds a simple non-scrolled layout.
     pub(crate) fn from_rect(rect: Recti, content_size: Dimensioni) -> Self {
-        Self::from_parts(rect, rect, Dimensioni::new(rect.width.max(0), rect.height.max(0)), content_size)
+        Self::from_parts(rect, Recti::new(0, 0, rect.width.max(0), rect.height.max(0)), content_size)
     }
 
-    /// Builds a layout from explicit frame, child viewport, and virtual size.
-    pub(crate) fn from_parts(frame: Recti, viewport: Recti, virtual_size: Dimensioni, content_size: Dimensioni) -> Self {
+    /// Builds a layout from an outer allocation and node-local child viewport.
+    pub(crate) fn from_parts(allocation: Recti, child_clip: Recti, content_size: Dimensioni) -> Self {
         Self {
-            frame,
-            content: ContentSpace::new(viewport, virtual_size),
+            allocation,
+            children: ChildLayout::new(child_clip),
             content_size,
             propagate_child_overflow: true,
         }
@@ -48,7 +48,6 @@ impl NodeLayout {
     /// Returns this layout with an updated content size.
     pub(crate) fn with_content_size(mut self, content_size: Dimensioni) -> Self {
         self.content_size = content_size;
-        self.content.virtual_size = content_size;
         self
     }
 
@@ -59,76 +58,80 @@ impl NodeLayout {
     }
 }
 
-/// Child content coordinate space exposed by one node.
+/// Node-local transform and viewport exposed to child nodes.
 #[derive(Copy, Clone, Debug, Default)]
-pub(crate) struct ContentSpace {
-    /// Translation from this node's child content coordinates to parent content coordinates.
-    pub(crate) content_to_parent_translation: Vec2i,
-    /// Visible child viewport in parent content coordinates.
-    pub(crate) viewport: Recti,
-    /// Virtual child content extent in content coordinates.
-    pub(crate) virtual_size: Dimensioni,
+pub(crate) struct ChildLayout {
+    /// Translation from child content coordinates into this node's local coordinates.
+    pub(crate) offset: Vec2i,
+    /// Visible child viewport in this node's local coordinates.
+    pub(crate) clip: Recti,
 }
 
-impl ContentSpace {
-    /// Builds content-space data from a parent-local viewport and virtual extent.
-    pub(crate) fn new(viewport: Recti, virtual_size: Dimensioni) -> Self {
-        Self {
-            content_to_parent_translation: Vec2i::default(),
-            viewport,
-            virtual_size,
-        }
+impl ChildLayout {
+    /// Builds child-layout data from a node-local viewport.
+    pub(crate) fn new(clip: Recti) -> Self {
+        Self { offset: Vec2i::default(), clip }
     }
 }
 
-/// Stack-only traversal state derived while walking the node tree.
+/// Stack-only transform derived while walking the node tree.
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct TraversalState {
+pub(crate) struct Transform {
     /// Translation from the current content coordinate space to screen coordinates.
-    pub(crate) content_to_screen_translation: Vec2i,
+    pub(crate) offset: Vec2i,
     /// Inherited effective clip in screen coordinates.
-    pub(crate) screen_clip: Recti,
+    pub(crate) clip: Recti,
 }
 
-impl TraversalState {
-    /// Creates a root traversal state.
+impl Transform {
+    /// Creates a root transform.
     pub(crate) fn root(screen_clip: Recti) -> Self {
         Self {
-            content_to_screen_translation: Vec2i::default(),
-            screen_clip,
+            offset: Vec2i::default(),
+            clip: screen_clip,
         }
     }
 
-    /// Creates a root traversal state with a screen-space origin.
+    /// Creates a root transform with a screen-space origin.
     pub(crate) fn root_at(origin: Vec2i, screen_clip: Recti) -> Self {
+        Self { offset: origin, clip: screen_clip }
+    }
+
+    /// Pushes a node's child coordinate system onto the transform stack.
+    pub(crate) fn push(self, layout: NodeLayout) -> Self {
+        let node_origin = self.offset + Vec2i::new(layout.allocation.x, layout.allocation.y);
+        let screen_clip = translate_rect(layout.children.clip, node_origin);
         Self {
-            content_to_screen_translation: origin,
-            screen_clip,
+            offset: node_origin + layout.children.offset,
+            clip: self.clip.intersect(&screen_clip).unwrap_or_default(),
         }
     }
 
-    /// Enters a node's child content space.
-    pub(crate) fn enter(self, layout: NodeLayout) -> Self {
-        let screen_viewport = translate_rect(layout.content.viewport, self.content_to_screen_translation);
-        Self {
-            content_to_screen_translation: self.content_to_screen_translation + layout.content.content_to_parent_translation,
-            screen_clip: self.screen_clip.intersect(&screen_viewport).unwrap_or_default(),
-        }
-    }
-
-    /// Derives a screen-space frame for the node allocation.
-    pub(crate) fn screen_frame(self, layout: NodeLayout) -> Recti {
-        translate_rect(layout.frame, self.content_to_screen_translation)
-    }
-
-    /// Derives a screen-space rect from the current content coordinate space.
-    pub(crate) fn screen_rect(self, rect: Recti) -> Recti {
-        translate_rect(rect, self.content_to_screen_translation)
+    /// Resolves a parent-local allocation into screen coordinates.
+    pub(crate) fn resolve(self, allocation: Recti) -> Recti {
+        translate_rect(allocation, self.offset)
     }
 }
 
 fn translate_rect(rect: Recti, offset: Vec2i) -> Recti {
     Recti::new(rect.x + offset.x, rect.y + offset.y, rect.width, rect.height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pushing_a_node_uses_node_local_child_geometry() {
+        let mut layout = NodeLayout::from_parts(Recti::new(10, 20, 30, 40), Recti::new(2, 3, 20, 10), Dimensioni::new(30, 40));
+        layout.children.offset = Vec2i::new(4, -5);
+
+        let parent = Transform::root_at(Vec2i::new(100, 200), Recti::new(0, 0, 1000, 1000));
+        let child = parent.push(layout);
+
+        assert_eq!((child.offset.x, child.offset.y), (114, 215));
+        assert_eq!((child.clip.x, child.clip.y, child.clip.width, child.clip.height), (112, 223, 20, 10));
+    }
 }
 
 /// Common runtime node state shared by widgets and containers.
@@ -139,8 +142,6 @@ pub(crate) struct UiNodeState {
     pub(crate) layout: NodeLayout,
     /// Whether this node participates in traversal.
     pub(crate) visible: bool,
-    /// Whether this node can interact.
-    pub(crate) enabled: bool,
     /// Cursor is hovering this node.
     pub(crate) hovered: bool,
     /// This node currently owns focus.
@@ -203,7 +204,6 @@ impl UiNode {
                 id,
                 layout: NodeLayout::default(),
                 visible: true,
-                enabled: true,
                 hovered: false,
                 focused: false,
                 clicked: false,
@@ -273,8 +273,8 @@ impl UiNode {
 
 /// Runtime payload for a common UI node.
 pub(crate) enum UiNodeData {
-    /// Widget behavior without child membership.
-    Widget(Box<dyn Widget>),
+    /// Leaf-node behavior without child membership.
+    Widget(Box<dyn NodeBehavior>),
     /// Container behavior with child membership.
     Container(Box<dyn Container>),
 }

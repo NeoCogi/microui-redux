@@ -1,6 +1,6 @@
 use crate::{Dimensioni, Recti};
 
-use super::{Container, LayoutCtx, MeasureCtx, Widget};
+use super::{Container, LayoutCtx, MeasureCtx, NodeBehavior};
 use crate::ui_node::{UiNode, UiNodeState};
 
 /// Column container.
@@ -10,7 +10,7 @@ pub(crate) struct Column {
     pub(crate) children: Vec<UiNode>,
 }
 
-impl Widget for Column {
+impl NodeBehavior for Column {
     fn measure(&self, ctx: &MeasureCtx<'_>, _state: &UiNodeState, available: Dimensioni) -> Dimensioni {
         measure_column(ctx, &self.children, available)
     }

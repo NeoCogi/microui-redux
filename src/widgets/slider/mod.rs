@@ -202,7 +202,7 @@ impl Slider {
         let range = self.high - self.low;
         if ctx.focused() && (!input.mouse_down().is_empty() || input.mouse_pressed().intersects(MouseButton::LEFT)) && base.width > 0 && range != 0.0 {
             // Mouse x maps linearly across the slider track.
-            let content_x = input.mouse_pos().x - ctx.frame_local_content_rect().x;
+            let content_x = input.mouse_pos().x;
             v = self.low + content_x as Real * range / base.width as Real;
             if self.step != 0. {
                 v = snap_slider_value(v, self.low, self.step);

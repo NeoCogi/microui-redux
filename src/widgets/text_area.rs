@@ -355,8 +355,7 @@ fn textarea_update(ctx: &mut WidgetCtx<'_>, input: &[UiInputEvent], state: &mut 
     }
 
     let layout = textarea_layout(ctx, state, font);
-    let content_in_frame = ctx.frame_local_content_rect();
-    let content_mouse_pos = input.mouse_pos() - Vec2i::new(content_in_frame.x, content_in_frame.y);
+    let content_mouse_pos = input.mouse_pos();
 
     if let Some(delta) = input.scroll_delta() {
         // Wheel/trackpad scrolling only affects axes that actually overflow.

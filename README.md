@@ -274,6 +274,10 @@ Registered roots can be configured with `Context::set_root_options(...)` to cont
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
 - Retained traversal measures committed widget state, allocates widget rectangles, updates the whole retained tree with `Widget::update`, then paints the whole retained tree with `Widget::paint`.
+- Internally, `NodeBehavior` is the runtime contract shared by widget adapters and framework containers. `WidgetNode` adapts the public `Widget` trait to it; application widgets never receive the internal node update/input/paint contexts.
+- Parent containers assign each node a retained parent-local allocation; child offsets and clips remain node-local and are resolved through a stack-only transform during traversal.
+- Resolved outer rectangles and clips remain runtime stack locals. Node behavior works against its local content surface, while outer frame painting, standard hit routing, and conversion from screen input remain runtime-owned.
+- A public widget's Painter geometry and routed pointer positions share the derived content-local origin.
 - `WidgetTreeBuilder` exposes retained `row`, `grid`, `column`, `stack`, `header`, `tree_node`, `scroll_area`, and `custom_render` structure so layout stays declarative instead of closure-driven.
 - `SizePolicy::Weight(value)` distributes available track space by sibling share ratio (spacing accounted for). Use `SizePolicy::Fraction(value)` for explicit `0.0..=1.0` proportional sizing in single-track flows.
 - Returning `<= 0` for either axis from `Widget::measure` still means "use layout fallback/defaults" for that axis.

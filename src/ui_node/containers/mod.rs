@@ -2,9 +2,9 @@ use crate::input::{ScrollBehavior, WidgetOption};
 use crate::render::{CustomRenderKey, DisplayList, Painter};
 use crate::widget_ctx::localize_events;
 use crate::window_manager::{erased_widget_state, WidgetStateHandleDyn};
-use crate::{Dimensioni, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
+use crate::{Dimensioni, FocusPolicy, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
 
-use super::{NodeLayout, TraversalState, UiNode, UiNodeId, UiNodeState, UiRuntime, WidgetCtx};
+use super::{NodeLayout, UiNode, UiNodeId, UiNodeState, UiRuntime, WidgetCtx};
 
 mod column;
 mod disclosure;
@@ -22,11 +22,16 @@ pub(crate) use scroll_area::{scroll_viewport_node, scrollbar_nodes, shared_scrol
 pub(crate) use scroll_area::{scroll_area_state, set_scroll_area_scroll, ScrollAreaState};
 pub(crate) use stack::Stack;
 
-/// Common internal behavior interface for retained nodes.
-pub(crate) trait Widget {
+/// Internal runtime behavior for any retained node, including widget adapters and containers.
+pub(crate) trait NodeBehavior {
     /// Returns whether the runtime owns an outer frame for this node.
     fn is_framed(&self) -> bool {
         false
+    }
+
+    /// Returns the standard public-widget interaction policy, when this behavior wraps one.
+    fn interaction_config(&self) -> Option<(WidgetOption, ScrollBehavior, FocusPolicy)> {
+        None
     }
 
     /// Measures the preferred size for a node.
@@ -64,7 +69,7 @@ pub(crate) trait Widget {
 }
 
 /// Internal behavior interface for widgets that own child nodes.
-pub(crate) trait Container: Widget {
+pub(crate) trait Container: NodeBehavior {
     /// Returns the owned child nodes.
     fn children(&self) -> &[UiNode];
 
@@ -95,9 +100,17 @@ impl Clone for WidgetNode {
     }
 }
 
-impl Widget for WidgetNode {
+impl NodeBehavior for WidgetNode {
     fn is_framed(&self) -> bool {
         self.widget.effective_widget_opt().intersects(WidgetOption::FRAME)
+    }
+
+    fn interaction_config(&self) -> Option<(WidgetOption, ScrollBehavior, FocusPolicy)> {
+        Some((
+            self.widget.effective_widget_opt(),
+            self.widget.effective_scroll_behavior(),
+            self.widget.focus_policy(),
+        ))
     }
 
     fn measure(&self, ctx: &MeasureCtx<'_>, state: &UiNodeState, available: Dimensioni) -> Dimensioni {
@@ -112,42 +125,26 @@ impl Widget for WidgetNode {
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, state: &mut UiNodeState) -> bool {
         let id = state.id();
-        let rect = ctx.node_rect(state);
-        let (hovered, focused, clicked, active, scroll_delta) = ctx.runtime.interaction_for(
-            id,
-            rect,
-            ctx.node_clip(),
-            ctx.input,
-            self.widget.effective_widget_opt(),
-            self.widget.effective_scroll_behavior(),
-            self.widget.focus_policy(),
-        );
-        state.hovered = hovered;
-        state.focused = focused;
-        state.clicked = clicked;
-        state.active = active;
-        state.scroll_delta = scroll_delta;
-
         let mut focus_seen = ctx.runtime.updated_focus;
-        let events = localize_events(rect, ctx.runtime.take_routed_events(id));
+        let events = localize_events(ctx.content_rect, ctx.runtime.take_routed_events(id));
         let accepts_pointer_input = ctx.runtime.accepts_pointer_input();
-        let node_clip = ctx.content_clip();
-        let mut widget_ctx = WidgetCtx::new_with_frame_geometry(
+        let content_rect = ctx.screen_rect(ctx.content_rect);
+        let content_clip = ctx.screen_clip();
+        let mut widget_ctx = WidgetCtx::new_with_content_geometry(
             id,
-            rect,
-            ctx.content_rect,
+            content_rect,
             &mut *ctx.display_list,
-            node_clip,
+            content_clip,
             ctx.style,
             &ctx.atlas,
             &mut ctx.runtime.focus,
             &mut focus_seen,
             accepts_pointer_input,
-            hovered,
-            focused,
-            clicked,
-            active,
-            scroll_delta,
+            state.hovered,
+            state.focused,
+            state.clicked,
+            state.active,
+            state.scroll_delta,
         );
         let result = self.widget.update(&mut widget_ctx, events);
         ctx.runtime.updated_focus = focus_seen;
@@ -163,16 +160,15 @@ impl Widget for WidgetNode {
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, state: &mut UiNodeState) -> bool {
         let id = state.id();
-        let rect = ctx.node_content_rect(state);
+        let rect = ctx.screen_rect(ctx.content_rect);
         let (hovered, focused, clicked, active, scroll_delta) = (state.hovered, state.focused, state.clicked, state.active, state.scroll_delta);
         let mut focus_seen = ctx.runtime.updated_focus;
-        let node_clip = ctx.node_clip();
-        let mut widget_ctx = WidgetCtx::new_with_frame_geometry(
+        let content_clip = ctx.screen_clip();
+        let mut widget_ctx = WidgetCtx::new_with_content_geometry(
             id,
-            ctx.frame_rect,
             rect,
             &mut *ctx.display_list,
-            node_clip,
+            content_clip,
             ctx.style,
             &ctx.atlas,
             &mut ctx.runtime.focus,
@@ -188,21 +184,9 @@ impl Widget for WidgetNode {
         ctx.runtime.updated_focus = focus_seen;
 
         if let Some(renderer) = self.custom_render {
-            ctx.display_list.push_custom(node_clip, renderer, rect);
+            ctx.display_list.push_custom(content_clip, renderer, rect);
         }
         false
-    }
-
-    fn update_on(&mut self, ctx: &mut InputCtx<'_>, state: &mut UiNodeState, event: &UiInputEvent) -> InputResult {
-        let rect = ctx.node_rect(state);
-        route_public_widget_input(
-            ctx,
-            state,
-            rect,
-            self.widget.effective_widget_opt(),
-            self.widget.effective_scroll_behavior(),
-            event,
-        )
     }
 }
 
@@ -211,14 +195,14 @@ impl Widget for WidgetNode {
 pub enum UiInputEvent {
     /// Pointer moved without any mouse button held.
     MouseMove {
-        /// Current pointer position in screen coordinates.
+        /// Current pointer position in the receiver's routed local coordinate space.
         pos: Vec2i,
         /// Pointer movement since the previous frame.
         delta: Vec2i,
     },
     /// Pointer moved while one or more mouse buttons are held.
     MouseDrag {
-        /// Current pointer position in screen coordinates.
+        /// Current pointer position in the receiver's routed local coordinate space.
         pos: Vec2i,
         /// Pointer movement since the previous frame.
         delta: Vec2i,
@@ -227,21 +211,21 @@ pub enum UiInputEvent {
     },
     /// One or more mouse buttons were pressed.
     MouseDown {
-        /// Current pointer position in screen coordinates.
+        /// Current pointer position in the receiver's routed local coordinate space.
         pos: Vec2i,
         /// Buttons pressed during this frame.
         button: MouseButton,
     },
     /// One or more mouse buttons were released.
     MouseUp {
-        /// Current pointer position in screen coordinates.
+        /// Current pointer position in the receiver's routed local coordinate space.
         pos: Vec2i,
         /// Buttons released during this frame.
         button: MouseButton,
     },
     /// Scroll wheel or equivalent high-level scroll input.
     Scroll {
-        /// Pointer position used for hit routing.
+        /// Pointer position in the receiver's routed local coordinate space.
         pos: Vec2i,
         /// Requested scroll delta.
         delta: Vec2i,
@@ -348,9 +332,10 @@ fn event_position(event: &UiInputEvent) -> Option<Vec2i> {
 }
 
 pub(super) fn route_public_widget_input(
-    ctx: &mut InputCtx<'_>,
+    runtime: &mut UiRuntime,
     state: &UiNodeState,
     rect: Recti,
+    clip: Recti,
     opt: WidgetOption,
     scroll_behavior: ScrollBehavior,
     event: &UiInputEvent,
@@ -361,34 +346,32 @@ pub(super) fn route_public_widget_input(
 
     let id = state.id();
     if event.is_focus_input() {
-        ctx.runtime.push_routed_event(id, event.clone());
+        runtime.push_routed_event(id, event.clone());
         return InputResult::Consumed;
     }
 
-    let captured = ctx.runtime.capture == Some(id);
-    let hovered = event_position(event)
-        .map(|pos| rect.contains(&pos) && ctx.node_clip().contains(&pos))
-        .unwrap_or(false);
+    let captured = runtime.capture == Some(id);
+    let hovered = event_position(event).map(|pos| rect.contains(&pos) && clip.contains(&pos)).unwrap_or(false);
 
     match event {
         UiInputEvent::MouseDown { .. } if hovered => {
-            ctx.runtime.push_routed_event(id, event.clone());
+            runtime.push_routed_event(id, event.clone());
             InputResult::Captured
         }
         UiInputEvent::MouseDrag { .. } if captured || state.focused || hovered => {
-            ctx.runtime.push_routed_event(id, event.clone());
+            runtime.push_routed_event(id, event.clone());
             if captured { InputResult::Captured } else { InputResult::Consumed }
         }
         UiInputEvent::MouseUp { .. } if captured || state.focused || hovered => {
-            ctx.runtime.push_routed_event(id, event.clone());
+            runtime.push_routed_event(id, event.clone());
             InputResult::Consumed
         }
         UiInputEvent::MouseMove { .. } if hovered => {
-            ctx.runtime.push_routed_event(id, event.clone());
+            runtime.push_routed_event(id, event.clone());
             InputResult::Consumed
         }
         UiInputEvent::Scroll { delta, .. } if hovered => {
-            ctx.runtime.push_routed_event(id, event.clone());
+            runtime.push_routed_event(id, event.clone());
             if scroll_behavior.is_grab_scroll() && (delta.x != 0 || delta.y != 0) {
                 InputResult::Consumed
             } else {
@@ -456,19 +439,12 @@ impl LayoutCtx<'_> {
         state.set_layout(layout);
     }
 
-    pub(crate) fn set_content_space_geometry(
-        &mut self,
-        state: &mut UiNodeState,
-        _rect: Recti,
-        viewport: Recti,
-        virtual_size: Dimensioni,
-        content_to_parent_translation: Vec2i,
-    ) {
+    pub(crate) fn set_content_space_geometry(&mut self, state: &mut UiNodeState, _rect: Recti, viewport: Recti, child_offset: Vec2i) {
         let viewport = viewport
             .intersect(&self.content)
             .unwrap_or_else(|| Recti::new(self.content.x, self.content.y, 0, 0));
-        let mut layout = NodeLayout::from_parts(self.outer, viewport, virtual_size, state.layout.content_size);
-        layout.content.content_to_parent_translation = content_to_parent_translation;
+        let mut layout = NodeLayout::from_parts(self.outer, viewport, state.layout.content_size);
+        layout.children.offset = child_offset;
         state.set_layout(layout);
     }
 }
@@ -479,45 +455,48 @@ impl LayoutCtx<'_> {
 /// the window-manager/builder path and remains stable during runtime traversal.
 pub(crate) struct UpdateCtx<'a> {
     pub(crate) runtime: &'a mut UiRuntime,
-    pub(crate) display_list: &'a mut DisplayList,
-    pub(crate) root_id: crate::RootId,
-    pub(crate) root_name: &'a str,
-    pub(crate) style: &'a Style,
-    pub(crate) atlas: crate::AtlasHandle,
-    pub(crate) input: &'a Input,
-    pub(crate) results: &'a mut FrameResults,
-    pub(crate) frame_rect: Recti,
-    pub(crate) content_rect: Recti,
-    pub(crate) frame_clip: Recti,
-    pub(crate) parent_traversal: TraversalState,
-    pub(crate) traversal: TraversalState,
+    pub(super) display_list: &'a mut DisplayList,
+    pub(super) root_id: crate::RootId,
+    pub(super) root_name: &'a str,
+    pub(super) style: &'a Style,
+    pub(super) atlas: crate::AtlasHandle,
+    pub(super) input: &'a Input,
+    pub(super) results: &'a mut FrameResults,
+    /// Current node origin in screen coordinates, used only by context adapters.
+    pub(super) screen_origin: Vec2i,
+    /// Content surface in node-local coordinates.
+    pub(super) content_rect: Recti,
+    /// Effective content clip in node-local coordinates.
+    pub(super) content_clip: Recti,
 }
 
 impl UpdateCtx<'_> {
-    pub(crate) fn node_rect(&self, state: &UiNodeState) -> Recti {
-        let _ = state;
-        self.frame_rect
+    fn screen_rect(&self, local_rect: Recti) -> Recti {
+        Recti::new(
+            self.screen_origin.x + local_rect.x,
+            self.screen_origin.y + local_rect.y,
+            local_rect.width,
+            local_rect.height,
+        )
     }
 
-    pub(crate) fn node_clip(&self) -> Recti {
-        self.frame_clip
-    }
-
-    pub(crate) fn content_clip(&self) -> Recti {
-        self.traversal.screen_clip
+    fn screen_clip(&self) -> Recti {
+        self.screen_rect(self.content_clip)
     }
 
     pub(crate) fn update_container_widget_in_rect(&mut self, state: &mut UiNodeState, local_rect: Recti, handle: WidgetHandle<Node>, label: &str) {
         let id = state.id();
-        let rect = self.parent_traversal.screen_rect(local_rect);
+        let rect = self.screen_rect(local_rect);
         let widget = erased_widget_state(handle.clone());
         let opt = widget.effective_widget_opt();
-        let content_rect = crate::frame::frame_geometry(rect, opt.intersects(WidgetOption::FRAME), self.style).content_or_empty();
+        let local_content_rect = crate::frame::frame_geometry(local_rect, opt.intersects(WidgetOption::FRAME), self.style).content_or_empty();
+        let content_rect = self.screen_rect(local_content_rect);
         let scroll_behavior = widget.effective_scroll_behavior();
         let focus_policy = widget.focus_policy();
+        let content_clip = self.screen_clip();
         let (hovered, focused, clicked, active, scroll_delta) =
             self.runtime
-                .interaction_for(id, rect, self.node_clip(), self.input, opt, scroll_behavior, focus_policy);
+                .interaction_for(id, rect, content_clip, self.input, opt, scroll_behavior, focus_policy);
         state.hovered = hovered;
         state.focused = focused;
         state.clicked = clicked;
@@ -526,14 +505,12 @@ impl UpdateCtx<'_> {
 
         let mut focus_seen = self.runtime.updated_focus;
         let accepts_pointer_input = self.runtime.accepts_pointer_input();
-        let events = localize_events(rect, self.runtime.take_routed_events(id));
-        let node_clip = self.node_clip();
-        let mut ctx = WidgetCtx::new_with_frame_geometry(
+        let events = localize_events(local_content_rect, self.runtime.take_routed_events(id));
+        let mut ctx = WidgetCtx::new_with_content_geometry(
             id,
-            rect,
             content_rect,
             &mut *self.display_list,
-            node_clip,
+            content_clip,
             self.style,
             &self.atlas,
             &mut self.runtime.focus,
@@ -559,22 +536,30 @@ impl UpdateCtx<'_> {
 pub(crate) struct InputCtx<'a> {
     pub(crate) runtime: &'a mut UiRuntime,
     pub(crate) style: &'a Style,
-    pub(crate) input: &'a Input,
-    pub(crate) parent_traversal: TraversalState,
-    pub(crate) traversal: TraversalState,
+    /// Content surface in node-local coordinates.
+    pub(super) content_rect: Recti,
+    /// Effective content clip in node-local coordinates.
+    pub(super) content_clip: Recti,
 }
 
 impl InputCtx<'_> {
-    pub(crate) fn node_rect(&self, state: &UiNodeState) -> Recti {
-        self.parent_traversal.screen_frame(state.layout)
+    pub(crate) fn content_rect(&self) -> Recti {
+        self.content_rect
     }
 
-    pub(crate) fn node_clip_and_rect(&self, local_rect: Recti) -> (Recti, Recti) {
-        (self.traversal.screen_clip, self.parent_traversal.screen_rect(local_rect))
+    pub(crate) fn contains(&self, rect: Recti, pos: Vec2i) -> bool {
+        rect.contains(&pos) && self.content_clip.contains(&pos)
     }
 
-    pub(crate) fn node_clip(&self) -> Recti {
-        self.parent_traversal.screen_clip
+    pub(crate) fn route_widget_input(
+        &mut self,
+        state: &UiNodeState,
+        rect: Recti,
+        opt: WidgetOption,
+        scroll_behavior: ScrollBehavior,
+        event: &UiInputEvent,
+    ) -> InputResult {
+        route_public_widget_input(self.runtime, state, rect, self.content_clip, opt, scroll_behavior, event)
     }
 }
 
@@ -584,67 +569,73 @@ impl InputCtx<'_> {
 /// read-only.
 pub(crate) struct PaintCtx<'a> {
     pub(crate) runtime: &'a mut UiRuntime,
-    pub(crate) display_list: &'a mut DisplayList,
+    pub(super) display_list: &'a mut DisplayList,
     pub(crate) style: &'a Style,
-    pub(crate) atlas: crate::AtlasHandle,
-    pub(crate) parent_traversal: TraversalState,
-    pub(crate) frame_rect: Recti,
-    pub(crate) content_rect: Recti,
-    pub(crate) traversal: TraversalState,
+    pub(super) atlas: crate::AtlasHandle,
+    /// Current node origin in screen coordinates, used only by painting adapters.
+    pub(super) screen_origin: Vec2i,
+    /// Content surface in node-local coordinates.
+    pub(super) content_rect: Recti,
+    /// Effective content clip in node-local coordinates.
+    pub(super) content_clip: Recti,
 }
 
 impl PaintCtx<'_> {
-    pub(crate) fn node_rect(&self, state: &UiNodeState) -> Recti {
-        let _ = state;
-        self.frame_rect
-    }
-
-    pub(crate) fn node_content_rect(&self, state: &UiNodeState) -> Recti {
-        let _ = state;
+    pub(crate) fn content_rect(&self) -> Recti {
         self.content_rect
     }
 
-    pub(crate) fn node_clip(&self) -> Recti {
-        self.traversal.screen_clip
+    fn screen_rect(&self, local_rect: Recti) -> Recti {
+        Recti::new(
+            self.screen_origin.x + local_rect.x,
+            self.screen_origin.y + local_rect.y,
+            local_rect.width,
+            local_rect.height,
+        )
+    }
+
+    fn screen_clip(&self) -> Recti {
+        self.screen_rect(self.content_clip)
+    }
+
+    fn painter(&mut self) -> Painter<'_> {
+        let screen_origin = self.screen_origin;
+        let content_rect = self.content_rect;
+        let screen_clip = self.screen_clip();
+        Painter::new(&mut *self.display_list, screen_origin, content_rect, screen_clip)
     }
 
     pub(crate) fn draw_internal_frame(&mut self, rect: Recti, color: crate::ControlColor) -> Option<Recti> {
         let fill = self.style.colors[color as usize];
-        let local_bounds = Recti::new(0, 0, i32::MAX, i32::MAX);
-        let node_clip = self.node_clip();
-        let mut painter = Painter::new(&mut *self.display_list, Vec2i::default(), local_bounds, node_clip);
-        crate::frame::paint_internal_frame(&mut painter, rect, Some(fill), self.style.frame_border())
+        let border = self.style.frame_border();
+        let mut painter = self.painter();
+        crate::frame::paint_internal_frame(&mut painter, rect, Some(fill), border)
     }
 
     pub(crate) fn draw_flat_rect(&mut self, rect: Recti, color: crate::ControlColor) {
         let fill = self.style.colors[color as usize];
-        let local_bounds = Recti::new(0, 0, i32::MAX, i32::MAX);
-        let node_clip = self.node_clip();
-        Painter::new(&mut *self.display_list, Vec2i::default(), local_bounds, node_clip).fill_rect(rect, fill);
+        self.painter().fill_rect(rect, fill);
     }
 
     pub(crate) fn paint_container_widget_in_rect(&mut self, state: &UiNodeState, local_rect: Recti, handle: WidgetHandle<Node>) {
         let id = state.id();
-        let rect = self.parent_traversal.screen_rect(local_rect);
         let (hovered, focused, clicked, active, scroll_delta) = (state.hovered, state.focused, state.clicked, state.active, state.scroll_delta);
         let widget = erased_widget_state(handle);
         let framed = widget.effective_widget_opt().intersects(WidgetOption::FRAME);
-        let geometry = crate::frame::frame_geometry(rect, framed, self.style);
+        let geometry = crate::frame::frame_geometry(local_rect, framed, self.style);
         if framed {
-            let local_bounds = Recti::new(0, 0, i32::MAX, i32::MAX);
-            let node_clip = self.node_clip();
-            let mut painter = Painter::new(&mut *self.display_list, Vec2i::default(), local_bounds, node_clip);
-            crate::frame::paint_internal_frame(&mut painter, rect, None, self.style.frame_border());
+            let border = self.style.frame_border();
+            let mut painter = self.painter();
+            crate::frame::paint_internal_frame(&mut painter, local_rect, None, border);
         }
-        let content_rect = geometry.content_or_empty();
+        let content_rect = self.screen_rect(geometry.content_or_empty());
         let mut focus_seen = self.runtime.updated_focus;
-        let node_clip = self.node_clip();
-        let mut ctx = WidgetCtx::new_with_frame_geometry(
+        let content_clip = self.screen_clip();
+        let mut ctx = WidgetCtx::new_with_content_geometry(
             id,
-            rect,
             content_rect,
             &mut *self.display_list,
-            node_clip,
+            content_clip,
             self.style,
             &self.atlas,
             &mut self.runtime.focus,

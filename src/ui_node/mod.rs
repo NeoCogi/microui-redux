@@ -6,6 +6,12 @@
 //!
 //! Topology is built by the window-manager/builder path and then traversed by input, update,
 //! measure, layout, and paint passes. Runtime traversal does not mutate child membership.
+//!
+//! Each node retains an allocation in its parent's child coordinates plus a node-local child
+//! offset and clip. Recursive passes carry one stack-only [`Transform`]. Resolved outer rectangles
+//! and outer clips remain runtime stack locals; phase contexts expose node-local content geometry.
+//! [`NodeBehavior`] is the internal retained-node contract; [`WidgetNode`] adapts the public
+//! [`crate::Widget`] contract to it.
 #![allow(dead_code)]
 
 use crate::render::DisplayList;
@@ -20,13 +26,13 @@ use crate::widget::FocusPolicy;
 use crate::widget_ctx::WidgetCtx;
 
 mod node;
-pub(crate) use node::{NodeLayout, TraversalState, UiNode, UiNodeData, UiNodeId, UiNodeState};
+pub(crate) use node::{NodeLayout, Transform, UiNode, UiNodeData, UiNodeId, UiNodeState};
 mod runtime;
 pub(crate) use runtime::UiRuntime;
 mod containers;
 pub(crate) use containers::{
-    scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Container, Disclosure, Grid, InputCtx, InputResult, LayoutCtx, MeasureCtx, Widget,
-    PaintCtx, Row, ScrollArea, Stack, UpdateCtx, WidgetNode,
+    scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Container, Disclosure, Grid, InputCtx, InputResult, LayoutCtx, MeasureCtx,
+    NodeBehavior, PaintCtx, Row, ScrollArea, Stack, UpdateCtx, WidgetNode,
 };
 #[cfg(test)]
 pub(crate) use containers::{scroll_area_state, set_scroll_area_scroll};
@@ -228,9 +234,14 @@ fn resolve_axis_tracks(policies: &[SizePolicy], preferred: &[i32], available: i3
 
 /// Returns the screen-space rectangle occupied by a child and any overflow content it measured.
 fn child_content_rect(node: &UiNode) -> Recti {
-    let frame = node.state.layout.frame;
+    let allocation = node.state.layout.allocation;
     let content_size = node.state.layout.content_size;
-    Recti::new(frame.x, frame.y, frame.width.max(content_size.width), frame.height.max(content_size.height))
+    Recti::new(
+        allocation.x,
+        allocation.y,
+        allocation.width.max(content_size.width),
+        allocation.height.max(content_size.height),
+    )
 }
 
 /// Builds pointer events from raw frame input.
@@ -370,13 +381,13 @@ mod tests {
             self.runtime.parent_of(&self.roots, id)
         }
 
-        fn traversal_state_for_node(&self, id: UiNodeId) -> TraversalState {
-            self.runtime.traversal_state_for_node(&self.roots, id)
+        fn transform_for_node(&self, id: UiNodeId) -> Transform {
+            self.runtime.transform_for_node(&self.roots, id)
         }
 
         fn node_screen_rect(&self, id: UiNodeId) -> Option<Recti> {
             self.node(id)
-                .map(|node| self.runtime.parent_traversal_state_for_node(&self.roots, id).screen_frame(node.state.layout))
+                .map(|node| self.runtime.parent_transform_for_node(&self.roots, id).resolve(node.state.layout.allocation))
         }
 
         fn replace_ui_nodes(&mut self, tree: UiNodeSet) {
@@ -399,12 +410,12 @@ mod tests {
                         continue;
                     }
                     let mut routed = None;
-                    let root_traversal = self.runtime.root_traversal();
+                    let root_transform = self.runtime.root_transform();
                     for root in self.z_order.iter().copied().rev() {
                         let Some(root) = self.roots.iter_mut().find(|node| node.id() == root) else {
                             continue;
                         };
-                        routed = self.runtime.route_input_event_to_node_ref(root, root_traversal, style, input, &event);
+                        routed = self.runtime.route_input_event_to_node_ref(root, root_transform, style, &event);
                         if routed.is_some() {
                             break;
                         }
@@ -451,7 +462,7 @@ mod tests {
         }
     }
 
-    impl Widget for RecordingBehavior {
+    impl NodeBehavior for RecordingBehavior {
         fn measure(&self, _ctx: &MeasureCtx<'_>, _state: &UiNodeState, _available: Dimensioni) -> Dimensioni {
             Dimensioni::default()
         }
@@ -488,6 +499,10 @@ mod tests {
         fn new(seen: Rc<RefCell<Vec<Vec<UiInputEvent>>>>) -> Self {
             Self { seen, opt: WidgetOption::NONE }
         }
+
+        fn with_opt(seen: Rc<RefCell<Vec<Vec<UiInputEvent>>>>, opt: WidgetOption) -> Self {
+            Self { seen, opt }
+        }
     }
 
     impl crate::Widget for EventRecorder {
@@ -509,7 +524,7 @@ mod tests {
 
     struct FrameToggle {
         opt: WidgetOption,
-        painted: Rc<RefCell<Vec<(Recti, Recti)>>>,
+        painted: Rc<RefCell<Vec<Recti>>>,
     }
 
     impl crate::Widget for FrameToggle {
@@ -527,7 +542,7 @@ mod tests {
         }
 
         fn paint(&mut self, ctx: &mut WidgetCtx<'_>) {
-            self.painted.borrow_mut().push((ctx.screen_frame_rect(), ctx.screen_content_rect()));
+            self.painted.borrow_mut().push(ctx.screen_content_rect());
         }
     }
 
@@ -581,8 +596,8 @@ mod tests {
         );
 
         let node = runtime.node(button_id).expect("button node missing");
-        assert_eq!(rect_key(node.state.layout.frame), (0, 0, 20, 12));
-        assert_eq!(rect_key(node.state.layout.content.viewport), (1, 1, 18, 10));
+        assert_eq!(rect_key(node.state.layout.allocation), (0, 0, 20, 12));
+        assert_eq!(rect_key(node.state.layout.children.clip), (1, 1, 18, 10));
         assert!(node.state.hovered, "the inside border remains part of the hit target");
 
         let border = style.colors[crate::ControlColor::Border as usize];
@@ -619,8 +634,8 @@ mod tests {
 
         runtime.runtime.layout_node_ref(&mut runtime.roots[0], &style, &atlas, rect(7, 9, 30, 14));
         runtime.runtime.layout_node_ref(&mut runtime.roots[1], &style, &atlas, rect(7, 30, 30, 14));
-        assert_eq!(rect_key(runtime.roots[0].state.layout.content.viewport), (8, 10, 28, 12));
-        assert_eq!(rect_key(runtime.roots[1].state.layout.content.viewport), (7, 30, 30, 14));
+        assert_eq!(rect_key(runtime.roots[0].state.layout.children.clip), (1, 1, 28, 12));
+        assert_eq!(rect_key(runtime.roots[1].state.layout.children.clip), (0, 0, 30, 14));
     }
 
     #[test]
@@ -639,13 +654,13 @@ mod tests {
         runtime.runtime.layout_node_ref(&mut runtime.roots[0], &style, &atlas, rect(4, 6, 40, 24));
 
         let scroll = runtime.node(scroll_id).expect("scroll area missing");
-        assert_eq!(rect_key(scroll.state.layout.frame), (4, 6, 40, 24));
-        assert_eq!(rect_key(scroll.state.layout.content.viewport), (5, 7, 38, 22));
+        assert_eq!(rect_key(scroll.state.layout.allocation), (4, 6, 40, 24));
+        assert_eq!(rect_key(scroll.state.layout.children.clip), (1, 1, 38, 22));
         let viewport = scroll.children().first().expect("scroll viewport missing");
-        assert!(viewport.state.layout.frame.x >= 5);
-        assert!(viewport.state.layout.frame.y >= 7);
-        assert!(viewport.state.layout.frame.x + viewport.state.layout.frame.width <= 43);
-        assert!(viewport.state.layout.frame.y + viewport.state.layout.frame.height <= 29);
+        assert!(viewport.state.layout.allocation.x >= 1);
+        assert!(viewport.state.layout.allocation.y >= 1);
+        assert!(viewport.state.layout.allocation.x + viewport.state.layout.allocation.width <= 39);
+        assert!(viewport.state.layout.allocation.y + viewport.state.layout.allocation.height <= 23);
     }
 
     #[test]
@@ -662,8 +677,8 @@ mod tests {
         runtime.runtime.layout_node_ref(&mut runtime.roots[0], &style, &atlas, rect(4, 6, 40, 24));
 
         let scroll = runtime.node(scroll_id).expect("scroll area missing");
-        assert_eq!(rect_key(scroll.state.layout.frame), (4, 6, 40, 24));
-        assert_eq!(rect_key(scroll.state.layout.content.viewport), (4, 6, 40, 24));
+        assert_eq!(rect_key(scroll.state.layout.allocation), (4, 6, 40, 24));
+        assert_eq!(rect_key(scroll.state.layout.children.clip), (0, 0, 40, 24));
     }
 
     #[test]
@@ -731,8 +746,45 @@ mod tests {
 
         let painted = painted.borrow();
         assert_eq!(painted.len(), 1);
-        assert_eq!(rect_key(painted[0].0), (50, 60, 20, 12));
-        assert_eq!(rect_key(painted[0].1), (51, 61, 18, 10));
+        assert_eq!(rect_key(painted[0]), (51, 61, 18, 10));
+    }
+
+    #[test]
+    fn framed_widget_receives_content_local_pointer_coordinates() {
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let widget = widget_handle(EventRecorder::with_opt(seen.clone(), WidgetOption::FRAME));
+        let tree = UiNodeBuilder::build(|tree| {
+            tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(&widget);
+        });
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
+        let atlas = test_atlas();
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(120, 100));
+        let style = Style { padding: 0, ..Style::default() };
+        let input = Input {
+            mouse_pos: Vec2i::new(55, 65),
+            mouse_down: MouseButton::LEFT,
+            mouse_pressed: MouseButton::LEFT,
+            ..Input::default()
+        };
+        let mut results = FrameResults::default();
+        results.begin_frame();
+        runtime.render_frame(
+            crate::RootId::from_raw(1),
+            "content-local-input-test",
+            &mut renderer,
+            &style,
+            &input,
+            &mut results,
+            rect(50, 60, 20, 12),
+            true,
+        );
+
+        assert!(
+            seen.borrow()[0]
+                .iter()
+                .any(|event| { matches!(event, UiInputEvent::MouseDown { pos, .. } if (pos.x, pos.y) == (4, 4)) })
+        );
     }
 
     fn rect_key(rect: Recti) -> (i32, i32, i32, i32) {
@@ -914,8 +966,8 @@ mod tests {
         );
 
         let button_rect = runtime.node_screen_rect(button_id).expect("button node missing");
-        let button_layout = runtime.node(button_id).expect("button node missing").state.layout.frame;
-        assert_eq!(button_layout.x, style.padding);
+        let button_layout = runtime.node(button_id).expect("button node missing").state.layout.allocation;
+        assert_eq!(button_layout.x, 0, "child allocation is local to its parent node");
         assert!(button_rect.y > 40 + style.title_height);
         assert_eq!(button_rect.x, 40 + style.padding);
         assert!(button_rect.width > 250);
@@ -1089,7 +1141,7 @@ mod tests {
         );
 
         let first_node = runtime.node(first_id).unwrap();
-        let first_rect = first_node.state.layout.frame;
+        let first_rect = first_node.state.layout.allocation;
         let first_screen_rect = runtime.node_screen_rect(first_id).unwrap();
         let scroll_state = scroll_area_state(&runtime.roots, scroll_area_id).unwrap();
         let body = scroll_state.body;
@@ -1135,7 +1187,7 @@ mod tests {
             body,
             true,
         );
-        let first_client = runtime.roots[0].state.layout.frame;
+        let first_client = runtime.roots[0].state.layout.allocation;
         let first_content = runtime.roots[0].state.layout.content_size;
 
         results.begin_frame();
@@ -1149,7 +1201,7 @@ mod tests {
             body,
             true,
         );
-        let second_client = runtime.roots[0].state.layout.frame;
+        let second_client = runtime.roots[0].state.layout.allocation;
         let second_content = runtime.roots[0].state.layout.content_size;
 
         assert!(same_rect(first_client, second_client));
@@ -1194,12 +1246,12 @@ mod tests {
 
         let root = &runtime.roots[0];
         let custom_rect = runtime.node_screen_rect(custom_id).unwrap();
-        assert_eq!(root.state.layout.frame.width, body.width - style.padding * 2);
-        assert_eq!(root.state.layout.frame.height, body.height - style.padding * 2);
-        assert_eq!(custom_rect.width, root.state.layout.frame.width);
-        assert_eq!(custom_rect.height, root.state.layout.frame.height);
-        assert!(root.state.layout.content_size.width <= root.state.layout.frame.width);
-        assert!(root.state.layout.content_size.height <= root.state.layout.frame.height);
+        assert_eq!(root.state.layout.allocation.width, body.width - style.padding * 2);
+        assert_eq!(root.state.layout.allocation.height, body.height - style.padding * 2);
+        assert_eq!(custom_rect.width, root.state.layout.allocation.width);
+        assert_eq!(custom_rect.height, root.state.layout.allocation.height);
+        assert!(root.state.layout.content_size.width <= root.state.layout.allocation.width);
+        assert!(root.state.layout.content_size.height <= root.state.layout.allocation.height);
     }
 
     #[test]
@@ -1288,7 +1340,7 @@ mod tests {
         assert!(
             icon_is_visible,
             "icon not visible; root client {:?} content {:?} scroll body {:?} scroll {:?} icon rect {:?} clip {:?}",
-            root.state.layout.frame, root.state.layout.content_size, body, scroll, icon_rect, icon_node.state.layout.content.viewport
+            root.state.layout.allocation, root.state.layout.content_size, body, scroll, icon_rect, icon_node.state.layout.children.clip
         );
     }
 

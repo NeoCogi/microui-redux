@@ -112,6 +112,11 @@ pub trait Widget {
     /// Values less than or equal to zero are treated as "use layout defaults" for that axis.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     /// Updates retained widget state for the current frame and returns its interaction result.
+    ///
+    /// Pointer positions in `input` are relative to the widget's derived content rectangle, using
+    /// the same origin as [`WidgetCtx::local_rect`] and [`WidgetCtx::painter`]. Outer frame pixels
+    /// remain part of the runtime hit target, so a pointer event on the border may lie just outside
+    /// the local content bounds.
     fn update(&mut self, ctx: &mut WidgetCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState;
     /// Records paint commands for the current frame.
     fn paint(&mut self, ctx: &mut WidgetCtx<'_>);

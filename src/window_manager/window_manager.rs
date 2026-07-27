@@ -326,12 +326,12 @@ impl<B: RendererBackend> Context<B> {
                 }
 
                 let mut routed = None;
-                let root_traversal = entry.runtime.root_traversal();
+                let root_transform = entry.runtime.root_transform();
                 for root in entry.z_order.iter().copied().rev() {
                     let Some(root) = entry.roots.iter_mut().find(|node| node.id() == root) else {
                         continue;
                     };
-                    routed = entry.runtime.route_input_event_to_node_ref(root, root_traversal, style, input, &event);
+                    routed = entry.runtime.route_input_event_to_node_ref(root, root_transform, style, &event);
                     if routed.is_some() {
                         break;
                     }

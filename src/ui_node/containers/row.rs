@@ -1,7 +1,7 @@
 use crate::sizing::SizePolicy;
 use crate::{Dimensioni, Recti};
 
-use super::{Container, LayoutCtx, MeasureCtx, Widget};
+use super::{Container, LayoutCtx, MeasureCtx, NodeBehavior};
 use crate::ui_node::{UiNode, UiNodeState};
 
 /// Row container.
@@ -14,7 +14,7 @@ pub(crate) struct Row {
     pub(crate) children: Vec<UiNode>,
 }
 
-impl Widget for Row {
+impl NodeBehavior for Row {
     fn measure(&self, ctx: &MeasureCtx<'_>, _state: &UiNodeState, available: Dimensioni) -> Dimensioni {
         let mut preferred_heights = Vec::new();
         let mut preferred_widths = Vec::new();

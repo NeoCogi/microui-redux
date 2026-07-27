@@ -1,7 +1,7 @@
 use crate::sizing::SizePolicy;
 use crate::{Dimensioni, GridSpan, Recti};
 
-use super::{Container, LayoutCtx, MeasureCtx, Widget};
+use super::{Container, LayoutCtx, MeasureCtx, NodeBehavior};
 use crate::ui_node::{UiNode, UiNodeState};
 
 /// Grid container.
@@ -16,7 +16,7 @@ pub(crate) struct Grid {
     pub(crate) children: Vec<UiNode>,
 }
 
-impl Widget for Grid {
+impl NodeBehavior for Grid {
     fn measure(&self, ctx: &MeasureCtx<'_>, _state: &UiNodeState, available: Dimensioni) -> Dimensioni {
         let cols = self.widths.len().max(1);
         let rows = grid_placements(&self.children, cols, &self.spans)

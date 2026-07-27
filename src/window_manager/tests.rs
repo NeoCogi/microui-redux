@@ -1523,5 +1523,5 @@ fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
     let root_entry = ctx.roots.iter().find(|entry| entry.id == root).unwrap();
     let root_node = root_entry.roots.first().unwrap();
     assert!(ctx.scroll_area_content_size(root, scroll_area).unwrap().height > ctx.scroll_area_body(root, scroll_area).unwrap().height);
-    assert!(root_node.state.layout.content_size.height <= root_node.state.layout.frame.height);
+    assert!(root_node.state.layout.content_size.height <= root_node.state.layout.allocation.height);
 }

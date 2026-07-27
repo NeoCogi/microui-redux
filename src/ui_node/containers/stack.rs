@@ -1,7 +1,7 @@
 use crate::sizing::SizePolicy;
 use crate::{Dimensioni, Recti, StackDirection};
 
-use super::{Container, LayoutCtx, MeasureCtx, Widget};
+use super::{Container, LayoutCtx, MeasureCtx, NodeBehavior};
 use crate::ui_node::{UiNode, UiNodeState};
 
 /// Stack container.
@@ -16,7 +16,7 @@ pub(crate) struct Stack {
     pub(crate) children: Vec<UiNode>,
 }
 
-impl Widget for Stack {
+impl NodeBehavior for Stack {
     fn measure(&self, ctx: &MeasureCtx<'_>, _state: &UiNodeState, available: Dimensioni) -> Dimensioni {
         let mut width = 0;
         let mut height: i32 = 0;
