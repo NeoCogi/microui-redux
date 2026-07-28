@@ -81,7 +81,7 @@ impl TextBlock {
         Self {
             text: text.into(),
             wrap,
-            config: WidgetConfig::new(WidgetOption::NO_INTERACT, ScrollBehavior::NONE),
+            config: WidgetConfig::new(WidgetOption::NO_INTERACT),
         }
     }
 
@@ -155,10 +155,7 @@ impl ColorSwatch {
         Self {
             fill,
             label: String::new(),
-            config: WidgetConfig::new(
-                WidgetOption::NO_INTERACT | WidgetOption::ALIGN_CENTER | WidgetOption::FRAME,
-                ScrollBehavior::NONE,
-            ),
+            config: WidgetConfig::new(WidgetOption::NO_INTERACT | WidgetOption::ALIGN_CENTER | WidgetOption::FRAME),
         }
     }
 

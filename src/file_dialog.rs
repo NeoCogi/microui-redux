@@ -275,7 +275,7 @@ impl FileDialogState {
 
                     // Main pane: folders on the left, files on the right, both scrollable through scroll areas.
                     tree.row(&pane_widths, SizePolicy::Weight(1.0), |tree| {
-                        tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+                        tree.scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                                 tree.widget(folders_label);
                                 for item in folder_items {
@@ -287,7 +287,7 @@ impl FileDialogState {
                             });
                         });
 
-                        tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+                        tree.scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                                 tree.widget(files_label);
                                 for item in file_items {
@@ -463,7 +463,7 @@ impl FileDialogState {
             .to_string_lossy()
             .to_string();
         let root = ctx.create_dialog("Open File", Recti::new(50, 50, 720, 520), UiNodeSet::default());
-        ctx.set_root_options(root, ContainerOption::FRAME);
+        ctx.set_root_options(root, WindowOption::FRAME);
         let mut dialog = Self {
             current_working_directory,
             file_name: None,

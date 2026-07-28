@@ -16,7 +16,7 @@ pub(super) struct WindowEntry {
     pub(super) id: RootId,
     name: String,
     rect: Recti,
-    opt: ContainerOption,
+    opt: WindowOption,
     visible: bool,
     kind: WindowKind,
     just_opened: bool,
@@ -43,14 +43,14 @@ struct WindowChrome {
 }
 
 impl WindowChrome {
-    fn new(rect: Recti, style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption) -> Self {
-        let client = crate::frame::frame_geometry(rect, opt.intersects(ContainerOption::FRAME), style).content_or_empty();
-        let title = (!opt.intersects(ContainerOption::NO_TITLE))
+    fn new(rect: Recti, style: &Style, atlas: &crate::AtlasHandle, opt: WindowOption) -> Self {
+        let client = crate::frame::frame_geometry(rect, opt.intersects(WindowOption::FRAME), style).content_or_empty();
+        let title = (!opt.intersects(WindowOption::NO_TITLE))
             .then(|| Recti::new(client.x, client.y, client.width, root_titlebar_height(style, atlas).min(client.height.max(0))));
         let close = title.and_then(|title| {
-            (!opt.intersects(ContainerOption::NO_CLOSE)).then(|| Recti::new(title.x + title.width - title.height, title.y, title.height, title.height))
+            (!opt.intersects(WindowOption::NO_CLOSE)).then(|| Recti::new(title.x + title.width - title.height, title.y, title.height, title.height))
         });
-        let resize = (!opt.intersects(ContainerOption::AUTO_SIZE) && !opt.intersects(ContainerOption::NO_RESIZE)).then(|| {
+        let resize = (!opt.intersects(WindowOption::AUTO_SIZE) && !opt.intersects(WindowOption::NO_RESIZE)).then(|| {
             let size = style.scrollbar_size.max(0);
             Recti::new(
                 rect.x.saturating_add(rect.width).saturating_sub(size),
@@ -81,7 +81,7 @@ impl WindowChrome {
 }
 
 impl<B: RendererBackend> Context<B> {
-    fn register_root(&mut self, kind: WindowKind, name: &str, rect: Recti, tree: UiNodeSet, opt: ContainerOption, visible: bool) -> RootId {
+    fn register_root(&mut self, kind: WindowKind, name: &str, rect: Recti, tree: UiNodeSet, opt: WindowOption, visible: bool) -> RootId {
         let id = self.next_root_id();
         let roots = tree.into_roots();
         let z_order = roots.iter().map(UiNode::id).collect();
@@ -116,7 +116,7 @@ impl<B: RendererBackend> Context<B> {
 
     /// Registers an open retained window and returns its stable root identifier.
     pub fn create_window(&mut self, name: &str, rect: Recti, tree: UiNodeSet) -> RootId {
-        self.register_root(WindowKind::Window, name, rect, tree, ContainerOption::FRAME, true)
+        self.register_root(WindowKind::Window, name, rect, tree, WindowOption::FRAME, true)
     }
 
     /// Returns whether a registered root is currently visible.
@@ -182,7 +182,7 @@ impl<B: RendererBackend> Context<B> {
 
     /// Registers a hidden dialog root.
     pub fn create_dialog(&mut self, name: &str, rect: Recti, tree: UiNodeSet) -> RootId {
-        self.register_root(WindowKind::Dialog, name, rect, tree, ContainerOption::FRAME, false)
+        self.register_root(WindowKind::Dialog, name, rect, tree, WindowOption::FRAME, false)
     }
 
     /// Registers a hidden popup root.
@@ -202,7 +202,7 @@ impl<B: RendererBackend> Context<B> {
     }
 
     /// Replaces the chrome options for a registered root.
-    pub fn set_root_options(&mut self, root: RootId, opt: ContainerOption) {
+    pub fn set_root_options(&mut self, root: RootId, opt: WindowOption) {
         if let Some(entry) = self.roots.iter_mut().find(|entry| entry.id == root) {
             entry.opt = opt;
         }
@@ -241,7 +241,7 @@ impl<B: RendererBackend> Context<B> {
         // Context owns the frame list lifecycle. Recording below appends every visible root in
         // painter order, and Renderer consumes the completed list exactly once at the end.
         for entry in &mut self.roots {
-            if entry.visible && entry.opt.intersects(ContainerOption::AUTO_SIZE) {
+            if entry.visible && entry.opt.intersects(WindowOption::AUTO_SIZE) {
                 let size = entry
                     .runtime
                     .measure_auto_size(&entry.roots, self.style.as_ref(), &self.renderer.atlas(), entry.opt, entry.rect.width);
@@ -348,7 +348,7 @@ impl<B: RendererBackend> Context<B> {
         let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
         let mut painter = Painter::screen_space(&mut self.display_list, viewport);
         let fill = self.style.colors[ControlColor::WindowBG as usize];
-        if entry.opt.intersects(ContainerOption::FRAME) {
+        if entry.opt.intersects(WindowOption::FRAME) {
             crate::frame::paint_internal_frame(&mut painter, entry.rect, Some(fill), self.style.frame_border());
         } else {
             painter.fill_rect(entry.rect, fill);
@@ -379,7 +379,7 @@ impl<B: RendererBackend> Context<B> {
             && resize.width > 0
             && resize.height > 0
         {
-            let client = crate::frame::frame_geometry(entry.rect, entry.opt.intersects(ContainerOption::FRAME), self.style.as_ref()).content_or_empty();
+            let client = crate::frame::frame_geometry(entry.rect, entry.opt.intersects(WindowOption::FRAME), self.style.as_ref()).content_or_empty();
             if let Some(visual) = resize.intersect(&client) {
                 let fill = self.style.colors[ControlColor::WindowBG as usize];
                 crate::frame::paint_internal_frame(&mut painter, visual, Some(fill), self.style.frame_border());
@@ -443,11 +443,11 @@ impl<B: RendererBackend> Context<B> {
         }
     }
 
-    const fn default_popup_options() -> ContainerOption {
-        ContainerOption::FRAME
-            .union(ContainerOption::AUTO_SIZE)
-            .union(ContainerOption::NO_RESIZE)
-            .union(ContainerOption::NO_TITLE)
+    const fn default_popup_options() -> WindowOption {
+        WindowOption::FRAME
+            .union(WindowOption::AUTO_SIZE)
+            .union(WindowOption::NO_RESIZE)
+            .union(WindowOption::NO_TITLE)
     }
 
     #[cfg(test)]
@@ -521,14 +521,14 @@ fn root_titlebar_height(style: &Style, atlas: &crate::AtlasHandle) -> i32 {
     style.title_height.max(min_title_h)
 }
 
-fn root_min_size(style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption, title: &str) -> Dimensioni {
-    let auto_size = opt.intersects(ContainerOption::AUTO_SIZE);
+fn root_min_size(style: &Style, atlas: &crate::AtlasHandle, opt: WindowOption, title: &str) -> Dimensioni {
+    let auto_size = opt.intersects(WindowOption::AUTO_SIZE);
     let mut width: i32 = if auto_size { 1 } else { 96 };
     let mut height: i32 = if auto_size { 1 } else { 64 };
-    if !opt.intersects(ContainerOption::NO_TITLE) {
+    if !opt.intersects(WindowOption::NO_TITLE) {
         let title_height = root_titlebar_height(style, atlas);
         let title_width = atlas.get_text_size(style.title_font, title).width;
-        let close_width = if opt.intersects(ContainerOption::NO_CLOSE) { 0 } else { title_height };
+        let close_width = if opt.intersects(WindowOption::NO_CLOSE) { 0 } else { title_height };
         let padding = style.padding.max(0);
         width = width.max(title_width.saturating_add(close_width).saturating_add(padding.saturating_mul(2)));
         let title_min_height = if auto_size {
@@ -538,7 +538,7 @@ fn root_min_size(style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption
         };
         height = height.max(title_min_height);
     }
-    let border = if opt.intersects(ContainerOption::FRAME) {
+    let border = if opt.intersects(WindowOption::FRAME) {
         style.frame_border().width.checked_mul(2).expect("root frame extent overflowed i32")
     } else {
         0

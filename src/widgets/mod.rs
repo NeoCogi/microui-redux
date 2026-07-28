@@ -57,7 +57,7 @@
 //! [`crate::Context`], and each widget's `update` path clamps transient invariants such as text
 //! cursors, scroll offsets, selected indices, and numeric ranges before `paint` records commands.
 
-use crate::{FontChoice, FontRole, ScrollBehavior, WidgetOption};
+use crate::{FontChoice, FontRole, WidgetOption};
 
 #[derive(Copy, Clone)]
 /// Shared configuration carried by built-in retained widgets.
@@ -66,23 +66,20 @@ pub struct WidgetConfig {
     pub font: FontChoice,
     /// Widget options applied during interaction and painting.
     pub opt: WidgetOption,
-    /// Scroll behavior requested by the widget.
-    pub scroll_behavior: ScrollBehavior,
 }
 
 impl Default for WidgetConfig {
     fn default() -> Self {
-        Self::new(WidgetOption::NONE, ScrollBehavior::NONE)
+        Self::new(WidgetOption::NONE)
     }
 }
 
 impl WidgetConfig {
-    /// Creates a config with the body font and explicit behavior flags.
-    pub const fn new(opt: WidgetOption, scroll_behavior: ScrollBehavior) -> Self {
+    /// Creates a config with the body font and explicit widget options.
+    pub const fn new(opt: WidgetOption) -> Self {
         Self {
             font: FontChoice::Role(FontRole::Body),
             opt,
-            scroll_behavior,
         }
     }
 
@@ -99,9 +96,6 @@ macro_rules! implement_widget {
         impl Widget for $ty {
             fn widget_opt(&self) -> &WidgetOption {
                 &self.config.opt
-            }
-            fn scroll_behavior(&self) -> ScrollBehavior {
-                self.config.scroll_behavior
             }
             fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
                 self.$measure(style, atlas, avail)

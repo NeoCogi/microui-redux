@@ -95,7 +95,7 @@ impl TextArea {
             cursor,
             scroll: vec2(0, 0),
             wrap: TextWrap::None,
-            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::GRAB_SCROLL),
+            config: WidgetConfig::new(WidgetOption::FRAME | WidgetOption::GRAB_SCROLL),
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
@@ -111,7 +111,7 @@ impl TextArea {
             cursor,
             scroll: vec2(0, 0),
             wrap: TextWrap::None,
-            config: WidgetConfig::new(opt, ScrollBehavior::GRAB_SCROLL),
+            config: WidgetConfig::new(opt | WidgetOption::GRAB_SCROLL),
             preferred_x: None,
             dragging_y: false,
             dragging_x: false,
@@ -546,10 +546,6 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &mut TextArea, font: Font
 impl Widget for TextArea {
     fn widget_opt(&self) -> &WidgetOption {
         &self.config.opt
-    }
-
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.config.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

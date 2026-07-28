@@ -20,7 +20,7 @@ use crate::render::RendererBackend;
 use crate::{expand_rect, Dimensioni, FrameResults, Input, MouseButton, Recti, Style, Vec2i, UNCLIPPED_RECT};
 #[cfg(test)]
 use crate::UiNodeSet;
-use crate::input::{ContainerOption, ScrollBehavior, WidgetOption};
+use crate::{WidgetOption, WindowOption};
 use crate::sizing::SizePolicy;
 use crate::widget::FocusPolicy;
 
@@ -36,6 +36,7 @@ pub(crate) use containers::{
 #[cfg(test)]
 pub(crate) use containers::{scroll_area_state, set_scroll_area_scroll};
 pub use containers::UiInputEvent;
+pub use containers::ScrollAreaOption;
 
 /// Computes titlebar height from style minimums and current title font metrics.
 fn root_titlebar_height(style: &Style, atlas: &crate::AtlasHandle) -> i32 {
@@ -521,6 +522,28 @@ mod tests {
         fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
     }
 
+    struct ScrollRecorder {
+        seen: Rc<RefCell<Vec<Option<Vec2i>>>>,
+        opt: WidgetOption,
+    }
+
+    impl crate::Widget for ScrollRecorder {
+        fn widget_opt(&self) -> &WidgetOption {
+            &self.opt
+        }
+
+        fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+            Dimensioni::new(10, 10)
+        }
+
+        fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+            self.seen.borrow_mut().push(ctx.scroll_delta());
+            ResourceState::NONE
+        }
+
+        fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+    }
+
     struct FrameToggle {
         opt: WidgetOption,
         painted: Rc<RefCell<Vec<Recti>>>,
@@ -641,11 +664,12 @@ mod tests {
     fn framed_scroll_area_intersects_its_child_viewport_with_frame_content() {
         let mut scroll_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
-            scroll_id = tree
-                .node(crate::NodeOptions::with_policy(Policy::fixed(40, 24)))
-                .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+            scroll_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(40, 24))).scroll_area(
+                ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
+                |tree| {
                     tree.text("inside");
-                });
+                },
+            );
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
@@ -663,12 +687,12 @@ mod tests {
     }
 
     #[test]
-    fn container_none_keeps_the_complete_allocation_as_content() {
+    fn scroll_area_without_frame_keeps_the_complete_allocation_as_content() {
         let mut scroll_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             scroll_id = tree
                 .node(crate::NodeOptions::with_policy(Policy::fixed(40, 24)))
-                .scroll_area(ContainerOption::NONE, ScrollBehavior::NONE, |_| {});
+                .scroll_area(ScrollAreaOption::ENABLE_SCROLL, |_| {});
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
@@ -692,7 +716,7 @@ mod tests {
                 callback_seen.borrow_mut().push((rect_key(args.content_area), rect_key(args.view)));
             })
             .expect("custom renderer registration");
-        let state = widget_handle(Custom::with_opt("custom", WidgetOption::FRAME, ScrollBehavior::NONE));
+        let state = widget_handle(Custom::with_opt("custom", WidgetOption::FRAME));
         let tree = UiNodeBuilder::build(|tree| {
             tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12)))
                 .custom_render(&state, custom_renderer);
@@ -784,6 +808,44 @@ mod tests {
                 .iter()
                 .any(|event| { matches!(event, UiInputEvent::MouseDown { pos, .. } if (pos.x, pos.y) == (4, 4)) })
         );
+    }
+
+    #[test]
+    fn grab_scroll_widget_option_delivers_hovered_scroll_delta() {
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let widget = widget_handle(ScrollRecorder {
+            seen: seen.clone(),
+            opt: WidgetOption::GRAB_SCROLL,
+        });
+        let tree = UiNodeBuilder::build(|tree| {
+            tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(&widget);
+        });
+        let mut runtime = TestRuntime::from_ui_nodes(tree);
+        let atlas = test_atlas();
+        let backend = NoopRenderer { atlas };
+        let mut renderer = Renderer::new_test(backend, Dimensioni::new(120, 100));
+        let style = Style { padding: 0, ..Style::default() };
+        let input = Input {
+            mouse_pos: Vec2i::new(55, 65),
+            scroll_delta: Vec2i::new(3, -7),
+            ..Input::default()
+        };
+        let mut results = FrameResults::default();
+        results.begin_frame();
+        runtime.render_frame(
+            crate::RootId::from_raw(1),
+            "grab-scroll-input-test",
+            &mut renderer,
+            &style,
+            &input,
+            &mut results,
+            rect(50, 60, 20, 12),
+            true,
+        );
+
+        let seen = seen.borrow();
+        let delta = seen[0].expect("grab-scroll widget did not receive a scroll delta");
+        assert_eq!((delta.x, delta.y), (3, -7));
     }
 
     fn rect_key(rect: Recti) -> (i32, i32, i32, i32) {
@@ -1145,16 +1207,17 @@ mod tests {
         let mut first_id = Id::new(0);
         let mut scroll_area_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
-            scroll_area_id =
-                tree.node(crate::NodeOptions::with_policy(Policy::fixed(120, 48)))
-                    .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
-                        tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(24), StackDirection::TopToBottom, |tree| {
-                            first_id = tree.widget(&first);
-                            for button in &rest {
-                                tree.widget(button);
-                            }
-                        });
+            scroll_area_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(120, 48))).scroll_area(
+                ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
+                |tree| {
+                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(24), StackDirection::TopToBottom, |tree| {
+                        first_id = tree.widget(&first);
+                        for button in &rest {
+                            tree.widget(button);
+                        }
                     });
+                },
+            );
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         set_scroll_area_scroll(&mut runtime.roots, scroll_area_id, Vec2i::new(0, 36));
@@ -1323,12 +1386,13 @@ mod tests {
         let mut scroll_area_id = Id::new(0);
         let mut icon_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
-            scroll_area_id =
-                tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 70)))
-                    .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
-                        tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 180))).widget(filler.clone());
-                        icon_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 40))).widget(icon_button.clone());
-                    });
+            scroll_area_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 70))).scroll_area(
+                ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
+                |tree| {
+                    tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 180))).widget(filler.clone());
+                    icon_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 40))).widget(icon_button.clone());
+                },
+            );
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let backend = NoopRenderer { atlas };

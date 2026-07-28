@@ -83,7 +83,7 @@ struct CubeWidget {
 impl CubeWidget {
     fn new() -> Self {
         Self {
-            config: WidgetConfig::new(WidgetOption::NO_INTERACT, ScrollBehavior::NONE),
+            config: WidgetConfig::new(WidgetOption::NO_INTERACT),
         }
     }
 }
@@ -91,10 +91,6 @@ impl CubeWidget {
 impl Widget for CubeWidget {
     fn widget_opt(&self) -> &WidgetOption {
         &self.config.opt
-    }
-
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.config.scroll_behavior
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {

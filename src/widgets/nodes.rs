@@ -112,7 +112,7 @@ impl Node {
         Self {
             label: label.into(),
             state,
-            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::NONE),
+            config: WidgetConfig::new(WidgetOption::FRAME),
             kind: NodeKind::Header,
         }
     }
@@ -122,7 +122,7 @@ impl Node {
         Self {
             label: label.into(),
             state,
-            config: WidgetConfig::new(WidgetOption::NONE, ScrollBehavior::NONE),
+            config: WidgetConfig::new(WidgetOption::NONE),
             kind: NodeKind::Tree,
         }
     }
@@ -221,10 +221,6 @@ impl Node {
 impl Widget for Node {
     fn widget_opt(&self) -> &WidgetOption {
         &self.config.opt
-    }
-
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.config.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

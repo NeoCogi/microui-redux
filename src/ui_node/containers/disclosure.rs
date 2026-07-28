@@ -89,13 +89,7 @@ impl NodeBehavior for Disclosure {
 
     fn update_on(&mut self, ctx: &mut InputCtx<'_>, state: &mut UiNodeState, event: &UiInputEvent) -> InputResult {
         let widget = crate::window_manager::erased_widget_state(self.state.clone());
-        ctx.route_widget_input(
-            state,
-            self.header_rect,
-            widget.effective_widget_opt(),
-            widget.effective_scroll_behavior(),
-            event,
-        )
+        ctx.route_widget_input(state, self.header_rect, widget.effective_widget_opt(), event)
     }
 }
 

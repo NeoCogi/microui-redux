@@ -122,14 +122,15 @@ fn row_nodes_capture_children_and_track_policy() {
 
 #[test]
 fn scroll_area_nodes_store_viewport_and_chrome_children() {
-    let leaf = widget_handle((crate::WidgetOption::NONE, crate::ScrollBehavior::NONE));
+    let leaf = widget_handle(crate::WidgetOption::NONE);
 
     let tree = UiNodeBuilder::build(|builder| {
-        builder
-            .node(NodeOptions::with_policy(Policy::fill()))
-            .scroll_area(crate::ContainerOption::FRAME, crate::ScrollBehavior::NONE, |builder| {
+        builder.node(NodeOptions::with_policy(Policy::fill())).scroll_area(
+            crate::ScrollAreaOption::FRAME | crate::ScrollAreaOption::ENABLE_SCROLL,
+            |builder| {
                 builder.widget(leaf.clone());
-            });
+            },
+        );
     });
 
     let node = tree.node(tree.roots()[0]).expect("scroll area node missing");

@@ -135,7 +135,7 @@ impl Slider {
             high,
             step: 0.0,
             precision: 0,
-            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::GRAB_SCROLL),
+            config: WidgetConfig::new(WidgetOption::FRAME | WidgetOption::GRAB_SCROLL),
             edit: NumberEditState::default(),
         }
     }
@@ -148,7 +148,7 @@ impl Slider {
             high,
             step,
             precision,
-            config: WidgetConfig::new(opt, ScrollBehavior::GRAB_SCROLL),
+            config: WidgetConfig::new(opt | WidgetOption::GRAB_SCROLL),
             edit: NumberEditState::default(),
         }
     }
@@ -310,10 +310,6 @@ impl Widget for Slider {
         &self.config.opt
     }
 
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.config.scroll_behavior
-    }
-
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         self.preferred_size_widget(style, atlas, avail)
     }
@@ -373,7 +369,7 @@ impl Number {
             value: if value.is_finite() { value } else { 0.0 },
             step,
             precision,
-            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::NONE),
+            config: WidgetConfig::new(WidgetOption::FRAME),
             edit: NumberEditState::default(),
         }
     }
@@ -399,7 +395,7 @@ impl Number {
             value: if value.is_finite() { value } else { 0.0 },
             step,
             precision,
-            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
+            config: WidgetConfig::new(opt),
             edit: NumberEditState::default(),
         }
     }
@@ -448,10 +444,6 @@ impl Number {
 impl Widget for Number {
     fn widget_opt(&self) -> &WidgetOption {
         &self.config.opt
-    }
-
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.config.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

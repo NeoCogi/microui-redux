@@ -59,10 +59,10 @@ use rs_math3d::Dimensioni;
 use crate::{
     atlas::AtlasHandle,
     id::Id,
-    input::{ResourceState, ScrollBehavior, WidgetOption},
+    input::ResourceState,
     style::Style,
     ui_node::UiInputEvent,
-    widget::{FocusPolicy, Widget},
+    widget::{FocusPolicy, Widget, WidgetOption},
     widget_ctx::{WidgetPaintCtx, WidgetUpdateCtx},
 };
 
@@ -140,8 +140,6 @@ pub(crate) trait WidgetStateHandleDyn {
     fn widget_handle_id(&self) -> Id;
     /// Returns the widget options after applying widget-specific effective-state overrides.
     fn effective_widget_opt(&self) -> WidgetOption;
-    /// Returns the widget scroll behavior after applying widget-specific overrides.
-    fn effective_scroll_behavior(&self) -> ScrollBehavior;
     /// Returns how the widget wants focus to be retained or released.
     fn focus_policy(&self) -> FocusPolicy;
     /// Measures the widget without mutating it.
@@ -169,10 +167,6 @@ impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
 
     fn effective_widget_opt(&self) -> WidgetOption {
         self.handle.read(Widget::effective_widget_opt)
-    }
-
-    fn effective_scroll_behavior(&self) -> ScrollBehavior {
-        self.handle.read(Widget::effective_scroll_behavior)
     }
 
     fn focus_policy(&self) -> FocusPolicy {

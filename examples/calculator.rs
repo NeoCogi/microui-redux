@@ -371,7 +371,7 @@ fn main() {
             button.node_id = node_id;
         }
         let root = ctx.create_window("Calculator", rect(0, 0, 320, 420), tree);
-        ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE);
+        ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_RESIZE | WindowOption::NO_TITLE);
         State {
             _root: root,
             display,

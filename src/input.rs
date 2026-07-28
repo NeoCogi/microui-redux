@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Raw input state, routed pointer events, and option bitfields shared across widgets.
+//! Raw input state, key/button identifiers, and input-related state flags.
 
 use bitflags::bitflags;
 use rs_math3d::Vec2i;
@@ -152,40 +152,6 @@ impl ResourceState {
 
 bitflags! {
     #[derive(Copy, Clone)]
-    /// Options that control how a container behaves.
-    pub struct ContainerOption : u32 {
-        /// Gives the container a Style-owned outer border and inset content area.
-        const FRAME = 1024;
-        /// Automatically adapts the container size to its content.
-        const AUTO_SIZE = 512;
-        /// Hides the title bar.
-        const NO_TITLE = 128;
-        /// Hides the close button.
-        const NO_CLOSE = 64;
-        /// Prevents the user from resizing the window.
-        const NO_RESIZE = 16;
-        /// No special options.
-        const NONE = 0;
-    }
-
-    #[derive(Copy, Clone)]
-    /// Widget specific options that influence layout and interactivity.
-    pub struct WidgetOption : u32 {
-        /// Gives the widget a Style-owned outer border and inset content rectangle.
-        const FRAME = 512;
-        /// Keeps keyboard focus while the widget is held.
-        const HOLD_FOCUS = 256;
-        /// Disables interaction for the widget.
-        const NO_INTERACT = 4;
-        /// Aligns the widget to the right side of the cell.
-        const ALIGN_RIGHT = 2;
-        /// Centers the widget inside the cell.
-        const ALIGN_CENTER = 1;
-        /// No special options.
-        const NONE = 0;
-    }
-
-    #[derive(Copy, Clone)]
     /// Controls which widget states should draw a filled background.
     pub struct WidgetFillOption : u32 {
         /// Fill the background for the idle/normal state.
@@ -196,36 +162,6 @@ bitflags! {
         const CLICK = 4;
         /// Fill the background for every interaction state.
         const ALL = Self::NORMAL.bits() | Self::HOVER.bits() | Self::CLICK.bits();
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-/// Scroll behavior requested by a widget or container.
-pub enum ScrollBehavior {
-    /// Use the default container scroll handling.
-    None,
-    /// Consume pending scroll when the widget is hovered.
-    GrabScroll,
-    /// Disable container scroll handling.
-    NoScroll,
-}
-
-impl ScrollBehavior {
-    /// Use the default container scroll handling.
-    pub const NONE: Self = Self::None;
-    /// Consume pending scroll when the widget is hovered.
-    pub const GRAB_SCROLL: Self = Self::GrabScroll;
-    /// Disable container scroll handling.
-    pub const NO_SCROLL: Self = Self::NoScroll;
-
-    /// Returns `true` if the option enables scroll grabbing for a widget.
-    pub fn is_grab_scroll(self) -> bool {
-        matches!(self, Self::GrabScroll)
-    }
-
-    /// Returns `true` if the option disables container scroll handling.
-    pub fn is_no_scroll(self) -> bool {
-        matches!(self, Self::NoScroll)
     }
 }
 

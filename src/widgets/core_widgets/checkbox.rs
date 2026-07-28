@@ -31,7 +31,7 @@ impl Checkbox {
         Self {
             label: label.into(),
             value,
-            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
+            config: WidgetConfig::new(opt),
         }
     }
 
@@ -80,10 +80,6 @@ impl Checkbox {
 impl Widget for Checkbox {
     fn widget_opt(&self) -> &WidgetOption {
         &self.config.opt
-    }
-
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.config.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

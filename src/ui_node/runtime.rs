@@ -60,18 +60,14 @@ impl UiRuntime {
     }
 
     /// Measures the outer root size needed for `AUTO_SIZE` node roots.
-    pub(crate) fn measure_auto_size(&self, roots: &[UiNode], style: &Style, atlas: &crate::AtlasHandle, opt: ContainerOption, min_width: i32) -> Dimensioni {
-        let title_height = if opt.intersects(ContainerOption::NO_TITLE) {
+    pub(crate) fn measure_auto_size(&self, roots: &[UiNode], style: &Style, atlas: &crate::AtlasHandle, opt: WindowOption, min_width: i32) -> Dimensioni {
+        let title_height = if opt.intersects(WindowOption::NO_TITLE) {
             0
         } else {
             root_titlebar_height(style, atlas)
         };
         let padding = style.padding.max(0);
-        let border_width = if opt.intersects(ContainerOption::FRAME) {
-            style.frame_border().width
-        } else {
-            0
-        };
+        let border_width = if opt.intersects(WindowOption::FRAME) { style.frame_border().width } else { 0 };
         let border_extent = border_width.checked_mul(2).expect("root frame extent overflowed i32");
         let horizontal_padding = padding.saturating_mul(2);
         let available = Dimensioni::new(min_width.saturating_sub(border_extent).saturating_sub(horizontal_padding).max(1), 10_000);
@@ -402,10 +398,9 @@ impl UiRuntime {
         let child_transform = parent_transform.push(node.state.layout);
         let content_clip = rect_relative_to(child_transform.clip, screen_origin);
 
-        if let Some((opt, scroll_behavior, focus_policy)) = node_interaction_config(node) {
+        if let Some((opt, focus_policy)) = node_interaction_config(node) {
             let id = node.id();
-            let (hovered, focused, clicked, active, scroll_delta) =
-                self.interaction_for(id, screen_rect, screen_clip, input, opt, scroll_behavior, focus_policy);
+            let (hovered, focused, clicked, active, scroll_delta) = self.interaction_for(id, screen_rect, screen_clip, input, opt, focus_policy);
             node.state.hovered = hovered;
             node.state.focused = focused;
             node.state.clicked = clicked;
@@ -450,7 +445,6 @@ impl UiRuntime {
         clip: Recti,
         input: &Input,
         opt: WidgetOption,
-        scroll_behavior: ScrollBehavior,
         focus_policy: FocusPolicy,
     ) -> (bool, bool, bool, bool, Option<Vec2i>) {
         if opt.intersects(WidgetOption::NO_INTERACT) {
@@ -486,7 +480,7 @@ impl UiRuntime {
         let focused = self.focus == Some(id);
         let active = focused && input.mouse_down.intersects(MouseButton::LEFT);
         let clicked = focused && input.mouse_pressed.intersects(MouseButton::LEFT);
-        let scroll_delta = if scroll_behavior.is_grab_scroll() && hovered && (input.scroll_delta.x != 0 || input.scroll_delta.y != 0) {
+        let scroll_delta = if opt.intersects(WidgetOption::GRAB_SCROLL) && hovered && (input.scroll_delta.x != 0 || input.scroll_delta.y != 0) {
             Some(input.scroll_delta)
         } else {
             None
@@ -584,8 +578,8 @@ impl UiRuntime {
         let content_clip = rect_relative_to(child_transform.clip, screen_origin);
         let local_event = crate::widget_ctx::localize_event(screen_origin, event.clone());
 
-        if let Some((opt, scroll_behavior, _focus_policy)) = node_interaction_config(node) {
-            return super::containers::route_public_widget_input(self, &node.state, local_rect, local_clip, opt, scroll_behavior, &local_event);
+        if let Some((opt, _focus_policy)) = node_interaction_config(node) {
+            return super::containers::route_public_widget_input(self, &node.state, local_rect, local_clip, opt, &local_event);
         }
 
         let mut ctx = InputCtx {
@@ -697,7 +691,7 @@ fn node_is_framed(node: &UiNode) -> bool {
     }
 }
 
-fn node_interaction_config(node: &UiNode) -> Option<(WidgetOption, ScrollBehavior, FocusPolicy)> {
+fn node_interaction_config(node: &UiNode) -> Option<(WidgetOption, FocusPolicy)> {
     match &node.data {
         UiNodeData::Widget(widget) => widget.interaction_config(),
         UiNodeData::Container(container) => container.interaction_config(),

@@ -34,12 +34,11 @@ use std::{collections::HashMap, hash::Hash};
 
 use crate::{
     id::{hash_id_key, IdNamespace},
-    input::{ContainerOption, ScrollBehavior},
     render::{CustomRenderHandle, RendererBackend},
     sizing::{SizePolicy, StackDirection},
     ui_node::{
         scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData,
-        UiNodeId, WidgetNode,
+        ScrollAreaOption, UiNodeId, WidgetNode,
     },
     widget::Widget,
     Node, Recti, TextBlock, TextWrap,
@@ -290,9 +289,9 @@ impl<'a> NodeBuilder<'a> {
         self.builder.insert_custom_render(self.options, state, renderer)
     }
 
-    /// Adds a scroll area node.
-    pub fn scroll_area(self, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut UiNodeBuilder)) -> NodeId {
-        self.builder.insert_scroll_area(self.options, opt, scroll_behavior, f)
+    /// Adds a scroll-area node; [`ScrollAreaOption::ENABLE_SCROLL`] enables overflow scrolling.
+    pub fn scroll_area(self, opt: ScrollAreaOption, f: impl FnOnce(&mut UiNodeBuilder)) -> NodeId {
+        self.builder.insert_scroll_area(self.options, opt, f)
     }
 
     /// Adds a collapsible header node.
@@ -430,13 +429,13 @@ impl UiNodeBuilder {
         )
     }
 
-    /// Adds an unkeyed scroll area node.
-    pub fn scroll_area(&mut self, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut Self)) -> NodeId {
-        self.insert_scroll_area(NodeOptions::new(), opt, scroll_behavior, f)
+    /// Adds an unkeyed scroll-area node; [`ScrollAreaOption::ENABLE_SCROLL`] enables overflow scrolling.
+    pub fn scroll_area(&mut self, opt: ScrollAreaOption, f: impl FnOnce(&mut Self)) -> NodeId {
+        self.insert_scroll_area(NodeOptions::new(), opt, f)
     }
 
     /// Adds a scroll area node with optional identity and placement metadata.
-    fn insert_scroll_area(&mut self, options: NodeOptions, opt: ContainerOption, scroll_behavior: ScrollBehavior, f: impl FnOnce(&mut Self)) -> NodeId {
+    fn insert_scroll_area(&mut self, options: NodeOptions, opt: ScrollAreaOption, f: impl FnOnce(&mut Self)) -> NodeId {
         let id = self.alloc_id(TAG_SCROLL_AREA, options.key);
         let state = shared_scroll_area_state();
         self.frames.push(BuilderFrame {
@@ -447,18 +446,15 @@ impl UiNodeBuilder {
         f(self);
         let frame = self.frames.pop().expect("scroll viewport frame missing");
 
-        let viewport = scroll_viewport_node(id, state.clone(), scroll_behavior, Self::child_nodes(frame.nodes));
+        let scroll_enabled = opt.intersects(ScrollAreaOption::ENABLE_SCROLL);
+        let viewport = scroll_viewport_node(id, state.clone(), scroll_enabled, Self::child_nodes(frame.nodes));
 
-        let scrollbars = scrollbar_nodes(id, state.clone(), scroll_behavior);
+        let scrollbars = scrollbar_nodes(id, state.clone(), scroll_enabled);
         let mut children = Vec::with_capacity(1 + scrollbars.len());
         children.push(viewport);
         children.extend(scrollbars);
 
-        let node = self.create_node_with_id(
-            id,
-            options,
-            UiNodeData::Container(Box::new(UiScrollArea::new(state, scroll_behavior, opt, children))),
-        );
+        let node = self.create_node_with_id(id, options, UiNodeData::Container(Box::new(UiScrollArea::new(state, opt, children))));
         Self::validate_unique_node_ids(std::slice::from_ref(&node));
         self.current_frame_mut().nodes.push(BuilderChild { node, grid_span: options.grid_span });
         id

@@ -1,4 +1,4 @@
-use crate::input::{ScrollBehavior, WidgetOption};
+use crate::WidgetOption;
 use crate::render::{CustomRenderKey, DisplayList, Painter};
 use crate::widget_ctx::{localize_events, WidgetPaintCtx, WidgetUpdateCtx};
 use crate::window_manager::{erased_widget_state, WidgetStateHandleDyn};
@@ -20,6 +20,7 @@ pub(crate) use row::Row;
 pub(crate) use scroll_area::{scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, ScrollArea};
 #[cfg(test)]
 pub(crate) use scroll_area::{scroll_area_state, set_scroll_area_scroll, ScrollAreaState};
+pub use scroll_area::ScrollAreaOption;
 pub(crate) use stack::Stack;
 
 /// Internal runtime behavior for any retained node, including widget adapters and containers.
@@ -30,7 +31,7 @@ pub(crate) trait NodeBehavior {
     }
 
     /// Returns the standard public-widget interaction policy, when this behavior wraps one.
-    fn interaction_config(&self) -> Option<(WidgetOption, ScrollBehavior, FocusPolicy)> {
+    fn interaction_config(&self) -> Option<(WidgetOption, FocusPolicy)> {
         None
     }
 
@@ -105,12 +106,8 @@ impl NodeBehavior for WidgetNode {
         self.widget.effective_widget_opt().intersects(WidgetOption::FRAME)
     }
 
-    fn interaction_config(&self) -> Option<(WidgetOption, ScrollBehavior, FocusPolicy)> {
-        Some((
-            self.widget.effective_widget_opt(),
-            self.widget.effective_scroll_behavior(),
-            self.widget.focus_policy(),
-        ))
+    fn interaction_config(&self) -> Option<(WidgetOption, FocusPolicy)> {
+        Some((self.widget.effective_widget_opt(), self.widget.focus_policy()))
     }
 
     fn measure(&self, ctx: &MeasureCtx<'_>, state: &UiNodeState, available: Dimensioni) -> Dimensioni {
@@ -329,7 +326,6 @@ pub(super) fn route_public_widget_input(
     rect: Recti,
     clip: Recti,
     opt: WidgetOption,
-    scroll_behavior: ScrollBehavior,
     event: &UiInputEvent,
 ) -> InputResult {
     if opt.intersects(WidgetOption::NO_INTERACT) {
@@ -364,7 +360,7 @@ pub(super) fn route_public_widget_input(
         }
         UiInputEvent::Scroll { delta, .. } if hovered => {
             runtime.push_routed_event(id, event.clone());
-            if scroll_behavior.is_grab_scroll() && (delta.x != 0 || delta.y != 0) {
+            if opt.intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0) {
                 InputResult::Consumed
             } else {
                 InputResult::Ignored
@@ -483,12 +479,9 @@ impl UpdateCtx<'_> {
         let opt = widget.effective_widget_opt();
         let local_content_rect = crate::frame::frame_geometry(local_rect, opt.intersects(WidgetOption::FRAME), self.style).content_or_empty();
         let content_rect = self.screen_rect(local_content_rect);
-        let scroll_behavior = widget.effective_scroll_behavior();
         let focus_policy = widget.focus_policy();
         let content_clip = self.screen_clip();
-        let (hovered, focused, clicked, active, scroll_delta) =
-            self.runtime
-                .interaction_for(id, rect, content_clip, self.input, opt, scroll_behavior, focus_policy);
+        let (hovered, focused, clicked, active, scroll_delta) = self.runtime.interaction_for(id, rect, content_clip, self.input, opt, focus_policy);
         state.hovered = hovered;
         state.focused = focused;
         state.clicked = clicked;
@@ -542,15 +535,8 @@ impl InputCtx<'_> {
         rect.contains(&pos) && self.content_clip.contains(&pos)
     }
 
-    pub(crate) fn route_widget_input(
-        &mut self,
-        state: &UiNodeState,
-        rect: Recti,
-        opt: WidgetOption,
-        scroll_behavior: ScrollBehavior,
-        event: &UiInputEvent,
-    ) -> InputResult {
-        route_public_widget_input(self.runtime, state, rect, self.content_clip, opt, scroll_behavior, event)
+    pub(crate) fn route_widget_input(&mut self, state: &UiNodeState, rect: Recti, opt: WidgetOption, event: &UiInputEvent) -> InputResult {
+        route_public_widget_input(self.runtime, state, rect, self.content_clip, opt, event)
     }
 }
 

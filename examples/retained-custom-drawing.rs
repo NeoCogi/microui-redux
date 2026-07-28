@@ -84,10 +84,6 @@ impl Widget for RetainedPaint {
         &self.opt
     }
 
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        ScrollBehavior::NONE
-    }
-
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         Dimensioni::new(96, 48)
     }

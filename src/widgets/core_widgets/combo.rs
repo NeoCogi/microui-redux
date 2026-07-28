@@ -28,7 +28,7 @@ impl Combo {
         Self {
             selected: 0,
             open: false,
-            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::NONE),
+            config: WidgetConfig::new(WidgetOption::FRAME),
             label: String::new(),
             clamped: false,
             last_anchor: Recti::default(),
@@ -36,11 +36,11 @@ impl Combo {
     }
 
     /// Creates a new combo state with explicit widget options.
-    pub fn with_opt(opt: WidgetOption, scroll_behavior: ScrollBehavior) -> Self {
+    pub fn with_opt(opt: WidgetOption) -> Self {
         Self {
             selected: 0,
             open: false,
-            config: WidgetConfig::new(opt, scroll_behavior),
+            config: WidgetConfig::new(opt),
             label: String::new(),
             clamped: false,
             last_anchor: Recti::default(),
@@ -180,10 +180,6 @@ impl Combo {
 impl Widget for Combo {
     fn widget_opt(&self) -> &WidgetOption {
         &self.config.opt
-    }
-
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.config.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

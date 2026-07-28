@@ -195,7 +195,7 @@ fn main() -> Result<(), String> {
         tree.node(NodeOptions::with_policy(Policy::fixed(64, 64))).widget(&probe);
     });
     let root = ctx.create_window("texture clipping smoke", rect(0, 0, 64, 64), tree);
-    ctx.set_root_options(root, ContainerOption::NO_TITLE | ContainerOption::NO_CLOSE | ContainerOption::NO_RESIZE);
+    ctx.set_root_options(root, WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE);
 
     // Keep the root background out of the recording log so the assertions isolate the widget's
     // atlas/texture ordering while still exercising the retained public rendering path.

@@ -31,7 +31,7 @@ impl ListItem {
         Self {
             label: label.into(),
             icon: None,
-            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
+            config: WidgetConfig::new(opt),
         }
     }
 
@@ -49,7 +49,7 @@ impl ListItem {
         Self {
             label: label.into(),
             icon: Some(icon),
-            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
+            config: WidgetConfig::new(opt),
         }
     }
 
@@ -140,7 +140,7 @@ impl ListBox {
         Self {
             label: label.into(),
             image,
-            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
+            config: WidgetConfig::new(opt),
         }
     }
 

@@ -56,16 +56,14 @@
 //! frame results that application code reads after each retained update.
 use std::{cell::RefCell, rc::Rc};
 
+use bitflags::bitflags;
 #[cfg(any(feature = "builder", feature = "png_source"))]
 use std::io::Cursor;
 
 #[cfg(any(feature = "builder", feature = "png_source"))]
 use png::{ColorType, Decoder};
 
-use crate::{
-    rect, ContainerOption, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId,
-    UiRuntime,
-};
+use crate::{rect, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId, UiRuntime};
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, DisplayList, FrameInfo, RenderError, Renderer, RendererBackend};
 use crate::ui_node::{pointer_events_from_input, UiNode, UiNodeId};
 use window_manager::WindowEntry;
@@ -77,6 +75,25 @@ mod window_manager;
 pub use builder::{GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, UiNodeSet, UiNodeBuilder};
 pub use retained::{widget_handle, WidgetHandle};
 pub(crate) use retained::{erased_widget_state, WidgetStateHandleDyn};
+
+bitflags! {
+    #[derive(Copy, Clone)]
+    /// Options that control a root window, dialog, or popup.
+    pub struct WindowOption : u32 {
+        /// Gives the root a Style-owned outer border and inset content area.
+        const FRAME = 1024;
+        /// Automatically adapts the root size to its content.
+        const AUTO_SIZE = 512;
+        /// Hides the title bar.
+        const NO_TITLE = 128;
+        /// Hides the close button.
+        const NO_CLOSE = 64;
+        /// Prevents the user from resizing the root.
+        const NO_RESIZE = 16;
+        /// No special options.
+        const NONE = 0;
+    }
+}
 
 /// Opaque identifier for a root window, dialog, or popup registered with [`Context`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

@@ -9,7 +9,7 @@ use super::*;
 use crate::{
     test_support::{recording_backend, test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer, RenderEvent},
     color, widget_handle, AtlasHandle, Button, Combo, Custom, ListItem, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId,
-    SizePolicy, ScrollBehavior, StackDirection, TextBlock, UiInputEvent, Widget, WidgetHandle, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, UiNodeBuilder,
+    ScrollAreaOption, SizePolicy, StackDirection, TextBlock, UiInputEvent, Widget, WidgetHandle, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, UiNodeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
@@ -47,26 +47,17 @@ fn chrome_key(
 struct AlwaysSubmitWidget {
     label: &'static str,
     opt: WidgetOption,
-    scroll_behavior: ScrollBehavior,
 }
 
 impl AlwaysSubmitWidget {
     fn new(label: &'static str) -> Self {
-        Self {
-            label,
-            opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
-        }
+        Self { label, opt: WidgetOption::NONE }
     }
 }
 
 impl Widget for AlwaysSubmitWidget {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.scroll_behavior
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
@@ -212,12 +203,12 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
     let tree = UiNodeBuilder::build(|tree| {
         scroll_area = tree
             .node(NodeOptions::with_policy(Policy::fill()))
-            .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+            .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                 tree.node(NodeOptions::with_policy(Policy::fixed(95, 200))).widget(child.clone());
             });
     });
     let root = ctx.create_window("window", rect(0, 0, 100, 100), tree);
-    ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::NO_TITLE);
+    ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE);
 
     ctx.update_ui();
     ctx.update_ui();
@@ -255,7 +246,7 @@ fn title_drag_does_not_route_pointer_to_scroll_area() {
     let tree = UiNodeBuilder::build(|tree| {
         scroll_area = tree
             .node(NodeOptions::with_policy(Policy::fill()))
-            .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+            .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                 tree.node(NodeOptions::with_policy(Policy::fixed(95, 220))).widget(child.clone());
             });
     });
@@ -387,7 +378,7 @@ fn reopening_dialog_replaces_old_commands_with_current_frame_commands() {
     let second_tree = UiNodeBuilder::build(|tree| {
         tree.text("after");
     });
-    let opt = ContainerOption::FRAME | ContainerOption::NO_TITLE | ContainerOption::NO_CLOSE | ContainerOption::NO_RESIZE;
+    let opt = WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE;
     let root = ctx.create_dialog("dialog", rect(10, 10, 80, 40), first_tree);
     ctx.set_root_options(root, opt);
 
@@ -439,7 +430,7 @@ fn reshown_roots_drop_stale_scroll_area_state_after_a_gap() {
     let mut ctx = Context::new_test(backend, Dimensioni::new(200, 200));
     let mut scroll_area = NodeId::default();
     let tree_with_scroll_area = UiNodeBuilder::build(|tree| {
-        scroll_area = tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+        scroll_area = tree.scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
             tree.text("scroll area child");
         });
     });
@@ -468,7 +459,7 @@ fn scroll_area_node_renders_scroll_area_node() {
     let mut ctx = Context::new_test(backend, Dimensioni::new(200, 200));
     let mut scroll_area = NodeId::default();
     let tree = UiNodeBuilder::build(|tree| {
-        scroll_area = tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+        scroll_area = tree.scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
             tree.text("scroll area child");
         });
     });
@@ -488,7 +479,7 @@ fn scroll_area_paints_disclosure_headers_in_screen_space() {
     let tree_node = widget_handle(Node::tree("Visible Tree", NodeStateValue::Expanded));
     let tree = UiNodeBuilder::build(|tree| {
         tree.node(NodeOptions::with_policy(Policy::fixed(180, 100)))
-            .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+            .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                 tree.header(&header, |tree| {
                     tree.tree_node(&tree_node, |tree| {
                         tree.text("Visible Child");
@@ -497,7 +488,7 @@ fn scroll_area_paints_disclosure_headers_in_screen_space() {
             });
     });
     let root = ctx.create_window("window", rect(0, 0, 200, 130), tree);
-    ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::NO_TITLE);
+    ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE);
 
     ctx.update_ui();
 
@@ -537,7 +528,7 @@ fn auto_sized_titled_window_uses_current_frame_content_size() {
         tree.text("hello\nhello\nhello");
     });
     let root = ctx.create_window("window", rect(0, 0, 1, 1), tree);
-    ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::AUTO_SIZE);
+    ctx.set_root_options(root, WindowOption::FRAME | WindowOption::AUTO_SIZE);
 
     ctx.update_ui();
 
@@ -586,7 +577,7 @@ fn auto_sized_titled_window_body_fits_current_content_same_frame() {
         tree.text("hello\nhello\nhello\nhello");
     });
     let root = ctx.create_window("window", rect(0, 0, 1, 1), tree);
-    ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::AUTO_SIZE);
+    ctx.set_root_options(root, WindowOption::FRAME | WindowOption::AUTO_SIZE);
 
     ctx.update_ui();
 
@@ -606,7 +597,7 @@ fn title_option_controls_root_window_title_bar_geometry() {
     let mut ctx = Context::new_test(backend, Dimensioni::new(240, 120));
     let titled = ctx.create_window("titled", rect(0, 0, 80, 40), UiNodeBuilder::build(|_tree| {}));
     let plain = ctx.create_window("plain", rect(100, 0, 80, 40), UiNodeBuilder::build(|_tree| {}));
-    ctx.set_root_options(plain, ContainerOption::FRAME | ContainerOption::NO_TITLE);
+    ctx.set_root_options(plain, WindowOption::FRAME | WindowOption::NO_TITLE);
     ctx.update_ui();
 
     let titled_rect = ctx.root_rect(titled).unwrap();
@@ -1272,7 +1263,7 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     let popup_root = ctx.create_popup("combo popup", UiNodeSet::default());
     ctx.set_root_options(
         popup_root,
-        ContainerOption::FRAME | ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
+        WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
     );
     let combo = widget_handle(Combo::new());
     let items = [widget_handle(ListItem::new("Apple")), widget_handle(ListItem::new("Banana"))];
@@ -1289,7 +1280,7 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
             }
         }),
     );
-    ctx.set_root_options(main_root, ContainerOption::FRAME | ContainerOption::NO_TITLE | ContainerOption::NO_RESIZE);
+    ctx.set_root_options(main_root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE);
     let popup_items = items.clone();
     ctx.set_root_nodes(
         popup_root,
@@ -1451,6 +1442,41 @@ fn node_popup_closes_when_clicking_another_node_window() {
 }
 
 #[test]
+fn scroll_area_requires_enable_scroll_option() {
+    let atlas = make_test_atlas();
+    let backend = NoopRenderer { atlas };
+    let mut ctx = Context::new_test(backend, Dimensioni::new(240, 160));
+    let mut style = Style::default();
+    style.padding = 0;
+    style.scrollbar_size = 10;
+    ctx.set_style(&style);
+
+    let mut scroll_area = NodeId::default();
+    let inner = widget_handle(Button::new("inner"));
+    let tree = UiNodeBuilder::build(|tree| {
+        scroll_area = tree
+            .node(NodeOptions::with_policy(Policy::fixed(90, 40)))
+            .scroll_area(ScrollAreaOption::FRAME, |tree| {
+                tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner.clone());
+            });
+    });
+    let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
+    ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE);
+
+    ctx.update_ui();
+    ctx.update_ui();
+
+    let body = ctx.scroll_area_body(root, scroll_area).unwrap();
+    ctx.mousemove(body.x + 2, body.y + 2);
+    ctx.update_ui();
+    ctx.scroll(0, 24);
+    ctx.update_ui();
+
+    let scroll = ctx.scroll_area_scroll(root, scroll_area).unwrap();
+    assert_eq!((scroll.x, scroll.y), (0, 0));
+}
+
+#[test]
 fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
     let atlas = make_test_atlas();
     let backend = NoopRenderer { atlas };
@@ -1464,35 +1490,37 @@ fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
     let inner = widget_handle(Button::new("inner"));
     let bottom = widget_handle(Button::new("bottom"));
     let tree = UiNodeBuilder::build(|tree| {
-        scroll_area = tree
-            .node(NodeOptions::with_policy(Policy::fixed(90, 40)))
-            .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
-                tree.node(NodeOptions::with_policy(Policy::fixed(180, 140))).widget(inner.clone());
-            });
+        scroll_area =
+            tree.node(NodeOptions::with_policy(Policy::fixed(90, 40)))
+                .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
+                    tree.node(NodeOptions::with_policy(Policy::fixed(180, 140))).widget(inner.clone());
+                });
         tree.node(NodeOptions::with_policy(Policy::fixed(90, 180))).widget(bottom.clone());
     });
     let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
-    ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::NO_TITLE);
+    ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE);
 
     ctx.update_ui();
     ctx.update_ui();
 
     ctx.mousemove(10, 10);
     ctx.update_ui();
-    ctx.scroll(0, -24);
+    ctx.scroll(0, 24);
     ctx.update_ui();
 
     let nested_scroll = ctx.scroll_area_scroll(root, scroll_area).unwrap();
-    assert!(nested_scroll.y > 0);
+    assert_eq!(
+        nested_scroll.y, 24,
+        "positive wheel delta should move scroll content in the same direction as TextArea"
+    );
     let body = ctx.scroll_area_body(root, scroll_area).unwrap();
     ctx.mousemove(body.x + 2, body.y + body.height + 2);
     ctx.update_ui();
-    ctx.scroll(-24, 0);
+    ctx.scroll(24, 0);
     ctx.update_ui();
 
     let scroll = ctx.scroll_area_scroll(root, scroll_area).unwrap();
-    assert!(scroll.x > 0);
-    assert!(scroll.y > 0);
+    assert_eq!((scroll.x, scroll.y), (24, 24));
 }
 
 #[test]
@@ -1508,14 +1536,14 @@ fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
     let mut scroll_area = NodeId::default();
     let inner = widget_handle(Button::new("inner"));
     let tree = UiNodeBuilder::build(|tree| {
-        scroll_area = tree
-            .node(NodeOptions::with_policy(Policy::fixed(90, 40)))
-            .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
-                tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner.clone());
-            });
+        scroll_area =
+            tree.node(NodeOptions::with_policy(Policy::fixed(90, 40)))
+                .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
+                    tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner.clone());
+                });
     });
     let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
-    ctx.set_root_options(root, ContainerOption::FRAME | ContainerOption::NO_TITLE);
+    ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE);
 
     ctx.update_ui();
     ctx.update_ui();

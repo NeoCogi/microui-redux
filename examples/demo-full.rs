@@ -110,7 +110,6 @@ struct PainterDemo {
     phase: f32,
     star_center: Option<Vec2f>,
     opt: WidgetOption,
-    scroll_behavior: ScrollBehavior,
 }
 
 impl PainterDemo {
@@ -119,7 +118,6 @@ impl PainterDemo {
             phase: 0.0,
             star_center: None,
             opt: WidgetOption::NONE,
-            scroll_behavior: ScrollBehavior::NONE,
         }
     }
 }
@@ -127,10 +125,6 @@ impl PainterDemo {
 impl Widget for PainterDemo {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.scroll_behavior
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
@@ -272,7 +266,6 @@ struct FalloffEditor {
     active: Option<FalloffTarget>,
     hovered: Option<FalloffTarget>,
     opt: WidgetOption,
-    scroll_behavior: ScrollBehavior,
 }
 
 impl FalloffEditor {
@@ -311,7 +304,6 @@ impl FalloffEditor {
             active: None,
             hovered: None,
             opt: WidgetOption::HOLD_FOCUS,
-            scroll_behavior: ScrollBehavior::NONE,
         };
         editor.sanitize();
         editor
@@ -530,10 +522,6 @@ impl Widget for FalloffEditor {
         &self.opt
     }
 
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.scroll_behavior
-    }
-
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         Dimensioni::new(300, 220)
     }
@@ -721,7 +709,7 @@ impl SuzanneWidget {
     fn new(data: Rc<RefCell<SuzanneData>>) -> Self {
         Self {
             data,
-            config: WidgetConfig::new(WidgetOption::HOLD_FOCUS, ScrollBehavior::GRAB_SCROLL),
+            config: WidgetConfig::new(WidgetOption::HOLD_FOCUS | WidgetOption::GRAB_SCROLL),
         }
     }
 }
@@ -729,10 +717,6 @@ impl SuzanneWidget {
 impl Widget for SuzanneWidget {
     fn widget_opt(&self) -> &WidgetOption {
         &self.config.opt
-    }
-
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.config.scroll_behavior
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
@@ -1040,12 +1024,12 @@ impl State {
         let combo_popup_root = ctx.create_popup("Combo Box Popup", UiNodeSet::default());
         ctx.set_root_options(
             combo_popup_root,
-            ContainerOption::FRAME | ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
+            WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
         );
         let popup_root = ctx.create_popup("Test Popup", UiNodeSet::default());
         ctx.set_root_options(
             popup_root,
-            ContainerOption::FRAME | ContainerOption::AUTO_SIZE | ContainerOption::NO_RESIZE | ContainerOption::NO_TITLE,
+            WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
         );
         ctx.set_root_visible(popup_root, false);
         let typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), UiNodeSet::default());
@@ -1197,7 +1181,7 @@ impl State {
             triangle_data,
             triangle_renderer,
             suzanne_renderer,
-            triangle_widget: widget_handle(Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS, ScrollBehavior::NONE)),
+            triangle_widget: widget_handle(Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS)),
             painter_widget: widget_handle(PainterDemo::new()),
             falloff_widget: widget_handle(FalloffEditor::new()),
             suzanne_widget: widget_handle(SuzanneWidget::new(suzanne_data.clone())),
@@ -1307,7 +1291,7 @@ impl State {
             let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Remainder(0)];
 
             tree.node(NodeOptions::with_policy(Policy::fill()))
-                .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+                .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                     for ((label, sliders), swatch) in style_color_labels
                         .iter()
                         .zip(style_color_sliders.chunks_exact(4))
@@ -1340,7 +1324,7 @@ impl State {
         self.log_tree = UiNodeBuilder::build(|tree| {
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
-                tree.scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+                tree.scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                     tree.widget(&log_text);
                 });
             });
@@ -1537,7 +1521,7 @@ impl State {
             let [texture0, texture1, texture2, texture3] = texture_buttons.clone();
 
             tree.node(NodeOptions::with_policy(Policy::fill()))
-                .scroll_area(ContainerOption::FRAME, ScrollBehavior::NONE, |tree| {
+                .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                 Self::section(tree, &window_header, |tree| {
                     tree.row(&window_info_row, SizePolicy::Auto, |tree| {
                         tree.widget(&label_pos);

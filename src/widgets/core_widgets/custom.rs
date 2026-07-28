@@ -24,10 +24,10 @@ impl Custom {
     }
 
     /// Creates a custom widget state with explicit options.
-    pub fn with_opt(name: impl Into<String>, opt: WidgetOption, scroll_behavior: ScrollBehavior) -> Self {
+    pub fn with_opt(name: impl Into<String>, opt: WidgetOption) -> Self {
         Self {
             name: name.into(),
-            config: WidgetConfig::new(opt, scroll_behavior),
+            config: WidgetConfig::new(opt),
         }
     }
 

@@ -55,15 +55,37 @@
 use std::cmp::max;
 use std::collections::HashMap;
 
+use bitflags::bitflags;
 use rs_math3d::Dimensioni;
 
 use crate::atlas::{AtlasHandle, EXPAND_DOWN_ICON};
 use crate::window_manager::RootId;
 use crate::id::Id;
-use crate::input::{ResourceState, ScrollBehavior, WidgetOption};
+use crate::input::ResourceState;
 use crate::style::Style;
 use crate::ui_node::UiInputEvent;
 pub use crate::widget_ctx::{WidgetInputEvents, WidgetPaintCtx, WidgetUpdateCtx};
+
+bitflags! {
+    #[derive(Copy, Clone)]
+    /// Widget-specific options that influence layout and interactivity.
+    pub struct WidgetOption : u32 {
+        /// Gives the widget a Style-owned outer border and inset content rectangle.
+        const FRAME = 512;
+        /// Keeps keyboard focus while the widget is held.
+        const HOLD_FOCUS = 256;
+        /// Consumes scroll input while the widget is hovered.
+        const GRAB_SCROLL = 32;
+        /// Disables interaction for the widget.
+        const NO_INTERACT = 4;
+        /// Aligns the widget to the right side of the cell.
+        const ALIGN_RIGHT = 2;
+        /// Centers the widget inside the cell.
+        const ALIGN_CENTER = 1;
+        /// No special options.
+        const NONE = 0;
+    }
+}
 
 /// High-level focus behavior requested by a widget.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -77,7 +99,7 @@ pub enum FocusPolicy {
 }
 
 impl FocusPolicy {
-    /// Derives a policy from legacy widget options.
+    /// Derives a policy from widget options.
     pub fn from_widget_options(opt: WidgetOption) -> Self {
         if opt.intersects(WidgetOption::HOLD_FOCUS) {
             Self::HoldUntilBlur
@@ -102,10 +124,6 @@ impl FocusPolicy {
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
-    /// Returns the scroll behavior for this state.
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        ScrollBehavior::NONE
-    }
     /// Returns the intrinsic widget size for the current frame's layout pass.
     ///
     /// `avail` reports the current container body size visible to the widget.
@@ -125,10 +143,6 @@ pub trait Widget {
     /// Widgets can override this to apply dynamic option adjustments.
     fn effective_widget_opt(&self) -> WidgetOption {
         *self.widget_opt()
-    }
-    /// Returns the effective scroll behavior used by generic dispatch.
-    fn effective_scroll_behavior(&self) -> ScrollBehavior {
-        self.scroll_behavior()
     }
     /// Returns the focus behavior used by generic dispatch.
     fn focus_policy(&self) -> FocusPolicy {
@@ -337,13 +351,9 @@ impl FrameResults {
     }
 }
 
-impl Widget for (WidgetOption, ScrollBehavior) {
+impl Widget for WidgetOption {
     fn widget_opt(&self) -> &WidgetOption {
-        &self.0
-    }
-
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.1
+        self
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {

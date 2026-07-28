@@ -78,7 +78,7 @@ impl Textbox {
         Self {
             buf,
             cursor,
-            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::NONE),
+            config: WidgetConfig::new(WidgetOption::FRAME),
         }
     }
 
@@ -89,7 +89,7 @@ impl Textbox {
         Self {
             buf,
             cursor,
-            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
+            config: WidgetConfig::new(opt),
         }
     }
 
@@ -273,10 +273,6 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
 impl Widget for Textbox {
     fn widget_opt(&self) -> &WidgetOption {
         &self.config.opt
-    }
-
-    fn scroll_behavior(&self) -> ScrollBehavior {
-        self.config.scroll_behavior
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {

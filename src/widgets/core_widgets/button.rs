@@ -47,7 +47,7 @@ impl Button {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             content: ButtonContent::Text { label: label.into(), icon: None },
-            config: WidgetConfig::new(WidgetOption::FRAME, ScrollBehavior::NONE),
+            config: WidgetConfig::new(WidgetOption::FRAME),
             fill: WidgetFillOption::ALL,
         }
     }
@@ -56,7 +56,7 @@ impl Button {
     pub fn with_opt(label: impl Into<String>, opt: WidgetOption) -> Self {
         Self {
             content: ButtonContent::Text { label: label.into(), icon: None },
-            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
+            config: WidgetConfig::new(opt),
             fill: WidgetFillOption::ALL,
         }
     }
@@ -65,7 +65,7 @@ impl Button {
     pub fn with_icon(label: impl Into<String>, icon: IconId, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::Text { label: label.into(), icon: Some(icon) },
-            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
+            config: WidgetConfig::new(opt),
             fill,
         }
     }
@@ -74,7 +74,7 @@ impl Button {
     pub fn with_image(label: impl Into<String>, image: Option<TextureId>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::Image { label: label.into(), image },
-            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
+            config: WidgetConfig::new(opt),
             fill,
         }
     }
@@ -83,7 +83,7 @@ impl Button {
     pub fn with_scaled_image(label: impl Into<String>, image: Option<TextureId>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::ScaledImage { label: label.into(), image },
-            config: WidgetConfig::new(opt, ScrollBehavior::NONE),
+            config: WidgetConfig::new(opt),
             fill,
         }
     }
