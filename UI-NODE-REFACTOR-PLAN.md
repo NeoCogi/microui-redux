@@ -1990,7 +1990,7 @@ explicit decision before changing the criterion.
   cargo test --release ui_node_p0_baseline -- --ignored --nocapture --test-threads=1
   ```
 
-- [ ] **P0.1 — Freeze the runtime/state separation contract**
+- [x] **P0.1 — Freeze the runtime/state separation contract**
 
   **Problem**
 
@@ -2013,6 +2013,13 @@ explicit decision before changing the criterion.
   weak typed handle. `WidgetState` has no
   measure/update/paint behavior and is never used as a substitute dispatch trait. Do not add
   identity, mount, child, or Context methods to `Widget`.
+
+  Apply the same construction boundary to containers through associated-type `ContainerBuilder`,
+  the non-overridable `create_container` factory, and opaque `OwnedContainer`. Construction returns
+  `Option<WidgetStateHandle<Self::State>>` plus `OwnedContainer`; the opaque owner retains the sole
+  persistent strong state cell while the concrete runtime receives only the matching weak typed
+  handle. `ContainerState: WidgetState` remains marker-only and does not acquire child access or
+  runtime behavior.
 
   Specify the replacement of the current crate-private `Container: NodeBehavior` coupling with the
   final public object-safe
@@ -2037,15 +2044,35 @@ explicit decision before changing the criterion.
   - An external custom leaf implements `Widget`, `WidgetState`, `WidgetParameters`, and
     `WidgetBuilder` without private APIs.
   - The P1.3/P2.1 batch's external custom-container test implements `Widget`, `Container`, and marker
-    `ContainerState`, owns its strong state cell, constructs `Children` through
-    `new`/`FromIterator`, supplies the same authoritative collection exactly once through both opaque
-    visitors, measures/layouts it through the exact public scoped operations, constructs it through
-    `create_container`, and enters the tree through public `Node::container(OwnedContainer)` without
-    private APIs.
+    `ContainerState`; proves the returned `OwnedContainer` retains the sole persistent strong state
+    cell while the concrete runtime receives its weak handle; constructs `Children` through
+    `new`/`FromIterator`; supplies the same authoritative collection exactly once through both
+    opaque visitors; measures/layouts it through the exact public scoped operations; constructs it
+    through `create_container`; and enters the tree through public
+    `Node::container(OwnedContainer)` without private APIs.
+  - Container conformance tests panic with the specified diagnostics when either opaque visitor
+    receives zero or multiple `Children` submissions; downstream documentation states the
+    same-authoritative-collection obligation that safe Rust cannot enforce across the two methods.
   - Ordinary downstream code cannot construct `ChildrenVisitor`/`ChildrenVisitorMut`, install a raw
     child callback, or obtain a `Children` borrow from `ContainerState`.
   - A compile-time supertrait check proves every `Container` is a `Widget`; `Container` declares no
     second measure/update/paint methods.
+
+  **Frozen contract evidence (2026-07-29)**
+
+  The normative target signatures and ownership diagrams above now define one complete separation
+  boundary for both leaves and containers: concrete runtime objects implement `Widget` (and, for
+  containers, `Container`), application data implements marker `WidgetState`/`ContainerState`, and
+  only opaque owners retain persistent strong state cells. Optional application capabilities and
+  concrete runtimes receive weak typed handles; no state trait becomes a phase-dispatch adapter.
+
+  Repository inspection confirms that the current implementation still returns `ResourceState`
+  from `Widget::update`, stores application/runtime state together, clones strong `WidgetHandle`
+  values into `WidgetStateHandleDyn`, and couples crate-private `Container` to `NodeBehavior` with
+  raw child-slice access. These are recorded migration gaps rather than preserved behavior. P0.1
+  intentionally changes no production API: its compile-time and runtime acceptance criteria are
+  protected specifications that become executable and green in their named P1.0/P1.1/P1.3/P2.3
+  owner batches, with the public container surface landing atomically rather than partially.
 
 - [ ] **P0.2 — Freeze the optional weak-exposure contract**
 
