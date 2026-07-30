@@ -2177,7 +2177,7 @@ explicit decision before changing the criterion.
   executable and green in P1.0/P1.3, including the hidden-state proof implementations needed to
   inspect otherwise unexposed ownership.
 
-- [ ] **P0.3 — Freeze the state-owned `Children` contract**
+- [x] **P0.3 — Freeze the state-owned `Children` contract**
 
   **Problem**
 
@@ -2191,11 +2191,10 @@ explicit decision before changing the criterion.
   **Settled decision and rationale**
 
   Every concrete container state owns one opaque `Children`, and `OwnedContainer` owns the sole
-  persistent strong `Rc<RefCell<State>>`. A
-  container that permits application topology changes
-  returns `Some(WidgetStateHandle<State>)`; a fixed/internal container returns `None` but retains the
-  same strong ownership shape. Application code changes membership through the typed state handle,
-  with no Context argument, mounted identity, `ContainerHandle`, or second editor API.
+  persistent strong `Rc<RefCell<State>>`. A container that permits application topology changes
+  returns `Some(WidgetStateHandle<State>)`; a fixed/internal container returns `None` but retains
+  the same strong ownership shape. Application code changes membership through the typed state
+  handle, with no Context argument, mounted identity, `ContainerHandle`, or second editor API.
 
   A Context-owned `ContainerEditor` was rejected because it requires public or handle-carried mount
   identity and duplicates checked state mutation. Rebuilding/replacing roots was rejected because it
@@ -2206,10 +2205,21 @@ explicit decision before changing the criterion.
 
   **Wanted behavior and contract**
 
-  Add public opaque `Children` with `new`, `Default`, and `FromIterator<Node>` construction; public
-  marker trait `ContainerState: WidgetState`; concrete built-in state types; and state-local `len`,
-  `is_empty`, `push`, `insert`, `remove_drop`, `clear`, and `replace` operations. No built-in state
+  Add public opaque `Children` with `new`, `Default`, and `FromIterator<Node>` construction plus
+  `len`, `is_empty`, indexed `measure_child`, `push`, `insert`, `remove_drop`, `clear`, and `replace`.
+  Add public marker trait `ContainerState: WidgetState` and concrete built-in state types whose
+  state-local membership methods mirror the applicable `Children` operations. No built-in state
   exposes `Children`, `&Children`, or `&mut Children`.
+
+  `Children::new`/`Default` are empty, and `FromIterator` preserves iterator order. `measure_child`
+  returns `None` for an out-of-range index without exposing the node. `push` appends. `insert`
+  accepts every index in `0..=len`; a larger index leaves the collection unchanged and returns the
+  exact still-unmounted input `Node`. `remove_drop` returns `true` and drops the indexed owner when
+  the index exists, or returns `false` without mutation otherwise. `clear` drops every current
+  owner, and `replace` collects the input in order and drops the previous owners without returning
+  them. `Children` is not `Clone` and exposes no public iterator, raw node access, detachment, or
+  removal-and-return operation.
+
   Use `WidgetStateHandle<C>` for container state; do not add `ContainerHandle` or `ContainerEditor`.
   Every public built-in container constructor returns
   `(Option<WidgetStateHandle<C>>, Node)` and performs its `create_container`/`OwnedContainer`
@@ -2224,6 +2234,19 @@ explicit decision before changing the criterion.
   ScrollArea lands in P2.2 using that already-complete foundation. Downstream compile tests exercise
   the Column/Disclosure/custom-container paths in the atomic batch and expand to every built-in as
   each later item lands.
+
+  The framework-provided APIs enforce unique ownership and no-reparent behavior for built-ins and
+  ordinary callers. Safe Rust cannot prevent a downstream custom state type from publishing its own
+  raw `Children` access or swapping collections; preserving the same no-detach/no-reparent boundary
+  is therefore an explicit safe custom-container conformance obligation, not an `unsafe` trait
+  requirement.
+
+  Successful direct removal or replacement drops the affected `Node` owner immediately. Its weak
+  widget/container state handles expire after any already-active access upgrades finish. Private
+  focus, hover, capture, and queued routed targets are checked against the retained tree before use
+  and sanitized at the next safe boundary; a stale target is cleared, never redirected, and a
+  replacement at the same index does not inherit it. Regardless of which cross-container mutation
+  a current traversal has already observed, the next ordinary frame is fully stable.
 
   The following target code is illustrative of the concrete construction and mutation contract:
 
@@ -2299,22 +2322,34 @@ explicit decision before changing the criterion.
 
   **Acceptance tests**
 
-  - Every child has exactly one owner in one `Children` value.
+  - Framework construction and mutation consume each unique `Node` into exactly one `Children`
+    owner; no framework-provided safe operation clones, detaches, shares, moves, or reparents an
+    attached node.
+  - Empty construction, ordered `FromIterator`, append, insertion at zero/`len`, out-of-range
+    insertion, valid/invalid `remove_drop`, empty/non-empty `clear`, ordered replacement, and
+    out-of-range `measure_child` follow the exact boundary behavior above.
+  - A failed `insert` returns the exact input node with its weak descendant handles still live; a
+    successful removal/clear/replacement returns no node and makes removed-state handles report
+    `Dropped` after any active access upgrade ends.
   - Same-container mutation during its traversal returns `Borrowed` without panic.
   - Mutation of another available container follows traversal order: current phases process the
     state they observe without rollback, and the next ordinary frame is fully stable.
-  - Removal drops the node and never returns an attached node.
   - Marker `ContainerState` has no methods, and public `Children` has no direct node iterator or API
     yielding an attached `Node`, `&Node`, or `&mut Node`.
-  - Compile-fail tests prove built-in state handles cannot obtain `&mut Children` and cannot use
-    `mem::swap`, `mem::replace`, or `mem::take` to move an attached collection.
+  - Compile-fail tests prove `Children` is not `Clone`; built-in state handles cannot obtain
+    `Children`/`&Children`/`&mut Children`; and ordinary callers cannot use `mem::swap`,
+    `mem::replace`, or `mem::take` to move an attached built-in collection.
   - Ordinary downstream callers cannot construct the opaque child visitors. A second `visit` call
     panics immediately and zero calls panic after the container method returns, with diagnostics
     naming the immutable/mutable method and the exactly-one rule.
   - Built-ins and the downstream conformance example submit the same authoritative `Children` from
     both visitor methods; documentation states that safe custom implementations must do the same and
-    that the framework cannot type-enforce it across the two object-safe calls.
+    must not expose attached collection/node extraction or reparenting, and that the framework
+    cannot type-enforce those obligations across downstream safe APIs and the two object-safe calls.
   - No topology method accepts Context or stores Context identity.
+  - Removing or replacing a focused, hovered, captured, or queued-event target drops its owner,
+    clears the stale private target at the next safe boundary, never redirects it, and does not
+    transfer interaction state to a replacement at the same index.
   - The atomic-batch downstream compile test constructs Column and Disclosure from their completed
     `Node` returns without a wrapping step; P2.0/P2.2 extend the same test to each later built-in.
   - Construction tests grow with the rollout and ultimately prove every public dynamic built-in
@@ -2327,6 +2362,26 @@ explicit decision before changing the criterion.
     `Context::set_root_nodes`.
   - Public documentation includes the construction, replacement, removal, hidden-container, and
     borrow-conflict examples above.
+
+  **Frozen contract evidence (2026-07-29)**
+
+  The normative container-ownership and runtime-lifecycle sections above now define one mutation
+  path: each concrete state owns one opaque ordered `Children`, its `OwnedContainer` retains the
+  strong state cell, and optional weak typed handles provide checked state-local membership changes.
+  The operation boundaries preserve unique unmounted inputs on failure, commit ownership exactly
+  once on success, never return an attached node, and separate immediate owner destruction from
+  deferred scalar-target sanitization. The custom-container exception is documented as a safe API
+  conformance obligation because Rust cannot enforce it across arbitrary downstream inherent
+  methods.
+
+  Repository inspection confirms that the current built-in containers instead own raw
+  `Vec<UiNode>` fields behind crate-private `Container: NodeBehavior`; `children_mut` lends the
+  complete vector, `remove_child` returns an attached node, builder assembly replaces whole child
+  vectors, and tests can swap collections between attached containers. `Context::set_root_nodes`
+  replaces complete root projections, and the file dialog rebuilds and installs its full tree for
+  local directory-list changes. Those facts are migration cost, not preserved behavior. P0.3
+  intentionally changes no production API: its ownership, boundary, compile-fail, lifecycle, and
+  file-dialog criteria become executable and green in P1.3/P2.0-P2.4/P3.2.
 
 - [ ] **P0.4 — Freeze the typed-state interaction contract**
 
