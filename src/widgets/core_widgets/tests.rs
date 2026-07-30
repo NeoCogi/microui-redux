@@ -110,7 +110,8 @@ fn convenience_constructors_store_explicit_outer_frame_policy() {
             .intersects(WidgetOption::FRAME)
     );
 
-    assert!(!Checkbox::new("checkbox", false).widget_opt().intersects(WidgetOption::FRAME));
+    let (_, checkbox) = Checkbox::create(CheckboxParameters::new("checkbox", false));
+    assert!(!checkbox.widget_opt().intersects(WidgetOption::FRAME));
     assert!(!ListItem::new("item").widget_opt().intersects(WidgetOption::FRAME));
     assert!(!ListBox::new("item", None).widget_opt().intersects(WidgetOption::FRAME));
     assert!(!Custom::new("custom").widget_opt().intersects(WidgetOption::FRAME));

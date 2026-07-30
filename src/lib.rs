@@ -135,7 +135,10 @@ pub mod retained {
     pub use crate::text_layout::TextWrap;
     pub use crate::window_manager::{Context, ContextFrame, RootId, WindowOption};
     pub use crate::ui_node::{ScrollAreaOption, UiInputEvent};
-    pub use crate::widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx};
+    pub use crate::widget::{
+        FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetBuilder, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState,
+        WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    };
     pub use crate::window_manager::{widget_handle, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, UiNodeSet, UiNodeBuilder};
 }
 
@@ -154,13 +157,13 @@ pub mod prelude {
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame};
     pub use crate::retained::{
         Context, ContextFrame, CustomRenderArgs, CustomRenderHandle, FocusPolicy, FrameResultGeneration, NodeBuilder, NodeId, NodeOptions, Policy, RetainedId,
-        RootId, ScrollAreaOption, TextWrap, UiInputEvent, Widget, WidgetHandle, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, WindowOption,
-        UiNodeSet, UiNodeBuilder, widget_handle,
+        RootId, ScrollAreaOption, TextWrap, UiInputEvent, Widget, WidgetBuilder, WidgetHandle, WidgetInputEvents, WidgetOption, WidgetPaintCtx,
+        WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, WindowOption, UiNodeSet, UiNodeBuilder, widget_handle,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
-        Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, Slider, TextArea, TextBlock, Textbox,
-        WidgetConfig,
+        Button, ButtonContent, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch, Combo, Custom, ListBox, ListItem, Node,
+        NodeStateValue, Number, Slider, TextArea, TextBlock, Textbox, WidgetConfig,
     };
     pub use rs_math3d::{
         Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3,
@@ -181,11 +184,14 @@ pub use input::{ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceStat
 pub use text_layout::TextWrap;
 pub use sizing::{SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
-pub use widget::{FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx};
+pub use widget::{
+    FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetBuilder, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState,
+    WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+};
 pub use ui_node::{ScrollAreaOption, UiInputEvent};
 pub use widgets::{
-    Button, ButtonContent, Checkbox, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue, Number, Slider, TextArea, TextBlock, Textbox,
-    WidgetConfig,
+    Button, ButtonContent, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue,
+    Number, Slider, TextArea, TextBlock, Textbox, WidgetConfig,
 };
 
 #[allow(unused_imports)]

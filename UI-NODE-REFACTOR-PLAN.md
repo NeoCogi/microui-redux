@@ -23,10 +23,9 @@ This is the sole authoritative UI-node migration plan. It supersedes the obsolet
 7. root geometry, visibility, chrome interaction state, and chrome events live in `RootState`.
    `WindowEntry` owns cross-root policy, z-order, backend viewport integration, and the
    framework-internal weak handle used to reach that state;
-8. the opaque `OwnedWidget`/`OwnedContainer` ownership boundary lands in P1 before the bulk widget
-   and container migrations. Any raw-box step used to keep a private integration commit compiling
-   is local scaffolding, is never a public checklist contract, and must disappear within its P1
-   owner item;
+8. every concrete retained runtime implements `WidgetStateOwner`, owns its one strong
+   `Rc<RefCell<State>>` directly, and is boxed only when it enters `Node`; there is no parallel
+   `OwnedWidget`/`OwnedContainer` wrapper or framework state-allocation factory;
 9. `ResourceState`, `FrameResults`, `FrameResultGeneration`, `RetainedId`, and generic frame-result
    lookup are removed. Typed `WidgetState`/`ContainerState` handles are the sole public observation
    and mutation mechanism, including for root/window chrome; focus remains a `WidgetUpdateCtx`
@@ -37,8 +36,8 @@ This is the sole authoritative UI-node migration plan. It supersedes the obsolet
 11. row/grid/stack layout configuration and scroll enablement are mutable through their exposed
     container states. `Node` policy and grid span are pre-insertion-only and have no mounted setter;
 12. moving a unique unmounted value through a state access uses the input-preserving
-    `WidgetStateHandle::try_update_with` operation, so `Dropped`/`Borrowed` returns the uncommitted
-    input instead of dropping an uninvoked closure capture;
+    `WidgetStateHandle::try_update_with` operation, so unavailable access returns the uncommitted
+    input directly instead of dropping an uninvoked closure capture;
 13. replacing a mounted root's application child while retaining its `RootId` is intentionally
     unsupported. Dynamic root content uses a persistent application container; destroying and
     recreating the root yields a new `RootHandle` with a fresh, never-reused `RootId`;
@@ -55,12 +54,11 @@ types. No adapter or alternate trait may transfer phase methods onto state. Ther
 frame-wide state lock, Context token, or in-frame/out-of-frame state distinction.
 
 The target keeps the useful part of the prior direction: one persistent, uniquely owned node tree
-and optional typed weak application handles. Framework-created
-`OwnedWidget`/`OwnedContainer` values retain the sole persistent strong `Rc<RefCell<T>>` for their
-`T: WidgetState`; the concrete runtime consumes the same cell through a weak typed handle.
-`Some(handle)` exposes an additional clone of that weak capability; `None` withholds it without
-changing ownership. P1 establishes this type-enforced boundary before the bulk migration so later
-items implement one ownership model.
+and typed weak application handles. Each concrete runtime owns the sole persistent strong
+`Rc<RefCell<T>>` for its `T: WidgetState` and implements `WidgetStateOwner` to produce the safe weak
+capability. A concrete constructor returns that handle when application access is meaningful or
+discards it for a `State = ()`/internal runtime. P1 establishes this direct ownership boundary
+before the bulk migration so later items implement one ownership model.
 
 Breaking public API changes are expected. The migration does not preserve `widget_handle`, strong
 `WidgetHandle<T>`, generated builder identity, `UiNodeBuilder`, `UiNodeSet`, public widget `NodeId`,
@@ -98,27 +96,26 @@ typed state:
   descendant-visibility, and routed-input contract needed by container nodes;
 - `WidgetState` marks concrete application state and contains widget-specific operations;
 - `WidgetParameters` represents construction input;
-- `WidgetBuilder` associates parameters with one concrete state type, chooses optional handle
-  exposure, and constructs the concrete boxed runtime through the framework-owned factory;
-- final widget construction returns `Option<WidgetStateHandle<T>>` and `OwnedWidget`;
-- final custom-container construction returns `Option<WidgetStateHandle<T>>` and
-  `OwnedContainer`;
-- the opaque owned wrapper always owns the persistent strong `Rc<RefCell<T>>` for its state;
-- `Some(handle)` exposes a weak typed application capability; `None` means only that no application
-  state handle is exposed;
+- `WidgetStateOwner: Widget` associates each concrete runtime with its one state type and returns a
+  safe weak state handle while keeping the strong `Rc<RefCell<T>>` private in that runtime;
+- `WidgetBuilder` associates Parameters with one concrete `W: WidgetStateOwner` and constructs that
+  runtime directly through `WidgetBuilder::create_widget`;
+- final widget construction returns the concrete runtime, or a typed handle plus the runtime when
+  application access is meaningful; no optional generic factory result or owner wrapper exists;
+- final custom-container construction follows the same runtime-owned state model;
 - `WidgetStateHandle<T>` is cloneable without requiring `T: Clone`; every clone remains weak;
-- each public built-in container construction returns its optional typed state handle and a completed
-  `Node`, while downstream custom containers may use public
-  `Node::container(OwnedContainer)`;
+- each public dynamic built-in container construction returns its typed state handle and a completed
+  `Node`, while downstream custom containers pass their concrete state-owning runtime to public
+  `Node::container`;
 - built-in container state owns its child `Node` values directly;
 - application-mutable container membership is changed through an exposed state handle, while fixed
   containers may hide their state; neither path uses a Context editor or identity token;
 - public container-state APIs never return a child or lend the complete mutable child collection;
-- same-cell conflicts between checked state-handle access operations return `Borrowed` rather than
+- same-cell conflicts between checked state-handle access operations return `None` rather than
   panicking;
 - unrelated state cells may be read or mutated at any time, including while a `ContextFrame` exists;
 - node identity, focus, capture, routing, layout, and painting remain internal runtime concerns;
-- removing a node drops its owned runtime/state wrapper and makes any exposed weak state handle
+- removing a node drops its concrete runtime and owned state cell and makes any exposed weak handle
   expire after active access closures release their temporary upgrades;
 - every root has one private retained `RootChromeContainer`; its exposed `RootState` reports chrome
   state and consumes chrome events through the same checked weak-handle API as other state;
@@ -162,11 +159,10 @@ This migration does not initially attempt to:
 - impose a global state-mutation boundary around a frame;
 - provide order-independent or snapshot semantics for cross-widget mutation;
 - detach, return, move, clone, or reparent an attached node;
-- keep state alive after its retained `OwnedWidget`/`OwnedContainer` and all temporary access
-  upgrades are gone;
+- keep state alive after its concrete retained runtime and all temporary access upgrades are gone;
 - return a strong `Rc`, raw `Weak`, raw pointer, internal runtime ID, or Context identity as an
-  application state capability; the framework factory keeps the sole persistent strong
-  `Rc<RefCell<T>>` behind the opaque owner;
+  application state capability; `WidgetStateOwner::state_handle` returns only the safe typed weak
+  wrapper and the concrete runtime keeps the sole persistent strong `Rc<RefCell<T>>` private;
 - preserve any generic public frame-result channel when the same observation can live in typed
   widget, container, or root state;
 - preserve source compatibility with projection builders or strong handles;
@@ -180,16 +176,19 @@ This migration does not initially attempt to:
 
 Single-threaded, traversal-ordered execution is a contract. A state or topology mutation succeeds
 whenever the target cell is live and its checked borrow is available. If the same cell is currently
-borrowed by its widget, container traversal, or another handle closure, access returns `Borrowed`.
+borrowed by its widget, container traversal, or another handle closure, ordinary access returns
+`None`; ownership-moving `try_update_with` returns its original input in `Err(input)`.
 Mutating a different available cell is valid; later work observes the mutation and already-completed
 work is not retroactively repeated.
 
-The `Borrowed` result belongs to the public state-handle API. Widget phase signatures do not
-propagate `StateAccessError`, so application closures passed to
-`try_read`/`try_update`/`try_update_with` must not invoke `ContextFrame::render_ui` or another
-top-level retained traversal entry point. This is an explicit application-reentrancy precondition,
-not a frame lock: state access while a `ContextFrame` merely exists remains valid when the closure
-returns before rendering begins. Framework-authorized recursion through
+The public state-handle API intentionally does not classify unavailable access. `is_alive()` reports
+whether persistent ownership or an active upgrade remains when an application genuinely needs that
+liveness fact; the ordinary access result stays `Option`, and `try_update_with` uses its error slot
+only to return ownership. Widget phase signatures have no borrow-failure channel, so application
+closures passed to `try_read`/`try_update`/`try_update_with` must not invoke
+`ContextFrame::render_ui` or another top-level retained traversal entry point. This is an explicit
+application-reentrancy precondition, not a frame lock: state access while a `ContextFrame` merely
+exists remains valid when the closure returns before rendering begins. Framework-authorized recursion through
 `Children::measure_child`, `ContainerLayoutCtx::layout_child`, and the opaque visitors is ordinary
 retained traversal and is explicitly exempt.
 
@@ -278,36 +277,31 @@ parallel state/node identity, and Context-mediated state/topology access.
 ```text
 Checkbox::create(CheckboxParameters)              exposed state, final release shape
     |
-    +-- Some(WidgetStateHandle<CheckboxState>) --- Weak<RefCell<CheckboxState>>
+    +-- WidgetStateHandle<CheckboxState> ---------- Weak<RefCell<CheckboxState>>
     |
-    +-- OwnedWidget
-            +-- runtime: Box<dyn Widget>
-            |      -> CheckboxWidget
-            |           -> WidgetStateHandle<CheckboxState>   weak runtime access
-            +-- state keep-alive: Rc<RefCell<CheckboxState>>   sole persistent strong owner
+    +-- Checkbox runtime
+            +-- state: Rc<RefCell<CheckboxState>>  sole persistent strong owner
+            +-- immutable runtime configuration
 
-Node::widget(OwnedWidget)
-    -> private RuntimeNodeId + NodeRuntime + owned Widget
+Node::widget(Checkbox)
+    -> private RuntimeNodeId + NodeRuntime + Box<dyn Widget>
 
 Decoration::create(DecorationParameters)           hidden state
     |
-    +-- None: Option<WidgetStateHandle<DecorationState>>
-    |
-    +-- OwnedWidget
-            +-- runtime: Box<dyn Widget> -> DecorationWidget -> weak runtime access
-            +-- state keep-alive: Rc<RefCell<DecorationState>>
-                no application Weak returned
+    +-- Decoration runtime
+            +-- state: Rc<RefCell<()>>             sole persistent strong owner
+            +-- public constructor discards its trivial weak handle
 
 Column::create(ColumnParameters { children })      exposed container state
     |
-    +-- Some(WidgetStateHandle<ColumnState>) ------ Weak<RefCell<ColumnState>>
+    +-- WidgetStateHandle<ColumnState> ------------ Weak<RefCell<ColumnState>>
     |
     +-- Node
          -> private NodeKind
-              -> Container(OwnedContainer)       public Container: Widget, private enum variant
-                   +-- runtime: Box<dyn Container> -> ColumnContainer -> weak runtime access
-                   +-- state keep-alive: Rc<RefCell<ColumnState>>
-                            -> Children(Vec<Node>)
+              -> Container(Box<dyn Container>)     public Container: Widget, private enum variant
+                   -> ColumnContainer
+                        +-- state: Rc<RefCell<ColumnState>>
+                              -> Children(Vec<Node>)
 
 Context
     -> WindowEntry
@@ -315,28 +309,26 @@ Context
          +-- WidgetStateHandle<RootState>       framework-only weak clone
          +-- WidgetTree
               -> Node root
-                   -> Container(OwnedContainer: private RootChromeContainer)
-                        +-- runtime weak RootState access
-                        +-- state keep-alive: Rc<RefCell<RootState>>
+                   -> Container(Box<dyn Container>: private RootChromeContainer)
+                        +-- state: Rc<RefCell<RootState>>
                               -> Children(exactly one application Node)
 ```
 
 ### Ownership boundary and compile-safe migration
 
-The architecture above is the only supported result. P1 establishes opaque
-`OwnedWidget`/`OwnedContainer` insertion before the bulk built-in and container migrations. A
-short-lived raw-box adapter may exist only inside one private, compile-safe P1 implementation step;
-it is not a public API, plan milestone, example surface, or compatibility boundary and is removed by
-the same item's completion. All subsequent checklist items and documentation use only the opaque
-owned insertion model.
+The architecture above is the only supported result. P1 establishes direct state-owning runtime
+insertion before the bulk built-in and container migrations. Public insertion is generic over a
+concrete `WidgetStateOwner` (and `Container` for container nodes), then erases the runtime to a
+private `Box<dyn Widget>`/`Box<dyn Container>` inside `Node`. No public raw-box overload exists, and
+there is no parallel opaque owner wrapper or erased state keep-alive allocation.
 
 Application state access is Context-free:
 
 ```text
 upgrade weak state cell
-    -> failure: Dropped
+    -> unavailable: return None / Err(input)
     -> try_borrow / try_borrow_mut
-    -> conflict: Borrowed
+    -> unavailable: return None / Err(input)
     -> run non-escaping typed closure
 ```
 
@@ -383,8 +375,8 @@ event directly in its typed associated state and returns no generic summary. Do 
 trait, add state/mount identity methods to it, or create a second internal trait with the same
 responsibility.
 
-`WidgetNode` becomes a thin runtime owner of `OwnedWidget` plus optional custom-render metadata. It
-invokes the owned runtime's delegated `Widget` methods directly. The current
+`WidgetNode` becomes a thin owner of `Box<dyn Widget>` plus optional custom-render metadata. It
+invokes the concrete runtime directly. The current
 `WidgetStateHandleDyn` redispatch layer and erased handle cloning disappear. Public
 `Node::widget` constructs the `None` metadata path; public backend-typed
 `Node::custom_render(widget, CustomRenderHandle<B>)` supplies the `Some` path while keeping
@@ -569,7 +561,7 @@ containers implement the final `Widget::measure`, `Widget::update`, `Widget::pai
 than exported.
 
 Private retained-tree traversal obtains `&dyn Widget`/`&mut dyn Widget` from either `NodeKind`
-variant through `OwnedWidget`/`OwnedContainer` delegation and uses exactly one common Widget
+variant's private runtime box and uses exactly one common Widget
 dispatch path per requested measurement, update, or paint invocation. This is not a promise of one
 `Widget::measure` call per frame: the required pre-input and post-update layouts, plus an explicitly
 bounded scroll-constraint convergence, may issue multiple legitimate measurement requests. The
@@ -579,8 +571,8 @@ container-owned descendant visibility, and special input routing. Generic `NodeR
 visibility bit or hide/show API. There is no shared `NodeBehavior` trait or parallel container phase
 adapter.
 
-Built-in factories return the completed `Node` for ergonomics, while downstream code may construct
-and insert its own implementation explicitly:
+Built-in constructors return the completed `Node` for ergonomics, while downstream code may
+construct and insert its own implementation explicitly:
 
 ```rust
 let (custom_state, custom_container) =
@@ -588,14 +580,15 @@ let (custom_state, custom_container) =
 let custom_node = Node::container(custom_container);
 ```
 
-### Final builder, owner, and stable state-handle contracts
+### Final builder, runtime owner, and stable state-handle contracts
 
-`WidgetState`, `WidgetParameters`, `WidgetStateHandle`, `StateAccessError`, and the opaque owned
-wrappers are the only construction and state-lifetime model implemented by P1 and used thereafter.
-`WidgetBuilder` uses associated types; a bare `WidgetParameters` argument would be a trait object and
-would lose the concrete parameter type. The associated `State` is the concrete state retained by
-the opaque owner even when construction returns `None`. A genuinely stateless runtime may use `()`;
-`None` is not represented by a special state type.
+`WidgetState`, `WidgetParameters`, `WidgetStateHandle`, `WidgetStateOwner`, and `WidgetBuilder` are
+the complete construction and state-lifetime model implemented by P1 and used thereafter. A
+concrete runtime owns its strong state cell directly. `WidgetStateOwner` associates that runtime
+with exactly one state type and returns only the safe weak handle; it never returns the underlying
+`Rc` or `Weak`. `WidgetBuilder` associates one Parameters type with one concrete state-owning
+runtime `W`. A genuinely stateless runtime uses `State = ()` and its public constructor may discard
+the trivial handle.
 
 ```rust
 pub trait WidgetState: 'static {}
@@ -616,131 +609,80 @@ impl<T: WidgetState> Clone for WidgetStateHandle<T> {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum StateAccessError {
-    Dropped,
-    Borrowed,
-}
-
-pub struct StateAccessFailure<I> {
-    error: StateAccessError,
-    input: I,
-}
-
-impl<I> StateAccessFailure<I> {
-    pub fn error(&self) -> StateAccessError;
-    pub fn into_input(self) -> I;
-    pub fn into_parts(self) -> (StateAccessError, I);
-}
-
 impl<T: WidgetState> WidgetStateHandle<T> {
-    pub(crate) fn from_owner(owner: &Rc<RefCell<T>>) -> Self;
+    pub fn new(owner: &Rc<RefCell<T>>) -> Self;
 
     pub fn is_alive(&self) -> bool;
 
     pub fn try_read<R>(
         &self,
         f: impl FnOnce(&T) -> R,
-    ) -> Result<R, StateAccessError>;
+    ) -> Option<R>;
 
     pub fn try_update<R>(
         &self,
         f: impl FnOnce(&mut T) -> R,
-    ) -> Result<R, StateAccessError>;
+    ) -> Option<R>;
 
     pub fn try_update_with<I, R>(
         &self,
         input: I,
         f: impl FnOnce(&mut T, I) -> R,
-    ) -> Result<R, StateAccessFailure<I>>;
+    ) -> Result<R, I>;
 }
 
-// Private, method-free lifetime erasure only.
-trait StateKeepAlive {}
+pub trait WidgetStateOwner: Widget + 'static {
+    type State: WidgetState;
 
-impl<T: WidgetState> StateKeepAlive for RefCell<T> {}
-
-pub struct OwnedWidget {
-    runtime: Box<dyn Widget>,
-    _state: Rc<dyn StateKeepAlive>,
-}
-
-pub struct OwnedContainer {
-    runtime: Box<dyn Container>,
-    _state: Rc<dyn StateKeepAlive>,
+    fn state_handle(&self) -> WidgetStateHandle<Self::State>;
 }
 
 pub trait WidgetBuilder: Sized + 'static {
     type Parameters: WidgetParameters;
-    type State: WidgetState;
+    type W: WidgetStateOwner;
 
-    fn initialize(parameters: Self::Parameters) -> (Self::State, Self);
-    fn build(self, state: WidgetStateHandle<Self::State>) -> Box<dyn Widget>;
-    const EXPOSE_STATE: bool;
+    fn create_widget(parameters: Self::Parameters) -> Self::W;
 }
-
-pub fn create_widget<B: WidgetBuilder>(
-    parameters: B::Parameters,
-) -> (Option<WidgetStateHandle<B::State>>, OwnedWidget);
 
 pub trait ContainerBuilder: Sized + 'static {
     type Parameters: WidgetParameters;
-    type State: ContainerState;
+    type W: Container + WidgetStateOwner;
 
-    fn initialize(parameters: Self::Parameters) -> (Self::State, Self);
-    fn build(self, state: WidgetStateHandle<Self::State>) -> Box<dyn Container>;
-    const EXPOSE_STATE: bool;
+    fn create_container(parameters: Self::Parameters) -> Self::W;
 }
-
-pub fn create_container<B: ContainerBuilder>(
-    parameters: B::Parameters,
-) -> (Option<WidgetStateHandle<B::State>>, OwnedContainer);
 ```
 
-The non-overridable factories consume Parameters through `initialize`, allocate exactly one
-`Rc<RefCell<State>>`, supply the runtime with a weak typed handle, and erase the sole persistent
-strong owner into the returned opaque wrapper. `EXPOSE_STATE` controls only whether an additional
-weak clone is returned to the application. `StateKeepAlive` has no methods, downcast, phase,
-Context, or policy role. An incorrect custom builder can ignore its supplied weak handle, which
-remains a documented safe-builder conformance error, but no raw boxed runtime can bypass the
-framework-owned state allocation at insertion.
+Each builder consumes Parameters once and returns the concrete runtime; that runtime constructs and
+privately retains exactly one `Rc<RefCell<State>>`. Its `state_handle` implementation calls
+`WidgetStateHandle::new(&self.state)`, which only downgrades the borrowed owner reference and never
+returns a strong pointer or raw `Weak`. The handle's manual `Clone` implementation clones only
+`Weak` and deliberately imposes no `T: Clone` bound. Incorrect custom implementations that return a
+handle for a different allocation violate the documented safe trait contract; built-in and
+downstream conformance tests prove the returned handle observes the same allocation used by runtime
+phases. Public `Node` constructors accept concrete state-owning runtimes, not raw trait-object boxes.
 
-`WidgetStateHandle::from_owner` merely downgrades a reference to the owner; it does not clone or
-return a strong pointer, and it is crate-private after P1 establishes the factory. Its manual
-`Clone` implementation clones only `Weak` and deliberately imposes no `T: Clone` bound. Built-ins
-provide inherent constructors that forward to `create_widget` or `create_container` so users do not
-need fully qualified factory syntax.
+`try_read` and `try_update` return `None` without invoking their closure when the weak owner is gone
+or the live cell is incompatibly borrowed. `is_alive()` supplies the separate liveness fact when it
+is actually needed; no public error taxonomy duplicates information already available from the
+handle. `try_update_with` upgrades and successfully borrows the cell before moving `input` into `f`,
+so either unavailable condition returns the untouched input directly as `Err(input)`. Ordinary
+`try_update` retains normal Rust closure semantics and cannot recover a value moved into an
+uninvoked closure; examples must use `try_update_with` whenever a unique `Node`, concrete runtime,
+or another non-cloneable input must survive access failure. Once `f` starts, it
+owns the input normally. A container `insert` that rejects an index returns its uncommitted node
+inside the successful outer access result.
 
-`try_update_with` upgrades and successfully borrows the cell before moving `input` into `f`. A
-`Dropped` or `Borrowed` failure therefore returns the untouched input in `StateAccessFailure` and
-never invokes the closure. Ordinary `try_update` retains normal Rust closure semantics and cannot
-recover a value moved into an uninvoked closure; examples must use `try_update_with` whenever a
-unique `Node`, `OwnedWidget`, `OwnedContainer`, or another non-cloneable input must survive access
-failure. Once `f` starts, it owns the input normally. A container `insert` that rejects an index
-returns its uncommitted node inside the successful outer access result.
-
-State exposure is chosen by the concrete widget or container implementation, not by its caller.
-Each specific constructor has one documented outcome: it always returns `Some(handle)` when that
-implementation exposes application-facing state, or always returns `None` when it keeps state
-internal. Parameters do not contain a generic exposure flag, and discarding a returned handle does
-not alter the constructor's policy.
-
-This is identical for widgets and containers. `Checkbox::create` and public dynamic layout
-containers return `Some`; a decoration widget or an internal fixed container returns `None`. Both
-outcomes use the same strong state representation in the opaque owner. A builder that never exposes
-state still names its actual state type; if it has no state data at all, it uses `()` and the wrapper
-owns `Rc<RefCell<()>>` under the strict uniform-ownership contract.
+Application handle exposure is expressed by each concrete constructor's return type, not by a
+generic `Option` or builder constant. `Checkbox::create` and public dynamic layout containers return
+their typed handles directly. A decoration widget or internal fixed container returns only its
+runtime/finished `Node` and discards the trivial or internal handle before insertion. Parameters do
+not contain an exposure flag, and discarding a weak handle never changes runtime ownership.
 
 ### Final Checkbox construction example
 
 The split is data-oriented rather than a rename of today's `Checkbox` struct:
 
 ```rust
-pub struct Checkbox {
-    label: String,
-    opt: WidgetOption,
-}
-
 pub struct CheckboxParameters {
     pub label: String,
     pub checked: bool,
@@ -783,46 +725,48 @@ impl CheckboxState {
     }
 }
 
-struct CheckboxWidget {
-    builder: Checkbox,
-    state: WidgetStateHandle<CheckboxState>,
+pub struct CheckboxBuilder;
+
+pub struct Checkbox {
+    label: String,
+    opt: WidgetOption,
+    state: Rc<RefCell<CheckboxState>>,
 }
 
-impl Widget for CheckboxWidget {
+impl Widget for Checkbox {
     // Current Widget methods. measure/paint read state and update mutates it.
 }
 
-impl WidgetBuilder for Checkbox {
-    type Parameters = CheckboxParameters;
+impl WidgetStateOwner for Checkbox {
     type State = CheckboxState;
 
-    fn initialize(parameters: Self::Parameters) -> (Self::State, Self) {
-        (
-            CheckboxState {
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
+    }
+}
+
+impl WidgetBuilder for CheckboxBuilder {
+    type Parameters = CheckboxParameters;
+    type W = Checkbox;
+
+    fn create_widget(parameters: Self::Parameters) -> Self::W {
+        Checkbox {
+            state: Rc::new(RefCell::new(CheckboxState {
                 checked: parameters.checked,
-            },
-            Self {
-                label: parameters.label,
-                opt: parameters.opt,
-            },
-        )
+            })),
+            label: parameters.label,
+            opt: parameters.opt,
+        }
     }
-
-    fn build(self, state: WidgetStateHandle<Self::State>) -> Box<dyn Widget> {
-        Box::new(CheckboxWidget {
-            builder: self,
-            state,
-        })
-    }
-
-    const EXPOSE_STATE: bool = true;
 }
 
 impl Checkbox {
     pub fn create(
         parameters: CheckboxParameters,
-    ) -> (Option<WidgetStateHandle<CheckboxState>>, OwnedWidget) {
-        create_widget::<Self>(parameters)
+    ) -> (WidgetStateHandle<CheckboxState>, Self) {
+        let widget = CheckboxBuilder::create_widget(parameters);
+        let state = widget.state_handle();
+        (state, widget)
     }
 }
 ```
@@ -831,38 +775,40 @@ Construction and insertion are explicit:
 
 ```rust
 let (checkbox_state, checkbox) = Checkbox::create(CheckboxParameters::new("Enabled", false));
-let checkbox_state = checkbox_state.expect("Checkbox exposes CheckboxState");
 let checkbox = Node::widget(checkbox);
 
 column_state.try_update_with(checkbox, |column, checkbox| {
     column.push(checkbox);
 })?;
-checkbox_state.try_update(CheckboxState::check)?;
+checkbox_state
+    .try_update(CheckboxState::check)
+    .expect("checkbox state unavailable");
 ```
 
-A widget with no application-visible state uses the same construction surface and withholds the
-weak application handle. Its opaque wrapper still owns the state strongly. This genuinely stateless
-example uses `()`; a hidden stateful widget instead uses its actual concrete state type:
+A widget with no application-visible state still owns its state cell directly. This genuinely
+stateless example uses `()` and its public constructor simply does not return the trivial handle:
 
 ```rust
 struct DecorationWidget {
-    state: WidgetStateHandle<()>,
+    state: Rc<RefCell<()>>,
     // Other runtime-only configuration and caches may remain ordinary fields.
 }
 
-impl WidgetBuilder for Decoration {
-    type Parameters = DecorationParameters;
+impl WidgetStateOwner for DecorationWidget {
     type State = ();
 
-    fn initialize(parameters: Self::Parameters) -> (Self::State, Self) {
-        ((), Self::new(parameters))
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
     }
+}
 
-    fn build(self, state: WidgetStateHandle<Self::State>) -> Box<dyn Widget> {
-        Box::new(DecorationWidget::new(self, state))
+impl WidgetBuilder for DecorationBuilder {
+    type Parameters = DecorationParameters;
+    type W = DecorationWidget;
+
+    fn create_widget(parameters: Self::Parameters) -> Self::W {
+        DecorationWidget::new(parameters, Rc::new(RefCell::new(())))
     }
-
-    const EXPOSE_STATE: bool = false;
 }
 ```
 
@@ -873,21 +819,19 @@ application must mutate later belongs in the state type. Stable runtime configur
 
 ### State ownership and access
 
-Every `OwnedWidget`/`OwnedContainer` owns one persistent strong `Rc<RefCell<T>>` for its
-`T: WidgetState`; the runtime consumes a factory-supplied weak handle. Any application
-`WidgetStateHandle<T>` clones are weak and non-owning. Exposure changes only whether construction
-returns an application weak handle; it never changes whether the retained value keeps the state
-cell alive.
+Every concrete `WidgetStateOwner` owns one persistent strong `Rc<RefCell<T>>` for its
+`T: WidgetState`. Any application `WidgetStateHandle<T>` clones are weak and non-owning. A
+constructor returning or discarding a weak handle never changes runtime ownership.
 
 An access operation temporarily upgrades the weak pointer. Consequently:
 
-- dropping an uninserted owned wrapper invalidates any exposed state handle;
-- removing a node drops its retained owner and invalidates handles once any already-running access closure
+- dropping an uninserted concrete runtime invalidates any exposed state handle;
+- removing a node drops its boxed runtime and invalidates handles once any already-running access closure
   releases its temporary strong upgrade;
 - handles do not know or care which Context or container owns the widget;
 - moving the unique `Node` before insertion does not affect any exposed state handle;
 - no frame state is checked;
-- same-cell reentrancy through another checked handle access returns `Borrowed`;
+- same-cell reentrancy through another checked handle access returns `None`;
 - cross-cell access succeeds when the other cell is available.
 
 The temporary-upgrade qualification is intentional. Preventing an active access closure from
@@ -900,16 +844,17 @@ and all already-active access operations are gone.
 Retained traversal is Context-local and never crosses Context boundaries. Entering a top-level
 retained render for the same Context that owns a borrowed state cell from inside application
 `WidgetStateHandle::try_read`/`try_update`/`try_update_with` is explicitly unsupported. The runtime
-cannot turn a state borrow conflict into `StateAccessError::Borrowed` because the existing
-`Widget::measure`, `update`, and `paint` return types do not carry that error. Skipping a borrowed
-widget or painting stale data is also not an acceptable fallback.
+cannot return the public handle's `None`/`Err(input)` outcome through `Widget::measure`, `update`, or
+`paint`. Skipping a borrowed widget or painting stale data is also not an acceptable fallback.
 
 This sequence is supported because the state borrow ends before traversal starts:
 
 ```rust
 let frame = ctx.frame(frame_info);
 
-checkbox_state.try_update(CheckboxState::check)?;
+checkbox_state
+    .try_update(CheckboxState::check)
+    .expect("checkbox state unavailable");
 
 frame.render_ui()?;
 ```
@@ -921,14 +866,14 @@ is still held by the closure:
 checkbox_state.try_update(|checkbox| {
     checkbox.check();
     ctx.frame(frame_info).render_ui() // unsupported reentrant rendering
-})?;
+});
 ```
 
 Do not add a FrameGate, Context token, state-access depth counter, or global “currently borrowed”
 flag to detect this condition. Built-in runtimes should use a small internal state-borrow helper that
 panics with a precise diagnostic if an unsupported reentrant render reaches a borrowed state cell;
 external custom widgets and containers are bound by the same documented precondition. Ordinary
-handle-to-handle borrow conflicts continue to return `StateAccessError::Borrowed`.
+handle-to-handle borrow conflicts continue to return `None` without invoking the nested closure.
 
 This prohibition does not apply to framework-authorized recursive traversal. A container runtime
 may retain its current checked state borrow while calling `Children::measure_child`,
@@ -1033,44 +978,33 @@ reaches that node. Work already completed in the frame is not repeated except fo
 post-update layout. Regardless of same-frame observation order, the next ordinary frame must be
 fully stable against the successful mutation.
 
-Public factories for row, column, grid, stack, disclosure, and scroll area return
-`(Option<WidgetStateHandle<SpecificContainerState>>, Node)`. Each built-in factory constructs its
-owned container runtime and immediately wraps it with `Node::container`, so downstream callers
-receive the ready node instead of performing a redundant wrapping step. Exposure is a fixed,
-documented
-property of each concrete constructor, just as it is for leaf widgets; callers do not select it in
-Parameters. The public dynamic layout primitives listed above return `Some`, while an internal
-fixed-composition container may define a constructor that always returns `None`. Either way, the
-opaque wrapper strongly owns the container state cell containing its children. External custom
-leaf widgets remain supported through `Widget`; external custom container runtimes are supported
-through public `ContainerBuilder`, `create_container`, and `Node::container(OwnedContainer)`.
+Public constructors for row, column, grid, stack, disclosure, and scroll area return
+`(WidgetStateHandle<SpecificContainerState>, Node)`. Each concrete container runtime owns its state
+cell and is immediately moved into `Node::container`, so downstream callers receive the ready node
+instead of performing a redundant wrapping step. An internal fixed-composition constructor may
+discard its state handle and return only `Node`. External custom leaf and container runtimes use
+`WidgetStateOwner`, public `WidgetBuilder`/`ContainerBuilder`, and the generic `Node` constructors.
 
 ```rust
-impl ContainerBuilder for Column {
+impl ContainerBuilder for ColumnBuilder {
     type Parameters = ColumnParameters;
-    type State = ColumnState;
+    type W = ColumnContainer;
 
-    fn initialize(parameters: Self::Parameters) -> (Self::State, Self) {
-        (
-            ColumnState {
+    fn create_container(parameters: Self::Parameters) -> Self::W {
+        ColumnContainer {
+            state: Rc::new(RefCell::new(ColumnState {
                 children: parameters.children,
-            },
-            Self,
-        )
+            })),
+        }
     }
-
-    fn build(self, state: WidgetStateHandle<Self::State>) -> Box<dyn Container> {
-        Box::new(ColumnContainer::new(state))
-    }
-
-    const EXPOSE_STATE: bool = true;
 }
 
 impl Column {
     pub fn create(
         parameters: ColumnParameters,
-    ) -> (Option<WidgetStateHandle<ColumnState>>, Node) {
-        let (state, container) = create_container::<Self>(parameters);
+    ) -> (WidgetStateHandle<ColumnState>, Node) {
+        let container = ColumnBuilder::create_container(parameters);
+        let state = container.state_handle();
         (state, Node::container(container))
     }
 }
@@ -1152,7 +1086,7 @@ The public name `Node` is reserved for the unique, opaque owner placed in roots 
 The existing header/tree widget with that name and its `NodeStateValue` enum are not aliased or
 renamed as public compatibility types; their supported behavior is absorbed by `Disclosure` below.
 
-The final payload stores only opaque owners:
+The final opaque `Node` payload stores only erased concrete runtimes:
 
 ```rust
 pub struct Node {
@@ -1163,11 +1097,11 @@ pub struct Node {
 
 enum NodeKind {
     Widget(WidgetNode),
-    Container(OwnedContainer),
+    Container(Box<dyn Container>),
 }
 
 struct WidgetNode {
-    widget: OwnedWidget,
+    widget: Box<dyn Widget>,
     custom_render: Option<CustomRenderKey>,
 }
 
@@ -1186,29 +1120,32 @@ Leaf construction has two paths. Both keep `CustomRenderKey` private:
 
 ```rust
 impl Node {
-    pub fn widget(widget: OwnedWidget) -> Self {
+    pub fn widget<W: WidgetStateOwner>(widget: W) -> Self {
         Self::widget_with_custom_render(widget, None)
     }
 
-    pub fn custom_render<B: RendererBackend>(
-        widget: OwnedWidget,
+    pub fn custom_render<B: RendererBackend, W: WidgetStateOwner>(
+        widget: W,
         renderer: CustomRenderHandle<B>,
     ) -> Self {
         Self::widget_with_custom_render(widget, Some(renderer.key))
     }
 
-    fn widget_with_custom_render(
-        widget: OwnedWidget,
+    fn widget_with_custom_render<W: WidgetStateOwner>(
+        widget: W,
         custom_render: Option<CustomRenderKey>,
     ) -> Self {
         Self::from_kind(NodeKind::Widget(WidgetNode {
-            widget,
+            widget: Box::new(widget),
             custom_render,
         }))
     }
 
-    pub fn container(container: OwnedContainer) -> Self {
-        Self::from_kind(NodeKind::Container(container))
+    pub fn container<C>(container: C) -> Self
+    where
+        C: Container + WidgetStateOwner,
+    {
+        Self::from_kind(NodeKind::Container(Box::new(container)))
     }
 
     pub fn with_policy(mut self, policy: Policy) -> Self {
@@ -1247,8 +1184,9 @@ let triangle_node =
 ```
 
 The owning type is named `Node`/`NodeKind`; an ID remains a private scalar. Public `Node::widget`
-and `Node::custom_render` create leaf variants from `OwnedWidget`. Public `Node::container` accepts
-downstream `OwnedContainer`; no raw-box overload exists. Built-in container factories call the
+and `Node::custom_render` create leaf variants from concrete `WidgetStateOwner` runtimes. Public
+`Node::container` accepts a concrete `Container + WidgetStateOwner`; no raw-box overload exists.
+Built-in container constructors call the
 applicable constructor internally and return the finished `Node` for convenience. Every path
 assigns a never-reused runtime
 ID from one process-wide monotonic allocator. Relaxed atomic allocation is sufficient because the
@@ -1264,30 +1202,31 @@ methods above before insertion. A successful insertion consumes it. Generic node
 absent: there is no `visible` field, `set_visible`, `show`, or `hide` operation on `Node` or
 `NodeRuntime`.
 
-### Fixed built-in state exposure and compatibility mapping
+### Fixed built-in constructor and compatibility mapping
 
-Exposure does not remain a P1 implementation choice. Every built-in has this fixed constructor
-outcome and mounted application surface:
+Every built-in has this fixed constructor result and mounted application surface. “Handle” means
+the constructor returns the typed weak handle directly; “runtime only” means it returns only the
+runtime/Node and discards its trivial handle:
 
-| Built-in | Exposure | Mounted application state/events |
+| Built-in | Constructor result | Mounted application state/events |
 |---|---|---|
-| `Checkbox` | `Some` | checked value and consumable change observation |
-| `Button` | `Some` | consumable submissions |
-| `ListItem` | `Some` | mutable label and consumable submissions |
-| `ListBox` | `Some` | consumable submissions |
-| `Combo` | `Some` | selected/open state, current label/anchor, selection operations, and consumable change/submit events |
-| `TextBlock` | `Some` | mutable text |
-| `ColorSwatch` | `Some` | mutable fill and label |
-| `Slider` | `Some` | value/editing state and consumable changes |
-| `Number` | `Some` | value/editing state and consumable changes |
-| `Textbox` | `Some` | text, cursor/selection, change/submit events, and queued focus command |
-| `TextArea` | `Some` | text, cursor/selection, scroll, and change/submit events |
-| `Custom` | `None` | no mounted application state; it uses `State = ()` |
+| `Checkbox` | handle + runtime | checked value and consumable change observation |
+| `Button` | handle + runtime | consumable submissions |
+| `ListItem` | handle + runtime | mutable label and consumable submissions |
+| `ListBox` | handle + runtime | consumable submissions |
+| `Combo` | handle + runtime | selected/open state, current label/anchor, selection operations, and consumable change/submit events |
+| `TextBlock` | handle + runtime | mutable text |
+| `ColorSwatch` | handle + runtime | mutable fill and label |
+| `Slider` | handle + runtime | value/editing state and consumable changes |
+| `Number` | handle + runtime | value/editing state and consumable changes |
+| `Textbox` | handle + runtime | text, cursor/selection, change/submit events, and queued focus command |
+| `TextArea` | handle + runtime | text, cursor/selection, scroll, and change/submit events |
+| `Custom` | runtime only | no mounted application state; it uses `State = ()` |
 | old `widgets::Node`/`NodeStateValue` | retired | replaced by exposed `DisclosureState` |
 
 Every public dynamic built-in container (`Column`, `Row`, `Grid`, `Stack`, `Disclosure`, and
-`ScrollArea`) returns `Some`; only explicitly fixed/internal container implementations return
-`None`. The outcome never depends on parameters or whether a caller plans to retain the handle.
+`ScrollArea`) returns its handle directly; explicitly fixed/internal constructors return only the
+finished Node. The outcome never depends on parameters or caller-selected flags.
 
 Initialization-only visual and base behavior data moves to Parameters: base font/options/config,
 button content/fill, checkbox label, list-item icon, list-box label/image, custom name/options,
@@ -1464,8 +1403,8 @@ Context
        tree: WidgetTree,
      }
        -> Node::Container(private RootChromeContainer runtime)
-            -> OwnedContainer                 // sole persistent strong RootState owner
-                 -> RootState.children        // exactly one application Node
+            -> RootChromeContainer.state      // sole persistent strong RootState owner
+                 -> RootState.children         // exactly one application Node
 ```
 
 The final private builder consumes the unique application node rather than borrowing/cloning it:
@@ -1483,27 +1422,28 @@ struct RootChromeBuilder;
 
 impl ContainerBuilder for RootChromeBuilder {
     type Parameters = RootChromeParameters;
-    type State = RootState;
+    type W = RootChromeContainer;
 
-    fn initialize(parameters: RootChromeParameters) -> (RootState, Self) {
+    fn create_container(parameters: RootChromeParameters) -> Self::W {
         let children = core::iter::once(parameters.content).collect();
-        (
-            RootState::new(
+        RootChromeContainer {
+            state: Rc::new(RefCell::new(RootState::new(
                 parameters.name,
                 parameters.options,
                 parameters.rect,
                 parameters.visible,
                 children,
-            ),
-            Self,
-        )
+            ))),
+        }
     }
+}
 
-    fn build(self, state: WidgetStateHandle<RootState>) -> Box<dyn Container> {
-        Box::new(RootChromeContainer::new(state))
+impl WidgetStateOwner for RootChromeContainer {
+    type State = RootState;
+
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
     }
-
-    const EXPOSE_STATE: bool = true;
 }
 ```
 
@@ -1519,7 +1459,8 @@ with a fresh, never-reused `RootId`.
 
 `RootState`'s name/options/rectangle/visibility methods are the only root query APIs. Remove the
 parallel `Context::root_rect` and `Context::root_visible` queries; after destruction the weak state
-handle reports `StateAccessError::Dropped`. Root mutation remains on `Context` because it also
+handle is no longer alive and its ordinary access methods return `None`. Root mutation remains on
+`Context` because it also
 coordinates z-order, front-root selection, backend viewport state, and transient input cleanup:
 
 - `set_root_rect(root, rect)` and `set_root_size(root, size)` mutate `RootState` through
@@ -1666,8 +1607,8 @@ already-destroyed IDs return `false`; IDs are never reused. With no active state
 drops the tree synchronously. An already-active access holds only its temporary upgraded `Rc`; a
 root-state access can therefore defer physical destruction of `RootState.children` until its closure
 returns, but the removed tree is immediately unmounted and can never traverse again. Every clone of
-the root and descendant weak state handles reports `Dropped` after all such active access closures
-release their temporary upgrades. Destruction never returns the `Node`, tree, pending events, or
+the root and descendant weak state handles become non-live and return `None` after all such active
+access closures release their temporary upgrades. Destruction never returns the `Node`, tree, pending events, or
 state. Hiding is distinct: title close, popup dismissal, and
 `set_root_visible(false)` retain both the tree and weak-handle liveness, and application code may
 later destroy the root for permanent removal.
@@ -1699,7 +1640,8 @@ Required rules:
   observation lives in typed state;
 - removal drops the node immediately even if runtime target cleanup occurs at the next safe tree
   boundary;
-- mutation of the child collection currently borrowed by traversal returns `Borrowed`;
+- mutation of the child collection currently borrowed by traversal returns `None` without invoking
+  the mutation closure;
 - cross-subtree topology mutation is observed according to deterministic traversal order.
 
 This is safe without a registry or Context callback because runtime targets are scalar IDs, not
@@ -1710,12 +1652,12 @@ capture removal, and replacement behavior.
 
 | Datum | Authoritative owner |
 |---|---|
-| Common measure/update/paint/options/focus behavior | concrete runtime implementing `Widget`, including the runtime inside each `OwnedContainer` through `Container: Widget` |
-| Container-only child/layout/special-input behavior | concrete runtime inside `OwnedContainer` |
-| Widget/container state lifetime | `OwnedWidget`/`OwnedContainer` strong `Rc<RefCell<T>>` keep-alive |
+| Common measure/update/paint/options/focus behavior | concrete runtime implementing `Widget`, including every `Container: Widget` runtime |
+| Container-only child/layout/special-input behavior | concrete runtime implementing `Container` |
+| Widget/container state lifetime | the concrete `WidgetStateOwner` runtime's private strong `Rc<RefCell<T>>` |
 | Hidden runtime-only caches/configuration | ordinary concrete boxed widget/container fields |
-| Optional application state capability | `Some(WidgetStateHandle<T>)`; `None` means unexposed |
-| Construction input and exposure policy | specific `Parameters`; each concrete widget/container constructor has one fixed documented exposure outcome |
+| Application state capability | `WidgetStateHandle<T>` returned explicitly by concrete constructors when meaningful |
+| Construction input and public return shape | specific `Parameters`; each concrete constructor documents whether it returns a handle with the runtime/finished node or only the runtime/node |
 | Container children | `Children` inside the concrete container state cell |
 | Node placement, derived layout, and transient interaction flags | `NodeRuntime`; no generic visibility field |
 | Descendant traversal visibility | concrete `Container::children_visible`, principally `Disclosure` |
@@ -1767,7 +1709,7 @@ capture removal, and replacement behavior.
     the target typed-state mechanism.
 16. Current generic node `visible` state is copied but otherwise unused, leaving an ownership-table
     feature with no mutation or phase semantics.
-17. Treating opaque owner insertion as late release hardening would force a second construction
+17. Treating the concrete-runtime owner insertion boundary as late release hardening would force a second construction
     migration; P1 must establish it before the bulk conversion.
 18. `ResourceState` currently has no retained-runtime responsibility once result stores are removed;
     focus, capture, routing, widget events, and target root events all have dedicated mechanisms.
@@ -1800,20 +1742,19 @@ change behavior. Amend the defining contract and its P0 criterion first, then up
    measure/update/paint or lend raw child collections to ordinary callers.
 3. `WidgetState` is data only and `ContainerState: WidgetState` is marker-only; implementing either
    does not implement runtime phases or grant generic child access.
-4. `WidgetBuilder` associates one concrete parameter type and one concrete state type, chooses
-   whether to expose a weak handle, and constructs one boxed runtime widget without exposing its
-   concrete implementation type.
-5. Every `OwnedWidget`/`OwnedContainer` owns the only persistent strong `Rc<RefCell<T>>` for its
-   `T: WidgetState`; no raw runtime insertion or direct concrete-runtime owner is a checklist
-   contract. `Some` and `None` differ only in weak application-handle exposure.
-6. When present, application state handles are typed, weak, cloneable without `T: Clone`, and contain
+4. `WidgetBuilder` associates one concrete parameter type with one concrete
+   `W: WidgetStateOwner` and constructs that concrete runtime directly.
+5. Every concrete `WidgetStateOwner` owns the only persistent strong `Rc<RefCell<T>>` for its
+   `T: WidgetState`; `Node` erases it only after generic insertion validates the ownership trait.
+   There is no parallel owner wrapper or public raw trait-object-box insertion contract.
+6. Application state handles are typed, weak, cloneable without `T: Clone`, and contain
    no Context or node identity.
 7. State access uses non-escaping closures and checked per-cell borrows; `try_update_with` preserves
    and returns owned input if upgrade/borrow fails before closure invocation.
 8. `ContextFrame` existence has no effect on state or container-state access, but a state-access
    closure must finish before retained rendering/traversal begins in the same Context; retained
    traversal never crosses Context boundaries.
-9. A same-cell conflict between checked handle accesses returns `Borrowed`; runtime phase access
+9. A same-cell conflict between checked handle accesses returns `None`; runtime phase access
    encountered through unsupported top-level render reentrancy may panic with the documented
    diagnostic. Framework-authorized child measurement/layout/visitor recursion is exempt.
 10. Each container state's private `Children` field is the unique owner of its child nodes;
@@ -1859,26 +1800,27 @@ change behavior. Amend the defining contract and its P0 criterion first, then up
 26. Root chrome uses the same routed-input, update, capture, typed-state, and pending-event machinery
     as other containers. Cross-root popup dismissal is the only private boundary injection and
     records into that same `RootState`.
-27. P1 establishes opaque `OwnedWidget`/`OwnedContainer` insertion before bulk migration; raw-box
-    insertion is never a public checklist or released compatibility boundary.
+27. P1 establishes direct generic insertion of concrete `WidgetStateOwner` runtimes before bulk
+    migration; raw trait-object-box insertion is never a public checklist or released compatibility
+    boundary.
 
 ## Priority and completion rules
 
 - **P0 — Baseline and wanted-behavior freeze:** characterize supported current behavior, freeze the
   currently wanted state/builder/container/event/root contracts, and route any later preservation
   trade-off through explicit change control.
-- **P1 — Ownership:** establish the final weak-handle/opaque-owner factories and direct
-  `OwnedWidget`/`OwnedContainer` nodes before bulk migration or projection deletion.
+- **P1 — Ownership:** establish the final weak-handle/concrete-runtime ownership traits and direct
+  runtime boxing at `Node` before bulk migration or projection deletion.
 - **P2 — Runtime mechanics:** migrate layouts, disclosure, scroll, routing, and cleanup onto direct
   state-owned topology.
 - **P3 — Application boundary:** migrate roots, examples, custom widgets, and the file dialog to
-  constructor-returned optional state handles and owned nodes.
+  fixed constructor-returned state handles and owned nodes.
 - **P4 — Correctness:** pin dynamic-mutation semantics and repair scroll, intrinsic measurement,
   axis allocation, window-boundary sizing, and transform edge cases against the simplified
   representation.
 - **P5 — Cleanup and measurement:** remove all obsolete adapters/identity/reconciliation and optimize
   only measured hot paths.
-- **Release validation:** verify the P1 opaque ownership boundary, rerun the complete validation
+- **Release validation:** verify the P1 concrete-runtime ownership boundary, rerun the complete validation
   matrix, and only then permit external release.
 
 An item is complete only when production code, focused tests, affected examples, public docs, and
@@ -2004,22 +1946,22 @@ explicit decision before changing the criterion.
   **Wanted behavior and contract**
 
   Keep `Widget` as the sole common runtime phase trait but change `Widget::update` to return `()`.
-  Add marker `WidgetState` and `WidgetParameters`,
-  associated-type `WidgetBuilder`, the non-overridable `create_widget` factory, and the
-  exposed/hidden construction shapes shown above. Construction returns
-  `Option<WidgetStateHandle<Self::State>>` plus opaque `OwnedWidget` without exposing the concrete
-  runtime type. Every returned owner retains the sole persistent strong
-  `Rc<RefCell<Self::State>>`, including on the `None` path, while the runtime receives the matching
-  weak typed handle. `WidgetState` has no
-  measure/update/paint behavior and is never used as a substitute dispatch trait. Do not add
-  identity, mount, child, or Context methods to `Widget`.
+  Add marker `WidgetState` and `WidgetParameters`, `WidgetStateOwner: Widget`, and associated-type
+  `WidgetBuilder`. A builder associates `Parameters` with one concrete `W: WidgetStateOwner` and
+  `WidgetBuilder::create_widget` returns that runtime directly. The concrete runtime privately owns
+  its sole persistent strong `Rc<RefCell<State>>`; its `state_handle` method returns only the typed
+  weak capability. Concrete convenience constructors decide through their ordinary return type
+  whether to return that handle alongside the runtime. There is no generic optional exposure policy,
+  owner wrapper, or framework state-allocation factory. `WidgetState` has no measure/update/paint
+  behavior and is never used as a substitute dispatch trait. Do not add identity, mount, child, or
+  Context methods to `Widget`.
 
-  Apply the same construction boundary to containers through associated-type `ContainerBuilder`,
-  the non-overridable `create_container` factory, and opaque `OwnedContainer`. Construction returns
-  `Option<WidgetStateHandle<Self::State>>` plus `OwnedContainer`; the opaque owner retains the sole
-  persistent strong state cell while the concrete runtime receives only the matching weak typed
-  handle. `ContainerState: WidgetState` remains marker-only and does not acquire child access or
-  runtime behavior.
+  Apply the same construction boundary to containers through associated-type `ContainerBuilder`:
+  its concrete `W: Container + WidgetStateOwner` owns the strong state cell and is erased directly
+  when passed to `Node::container`. Public built-in convenience constructors return their typed state
+  handle plus a completed `Node`; internal fixed constructors may discard an internal/trivial handle
+  and return only `Node`. `ContainerState: WidgetState` remains marker-only and does not acquire child
+  access or runtime behavior.
 
   Specify the replacement of the current crate-private `Container: NodeBehavior` coupling with the
   final public object-safe
@@ -2038,18 +1980,19 @@ explicit decision before changing the criterion.
   - Compile-time signature tests pin the public `Widget` methods/defaults and prove `update` returns
     `()` with no generic result summary.
   - `CheckboxState` can be mutated without exposing measure/update/paint.
-  - `CheckboxWidget` dispatches through `OwnedWidget` with no erased state-handle trait.
-  - A hidden-state widget returns `None` while its opaque owner still retains the strong state `Rc`;
-    no weak application capability is returned.
+  - Concrete `Checkbox` owns its state `Rc` and dispatches after direct generic boxing with no erased
+    state-handle trait or parallel owner wrapper.
+  - A stateless/internal proof runtime owns `Rc<RefCell<()>>`; discarding its weak handle does not
+    change that ownership or runtime behavior.
   - An external custom leaf implements `Widget`, `WidgetState`, `WidgetParameters`, and
     `WidgetBuilder` without private APIs.
-  - The P1.3/P2.1 batch's external custom-container test implements `Widget`, `Container`, and marker
-    `ContainerState`; proves the returned `OwnedContainer` retains the sole persistent strong state
-    cell while the concrete runtime receives its weak handle; constructs `Children` through
-    `new`/`FromIterator`; supplies the same authoritative collection exactly once through both
-    opaque visitors; measures/layouts it through the exact public scoped operations; constructs it
-    through `create_container`; and enters the tree through public
-    `Node::container(OwnedContainer)` without private APIs.
+  - The P1.3/P2.1 batch's external custom-container test implements `Widget`, `WidgetStateOwner`,
+    `Container`, and marker `ContainerState`; proves the concrete runtime retains the sole persistent
+    strong state cell and returns its matching weak handle; constructs `Children` through
+    `new`/`FromIterator`; supplies the same authoritative collection exactly once through both opaque
+    visitors; measures/layouts it through the exact public scoped operations; constructs it through
+    `ContainerBuilder::create_container`; and enters the tree through public generic
+    `Node::container` without private APIs.
   - Container conformance tests panic with the specified diagnostics when either opaque visitor
     receives zero or multiple `Children` submissions; downstream documentation states the
     same-authoritative-collection obligation that safe Rust cannot enforce across the two methods.
@@ -2061,10 +2004,11 @@ explicit decision before changing the criterion.
   **Frozen contract evidence (2026-07-29)**
 
   The normative target signatures and ownership diagrams above now define one complete separation
-  boundary for both leaves and containers: concrete runtime objects implement `Widget` (and, for
-  containers, `Container`), application data implements marker `WidgetState`/`ContainerState`, and
-  only opaque owners retain persistent strong state cells. Optional application capabilities and
-  concrete runtimes receive weak typed handles; no state trait becomes a phase-dispatch adapter.
+  boundary for both leaves and containers: concrete runtime objects implement `WidgetStateOwner`
+  plus `Widget` (and, for containers, `Container`), application data implements marker
+  `WidgetState`/`ContainerState`, and each concrete runtime retains its persistent strong state cell.
+  Application capabilities are weak typed handles returned explicitly by concrete APIs; no state
+  trait becomes a phase-dispatch adapter.
 
   Repository inspection confirms that the current implementation still returns `ResourceState`
   from `Widget::update`, stores application/runtime state together, clones strong `WidgetHandle`
@@ -2074,78 +2018,88 @@ explicit decision before changing the criterion.
   protected specifications that become executable and green in their named P1.0/P1.1/P1.3/P2.3
   owner batches, with the public container surface landing atomically rather than partially.
 
-- [x] **P0.2 — Freeze the optional weak-exposure contract**
+- [x] **P0.2 — Freeze the runtime-owned weak-state contract**
 
   **Problem**
 
-  Strong public handles outlive topology. Every runtime must own its state strongly, but that does
-  not mean every widget/container should expose a state capability to the application. The previous
-  replacement also added Context metadata even though an exposed handle needs only liveness and
-  borrow checking.
+  Strong public handles outlive topology. Every runtime must own its state strongly, while public
+  state access needs only a typed weak capability with liveness and checked borrowing. The ownership
+  boundary must not require a second wrapper, generic exposure policy, or Context metadata.
 
-  **Decision needed: No — protected wanted-behavior baseline**
+  **Decision needed: No — simplified by explicit plan-owner decision after P1.0 usage audit**
 
   **Implementation owner: P1.0 and P1.3**
 
   **Settled decision and rationale**
 
-  `create_widget`/`create_container` returns `Some(WidgetStateHandle<T>)` when the concrete builder's
-  fixed `EXPOSE_STATE` policy permits application access and `None` when it keeps that capability
-  private. The opaque owned wrapper retains the strong `Rc<RefCell<T>>` in both exposure cases.
-  Present handles are weak, so node lifetime remains authoritative. Neither the strong owner nor
-  the weak handle is a Context capability or a lock.
+  Each concrete `WidgetStateOwner` runtime privately retains the strong `Rc<RefCell<T>>` and returns
+  a `WidgetStateHandle<T>` for that same allocation. Builders return their associated concrete
+  runtime, not an optional handle/opaque-owner pair. A meaningful convenience constructor may return
+  `(WidgetStateHandle<T>, Runtime)` or `(WidgetStateHandle<T>, Node)`; a stateless/internal
+  constructor may return only its runtime or completed node and discard the trivial/internal weak
+  handle. Present handles are weak, so node lifetime remains authoritative. Neither the strong owner
+  nor the weak handle is a Context capability or a lock.
 
-  Mandatory exposure was rejected because it leaks implementation-only state or creates a
-  meaningless public capability. Strong application handles were rejected because they keep
-  removed widget state alive and allow one state allocation to outlive or back multiple nodes.
+  A generic mandatory-or-optional exposure switch was rejected because the concrete constructor's
+  return type already states what its callers receive. Strong application handles were rejected
+  because they keep removed widget state alive and allow one state allocation to outlive or back
+  multiple nodes. Raw `Weak` exposure was rejected because callers could upgrade it and let a strong
+  clone escape; the typed handle deliberately provides only closure-scoped upgrades.
+
+  Public `Dropped`/`Borrowed` error variants were also rejected after the P1.0 implementation audit:
+  no production or later-plan consumer branches on the cause, `is_alive` already supplies the only
+  separately useful liveness fact, and ownership-moving mutation needs the original input rather
+  than an error wrapper. The smaller API returns `None` for unavailable ordinary access and
+  `Err(input)` for unavailable ownership-moving access. Internal runtime traversal diagnoses an
+  incompatible application borrow precisely at its invariant boundary; dropped ownership is
+  impossible while the concrete runtime method is running.
 
   **Wanted behavior and contract**
 
-  Implement `WidgetStateHandle<T>`, `StateAccessError`, input-preserving
-  `StateAccessFailure<I>`/`try_update_with`, the associated builders, and the required
-  optional-returning framework factories. Each factory creates one `Rc<RefCell<B::State>>` for its
-  concrete builder `B`, supplies the runtime a weak handle to it, and moves the strong owner into
-  `OwnedWidget` or `OwnedContainer`. `WidgetStateHandle::from_owner` is crate-private; the
-  application receives a weak clone only for the `Some` path. `is_alive` reports whether that weak
+  Implement `WidgetStateHandle<T>`, input-preserving `try_update_with`, `WidgetStateOwner`, and the
+  associated concrete-runtime builders. Each runtime creates and privately stores one
+  `Rc<RefCell<State>>`; `WidgetStateHandle::new(&runtime.state)` downgrades a borrowed owner reference
+  without exposing the raw `Weak` or returning a strong pointer. `is_alive` reports whether that weak
   cell can still be upgraded without borrowing its contents; an already-active access operation's
-  temporary upgrade therefore keeps it true after the opaque owner is dropped and until that
-  operation returns. Each concrete widget or container constructor makes one fixed, documented
-  exposure choice; Parameters do not contain a generic exposure selector and exposure cannot
-  change after construction. Handles contain only `Weak<RefCell<T>>`; `try_read` and `try_update`
-  use checked borrows, return the closure result, and expose only `Dropped`/`Borrowed`; remove
-  `replace`. Document that access closures may not invoke retained traversal/rendering, and use the
-  shared internal runtime-borrow diagnostic for built-ins instead of adding a frame/state-access
-  gate. The application top-level-render prohibition explicitly exempts framework-created child
-  measurement/layout/visitor recursion.
+  temporary upgrade therefore keeps it true after the concrete runtime is dropped and until that
+  operation returns. Handles contain only `Weak<RefCell<T>>`; `try_read` and `try_update`
+  use checked borrows and return `Some(closure_result)` on success or `None` without invoking the
+  closure when ownership or borrowing makes state unavailable. `try_update_with` returns
+  `Ok(closure_result)` on success or the exact uncommitted `Err(input)` on either unavailable path.
+  `is_alive` separately reports the allocation-liveness fact; remove `replace` and expose no public
+  access-error or failure-wrapper type. Document that access closures may not invoke retained
+  traversal/rendering, and use the shared internal runtime-borrow diagnostic for built-ins instead
+  of adding a frame/state-access gate. The application top-level-render prohibition explicitly
+  exempts framework-created child measurement/layout/visitor recursion.
 
   **Acceptance tests**
 
-  - Checkbox returns `Some`; cloning that handle does not increase strong count.
+  - `Checkbox::create` returns a typed handle and concrete `Checkbox`; cloning the handle does not
+    increase strong count.
   - A compile-time test clones `WidgetStateHandle<NonCloneState>` and proves the handle's `Clone`
     implementation has no `T: Clone` bound.
-  - Dropping Checkbox's returned `OwnedWidget` makes an idle handle report `Dropped`.
+  - Dropping the concrete Checkbox runtime makes `is_alive` false and ordinary idle access
+    return `None`.
   - `is_alive` does not borrow state: it remains true during an existing read or mutable access,
-    remains true after that closure drops the opaque owner because the active operation holds a
+    remains true after that closure drops the concrete runtime because the active operation holds a
     temporary upgrade, and becomes false when the final owner/active upgrade is gone.
-  - `try_read` and `try_update` return their closure results; an expired cell returns `Dropped`, and
-    an unavailable live cell returns `Borrowed` without invoking the closure.
-  - `StateAccessFailure::error`, `into_input`, and `into_parts` report the original error and return
-    the exact uncommitted input without cloning or substitution.
-  - `Custom` and a crate-private fixed-container proof implementation return `None`, but each
-    returned opaque wrapper owns its strong state `Rc`.
-  - Classification tests pin the complete fixed built-in outcome: `Checkbox`, `Button`, `ListItem`,
-    `ListBox`, `Combo`, `TextBlock`, `ColorSwatch`, `Slider`, `Number`, `Textbox`, and `TextArea`
-    return `Some`; `Custom` returns `None`; and every public dynamic container (`Column`, `Row`,
-    `Grid`, `Stack`, `Disclosure`, and `ScrollArea`) returns `Some`. The old header/tree `Node` is
-    retired rather than assigned an exposure outcome.
-  - Repeated calls to the same constructor have the same exposure outcome regardless of parameter
-    values or how the caller uses the result.
-  - No public Parameters type contains a generic exposure flag, and no exposure-selector type or
-    post-construction exposure operation exists.
-  - Same-cell reentrancy returns `Borrowed`; cross-cell access succeeds.
-  - `try_update_with(node, ...)` returns that exact unmounted node on both `Dropped` and `Borrowed`
-    without invoking the closure; successful access moves it once, and an invalid `insert` returns
-    it from the inner operation.
+  - `try_read` and `try_update` return `Some(closure_result)` on success; both an expired cell and an
+    unavailable live cell return `None` without invoking the closure. `is_alive` distinguishes the
+    liveness fact only when a caller actually needs it.
+  - `try_update_with` returns the exact uncommitted input directly as `Err(input)` without cloning,
+    substitution, or a public failure wrapper.
+  - A stateless/internal proof runtime retains its unit state with one strong `Rc`; discarding a
+    freshly produced weak handle neither changes strong count nor disables runtime dispatch.
+  - Constructor signature tests pin the complete built-in return shapes: application-meaningful
+    state constructors return a typed handle with their runtime/finished node, while `Custom` and
+    internal fixed-composition constructors return only their runtime/node. The old header/tree
+    `Node` is retired rather than assigned a state return shape.
+  - No public Parameters type contains a generic exposure flag, and no `EXPOSE_STATE`, optional
+    factory result, exposure-selector type, or post-construction exposure operation exists.
+  - Same-cell reentrancy returns `None`; cross-cell access succeeds.
+  - `try_update_with(node, ...)` returns that exact unmounted node as `Err(node)` for either expired
+    ownership or a live borrow conflict without invoking the closure; successful access moves it
+    once, and an invalid `insert` returns it from the inner operation.
   - State access behaves identically before, during, and after a `ContextFrame` when borrow state is
     identical and the access closure completes before `render_ui` begins.
   - Rendering any retained root of the same Context from inside `try_read`/`try_update` is documented
@@ -2155,27 +2109,33 @@ explicit decision before changing the criterion.
     `ContainerLayoutCtx::layout_child`, and visitor traversal while its parent state borrow is active
     without triggering the top-level-reentrancy diagnostic.
   - No frame/state-access flag or gate is added to enforce the reentrancy precondition.
-  - Compile-fail checks prove ordinary downstream code cannot construct a state handle from a raw
-    `Weak`, extract its `Rc`/`Weak`, or access `WidgetStateHandle::from_owner`; no Context token,
-    frame flag, mount metadata, strong `Rc`, or raw `Weak` is returned as the application state
-    capability or consulted during access.
+  - Downstream conformance tests construct a private state `Rc`, implement `WidgetStateOwner` with
+    `WidgetStateHandle::new(&self.state)`, and prove the handle observes the same allocation used by
+    runtime phases. Compile-fail checks prove callers cannot construct a handle from a raw `Weak` or
+    extract its `Rc`/`Weak`; no Context token, frame flag, mount metadata, strong `Rc`, or raw `Weak`
+    is returned as the application state capability or consulted during access.
+  - Public API/source searches find no `StateAccessError`, `StateAccessFailure`, or equivalent
+    public classification of unavailable handle access.
 
   **Frozen contract evidence (2026-07-29)**
 
-  The normative ownership and access sections above now define the complete optional-exposure
-  contract. Factories always allocate and retain one strong state cell inside the opaque owner;
-  `EXPOSE_STATE` controls only whether the application receives another weak typed capability.
-  Liveness is allocation-based, borrow conflicts are per cell, failed ownership-moving updates
-  return their exact input, and neither frame existence nor Context identity participates in state
-  access. The fixed built-in table is the exhaustive exposure compatibility boundary.
+  The normative ownership and access sections above now define the complete direct-runtime
+  contract. Every concrete runtime allocates and retains one strong state cell; concrete constructor
+  return types state whether callers also receive a weak typed capability.
+  Liveness is allocation-based, borrow conflicts are per cell, ordinary unavailable access is one
+  `None` outcome, failed ownership-moving updates return their exact input directly, and neither
+  frame existence nor Context identity participates in state access. The fixed built-in table is
+  the exhaustive constructor-return compatibility boundary. The post-P1.0 audit found no consumer that needs
+  the unavailable cause as public data, so the earlier error enum/wrapper design was removed rather
+  than carried into later items.
 
-  Repository inspection confirms that the current `WidgetHandle<T>` instead stores and clones a
-  strong `Rc<RefCell<T>>`, exposes allocation-derived identity, uses panicking `borrow`/`borrow_mut`,
-  offers whole-value `replace`, and is cloned again by `WidgetStateHandleDyn` for runtime dispatch.
-  Those properties explain the migration but are not preserved behavior. P0.2 intentionally changes
-  no production API: its compile-time, lifetime, borrow, and input-preservation criteria become
-  executable and green in P1.0/P1.3, including the hidden-state proof implementations needed to
-  inspect otherwise unexposed ownership.
+  P1.0 now implements this final handle and direct-runtime construction contract for the widget
+  path: ordinary access methods return `Option<R>`, ownership-moving access returns `Result<R, I>`,
+  the public error enum/failure wrapper and owner wrapper are absent, and focused ownership,
+  lifetime, borrow-conflict, liveness, and input-preservation tests are green. The legacy
+  `WidgetHandle<T>` remains only for unsplit widgets during migration and is not part of the final
+  contract. P1.3 applies the same settled behavior to container construction and supplies the
+  remaining container-specific acceptance evidence.
 
 - [x] **P0.3 — Freeze the state-owned `Children` contract**
 
@@ -2190,17 +2150,18 @@ explicit decision before changing the criterion.
 
   **Settled decision and rationale**
 
-  Every concrete container state owns one opaque `Children`, and `OwnedContainer` owns the sole
-  persistent strong `Rc<RefCell<State>>`. A container that permits application topology changes
-  returns `Some(WidgetStateHandle<State>)`; a fixed/internal container returns `None` but retains
-  the same strong ownership shape. Application code changes membership through the typed state
-  handle, with no Context argument, mounted identity, `ContainerHandle`, or second editor API.
+  Every concrete container state owns one opaque `Children`, and its concrete
+  `Container + WidgetStateOwner` runtime owns the sole persistent strong `Rc<RefCell<State>>`. A
+  public dynamic container convenience constructor returns its typed handle plus a completed `Node`;
+  a fixed/internal constructor returns only its completed `Node` after discarding any trivial or
+  internal weak handle. Application code changes membership through the typed state handle, with no
+  Context argument, mounted identity, `ContainerHandle`, or second editor API.
 
   A Context-owned `ContainerEditor` was rejected because it requires public or handle-carried mount
   identity and duplicates checked state mutation. Rebuilding/replacing roots was rejected because it
   preserves allocation, generated-identity, and state-transfer work for a local child-list change.
   The accepted consequence is traversal-order observation: same-container mutation while that state
-  is borrowed returns `Borrowed`, while mutation of another available container follows documented
+  is borrowed returns `None`, while mutation of another available container follows documented
   deterministic traversal order. Focus/capture cleanup occurs at the next safe tree boundary.
 
   **Wanted behavior and contract**
@@ -2221,15 +2182,12 @@ explicit decision before changing the criterion.
   removal-and-return operation.
 
   Use `WidgetStateHandle<C>` for container state; do not add `ContainerHandle` or `ContainerEditor`.
-  Every public built-in container constructor returns
-  `(Option<WidgetStateHandle<C>>, Node)` and performs its `create_container`/`OwnedContainer`
-  wrapping internally.
-  Each concrete constructor owns its fixed exposure policy: the public dynamic layout constructors
-  return `Some`, while an internal fixed container constructor may always return `None`. Callers do
-  not select exposure through Parameters or a separate API.
+  Every public dynamic built-in container constructor returns
+  `(WidgetStateHandle<C>, Node)` and performs its concrete-runtime construction plus
+  `Node::container` wrapping internally. An internal fixed container constructor may return only its
+  completed `Node`. Callers do not select the return shape through Parameters or a separate API.
   The atomic P1.3/P2.1 compile-safe batch publishes `Container`, constructible `Children`, the opaque
-  visitors/contexts, owning `Node`, `ContainerBuilder`, `create_container`,
-  `Node::container(OwnedContainer)`, the Column vertical
+  visitors/contexts, owning `Node`, `ContainerBuilder`, generic `Node::container`, the Column vertical
   slice, and Disclosure as the old public `Node` replacement. Row/Grid/Stack land in P2.0 and
   ScrollArea lands in P2.2 using that already-complete foundation. Downstream compile tests exercise
   the Column/Disclosure/custom-container paths in the atomic batch and expand to every built-in as
@@ -2265,12 +2223,11 @@ explicit decision before changing the criterion.
       }
   }
 
-  // Build the persistent file-list container once. Column's OwnedContainer owns the
+  // Build the persistent file-list container once. The concrete Column runtime owns the
   // strong Rc<RefCell<ColumnState>>; the application receives only this weak handle.
   let initial_rows = directory_entries().map(file_row_node);
   let (files_state, files_node) =
       Column::create(ColumnParameters::new(initial_rows));
-  let files_state = files_state.expect("the dynamic file list exposes ColumnState");
 
   // A directory refresh replaces only this container's children. It does not rebuild the
   // dialog root and does not require Context or a container/node ID.
@@ -2280,21 +2237,23 @@ explicit decision before changing the criterion.
   })?;
 
   // Successful removal drops the child in place; no attached Node is returned for reuse.
-  files_state.try_update(|column| {
-      assert!(column.remove_drop(3));
-  })?;
+  files_state
+      .try_update(|column| {
+          assert!(column.remove_drop(3));
+      })
+      .expect("file-list state unavailable");
   ```
 
   A crate-private fixed-composition container implementation uses the same strong state ownership
-  but defines a constructor that always withholds the application capability:
+  but defines a constructor that returns only the completed node:
 
   ```rust
-  let (toolbar_state, toolbar_node) =
-      FixedGroup::create(FixedGroupParameters::new(fixed_toolbar_children));
+  let toolbar_node = FixedGroup::create(
+      FixedGroupParameters::new(fixed_toolbar_children),
+  );
 
-  assert!(toolbar_state.is_none());
-  // The Node's private FixedGroup OwnedContainer still owns
-  // Rc<RefCell<FixedGroupState>> and its Children.
+  // The concrete FixedGroup runtime inside Node still owns its
+  // Rc<RefCell<FixedGroupState>> and Children.
   ```
 
   `FixedGroup` is the internal/test proof of the hidden-container path, not a mode of `Column`,
@@ -2304,20 +2263,19 @@ explicit decision before changing the criterion.
   Checked borrowing defines conflicting and cross-container mutation without a frame gate:
 
   ```rust
-  files_state.try_read(|_files| {
-      // The same state cell is already borrowed.
-      assert_eq!(
-          files_state.try_update(|_files| {}),
-          Err(StateAccessError::Borrowed),
-      );
+  files_state
+      .try_read(|_files| {
+          // The same state cell is already borrowed.
+          assert_eq!(files_state.try_update(|_files| {}), None);
 
-      // A different available container remains independently mutable.
-      sidebar_state
-          .try_update_with(notification_node, |sidebar, notification_node| {
-              sidebar.push(notification_node)
-          })
-          .unwrap();
-  })?;
+          // A different available container remains independently mutable.
+          sidebar_state
+              .try_update_with(notification_node, |sidebar, notification_node| {
+                  sidebar.push(notification_node)
+              })
+              .unwrap();
+      })
+      .expect("file-list state unavailable");
   ```
 
   **Acceptance tests**
@@ -2329,9 +2287,9 @@ explicit decision before changing the criterion.
     insertion, valid/invalid `remove_drop`, empty/non-empty `clear`, ordered replacement, and
     out-of-range `measure_child` follow the exact boundary behavior above.
   - A failed `insert` returns the exact input node with its weak descendant handles still live; a
-    successful removal/clear/replacement returns no node and makes removed-state handles report
-    `Dropped` after any active access upgrade ends.
-  - Same-container mutation during its traversal returns `Borrowed` without panic.
+    successful removal/clear/replacement returns no node and makes removed-state handles become
+    non-live and return `None` after any active access upgrade ends.
+  - Same-container mutation during its traversal returns `None` without panic.
   - Mutation of another available container follows traversal order: current phases process the
     state they observe without rollback, and the next ordinary frame is fully stable.
   - Marker `ContainerState` has no methods, and public `Children` has no direct node iterator or API
@@ -2353,11 +2311,11 @@ explicit decision before changing the criterion.
   - The atomic-batch downstream compile test constructs Column and Disclosure from their completed
     `Node` returns without a wrapping step; P2.0/P2.2 extend the same test to each later built-in.
   - Construction tests grow with the rollout and ultimately prove every public dynamic built-in
-    container returns `Some`, while the fixed internal proof container returns `None`; both paths
-    retain identical strong-owner shape.
-  - A downstream custom container implements public `Container`/`ContainerBuilder`, uses
-    `Children::new` or `collect::<Children>()`, receives the factory-supplied weak state handle, and
-    is accepted by `Node::container(OwnedContainer)` without private APIs.
+    container returns a typed handle plus `Node`, while the fixed internal proof container returns
+    only `Node`; both paths retain identical concrete-runtime strong-owner shape.
+  - A downstream custom container implements public `Container`/`WidgetStateOwner`/
+    `ContainerBuilder`, uses `Children::new` or `collect::<Children>()`, returns the weak state handle
+    from its concrete runtime, and is accepted by generic `Node::container` without private APIs.
   - File-dialog refresh replaces only the file/folder list children and does not call
     `Context::set_root_nodes`.
   - Public documentation includes the construction, replacement, removal, hidden-container, and
@@ -2366,8 +2324,9 @@ explicit decision before changing the criterion.
   **Frozen contract evidence (2026-07-29)**
 
   The normative container-ownership and runtime-lifecycle sections above now define one mutation
-  path: each concrete state owns one opaque ordered `Children`, its `OwnedContainer` retains the
-  strong state cell, and optional weak typed handles provide checked state-local membership changes.
+  path: each concrete state owns one opaque ordered `Children`, its concrete container runtime
+  retains the strong state cell, and explicitly returned weak typed handles provide checked
+  state-local membership changes.
   The operation boundaries preserve unique unmounted inputs on failure, commit ownership exactly
   once on success, never return an attached node, and separate immediate owner destruction from
   deferred scalar-target sanitization. The custom-container exception is documented as a safe API
@@ -2415,7 +2374,7 @@ explicit decision before changing the criterion.
   all generic result production and storage. Remove `ResourceState`, `FrameResults`,
   `FrameResultGeneration`, public `RetainedId`, public widget `NodeId`, every `state_of*` operation,
   and targeted Context focus. Root chrome uses `RootState` and the same pending typed-event contract;
-  use the fixed built-in exposure/mutation table above rather than reclassifying in P1.1.
+  use the fixed built-in constructor/mutation table above rather than reclassifying in P1.1.
 
   Every pending event counter starts at zero. Recording uses `saturating_add(1)`, so `u32::MAX`
   remains `u32::MAX` rather than wrapping. A `take_*` call at zero returns `false` without changing
@@ -2434,11 +2393,15 @@ explicit decision before changing the criterion.
   Persistent values are read and changed directly through typed state:
 
   ```rust
-  let checked = checkbox_state.try_read(CheckboxState::checked)?;
+  let checked = checkbox_state
+      .try_read(CheckboxState::checked)
+      .expect("checkbox state unavailable");
 
-  checkbox_state.try_update(|checkbox| {
-      checkbox.set_checked(!checked);
-  })?;
+  checkbox_state
+      .try_update(|checkbox| {
+          checkbox.set_checked(!checked);
+      })
+      .expect("checkbox state unavailable");
   ```
 
   Button-like interactions use a consumable count rather than a one-frame generic result flag, so
@@ -2468,7 +2431,10 @@ explicit decision before changing the criterion.
   }
 
   // ButtonWidget::update records the typed event at the click decision point and returns ().
-  if save_button_state.try_update(ButtonState::take_submitted)? {
+  if save_button_state
+      .try_update(ButtonState::take_submitted)
+      .expect("button state unavailable")
+  {
       save_document();
   }
   ```
@@ -2499,7 +2465,9 @@ explicit decision before changing the criterion.
   }
 
   // Application code queues the command through the weak typed state handle.
-  textbox_state.try_update(TextboxState::request_focus)?;
+  textbox_state
+      .try_update(TextboxState::request_focus)
+      .expect("textbox state unavailable");
 
   // Inside TextboxWidget::update, after obtaining &mut TextboxState as `state`,
   // the runtime consumes the command using its existing widget-local context.
@@ -2516,13 +2484,11 @@ explicit decision before changing the criterion.
   fulfilled. A hidden or gated descendant receives no update, so its queued request remains
   untouched.
 
-  A hidden widget/container uses the same `Widget::update -> ()` signature. Returning `None` from
-  construction means only that none of its values, events, or commands form an application API:
+  A unit/internal-state widget or container uses the same `Widget::update -> ()` signature. Its
+  convenience constructor may simply omit a meaningless state handle from its return type:
 
   ```rust
-  let (decoration_state, decoration_runtime) = Decoration::create(parameters);
-  assert!(decoration_state.is_none());
-
+  let decoration_runtime = Decoration::create(parameters);
   let decoration = Node::widget(decoration_runtime);
   // DecorationWidget::update performs its runtime work and returns no generic leaf result.
   ```
@@ -2661,7 +2627,7 @@ explicit decision before changing the criterion.
   ```
 
   `Node::from_kind` is the only allocation point. `Node::widget`, `Node::custom_render`, and
-  `Node::container` reach it exactly once; built-in container factories do not allocate an
+  `Node::container` reach it exactly once; built-in container constructors do not allocate an
   additional identity around their returned node. Moving an unmounted node, configuring it through
   consuming `with_policy`/`with_grid_span`, returning it from a failed `Children::insert`, and
   mounting it in any Context preserve the original scalar. Dropping even a never-mounted node does
@@ -2721,7 +2687,7 @@ explicit decision before changing the criterion.
 
   - Sequential unit tests observe nonzero monotonically increasing IDs, and IDs remain unique across
     multiple Contexts and independent node construction streams.
-  - `Node::widget`, `Node::custom_render`, `Node::container`, and every built-in container factory
+  - `Node::widget`, `Node::custom_render`, `Node::container`, and every built-in container constructor
     allocate exactly one ID per returned node; private root-chrome construction allocates exactly
     one ID for its chrome node.
   - Moving/configuring an unmounted node, a failed insertion that returns it, and mounting it in any
@@ -2901,8 +2867,8 @@ explicit decision before changing the criterion.
 
   **Settled decision and rationale**
 
-  Model every root as retained UI with the same typed weak-state capability and opaque strong owner
-  as ordinary widgets and containers. A parallel `WindowEntry` chrome-state/result API was rejected
+  Model every root as retained UI with the same typed weak-state capability and concrete-runtime
+  strong ownership as ordinary widgets and containers. A parallel `WindowEntry` chrome-state/result API was rejected
   because it would duplicate geometry, visibility, interaction state, event lifetime, and checked
   borrowing outside the retained model. Synthetic title/close/resize child nodes were rejected
   because those chrome regions have no independent application identity or topology and would add
@@ -2926,8 +2892,8 @@ explicit decision before changing the criterion.
 
   `RootHandle` contains the public lifecycle `RootId` and one weak
   `WidgetStateHandle<RootState>`. Cloning or dropping a handle never changes root lifetime while its
-  Context remains live. The private `RootChromeContainer`'s `OwnedContainer` is the sole persistent
-  strong `RootState` owner; `WindowEntry` retains only a framework-internal weak clone. `RootState`
+  Context remains live. The private `RootChromeContainer` runtime is the sole persistent strong
+  `RootState` owner; `WindowEntry` retains only a framework-internal weak clone. `RootState`
   owns the immutable name, current options/rectangle/visibility, mutually exclusive moving/resizing
   mode, independent saturating change/submission counts, and exactly one application child. It
   exposes only the query/event methods specified above and no child getter or topology mutation.
@@ -3000,8 +2966,9 @@ explicit decision before changing the criterion.
   opening/showing press and clears after the first eligible popup frame. Any later pointer-button
   press outside the sole visible popup hides and sanitizes it, records exactly one submission through
   `RootState`, and then routes that same press exactly once to the highest eligible remaining root.
-  Showing popup B while popup A is visible first obtains both checked state borrows; `Borrowed`
-  leaves both roots, z-order, and targets unchanged. Nested popup relationships remain out of scope.
+  Showing popup B while popup A is visible first obtains both checked state borrows;
+  `RootMutationError::Borrowed` leaves both roots, z-order, and targets unchanged. Nested popup
+  relationships remain out of scope.
 
   **Acceptance tests**
 
@@ -3014,13 +2981,15 @@ explicit decision before changing the criterion.
   - Cloning/dropping `RootHandle` changes neither strong owner count nor root lifetime. Dropping
     Context releases every remaining root; while it remains live, only `destroy_root` removes one.
   - Destroying an existing root returns `true`, immediately unmounts/releases the chrome container
-    plus application subtree, and makes root/descendant handles report `Dropped` after active access
-    closures finish; a root-state closure is the only temporary reason physical child drop may lag.
+    plus application subtree, and makes root/descendant handles become non-live and return `None`
+    after active access closures finish; a root-state closure is the only temporary reason physical
+    child drop may lag.
     A destroy invoked while that root state is actively borrowed still succeeds and the removed tree
     can never traverse again.
   - Destroying an unknown or already-destroyed root returns `false`; later creation never reuses the
     ID, and exhaustion panics before registration rather than wrapping or aliasing.
-  - Every Context root setter distinguishes `UnknownRoot` from `Borrowed` and is atomic on failure;
+  - Every Context root setter distinguishes `RootMutationError::UnknownRoot` from
+    `RootMutationError::Borrowed` and is atomic on failure;
     public root reads occur only through the checked `RootState` handle, and no parallel Context
     query remains. An internal weak-upgrade failure for an extant entry is an invariant panic.
   - Rectangle/size setters, minimum normalization, auto-size, options, visibility, fronting,
@@ -3036,9 +3005,9 @@ explicit decision before changing the criterion.
     activating it.
   - At most one popup is visible per Context. Showing another silently hides the previous popup,
     clears its transient targets without recording a submission, and gives the new popup ordinary
-    `just_opened` suppression. The switch is atomic and returns `Borrowed` without changing either
-    popup if one of the required state cells is unavailable. Nested popups remain a separate
-    feature.
+    `just_opened` suppression. The switch is atomic and returns `RootMutationError::Borrowed`
+    without changing either popup if one of the required state cells is unavailable. Nested popups
+    remain a separate feature.
   - Re-showing an already-visible popup raises it without changing its rectangle or rearming
     `just_opened`; reopening a hidden popup applies pointer placement and suppression exactly once.
   - Drag/resize exposes current active/moving/resizing state and increments `take_changed` only when
@@ -3114,11 +3083,11 @@ explicit decision before changing the criterion.
 
 ### P1 — Final state ownership and persistent topology
 
-P1 implements the final opaque ownership model directly. Each item inherits the behavioral
+P1 implements the final concrete-runtime ownership model directly. Each item inherits the behavioral
 acceptance criteria of its named P0 owner; the bullets below add migration sequencing, structural
 removal, and focused implementation evidence rather than redefining that behavior.
 
-- [ ] **P1.0 — Land the public construction/state primitives with Checkbox as the vertical slice**
+- [x] **P1.0 — Land the public construction/state primitives with Checkbox as the vertical slice**
 
   **Problem**
 
@@ -3128,32 +3097,85 @@ removal, and focused implementation evidence rather than redefining that behavio
 
   **Target contract or migration**
 
-  Add the four public widget roles, weak handle/error primitives including `try_update_with`, private
-  method-free `StateKeepAlive`, opaque `OwnedWidget`, non-overridable `create_widget`, and the final
-  `WidgetBuilder::{initialize, build, EXPOSE_STATE}` contract. Split `Checkbox` into builder,
-  parameters, state, and runtime implementation. Let a temporary crate-private projection adapter
-  own and delegate the new `OwnedWidget`; delete it in P1.2. No raw-box insertion API is exposed or
-  retained past this item. Container/visitor contracts may be implemented
+  Add the public widget state/construction roles, weak handle primitives including input-preserving
+  `try_update_with`, `WidgetStateOwner`, and the final
+  `WidgetBuilder::{Parameters, W, create_widget}` contract. Split `Checkbox` into builder,
+  parameters, state, and concrete runtime implementation; that runtime owns its strong state cell
+  directly. Let a temporary crate-private projection adapter accept the concrete runtime generically
+  and erase it to `Box<dyn Widget>` only at insertion; delete the legacy payload branch in P1.2. No
+  public raw-box insertion API is exposed or retained past this item. Container/visitor contracts may be implemented
   crate-privately as migration scaffolding, but do not export public `Container`, `ContainerState`,
   `Children`, visitors, container contexts/results, or owning `Node` until the atomic P1.3/P2.1
   compile-safe batch supplies a usable complete surface and resolves the old public `Node` collision.
 
   **Acceptance tests**
 
-  - Checkbox construction returns `Some(WidgetStateHandle<CheckboxState>)` plus `OwnedWidget`.
-  - Checkbox's `OwnedWidget` owns the only persistent strong `Rc<RefCell<CheckboxState>>`; its
-    runtime uses the exact factory-supplied weak handle.
-  - A hidden-state proof widget returns `None` plus a fully functional `OwnedWidget` that owns the
-    same strong unit-state shape.
+  - `Checkbox::create` returns `WidgetStateHandle<CheckboxState>` plus concrete `Checkbox`.
+  - Concrete `Checkbox` owns the only persistent strong `Rc<RefCell<CheckboxState>>`; its
+    `state_handle` method downgrades that exact allocation.
+  - A stateless proof runtime owns the same strong unit-state shape; discarding its weak handle does
+    not alter ownership or phase behavior.
   - External code can implement the complete four-role custom widget path.
   - Checked read/update and destruction behavior match P0.2.
   - Current checkbox geometry, click toggle, paint, and options remain correct.
   - Public rustdoc explains which data belongs in Parameters versus State.
-  - Public exports at this item contain the widget roles/handle/error surface and no incomplete
+  - Public exports at this item contain the widget roles/handle surface and no incomplete
     container/visitor/owning-Node API. Any temporary projection or `NodeBehavior` migration bridge is
     crate-private and names the P1.3/P2.1 batch or P2.3 as its deletion/export point.
 
-- [ ] **P1.1 — Split every built-in leaf using the fixed exposure/mutation mapping**
+  **Implementation evidence (2026-07-30)**
+
+  `src/widget.rs` now defines the public `WidgetState`, `WidgetParameters`, `WidgetStateOwner`,
+  `WidgetBuilder`, and `WidgetStateHandle<T>` surface. The handle deliberately has no public
+  access-error taxonomy: ordinary unavailable access returns `None`, while `try_update_with` returns
+  its input directly as `Err(input)`. Each concrete runtime owns exactly one strong
+  `Rc<RefCell<State>>` and implements `state_handle` with `WidgetStateHandle::new(&self.state)`. The
+  builder associates Parameters with concrete `W` and returns that runtime directly; there is no
+  framework allocator, optional exposure result, `EXPOSE_STATE`, state keep-alive trait, or parallel
+  owner wrapper. The handle implementation uses checked per-cell borrows, has a manual `Clone`
+  without a `T: Clone` bound, preserves owned input through `try_update_with`, and exposes no raw
+  `Rc`, `Weak`, Context identity, mount identity, or frame gate. Shared internal runtime helpers turn
+  an incompatible associated-state borrow into a precise invariant diagnostic.
+
+  `Checkbox` is the first complete split built-in. `CheckboxParameters` owns its one-shot label,
+  font, initial value, and options; `CheckboxState` owns the checked value and its silent
+  programmatic operations; public `CheckboxBuilder` implements `WidgetBuilder`; and public concrete
+  `Checkbox` implements the current common `Widget` phases plus `WidgetStateOwner` while owning the
+  strong state cell. `Checkbox::create` returns its typed weak handle plus that concrete runtime.
+  Measurement, framing/options, text and icon paint, click toggling, and the temporary
+  legacy `CHANGE` result remain characterized. The typed pending-event migration and unit-returning
+  `Widget::update` remain with P1.1/P3.0 as assigned by P0.4 rather than being partially applied to
+  unsplit widgets here.
+
+  The current projection contains one crate-private `WidgetPayload::{Legacy, Direct}` bridge. Its
+  direct branch erases a generic concrete `W: WidgetStateOwner` to `Box<dyn Widget>` at the node
+  boundary, performs no erased state-handle redispatch or owner clone, and records legacy frame
+  results without inventing a widget-handle identity. The doc-hidden staging insertion is generic
+  over `WidgetStateOwner` and never accepts `Box<dyn Widget>`; P1.2 removes the payload bridge when
+  every leaf uses direct boxed runtime dispatch, and P1.3 replaces the staging insertion with public
+  owning `Node`. Other widgets continue through the old strong-handle branch until their assigned
+  migration items.
+
+  Focused tests prove the sole persistent strong owner, weak cloning for non-`Clone` state,
+  unavailable-access behavior, separate liveness observation, closure-result propagation,
+  same-cell conflict, cross-cell access, active read and write lifetime, exact input recovery,
+  discarded-unit-handle ownership, and the top-level rendering precondition. A downstream
+  integration implements all four roles for meaningful and unit-state widgets, inserts both
+  concrete runtimes through the generic staging bridge, exercises them
+  before/during/after a live `ContextFrame`, and observes handle expiry when Context releases the
+  tree. Checkbox characterization proves direct typed mutation, retained geometry/text paint,
+  options, click toggling, compatibility result recording, zero erased adapters on its branch, and
+  the shared reentrant-borrow diagnostic. The full demo now moves its three concrete Checkbox runtimes
+  once instead of cloning strong handles.
+
+  Validation passes `cargo fmt --all -- --check`, `cargo test --all-targets` (180 unit tests and two
+  downstream integration tests passed; three existing manual baselines ignored), `cargo test
+  --doc` (17 passed), `cargo check --no-default-features`, `cargo doc --no-deps`, and separate
+  all-example checks for `example-glow`, `example-vulkan`, and `example-wgpu`. `cargo clippy
+  --all-targets -- -W clippy::all` completes with the repository's pre-existing warning baseline;
+  a path-filtered rerun reports no warning in a P1.0-touched file.
+
+- [ ] **P1.1 — Split every built-in leaf using the fixed constructor/mutation mapping**
 
   **Problem**
 
@@ -3163,8 +3185,9 @@ removal, and focused implementation evidence rather than redefining that behavio
 
   **Target contract or migration**
 
-  Implement the authoritative table in “Fixed built-in state exposure and compatibility mapping”:
-  every listed leaf except `Custom` returns `Some`, `Custom` returns `None` with `State = ()`, and
+  Implement the authoritative table in “Fixed built-in constructor and compatibility mapping”:
+  every application-state leaf constructor returns its typed handle with the concrete runtime;
+  `Custom` returns only its concrete runtime with `State = ()`, and
   the old header/tree `widgets::Node`/`NodeStateValue` APIs retire into exposed `DisclosureState` in
   P2.1 without an alias. Preserve exactly the mounted values/events/commands listed in that table.
   Move initialization-only visual/base configuration to Parameters and runtime-derived/cached data
@@ -3181,16 +3204,16 @@ removal, and focused implementation evidence rather than redefining that behavio
   - Checkbox/slider/number/text change and button/list/text/combo submission use the exact typed
     event APIs, recording points, saturating multiplicity, and programmatic-setter rules specified
     above; Combo clamp/select edge cases are pinned separately.
-  - `Custom` has a negative test proving no weak application handle is returned and a
-    lifetime/ownership test proving its `OwnedWidget` retains the unit state cell; no other listed
-    leaf is conditionally hidden.
+  - `Custom` has a signature test proving its convenience constructor returns no weak application
+    handle and a lifetime/ownership test proving its concrete runtime retains the unit state cell;
+    no constructor has a parameter-dependent return shape.
   - Built-in Widget implementations preserve current phase behavior and focus policies.
   - No built-in state type implements `Widget` merely to obtain dispatch.
   - The migration mapping names `Node::header`, `Node::tree`, `NodeStateValue::{Expanded, Closed}`,
     their predicates, label/options, and click-toggle behavior and points each one to its exact
     `DisclosureParameters`/`DisclosureState` replacement.
 
-- [ ] **P1.2 — Dispatch persistent leaf payloads directly through `OwnedWidget`**
+- [ ] **P1.2 — Dispatch persistent leaf payloads directly through boxed runtimes**
 
   **Problem**
 
@@ -3200,11 +3223,12 @@ removal, and focused implementation evidence rather than redefining that behavio
 
   **Target contract or migration**
 
-  Change the internal leaf payload to own `OwnedWidget`. Keep only the generic geometry/input
+  Change the internal leaf payload to own `Box<dyn Widget>`. Keep only the generic geometry/input
   adapter required to create `WidgetUpdateCtx`/`WidgetPaintCtx`; it delegates `Widget` directly and
-  owns optional private `CustomRenderKey`. The final
-  `Node::widget(OwnedWidget)`/`Node::custom_render(OwnedWidget, CustomRenderHandle<B>)` surface lands
-  with the owning `Node` in P1.3; no raw box overload exists. Delete `WidgetStateHandleDyn`, `clone_box`,
+  owns optional private `CustomRenderKey`. The final generic
+  `Node::widget<W: WidgetStateOwner>(W)`/`Node::custom_render<W: WidgetStateOwner, B>(W,
+  CustomRenderHandle<B>)` surface lands with the owning `Node` in P1.3; no raw box overload exists.
+  Delete `WidgetStateHandleDyn`, `clone_box`,
   `erased_widget_state`, widget allocation IDs, and duplicate-state dispatch tracking. Keep existing
   renderer-registry preflight for removed, foreign, or backend-incompatible erased keys.
 
@@ -3212,11 +3236,13 @@ removal, and focused implementation evidence rather than redefining that behavio
 
   - Each requested leaf measure/update/paint invocation uses one direct Widget dispatch path; tests
     do not incorrectly require only one measurement request per frame.
-  - Moving the `OwnedWidget` into a node does not change an exposed handle or create one for a hidden
-    widget.
-  - An `OwnedWidget` cannot be cloned into two nodes through safe APIs.
-  - The P1.3 downstream example constructs a custom-render leaf from the owner returned by
-    `create_widget` and a `CustomRenderHandle<B>` without accessing `CustomRenderKey`.
+  - Moving a concrete runtime into a node does not change an already-returned weak handle or create a
+    new one.
+  - Built-in concrete runtimes are non-`Clone`; downstream documentation makes unique
+    state-allocation ownership a safe `WidgetStateOwner` conformance obligation because arbitrary
+    custom inherent APIs cannot be type-policed by the framework.
+  - The P1.3 downstream example constructs a custom-render leaf from the concrete runtime returned by
+    `WidgetBuilder::create_widget` and a `CustomRenderHandle<B>` without accessing `CustomRenderKey`.
   - `Node::widget` records no custom draw; `Node::custom_render` runs its callback after widget paint
     with the derived content rectangle and clip.
   - Removed/foreign custom-render handles fail existing preflight before backend acquisition.
@@ -3232,20 +3258,18 @@ removal, and focused implementation evidence rather than redefining that behavio
 
   **Target contract or migration**
 
-  Add `ContainerBuilder`, non-overridable `create_container`, opaque `OwnedContainer`, the one public
-  opaque non-cloneable owning `Node`, private `NodeKind`, private
+  Add `ContainerBuilder`, the one public opaque non-cloneable owning `Node`, private `NodeKind`, private
   `RuntimeNodeId`, `NodeRuntime` without generic visibility, opaque constructible `Children`,
   public `Container: Widget`, marker `ContainerState`, opaque visitors, scoped layout/input
-  contexts/results, the Column state/owner vertical slice, and P2.1 Disclosure as the atomic
+  contexts/results, the Column state/runtime vertical slice, and P2.1 Disclosure as the atomic
   P1.3/P2.1 public API batch. Add exact consuming
   `Node::with_policy`/`with_grid_span` placement methods; successful child insertion consumes the
-  node. Use the same optional
-  `WidgetStateHandle<C>` model for both leaf and container state. Column and Disclosure constructors
-  return `(Option<WidgetStateHandle<C>>, Node)` in this batch after using public `Node::container`
-  internally. Row/Grid/Stack add the same final shape in P2.0, and ScrollArea does so in P2.2; each
-  returns its fixed documented exposure outcome when it lands. Downstream custom constructors use
-  `create_container` and pass the returned `OwnedContainer` to the same node constructor explicitly;
-  no raw container box can enter the tree.
+  node. Use the same typed weak `WidgetStateHandle<C>` model for both leaf and container state.
+  Column and Disclosure constructors return `(WidgetStateHandle<C>, Node)` in this batch after using
+  public generic `Node::container` internally. Row/Grid/Stack add the same final shape in P2.0, and
+  ScrollArea does so in P2.2. Downstream custom constructors use
+  `ContainerBuilder::create_container` and pass the returned concrete runtime to the same node
+  constructor explicitly; no raw container box can enter the tree.
 
   The old header/tree `widgets::Node` exports must be removed before the owning `Node` export lands.
   P1.3 and P2.1 therefore land in one compile-safe integration batch, or a crate-private
@@ -3256,22 +3280,22 @@ removal, and focused implementation evidence rather than redefining that behavio
 
   - Node creation assigns unique private identity before mounting.
   - Children growth/reordering does not change node IDs or state cell addresses.
-  - Removing/clearing/replacing drops exactly the removed nodes and opaque owners.
+  - Removing/clearing/replacing drops exactly the removed nodes, concrete runtimes, and state cells.
   - Failed out-of-range insertion returns the uncommitted input node.
-  - `try_update_with` also returns the exact unmounted node if the target state is `Dropped` or
-    `Borrowed` before insertion begins; examples never move unique nodes into ordinary `try_update`
-    closures when access failure must preserve them.
+  - `try_update_with` also returns the exact unmounted node as `Err(node)` whenever target-state
+    access is unavailable before insertion begins; examples never move unique nodes into ordinary
+    `try_update` closures when access failure must preserve them.
   - `Node::with_policy` and `with_grid_span` work before insertion; no mounted placement or generic
     visibility mutator exists.
   - No `ContainerHandle`, `ContainerEditor`, mounted-state metadata, raw mutable child callback, or
     framework-provided reparent path exists.
-  - Column and Disclosure construction has no heuristic, parameter-selected, or caller-usage-based
-    exposure decision; P2.0/P2.2 extend that fixed policy to the later constructors.
+  - Column and Disclosure construction has one explicit typed-handle-plus-node return shape;
+    P2.0/P2.2 extend that shape to the later public dynamic constructors.
   - No incomplete public container/visitor surface exists before this compile-safe batch, and the
     old public header/tree `Node` is absent before the owning `Node` export becomes reachable.
   - Atomic-batch downstream tests cover ergonomic Column/Disclosure `(handle, Node)` construction
     and an external `ContainerBuilder`/`Container` implementation created through
-    `create_container` and wrapped with `Node::container(OwnedContainer)`; later rollout tests extend
+    `ContainerBuilder::create_container` and wrapped with generic `Node::container`; later rollout tests extend
     the constructor assertion to every built-in.
 
 - [ ] **P1.4 — Give each root one persistent `WidgetTree`**
@@ -3286,7 +3310,7 @@ removal, and focused implementation evidence rather than redefining that behavio
 
   Change window/dialog/popup creation to consume one application `Node`, construct one private
   `RootChromeContainer` around it, and return `RootHandle`. Give `WindowEntry` only a private weak
-  clone of the `RootState` handle; the internal container's owned wrapper is the sole persistent
+  clone of the `RootState` handle; the concrete private container runtime is the sole persistent
   strong state owner. A caller needing multiple application children constructs a column/row/stack
   as the single content node.
 
@@ -3307,8 +3331,8 @@ removal, and focused implementation evidence rather than redefining that behavio
   - Creation returns `RootHandle`; hide/show preserves its weak state capability and pending events,
     while destruction expires root/descendant handles after active accesses finish.
   - Unknown/already-destroyed IDs return `false` from destruction/fronting and `UnknownRoot` from
-    setters; handles report `Dropped`, same-state setter conflicts report `Borrowed`, and IDs are
-    never reused.
+    setters; destroyed handles become non-live and return `None`, same-state setter conflicts report
+    `RootMutationError::Borrowed`, and IDs are never reused.
   - `RootState` is authoritative for rect/visibility/current chrome interaction/pending events;
     WindowEntry is authoritative for lifecycle/cross-root/z-order/backend concerns only.
   - Title close/popup dismissal hide and record typed submission; actual user drag/resize changes
@@ -3346,7 +3370,7 @@ change a protected P0 behavior follows the explicit change-control rule.
   measure/layout and supply children for recursion through opaque visitors with explicit scopes.
   Every public dynamic state exposes the same safe
   `len`/`is_empty`/`push`/`insert`/`remove_drop`/`clear`/`replace` family and no whole-collection
-  getter. Extend constructor/exposure/ownership conformance from Column/Disclosure to Row/Grid/Stack.
+  getter. Extend constructor-return/ownership conformance from Column/Disclosure to Row/Grid/Stack.
 
   **Acceptance tests**
 
@@ -3357,7 +3381,7 @@ change a protected P0 behavior follows the explicit change-control rule.
     nested transforms follow the exact target rules.
   - `layout_child` applies `Policy` once after slot/span resolution; a non-`Auto` policy changes only
     that child allocation and never rewrites a shared track. No mounted policy/span setter exists.
-  - Same-container visitor mutation returns `Borrowed`; another container mutation follows pinned
+  - Same-container visitor mutation returns `None`; another container mutation follows pinned
     traversal order.
   - Dynamic membership performs no root reconstruction or state transfer.
 
@@ -3456,7 +3480,7 @@ change a protected P0 behavior follows the explicit change-control rule.
   `ContainerLayoutCtx::set_children_viewport` for the clipped/translated content surface. Remove
   all synthetic semantic nodes.
   `ScrollAreaState` exposes the same safe child-operation family and never returns or lends its
-  complete collection. Its constructor extends the final `(Some(handle), Node)` ownership/exposure
+  complete collection. Its constructor extends the final `(handle, Node)` ownership/return-shape
   conformance already established for the other public dynamic containers.
 
   **Acceptance tests**
@@ -3544,16 +3568,17 @@ change a protected P0 behavior follows the explicit change-control rule.
     propagation.
   - Disclosure and scroll tests exercise `route_widget_in_rect`; ordinary containers exercise
     `route_widget` over the full content rectangle.
-  - Tree walking performs no weak upgrade for identity, topology, lookup, or dispatch and performs
-    no hash lookup, registry access, or downcast. A concrete runtime may upgrade only its own
-    factory-supplied associated-state handle, at most once per runtime method invocation that needs
-    state; those upgrades are counted separately in baselines.
+  - Tree walking performs no weak upgrade for identity, topology, lookup, dispatch, or concrete
+    runtime state access and performs no hash lookup, registry access, or downcast. A concrete
+    runtime borrows its directly owned state cell at most once per runtime method invocation that
+    needs state.
   - Nested geometry remains correct at nonzero origins.
   - Update/layout/paint visit siblings forward; pointer routing visits siblings in reverse z-order.
   - Downstream compile-fail tests prove ordinary callers cannot construct the opaque visitors,
     obtain `&mut Children`/`&mut Node`, call direct node iteration, or swap/replace/take an attached
     collection through framework-provided APIs.
-  - Same-cell and cross-cell visitor tests produce errors/observation exactly as documented.
+  - Same-cell and cross-cell visitor tests produce access outcomes/observation exactly as
+    documented.
   - Zero/multiple visitor submissions panic with the specified diagnostics, while built-ins and the
     downstream conformance example submit the same authoritative collection through both methods.
   - Runtime module docs state phase, traversal, and borrow order.
@@ -3676,8 +3701,8 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   **Target contract or migration**
 
-  Migrate root creation and all built-in factories to constructor-returned optional state handles
-  and boxed runtimes wrapped in unique Nodes. Delete `UiNodeSet`, `UiNodeBuilder`, `NodeBuilder`,
+  Migrate root creation and all built-in constructors to their fixed typed-handle return shapes and
+  concrete runtimes boxed inside unique Nodes. Delete `UiNodeSet`, `UiNodeBuilder`, `NodeBuilder`,
   builder keys, `set_root_nodes`, and `transfer_runtime_state_from`. Delete the P1 temporary adapter
   in this item. Delete `ResourceState`, the complete frame-result store/query API, and all public
   generated result identity. Migrate root owners from stored `RootId` alone to `RootHandle`, using
@@ -3708,11 +3733,11 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   Migrate `simple`, calculator, `demo-full`, backend cube, texture smoke, and retained custom drawing
   to parameter/state/runtime/builder roles. Construct roots once, retain only the typed handles
-  returned as `Some`, consume exposed widget events from state, and mutate dynamic membership through
+  returned by stateful constructors, consume widget events from state, and mutate dynamic membership through
   exposed container state. Replace every old header/tree `Node` use with the corresponding
   `DisclosureParameters::header`/`tree` construction. Migrate the demonstrated stack-direction
   rebuild to `StackState::set_direction`; move initialization-only visual/font/wrap configuration
-  into Parameters. Do not manufacture handles for hidden widgets.
+  into Parameters. Do not manufacture or retain meaningless unit/internal-state handles.
 
   **Acceptance tests**
 
@@ -3732,8 +3757,8 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   **Target contract or migration**
 
-  Construct the shell once. Inputs/buttons and folder/file list containers deliberately expose state,
-  so require `Some` at initialization and retain those typed handles. On refresh, construct row
+  Construct the shell once. Inputs/buttons and folder/file list containers return state handles
+  directly, so retain those typed handles at initialization. On refresh, construct row
   state/widget pairs and replace only list `Children`. Consume actions through button/list state.
   Preserve the existing scroll offset across child replacement, then clamp it to the new content
   range during the post-replacement layout. Do not reset it merely because the directory rows were
@@ -3743,8 +3768,8 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   - Idle visible/hidden evaluation allocates no nodes/state and changes no topology.
   - Refresh changes only row nodes and explicitly updated state.
-  - Refresh uses `try_update_with(new_rows, ...)`; a `Dropped`/`Borrowed` access failure returns the
-    complete unmounted replacement vector rather than dropping it through an uninvoked closure.
+  - Refresh uses `try_update_with(new_rows, ...)`; unavailable access returns the complete unmounted
+    replacement vector as `Err(new_rows)` rather than dropping it through an uninvoked closure.
   - Refresh with a still-valid scroll offset preserves it exactly; shorter or empty replacement
     content clamps it to the nearest valid offset, including zero when no scrolling remains.
   - Removed row handles expire; persistent controls and scroll handles remain live.
@@ -3763,15 +3788,15 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   Document `Widget`, `WidgetState`, `WidgetParameters`, `WidgetBuilder`, public
   `Container: Widget`, marker `ContainerState`, opaque child visitors, the exact container-only
-  layout/input methods, the final opaque ownership rule, optional weak handles, built-in
+  layout/input methods, the final concrete-runtime ownership rule, typed weak handles, built-in
   state/parameter types, owning `Node`/opaque `Children`, `Disclosure` as the old header/tree
   replacement, the absence of generic node visibility, unified
   `RootHandle`/`RootState`/`RootMutationError` chrome and explicit root destruction, state-local
   events/commands, and traversal-order mutation. Include final custom-container construction through
-  `create_container`/`Node::container(OwnedContainer)`, state the fixed `Some`/`None` policy of every
-  concrete built-in constructor, and state clearly that `None` changes exposure, not ownership.
-  Examples must not imply that callers select exposure through Parameters. Document the fixed
-  leaf/container exposure table, the intentional removal of
+  `ContainerBuilder::create_container` and generic `Node::container`; state the fixed ordinary return
+  shape of every concrete built-in constructor and that discarding a weak handle never changes
+  runtime ownership. Examples must not imply that callers select handle exposure through Parameters.
+  Document the fixed leaf/container constructor table, the intentional removal of
   arbitrary mounted public-field mutation, exact mounted Row/Grid/Stack/Scroll configuration,
   input-preserving `try_update_with`, policy/span precedence, no root replacement, the one ordered
   input dispatcher and popup-boundary exception, the two-layout frame, the complete removal of
@@ -3816,7 +3841,7 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   - Update-time intrinsic-size changes affect same-frame post-update layout and paint.
   - Mutation of a later/earlier sibling produces the documented distinct outcome.
-  - Same-container topology mutation is `Borrowed`; a not-currently-borrowed subtree mutation is
+  - Same-container topology mutation returns `None`; a not-currently-borrowed subtree mutation is
     safe and deterministic.
   - Custom-render callback mutation follows the same contract without panic.
   - A state-access closure that completes before `ContextFrame::render_ui` remains valid; invoking
@@ -3955,7 +3980,7 @@ change a protected P0 behavior follows the explicit change-control rule.
   **Target contract or migration**
 
   Repeat P0 measurements for allocations, semantic nodes, idle file dialog, phase counts, state
-  access, associated-state weak upgrades, and code/type counts. Full traversal remains the
+  access, direct associated-state borrows, root-boundary weak upgrades, and code/type counts. Full traversal remains the
   completion baseline.
 
   **Acceptance tests**
@@ -3996,7 +4021,7 @@ change a protected P0 behavior follows the explicit change-control rule.
 
 ## Final release validation gate
 
-P1.0 and P1.3 establish the opaque ownership boundary before the bulk migration. This gate does not
+P1.0 and P1.3 establish the concrete-runtime ownership boundary before the bulk migration. This gate does not
 schedule a second construction rewrite; it audits that the P1 boundary survived P2-P5, that no raw
 insertion bypass appeared, and that the complete migration is safe to expose. P0-P5 remain internal
 until this validation passes.
@@ -4005,11 +4030,12 @@ until this validation passes.
 
 **Problem**
 
-The final release must prove that no later migration item bypassed P1's framework-created
-`Rc<RefCell<State>>` owner or reintroduced raw-box insertion. Rust cannot force an arbitrary
-implementation of a public runtime trait to consult a particular field, but the P1 insertion
-boundary must continue to pair every retained runtime with the framework-created allocation for its
-builder's associated `State`.
+The final release must prove that no later migration item bypassed P1's concrete
+`WidgetStateOwner` boundary or reintroduced raw-box insertion. Rust cannot force an arbitrary safe
+custom implementation to use a particular private field, return a handle for that same field, or
+avoid publishing a cloning API; those are documented conformance obligations. The framework must
+keep every built-in runtime non-cloneable, directly state-owning, and generically validated before
+trait-object erasure.
 
 **Decision needed: No — validation of P1.0/P1.3 before the first externally visible release**
 
@@ -4017,62 +4043,59 @@ builder's associated `State`.
 
 Audit the normative “Final builder, owner, and stable state-handle contracts,” “Containers own
 children in their state,” “Owning node and internal identity,” and root-chrome ownership sections.
-P1.0/P1.3 must still be their only implementation owners: the non-overridable factories allocate the
-state, the opaque wrapper keeps it alive, the runtime receives the matching weak handle, and only
-`OwnedWidget`/`OwnedContainer` enter `Node`. The audit must not invent a second construction contract
-or overstate what Rust can prove about whether an arbitrary custom runtime actually consults its
-factory-supplied weak handle.
+P1.0/P1.3 must still be their only implementation owners: builders return associated concrete
+runtimes, those runtimes own their state allocation, and generic `Node` constructors accept only
+`WidgetStateOwner` runtimes before boxing them. The audit must not invent a second construction
+contract or overstate what Rust can prove about arbitrary custom safe APIs.
 
 **Acceptance tests**
 
 - Compile-fail tests prove `Node::widget(Box::new(...))`,
   `Node::custom_render(Box::new(...), renderer)`, and `Node::container(Box::new(...))` cannot insert
   a raw runtime.
-- A compile-fail test proves downstream code cannot directly construct `OwnedWidget`/
-  `OwnedContainer` or insert a runtime without the factory-created associated-state keep-alive.
-- `WidgetBuilder` cannot override the state-allocation/ownership factory.
+- Public API/source checks prove no `OwnedWidget`, `OwnedContainer`, free construction factory,
+  `EXPOSE_STATE`, or state keep-alive trait exists.
 - `WidgetBuilder::Parameters` and `ContainerBuilder::Parameters` both implement the same public
   `WidgetParameters` marker; no unbounded container-only parameter role contradicts the four-role
   contract.
-- `initialize` consumes Parameters exactly once and returns `(State, Builder)`; a compile/runtime
-  test moves non-cloneable child Nodes into Column and `RootState` without cloning, loss, or a fifth
-  public construction role, then calls `build` exactly once with the factory-supplied weak handle.
-- `EXPOSE_STATE` is fixed by each widget/container builder implementation; no Parameters value or
-  call-site option can change it.
-- The `Some` and `None` paths each leave exactly one persistent strong state owner in the opaque
-  retained wrapper; only `Some` returns an application weak handle.
-- The runtime receives a weak handle to the exact allocation retained by its wrapper; conformance
-  tests prove every built-in runtime uses that supplied handle, and custom-builder docs state the
-  same correctness contract.
-- Each runtime method that needs associated state upgrades its supplied weak handle at most once for
-  that invocation; traversal performs no identity/topology/dispatch weak upgrade.
+- `WidgetBuilder::create_widget` and `ContainerBuilder::create_container` each consume Parameters
+  exactly once and return their associated concrete runtime. A compile/runtime test moves
+  non-cloneable child Nodes into Column and `RootState` without cloning, loss, or a fifth public
+  construction role.
+- Constructor signature tests prove application-meaningful built-ins return a typed handle with
+  their runtime/completed node, while stateless/internal constructors return only the runtime/node;
+  no Parameters value or call-site option changes the return shape.
+- Every built-in runtime privately owns one strong state `Rc`, returns a weak handle for that exact
+  allocation, and consults the same allocation during its runtime phases. Custom-builder docs state
+  this same safe conformance contract.
+- Each built-in runtime method borrows its directly owned associated state at most once for that
+  invocation; traversal performs no identity/topology/dispatch weak upgrade.
 - Each window-manager boundary operation that needs root data upgrades its private `RootState` weak
   clone at most once and scopes the borrow before invoking retained tree traversal.
-- Downstream code cannot call `WidgetStateHandle::from_owner`; cloning a
-  `WidgetStateHandle<NonCloneState>` remains supported.
+- `WidgetStateHandle::new` accepts only a borrowed strong owner and exposes no raw `Weak` or strong
+  pointer; cloning a `WidgetStateHandle<NonCloneState>` remains supported.
 - `try_update_with` remains part of the final handle API and returns owned input unchanged on failed
   upgrade/borrow.
-- Dropping an uninserted or removed `OwnedWidget`/`OwnedContainer` makes all weak handles report
-  `Dropped` after active access closures release temporary upgrades.
+- Dropping an uninserted or removed concrete runtime makes all weak handles become
+  non-live and return `None` after active access closures release temporary upgrades.
 - Equivalent compile-time and lifetime coverage exists for external custom containers through
-  public `ContainerBuilder`/`OwnedContainer`, while built-in factories still return a completed
-  `Node` for convenience.
-- Root creation uses `create_container`/`OwnedContainer` for `RootChromeContainer`; dropping the
+  public `ContainerBuilder`/`WidgetStateOwner`, while built-in convenience constructors still return
+  a completed `Node`.
+- Root creation uses a directly state-owning `RootChromeContainer`; dropping the
   `WindowEntry` expires both the `RootHandle` state capability and every descendant capability.
 - The public `Widget` trait has exactly its P0-frozen runtime methods, including
   `Widget::update -> ()`, and remains distinct from `WidgetState`.
-- Public `Container` still has `Widget` as its supertrait; `OwnedContainer` delegates inherited
-  `Widget` calls once and the opaque child visitors work when the runtime consumes state through the
-  factory-supplied weak handle. No raw child callback reappears.
-- `StateKeepAlive` remains private and method-free, with no downcast, phase, Context, frame-token, or
-  write-lock behavior.
-- Final documentation/examples explain that the opaque wrapper is the retained widget/state owner,
-  that `None` affects exposure only, and that custom builders must use the supplied state handle.
-  They contain no raw-box insertion signature or staging migration path as a supported alternative.
-- Crate-root, `retained`, and prelude exports expose owning `Node`, `OwnedWidget`, `OwnedContainer`,
-  the framework factories, marker `ContainerState`, opaque visitors, and no old header/tree `Node`.
-- Production-source/API searches find no raw-box overload on `Node`, no overridable
-  `WidgetBuilder::create`, and no second supported construction path.
+- Public `Container` still has `Widget` as its supertrait; its concrete runtime dispatches inherited
+  `Widget` calls once and opaque child visitors reach the same directly owned state. No raw child
+  callback reappears.
+- Final documentation/examples explain that the concrete runtime is the retained widget/state owner,
+  that convenience-constructor return shape controls whether a handle is immediately returned, and
+  that custom builders must preserve the `WidgetStateOwner` conformance contract. They contain no
+  raw-box insertion signature or staging migration path as a supported alternative.
+- Crate-root, `retained`, and prelude exports expose owning `Node`, `WidgetStateOwner`, the builder
+  traits, marker `ContainerState`, opaque visitors, and no old header/tree `Node`.
+- Production-source/API searches find no raw-box overload on `Node`, no owner wrapper, no optional
+  generic factory result, and no second supported construction path.
 - Allocation and phase measurements remain within the P5.1 baseline; any regression gets a separate
   evidence-backed decision rather than weakening ownership.
 
@@ -4081,7 +4104,7 @@ factory-supplied weak handle.
 | Defect | Current cause | Simplification first | Fix/verification item |
 |---|---|---|---|
 | Removed widget state remains alive | Strong application handle | Runtime strong owner/application weak handle split | P0.2/P1.0 |
-| Same state can be projected twice | Strong handle cloning | Unique `OwnedWidget` + Node | P1.2/P1.3 |
+| Same state can be projected twice | Strong handle cloning | Non-cloneable built-in runtime + unique Node; documented custom conformance | P1.2/P1.3 |
 | Typed mutation and runtime behavior are conflated | Built-in struct implements both roles | Parameters/State/Builder split | P0.1/P1.1 |
 | Widget/container common phases have parallel dispatch | Private `NodeBehavior` plus forwarding `WidgetNode` | Public `Container: Widget` and one supertrait dispatch path | P0.1/P2.3 |
 | Reentrant state access can panic | Infallible `RefCell` borrow | Checked per-cell handles | P0.2/P1.0 |
@@ -4100,9 +4123,9 @@ factory-supplied weak handle.
 | Generic node visibility is specified but behaviorally absent | Unused `UiNodeState::visible` field | Remove it; separate root visibility and container descendant gating | P0.6/P2.1/P2.4 |
 | Root lifetime has no destruction operation | WindowEntry can only be hidden | Explicit `destroy_root` with immediate unmount/ownership release and active-access-safe final drop | P0.7/P1.4 |
 | Root/chrome observation would require a parallel result mechanism | Chrome is special-cased outside retained typed state | One private `RootChromeContainer` with public `RootState` and `RootHandle` | P0.7/P1.4/P3.0 |
-| Built-in container callers should not repeat the runtime-to-node wrapping step | Factory returns raw `Box<dyn Container>` | Built-in factory returns `Node`; custom insertion accepts `OwnedContainer` | P0.3/P1.3 |
+| Built-in container callers should not repeat the runtime-to-node wrapping step | Factory returns raw `Box<dyn Container>` | Built-in convenience constructor returns `Node`; custom insertion accepts concrete `Container + WidgetStateOwner` | P0.3/P1.3 |
 | Container rollout previously assigned every built-in to the atomic foundation batch | Foundation and concrete migrations were conflated | Atomic Node/visitor/Column/Disclosure slice; Row/Grid/Stack and ScrollArea extend it later | P1.3/P2.0/P2.1/P2.2 |
-| Runtime phases cannot return `StateAccessError` during render reentrancy | Phase signatures have no state-access error channel | Forbid rendering inside state-access closures; local diagnostic only | P0.2/P4.0 |
+| Runtime phases cannot return a handle-unavailable outcome during render reentrancy | Phase signatures have no state-access outcome channel | Forbid rendering inside state-access closures; local diagnostic only | P0.2/P4.0 |
 | A failed state access can drop a moved, unmounted node before insertion | Plain closure capture gives the handle no way to return ownership | `try_update_with` validates access first and returns the exact input on failure | P0.2/P1.3 |
 | `Widget::update` generic results have no runtime consumer after result removal | `ResourceState` historically fed `FrameResults` | Change update to return `()` and remove the complete generic result family | P0.1/P0.4/P5.0 |
 | Raw input and routed events can disagree | Retained update derives interaction separately with `interaction_for` | One ordered dispatcher; routed events for ordinary interaction and one explicit popup boundary decision | P2.5/P5.0 |
@@ -4116,7 +4139,7 @@ factory-supplied weak handle.
 | A mounted root cannot change widget type in place | Stable `RootId` and root replacement have conflicting lifetime semantics | Persistent container root for dynamic content; otherwise destroy/recreate with a new ID | P0.7/P1.4/P3.0 |
 | Optional `CustomRenderKey` has no public retained-node construction path | Builder removal drops key injection | Backend-typed `Node::custom_render` constructor | P1.2 |
 | Raw boxed runtime does not prove an associated state is retained | A raw insertion boundary can bypass the builder allocation | Opaque framework-created retained owner | P1.0/P1.3/R0.0 |
-| Late opaque-owner hardening would cause a second downstream API migration | Final ownership introduced after bulk migration | Establish Owned types before bulk conversion | P1.0/P1.3 |
+| Late runtime-owner hardening would cause a second downstream API migration | Final ownership introduced after bulk migration | Establish `WidgetStateOwner` and generic insertion before bulk conversion | P1.0/P1.3 |
 
 ## Cross-cutting validation
 
@@ -4147,9 +4170,9 @@ them.
 Update together:
 
 - crate-level retained UI documentation and prelude;
-- rustdoc for all four widget roles, public `Container: Widget`, marker `ContainerState`, opaque
-  child visitors, the exact container-only scoped context methods, owner/handle access,
-  `OwnedWidget`/`OwnedContainer`, owning `Node`/opaque `Children`, Disclosure, visibility boundaries,
+- rustdoc for all four widget roles, `WidgetStateOwner`, public `Container: Widget`, marker
+  `ContainerState`, opaque child visitors, the exact container-only scoped context methods,
+  runtime/handle access, owning `Node`/opaque `Children`, Disclosure, visibility boundaries,
   exact mounted container configuration, input-preserving access, and unified
   `RootHandle`/`RootState`/`RootMutationError` chrome and lifecycle;
 - README construction, state mutation, event consumption, dynamic list, custom-render construction,
@@ -4164,17 +4187,17 @@ Update together:
   visibility, immutable node placement, the ordered input dispatcher/popup-boundary exception, the
   two-layout frame, explicit
   intrinsic constraints/shared axis allocation, removal of public widget IDs/results, and the one
-  externally visible Owned insertion boundary.
+  externally visible generic state-owning-runtime insertion boundary.
 
 ## Suggested implementation sequence
 
 1. Land characterization and establish the final `Widget` signatures, including
    `Widget::update -> ()`.
-2. Add parameters/state/builder/owner/optional-handle primitives and migrate one exposed Checkbox
-   plus one hidden-state widget end to end.
-3. Apply the fixed exposure/mutation table while splitting the remaining built-ins, defining only
+2. Add parameters/state/builder/runtime-owner/weak-handle primitives and migrate one Checkbox plus
+   one unit-state widget end to end.
+3. Apply the fixed constructor/mutation table while splitting the remaining built-ins, defining only
    the listed state-local values, events, and commands.
-4. Store `OwnedWidget` directly, add the final `Node::widget`/`Node::custom_render` paths, and delete
+4. Store `Box<dyn Widget>` directly, add the final generic `Node::widget`/`Node::custom_render` paths, and delete
    erased handle dispatch without exposing a raw insertion boundary.
 5. Land the uniquely named owning Node, private runtime IDs, placement methods, marker
    `ContainerState`, constructible opaque Children, opaque traversal visitors, Disclosure, and the
@@ -4192,11 +4215,11 @@ Update together:
 10. Migrate the file dialog early as the dynamic-topology proof, then remaining examples/docs.
 11. Delete all obsolete ownership/identity/mutation machinery, repeat baselines, and optimize only
     from evidence.
-12. Run R0.0 and the full validation matrix against the P1 opaque ownership boundary, then and only
+12. Run R0.0 and the full validation matrix against the P1 concrete-runtime ownership boundary, then and only
     then merge/tag/release the migration for downstream consumption.
 
-P1 ownership changes may need one integration branch: weak handles are not valid until the returned
-opaque owner retains the strong state, and direct child mutation is not valid until runtime target
+P1 ownership changes may need one integration branch: weak handles are not valid until the concrete
+runtime retains the strong state, and direct child mutation is not valid until runtime target
 use tolerates removal. Keep commits mechanically reviewable, but expose no intermediate raw-box
 contract; the externally visible branch must include the final ownership model and documentation.
 
@@ -4224,57 +4247,60 @@ The migration is complete when:
 - `WidgetState`, `WidgetParameters`, and `WidgetBuilder` have distinct data/construction roles, and
   marker `ContainerState` has no child-access methods; both `WidgetBuilder::Parameters` and
   `ContainerBuilder::Parameters` implement `WidgetParameters`;
-- each final widget constructor returns `Option<WidgetStateHandle<T>>` plus `OwnedWidget` through
-  the framework factory;
-- each public built-in container constructor returns `Option<WidgetStateHandle<C>>` plus a completed
-  `Node`, while `ContainerBuilder`/`create_container` and public
-  `Node::container(OwnedContainer)` support downstream custom containers;
-- each concrete widget/container constructor has one fixed, documented `Some` or `None` exposure
-  policy chosen by its implementation; no public exposure selector exists;
+- `WidgetStateOwner: Widget` associates every retained concrete runtime with its state type and
+  returns a weak checked handle for the runtime's directly owned state cell;
+- `WidgetBuilder::create_widget` and `ContainerBuilder::create_container` return their associated
+  concrete runtimes directly; there is no owner wrapper or generic optional factory result;
+- each public application-state widget constructor returns `WidgetStateHandle<T>` plus its concrete
+  runtime, and each public dynamic built-in container constructor returns
+  `WidgetStateHandle<C>` plus a completed `Node`;
+- each concrete widget/container constructor has one fixed, documented ordinary return shape; no
+  public exposure selector exists;
 - `Checkbox`, `Button`, `ListItem`, `ListBox`, `Combo`, `TextBlock`, `ColorSwatch`, `Slider`,
-  `Number`, `Textbox`, `TextArea`, and every public dynamic built-in container return `Some`;
-  `Custom` and explicitly fixed/internal containers return `None`, and the old widget `Node` is
-  retired into exposed `DisclosureState`;
-- every `OwnedWidget`/`OwnedContainer` owns the only persistent strong allocation for its builder's
-  associated `State`, including when construction returns `None`, and every built-in runtime uses
-  the exact weak handle supplied by its factory;
-- `Some` returns a weak application state capability while `None` withholds that capability without
-  changing the retained wrapper's strong state ownership;
-- present application state handles contain only a typed weak state capability, clone without
-  requiring `T: Clone`, and use checked closures; `from_owner` is not public at the release boundary;
+  `Number`, `Textbox`, `TextArea`, and every public dynamic built-in container return a typed handle;
+  `Custom` and explicitly fixed/internal containers return only their runtime/completed node, and the
+  old widget `Node` is retired into exposed `DisclosureState`;
+- every concrete `WidgetStateOwner` owns the only persistent strong allocation for its associated
+  `State`, and every built-in `state_handle` observes the exact allocation used by runtime phases;
+- discarding or not returning a weak handle does not change concrete-runtime strong state ownership;
+- application state handles contain only a typed weak state capability, clone without requiring
+  `T: Clone`, and use checked closures; `WidgetStateHandle::new` accepts a borrowed owner and exposes
+  no raw `Weak` or strong pointer;
 - `try_update_with` checks upgrade/borrow before committing its owned input and returns that exact
-  input with `Dropped` or `Borrowed`; ordinary closure capture is documented as non-recovering;
+  input as `Err(input)` whenever access is unavailable; ordinary closure capture is documented as
+  non-recovering;
 - state/topology access never checks Context identity, mount state, frame state, or a global lock;
-- same-cell conflicts between checked handle operations return `Borrowed`, while unrelated available
+- same-cell conflicts between checked handle operations return `None`, while unrelated available
   cells can be accessed regardless of `ContextFrame` lifetime;
 - state-access closures finish before retained traversal/rendering; reentrant rendering from inside
   a closure is documented as unsupported and is not implemented with a frame/write gate;
 - framework-owned nested `Children::measure_child`, `ContainerLayoutCtx::layout_child`, and opaque
   visitor traversal are authorized recursion, not application rendering reentrancy;
 - `WidgetStateHandleDyn`, erased handle cloning, and duplicate state dispatch are absent;
-- every built-in leaf has explicit Parameters, concrete State, optional handle exposure, runtime
+- every built-in leaf has explicit Parameters, concrete State, fixed constructor return shape, runtime
   Widget, and Builder responsibilities;
 - any application-observed widget values, events, and commands require an exposed typed state;
-  hidden runtime state never leaks through node/result identity;
+  internal runtime state never leaks through node/result identity;
 - every fixed built-in change/submit event uses the specified private saturating count and
   one-occurrence `take_changed`/`take_submitted` API; ordinary programmatic setters are silent and
   Combo alone retains its documented clamp exception;
 - `TextboxState::request_focus` remains queued while the textbox is hidden, gated, or
   non-interactive and clears only when `WidgetUpdateCtx::set_focus` reports successful assignment;
 - crate-root/prelude `Node` is the only public type with that name, is unique and non-cloneable, and
-  owns one `OwnedWidget` or `OwnedContainer`; old `widgets::Node`, `NodeStateValue`, and compatibility
-  aliases are absent;
-- public `Node::widget(OwnedWidget)` and backend-typed
-  `Node::custom_render(OwnedWidget, CustomRenderHandle<B>)` are the complete leaf insertion paths;
+  owns one boxed concrete widget or container runtime; old `widgets::Node`, `NodeStateValue`, and
+  compatibility aliases are absent;
+- public generic `Node::widget<W: WidgetStateOwner>(W)` and backend-typed
+  `Node::custom_render<W: WidgetStateOwner, B>(W, CustomRenderHandle<B>)` are the complete leaf
+  insertion paths;
   `CustomRenderKey` remains private and registry preflight rejects invalid erased keys;
 - `Node::with_policy` and `with_grid_span` are the complete pre-insertion placement surface, and
   `NodeRuntime` has no generic visibility field or mutation API; mounted policy/span mutation is
   unsupported and layout applies the settled slot/span/policy precedence exactly once;
 - private process-unique runtime IDs support focus/capture/routing and are never exposed or stored in
   state handles;
-- container runtime state owns a private opaque `Children`; application-dynamic containers expose a
-  weak checked state handle with only safe inherent operations, while fixed/internal containers may
-  return `None`;
+- container runtime state owns a private opaque `Children`; application-dynamic container
+  constructors return a weak checked state handle with only safe inherent operations, while
+  fixed/internal constructors may return only a completed node;
 - mounted Row widths/item height, Grid tracks, Stack width/height/direction, and Scroll offset/
   enablement have the exact state getters/setters and edge semantics specified above; Column adds no
   local layout configuration, Disclosure exposes expansion, and framing/base options remain
@@ -4304,9 +4330,10 @@ The migration is complete when:
   access as widgets/containers;
 - `RootHandle`, `RootState`, and `RootMutationError` are exported at crate root/prelude, while the
   chrome container, interaction enum, and framework mutation helpers remain private;
-- root reads exist only on `RootState`; Context root setters return `UnknownRoot` or `Borrowed`
-  explicitly and keep z-order/backend/transient-target side effects coordinated with the state
-  mutation, while front/destroy return `false` for an unknown ID;
+- root reads exist only on `RootState`; Context root setters return
+  `RootMutationError::{UnknownRoot, Borrowed}` explicitly and keep
+  z-order/backend/transient-target side effects coordinated with the state mutation, while
+  front/destroy return `false` for an unknown ID;
 - preserving a `RootId` while replacing the application child is unsupported, so dynamic root
   content uses a persistent application container or destroys/recreates the root with a new ID;
 - `Context::destroy_root` removes and releases the root, returns `false` for unknown IDs, never
@@ -4346,13 +4373,14 @@ The migration is complete when:
   locks are gone;
 - raw-box insertion, old header/tree Node APIs, generic node visibility, method-bearing
   `ContainerState`, and raw mutable child callbacks are gone;
-- docs/examples/tests describe one state-first, framework-owned construction model using
-  `OwnedWidget`/`OwnedContainer`; no raw-box surface is documented as supported;
+- docs/examples/tests describe one state-first, concrete-runtime-owned construction model using
+  `WidgetStateOwner`; no raw-box or parallel owner-wrapper surface is documented as supported;
 - measurements show zero root reconstruction, zero erased state redispatch, two semantic nodes for a
   one-child scroll area, exactly one internal chrome-container node per root, zero idle file-dialog
   tree allocation, two retained-tree layouts per
-  ordinary frame, at most one associated-state weak upgrade per runtime method that needs state, no
-  identity/topology/dispatch weak upgrades, and no material regression;
+  ordinary frame, zero associated-state weak upgrades during concrete runtime methods, at most one
+  direct associated-state borrow per such method, no identity/topology/dispatch weak upgrades, and
+  no material regression;
 - no incremental traversal or retained-paint cache is added without a separate evidence-backed
   contract.
 

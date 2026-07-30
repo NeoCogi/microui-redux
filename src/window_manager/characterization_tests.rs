@@ -10,8 +10,9 @@ use std::{
 use super::*;
 use crate::{
     test_support::{AllocationCount, AllocationMeasurement, NoopRenderer, test_atlas},
-    Button, Checkbox, ColorSwatch, Combo, ListBox, ListItem, Node, NodeStateValue, Number, ResourceState, RetainedId, ScrollAreaOption, SizePolicy,
-    StackDirection, TextArea, TextBlock, Textbox, UiInputEvent, Widget, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, color, widget_handle,
+    Button, Checkbox, CheckboxParameters, CheckboxState, ColorSwatch, Combo, ListBox, ListItem, Node, NodeStateValue, Number, ResourceState, RetainedId,
+    ScrollAreaOption, SizePolicy, StackDirection, TextArea, TextBlock, Textbox, UiInputEvent, Widget, WidgetFillOption, WidgetOption, WidgetPaintCtx,
+    WidgetUpdateCtx, color, widget_handle,
 };
 
 fn context(width: i32, height: i32) -> Context<NoopRenderer> {
@@ -98,7 +99,7 @@ fn p0_widget_phase_order_and_three_layouts_are_explicit() {
 
 #[test]
 fn p0_existing_typed_widget_mutations_remain_observable() {
-    let checkbox = widget_handle(Checkbox::new("check", false));
+    let (checkbox, _checkbox_widget) = Checkbox::create(CheckboxParameters::new("check", false));
     let button = widget_handle(Button::new("before"));
     let list_item = widget_handle(ListItem::new("before"));
     let list_box = widget_handle(ListBox::new("before", None));
@@ -111,7 +112,7 @@ fn p0_existing_typed_widget_mutations_remain_observable() {
     let text_area = widget_handle(TextArea::new("before"));
     let disclosure = widget_handle(Node::header("section", NodeStateValue::Closed));
 
-    checkbox.update(|state| state.value = true);
+    checkbox.try_update(CheckboxState::check).unwrap();
     button.update(|state| {
         state.content = crate::ButtonContent::Text { label: "after".into(), icon: None };
         state.fill = WidgetFillOption::HOVER;
@@ -137,7 +138,7 @@ fn p0_existing_typed_widget_mutations_remain_observable() {
     });
     disclosure.update(|state| state.state = NodeStateValue::Expanded);
 
-    assert!(checkbox.read(|state| state.value));
+    assert_eq!(checkbox.try_read(CheckboxState::checked), Some(true));
     assert_eq!(combo.read(Combo::selected), 1);
     assert_eq!(slider.read(crate::Slider::value), 7.0);
     assert_eq!(number.read(Number::value), 8.0);
@@ -166,6 +167,48 @@ fn p0_existing_typed_widget_mutations_remain_observable() {
     for expected in ["after", "after item", "after box", "after text", "after swatch", "after textbox", "after area"] {
         assert!(rendered.iter().any(|text| text == expected), "missing rendered text {expected:?}: {rendered:?}");
     }
+}
+
+#[test]
+fn p1_checkbox_runtime_preserves_projection_geometry_paint_and_click_behavior() {
+    let (checkbox, widget) = Checkbox::create(CheckboxParameters::with_opt("retained checkbox", false, WidgetOption::FRAME));
+    let mut checkbox_id = NodeId::default();
+    let tree = UiNodeBuilder::build(|tree| {
+        checkbox_id = tree.state_widget(widget);
+    });
+
+    let node = tree.node(checkbox_id).expect("checkbox projection node");
+    assert_eq!(node.debug_erased_adapter_count(), 0);
+
+    let mut ctx = context(220, 120);
+    let root = ctx.create_window("checkbox", rect(0, 0, 180, 90), tree);
+    ctx.update_ui();
+
+    let checkbox_rect = ctx.debug_root_node_rect(root, checkbox_id).expect("checkbox geometry");
+    assert!(checkbox_rect.width > 0);
+    assert!(checkbox_rect.height > 0);
+    assert!(ctx.debug_root_texts(root).iter().any(|text| text == "retained checkbox"));
+    assert_eq!(checkbox.try_read(CheckboxState::checked), Some(false));
+
+    let (checkbox_x, checkbox_y) = center(checkbox_rect);
+    ctx.mousedown(checkbox_x, checkbox_y, MouseButton::LEFT);
+    ctx.update_ui();
+
+    assert_eq!(checkbox.try_read(CheckboxState::checked), Some(true));
+    assert!(ctx.committed_results().state_of_retained(RetainedId::root_node(root, checkbox_id)).is_changed());
+}
+
+#[test]
+#[should_panic(expected = "retained widget state invariant violated during Checkbox::paint: associated state is already borrowed")]
+fn p1_checkbox_reports_reentrant_rendering_as_a_state_invariant_violation() {
+    let (checkbox, widget) = Checkbox::create(CheckboxParameters::new("reentrant", false));
+    let tree = UiNodeBuilder::build(|tree| {
+        tree.state_widget(widget);
+    });
+    let mut ctx = context(160, 100);
+    ctx.create_window("reentrant checkbox", rect(0, 0, 120, 70), tree);
+
+    let _ = checkbox.try_update(|_| ctx.update_ui());
 }
 
 #[test]

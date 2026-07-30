@@ -1,4 +1,4 @@
-use crate::WidgetOption;
+use crate::{Widget, WidgetOption, WidgetStateOwner};
 use crate::render::{CustomRenderKey, DisplayList, Painter};
 use crate::widget_ctx::{localize_events, WidgetPaintCtx, WidgetUpdateCtx};
 use crate::window_manager::{erased_widget_state, WidgetStateHandleDyn};
@@ -92,17 +92,84 @@ pub(crate) trait Container: NodeBehavior {
 
 /// Retained widget adapter behind the internal node behavior interface.
 pub(crate) struct WidgetNode {
-    /// Type-erased retained widget state.
-    pub(crate) widget: Box<dyn WidgetStateHandleDyn>,
+    /// Legacy erased handle or a directly boxed state-owning runtime during the P1 migration.
+    widget: WidgetPayload,
     /// Optional custom backend render callback for custom-render leaves.
-    pub(crate) custom_render: Option<CustomRenderKey>,
+    custom_render: Option<CustomRenderKey>,
 }
 
-impl Clone for WidgetNode {
-    fn clone(&self) -> Self {
+/// Compile-safe projection payload while P1.2 migrates every leaf to direct runtime ownership.
+enum WidgetPayload {
+    /// Existing strong-handle adapter retained for built-ins not yet split by P1.1.
+    Legacy(Box<dyn WidgetStateHandleDyn>),
+    /// Final concrete-runtime ownership shape used by the Checkbox vertical slice.
+    Direct(Box<dyn Widget>),
+}
+
+impl WidgetNode {
+    /// Creates the existing erased-handle projection path.
+    pub(crate) fn legacy(widget: Box<dyn WidgetStateHandleDyn>, custom_render: Option<CustomRenderKey>) -> Self {
         Self {
-            widget: self.widget.clone_box(),
-            custom_render: self.custom_render.clone(),
+            widget: WidgetPayload::Legacy(widget),
+            custom_render,
+        }
+    }
+
+    /// Creates the temporary projection bridge by erasing a concrete state-owning runtime.
+    pub(crate) fn direct<W: WidgetStateOwner>(widget: W) -> Self {
+        Self {
+            widget: WidgetPayload::Direct(Box::new(widget)),
+            custom_render: None,
+        }
+    }
+}
+
+impl WidgetPayload {
+    /// Returns the legacy allocation identity while that migration path exists.
+    fn legacy_handle_id(&self) -> Option<crate::Id> {
+        match self {
+            Self::Legacy(widget) => Some(widget.widget_handle_id()),
+            Self::Direct(_) => None,
+        }
+    }
+
+    /// Returns effective widget options through either retained payload shape.
+    fn effective_widget_opt(&self) -> WidgetOption {
+        match self {
+            Self::Legacy(widget) => widget.effective_widget_opt(),
+            Self::Direct(widget) => widget.effective_widget_opt(),
+        }
+    }
+
+    /// Returns focus policy through either retained payload shape.
+    fn focus_policy(&self) -> FocusPolicy {
+        match self {
+            Self::Legacy(widget) => widget.focus_policy(),
+            Self::Direct(widget) => widget.focus_policy(),
+        }
+    }
+
+    /// Measures through either retained payload shape.
+    fn measure(&self, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+        match self {
+            Self::Legacy(widget) => widget.measure(style, atlas, available),
+            Self::Direct(widget) => widget.measure(style, atlas, available),
+        }
+    }
+
+    /// Updates through either retained payload shape.
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, events: Vec<UiInputEvent>) -> crate::ResourceState {
+        match self {
+            Self::Legacy(widget) => widget.update(ctx, events),
+            Self::Direct(widget) => widget.update(ctx, events),
+        }
+    }
+
+    /// Paints through either retained payload shape.
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        match self {
+            Self::Legacy(widget) => widget.paint(ctx),
+            Self::Direct(widget) => widget.paint(ctx),
         }
     }
 }
@@ -110,7 +177,7 @@ impl Clone for WidgetNode {
 impl NodeBehavior for WidgetNode {
     #[cfg(test)]
     fn debug_is_erased_widget_adapter(&self) -> bool {
-        true
+        matches!(self.widget, WidgetPayload::Legacy(_))
     }
 
     fn is_framed(&self) -> bool {
@@ -156,12 +223,13 @@ impl NodeBehavior for WidgetNode {
         let result = self.widget.update(&mut widget_ctx, events);
         ctx.runtime.updated_focus = focus_seen;
 
-        ctx.results.record_retained_with_context(
-            RetainedId::root_node(ctx.root_id, id),
-            self.widget.widget_handle_id(),
-            result,
-            format!("root {:?} ui node {:?}", ctx.root_name, id),
-        );
+        let retained_id = RetainedId::root_node(ctx.root_id, id);
+        let dispatch_site = format!("root {:?} ui node {:?}", ctx.root_name, id);
+        if let Some(widget_handle_id) = self.widget.legacy_handle_id() {
+            ctx.results.record_retained_with_context(retained_id, widget_handle_id, result, dispatch_site);
+        } else {
+            ctx.results.record_direct_with_context(retained_id, result, dispatch_site);
+        }
         false
     }
 

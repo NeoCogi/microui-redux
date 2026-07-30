@@ -40,7 +40,7 @@ use crate::{
         scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData,
         ScrollAreaOption, UiNodeId, WidgetNode,
     },
-    widget::Widget,
+    widget::{Widget, WidgetStateOwner},
     Node, Recti, TextBlock, TextWrap,
 };
 
@@ -280,6 +280,12 @@ impl<'a> NodeBuilder<'a> {
         self.builder.insert_widget(self.options, widget)
     }
 
+    /// Adds a concrete state-owning widget through the temporary P1 projection bridge.
+    #[doc(hidden)]
+    pub fn state_widget<W: WidgetStateOwner>(self, widget: W) -> NodeId {
+        self.builder.insert_state_widget(self.options, widget)
+    }
+
     /// Adds a custom-render widget node.
     pub fn custom_render<B, W>(self, state: impl Into<WidgetHandle<W>>, renderer: CustomRenderHandle<B>) -> NodeId
     where
@@ -378,17 +384,27 @@ impl UiNodeBuilder {
         self.insert_widget(NodeOptions::new(), widget)
     }
 
+    /// Adds a concrete state-owning widget through the temporary P1 projection bridge.
+    ///
+    /// The final owning [`crate::Node`] insertion surface replaces this staging method in P1.3.
+    #[doc(hidden)]
+    pub fn state_widget<W: WidgetStateOwner>(&mut self, widget: W) -> NodeId {
+        self.insert_state_widget(NodeOptions::new(), widget)
+    }
+
     /// Adds a widget leaf node with optional identity and placement metadata.
     fn insert_widget<W: Widget + 'static>(&mut self, options: NodeOptions, widget: impl Into<WidgetHandle<W>>) -> NodeId {
         let widget = widget.into();
         self.push_leaf(
             options,
             TAG_WIDGET,
-            UiNodeData::Widget(Box::new(WidgetNode {
-                widget: erased_widget_state(widget),
-                custom_render: None,
-            })),
+            UiNodeData::Widget(Box::new(WidgetNode::legacy(erased_widget_state(widget), None))),
         )
+    }
+
+    /// Erases a concrete state-owning runtime only at the existing projection boundary.
+    fn insert_state_widget<W: WidgetStateOwner>(&mut self, options: NodeOptions, widget: W) -> NodeId {
+        self.push_leaf(options, TAG_WIDGET, UiNodeData::Widget(Box::new(WidgetNode::direct(widget))))
     }
 
     /// Adds a text block without wrapping.
@@ -422,10 +438,7 @@ impl UiNodeBuilder {
         self.push_leaf(
             options,
             TAG_CUSTOM_RENDER,
-            UiNodeData::Widget(Box::new(WidgetNode {
-                widget: erased_widget_state(state),
-                custom_render: Some(renderer.key),
-            })),
+            UiNodeData::Widget(Box::new(WidgetNode::legacy(erased_widget_state(state), Some(renderer.key)))),
         )
     }
 

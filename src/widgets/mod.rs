@@ -121,7 +121,7 @@ mod text_area;
 mod text_edit;
 mod textbox;
 
-pub use core_widgets::{Button, ButtonContent, Checkbox, Combo, Custom, ListBox, ListItem};
+pub use core_widgets::{Button, ButtonContent, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, Combo, Custom, ListBox, ListItem};
 pub use display::{ColorSwatch, TextBlock};
 pub use nodes::{Node, NodeStateValue};
 pub use slider::{Number, Slider};

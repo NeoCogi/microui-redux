@@ -200,7 +200,7 @@ mod custom;
 mod list;
 
 pub use button::{Button, ButtonContent};
-pub use checkbox::Checkbox;
+pub use checkbox::{Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState};
 pub use combo::Combo;
 pub use custom::Custom;
 pub use list::{ListBox, ListItem};

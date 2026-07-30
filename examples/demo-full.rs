@@ -865,7 +865,7 @@ struct State {
     weight_button_ids: [NodeId; 9],
     combo_item_ids: [NodeId; 4],
     external_image_button: Option<WidgetHandle<Button>>,
-    checkboxes: [WidgetHandle<Checkbox>; 3],
+    checkboxes: [Option<Checkbox>; 3],
     open_popup: bool,
     open_dialog: bool,
     triangle_data: Rc<RefCell<TriangleState>>,
@@ -1172,9 +1172,9 @@ impl State {
             combo_item_ids: [NodeId::default(); 4],
             external_image_button,
             checkboxes: [
-                widget_handle(Checkbox::new("Checkbox 1", false)),
-                widget_handle(Checkbox::new("Checkbox 2", true)),
-                widget_handle(Checkbox::new("Checkbox 3", false)),
+                Some(Checkbox::create(CheckboxParameters::new("Checkbox 1", false)).1),
+                Some(Checkbox::create(CheckboxParameters::new("Checkbox 2", true)).1),
+                Some(Checkbox::create(CheckboxParameters::new("Checkbox 3", false)).1),
             ],
             open_popup: false,
             open_dialog: false,
@@ -1492,7 +1492,7 @@ impl State {
         let test_button_labels = self.test_button_labels.clone();
         let combo_state = self.combo_state.clone();
         let tree_buttons = self.tree_buttons.clone();
-        let checkboxes = self.checkboxes.clone();
+        let [checkbox0, checkbox1, checkbox2] = mem::take(&mut self.checkboxes).map(|checkbox| checkbox.expect("checkbox runtime consumed once"));
         let tree_labels = self.tree_labels.clone();
         let text_area = self.text_area.clone();
         let bg_sliders = self.bg_sliders.clone();
@@ -1514,7 +1514,6 @@ impl State {
             let [button0, button1, button2, button3, button4, button5] = test_buttons.clone();
             let [test_label0, test_label1, test_label2] = test_button_labels.clone();
             let [tree_button0, tree_button1, tree_button2, tree_button3, tree_button4, tree_button5] = tree_buttons.clone();
-            let [checkbox0, checkbox1, checkbox2] = checkboxes.clone();
             let [tree_label_hello, tree_label_world] = tree_labels.clone();
             let [slider_red, slider_green, slider_blue] = bg_sliders.clone();
             let [label_red, label_green, label_blue] = background_labels.clone();
@@ -1585,9 +1584,9 @@ impl State {
                                 });
                             });
                             tree.tree_node(&test3_tn, |tree| {
-                                tree.widget(&checkbox0);
-                                tree.widget(&checkbox1);
-                                tree.widget(&checkbox2);
+                                tree.state_widget(checkbox0);
+                                tree.state_widget(checkbox1);
+                                tree.state_widget(checkbox2);
                             });
                         });
                         tree.column(|tree| {
