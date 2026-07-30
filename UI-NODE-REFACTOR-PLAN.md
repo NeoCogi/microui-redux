@@ -2383,7 +2383,7 @@ explicit decision before changing the criterion.
   intentionally changes no production API: its ownership, boundary, compile-fail, lifecycle, and
   file-dialog criteria become executable and green in P1.3/P2.0-P2.4/P3.2.
 
-- [ ] **P0.4 — Freeze the typed-state interaction contract**
+- [x] **P0.4 — Freeze the typed-state interaction contract**
 
   **Problem**
 
@@ -2416,6 +2416,20 @@ explicit decision before changing the criterion.
   `FrameResultGeneration`, public `RetainedId`, public widget `NodeId`, every `state_of*` operation,
   and targeted Context focus. Root chrome uses `RootState` and the same pending typed-event contract;
   use the fixed built-in exposure/mutation table above rather than reclassifying in P1.1.
+
+  Every pending event counter starts at zero. Recording uses `saturating_add(1)`, so `u32::MAX`
+  remains `u32::MAX` rather than wrapping. A `take_*` call at zero returns `false` without changing
+  state; otherwise it subtracts exactly one and returns `true`. Change and submission counters are
+  independent: one `Widget::update` may record one occurrence of each kind, but never more than one
+  occurrence of the same semantic kind regardless of how many low-level inputs contributed to that
+  update. Pending occurrences remain in the strongly owned state across frames, hidden roots, and
+  gated descendants until consumed or the owner is destroyed.
+
+  Built-ins absent from the fixed event table expose no generic interaction event. In particular,
+  ordinary leaf `ACTIVE` remains private runtime/paint state rather than a pending typed event.
+  `RootState::is_active` is the intentional root-only persistent-state exception, while root change
+  and submission occurrences use the same independent saturating counters; P0.7 owns their exact
+  chrome recording points and programmatic-silence rules.
 
   Persistent values are read and changed directly through typed state:
 
@@ -2494,9 +2508,13 @@ explicit decision before changing the criterion.
   }
   ```
 
-  `WidgetUpdateCtx::set_focus(&mut self) -> bool` returns `false` without changing focus when the
-  current widget is not eligible to take it. Existing custom widgets may ignore the returned value;
-  queued commands use it to avoid consuming a request that was not fulfilled.
+  `WidgetUpdateCtx::set_focus(&mut self) -> bool` returns `true`, establishes or retains focus, and
+  marks focus as refreshed when the current widget is eligible, including when it already owns
+  focus. It returns `false` without changing the focus slot or its update marker when effective
+  options or cross-root/modal policy makes the widget ineligible. Existing custom widgets may
+  ignore the returned value; queued commands use it to avoid consuming a request that was not
+  fulfilled. A hidden or gated descendant receives no update, so its queued request remains
+  untouched.
 
   A hidden widget/container uses the same `Widget::update -> ()` signature. Returning `None` from
   construction means only that none of its values, events, or commands form an application API:
@@ -2511,25 +2529,58 @@ explicit decision before changing the criterion.
 
   **Acceptance tests**
 
-  - Every change/submission listed in the fixed event table is observed and consumed at most once
-    through its typed state; unconsumed and multiple pending occurrences follow the documented
-    saturating-counter semantics.
+  - Every change/submission listed in the fixed event table is observed through its typed state.
+    Zero-count reads are stable, each successful `take_*` consumes exactly one occurrence, separate
+    event kinds remain independent, and a test-only maximum counter proves saturation without wrap.
   - Multiple low-level inputs contributing to one update produce one semantic occurrence, while
-    occurrences from separate updates accumulate and require separate `take_*` calls.
+    occurrences from separate updates accumulate and require separate `take_*` calls. An update
+    that produces both change and submission records one independently consumable occurrence of
+    each kind.
+  - Unconsumed occurrences survive ordinary frames, root hiding/showing, and descendant gating;
+    destruction drops them with their owning state rather than publishing a final generic result.
   - Programmatic setters are silent; tests cover every setter plus Combo's documented
     `update_items` clamp exception and silent direct `select`.
   - Combo records consumable `CHANGE`/`SUBMIT` equivalents at the same clamp/header-click decision
     points as the current implementation.
   - Textbox focus requests survive hidden, gated, non-interactive, or cross-root/modal-ineligible
-    updates and clear only after an eligible update successfully assigns focus.
+    updates and clear only after an eligible update successfully assigns focus. `set_focus` returns
+    `true` for an eligible already-focused widget and `false` without changing focus/update state
+    for an ineligible widget.
   - Checkbox, slider, combo, textbox, and custom state require no Context argument.
   - A custom `Widget::update` compiles only with the unit return and stores no generic leaf result;
     its own typed state may define custom events independently.
+  - Ordinary leaf active/pressed state has no application pending-event API. Root active state and
+    root change/submission counters follow the shared typed-state contract, with P0.7 tests pinning
+    their exact chrome transitions.
+  - Public compile-fail checks and internal source/API audits prove `ResourceState`, `FrameResults`,
+    `FrameResultGeneration`, `RetainedId`, public widget `NodeId`, `Context::committed_results`,
+    `state_of_retained`/every other `state_of*` lookup, and `Context::set_root_focus_node` no longer
+    exist; no replacement generic result store, event summary, or targeted focus API is introduced.
   - Applications retain no parallel node IDs for widget interaction.
   - Calculator, demo, and file-dialog application code consume typed state instead of any generic
     frame-result lookup.
   - Public examples and rustdoc include persistent-value, consumable-event, queued-command, and
     hidden-runtime cases matching the code above.
+
+  **Frozen contract evidence (2026-07-29)**
+
+  The normative typed-state table and command sections above now define the sole application
+  interaction boundary. Persistent values, independent saturating event counts, and queued commands
+  live with their concrete state; `Widget::update` mutates that state and returns `()`; focus,
+  capture, and routing retain dedicated runtime mechanisms without becoming application identity
+  APIs. Event lifetime follows state lifetime rather than a frame generation, and programmatic
+  setters remain silent except for the explicitly preserved Combo normalization behavior.
+
+  Repository inspection confirms that the current implementation instead returns the
+  `ResourceState::{CHANGE, SUBMIT, ACTIVE}` bitflags from every `Widget::update`, double-buffers them
+  in `FrameResults` maps keyed by public/scoped `RetainedId`, exposes the committed generation through
+  `Context::committed_results`, and uses public builder `NodeId` values for result lookup and
+  `Context::set_root_focus_node`. `WidgetUpdateCtx::set_focus` currently assigns unconditionally and
+  returns `()`. The calculator, full demo, file dialog, tests, and custom-widget examples still
+  produce or consume parts of that surface. Those facts are migration cost, not preserved behavior.
+  P0.4 intentionally changes no production API: its typed-event, focus-command, API-removal,
+  compile-fail, application-migration, and documentation criteria become executable and green in
+  P1.1/P2.5/P3.0-P3.2.
 
 - [ ] **P0.5 — Freeze the process-unique private runtime identity contract**
 
