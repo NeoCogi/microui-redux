@@ -1,13 +1,18 @@
 //! Shared fixtures, renderer recordings, and no-op helpers used by unit tests.
 
 use crate::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
-use crate::{AtlasHandle, AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, TextureId, Vec2i};
+use crate::{widget_handle, AtlasHandle, AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, TextureId, Vec2i, WidgetBuilder, WidgetHandle};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
+
+/// Builds a concrete runtime and wraps it in the temporary retained projection used by tests.
+pub(crate) fn projected_widget<B: WidgetBuilder>(parameters: B::Parameters) -> WidgetHandle<B::W> {
+    widget_handle(B::create_widget(parameters))
+}
 
 /// Test-process allocator whose counters are enabled only inside an explicit measurement window.
 pub(crate) struct CountingAllocator;

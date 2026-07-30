@@ -61,7 +61,6 @@ use crate::WidgetOption;
 use crate::ui_node::UiInputEvent;
 use crate::style::{Color, Style, TextureId};
 use crate::text_layout::control_text_position_with_font;
-use crate::ui_node::UiNodeId;
 
 /// Convenience methods for a widget-local routed input batch.
 pub trait WidgetInputEvents {
@@ -248,7 +247,8 @@ impl<'a> WidgetContextData<'a> {
 ///
 /// This context deliberately has no `DisplayList`, [`Painter`], or drawing helpers. Consequently
 /// an update implementation cannot record visual work, and retained traversal does not need to
-/// carry rendering state through the update pass.
+/// carry rendering state through the update pass. Interaction and focus are router-produced
+/// snapshots; widgets can inspect them but cannot cooperatively assign or clear focus.
 ///
 /// ```compile_fail
 /// use microui_redux::prelude::WidgetUpdateCtx;
@@ -258,30 +258,21 @@ impl<'a> WidgetContextData<'a> {
 /// }
 /// ```
 pub struct WidgetUpdateCtx<'a> {
-    /// Runtime node identity used for focus operations.
-    interaction_id: UiNodeId,
     /// Common read-only data, intentionally separated from phase capabilities.
     common: WidgetContextData<'a>,
-    /// Focus slot owned by the active container.
-    focus: &'a mut Option<UiNodeId>,
-    /// Flag indicating whether focus was refreshed or changed this frame.
-    updated_focus: &'a mut bool,
     /// Whether this widget is inside the current hover root.
     in_hover_root: bool,
 }
 
 impl<'a> WidgetUpdateCtx<'a> {
-    /// Creates an update context with a stable runtime interaction identity.
+    /// Creates an update context from router-owned interaction state.
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_interaction(
-        interaction_id: UiNodeId,
         rect: Recti,
         screen_clip: Recti,
         style: &'a Style,
         atlas: &'a AtlasHandle,
-        focus: &'a mut Option<UiNodeId>,
-        updated_focus: &'a mut bool,
         in_hover_root: bool,
         hovered: bool,
         focused: bool,
@@ -289,33 +280,16 @@ impl<'a> WidgetUpdateCtx<'a> {
         active: bool,
         scroll_delta: Option<Vec2i>,
     ) -> Self {
-        Self::new_with_content_geometry(
-            interaction_id,
-            rect,
-            screen_clip,
-            style,
-            atlas,
-            focus,
-            updated_focus,
-            in_hover_root,
-            hovered,
-            focused,
-            clicked,
-            active,
-            scroll_delta,
-        )
+        Self::new_with_content_geometry(rect, screen_clip, style, atlas, in_hover_root, hovered, focused, clicked, active, scroll_delta)
     }
 
     /// Creates update services for one traversal-derived content surface.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_content_geometry(
-        interaction_id: UiNodeId,
         content_rect: Recti,
         screen_clip: Recti,
         style: &'a Style,
         atlas: &'a AtlasHandle,
-        focus: &'a mut Option<UiNodeId>,
-        updated_focus: &'a mut bool,
         in_hover_root: bool,
         hovered: bool,
         focused: bool,
@@ -324,10 +298,7 @@ impl<'a> WidgetUpdateCtx<'a> {
         scroll_delta: Option<Vec2i>,
     ) -> Self {
         Self {
-            interaction_id,
             common: WidgetContextData::new(content_rect, screen_clip, style, atlas, hovered, focused, clicked, active, scroll_delta),
-            focus,
-            updated_focus,
             in_hover_root,
         }
     }
@@ -368,18 +339,6 @@ impl<'a> WidgetUpdateCtx<'a> {
     /// Returns scroll delta routed to this widget for this frame.
     pub fn scroll_delta(&self) -> Option<Vec2i> {
         self.common.scroll_delta
-    }
-
-    /// Sets focus to this widget for the current frame.
-    pub fn set_focus(&mut self) {
-        *self.focus = Some(self.interaction_id);
-        *self.updated_focus = true;
-    }
-
-    /// Clears focus from the current widget.
-    pub fn clear_focus(&mut self) {
-        *self.focus = None;
-        *self.updated_focus = true;
     }
 
     /// Returns the active style for built-in update logic.

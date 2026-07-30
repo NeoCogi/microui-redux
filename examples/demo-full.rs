@@ -789,26 +789,60 @@ impl Widget for SuzanneWidget {
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
+fn projected_leaf<B: WidgetBuilder>(parameters: B::Parameters) -> (WidgetStateHandle<<B::W as WidgetStateOwner>::State>, WidgetHandle<B::W>) {
+    let runtime = B::create_widget(parameters);
+    let state = runtime.state_handle();
+    (state, widget_handle(runtime))
+}
+
+fn retained_leaf<B: WidgetBuilder>(parameters: B::Parameters) -> WidgetHandle<B::W> {
+    projected_leaf::<B>(parameters).1
+}
+
 fn static_label(text: impl Into<String>) -> WidgetHandle<ListItem> {
-    widget_handle(ListItem::with_opt(text, WidgetOption::NO_INTERACT))
+    retained_leaf::<ListItemBuilder>(ListItemParameters::with_opt(text, WidgetOption::NO_INTERACT))
+}
+
+fn centered_button(label: impl Into<String>) -> (WidgetStateHandle<ButtonState>, WidgetHandle<Button>) {
+    projected_leaf::<ButtonBuilder>(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER))
+}
+
+fn set_slider_value(state: &WidgetStateHandle<SliderState>, value: Real) {
+    state.try_update(|slider| slider.set_value(value)).expect("slider state unavailable");
+}
+
+fn slider_value(state: &WidgetStateHandle<SliderState>) -> Real {
+    state.try_read(SliderState::value).expect("slider state unavailable")
+}
+
+fn take_button_submission(state: &WidgetStateHandle<ButtonState>) -> bool {
+    state.try_update(ButtonState::take_submitted).expect("button state unavailable")
 }
 
 struct State {
     bg: [Real; 3],
+    bg_slider_states: [WidgetStateHandle<SliderState>; 3],
     bg_sliders: [WidgetHandle<Slider>; 3],
+    style_color_slider_states: [WidgetStateHandle<SliderState>; 60],
     style_color_sliders: [WidgetHandle<Slider>; 60],
+    style_value_slider_states: [WidgetStateHandle<SliderState>; 5],
     style_value_sliders: [WidgetHandle<Slider>; 5],
     logbuf: Rc<RefCell<String>>,
+    submit_buf_state: WidgetStateHandle<TextboxState>,
     submit_buf: WidgetHandle<Textbox>,
     text_area: WidgetHandle<TextArea>,
+    combo_typed_state: WidgetStateHandle<ComboState>,
     combo_state: WidgetHandle<Combo>,
+    combo_item_states: [WidgetStateHandle<ListItemState>; 4],
     combo_items: [WidgetHandle<ListItem>; 4],
     style_color_labels: [WidgetHandle<ListItem>; 14],
+    style_color_swatch_states: [WidgetStateHandle<ColorSwatchState>; 14],
     style_color_swatches: [WidgetHandle<ColorSwatch>; 14],
     style_metric_labels: [WidgetHandle<ListItem>; 5],
     stack_direction_labels: [WidgetHandle<ListItem>; 2],
     weight_labels: [WidgetHandle<ListItem>; 2],
     window_info_labels: [WidgetHandle<ListItem>; 3],
+    window_info_value_states: [WidgetStateHandle<ListItemState>; 3],
     window_info_values: [WidgetHandle<ListItem>; 3],
     test_button_labels: [WidgetHandle<ListItem>; 3],
     tree_labels: [WidgetHandle<ListItem>; 2],
@@ -845,25 +879,24 @@ struct State {
     test1b_tn: WidgetHandle<Node>,
     test2_tn: WidgetHandle<Node>,
     test3_tn: WidgetHandle<Node>,
+    submit_button_state: WidgetStateHandle<ButtonState>,
     submit_button: WidgetHandle<Button>,
+    log_text_state: WidgetStateHandle<TextBlockState>,
     log_text: WidgetHandle<TextBlock>,
     typography_heading: WidgetHandle<TextBlock>,
     typography_body: WidgetHandle<TextBlock>,
     typography_button: WidgetHandle<Button>,
+    test_button_states: [WidgetStateHandle<ButtonState>; 6],
     test_buttons: [WidgetHandle<Button>; 6],
+    tree_button_states: [WidgetStateHandle<ButtonState>; 6],
     tree_buttons: [WidgetHandle<Button>; 6],
+    popup_button_states: [WidgetStateHandle<ButtonState>; 2],
     popup_buttons: [WidgetHandle<Button>; 2],
     texture_buttons: [WidgetHandle<Button>; 4],
+    stack_direction_button_states: [WidgetStateHandle<ButtonState>; 6],
     stack_direction_buttons: [WidgetHandle<Button>; 6],
+    weight_button_states: [WidgetStateHandle<ButtonState>; 9],
     weight_buttons: [WidgetHandle<Button>; 9],
-    submit_buf_id: NodeId,
-    submit_button_id: NodeId,
-    test_button_ids: [NodeId; 6],
-    tree_button_ids: [NodeId; 6],
-    popup_button_ids: [NodeId; 2],
-    stack_direction_button_ids: [NodeId; 6],
-    weight_button_ids: [NodeId; 9],
-    combo_item_ids: [NodeId; 4],
     external_image_button: Option<WidgetHandle<Button>>,
     checkboxes: [Option<Checkbox>; 3],
     open_popup: bool,
@@ -875,6 +908,7 @@ struct State {
     painter_widget: WidgetHandle<PainterDemo>,
     falloff_widget: WidgetHandle<FalloffEditor>,
     suzanne_widget: WidgetHandle<SuzanneWidget>,
+    background_swatch_state: WidgetStateHandle<ColorSwatchState>,
     background_swatch: WidgetHandle<ColorSwatch>,
     style_tree: UiNodeSet,
     log_tree: UiNodeSet,
@@ -959,25 +993,25 @@ impl State {
         let blue_texture = upload_solid_texture(ctx, 64, 24, [0, 0, 0xFF, 0xFF]);
         let noise_texture = upload_noise_texture(ctx, 24, 32);
         let texture_buttons = [
-            widget_handle(Button::with_image(
+            retained_leaf::<ButtonBuilder>(ButtonParameters::with_image(
                 "Texture 1 - Red",
                 Some(red_texture),
                 WidgetOption::FRAME,
                 WidgetFillOption::ALL,
             )),
-            widget_handle(Button::with_image(
+            retained_leaf::<ButtonBuilder>(ButtonParameters::with_image(
                 "Texture 2 - Green",
                 Some(green_texture),
                 WidgetOption::FRAME,
                 WidgetFillOption::ALL,
             )),
-            widget_handle(Button::with_image(
+            retained_leaf::<ButtonBuilder>(ButtonParameters::with_image(
                 "Texture 3 - Blue",
                 Some(blue_texture),
                 WidgetOption::FRAME,
                 WidgetFillOption::ALL,
             )),
-            widget_handle(Button::with_image(
+            retained_leaf::<ButtonBuilder>(ButtonParameters::with_image(
                 "Texture 4 - Noise",
                 Some(noise_texture),
                 WidgetOption::FRAME,
@@ -985,38 +1019,100 @@ impl State {
             )),
         ];
         let external_image_button = image_texture.map(|texture| {
-            widget_handle(Button::with_scaled_image(
+            retained_leaf::<ButtonBuilder>(ButtonParameters::with_scaled_image(
                 "External Image",
                 Some(texture),
                 WidgetOption::FRAME,
                 WidgetFillOption::ALL,
             ))
         });
-        let style_color_sliders =
-            std::array::from_fn(|_| widget_handle(Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)));
-        let style_color_swatches = std::array::from_fn(|_| widget_handle(ColorSwatch::new(color(0, 0, 0, 0xFF))));
-        let style_value_sliders = [
-            widget_handle(Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-            widget_handle(Slider::with_opt(0.0, 0.0, 16.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-            widget_handle(Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-            widget_handle(Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-            widget_handle(Slider::with_opt(0.0, 0.0, 128.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
+        let style_color_slider_pairs = std::array::from_fn(|_| {
+            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+                0.0,
+                0.0,
+                255.0,
+                0.0,
+                0,
+                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
+            ))
+        });
+        let style_color_slider_states = style_color_slider_pairs.each_ref().map(|(state, _)| state.clone());
+        let style_color_sliders = style_color_slider_pairs.map(|(_, runtime)| runtime);
+        let style_color_swatch_pairs = std::array::from_fn(|_| projected_leaf::<ColorSwatchBuilder>(ColorSwatchParameters::new(color(0, 0, 0, 0xFF))));
+        let style_color_swatch_states = style_color_swatch_pairs.each_ref().map(|(state, _)| state.clone());
+        let style_color_swatches = style_color_swatch_pairs.map(|(_, runtime)| runtime);
+        let style_value_slider_pairs = [
+            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+                0.0,
+                0.0,
+                16.0,
+                0.0,
+                0,
+                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
+            )),
+            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+                0.0,
+                0.0,
+                16.0,
+                0.0,
+                0,
+                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
+            )),
+            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+                0.0,
+                0.0,
+                128.0,
+                0.0,
+                0,
+                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
+            )),
+            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+                0.0,
+                0.0,
+                128.0,
+                0.0,
+                0,
+                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
+            )),
+            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+                0.0,
+                0.0,
+                128.0,
+                0.0,
+                0,
+                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
+            )),
         ];
-        let bg_sliders = std::array::from_fn(|_| widget_handle(Slider::with_opt(0.0, 0.0, 255.0, 0.0, 0, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)));
-        let mut text_area =
-            TextArea::new("This is a multi-line TextArea.\nYou can type, scroll, and resize the window.\n\nTry adding more lines to see the scrollbars.");
-        text_area.wrap = TextWrap::Word;
-        let mut submit_buf = Textbox::new("");
-        submit_buf.config.font = FontRole::Mono.into();
-        let mut log_text = TextBlock::new("");
-        log_text.config.font = FontRole::Mono.into();
-        let mut typography_heading = TextBlock::new("NORMAL.ttf at 18px");
-        typography_heading.config.font = FontRole::Heading.into();
-        let mut typography_body = TextBlock::with_wrap(
-            "NORMAL.ttf at 12px remains the control font. Window titles use BOLD.ttf, and the log window uses CONSOLE.ttf for input and output.",
-            TextWrap::Word,
+        let style_value_slider_states = style_value_slider_pairs.each_ref().map(|(state, _)| state.clone());
+        let style_value_sliders = style_value_slider_pairs.map(|(_, runtime)| runtime);
+        let bg_slider_pairs = std::array::from_fn(|_| {
+            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+                0.0,
+                0.0,
+                255.0,
+                0.0,
+                0,
+                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
+            ))
+        });
+        let bg_slider_states = bg_slider_pairs.each_ref().map(|(state, _)| state.clone());
+        let bg_sliders = bg_slider_pairs.map(|(_, runtime)| runtime);
+        let text_area = retained_leaf::<TextAreaBuilder>(
+            TextAreaParameters::new(
+                "This is a multi-line TextArea.\nYou can type, scroll, and resize the window.\n\nTry adding more lines to see the scrollbars.",
+            )
+            .wrap(TextWrap::Word),
         );
-        typography_body.config.font = FontRole::Body.into();
+        let (submit_buf_state, submit_buf) = projected_leaf::<TextboxBuilder>(TextboxParameters::new("").font(FontRole::Mono.into()));
+        let (log_text_state, log_text) = projected_leaf::<TextBlockBuilder>(TextBlockParameters::new("").font(FontRole::Mono.into()));
+        let typography_heading = retained_leaf::<TextBlockBuilder>(TextBlockParameters::new("NORMAL.ttf at 18px").font(FontRole::Heading.into()));
+        let typography_body = retained_leaf::<TextBlockBuilder>(
+            TextBlockParameters::with_wrap(
+                "NORMAL.ttf at 12px remains the control font. Window titles use BOLD.ttf, and the log window uses CONSOLE.ttf for input and output.",
+                TextWrap::Word,
+            )
+            .font(FontRole::Body.into()),
+        );
         let style = Style::default().with_named_fonts(&ctx.renderer().atlas());
         let demo_root = ctx.create_window("Demo Window", rect(40, 40, 300, 450), UiNodeSet::default());
         let style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), UiNodeSet::default());
@@ -1039,21 +1135,83 @@ impl State {
         let suzanne_root = ctx.create_window("Suzanne Window", rect(220, 220, 300, 300), UiNodeSet::default());
         let stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), UiNodeSet::default());
         let weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), UiNodeSet::default());
+        let (combo_typed_state, combo_state) = projected_leaf::<ComboBuilder>(ComboParameters::new());
+        let combo_item_pairs = [
+            projected_leaf::<ListItemBuilder>(ListItemParameters::new("Apple")),
+            projected_leaf::<ListItemBuilder>(ListItemParameters::new("Banana")),
+            projected_leaf::<ListItemBuilder>(ListItemParameters::new("Cherry")),
+            projected_leaf::<ListItemBuilder>(ListItemParameters::new("Date")),
+        ];
+        let combo_item_states = combo_item_pairs.each_ref().map(|(state, _)| state.clone());
+        let combo_items = combo_item_pairs.map(|(_, runtime)| runtime);
+        let window_info_value_pairs = std::array::from_fn(|_| projected_leaf::<ListItemBuilder>(ListItemParameters::with_opt("", WidgetOption::NO_INTERACT)));
+        let window_info_value_states = window_info_value_pairs.each_ref().map(|(state, _)| state.clone());
+        let window_info_values = window_info_value_pairs.map(|(_, runtime)| runtime);
+        let (submit_button_state, submit_button) = centered_button("Submit");
+        let typography_button = centered_button("Control Preview").1;
+        let test_button_pairs = [
+            centered_button("Button 1"),
+            centered_button("Button 2"),
+            centered_button("Button 3"),
+            centered_button("Popup"),
+            centered_button("Button 4"),
+            centered_button("Dialog"),
+        ];
+        let test_button_states = test_button_pairs.each_ref().map(|(state, _)| state.clone());
+        let test_buttons = test_button_pairs.map(|(_, runtime)| runtime);
+        let tree_button_pairs = [
+            centered_button("Button 1"),
+            centered_button("Button 2"),
+            centered_button("Button 3"),
+            centered_button("Button 4"),
+            centered_button("Button 5"),
+            centered_button("Button 6"),
+        ];
+        let tree_button_states = tree_button_pairs.each_ref().map(|(state, _)| state.clone());
+        let tree_buttons = tree_button_pairs.map(|(_, runtime)| runtime);
+        let popup_button_pairs = [centered_button("Hello"), centered_button("World")];
+        let popup_button_states = popup_button_pairs.each_ref().map(|(state, _)| state.clone());
+        let popup_buttons = popup_button_pairs.map(|(_, runtime)| runtime);
+        let stack_direction_button_pairs = [
+            centered_button("Call 1"),
+            centered_button("Call 2"),
+            centered_button("Call 3"),
+            centered_button("Call 1"),
+            centered_button("Call 2"),
+            centered_button("Call 3"),
+        ];
+        let stack_direction_button_states = stack_direction_button_pairs.each_ref().map(|(state, _)| state.clone());
+        let stack_direction_buttons = stack_direction_button_pairs.map(|(_, runtime)| runtime);
+        let weight_button_pairs = [
+            centered_button("w1"),
+            centered_button("w2"),
+            centered_button("w3"),
+            centered_button("g1"),
+            centered_button("g2"),
+            centered_button("g3"),
+            centered_button("g4"),
+            centered_button("g5"),
+            centered_button("g6"),
+        ];
+        let weight_button_states = weight_button_pairs.each_ref().map(|(state, _)| state.clone());
+        let weight_buttons = weight_button_pairs.map(|(_, runtime)| runtime);
+        let (background_swatch_state, background_swatch) = projected_leaf::<ColorSwatchBuilder>(ColorSwatchParameters::new(color(90, 95, 100, 0xFF)));
         let mut state = Self {
             bg: [90.0, 95.0, 100.0],
+            bg_slider_states,
             bg_sliders,
+            style_color_slider_states,
             style_color_sliders,
+            style_value_slider_states,
             style_value_sliders,
             logbuf: Rc::new(RefCell::new(String::new())),
-            submit_buf: widget_handle(submit_buf),
-            text_area: widget_handle(text_area),
-            combo_state: widget_handle(Combo::new()),
-            combo_items: [
-                widget_handle(ListItem::new("Apple")),
-                widget_handle(ListItem::new("Banana")),
-                widget_handle(ListItem::new("Cherry")),
-                widget_handle(ListItem::new("Date")),
-            ],
+            submit_buf_state,
+            submit_buf,
+            text_area,
+            combo_typed_state,
+            combo_state,
+            combo_item_states,
+            combo_items,
             style_color_labels: [
                 static_label("text"),
                 static_label("border:"),
@@ -1070,6 +1228,7 @@ impl State {
                 static_label("scrollbase:"),
                 static_label("scrollthumb:"),
             ],
+            style_color_swatch_states,
             style_color_swatches,
             style_metric_labels: [
                 static_label("padding"),
@@ -1081,7 +1240,8 @@ impl State {
             stack_direction_labels: [static_label("Top -> Bottom"), static_label("Bottom -> Top")],
             weight_labels: [static_label("Row weights 1 : 2 : 3"), static_label("Grid weights rows 1 : 2")],
             window_info_labels: [static_label("Position:"), static_label("Size:"), static_label("FPS:")],
-            window_info_values: [static_label(""), static_label(""), static_label("")],
+            window_info_value_states,
+            window_info_values,
             test_button_labels: [
                 static_label("Test buttons 1:"),
                 static_label("Test buttons 2:"),
@@ -1117,59 +1277,24 @@ impl State {
             test1b_tn: widget_handle(Node::tree("Test 1b", NodeStateValue::Closed)),
             test2_tn: widget_handle(Node::tree("Test 2", NodeStateValue::Closed)),
             test3_tn: widget_handle(Node::tree("Test 3", NodeStateValue::Closed)),
-            submit_button: widget_handle(Button::with_opt("Submit", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-            log_text: widget_handle(log_text),
-            typography_heading: widget_handle(typography_heading),
-            typography_body: widget_handle(typography_body),
-            typography_button: widget_handle(Button::with_opt("Control Preview", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-            test_buttons: [
-                widget_handle(Button::with_opt("Button 1", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 2", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Popup", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 4", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Dialog", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-            ],
-            tree_buttons: [
-                widget_handle(Button::with_opt("Button 1", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 2", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 4", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 5", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Button 6", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-            ],
-            popup_buttons: [
-                widget_handle(Button::with_opt("Hello", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("World", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-            ],
+            submit_button_state,
+            submit_button,
+            log_text_state,
+            log_text,
+            typography_heading,
+            typography_body,
+            typography_button,
+            test_button_states,
+            test_buttons,
+            tree_button_states,
+            tree_buttons,
+            popup_button_states,
+            popup_buttons,
             texture_buttons,
-            stack_direction_buttons: [
-                widget_handle(Button::with_opt("Call 1", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Call 2", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Call 3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Call 1", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Call 2", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("Call 3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-            ],
-            weight_buttons: [
-                widget_handle(Button::with_opt("w1", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("w2", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("w3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("g1", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("g2", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("g3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("g4", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("g5", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-                widget_handle(Button::with_opt("g6", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-            ],
-            submit_buf_id: NodeId::default(),
-            submit_button_id: NodeId::default(),
-            test_button_ids: [NodeId::default(); 6],
-            tree_button_ids: [NodeId::default(); 6],
-            popup_button_ids: [NodeId::default(); 2],
-            stack_direction_button_ids: [NodeId::default(); 6],
-            weight_button_ids: [NodeId::default(); 9],
-            combo_item_ids: [NodeId::default(); 4],
+            stack_direction_button_states,
+            stack_direction_buttons,
+            weight_button_states,
+            weight_buttons,
             external_image_button,
             checkboxes: [
                 Some(Checkbox::create(CheckboxParameters::new("Checkbox 1", false)).1),
@@ -1181,11 +1306,12 @@ impl State {
             triangle_data,
             triangle_renderer,
             suzanne_renderer,
-            triangle_widget: widget_handle(Custom::with_opt("Triangle", WidgetOption::HOLD_FOCUS)),
+            triangle_widget: widget_handle(Custom::create(CustomParameters::with_opt("Triangle", WidgetOption::HOLD_FOCUS))),
             painter_widget: widget_handle(PainterDemo::new()),
             falloff_widget: widget_handle(FalloffEditor::new()),
             suzanne_widget: widget_handle(SuzanneWidget::new(suzanne_data.clone())),
-            background_swatch: widget_handle(ColorSwatch::new(color(90, 95, 100, 0xFF))),
+            background_swatch_state,
+            background_swatch,
             style_tree: UiNodeSet::default(),
             log_tree: UiNodeSet::default(),
             typography_tree: UiNodeSet::default(),
@@ -1207,33 +1333,38 @@ impl State {
     }
 
     fn sync_background_controls_from_bg(&mut self) {
-        self.bg_sliders[0].update(|slider| slider.set_value(self.bg[0]));
-        self.bg_sliders[1].update(|slider| slider.set_value(self.bg[1]));
-        self.bg_sliders[2].update(|slider| slider.set_value(self.bg[2]));
+        set_slider_value(&self.bg_slider_states[0], self.bg[0]);
+        set_slider_value(&self.bg_slider_states[1], self.bg[1]);
+        set_slider_value(&self.bg_slider_states[2], self.bg[2]);
         self.sync_background_swatch();
     }
 
     fn sync_background_swatch(&mut self) {
-        self.background_swatch.update(|swatch| {
-            swatch.fill = color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255);
-            swatch.label = format!("#{:02X}{:02X}{:02X}", swatch.fill.r, swatch.fill.g, swatch.fill.b);
-        });
+        let fill = color(self.bg[0] as u8, self.bg[1] as u8, self.bg[2] as u8, 255);
+        self.background_swatch_state
+            .try_update(|swatch| {
+                swatch.set_fill(fill);
+                swatch.set_label(format!("#{:02X}{:02X}{:02X}", fill.r, fill.g, fill.b));
+            })
+            .expect("background swatch state unavailable");
     }
 
     fn sync_style_controls_from_style(&mut self) {
         for (i, color) in self.style.colors.iter().enumerate() {
             let slider_base = i * 4;
-            self.style_color_sliders[slider_base].update(|slider| slider.set_value(color.r as Real));
-            self.style_color_sliders[slider_base + 1].update(|slider| slider.set_value(color.g as Real));
-            self.style_color_sliders[slider_base + 2].update(|slider| slider.set_value(color.b as Real));
-            self.style_color_sliders[slider_base + 3].update(|slider| slider.set_value(color.a as Real));
-            self.style_color_swatches[i].update(|swatch| swatch.fill = *color);
+            set_slider_value(&self.style_color_slider_states[slider_base], color.r as Real);
+            set_slider_value(&self.style_color_slider_states[slider_base + 1], color.g as Real);
+            set_slider_value(&self.style_color_slider_states[slider_base + 2], color.b as Real);
+            set_slider_value(&self.style_color_slider_states[slider_base + 3], color.a as Real);
+            self.style_color_swatch_states[i]
+                .try_update(|swatch| swatch.set_fill(*color))
+                .expect("style swatch state unavailable");
         }
-        self.style_value_sliders[0].update(|slider| slider.set_value(self.style.padding as Real));
-        self.style_value_sliders[1].update(|slider| slider.set_value(self.style.spacing as Real));
-        self.style_value_sliders[2].update(|slider| slider.set_value(self.style.title_height as Real));
-        self.style_value_sliders[3].update(|slider| slider.set_value(self.style.thumb_size as Real));
-        self.style_value_sliders[4].update(|slider| slider.set_value(self.style.scrollbar_size as Real));
+        set_slider_value(&self.style_value_slider_states[0], self.style.padding as Real);
+        set_slider_value(&self.style_value_slider_states[1], self.style.spacing as Real);
+        set_slider_value(&self.style_value_slider_states[2], self.style.title_height as Real);
+        set_slider_value(&self.style_value_slider_states[3], self.style.thumb_size as Real);
+        set_slider_value(&self.style_value_slider_states[4], self.style.scrollbar_size as Real);
     }
 
     fn install_root_nodes(&mut self, ctx: &mut Context<SelectedBackend>) {
@@ -1263,14 +1394,6 @@ impl State {
 
     fn section(tree: &mut UiNodeBuilder, node: &WidgetHandle<Node>, f: impl FnOnce(&mut UiNodeBuilder)) {
         tree.header(node, f);
-    }
-
-    fn root_submitted(results: FrameResultGeneration<'_>, root: RootId, node_id: NodeId) -> bool {
-        results.state_of_retained(RetainedId::root_node(root, node_id)).is_submitted()
-    }
-
-    fn remember_widget<W: Widget + 'static>(tree: &mut UiNodeBuilder, slot: &mut NodeId, handle: &WidgetHandle<W>) {
-        *slot = tree.widget(handle);
     }
 
     fn rebuild_trees(&mut self) {
@@ -1319,8 +1442,6 @@ impl State {
         let log_text = self.log_text.clone();
         let submit_buf = self.submit_buf.clone();
         let submit_button = self.submit_button.clone();
-        let mut submit_buf_id = NodeId::default();
-        let mut submit_button_id = NodeId::default();
         self.log_tree = UiNodeBuilder::build(|tree| {
             let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
@@ -1329,12 +1450,10 @@ impl State {
                 });
             });
             tree.row(&submit_row, SizePolicy::Auto, |tree| {
-                Self::remember_widget(tree, &mut submit_buf_id, &submit_buf);
-                Self::remember_widget(tree, &mut submit_button_id, &submit_button);
+                tree.widget(&submit_buf);
+                tree.widget(&submit_button);
             });
         });
-        self.submit_buf_id = submit_buf_id;
-        self.submit_button_id = submit_button_id;
 
         let typography_heading = self.typography_heading.clone();
         let typography_body = self.typography_body.clone();
@@ -1379,7 +1498,6 @@ impl State {
 
         let stack_direction_labels = self.stack_direction_labels.clone();
         let stack_direction_buttons = self.stack_direction_buttons.clone();
-        let mut stack_direction_button_ids = [NodeId::default(); 6];
         self.stack_direction_tree = UiNodeBuilder::build(|tree| {
             let columns = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
             let [label_top, label_bottom] = stack_direction_labels.clone();
@@ -1391,25 +1509,23 @@ impl State {
             tree.row(&columns, SizePolicy::Fixed(120), |tree| {
                 tree.column(|tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, |tree| {
-                        Self::remember_widget(tree, &mut stack_direction_button_ids[0], &button_top_0);
-                        Self::remember_widget(tree, &mut stack_direction_button_ids[1], &button_top_1);
-                        Self::remember_widget(tree, &mut stack_direction_button_ids[2], &button_top_2);
+                        tree.widget(&button_top_0);
+                        tree.widget(&button_top_1);
+                        tree.widget(&button_top_2);
                     });
                 });
                 tree.column(|tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::BottomToTop, |tree| {
-                        Self::remember_widget(tree, &mut stack_direction_button_ids[3], &button_bottom_0);
-                        Self::remember_widget(tree, &mut stack_direction_button_ids[4], &button_bottom_1);
-                        Self::remember_widget(tree, &mut stack_direction_button_ids[5], &button_bottom_2);
+                        tree.widget(&button_bottom_0);
+                        tree.widget(&button_bottom_1);
+                        tree.widget(&button_bottom_2);
                     });
                 });
             });
         });
-        self.stack_direction_button_ids = stack_direction_button_ids;
 
         let weight_labels = self.weight_labels.clone();
         let weight_buttons = self.weight_buttons.clone();
-        let mut weight_button_ids = [NodeId::default(); 9];
         self.weight_tree = UiNodeBuilder::build(|tree| {
             let [row_weight_label, grid_weight_label] = weight_labels.clone();
             let [
@@ -1430,9 +1546,9 @@ impl State {
                 tree.widget(&row_weight_label);
             });
             tree.row(&row, SizePolicy::Fixed(28), |tree| {
-                Self::remember_widget(tree, &mut weight_button_ids[0], &button_row_0);
-                Self::remember_widget(tree, &mut weight_button_ids[1], &button_row_1);
-                Self::remember_widget(tree, &mut weight_button_ids[2], &button_row_2);
+                tree.widget(&button_row_0);
+                tree.widget(&button_row_1);
+                tree.widget(&button_row_2);
             });
             tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |tree| {
                 tree.widget(&grid_weight_label);
@@ -1440,39 +1556,34 @@ impl State {
             tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |tree| {
                 tree.column(|tree| {
                     tree.grid(&cols, &rows, |tree| {
-                        Self::remember_widget(tree, &mut weight_button_ids[3], &button_grid_0);
-                        Self::remember_widget(tree, &mut weight_button_ids[4], &button_grid_1);
-                        Self::remember_widget(tree, &mut weight_button_ids[5], &button_grid_2);
-                        Self::remember_widget(tree, &mut weight_button_ids[6], &button_grid_3);
-                        Self::remember_widget(tree, &mut weight_button_ids[7], &button_grid_4);
-                        Self::remember_widget(tree, &mut weight_button_ids[8], &button_grid_5);
+                        tree.widget(&button_grid_0);
+                        tree.widget(&button_grid_1);
+                        tree.widget(&button_grid_2);
+                        tree.widget(&button_grid_3);
+                        tree.widget(&button_grid_4);
+                        tree.widget(&button_grid_5);
                     });
                 });
             });
         });
-        self.weight_button_ids = weight_button_ids;
 
         let combo_items = self.combo_items.clone();
-        let mut combo_item_ids = [NodeId::default(); 4];
         self.combo_tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                for (index, item) in combo_items.iter().enumerate() {
-                    Self::remember_widget(tree, &mut combo_item_ids[index], item);
+                for item in &combo_items {
+                    tree.widget(item);
                 }
             });
         });
-        self.combo_item_ids = combo_item_ids;
 
         let popup_buttons = self.popup_buttons.clone();
-        let mut popup_button_ids = [NodeId::default(); 2];
         self.popup_tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                for (index, button) in popup_buttons.iter().enumerate() {
-                    Self::remember_widget(tree, &mut popup_button_ids[index], button);
+                for button in &popup_buttons {
+                    tree.widget(button);
                 }
             });
         });
-        self.popup_button_ids = popup_button_ids;
 
         let window_header = self.window_header.clone();
         let test_buttons_header = self.test_buttons_header.clone();
@@ -1500,8 +1611,6 @@ impl State {
         let background_swatch = self.background_swatch.clone();
         let texture_buttons = self.texture_buttons.clone();
         let external_image_button = self.external_image_button.clone();
-        let mut test_button_ids = [NodeId::default(); 6];
-        let mut tree_button_ids = [NodeId::default(); 6];
         self.demo_tree = UiNodeBuilder::build(|tree| {
             let window_info_row = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
             let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
@@ -1539,18 +1648,18 @@ impl State {
                 Self::section(tree, &test_buttons_header, |tree| {
                     tree.row(&button_widths, SizePolicy::Auto, |tree| {
                         tree.widget(&test_label0);
-                        Self::remember_widget(tree, &mut test_button_ids[0], &button0);
-                        Self::remember_widget(tree, &mut test_button_ids[1], &button1);
+                        tree.widget(&button0);
+                        tree.widget(&button1);
                     });
                     tree.row(&button_widths, SizePolicy::Auto, |tree| {
                         tree.widget(&test_label1);
-                        Self::remember_widget(tree, &mut test_button_ids[2], &button2);
-                        Self::remember_widget(tree, &mut test_button_ids[3], &button3);
+                        tree.widget(&button2);
+                        tree.widget(&button3);
                     });
                     tree.row(&button_widths, SizePolicy::Auto, |tree| {
                         tree.widget(&test_label2);
-                        Self::remember_widget(tree, &mut test_button_ids[4], &button4);
-                        Self::remember_widget(tree, &mut test_button_ids[5], &button5);
+                        tree.widget(&button4);
+                        tree.widget(&button5);
                     });
                 });
 
@@ -1569,18 +1678,18 @@ impl State {
                                     tree.widget(&tree_label_world);
                                 });
                                 tree.tree_node(&test1b_tn, |tree| {
-                                    Self::remember_widget(tree, &mut tree_button_ids[0], &tree_button0);
-                                    Self::remember_widget(tree, &mut tree_button_ids[1], &tree_button1);
+                                    tree.widget(&tree_button0);
+                                    tree.widget(&tree_button1);
                                 });
                             });
                             tree.tree_node(&test2_tn, |tree| {
                                 tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
-                                    Self::remember_widget(tree, &mut tree_button_ids[2], &tree_button2);
-                                    Self::remember_widget(tree, &mut tree_button_ids[3], &tree_button3);
+                                    tree.widget(&tree_button2);
+                                    tree.widget(&tree_button3);
                                 });
                                 tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
-                                    Self::remember_widget(tree, &mut tree_button_ids[4], &tree_button4);
-                                    Self::remember_widget(tree, &mut tree_button_ids[5], &tree_button5);
+                                    tree.widget(&tree_button4);
+                                    tree.widget(&tree_button5);
                                 });
                             });
                             tree.tree_node(&test3_tn, |tree| {
@@ -1641,51 +1750,44 @@ impl State {
                 });
                 });
         });
-        self.test_button_ids = test_button_ids;
-        self.tree_button_ids = tree_button_ids;
     }
 
     fn style_window(&mut self, ctx: &mut Context<SelectedBackend>) {
-        for (color, sliders) in self.style.colors.iter_mut().zip(self.style_color_sliders.chunks_exact(4)) {
-            color.r = sliders[0].read(|slider| slider.value() as u8);
-            color.g = sliders[1].read(|slider| slider.value() as u8);
-            color.b = sliders[2].read(|slider| slider.value() as u8);
-            color.a = sliders[3].read(|slider| slider.value() as u8);
+        for (color, sliders) in self.style.colors.iter_mut().zip(self.style_color_slider_states.chunks_exact(4)) {
+            color.r = slider_value(&sliders[0]) as u8;
+            color.g = slider_value(&sliders[1]) as u8;
+            color.b = slider_value(&sliders[2]) as u8;
+            color.a = slider_value(&sliders[3]) as u8;
         }
-        for (swatch, color) in self.style_color_swatches.iter().zip(self.style.colors.iter()) {
-            swatch.update(|swatch| swatch.fill = *color);
+        for (swatch, color) in self.style_color_swatch_states.iter().zip(self.style.colors.iter()) {
+            swatch.try_update(|swatch| swatch.set_fill(*color)).expect("style swatch state unavailable");
         }
-        self.style.padding = self.style_value_sliders[0].read(|slider| slider.value() as i32);
-        self.style.spacing = self.style_value_sliders[1].read(|slider| slider.value() as i32);
-        self.style.title_height = self.style_value_sliders[2].read(|slider| slider.value() as i32);
-        self.style.thumb_size = self.style_value_sliders[3].read(|slider| slider.value() as i32);
-        self.style.scrollbar_size = self.style_value_sliders[4].read(|slider| slider.value() as i32);
+        self.style.padding = slider_value(&self.style_value_slider_states[0]) as i32;
+        self.style.spacing = slider_value(&self.style_value_slider_states[1]) as i32;
+        self.style.title_height = slider_value(&self.style_value_slider_states[2]) as i32;
+        self.style.thumb_size = slider_value(&self.style_value_slider_states[3]) as i32;
+        self.style.scrollbar_size = slider_value(&self.style_value_slider_states[4]) as i32;
         ctx.set_style(&self.style);
     }
 
-    fn log_window(&mut self, ctx: &mut Context<SelectedBackend>) {
-        self.log_text.update(|log_text| {
-            log_text.text = self.logbuf.borrow().clone();
-        });
+    fn log_window(&mut self, _ctx: &mut Context<SelectedBackend>) {
+        let text = self.logbuf.borrow().clone();
+        self.log_text_state
+            .try_update_with(text, |log_text, text| log_text.set_text(text))
+            .expect("log text state unavailable");
 
-        let mut submitted = false;
-        {
-            let results = ctx.committed_results();
-            let submit_buf_out = Self::root_submitted(results, self.log_root, self.submit_buf_id);
-            let submit_btn_out = Self::root_submitted(results, self.log_root, self.submit_button_id);
-            if submit_buf_out {
-                ctx.set_root_focus_node(self.log_root, self.submit_buf_id);
-                submitted = true;
-            }
-            if submit_btn_out {
-                submitted = true;
-            }
-        }
-        if submitted {
-            let mut buf = String::new();
-            self.submit_buf.read(|submit_buf| buf.push_str(submit_buf.text()));
+        let submit_buf_out = self
+            .submit_buf_state
+            .try_update(TextboxState::take_submitted)
+            .expect("submit textbox state unavailable");
+        let submit_btn_out = take_button_submission(&self.submit_button_state);
+        if submit_buf_out || submit_btn_out {
+            let buf = self
+                .submit_buf_state
+                .try_read(|submit_buf| submit_buf.text().to_owned())
+                .expect("submit textbox state unavailable");
             self.write_log(buf.as_str());
-            self.submit_buf.update(Textbox::clear);
+            self.submit_buf_state.try_update(TextboxState::clear).expect("submit textbox state unavailable");
         }
     }
 
@@ -1699,27 +1801,20 @@ impl State {
 
     fn falloff_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
 
-    fn stack_direction_window(&mut self, ctx: &mut Context<SelectedBackend>) {
+    fn stack_direction_window(&mut self, _ctx: &mut Context<SelectedBackend>) {
         let mut logs: Vec<&'static str> = Vec::new();
-
-        let results = ctx.committed_results();
-        if Self::root_submitted(results, self.stack_direction_root, self.stack_direction_button_ids[0]) {
-            logs.push("Top->Bottom: call 1");
-        }
-        if Self::root_submitted(results, self.stack_direction_root, self.stack_direction_button_ids[1]) {
-            logs.push("Top->Bottom: call 2");
-        }
-        if Self::root_submitted(results, self.stack_direction_root, self.stack_direction_button_ids[2]) {
-            logs.push("Top->Bottom: call 3");
-        }
-        if Self::root_submitted(results, self.stack_direction_root, self.stack_direction_button_ids[3]) {
-            logs.push("Bottom->Top: call 1");
-        }
-        if Self::root_submitted(results, self.stack_direction_root, self.stack_direction_button_ids[4]) {
-            logs.push("Bottom->Top: call 2");
-        }
-        if Self::root_submitted(results, self.stack_direction_root, self.stack_direction_button_ids[5]) {
-            logs.push("Bottom->Top: call 3");
+        let messages = [
+            "Top->Bottom: call 1",
+            "Top->Bottom: call 2",
+            "Top->Bottom: call 3",
+            "Bottom->Top: call 1",
+            "Bottom->Top: call 2",
+            "Bottom->Top: call 3",
+        ];
+        for (button, message) in self.stack_direction_button_states.iter().zip(messages) {
+            if take_button_submission(button) {
+                logs.push(message);
+            }
         }
 
         for msg in logs {
@@ -1727,36 +1822,23 @@ impl State {
         }
     }
 
-    fn weight_window(&mut self, ctx: &mut Context<SelectedBackend>) {
+    fn weight_window(&mut self, _ctx: &mut Context<SelectedBackend>) {
         let mut logs: Vec<&'static str> = Vec::new();
-
-        let results = ctx.committed_results();
-        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[0]) {
-            logs.push("Weight row: 1");
-        }
-        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[1]) {
-            logs.push("Weight row: 2");
-        }
-        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[2]) {
-            logs.push("Weight row: 3");
-        }
-        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[3]) {
-            logs.push("Weight grid: 1");
-        }
-        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[4]) {
-            logs.push("Weight grid: 2");
-        }
-        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[5]) {
-            logs.push("Weight grid: 3");
-        }
-        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[6]) {
-            logs.push("Weight grid: 4");
-        }
-        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[7]) {
-            logs.push("Weight grid: 5");
-        }
-        if Self::root_submitted(results, self.weight_root, self.weight_button_ids[8]) {
-            logs.push("Weight grid: 6");
+        let messages = [
+            "Weight row: 1",
+            "Weight row: 2",
+            "Weight row: 3",
+            "Weight grid: 1",
+            "Weight grid: 2",
+            "Weight grid: 3",
+            "Weight grid: 4",
+            "Weight grid: 5",
+            "Weight grid: 6",
+        ];
+        for (button, message) in self.weight_button_states.iter().zip(messages) {
+            if take_button_submission(button) {
+                logs.push(message);
+            }
         }
 
         for msg in logs {
@@ -1771,60 +1853,67 @@ impl State {
             win.height = win.height.max(300);
             ctx.set_root_rect(self.demo_root, win);
 
-            let [value_pos, value_size, value_fps] = self.window_info_values.clone();
-            value_pos.update(|value| value.label = format!("{}, {}", win.x, win.y));
-            value_size.update(|value| value.label = format!("{}, {}", win.width, win.height));
-            value_fps.update(|value| value.label = format!("{:.1}", self.fps));
+            let [value_pos, value_size, value_fps] = &self.window_info_value_states;
+            value_pos
+                .try_update(|value| value.set_label(format!("{}, {}", win.x, win.y)))
+                .expect("window position state unavailable");
+            value_size
+                .try_update(|value| value.set_label(format!("{}, {}", win.width, win.height)))
+                .expect("window size state unavailable");
+            value_fps
+                .try_update(|value| value.set_label(format!("{:.1}", self.fps)))
+                .expect("window fps state unavailable");
         }
 
-        let combo_labels: Vec<String> = self.combo_items.iter().map(|item| item.read(|item| item.label.clone())).collect();
-        self.combo_state.update(|combo| combo.update_items(&combo_labels));
+        let combo_labels: Vec<String> = self
+            .combo_item_states
+            .iter()
+            .map(|item| item.try_read(|item| item.label().to_owned()).expect("combo item state unavailable"))
+            .collect();
+        self.combo_typed_state
+            .try_update(|combo| combo.update_items(&combo_labels))
+            .expect("combo state unavailable");
 
         let mut button_logs: Vec<&'static str> = Vec::new();
         let mut tree_logs: Vec<&'static str> = Vec::new();
-        let combo_anchor = self.combo_state.read(Combo::anchor);
-        {
-            let results = ctx.committed_results();
-            if Self::root_submitted(results, self.demo_root, self.test_button_ids[0]) {
-                button_logs.push("Pressed button 1");
-            }
-            if Self::root_submitted(results, self.demo_root, self.test_button_ids[1]) {
-                button_logs.push("Pressed button 2");
-            }
-            if Self::root_submitted(results, self.demo_root, self.test_button_ids[2]) {
-                button_logs.push("Pressed button 3");
-            }
-            if Self::root_submitted(results, self.demo_root, self.test_button_ids[3]) {
-                self.open_popup = true;
-            }
-            if Self::root_submitted(results, self.demo_root, self.test_button_ids[4]) {
-                button_logs.push("Pressed button 4");
-            }
-            if Self::root_submitted(results, self.demo_root, self.test_button_ids[5]) {
-                self.open_dialog = true;
-            }
-            if Self::root_submitted(results, self.demo_root, self.tree_button_ids[0]) {
-                tree_logs.push("Pressed button 1");
-            }
-            if Self::root_submitted(results, self.demo_root, self.tree_button_ids[1]) {
-                tree_logs.push("Pressed button 2");
-            }
-            if Self::root_submitted(results, self.demo_root, self.tree_button_ids[2]) {
-                tree_logs.push("Pressed button 3");
-            }
-            if Self::root_submitted(results, self.demo_root, self.tree_button_ids[3]) {
-                tree_logs.push("Pressed button 4");
-            }
-            if Self::root_submitted(results, self.demo_root, self.tree_button_ids[4]) {
-                tree_logs.push("Pressed button 5");
-            }
-            if Self::root_submitted(results, self.demo_root, self.tree_button_ids[5]) {
-                tree_logs.push("Pressed button 6");
+        let combo_anchor = self.combo_typed_state.try_read(ComboState::anchor).expect("combo state unavailable");
+        let button_messages = [
+            Some("Pressed button 1"),
+            Some("Pressed button 2"),
+            Some("Pressed button 3"),
+            None,
+            Some("Pressed button 4"),
+            None,
+        ];
+        for (index, (button, message)) in self.test_button_states.iter().zip(button_messages).enumerate() {
+            if take_button_submission(button) {
+                match index {
+                    3 => self.open_popup = true,
+                    5 => self.open_dialog = true,
+                    _ => {
+                        if let Some(message) = message {
+                            button_logs.push(message);
+                        }
+                    }
+                }
             }
         }
-        self.bg[0] = self.bg_sliders[0].read(Slider::value);
-        self.bg[1] = self.bg_sliders[1].read(Slider::value);
-        self.bg[2] = self.bg_sliders[2].read(Slider::value);
+        let tree_messages = [
+            "Pressed button 1",
+            "Pressed button 2",
+            "Pressed button 3",
+            "Pressed button 4",
+            "Pressed button 5",
+            "Pressed button 6",
+        ];
+        for (button, message) in self.tree_button_states.iter().zip(tree_messages) {
+            if take_button_submission(button) {
+                tree_logs.push(message);
+            }
+        }
+        self.bg[0] = slider_value(&self.bg_slider_states[0]);
+        self.bg[1] = slider_value(&self.bg_slider_states[1]);
+        self.bg[2] = slider_value(&self.bg_slider_states[2]);
         self.sync_background_swatch();
         for msg in button_logs {
             self.write_log(msg);
@@ -1833,18 +1922,17 @@ impl State {
             self.write_log(msg);
         }
 
-        let combo_log = {
-            let results = ctx.committed_results();
-            let mut selected_label = None;
-            for (idx, node_id) in self.combo_item_ids.iter().enumerate() {
-                if Self::root_submitted(results, self.combo_popup_root, *node_id) {
-                    selected_label = self.combo_state.update(|combo| combo.select(idx, &combo_labels));
-                    break;
-                }
+        let mut combo_log = None;
+        for (idx, item) in self.combo_item_states.iter().enumerate() {
+            if item.try_update(ListItemState::take_submitted).expect("combo item state unavailable") {
+                combo_log = self
+                    .combo_typed_state
+                    .try_update(|combo| combo.select(idx, &combo_labels))
+                    .expect("combo state unavailable");
+                break;
             }
-            selected_label
-        };
-        if self.combo_state.read(Combo::is_open) {
+        }
+        if self.combo_typed_state.try_read(ComboState::is_open).expect("combo state unavailable") {
             ctx.set_root_visible(self.combo_popup_root, true);
             ctx.set_root_rect(self.combo_popup_root, combo_anchor);
         } else {
@@ -1863,13 +1951,9 @@ impl State {
         }
 
         let mut popup_logs: Vec<&'static str> = Vec::new();
-        {
-            let results = ctx.committed_results();
-            if Self::root_submitted(results, self.popup_root, self.popup_button_ids[0]) {
-                popup_logs.push("Hello")
-            }
-            if Self::root_submitted(results, self.popup_root, self.popup_button_ids[1]) {
-                popup_logs.push("World")
+        for (button, message) in self.popup_button_states.iter().zip(["Hello", "World"]) {
+            if take_button_submission(button) {
+                popup_logs.push(message);
             }
         }
         for msg in popup_logs {

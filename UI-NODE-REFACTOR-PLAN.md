@@ -85,6 +85,52 @@ architecture rule, P0 acceptance criterion, implementation owner, migration note
 tests together. Known defects remain excluded from the preservation baseline unless an explicit
 decision reclassifies one.
 
+## Deferred post-refactor redesign: keyboard and pointer focus
+
+**Status: Known defect, explicitly deferred until after P0-P5 complete**
+
+**Decision needed: Yes — only after the final retained tree and routing shape exists**
+
+The current runtime uses one `focus` target for several distinct responsibilities: persistent
+keyboard/text routing, pointer-press activity, focused/pressed paint state, and parts of drag
+lifetime. `FocusPolicy` and `WidgetOption::HOLD_FOCUS` vary the lifetime of that combined target.
+Each visible window-manager root also owns an independent runtime focus slot. The window-manager
+dispatcher sends keyboard/text input only through the front visible root's slot, but cross-root
+keyboard ownership is not yet stored as one explicit target. These facts are observed migration
+state, not an endorsed final focus model.
+
+P1.1 nevertheless fixes one local authority violation without attempting that broader redesign:
+widgets cannot assign or clear focus through `WidgetUpdateCtx`, widget state contains no queued
+focus command, and textbox submission records its event without releasing focus. The
+window-manager dispatcher selects one front visible root, and that root's `UiRuntime` sends each
+keyboard/text event only to its current focused node. This removes cooperative widget focus
+mutation and the textbox refocus workaround while leaving the combined pointer/keyboard focus
+model for the post-refactor redesign.
+
+Do not redesign this subsystem during P0-P5. In particular, this plan does not choose a final
+focusability option, focus-target type, handle/identity representation, container-versus-tree
+owner, cross-root activation model, or public focus-command API. Choosing those types before
+projection builders, compatibility result paths, temporary payload adapters, and the old routing
+pipeline are gone would be speculative and could force the same migration twice. The current focus
+machinery may change only as required to keep the UI-node migration compile-safe,
+preserve demonstrated editing and pointer behavior, route input through the planned authoritative
+dispatcher, and sanitize stale targets; such work must not claim to resolve this defect.
+
+After every P0-P5 completion criterion is satisfied, create a separate repository-grounded focus
+redesign plan against the resulting code. That plan must re-inspect the final ownership and event
+flow before deciding:
+
+- how keyboard/text focus is declared, stored, transferred, cleared, and restored;
+- how pointer hover, press, active state, and capture remain independent from keyboard focus;
+- how exactly one root and widget receive each keyboard/text event;
+- how hidden, gated, disabled, removed, and destroyed targets affect focus;
+- how programmatic focus requests interact with traversal order and frame boundaries; and
+- which built-in/custom widget APIs, style states, examples, and compatibility behavior survive.
+
+Completion of this UI-node plan deliberately leaves that decision open. References elsewhere in
+this document to preserving focus behavior, `FocusPolicy`, or `HOLD_FOCUS` describe the migration's
+temporary compatibility boundary, not the approved architecture of the follow-on focus system.
+
 ## Goal
 
 Replace projection rebuilding with a persistent retained tree whose application-facing capability is
@@ -172,7 +218,9 @@ This migration does not initially attempt to:
 - replace a mounted root `Node` while retaining its `RootId`;
 - mutate an attached node's `Policy` or `GridSpan`;
 - add generic per-node hide/show state or public node-visibility mutation;
-- add dirty propagation, retained paint fragments, a node registry, or an arena without measurement.
+- add dirty propagation, retained paint fragments, a node registry, or an arena without measurement;
+- redesign keyboard focus, pointer activity, or cross-root focus ownership before the final retained
+  tree and routed-input architecture exists; that work is deferred by the dedicated section above.
 
 Single-threaded, traversal-ordered execution is a contract. A state or topology mutation succeeds
 whenever the target cell is live and its checked borrow is available. If the same cell is currently
@@ -1219,8 +1267,8 @@ runtime/Node and discards its trivial handle:
 | `ColorSwatch` | handle + runtime | mutable fill and label |
 | `Slider` | handle + runtime | value/editing state and consumable changes |
 | `Number` | handle + runtime | value/editing state and consumable changes |
-| `Textbox` | handle + runtime | text, cursor/selection, change/submit events, and queued focus command |
-| `TextArea` | handle + runtime | text, cursor/selection, scroll, and change/submit events |
+| `Textbox` | handle + runtime | text, cursor, and change/submit events; focus remains router-owned |
+| `TextArea` | handle + runtime | text, cursor, scroll, and change/submit events |
 | `Custom` | runtime only | no mounted application state; it uses `State = ()` |
 | old `widgets::Node`/`NodeStateValue` | retired | replaced by exposed `DisclosureState` |
 
@@ -1242,11 +1290,11 @@ claim that every formerly mutable public field moves into State.
 ### Application interaction lives in typed state
 
 The application should not need a second node identity to learn what its widget did. Persistent
-values and commands live in the widget-specific state:
+values and observations live in the widget-specific state:
 
 - `CheckboxState::checked` exposes the persistent value;
 - `SliderState::value` and `set_value` expose numeric state;
-- `TextboxState` owns text, cursor, selection, and a focus-request command;
+- `TextboxState` owns text and cursor; it does not own focus;
 - `ComboState` owns open/selected state;
 - widget states expose the exact consumable change/submit operations below;
 - custom widgets define their own state and observation methods.
@@ -1271,7 +1319,7 @@ recording points are:
 | `TextboxState` | `take_changed`, `take_submitted` | user text editing changes the buffer; the user submits it |
 | `TextAreaState` | `take_changed`, `take_submitted` | user text editing changes the buffer; the user submits it |
 
-Programmatic value setters (`set_checked`, `set_value`, `set_text`, cursor/selection setters, and
+Programmatic value setters (`set_checked`, `set_value`, `set_text`, cursor setters, and
 open/close/select operations) do not record interaction events. This matches current behavior and
 prevents feedback loops. `ComboState::update_items` clamping remains the one explicit compatibility
 exception because current Combo reports `CHANGE` for that normalization; direct `select` remains
@@ -1281,18 +1329,12 @@ copied into their typed state. Root chrome separately exposes its persistent mov
 through `RootState::is_active` because that mode is itself application-observable window state; it
 is still not a consumable event.
 
-`Widget::update` returns `()` and records typed events at the interaction decision point. Focus is
-changed through `WidgetUpdateCtx`; input consumption and capture come from
-`ContainerInputResult`/private routing state. Root chrome records its values and events in
-`RootState` by exactly the same mechanism. Do not add a replacement result store, generic event
-summary, or root-only side channel.
-
-Programmatic widget commands also use typed state. For example, `TextboxState::request_focus`
-records a request that persists while the textbox is unable to take focus, including while its root
-is hidden, an ancestor gates traversal, its effective options make it non-interactive, or current
-cross-root/modal policy makes it ineligible. On an eligible update, `WidgetUpdateCtx::set_focus`
-reports whether focus was actually assigned; only a successful assignment clears the queued
-request. This removes public targeted node operations and their Context-validation problem.
+`Widget::update` returns `()` and records typed events at the interaction decision point. Focus
+selection and keyboard/text delivery remain authoritative router operations; `WidgetUpdateCtx`
+exposes only the router-produced focused snapshot and cannot assign or clear focus. Input
+consumption and capture come from `ContainerInputResult`/private routing state. Root chrome records
+its values and events in `RootState` by exactly the same mechanism. Do not add a replacement result
+store, generic event summary, root-only side channel, or widget-state focus command.
 
 ### Unified root chrome container, typed state, and lifecycle
 
@@ -2355,8 +2397,8 @@ explicit decision before changing the criterion.
 
   **Settled decision and rationale**
 
-  Widget-specific persistent values, consumable events, and queued commands live in the concrete
-  `WidgetState`. Application code observes or changes them only through
+  Widget-specific persistent values, consumable events, and value mutation operations live in the
+  concrete `WidgetState`. Application code observes or changes them only through
   `WidgetStateHandle<State>::try_read`/`try_update`; it does not pass the handle back to Context or
   retain a parallel widget `NodeId`.
 
@@ -2364,13 +2406,14 @@ explicit decision before changing the criterion.
   carry mounted node/Context identity or require Context to maintain a state-to-node registry.
   Public generated `NodeId` lookup was rejected because it makes applications retain state and
   placement identity together. The accepted migration cost is that each built-in defines the
-  value, event, and command operations appropriate to its own state type.
+  value and event operations appropriate to its own state type. Focus is excluded because the
+  router, not widget state, owns the current focus target.
 
   **Wanted behavior and contract**
 
   Define state-specific observation exactly as specified in the fixed event table: saturating
-  pending counts consumed one occurrence at a time through `take_changed`/`take_submitted`, plus
-  queued commands such as textbox focus request. Change `Widget::update` to return `()` and remove
+  pending counts consumed one occurrence at a time through `take_changed`/`take_submitted`. Change
+  `Widget::update` to return `()` and remove
   all generic result production and storage. Remove `ResourceState`, `FrameResults`,
   `FrameResultGeneration`, public `RetainedId`, public widget `NodeId`, every `state_of*` operation,
   and targeted Context focus. Root chrome uses `RootState` and the same pending typed-event contract;
@@ -2439,50 +2482,13 @@ explicit decision before changing the criterion.
   }
   ```
 
-  Programmatic commands are queued in state and consumed by that same widget at its next eligible
-  update. For example, focus does not require the application to know the textbox's runtime node ID:
-
-  ```rust
-  pub struct TextboxState {
-      text: String,
-      focus_requested: bool,
-  }
-
-  impl WidgetState for TextboxState {}
-
-  impl TextboxState {
-      pub fn request_focus(&mut self) {
-          self.focus_requested = true;
-      }
-
-      pub(crate) fn focus_requested(&self) -> bool {
-          self.focus_requested
-      }
-
-      pub(crate) fn clear_focus_request(&mut self) {
-          self.focus_requested = false;
-      }
-  }
-
-  // Application code queues the command through the weak typed state handle.
-  textbox_state
-      .try_update(TextboxState::request_focus)
-      .expect("textbox state unavailable");
-
-  // Inside TextboxWidget::update, after obtaining &mut TextboxState as `state`,
-  // the runtime consumes the command using its existing widget-local context.
-  if state.focus_requested() && ctx.set_focus() {
-      state.clear_focus_request();
-  }
-  ```
-
-  `WidgetUpdateCtx::set_focus(&mut self) -> bool` returns `true`, establishes or retains focus, and
-  marks focus as refreshed when the current widget is eligible, including when it already owns
-  focus. It returns `false` without changing the focus slot or its update marker when effective
-  options or cross-root/modal policy makes the widget ineligible. Existing custom widgets may
-  ignore the returned value; queued commands use it to avoid consuming a request that was not
-  fulfilled. A hidden or gated descendant receives no update, so its queued request remains
-  untouched.
+  Focus is not a cooperative widget-state command. The private dispatcher selects the front
+  visible root, and that root's router delivers keyboard/text events only to its focused node.
+  `WidgetUpdateCtx::focused` exposes the router-produced snapshot for editing and paint decisions,
+  but the context has no `set_focus` or `clear_focus` capability. In particular, a textbox records
+  Return as a submission without clearing focus, so an application can clear or replace its text
+  through `TextboxState` and the next keyboard/text event still reaches the same router-owned
+  target.
 
   A unit/internal-state widget or container uses the same `Widget::update -> ()` signature. Its
   convenience constructor may simply omit a meaningless state handle from its return type:
@@ -2508,10 +2514,10 @@ explicit decision before changing the criterion.
     `update_items` clamp exception and silent direct `select`.
   - Combo records consumable `CHANGE`/`SUBMIT` equivalents at the same clamp/header-click decision
     points as the current implementation.
-  - Textbox focus requests survive hidden, gated, non-interactive, or cross-root/modal-ineligible
-    updates and clear only after an eligible update successfully assigns focus. `set_focus` returns
-    `true` for an eligible already-focused widget and `false` without changing focus/update state
-    for an ineligible widget.
+  - Keyboard/text events are routed only through the front visible root and then only to that
+    runtime's current focused node. Textbox submission leaves that focus intact, subsequent text
+    continues to reach the same textbox, and neither `TextboxState` nor `WidgetUpdateCtx` exposes a
+    focus-mutation command.
   - Checkbox, slider, combo, textbox, and custom state require no Context argument.
   - A custom `Widget::update` compiles only with the unit return and stores no generic leaf result;
     its own typed state may define custom events independently.
@@ -2525,26 +2531,26 @@ explicit decision before changing the criterion.
   - Applications retain no parallel node IDs for widget interaction.
   - Calculator, demo, and file-dialog application code consume typed state instead of any generic
     frame-result lookup.
-  - Public examples and rustdoc include persistent-value, consumable-event, queued-command, and
+  - Public examples and rustdoc include persistent-value, consumable-event, router-authority, and
     hidden-runtime cases matching the code above.
 
   **Frozen contract evidence (2026-07-29)**
 
-  The normative typed-state table and command sections above now define the sole application
-  interaction boundary. Persistent values, independent saturating event counts, and queued commands
-  live with their concrete state; `Widget::update` mutates that state and returns `()`; focus,
-  capture, and routing retain dedicated runtime mechanisms without becoming application identity
-  APIs. Event lifetime follows state lifetime rather than a frame generation, and programmatic
-  setters remain silent except for the explicitly preserved Combo normalization behavior.
+  The normative typed-state table and mutation sections above now define the sole application
+  interaction boundary. Persistent values and independent saturating event counts live with their
+  concrete state; `Widget::update` mutates that state and returns `()`; focus, capture, and routing
+  retain dedicated runtime mechanisms without becoming application identity APIs or cooperative
+  widget-state commands. Event lifetime follows state lifetime rather than a frame generation, and
+  programmatic setters remain silent except for the explicitly preserved Combo normalization
+  behavior.
 
   Repository inspection confirms that the current implementation instead returns the
   `ResourceState::{CHANGE, SUBMIT, ACTIVE}` bitflags from every `Widget::update`, double-buffers them
   in `FrameResults` maps keyed by public/scoped `RetainedId`, exposes the committed generation through
   `Context::committed_results`, and uses public builder `NodeId` values for result lookup and
-  `Context::set_root_focus_node`. `WidgetUpdateCtx::set_focus` currently assigns unconditionally and
-  returns `()`. The calculator, full demo, file dialog, tests, and custom-widget examples still
+  `Context::set_root_focus_node`. The calculator, full demo, file dialog, tests, and custom-widget examples still
   produce or consume parts of that surface. Those facts are migration cost, not preserved behavior.
-  P0.4 intentionally changes no production API: its typed-event, focus-command, API-removal,
+  P0.4 intentionally changes no production API: its typed-event, API-removal,
   compile-fail, application-migration, and documentation criteria become executable and green in
   P1.1/P2.5/P3.0-P3.2.
 
@@ -2634,8 +2640,8 @@ explicit decision before changing the criterion.
   not return its ID to the allocator.
 
   Actual focus, hover, capture, and routed input are owned per retained tree, below Context and
-  inside its `WindowEntry`. A state type may contain a command such as `focus_requested`, but the
-  authoritative focused node remains the private tree target:
+  inside its `WindowEntry`. Widget state cannot request or clear focus; the authoritative focused
+  node remains the private tree target:
 
   ```rust
   struct WindowEntry {
@@ -3175,7 +3181,7 @@ removal, and focused implementation evidence rather than redefining that behavio
   --all-targets -- -W clippy::all` completes with the repository's pre-existing warning baseline;
   a path-filtered rerun reports no warning in a P1.0-touched file.
 
-- [ ] **P1.1 — Split every built-in leaf using the fixed constructor/mutation mapping**
+- [x] **P1.1 — Split every built-in leaf using the fixed constructor/mutation mapping**
 
   **Problem**
 
@@ -3193,6 +3199,30 @@ removal, and focused implementation evidence rather than redefining that behavio
   Move initialization-only visual/base configuration to Parameters and runtime-derived/cached data
   to private runtime fields. This is a deliberate breaking boundary; arbitrary old public-field
   mutation not listed in the table does not become a mounted State API.
+
+  **Complete P1.1 old-public-symbol classification**
+
+  This table is exhaustive for the public fields and inherent methods on the pre-split built-in
+  leaf structs. `Parameters` entries are construction-only; “runtime-private” entries have no
+  mounted mutation API. The new `create(Parameters)` convenience constructor is the fixed
+  handle-plus-runtime result except for `Custom`, which returns only its runtime.
+
+  | Old built-in | Old public fields and methods | P1.1 classification or exact replacement |
+  |---|---|---|
+  | `ButtonContent` / `Button` | `ButtonContent::{Text { label, icon }, Image { label, image }, ScaledImage { label, image }}`; fields `content`, `config`, `fill`; `new`, `with_opt`, `with_icon`, `with_image`, `with_scaled_image` | `ButtonContent` remains construction data in `ButtonParameters::content`; `config.{font,opt}` and `fill` become `ButtonParameters::{font,opt,fill}` plus runtime-private configuration; the old constructors move to `ButtonParameters`; mounted state exposes only `ButtonState::take_submitted`. |
+  | `Checkbox` family (already split in P1.0) | `CheckboxParameters` fields `label`, `checked`, `font`, `opt` and methods `new`, `with_opt`, `font`; `CheckboxState::{check, uncheck, set_checked, checked}`; `Checkbox::create` | Parameter and value methods remain in their existing roles; P1.1 adds only `CheckboxState::take_changed` and its saturating pending count. Label/font/options remain initialization-only. |
+  | `ListItem` | fields `label`, `icon`, `config`; `new`, `with_opt`, `with_icon`, `with_icon_opt` | Initial label/icon/font/options and the four old constructors move to `ListItemParameters`; mounted label becomes private `ListItemState` data exposed by `label`/`set_label`; icon/font/options are runtime-private after construction; submission is `take_submitted`. |
+  | `ListBox` | fields `label`, `image`, `config`; `new`, `with_opt` | All old fields and both constructors move to `ListBoxParameters` and runtime-private paint/measure configuration; there is no mounted label/image/config mutation; `ListBoxState` exposes only `take_submitted`. |
+  | `Combo` | field `config`; `new`, `with_opt`, `anchor`, `selected`, `is_open`, `open_popup`, `close_popup`, `update_items`, `select` | Font/options and constructors move to `ComboParameters`; all listed observation/selection methods move to `ComboState` (with `label` added for the current cached label); derived anchor is state-readable; change/submit observations are `take_changed`/`take_submitted`. |
+  | `TextBlock` | fields `text`, `wrap`, `config`; `new`, `with_wrap` | Initial text/wrap/font/options and constructors move to `TextBlockParameters`; mounted text becomes private `TextBlockState` data exposed by `text`/`set_text`/`clear`; wrap/font/options are runtime-private after construction. |
+  | `ColorSwatch` | fields `fill`, `label`, `config`; `new` | Initial fill/label/font/options and construction move to `ColorSwatchParameters`; mounted fill and label become private `ColorSwatchState` data exposed by getters/setters; font/options are runtime-private. |
+  | `Slider` | fields `low`, `high`, `step`, `precision`, `config`; `new`, `with_opt`, `value`, `set_value`, `is_editing` | Bounds/step/precision/font/options and constructors move to `SliderParameters` plus private constraint/runtime data; value/editing methods move to `SliderState`; user changes are consumed with `take_changed`. Bounds remain initialization-only even though private retained constraint data clamps `set_value`. |
+  | `Number` | fields `step`, `precision`, `config`; `new`, `with_opt`, `value`, `set_value`, `is_editing` | Step/precision/font/options and constructors move to `NumberParameters` and runtime-private configuration; value/editing methods move to `NumberState`; user changes are consumed with `take_changed`. |
+  | `Textbox` | field `config`; `new`, `with_opt`, `text`, `set_text`, `clear`, `cursor`, `set_cursor`, `move_cursor_to_end` | Initial text/font/options and constructors move to `TextboxParameters`; every listed text/cursor operation moves to `TextboxState`; `take_changed` and `take_submitted` are added there. Focus remains router-owned and Return submission does not clear it. The contract is cursor-only: no selection state or selection API is introduced. |
+  | `TextArea` | fields `wrap`, `config`; `new`, `with_opt`, `text`, `set_text`, `clear`, `cursor`, `set_cursor`, `move_cursor_to_end`, `scroll`, `set_scroll` | Initial text/wrap/font/options and constructors move to `TextAreaParameters`; every listed text/cursor/scroll operation moves to `TextAreaState`; `take_changed` and `take_submitted` are added there. Wrap/font/options and preferred-column/drag details are runtime-private. The contract is cursor-only. |
+  | `Custom` | fields `name`, `config`; `new`, `with_opt` | Name/font/options and constructors move to `CustomParameters`; the runtime privately owns `State = ()`; `Custom::create` returns the runtime only and exposes no mounted application handle. |
+  | `WidgetConfig` as used by leaves | fields `font`, `opt`; `new`, `font` | Each leaf absorbs these into its Parameters and private runtime fields; `WidgetConfig` remains temporarily only for the old header/tree `Node` until P2.1 and is not a leaf mounted-state API. |
+  | old `widgets::Node` / `NodeStateValue` | `NodeStateValue::{Expanded, Closed, is_expanded, is_closed}`; `Node` fields `label`, `state`, `config`; `header`, `tree`, `with_options`, `is_expanded`, `is_closed`, `is_tree`, `is_header`; click-toggle and visual behavior | Retired in P2.1 without an alias. `header`/`tree` become `DisclosureParameters::{header,tree}`; label/options/visual variant are initialization-only; expansion becomes `DisclosureState::{is_expanded,is_collapsed,expand,collapse,toggle}`; `is_header`/`is_tree` retire; one private-variant `Disclosure` runtime preserves click toggle, label/icon paint, framing/hover treatment, and tree indentation. |
 
   **Acceptance tests**
 
@@ -3212,6 +3242,30 @@ removal, and focused implementation evidence rather than redefining that behavio
   - The migration mapping names `Node::header`, `Node::tree`, `NodeStateValue::{Expanded, Closed}`,
     their predicates, label/options, and click-toggle behavior and points each one to its exact
     `DisclosureParameters`/`DisclosureState` replacement.
+
+  **Implementation evidence (2026-07-30)**
+
+  Every built-in leaf now has explicit Parameters, State, concrete runtime, and Builder roles. Each
+  stateful constructor returns its weak typed state handle with the non-`Clone` runtime, while
+  `Custom::create` returns only its unit-state runtime. Typed saturating event counters replace
+  application-side generic result lookup for change/submission, programmatic setters remain silent,
+  and Combo item-clamp changes are pinned separately. Textbox and TextArea deliberately expose
+  cursor-only editing state; no selection or focus-command API was added. Textbox Return records a
+  submission without clearing router-owned focus. The old header/tree `Node` surface remains only
+  as the explicitly classified P2.1 migration input.
+
+  Focused tests cover typed event multiplicity and saturation, silent setters, Combo clamp/select
+  behavior, Custom's return shape and unit-state lifetime, text change/submission independence,
+  cursor-only setters, focus retention after submission, and single-target keyboard/text routing.
+  README examples, all shipped examples, the file dialog, window-manager construction, and
+  characterization tests now use the split constructors and typed leaf-state capabilities.
+
+  Validation passes `cargo fmt --all -- --check`, `cargo test --all-targets` (192 unit tests and two
+  downstream integration tests passed; three existing manual baselines ignored), `cargo test
+  --doc` (17 passed), `cargo check --no-default-features`, `cargo doc --no-deps`, and separate
+  all-example checks for `example-glow`, `example-vulkan`, and `example-wgpu`. `cargo clippy --lib
+  -- -W clippy::all` completes with the repository's pre-existing warning baseline and no P1.1
+  warning remains in the newly split leaf implementations.
 
 - [ ] **P1.2 — Dispatch persistent leaf payloads directly through boxed runtimes**
 
@@ -3640,10 +3694,8 @@ change a protected P0 behavior follows the explicit change-control rule.
   `UiRuntime::interaction_for`, and the duplicate scroll-delta channel. Delete public
   `WidgetUpdateCtx::scroll_delta()` and `WidgetPaintCtx::scroll_delta()` plus their common stored
   field; widgets read scroll only through `WidgetInputEvents::scroll_delta()` on the localized
-  `UiInputEvent` batch. `WidgetUpdateCtx::set_focus` returns whether the current routed snapshot
-  permits focus; it refuses non-interactive widgets so queued typed-state focus commands can remain
-  pending. Existing custom widget calls may ignore the returned value. Document these intentional
-  custom-widget API changes.
+  `UiInputEvent` batch. `WidgetUpdateCtx` exposes the router-produced focused snapshot read-only and
+  has no focus mutation method. Document these intentional custom-widget API changes.
 
   Cross-root/modal selection is the first stage of that same dispatcher. It applies the one
   `just_opened`/outside-popup dismissal rule through the popup's private `RootState` operation, then
@@ -3685,9 +3737,8 @@ change a protected P0 behavior follows the explicit change-control rule.
   - Textbox, slider, number, text-area, disclosure, nested scroll, capture, key/text, and front-root
     pointer gating tests pass with routed events as their only source; popup dismissal is covered as
     the single documented cross-root exception.
-  - A textbox focus command remains queued when its update snapshot is non-interactive and clears
-    only after `set_focus` returns `true`; hidden or gated widgets do not update and therefore also
-    retain the request.
+  - Keyboard/text routing selects only the front visible root and its focused node; widgets cannot
+    cooperatively assign or clear that focus, and textbox submission leaves it intact.
 
 ### P3 — Public roots and application migration
 
@@ -4137,6 +4188,7 @@ contract or overstate what Rust can prove about arbitrary custom safe APIs.
 | A custom container can visit different child collections by phase | Safe Rust cannot relate two opaque visitor calls across methods | Document one-authoritative-`Children` conformance obligation and test examples | P0.1/P2.3 |
 | A visitor can omit or repeat its one child submission | The visitor API has no `Result` channel | Framework invariant panic with container/type/phase diagnostic | P0.1/P2.3 |
 | A mounted root cannot change widget type in place | Stable `RootId` and root replacement have conflicting lifetime semantics | Persistent container root for dynamic content; otherwise destroy/recreate with a new ID | P0.7/P1.4/P3.0 |
+| Keyboard focus, pointer activity, and cross-root focus ownership are conflated | One per-tree `focus` target, front-root keyboard dispatch, and `FocusPolicy`/`HOLD_FOCUS` serve overlapping roles | Complete P0-P5 and remove the transitional tree/payload/result/routing shapes before choosing replacement types | Deferred post-refactor focus redesign section; separate follow-on plan |
 | Optional `CustomRenderKey` has no public retained-node construction path | Builder removal drops key injection | Backend-typed `Node::custom_render` constructor | P1.2 |
 | Raw boxed runtime does not prove an associated state is retained | A raw insertion boundary can bypass the builder allocation | Opaque framework-created retained owner | P1.0/P1.3/R0.0 |
 | Late runtime-owner hardening would cause a second downstream API migration | Final ownership introduced after bulk migration | Establish `WidgetStateOwner` and generic insertion before bulk conversion | P1.0/P1.3 |
@@ -4284,8 +4336,9 @@ The migration is complete when:
 - every fixed built-in change/submit event uses the specified private saturating count and
   one-occurrence `take_changed`/`take_submitted` API; ordinary programmatic setters are silent and
   Combo alone retains its documented clamp exception;
-- `TextboxState::request_focus` remains queued while the textbox is hidden, gated, or
-  non-interactive and clears only when `WidgetUpdateCtx::set_focus` reports successful assignment;
+- keyboard/text events are delivered only through the front visible root and then to that
+  runtime's focused node; textbox submission keeps that target, and widget state/update contexts
+  expose no cooperative focus mutation;
 - crate-root/prelude `Node` is the only public type with that name, is unique and non-cloneable, and
   owns one boxed concrete widget or container runtime; old `widgets::Node`, `NodeStateValue`, and
   compatibility aliases are absent;
@@ -4358,8 +4411,9 @@ The migration is complete when:
   clears descendant transient targets without restoring them on expansion;
 - the file dialog changes only row children on directory refresh, preserves then clamps its scroll
   offset to the new content range, and performs no idle tree work;
-- focus, capture, input, layout, paint, clipping, scrolling, and custom rendering retain supported
-  behavior under deterministic tests;
+- focus, capture, input, layout, paint, clipping, scrolling, and custom rendering retain the
+  supported behavior required by this migration under deterministic tests, subject to the
+  explicitly unresolved post-refactor focus-model defect above;
 - raw input enters one ordered dispatcher; routed events are the only ordinary retained interaction
   source and popup outside dismissal is the sole cross-root boundary exception. A frame performs
   exactly one pre-input and one post-update retained-tree layout, with no raw-input

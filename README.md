@@ -234,30 +234,30 @@ cargo run --example backend-frame-cube --features example-wgpu
 
 ### Retained-mode migration status
 
-The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate retained widget handle state over time, and drive frames with `Context::frame(FrameInfo).render_ui()?`.
+The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate built-in state through typed `WidgetStateHandle` values, and drive frames with `Context::frame(FrameInfo).render_ui()?`.
 
-Per-frame root submission APIs have been removed from the public surface. Root trees are registered or replaced explicitly with `create_window`, `create_dialog`, `create_popup`, and `set_root_tree`; visibility is controlled with `set_root_visible`.
+Per-frame root submission APIs have been removed from the public surface. Root trees are registered or replaced explicitly with `create_window`, `create_dialog`, `create_popup`, and `set_root_nodes`; visibility is controlled with `set_root_visible`.
 
 ```rust
-let name = widget_handle(Textbox::new(""));
-let mut name_node = NodeId::default();
-let tree = WidgetTreeBuilder::build(|tree| {
+let (name_state, name_runtime) = Textbox::create(TextboxParameters::new(""));
+let name = widget_handle(name_runtime);
+let tree = UiNodeBuilder::build(|tree| {
     tree.row(&[SizePolicy::Fixed(120), SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
         tree.text("Name");
-        name_node = tree.widget(&name);
+        tree.widget(&name);
     });
 });
 
-let root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
+ctx.create_window("main", rect(20, 20, 240, 120), tree);
 let info = FrameInfo::try_new(Dimensioni::new(800, 600), color(20, 22, 26, 255))?;
 ctx.frame(info).render_ui()?;
 
-if ctx.committed_results().state_of_retained(RetainedId::root_node(root, name_node)).is_submitted() {
+if name_state.try_update(TextboxState::take_submitted).unwrap_or(false) {
     // react to the textbox submission here
 }
 ```
 
-Retained trees are the supported public authoring path. Post-render business logic reads from `ctx.committed_results()`, which intentionally exposes the previous frame's published interaction generation:
+Retained trees are the supported public authoring path. Built-in values, consumable events, and commands are accessed through their typed weak state handles; temporary `WidgetHandle` projections continue to own concrete runtimes during the ongoing node-ownership migration.
 
 ```rust
 let info = FrameInfo::try_new(Dimensioni::new(800, 600), color(20, 22, 26, 255))?;
@@ -348,8 +348,9 @@ let config = builder::Config {
     fonts: FONTS,
 };
 
-let mut title = TextBlock::new("Inspector");
-title.config.font = FontRole::Heading.into();
+let (_title_state, title_runtime) = TextBlock::create(
+    TextBlockParameters::new("Inspector").font(FontRole::Heading.into()),
+);
 ```
 
 If `fonts` is empty, `builder::Config` falls back to `default_font` + `default_font_size` for the old single-font atlas layout.

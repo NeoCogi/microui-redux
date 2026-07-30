@@ -324,10 +324,11 @@ mod tests {
 
     use crate::render::Renderer;
     use crate::{
-        rect, AtlasHandle, AtlasSource, Button, CharEntry, Custom, FontEntry, Id, Input, KeyMode, ListItem, NodeOptions, Policy, ResourceState, SourceFormat,
-        StackDirection, Textbox, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, UiNodeBuilder, widget_handle,
+        rect, AtlasHandle, AtlasSource, Button, ButtonBuilder, ButtonParameters, ButtonState, CharEntry, CustomBuilder, CustomParameters, FontEntry, Id, Input,
+        KeyMode, ListItemBuilder, ListItemParameters, NodeOptions, Policy, ResourceState, SourceFormat, StackDirection, TextboxBuilder, TextboxParameters,
+        WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, UiNodeBuilder, widget_handle,
     };
-    use crate::test_support::{test_atlas, NoopRenderer};
+    use crate::test_support::{projected_widget, test_atlas, NoopRenderer};
 
     struct TestRuntime {
         runtime: UiRuntime,
@@ -572,7 +573,7 @@ mod tests {
 
     #[test]
     fn ui_node_set_conversion_keeps_container_children_off_leaf_widgets() {
-        let button = widget_handle(Button::new("child"));
+        let button = projected_widget::<ButtonBuilder>(ButtonParameters::new("child"));
         let tree = UiNodeBuilder::build(|tree| {
             tree.node(crate::NodeOptions::with_policy(Policy::fixed(10, 20))).column(|tree| {
                 tree.widget(button.clone());
@@ -590,7 +591,7 @@ mod tests {
 
     #[test]
     fn framed_widget_owns_inside_border_content_clip_and_outer_hit_box() {
-        let button = widget_handle(Button::new("framed"));
+        let button = projected_widget::<ButtonBuilder>(ButtonParameters::new("framed"));
         let mut button_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             button_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(&button);
@@ -641,8 +642,8 @@ mod tests {
 
     #[test]
     fn frame_option_changes_preferred_outer_size_but_none_keeps_full_content() {
-        let framed = widget_handle(Button::with_opt("size", WidgetOption::FRAME));
-        let flat = widget_handle(Button::with_opt("size", WidgetOption::NONE));
+        let framed = projected_widget::<ButtonBuilder>(ButtonParameters::with_opt("size", WidgetOption::FRAME));
+        let flat = projected_widget::<ButtonBuilder>(ButtonParameters::with_opt("size", WidgetOption::NONE));
         let tree = UiNodeBuilder::build(|tree| {
             tree.widget(&framed);
             tree.widget(&flat);
@@ -718,7 +719,7 @@ mod tests {
                 callback_seen.borrow_mut().push((rect_key(args.content_area), rect_key(args.view)));
             })
             .expect("custom renderer registration");
-        let state = widget_handle(Custom::with_opt("custom", WidgetOption::FRAME));
+        let state = projected_widget::<CustomBuilder>(CustomParameters::with_opt("custom", WidgetOption::FRAME));
         let tree = UiNodeBuilder::build(|tree| {
             tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12)))
                 .custom_render(&state, custom_renderer);
@@ -982,7 +983,7 @@ mod tests {
 
     #[test]
     fn replacing_projection_drops_absent_nodes_and_transient_state() {
-        let button = widget_handle(Button::new("removed"));
+        let button = projected_widget::<ButtonBuilder>(ButtonParameters::new("removed"));
         let mut removed_id = Id::default();
         let first = UiNodeBuilder::build(|tree| {
             removed_id = tree.widget(button.clone());
@@ -1006,7 +1007,7 @@ mod tests {
         let atlas = test_atlas();
         let client = rect(7, 11, 180, 120);
 
-        let auto_button = widget_handle(Button::new("auto"));
+        let auto_button = projected_widget::<ButtonBuilder>(ButtonParameters::new("auto"));
         let auto_tree = UiNodeBuilder::build(|tree| {
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
                 tree.widget(&auto_button);
@@ -1023,7 +1024,7 @@ mod tests {
         assert!(auto_preferred.height < client.height, "test requires spare client height");
         assert_eq!(auto_runtime.roots[0].state.layout.allocation.height, auto_preferred.height);
 
-        let fill_button = widget_handle(Button::new("fill"));
+        let fill_button = projected_widget::<ButtonBuilder>(ButtonParameters::new("fill"));
         let fill_tree = UiNodeBuilder::build(|tree| {
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
                 tree.widget(&fill_button);
@@ -1037,7 +1038,7 @@ mod tests {
 
     #[test]
     fn node_window_chrome_offsets_layout_body() {
-        let button = widget_handle(Button::new("bbbb"));
+        let button = projected_widget::<ButtonBuilder>(ButtonParameters::new("bbbb"));
         let mut button_id = Id::default();
         let tree = UiNodeBuilder::build(|tree| {
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
@@ -1072,17 +1073,23 @@ mod tests {
     }
 
     #[test]
-    fn node_calculator_grid_uses_weighted_tracks() {
-        let display = widget_handle(Textbox::with_opt(
+    fn node_calculator_layout_preserves_display_fraction_and_weighted_keypad_tracks() {
+        let display = projected_widget::<TextboxBuilder>(TextboxParameters::with_opt(
             "0",
             WidgetOption::FRAME | WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT,
         ));
-        let buttons: Vec<_> = (0..20).map(|_| widget_handle(Button::new("b"))).collect();
+        let (first_button_state, first_button_runtime) = Button::create(ButtonParameters::new("b"));
+        let mut buttons = vec![widget_handle(first_button_runtime)];
+        buttons.extend((1..20).map(|_| projected_widget::<ButtonBuilder>(ButtonParameters::new("b"))));
         let button_ids = std::cell::RefCell::new(Vec::new());
+        let mut display_row_id = Id::default();
+        let mut display_id = Id::default();
         let tree = UiNodeBuilder::build(|tree| {
-            tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Fraction(0.20), |tree| {
-                tree.widget(&display);
-            });
+            display_row_id = tree
+                .node(NodeOptions::with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Fraction(0.20))))
+                .row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
+                    display_id = tree.widget(&display);
+                });
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
                 tree.column(|tree| {
                     let columns = [SizePolicy::Weight(1.0); 4];
@@ -1115,20 +1122,44 @@ mod tests {
         );
 
         let ids = button_ids.borrow();
+        let display_row = runtime.node_screen_rect(display_row_id).unwrap();
+        let display = runtime.node_screen_rect(display_id).unwrap();
         let first = runtime.node_screen_rect(ids[0]).unwrap();
         let fourth = runtime.node_screen_rect(ids[3]).unwrap();
         let fifth = runtime.node_screen_rect(ids[4]).unwrap();
+        let body_view_height = 420 - style.padding * 2;
+        let expected_display_height = (body_view_height as f32 * 0.20).floor() as i32;
+        assert_eq!(display_row.height, expected_display_height);
+        assert_eq!(display_row.width, 320 - style.padding * 2);
+        assert_eq!(display.height, display_row.height);
+        assert_eq!(display.width, display_row.width);
+        assert_eq!(first.y, display_row.y + display_row.height + style.spacing);
         assert!(first.width > 60);
         assert_eq!(first.y, fourth.y);
         assert!(fourth.x > first.x);
         assert!(fifth.y > first.y);
+
+        let mut click = Input::default();
+        click.mousedown(first.x + first.width / 2, first.y + first.height / 2, MouseButton::LEFT);
+        results.begin_frame();
+        runtime.render_frame(
+            crate::RootId::from_raw(1),
+            "test",
+            &mut renderer,
+            &style,
+            &click,
+            &mut results,
+            rect(0, 0, 320, 420),
+            true,
+        );
+        assert_eq!(first_button_state.try_update(ButtonState::take_submitted), Some(true));
     }
 
     #[test]
     fn node_row_remainder_tracks_resolve_left_to_right() {
-        let label = widget_handle(ListItem::with_opt("Test buttons 2:", WidgetOption::NO_INTERACT));
-        let middle = widget_handle(Button::with_opt("Button 3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
-        let right = widget_handle(Button::with_opt("Popup", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
+        let label = projected_widget::<ListItemBuilder>(ListItemParameters::with_opt("Test buttons 2:", WidgetOption::NO_INTERACT));
+        let middle = projected_widget::<ButtonBuilder>(ButtonParameters::with_opt("Button 3", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
+        let right = projected_widget::<ButtonBuilder>(ButtonParameters::with_opt("Popup", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
         let mut middle_id = Id::new(0);
         let mut right_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
@@ -1167,8 +1198,8 @@ mod tests {
 
     #[test]
     fn node_content_size_includes_nested_stack_overflow() {
-        let small = widget_handle(Button::new("slot"));
-        let image = widget_handle(Button::new("image"));
+        let small = projected_widget::<ButtonBuilder>(ButtonParameters::new("slot"));
+        let image = projected_widget::<ButtonBuilder>(ButtonParameters::new("image"));
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(67), StackDirection::TopToBottom, |tree| {
                 tree.widget(&small);
@@ -1204,8 +1235,8 @@ mod tests {
     fn node_scroll_area_keeps_runtime_content_and_scroll_state() {
         let atlas = test_atlas();
         let style = Rc::new(Style::default());
-        let first = widget_handle(Button::new("first"));
-        let rest: Vec<_> = (0..5).map(|_| widget_handle(Button::new("row"))).collect();
+        let first = projected_widget::<ButtonBuilder>(ButtonParameters::new("first"));
+        let rest: Vec<_> = (0..5).map(|_| projected_widget::<ButtonBuilder>(ButtonParameters::new("row"))).collect();
         let mut first_id = Id::new(0);
         let mut scroll_area_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
@@ -1258,7 +1289,7 @@ mod tests {
 
     #[test]
     fn root_body_view_is_stable_for_identical_size_without_root_scrollbars() {
-        let buttons: Vec<_> = (0..6).map(|_| widget_handle(Button::new("wide row"))).collect();
+        let buttons: Vec<_> = (0..6).map(|_| projected_widget::<ButtonBuilder>(ButtonParameters::new("wide row"))).collect();
         let tree = UiNodeBuilder::build(|tree| {
             tree.node(NodeOptions::with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Remainder(0))))
                 .stack(SizePolicy::Fixed(150), SizePolicy::Fixed(24), StackDirection::TopToBottom, |tree| {
@@ -1318,7 +1349,7 @@ mod tests {
         let backend = NoopRenderer { atlas };
         let mut renderer = Renderer::new_test(backend, Dimensioni::new(220, 160));
         let custom_renderer = renderer.register_custom_renderer(|_frame, _args| {}).unwrap();
-        let custom = widget_handle(Custom::new("viewport"));
+        let custom = projected_widget::<CustomBuilder>(CustomParameters::new("viewport"));
         let mut custom_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
@@ -1383,8 +1414,13 @@ mod tests {
             fonts: &fonts,
             format: SourceFormat::Raw,
         });
-        let icon_button = widget_handle(Button::with_icon("icon", crate::WHITE_ICON, WidgetOption::FRAME, WidgetFillOption::ALL));
-        let filler = widget_handle(Button::new("filler"));
+        let icon_button = projected_widget::<ButtonBuilder>(ButtonParameters::with_icon(
+            "icon",
+            crate::WHITE_ICON,
+            WidgetOption::FRAME,
+            WidgetFillOption::ALL,
+        ));
+        let filler = projected_widget::<ButtonBuilder>(ButtonParameters::new("filler"));
         let mut scroll_area_id = Id::new(0);
         let mut icon_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
@@ -1477,7 +1513,12 @@ mod tests {
         let backend = NoopRenderer { atlas };
         let mut renderer = Renderer::new_test(backend, Dimensioni::new(200, 140));
         let texture = renderer.try_load_texture_rgba(64, 64, &[255; 64 * 64 * 4]).unwrap();
-        let button = widget_handle(Button::with_scaled_image("image", Some(texture), WidgetOption::FRAME, WidgetFillOption::ALL));
+        let button = projected_widget::<ButtonBuilder>(ButtonParameters::with_scaled_image(
+            "image",
+            Some(texture),
+            WidgetOption::FRAME,
+            WidgetFillOption::ALL,
+        ));
         let mut button_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
@@ -1537,7 +1578,7 @@ mod tests {
         let backend = NoopRenderer { atlas };
         let mut renderer = Renderer::new_test(backend, Dimensioni::new(300, 160));
         let texture = renderer.try_load_texture_rgba(64, 64, &[255; 64 * 64 * 4]).unwrap();
-        let button = widget_handle(Button::with_image("image", Some(texture), WidgetOption::FRAME, WidgetFillOption::ALL));
+        let button = projected_widget::<ButtonBuilder>(ButtonParameters::with_image("image", Some(texture), WidgetOption::FRAME, WidgetFillOption::ALL));
         let mut button_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
@@ -1571,9 +1612,9 @@ mod tests {
 
     #[test]
     fn node_grid_honors_explicit_child_spans() {
-        let first = widget_handle(Button::new("a"));
-        let second = widget_handle(Button::new("b"));
-        let third = widget_handle(Button::new("c"));
+        let first = projected_widget::<ButtonBuilder>(ButtonParameters::new("a"));
+        let second = projected_widget::<ButtonBuilder>(ButtonParameters::new("b"));
+        let third = projected_widget::<ButtonBuilder>(ButtonParameters::new("c"));
         let mut first_id = Id::new(0);
         let mut second_id = Id::new(0);
         let mut third_id = Id::new(0);

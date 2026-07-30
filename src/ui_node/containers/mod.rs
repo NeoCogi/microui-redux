@@ -200,19 +200,15 @@ impl NodeBehavior for WidgetNode {
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, state: &mut UiNodeState) -> bool {
         let id = state.id();
-        let mut focus_seen = ctx.runtime.updated_focus;
         let events = localize_events(ctx.content_rect, ctx.runtime.take_routed_events(id));
         let accepts_pointer_input = ctx.runtime.accepts_pointer_input();
         let content_rect = ctx.screen_rect(ctx.content_rect);
         let content_clip = ctx.screen_clip();
         let mut widget_ctx = WidgetUpdateCtx::new_with_content_geometry(
-            id,
             content_rect,
             content_clip,
             ctx.style,
             &ctx.atlas,
-            &mut ctx.runtime.focus,
-            &mut focus_seen,
             accepts_pointer_input,
             state.hovered,
             state.focused,
@@ -221,7 +217,6 @@ impl NodeBehavior for WidgetNode {
             state.scroll_delta,
         );
         let result = self.widget.update(&mut widget_ctx, events);
-        ctx.runtime.updated_focus = focus_seen;
 
         let retained_id = RetainedId::root_node(ctx.root_id, id);
         let dispatch_site = format!("root {:?} ui node {:?}", ctx.root_name, id);
@@ -413,6 +408,10 @@ pub(super) fn route_public_widget_input(
 
     let id = state.id();
     if event.is_focus_input() {
+        // Enforce the router invariant at the final delivery boundary as well as at target lookup.
+        if runtime.focus != Some(id) {
+            return InputResult::Ignored;
+        }
         runtime.push_routed_event(id, event.clone());
         return InputResult::Consumed;
     }
@@ -567,17 +566,13 @@ impl UpdateCtx<'_> {
         state.active = active;
         state.scroll_delta = scroll_delta;
 
-        let mut focus_seen = self.runtime.updated_focus;
         let accepts_pointer_input = self.runtime.accepts_pointer_input();
         let events = localize_events(local_content_rect, self.runtime.take_routed_events(id));
         let mut ctx = WidgetUpdateCtx::new_with_content_geometry(
-            id,
             content_rect,
             content_clip,
             self.style,
             &self.atlas,
-            &mut self.runtime.focus,
-            &mut focus_seen,
             accepts_pointer_input,
             hovered,
             focused,
@@ -586,7 +581,6 @@ impl UpdateCtx<'_> {
             scroll_delta,
         );
         let result = widget.update(&mut ctx, events);
-        self.runtime.updated_focus = focus_seen;
 
         self.results
             .record_retained_with_context(RetainedId::root_node(self.root_id, id), handle.id(), result, format!("{label} {:?}", id));

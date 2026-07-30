@@ -10,9 +10,10 @@ use std::{
 use super::*;
 use crate::{
     test_support::{AllocationCount, AllocationMeasurement, NoopRenderer, test_atlas},
-    Button, Checkbox, CheckboxParameters, CheckboxState, ColorSwatch, Combo, ListBox, ListItem, Node, NodeStateValue, Number, ResourceState, RetainedId,
-    ScrollAreaOption, SizePolicy, StackDirection, TextArea, TextBlock, Textbox, UiInputEvent, Widget, WidgetFillOption, WidgetOption, WidgetPaintCtx,
-    WidgetUpdateCtx, color, widget_handle,
+    Button, ButtonParameters, Checkbox, CheckboxParameters, CheckboxState, ColorSwatch, ColorSwatchParameters, Combo, ComboParameters, ComboState, ListBox,
+    ListBoxParameters, ListItem, ListItemParameters, Node, NodeStateValue, Number, NumberParameters, NumberState, ResourceState, RetainedId, ScrollAreaOption,
+    SizePolicy, SliderParameters, SliderState, StackDirection, TextArea, TextAreaParameters, TextBlock, TextBlockParameters, Textbox, TextboxParameters,
+    TextboxState, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, color, widget_handle,
 };
 
 fn context(width: i32, height: i32) -> Context<NoopRenderer> {
@@ -100,50 +101,60 @@ fn p0_widget_phase_order_and_three_layouts_are_explicit() {
 #[test]
 fn p0_existing_typed_widget_mutations_remain_observable() {
     let (checkbox, _checkbox_widget) = Checkbox::create(CheckboxParameters::new("check", false));
-    let button = widget_handle(Button::new("before"));
-    let list_item = widget_handle(ListItem::new("before"));
-    let list_box = widget_handle(ListBox::new("before", None));
-    let combo = widget_handle(Combo::new());
-    let text = widget_handle(TextBlock::new("before"));
-    let swatch = widget_handle(ColorSwatch::new(color(1, 2, 3, 255)));
-    let slider = widget_handle(crate::Slider::new(0.0, 0.0, 10.0));
-    let number = widget_handle(Number::new(0.0, 1.0, 0));
-    let textbox = widget_handle(Textbox::new("before"));
-    let text_area = widget_handle(TextArea::new("before"));
+    let (_, button_runtime) = Button::create(ButtonParameters::new("after"));
+    let button = widget_handle(button_runtime);
+    let (list_item_state, list_item_runtime) = ListItem::create(ListItemParameters::new("before"));
+    let list_item = widget_handle(list_item_runtime);
+    let (_, list_box_runtime) = ListBox::create(ListBoxParameters::new("after box", None));
+    let list_box = widget_handle(list_box_runtime);
+    let (combo_state, _combo_runtime) = Combo::create(ComboParameters::new());
+    let (text_state, text_runtime) = TextBlock::create(TextBlockParameters::new("before"));
+    let text = widget_handle(text_runtime);
+    let (swatch_state, swatch_runtime) = ColorSwatch::create(ColorSwatchParameters::new(color(1, 2, 3, 255)));
+    let swatch = widget_handle(swatch_runtime);
+    let (slider_state, _slider_runtime) = crate::Slider::create(SliderParameters::new(0.0, 0.0, 10.0));
+    let (number_state, _number_runtime) = Number::create(NumberParameters::new(0.0, 1.0, 0));
+    let (textbox_state, textbox_runtime) = Textbox::create(TextboxParameters::new("before"));
+    let textbox = widget_handle(textbox_runtime);
+    let (text_area_state, text_area_runtime) = TextArea::create(TextAreaParameters::new("before"));
+    let text_area = widget_handle(text_area_runtime);
     let disclosure = widget_handle(Node::header("section", NodeStateValue::Closed));
 
     checkbox.try_update(CheckboxState::check).unwrap();
-    button.update(|state| {
-        state.content = crate::ButtonContent::Text { label: "after".into(), icon: None };
-        state.fill = WidgetFillOption::HOVER;
-    });
-    list_item.update(|state| state.label = "after item".into());
-    list_box.update(|state| state.label = "after box".into());
-    combo.update(|state| {
-        state.open_popup();
-        assert_eq!(state.select(1, &["zero", "one"]), Some("one".into()));
-    });
-    text.update(|state| state.text = "after text".into());
-    swatch.update(|state| {
-        state.fill = color(9, 8, 7, 255);
-        state.label = "after swatch".into();
-    });
-    slider.update(|state| state.set_value(7.0));
-    number.update(|state| state.set_value(8.0));
-    textbox.update(|state| state.set_text("after textbox"));
-    text_area.update(|state| {
-        state.set_text("after area");
-        state.set_cursor(5);
-        state.set_scroll(crate::vec2(3, 4));
-    });
+    list_item_state.try_update(|state| state.set_label("after item")).unwrap();
+    combo_state
+        .try_update(|state| {
+            state.open_popup();
+            assert_eq!(state.select(1, &["zero", "one"]), Some("one".into()));
+        })
+        .unwrap();
+    text_state.try_update(|state| state.set_text("after text")).unwrap();
+    swatch_state
+        .try_update(|state| {
+            state.set_fill(color(9, 8, 7, 255));
+            state.set_label("after swatch");
+        })
+        .unwrap();
+    slider_state.try_update(|state| state.set_value(7.0)).unwrap();
+    number_state.try_update(|state| state.set_value(8.0)).unwrap();
+    textbox_state.try_update(|state| state.set_text("after textbox")).unwrap();
+    text_area_state
+        .try_update(|state| {
+            state.set_text("after area");
+            state.set_cursor(5);
+            state.set_scroll(crate::vec2(3, 4));
+        })
+        .unwrap();
     disclosure.update(|state| state.state = NodeStateValue::Expanded);
 
     assert_eq!(checkbox.try_read(CheckboxState::checked), Some(true));
-    assert_eq!(combo.read(Combo::selected), 1);
-    assert_eq!(slider.read(crate::Slider::value), 7.0);
-    assert_eq!(number.read(Number::value), 8.0);
-    assert_eq!(textbox.read(|state| state.text().to_owned()), "after textbox");
-    let (area_text, area_cursor, area_scroll) = text_area.read(|state| (state.text().to_owned(), state.cursor(), state.scroll()));
+    assert_eq!(combo_state.try_read(ComboState::selected), Some(1));
+    assert_eq!(slider_state.try_read(SliderState::value), Some(7.0));
+    assert_eq!(number_state.try_read(NumberState::value), Some(8.0));
+    assert_eq!(textbox_state.try_read(|state| state.text().to_owned()).as_deref(), Some("after textbox"));
+    let (area_text, area_cursor, area_scroll) = text_area_state
+        .try_read(|state| (state.text().to_owned(), state.cursor(), state.scroll()))
+        .unwrap();
     assert_eq!(area_text, "after area");
     assert_eq!(area_cursor, 5);
     assert_eq!((area_scroll.x, area_scroll.y), (3, 4));
@@ -213,8 +224,10 @@ fn p1_checkbox_reports_reentrant_rendering_as_a_state_invariant_violation() {
 
 #[test]
 fn p0_committed_button_and_textbox_submissions_follow_focus() {
-    let button = widget_handle(Button::new("submit"));
-    let textbox = widget_handle(Textbox::new(""));
+    let (button_state, button_runtime) = Button::create(ButtonParameters::new("submit"));
+    let button = widget_handle(button_runtime);
+    let (textbox_state, textbox_runtime) = Textbox::create(TextboxParameters::new(""));
+    let textbox = widget_handle(textbox_runtime);
     let mut button_id = NodeId::default();
     let mut textbox_id = NodeId::default();
     let tree = UiNodeBuilder::build(|tree| {
@@ -231,6 +244,7 @@ fn p0_committed_button_and_textbox_submissions_follow_focus() {
     ctx.mousedown(button_x, button_y, MouseButton::LEFT);
     ctx.update_ui();
     assert!(ctx.committed_results().state_of_retained(RetainedId::root_node(root, button_id)).is_submitted());
+    assert_eq!(button_state.try_update(crate::ButtonState::take_submitted), Some(true));
     ctx.mouseup(button_x, button_y, MouseButton::LEFT);
     ctx.update_ui();
 
@@ -246,14 +260,60 @@ fn p0_committed_button_and_textbox_submissions_follow_focus() {
     let result = ctx.committed_results().state_of_retained(RetainedId::root_node(root, textbox_id));
     assert!(result.is_changed());
     assert!(result.is_submitted());
-    assert_eq!(textbox.read(|state| state.text().to_owned()), "typed");
+    assert_eq!(textbox_state.try_update(TextboxState::take_changed), Some(true));
+    assert_eq!(textbox_state.try_update(TextboxState::take_submitted), Some(true));
+    assert_eq!(textbox_state.try_read(|state| state.text().to_owned()).as_deref(), Some("typed"));
+
+    ctx.text(" again");
+    ctx.update_ui();
+    assert_eq!(textbox_state.try_read(|state| state.text().to_owned()).as_deref(), Some("typed again"));
+}
+
+#[test]
+fn keyboard_text_routes_to_only_the_front_roots_focused_widget() {
+    let (first_state, first_runtime) = Textbox::create(TextboxParameters::new(""));
+    let first = widget_handle(first_runtime);
+    let (second_state, second_runtime) = Textbox::create(TextboxParameters::new(""));
+    let second = widget_handle(second_runtime);
+    let mut first_id = NodeId::default();
+    let mut second_id = NodeId::default();
+    let first_tree = UiNodeBuilder::build(|tree| {
+        first_id = tree.widget(&first);
+    });
+    let second_tree = UiNodeBuilder::build(|tree| {
+        second_id = tree.widget(&second);
+    });
+    let mut ctx = context(300, 120);
+    let first_root = ctx.create_window("first", rect(0, 0, 120, 90), first_tree);
+    let second_root = ctx.create_window("second", rect(150, 0, 120, 90), second_tree);
+    ctx.update_ui();
+
+    let (first_x, first_y) = center(ctx.debug_root_node_rect(first_root, first_id).unwrap());
+    ctx.mousedown(first_x, first_y, MouseButton::LEFT);
+    ctx.update_ui();
+    ctx.mouseup(first_x, first_y, MouseButton::LEFT);
+    ctx.update_ui();
+
+    let (second_x, second_y) = center(ctx.debug_root_node_rect(second_root, second_id).unwrap());
+    ctx.mousedown(second_x, second_y, MouseButton::LEFT);
+    ctx.update_ui();
+    ctx.mouseup(second_x, second_y, MouseButton::LEFT);
+    ctx.update_ui();
+
+    ctx.text("x");
+    ctx.update_ui();
+
+    assert_eq!(first_state.try_read(|state| state.text().to_owned()).as_deref(), Some(""));
+    assert_eq!(second_state.try_read(|state| state.text().to_owned()).as_deref(), Some("x"));
 }
 
 #[test]
 fn p0_container_disclosure_scroll_and_dynamic_list_outcomes_are_stable() {
     let disclosure = widget_handle(Node::header("section", NodeStateValue::Closed));
-    let first = widget_handle(ListItem::new("first"));
-    let second = widget_handle(ListItem::new("second"));
+    let (_, first_runtime) = ListItem::create(ListItemParameters::new("first"));
+    let first = widget_handle(first_runtime);
+    let (_, second_runtime) = ListItem::create(ListItemParameters::new("second"));
+    let second = widget_handle(second_runtime);
     let mut disclosure_id = NodeId::default();
     let mut scroll_id = NodeId::default();
     let mut second_id = NodeId::default();
@@ -315,8 +375,10 @@ fn p0_container_disclosure_scroll_and_dynamic_list_outcomes_are_stable() {
 
 #[test]
 fn p0_keyed_dynamic_list_reorder_preserves_typed_state_and_visual_order() {
-    let first = widget_handle(ListItem::new("first"));
-    let second = widget_handle(ListItem::new("second"));
+    let (first_state, first_runtime) = ListItem::create(ListItemParameters::new("first"));
+    let first = widget_handle(first_runtime);
+    let (_, second_runtime) = ListItem::create(ListItemParameters::new("second"));
+    let second = widget_handle(second_runtime);
     let mut first_id = NodeId::default();
     let mut second_id = NodeId::default();
     let initial = UiNodeBuilder::build(|tree| {
@@ -330,7 +392,7 @@ fn p0_keyed_dynamic_list_reorder_preserves_typed_state_and_visual_order() {
     ctx.update_ui();
     assert!(ctx.debug_root_node_rect(root, first_id).unwrap().y < ctx.debug_root_node_rect(root, second_id).unwrap().y);
 
-    first.update(|state| state.label = "first retained".into());
+    first_state.try_update(|state| state.set_label("first retained")).unwrap();
     let reordered = UiNodeBuilder::build(|tree| {
         tree.column(|tree| {
             second_id = tree.node(NodeOptions::keyed("second")).widget(&second);
@@ -392,7 +454,8 @@ fn p0_root_lifecycle_and_projection_replacement_are_observable() {
 
 #[test]
 fn p0_known_structural_costs_are_evidence_not_compatibility() {
-    let widget = widget_handle(TextBlock::new("owned twice"));
+    let (_, runtime) = TextBlock::create(TextBlockParameters::new("owned twice"));
+    let widget = widget_handle(runtime);
     assert_eq!(widget.debug_strong_count(), 1);
     let tree = UiNodeBuilder::build(|tree| {
         tree.widget(&widget);

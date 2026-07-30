@@ -7,9 +7,10 @@ use std::{
 
 use super::*;
 use crate::{
-    test_support::{recording_backend, test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer, RenderEvent},
-    color, widget_handle, AtlasHandle, Button, Combo, Custom, ListItem, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId,
-    ScrollAreaOption, SizePolicy, StackDirection, TextBlock, UiInputEvent, Widget, WidgetHandle, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, UiNodeBuilder,
+    test_support::{projected_widget, recording_backend, test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer, RenderEvent},
+    color, widget_handle, AtlasHandle, ButtonBuilder, ButtonParameters, Combo, ComboParameters, ComboState, CustomBuilder, CustomParameters, ListItem,
+    ListItemParameters, ListItemState, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId, ScrollAreaOption, SizePolicy,
+    StackDirection, TextBlockBuilder, TextBlockParameters, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, UiNodeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
@@ -115,7 +116,7 @@ fn root_windows_do_not_render_scrollbars_for_overflow_content() {
     style.scrollbar_size = 10;
     ctx.set_style(&style);
 
-    let text = widget_handle(TextBlock::new("a\na\na\na\na\na"));
+    let text = projected_widget::<TextBlockBuilder>(TextBlockParameters::new("a\na\na\na\na\na"));
     let tree = UiNodeBuilder::build(|tree| {
         tree.widget(text.clone());
     });
@@ -161,7 +162,7 @@ fn resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
     style.scrollbar_size = 10;
     ctx.set_style(&style);
 
-    let text = widget_handle(TextBlock::new("aaaaaaaaaaaaaaaaaaaaaaaa\na\na\na\na\na\na\na"));
+    let text = projected_widget::<TextBlockBuilder>(TextBlockParameters::new("aaaaaaaaaaaaaaaaaaaaaaaa\na\na\na\na\na\na\na"));
     let tree = UiNodeBuilder::build(|tree| {
         tree.widget(text.clone());
     });
@@ -199,7 +200,7 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
     ctx.set_style(&style);
 
     let mut scroll_area = NodeId::default();
-    let child = widget_handle(Button::new("child"));
+    let child = projected_widget::<ButtonBuilder>(ButtonParameters::new("child"));
     let tree = UiNodeBuilder::build(|tree| {
         scroll_area = tree
             .node(NodeOptions::with_policy(Policy::fill()))
@@ -242,7 +243,7 @@ fn title_drag_does_not_route_pointer_to_scroll_area() {
     ctx.set_style(&style);
 
     let mut scroll_area = NodeId::default();
-    let child = widget_handle(Button::new("child"));
+    let child = projected_widget::<ButtonBuilder>(ButtonParameters::new("child"));
     let tree = UiNodeBuilder::build(|tree| {
         scroll_area = tree
             .node(NodeOptions::with_policy(Policy::fill()))
@@ -693,7 +694,8 @@ fn registered_window_renders_across_frames_without_resubmission() {
     let atlas = make_test_atlas();
     let backend = NoopRenderer { atlas };
     let mut ctx = Context::new_test(backend, Dimensioni::new(200, 200));
-    let text = widget_handle(TextBlock::new("before"));
+    let (text_state, text_runtime) = crate::TextBlock::create(TextBlockParameters::new("before"));
+    let text = widget_handle(text_runtime);
     let tree = UiNodeBuilder::build({
         let text = text.clone();
         move |tree| {
@@ -705,9 +707,7 @@ fn registered_window_renders_across_frames_without_resubmission() {
     ctx.update_ui();
     assert!(root_texts(&ctx, root).iter().any(|text| text == "before"));
 
-    text.update(|text| {
-        text.text = "after".to_string();
-    });
+    text_state.try_update(|text| text.set_text("after")).unwrap();
     ctx.update_ui();
     let texts = root_texts(&ctx, root);
     assert!(texts.iter().any(|text| text == "after"));
@@ -788,7 +788,7 @@ fn window_manager_executes_one_z_ordered_display_list_per_ui_frame() {
     let (backend, log) = recording_backend(make_test_atlas());
     let mut ctx = Context::new_test(backend, Dimensioni::new(240, 120));
 
-    let back = widget_handle(Custom::new("back"));
+    let back = projected_widget::<CustomBuilder>(CustomParameters::new("back"));
     let back_log = log.clone();
     let back_renderer = ctx
         .register_custom_renderer(move |_frame, _args| back_log.record_marker("back-content"))
@@ -798,7 +798,7 @@ fn window_manager_executes_one_z_ordered_display_list_per_ui_frame() {
     });
     ctx.create_window("back", rect(0, 0, 90, 60), back_tree);
 
-    let front = widget_handle(Custom::new("front"));
+    let front = projected_widget::<CustomBuilder>(CustomParameters::new("front"));
     let front_log = log.clone();
     let front_renderer = ctx
         .register_custom_renderer(move |_frame, _args| front_log.record_marker("front-content"))
@@ -921,8 +921,8 @@ fn root_hover_selection_uses_root_z_order() {
     let atlas = make_test_atlas();
     let backend = NoopRenderer { atlas };
     let mut ctx = Context::new_test(backend, Dimensioni::new(240, 120));
-    let left_button = widget_handle(Button::new("left"));
-    let right_button = widget_handle(Button::new("right"));
+    let left_button = projected_widget::<ButtonBuilder>(ButtonParameters::new("left"));
+    let right_button = projected_widget::<ButtonBuilder>(ButtonParameters::new("right"));
     let left = ctx.create_window(
         "left",
         rect(0, 0, 120, 80),
@@ -1171,7 +1171,7 @@ fn retained_resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
     style.scrollbar_size = 10;
     ctx.set_style(&style);
 
-    let text = widget_handle(TextBlock::new("aaaaaaaaaaaaaaaaaaaaaaaa\na\na\na\na\na\na\na"));
+    let text = projected_widget::<TextBlockBuilder>(TextBlockParameters::new("aaaaaaaaaaaaaaaaaaaaaaaa\na\na\na\na\na\na\na"));
     let tree = UiNodeBuilder::build({
         let text = text.clone();
         move |tree| {
@@ -1227,24 +1227,22 @@ fn retained_popup_closes_from_root_state_when_clicking_outside() {
 fn run_combo_frame(
     ctx: &mut Context<NoopRenderer>,
     popup_root: RootId,
-    combo: &WidgetHandle<Combo>,
-    items: &[WidgetHandle<ListItem>; 2],
-    item_ids: &[NodeId; 2],
+    combo: &crate::WidgetStateHandle<ComboState>,
+    item_states: &[crate::WidgetStateHandle<ListItemState>; 2],
 ) -> Option<String> {
-    let labels: Vec<String> = items.iter().map(|item| item.read(|item| item.label.clone())).collect();
-    combo.update(|combo| combo.update_items(&labels));
-    let combo_anchor = combo.read(Combo::anchor);
+    let labels: Vec<String> = item_states.iter().map(|item| item.try_read(|item| item.label().to_owned()).unwrap()).collect();
+    combo.try_update(|combo| combo.update_items(&labels)).unwrap();
+    let combo_anchor = combo.try_read(ComboState::anchor).unwrap();
 
     let mut selected_label = None;
-    let results = ctx.committed_results();
-    for (idx, node_id) in item_ids.iter().enumerate() {
-        if results.state_of_retained(RetainedId::root_node(popup_root, *node_id)).is_submitted() {
-            selected_label = combo.update(|combo| combo.select(idx, &labels));
+    for (idx, item) in item_states.iter().enumerate() {
+        if item.try_update(ListItemState::take_submitted).unwrap_or(false) {
+            selected_label = combo.try_update(|combo| combo.select(idx, &labels)).unwrap();
             break;
         }
     }
 
-    if combo.read(Combo::is_open) {
+    if combo.try_read(ComboState::is_open).unwrap_or(false) {
         ctx.set_root_visible(popup_root, true);
         ctx.set_root_rect(popup_root, combo_anchor);
     } else {
@@ -1265,8 +1263,12 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
         popup_root,
         WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
     );
-    let combo = widget_handle(Combo::new());
-    let items = [widget_handle(ListItem::new("Apple")), widget_handle(ListItem::new("Banana"))];
+    let (combo_state, combo_runtime) = Combo::create(ComboParameters::new());
+    let combo = widget_handle(combo_runtime);
+    let (apple_state, apple_runtime) = ListItem::create(ListItemParameters::new("Apple"));
+    let (banana_state, banana_runtime) = ListItem::create(ListItemParameters::new("Banana"));
+    let item_states = [apple_state, banana_state];
+    let items = [widget_handle(apple_runtime), widget_handle(banana_runtime)];
     let mut item_ids = [NodeId::default(); 2];
     let main_root = ctx.create_window(
         "combo window",
@@ -1293,14 +1295,14 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
         }),
     );
 
-    run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+    run_combo_frame(&mut ctx, popup_root, &combo_state, &item_states);
     ctx.mousemove(10, 10);
-    run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+    run_combo_frame(&mut ctx, popup_root, &combo_state, &item_states);
     ctx.mousedown(10, 10, MouseButton::LEFT);
-    run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+    run_combo_frame(&mut ctx, popup_root, &combo_state, &item_states);
     ctx.mouseup(10, 10, MouseButton::LEFT);
-    run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
-    assert!(combo.read(Combo::is_open));
+    run_combo_frame(&mut ctx, popup_root, &combo_state, &item_states);
+    assert_eq!(combo_state.try_read(ComboState::is_open), Some(true));
     assert_eq!(ctx.root_visible(popup_root), Some(true));
 
     let popup_rect = ctx.root_rect(popup_root).unwrap();
@@ -1308,18 +1310,18 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
     let item_x = popup_rect.x + 12;
     let item_y = popup_rect.y + 12;
     ctx.mousemove(item_x, item_y);
-    run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+    run_combo_frame(&mut ctx, popup_root, &combo_state, &item_states);
     ctx.mousedown(item_x, item_y, MouseButton::LEFT);
-    run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+    run_combo_frame(&mut ctx, popup_root, &combo_state, &item_states);
     ctx.mouseup(item_x, item_y, MouseButton::LEFT);
-    let selected = run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
+    let selected = run_combo_frame(&mut ctx, popup_root, &combo_state, &item_states);
 
     assert_eq!(selected.as_deref(), Some("Apple"));
-    assert!(!combo.read(Combo::is_open));
+    assert_eq!(combo_state.try_read(ComboState::is_open), Some(false));
     assert_eq!(ctx.root_visible(popup_root), Some(false));
 
-    run_combo_frame(&mut ctx, popup_root, &combo, &items, &item_ids);
-    assert!(!combo.read(Combo::is_open));
+    run_combo_frame(&mut ctx, popup_root, &combo_state, &item_states);
+    assert_eq!(combo_state.try_read(ComboState::is_open), Some(false));
     assert_eq!(ctx.root_visible(popup_root), Some(false));
 }
 
@@ -1358,8 +1360,8 @@ fn node_popup_auto_size_fits_stacked_buttons() {
     let atlas = make_test_atlas();
     let backend = NoopRenderer { atlas };
     let mut ctx = Context::new_test(backend, Dimensioni::new(240, 120));
-    let hello = widget_handle(Button::with_opt("Hello", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
-    let world = widget_handle(Button::with_opt("World", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
+    let hello = projected_widget::<ButtonBuilder>(ButtonParameters::with_opt("Hello", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
+    let world = projected_widget::<ButtonBuilder>(ButtonParameters::with_opt("World", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
     let mut hello_id = NodeId::default();
     let mut world_id = NodeId::default();
     let popup = ctx.create_popup(
@@ -1452,7 +1454,7 @@ fn scroll_area_requires_enable_scroll_option() {
     ctx.set_style(&style);
 
     let mut scroll_area = NodeId::default();
-    let inner = widget_handle(Button::new("inner"));
+    let inner = projected_widget::<ButtonBuilder>(ButtonParameters::new("inner"));
     let tree = UiNodeBuilder::build(|tree| {
         scroll_area = tree
             .node(NodeOptions::with_policy(Policy::fixed(90, 40)))
@@ -1487,8 +1489,8 @@ fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
     ctx.set_style(&style);
 
     let mut scroll_area = NodeId::default();
-    let inner = widget_handle(Button::new("inner"));
-    let bottom = widget_handle(Button::new("bottom"));
+    let inner = projected_widget::<ButtonBuilder>(ButtonParameters::new("inner"));
+    let bottom = projected_widget::<ButtonBuilder>(ButtonParameters::new("bottom"));
     let tree = UiNodeBuilder::build(|tree| {
         scroll_area =
             tree.node(NodeOptions::with_policy(Policy::fixed(90, 40)))
@@ -1534,7 +1536,7 @@ fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
     ctx.set_style(&style);
 
     let mut scroll_area = NodeId::default();
-    let inner = widget_handle(Button::new("inner"));
+    let inner = projected_widget::<ButtonBuilder>(ButtonParameters::new("inner"));
     let tree = UiNodeBuilder::build(|tree| {
         scroll_area =
             tree.node(NodeOptions::with_policy(Policy::fixed(90, 40)))

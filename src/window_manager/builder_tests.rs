@@ -1,14 +1,15 @@
 //! Tests for retained UI node building and identity behavior.
 
-use crate::{Button, SizePolicy};
+use crate::{ButtonBuilder, ButtonParameters, SizePolicy};
+use crate::test_support::projected_widget;
 use crate::ui_node::UiNodeData;
 
 use super::*;
 
 #[test]
 fn unkeyed_widget_ids_are_stable_for_same_shape() {
-    let button_a = widget_handle(Button::new("A"));
-    let button_b = widget_handle(Button::new("B"));
+    let button_a = projected_widget::<ButtonBuilder>(ButtonParameters::new("A"));
+    let button_b = projected_widget::<ButtonBuilder>(ButtonParameters::new("B"));
 
     let tree_a = UiNodeBuilder::build(|builder| {
         builder.widget(button_a.clone());
@@ -27,8 +28,8 @@ fn unkeyed_widget_ids_are_stable_for_same_shape() {
 
 #[test]
 fn keyed_widgets_keep_ids_across_reorder() {
-    let button_a = widget_handle(Button::new("A"));
-    let button_b = widget_handle(Button::new("B"));
+    let button_a = projected_widget::<ButtonBuilder>(ButtonParameters::new("A"));
+    let button_b = projected_widget::<ButtonBuilder>(ButtonParameters::new("B"));
 
     let tree_a = UiNodeBuilder::build(|builder| {
         builder.node(NodeOptions::keyed("a")).widget(button_a.clone());
@@ -47,9 +48,9 @@ fn keyed_widgets_keep_ids_across_reorder() {
 
 #[test]
 fn inserting_keyed_widget_does_not_shift_later_unkeyed_ids() {
-    let button_a = widget_handle(Button::new("A"));
-    let button_b = widget_handle(Button::new("B"));
-    let keyed = widget_handle(Button::new("keyed"));
+    let button_a = projected_widget::<ButtonBuilder>(ButtonParameters::new("A"));
+    let button_b = projected_widget::<ButtonBuilder>(ButtonParameters::new("B"));
+    let keyed = projected_widget::<ButtonBuilder>(ButtonParameters::new("keyed"));
 
     let tree_a = UiNodeBuilder::build(|builder| {
         builder.widget(button_a.clone());
@@ -71,8 +72,8 @@ fn inserting_keyed_widget_does_not_shift_later_unkeyed_ids() {
 #[test]
 #[should_panic(expected = "duplicate retained node id")]
 fn duplicate_keyed_sibling_ids_are_rejected_at_build_time() {
-    let button_a = widget_handle(Button::new("A"));
-    let button_b = widget_handle(Button::new("B"));
+    let button_a = projected_widget::<ButtonBuilder>(ButtonParameters::new("A"));
+    let button_b = projected_widget::<ButtonBuilder>(ButtonParameters::new("B"));
 
     UiNodeBuilder::build(|builder| {
         builder.node(NodeOptions::keyed("same")).widget(&button_a);
@@ -82,8 +83,8 @@ fn duplicate_keyed_sibling_ids_are_rejected_at_build_time() {
 
 #[test]
 fn matching_child_keys_in_different_scopes_remain_distinct() {
-    let button_a = widget_handle(Button::new("A"));
-    let button_b = widget_handle(Button::new("B"));
+    let button_a = projected_widget::<ButtonBuilder>(ButtonParameters::new("A"));
+    let button_b = projected_widget::<ButtonBuilder>(ButtonParameters::new("B"));
     let mut first_child = NodeId::default();
     let mut second_child = NodeId::default();
 
@@ -101,8 +102,8 @@ fn matching_child_keys_in_different_scopes_remain_distinct() {
 
 #[test]
 fn row_nodes_capture_children_and_track_policy() {
-    let button_a = widget_handle(Button::new("A"));
-    let button_b = widget_handle(Button::new("B"));
+    let button_a = projected_widget::<ButtonBuilder>(ButtonParameters::new("A"));
+    let button_b = projected_widget::<ButtonBuilder>(ButtonParameters::new("B"));
 
     let tree = UiNodeBuilder::build(|builder| {
         builder

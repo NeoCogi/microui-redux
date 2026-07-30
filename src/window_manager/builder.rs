@@ -41,10 +41,10 @@ use crate::{
         ScrollAreaOption, UiNodeId, WidgetNode,
     },
     widget::{Widget, WidgetStateOwner},
-    Node, Recti, TextBlock, TextWrap,
+    Node, Recti, TextBlock, TextBlockParameters, TextWrap,
 };
 
-use super::{erased_widget_state, widget_handle, WidgetHandle};
+use super::{erased_widget_state, WidgetHandle};
 
 /// Stable identifier assigned to a retained node.
 pub type NodeId = crate::Id;
@@ -410,13 +410,15 @@ impl UiNodeBuilder {
     /// Adds a text block without wrapping.
     pub fn text(&mut self, text: impl Into<String>) -> NodeId {
         let text = text.into();
-        self.widget(widget_handle(TextBlock::new(text)))
+        let (_, runtime) = TextBlock::create(TextBlockParameters::new(text));
+        self.state_widget(runtime)
     }
 
     /// Adds a wrapped text block.
     pub fn text_with_wrap(&mut self, text: impl Into<String>, wrap: TextWrap) -> NodeId {
         let text = text.into();
-        self.widget(widget_handle(TextBlock::with_wrap(text, wrap)))
+        let (_, runtime) = TextBlock::create(TextBlockParameters::with_wrap(text, wrap));
+        self.state_widget(runtime)
     }
 
     /// Adds a custom-render widget node.

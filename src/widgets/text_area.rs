@@ -55,7 +55,8 @@
 //! Text areas share the UTF-8 editing core with textboxes but track line layout, vertical scroll,
 //! and mouse-driven cursor placement across multiple wrapped lines.
 use crate::*;
-use super::WidgetConfig;
+use crate::widget::{runtime_read_state, runtime_update_state};
+use std::{cell::RefCell, rc::Rc};
 use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
 use crate::text_layout::{build_text_lines, TextLine};
 
@@ -64,60 +65,73 @@ use super::text_edit::{
     FontLineMetrics, ReturnBehavior,
 };
 
-#[derive(Clone)]
-/// Persistent state for multi-line text area widgets.
-pub struct TextArea {
-    /// Buffer edited by the text area.
+/// One-shot construction input for a [`TextArea`].
+pub struct TextAreaParameters {
+    /// Initial buffer edited by the text area.
     buf: String,
-    /// Current cursor position within the buffer (byte index).
-    cursor: usize,
-    /// Scroll offset applied to the text view.
-    scroll: Vec2i,
     /// Wrapping mode used when rendering the buffer.
     pub wrap: TextWrap,
-    /// Shared widget configuration.
-    pub config: WidgetConfig,
-    /// Desired caret x position preserved while moving vertically.
-    preferred_x: Option<i32>,
-    /// Whether the vertical scrollbar thumb is being dragged.
-    dragging_y: bool,
-    /// Whether the horizontal scrollbar thumb is being dragged.
-    dragging_x: bool,
+    /// Font used for measurement, editing, and paint.
+    pub font: FontChoice,
+    /// Base widget options.
+    pub opt: WidgetOption,
 }
 
-impl TextArea {
-    /// Creates a text area with default widget options.
+impl WidgetParameters for TextAreaParameters {}
+
+impl TextAreaParameters {
+    /// Creates text-area parameters with default widget options.
     pub fn new(buf: impl Into<String>) -> Self {
-        let buf = buf.into();
-        let cursor = buf.len();
         Self {
-            buf,
-            cursor,
-            scroll: vec2(0, 0),
+            buf: buf.into(),
             wrap: TextWrap::None,
-            config: WidgetConfig::new(WidgetOption::FRAME | WidgetOption::GRAB_SCROLL),
-            preferred_x: None,
-            dragging_y: false,
-            dragging_x: false,
+            font: FontChoice::Role(FontRole::Body),
+            opt: WidgetOption::FRAME | WidgetOption::GRAB_SCROLL,
         }
     }
 
-    /// Creates a text area with explicit widget options.
+    /// Creates text-area parameters with explicit widget options.
     pub fn with_opt(buf: impl Into<String>, opt: WidgetOption) -> Self {
-        let buf = buf.into();
-        let cursor = buf.len();
         Self {
-            buf,
-            cursor,
-            scroll: vec2(0, 0),
+            buf: buf.into(),
             wrap: TextWrap::None,
-            config: WidgetConfig::new(opt | WidgetOption::GRAB_SCROLL),
-            preferred_x: None,
-            dragging_y: false,
-            dragging_x: false,
+            font: FontChoice::Role(FontRole::Body),
+            opt: opt | WidgetOption::GRAB_SCROLL,
         }
     }
 
+    /// Replaces the wrapping mode used by the text area.
+    pub const fn wrap(mut self, wrap: TextWrap) -> Self {
+        self.wrap = wrap;
+        self
+    }
+
+    /// Replaces the font used by the text area.
+    pub const fn font(mut self, font: FontChoice) -> Self {
+        self.font = font;
+        self
+    }
+}
+
+/// Application-facing persistent text-area state.
+pub struct TextAreaState {
+    /// Current text buffer.
+    buf: String,
+    /// Current UTF-8 byte cursor.
+    cursor: usize,
+    /// Current scroll offset.
+    scroll: Vec2i,
+    /// Requests a runtime-only vertical-cursor preference reset.
+    reset_preferred_x: bool,
+    /// User text changes waiting to be consumed.
+    pending_changes: u32,
+    /// User submissions waiting to be consumed.
+    pending_submissions: u32,
+}
+
+impl WidgetState for TextAreaState {}
+
+impl TextAreaState {
     /// Returns the current text buffer.
     pub fn text(&self) -> &str {
         self.buf.as_str()
@@ -127,7 +141,7 @@ impl TextArea {
     pub fn set_text(&mut self, text: impl Into<String>) {
         self.buf = text.into();
         self.cursor = self.buf.len();
-        self.preferred_x = None;
+        self.reset_preferred_x = true;
     }
 
     /// Clears the current text and resets cursor/scroll state.
@@ -135,7 +149,7 @@ impl TextArea {
         self.buf.clear();
         self.cursor = 0;
         self.scroll = vec2(0, 0);
-        self.preferred_x = None;
+        self.reset_preferred_x = true;
     }
 
     /// Returns the current cursor byte position.
@@ -146,13 +160,13 @@ impl TextArea {
     /// Moves the cursor to a valid UTF-8 boundary within the current text.
     pub fn set_cursor(&mut self, cursor: usize) {
         self.cursor = clamp_cursor_boundary(&self.buf, cursor);
-        self.preferred_x = None;
+        self.reset_preferred_x = true;
     }
 
     /// Moves the cursor to the end of the current text.
     pub fn move_cursor_to_end(&mut self) {
         self.cursor = self.buf.len();
-        self.preferred_x = None;
+        self.reset_preferred_x = true;
     }
 
     /// Returns the current scroll offset.
@@ -165,40 +179,117 @@ impl TextArea {
         self.scroll = vec2(scroll.x.max(0), scroll.y.max(0));
     }
 
+    /// Consumes one pending user text change.
+    pub fn take_changed(&mut self) -> bool {
+        crate::widgets::take_pending_event(&mut self.pending_changes)
+    }
+
+    /// Consumes one pending user submission.
+    pub fn take_submitted(&mut self) -> bool {
+        crate::widgets::take_pending_event(&mut self.pending_submissions)
+    }
+}
+
+/// Runtime-only text-area editing state.
+#[derive(Default)]
+struct TextAreaInteraction {
+    /// Desired caret x position preserved while moving vertically.
+    preferred_x: Option<i32>,
+    /// Whether the vertical scrollbar thumb is being dragged.
+    dragging_y: bool,
+    /// Whether the horizontal scrollbar thumb is being dragged.
+    dragging_x: bool,
+}
+
+/// Concrete text-area runtime and sole strong owner of its application state.
+pub struct TextArea {
+    /// Initialization-only wrapping mode.
+    wrap: TextWrap,
+    /// Initialization-only font.
+    font: FontChoice,
+    /// Base widget options.
+    opt: WidgetOption,
+    /// Runtime-only derived editing state.
+    interaction: TextAreaInteraction,
+    /// Persistent state allocation.
+    state: Rc<RefCell<TextAreaState>>,
+}
+
+impl TextArea {
+    /// Constructs a typed state handle and unique text-area runtime.
+    pub fn create(parameters: TextAreaParameters) -> (WidgetStateHandle<TextAreaState>, Self) {
+        let widget = TextAreaBuilder::create_widget(parameters);
+        let state = widget.state_handle();
+        (state, widget)
+    }
+
     /// Measures the text area content, respecting wrapping and available constraints.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
-        let font = style.resolve_font_choice(self.config.font);
+        let font = style.resolve_font_choice(self.font);
         let max_width = if self.wrap == TextWrap::Word && avail.width > 0 {
             (avail.width - padding * 2).max(1)
         } else {
             i32::MAX / 4
         };
-        let lines = build_text_lines(self.buf.as_str(), self.wrap, max_width, font, atlas);
-        let text_w = lines.iter().map(|line| line.width).max().unwrap_or(0);
-        let line_count = (lines.len() as i32).max(1);
-        let line_height = atlas.get_font_height(font) as i32;
-        let mut width = text_w.saturating_add(padding * 2).max(0);
-        let mut height = line_height.saturating_mul(line_count).saturating_add(padding * 2).max(0);
-        if avail.width > 0 {
-            width = width.min(avail.width.max(0));
-        }
-        if avail.height > 0 {
-            height = height.min(avail.height.max(0));
-        }
-        Dimensioni::new(width, height)
+        runtime_read_state(&self.state, "TextArea::measure", |state| {
+            let lines = build_text_lines(state.buf.as_str(), self.wrap, max_width, font, atlas);
+            let text_w = lines.iter().map(|line| line.width).max().unwrap_or(0);
+            let line_count = (lines.len() as i32).max(1);
+            let line_height = atlas.get_font_height(font) as i32;
+            let mut width = text_w.saturating_add(padding * 2).max(0);
+            let mut height = line_height.saturating_mul(line_count).saturating_add(padding * 2).max(0);
+            if avail.width > 0 {
+                width = width.min(avail.width.max(0));
+            }
+            if avail.height > 0 {
+                height = height.min(avail.height.max(0));
+            }
+            Dimensioni::new(width, height)
+        })
     }
 
     /// Applies multiline editing, scrolling, and scrollbar dragging.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
-        let font = ctx.style().resolve_font_choice(self.config.font);
-        textarea_update(ctx, input, self, font)
+        let font = ctx.style().resolve_font_choice(self.font);
+        let old_preferred_x = self.interaction.preferred_x;
+        let old_dragging_y = self.interaction.dragging_y;
+        let old_dragging_x = self.interaction.dragging_x;
+        runtime_update_state(&self.state, "TextArea::update", |state| {
+            let old_buf = state.buf.clone();
+            let old_cursor = state.cursor;
+            let old_scroll = state.scroll;
+            if state.reset_preferred_x {
+                self.interaction.preferred_x = None;
+                state.reset_preferred_x = false;
+            }
+            let mut res = textarea_update(ctx, input, state, &mut self.interaction, self.wrap, font);
+            if res.is_changed() {
+                crate::widgets::record_pending_event(&mut state.pending_changes);
+            }
+            if res.is_submitted() {
+                crate::widgets::record_pending_event(&mut state.pending_submissions);
+            }
+            let changed = state.buf != old_buf
+                || state.cursor != old_cursor
+                || state.scroll.x != old_scroll.x
+                || state.scroll.y != old_scroll.y
+                || self.interaction.preferred_x != old_preferred_x
+                || self.interaction.dragging_y != old_dragging_y
+                || self.interaction.dragging_x != old_dragging_x;
+            if ctx.focused() || changed {
+                res |= ResourceState::ACTIVE;
+            }
+            res
+        })
     }
 
     /// Paints the multiline editor and scrollbars.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let font = ctx.style().resolve_font_choice(self.config.font);
-        textarea_paint(ctx, self, font);
+        let font = ctx.style().resolve_font_choice(self.font);
+        runtime_read_state(&self.state, "TextArea::paint", |state| {
+            textarea_paint(ctx, state, self.wrap, font);
+        });
     }
 }
 
@@ -236,7 +327,7 @@ struct TextAreaLayout {
 ///
 /// Raw read-only inputs keep this calculation phase-neutral: update and paint derive the same
 /// geometry without either context borrowing capabilities from the other.
-fn textarea_layout(content_rect: Recti, style: &Style, atlas: &AtlasHandle, state: &TextArea, font: FontId) -> TextAreaLayout {
+fn textarea_layout(content_rect: Recti, style: &Style, atlas: &AtlasHandle, state: &TextAreaState, wrap: TextWrap, font: FontId) -> TextAreaLayout {
     let bounds = content_rect;
     let padding = style.padding;
     let scrollbar_size = style.scrollbar_size;
@@ -256,7 +347,7 @@ fn textarea_layout(content_rect: Recti, style: &Style, atlas: &AtlasHandle, stat
         // Vertical and horizontal scrollbars can force each other to appear. Iterate a few times
         // until the body stabilizes without making the layout solver recursive.
         let available_width = (body.width - padding * 2).max(0);
-        lines = build_text_lines(state.buf.as_str(), state.wrap, available_width, font, atlas);
+        lines = build_text_lines(state.buf.as_str(), wrap, available_width, font, atlas);
         content_width = lines.iter().map(|line| line.width).max().unwrap_or(0);
         content_height = line_height * lines.len() as i32;
         let cs = vec2(content_width + padding * 2, content_height + padding * 2);
@@ -310,19 +401,26 @@ fn textarea_layout(content_rect: Recti, style: &Style, atlas: &AtlasHandle, stat
 }
 
 /// Updates text-area buffer, cursor, scroll position, and scrollbar drag state.
-fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent], state: &mut TextArea, font: FontId) -> ResourceState {
+fn textarea_update(
+    ctx: &mut WidgetUpdateCtx<'_>,
+    input: &[UiInputEvent],
+    state: &mut TextAreaState,
+    interaction: &mut TextAreaInteraction,
+    wrap: TextWrap,
+    font: FontId,
+) -> ResourceState {
     let mut res = ResourceState::NONE;
     if !ctx.focused() {
         // Blurred text areas park the cursor at the end and forget vertical cursor preference.
         state.cursor = state.buf.len();
-        state.preferred_x = None;
+        interaction.preferred_x = None;
     }
     let mut cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
 
     let mut ensure_visible = false;
     let mut reset_preferred = false;
     let mut vertical_moved = false;
-    let mut preferred_x = state.preferred_x;
+    let mut preferred_x = interaction.preferred_x;
 
     if ctx.focused() {
         let text_input = input.text_input();
@@ -351,7 +449,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent], state:
         }
     }
 
-    let layout = textarea_layout(ctx.local_rect(), ctx.style(), ctx.atlas(), state, font);
+    let layout = textarea_layout(ctx.local_rect(), ctx.style(), ctx.atlas(), state, wrap, font);
     let content_mouse_pos = input.mouse_pos();
 
     if let Some(delta) = input.scroll_delta() {
@@ -365,8 +463,8 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent], state:
     }
 
     if !input.mouse_down().intersects(MouseButton::LEFT) {
-        state.dragging_y = false;
-        state.dragging_x = false;
+        interaction.dragging_y = false;
+        interaction.dragging_x = false;
     }
 
     let mut clicked_scrollbar = false;
@@ -374,20 +472,20 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent], state:
     if layout.needs_v && layout.maxscroll_y > 0 && layout.body.height > 0 {
         if input.mouse_pressed().intersects(MouseButton::LEFT) && layout.vscroll_base.contains(&content_mouse_pos) {
             // Track scrollbar drag separately so text clicks do not also move the caret.
-            state.dragging_y = true;
+            interaction.dragging_y = true;
             clicked_scrollbar = true;
         }
-        if state.dragging_y {
+        if interaction.dragging_y {
             state.scroll.y += scrollbar_drag_delta(ScrollAxis::Vertical, input.mouse_delta(), layout.content_size.y, layout.vscroll_base);
         }
     }
 
     if layout.needs_h && layout.maxscroll_x > 0 && layout.body.width > 0 {
         if input.mouse_pressed().intersects(MouseButton::LEFT) && layout.hscroll_base.contains(&content_mouse_pos) {
-            state.dragging_x = true;
+            interaction.dragging_x = true;
             clicked_scrollbar = true;
         }
-        if state.dragging_x {
+        if interaction.dragging_x {
             state.scroll.x += scrollbar_drag_delta(ScrollAxis::Horizontal, input.mouse_delta(), layout.content_size.x, layout.hscroll_base);
         }
     }
@@ -450,7 +548,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent], state:
         preferred_x = Some(caret_x);
     }
 
-    if ensure_visible && !state.dragging_x && !state.dragging_y {
+    if ensure_visible && !interaction.dragging_x && !interaction.dragging_y {
         // Auto-scroll only when text editing moved the caret, not while the user drags scrollbars.
         let view_width = (layout.body.width - layout.padding * 2).max(0);
         let view_height = (layout.body.height - layout.padding * 2).max(0);
@@ -474,13 +572,13 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent], state:
     state.scroll.x = clamp_scroll(state.scroll.x, layout.maxscroll_x);
     state.scroll.y = clamp_scroll(state.scroll.y, layout.maxscroll_y);
     state.cursor = cursor_pos;
-    state.preferred_x = preferred_x;
+    interaction.preferred_x = preferred_x;
     res
 }
 
 /// Paints text-area frame, visible text lines, caret, and scrollbars.
-fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &mut TextArea, font: FontId) {
-    let layout = textarea_layout(ctx.local_rect(), ctx.style(), ctx.atlas(), state, font);
+fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &TextAreaState, wrap: TextWrap, font: FontId) {
+    let layout = textarea_layout(ctx.local_rect(), ctx.style(), ctx.atlas(), state, wrap, font);
     let cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
     let cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
     let caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
@@ -545,7 +643,7 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &mut TextArea, font: Font
 
 impl Widget for TextArea {
     fn widget_opt(&self) -> &WidgetOption {
-        &self.config.opt
+        &self.opt
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
@@ -553,24 +651,7 @@ impl Widget for TextArea {
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
-        let old_buf = self.buf.clone();
-        let old_cursor = self.cursor;
-        let old_scroll = self.scroll;
-        let old_preferred_x = self.preferred_x;
-        let old_dragging_y = self.dragging_y;
-        let old_dragging_x = self.dragging_x;
-        let mut res = self.update_widget(ctx, &input);
-        let scroll_changed = self.scroll.x != old_scroll.x || self.scroll.y != old_scroll.y;
-        let changed = self.buf != old_buf
-            || self.cursor != old_cursor
-            || scroll_changed
-            || self.preferred_x != old_preferred_x
-            || self.dragging_y != old_dragging_y
-            || self.dragging_x != old_dragging_x;
-        if ctx.focused() || changed {
-            res |= ResourceState::ACTIVE;
-        }
-        res
+        self.update_widget(ctx, &input)
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -578,10 +659,93 @@ impl Widget for TextArea {
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
-        self.config.opt | WidgetOption::HOLD_FOCUS
+        self.opt | WidgetOption::HOLD_FOCUS
     }
 
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::HoldUntilBlur
+    }
+}
+
+impl WidgetStateOwner for TextArea {
+    type State = TextAreaState;
+
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
+    }
+}
+
+/// Builder associating text-area parameters with the concrete runtime.
+pub struct TextAreaBuilder;
+
+impl WidgetBuilder for TextAreaBuilder {
+    type Parameters = TextAreaParameters;
+    type W = TextArea;
+
+    fn create_widget(parameters: Self::Parameters) -> Self::W {
+        let cursor = parameters.buf.len();
+        TextArea {
+            wrap: parameters.wrap,
+            font: parameters.font,
+            opt: parameters.opt,
+            interaction: TextAreaInteraction::default(),
+            state: Rc::new(RefCell::new(TextAreaState {
+                buf: parameters.buf,
+                cursor,
+                scroll: vec2(0, 0),
+                reset_preferred_x: false,
+                pending_changes: 0,
+                pending_submissions: 0,
+            })),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::test_atlas;
+
+    fn update_text_area(text_area: &mut TextArea, input: Vec<UiInputEvent>) -> ResourceState {
+        let atlas = test_atlas();
+        let style = Style::default();
+        let bounds = rect(0, 0, 160, 80);
+        let mut ctx = WidgetUpdateCtx::new_with_interaction(bounds, bounds, &style, &atlas, true, true, true, false, false, None);
+        text_area.update(&mut ctx, input)
+    }
+
+    #[test]
+    fn text_area_records_independent_change_and_submission_events() {
+        let (state, mut text_area) = TextArea::create(TextAreaParameters::new(""));
+        let result = update_text_area(
+            &mut text_area,
+            vec![
+                UiInputEvent::Text { text: "line".into() },
+                UiInputEvent::KeyState { keys: KeyMode::CTRL },
+                UiInputEvent::KeyDown { key: KeyMode::RETURN },
+            ],
+        );
+        assert!(result.is_changed());
+        assert!(result.is_submitted());
+        assert_eq!(state.try_update(TextAreaState::take_changed), Some(true));
+        assert_eq!(state.try_update(TextAreaState::take_changed), Some(false));
+        assert_eq!(state.try_update(TextAreaState::take_submitted), Some(true));
+        assert_eq!(state.try_update(TextAreaState::take_submitted), Some(false));
+    }
+
+    #[test]
+    fn programmatic_text_cursor_and_scroll_setters_are_silent() {
+        let (state, _text_area) = TextArea::create(TextAreaParameters::new("initial"));
+        state
+            .try_update(|state| {
+                state.set_text("replacement");
+                state.set_cursor(3);
+                state.move_cursor_to_end();
+                state.set_scroll(vec2(5, 7));
+                state.clear();
+            })
+            .unwrap();
+        assert_eq!(state.try_update(TextAreaState::take_changed), Some(false));
+        assert_eq!(state.try_update(TextAreaState::take_submitted), Some(false));
     }
 }

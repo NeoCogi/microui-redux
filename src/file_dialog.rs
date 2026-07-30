@@ -45,8 +45,12 @@ pub struct FileDialogState {
     file_path: Option<String>,
     /// Editable path textbox.
     path_box: WidgetHandle<Textbox>,
+    /// Typed application state for the path textbox.
+    path_box_state: WidgetStateHandle<TextboxState>,
     /// Editable filename textbox.
     tmp_file_name: WidgetHandle<Textbox>,
+    /// Typed application state for the filename textbox.
+    tmp_file_name_state: WidgetStateHandle<TextboxState>,
     /// Folder selected from the folder list, if any.
     selected_folder: Option<String>,
     /// Registered root id for the dialog window.
@@ -59,22 +63,36 @@ pub struct FileDialogState {
     files: Vec<String>,
     /// Retained list-item handles for folder rows.
     folder_items: Vec<WidgetHandle<ListItem>>,
+    /// Typed application state for folder rows.
+    folder_item_states: Vec<WidgetStateHandle<ListItemState>>,
     /// Retained list-item handles for file rows.
     file_items: Vec<WidgetHandle<ListItem>>,
+    /// Typed application state for file rows.
+    file_item_states: Vec<WidgetStateHandle<ListItemState>>,
     /// Node ids corresponding to folder rows.
     folder_item_ids: Vec<NodeId>,
     /// Node ids corresponding to file rows.
     file_item_ids: Vec<NodeId>,
     /// Button that navigates to the parent directory.
     up_button: WidgetHandle<Button>,
+    /// Typed application state for the parent-directory button.
+    up_button_state: WidgetStateHandle<ButtonState>,
     /// Button that navigates to the home directory.
     home_button: WidgetHandle<Button>,
+    /// Typed application state for the home-directory button.
+    home_button_state: WidgetStateHandle<ButtonState>,
     /// Button that applies the path textbox.
     go_button: WidgetHandle<Button>,
+    /// Typed application state for the path-apply button.
+    go_button_state: WidgetStateHandle<ButtonState>,
     /// Button that accepts the current selection.
     ok_button: WidgetHandle<Button>,
+    /// Typed application state for the accept button.
+    ok_button_state: WidgetStateHandle<ButtonState>,
     /// Button that closes without selecting.
     cancel_button: WidgetHandle<Button>,
+    /// Typed application state for the cancel button.
+    cancel_button_state: WidgetStateHandle<ButtonState>,
     /// Node id for the parent-directory button.
     up_button_id: NodeId,
     /// Node id for the home-directory button.
@@ -104,6 +122,30 @@ pub struct FileDialogState {
 }
 
 impl FileDialogState {
+    /// Builds the temporary projection handle used until owning nodes land in P1.3.
+    fn projected_textbox(parameters: TextboxParameters) -> (WidgetStateHandle<TextboxState>, WidgetHandle<Textbox>) {
+        let (state, runtime) = Textbox::create(parameters);
+        (state, widget_handle(runtime))
+    }
+
+    /// Builds a button state/runtime pair across the temporary projection boundary.
+    fn projected_button(parameters: ButtonParameters) -> (WidgetStateHandle<ButtonState>, WidgetHandle<Button>) {
+        let (state, runtime) = Button::create(parameters);
+        (state, widget_handle(runtime))
+    }
+
+    /// Builds a list-item state/runtime pair across the temporary projection boundary.
+    fn projected_list_item(parameters: ListItemParameters) -> (WidgetStateHandle<ListItemState>, WidgetHandle<ListItem>) {
+        let (state, runtime) = ListItem::create(parameters);
+        (state, widget_handle(runtime))
+    }
+
+    /// Builds a projection-only list item whose mounted state is intentionally unused.
+    fn projected_static_list_item(parameters: ListItemParameters) -> WidgetHandle<ListItem> {
+        let (_, runtime) = ListItem::create(parameters);
+        widget_handle(runtime)
+    }
+
     /// Returns the selected file name (basename only) if the dialog completed successfully.
     pub fn file_name(&self) -> &Option<String> {
         &self.file_name
@@ -193,7 +235,9 @@ impl FileDialogState {
         let parent_path = Path::new(&self.current_working_directory).parent().map(|p| p.to_string_lossy().to_string());
 
         self.folder_items.clear();
+        self.folder_item_states.clear();
         self.folder_items.reserve(self.folders.len());
+        self.folder_item_states.reserve(self.folders.len());
         for f in &self.folders {
             // Show the injected parent entry using the conventional ".." label
             // while preserving the full path internally for navigation.
@@ -209,17 +253,19 @@ impl FileDialogState {
             } else {
                 CLOSED_FOLDER_16_ICON
             };
-            let mut state = ListItem::new(label);
-            state.icon = Some(icon);
-            self.folder_items.push(widget_handle(state));
+            let (state, runtime) = Self::projected_list_item(ListItemParameters::with_icon(label, icon));
+            self.folder_item_states.push(state);
+            self.folder_items.push(runtime);
         }
 
         self.file_items.clear();
+        self.file_item_states.clear();
         self.file_items.reserve(self.files.len());
+        self.file_item_states.reserve(self.files.len());
         for f in &self.files {
-            let mut state = ListItem::new(f.as_str());
-            state.icon = Some(FILE_16_ICON);
-            self.file_items.push(widget_handle(state));
+            let (state, runtime) = Self::projected_list_item(ListItemParameters::with_icon(f.as_str(), FILE_16_ICON));
+            self.file_item_states.push(state);
+            self.file_items.push(runtime);
         }
     }
 
@@ -327,10 +373,10 @@ impl FileDialogState {
 
     /// Synchronizes text boxes and tree structure with the current dialog state.
     fn sync_retained_view(&mut self, spacing: i32) {
-        if self.path_box.read(|path_box| path_box.text() != self.current_working_directory) {
-            self.path_box.update(|path_box| {
-                path_box.set_text(self.current_working_directory.clone());
-            });
+        if self.path_box_state.try_read(|path_box| path_box.text() != self.current_working_directory) == Some(true) {
+            let _ = self
+                .path_box_state
+                .try_update_with(self.current_working_directory.clone(), |path_box, path| path_box.set_text(path));
         }
         self.rebuild_tree(spacing);
     }
@@ -342,12 +388,10 @@ impl FileDialogState {
         }
         self.current_working_directory = path;
         self.selected_folder = None;
-        self.path_box.update(|path_box| {
-            path_box.set_text(self.current_working_directory.clone());
-        });
-        self.tmp_file_name.update(|tmp_file_name| {
-            tmp_file_name.set_text("");
-        });
+        let _ = self
+            .path_box_state
+            .try_update_with(self.current_working_directory.clone(), |path_box, path| path_box.set_text(path));
+        let _ = self.tmp_file_name_state.try_update(|tmp_file_name| tmp_file_name.set_text(""));
         true
     }
 
@@ -358,29 +402,25 @@ impl FileDialogState {
         self.open = ctx.root_visible(self.root).unwrap_or(false);
     }
 
-    /// Checks whether a node inside the root dialog submitted in the committed results.
-    fn root_submitted(&self, results: FrameResultGeneration<'_>, node_id: NodeId) -> bool {
-        results.state_of_retained(RetainedId::root_node(self.root, node_id)).is_submitted()
-    }
-
     /// Applies toolbar/path navigation actions from committed frame results.
-    fn apply_navigation_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
-        if self.root_submitted(results, self.up_button_id) {
-            if let Some(parent) = Path::new(self.current_working_directory.as_str()).parent() {
-                return self.navigate_to(parent.to_string_lossy().to_string());
-            }
+    fn apply_navigation_actions(&mut self) -> bool {
+        if self.up_button_state.try_update(ButtonState::take_submitted).unwrap_or(false)
+            && let Some(parent) = Path::new(self.current_working_directory.as_str()).parent()
+        {
+            return self.navigate_to(parent.to_string_lossy().to_string());
         }
 
-        if self.root_submitted(results, self.home_button_id) {
-            if let Some(home) = Self::home_dir() {
-                if Path::new(home.as_str()).is_dir() {
-                    return self.navigate_to(home);
-                }
-            }
+        if self.home_button_state.try_update(ButtonState::take_submitted).unwrap_or(false)
+            && let Some(home) = Self::home_dir()
+            && Path::new(home.as_str()).is_dir()
+        {
+            return self.navigate_to(home);
         }
 
-        if self.root_submitted(results, self.path_box_id) || self.root_submitted(results, self.go_button_id) {
-            let path_input = self.path_box.read(|path_box| path_box.text().to_owned());
+        let path_submitted = self.path_box_state.try_update(TextboxState::take_submitted).unwrap_or(false);
+        let go_submitted = self.go_button_state.try_update(ButtonState::take_submitted).unwrap_or(false);
+        if path_submitted || go_submitted {
+            let path_input = self.path_box_state.try_read(|path_box| path_box.text().to_owned()).unwrap_or_default();
             if let Some(path) = Self::resolve_directory_path(self.current_working_directory.as_str(), path_input.as_str()) {
                 return self.navigate_to(path);
             }
@@ -390,9 +430,9 @@ impl FileDialogState {
     }
 
     /// Applies folder-list selection and navigates when a folder is submitted.
-    fn apply_folder_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
-        let next_directory = self.folder_item_ids.iter().enumerate().find_map(|(index, node_id)| {
-            if self.root_submitted(results, *node_id) {
+    fn apply_folder_actions(&mut self) -> bool {
+        let next_directory = self.folder_item_states.iter().enumerate().find_map(|(index, state)| {
+            if state.try_update(ListItemState::take_submitted).unwrap_or(false) {
                 self.folders.get(index).cloned()
             } else {
                 None
@@ -408,9 +448,9 @@ impl FileDialogState {
     }
 
     /// Applies file-list selection into the temporary filename textbox.
-    fn apply_file_actions(&mut self, results: FrameResultGeneration<'_>) {
-        let selected_file = self.file_item_ids.iter().enumerate().find_map(|(index, node_id)| {
-            if self.root_submitted(results, *node_id) {
+    fn apply_file_actions(&mut self) {
+        let selected_file = self.file_item_states.iter().enumerate().find_map(|(index, state)| {
+            if state.try_update(ListItemState::take_submitted).unwrap_or(false) {
                 self.files.get(index).cloned()
             } else {
                 None
@@ -418,24 +458,27 @@ impl FileDialogState {
         });
 
         if let Some(name) = selected_file {
-            self.tmp_file_name.update(|tmp_file_name| {
-                tmp_file_name.set_text(name);
-            });
+            let _ = self
+                .tmp_file_name_state
+                .try_update_with(name, |tmp_file_name, name| tmp_file_name.set_text(name));
         }
     }
 
     /// Applies OK/Cancel actions and stores the selected file result.
-    fn apply_completion_actions(&mut self, results: FrameResultGeneration<'_>) -> bool {
+    fn apply_completion_actions(&mut self) -> bool {
         let mut close = false;
-        if self.root_submitted(results, self.cancel_button_id) {
+        if self.cancel_button_state.try_update(ButtonState::take_submitted).unwrap_or(false) {
             self.file_name = None;
             self.file_path = None;
             self.open = false;
             close = true;
         }
 
-        if self.root_submitted(results, self.ok_button_id) {
-            let typed_name = self.tmp_file_name.read(|tmp_file_name| tmp_file_name.text().to_owned());
+        if self.ok_button_state.try_update(ButtonState::take_submitted).unwrap_or(false) {
+            let typed_name = self
+                .tmp_file_name_state
+                .try_read(|tmp_file_name| tmp_file_name.text().to_owned())
+                .unwrap_or_default();
             if typed_name.is_empty() {
                 self.file_name = None;
                 self.file_path = None;
@@ -464,43 +507,59 @@ impl FileDialogState {
             .to_string();
         let root = ctx.create_dialog("Open File", Recti::new(50, 50, 720, 520), UiNodeSet::default());
         ctx.set_root_options(root, WindowOption::FRAME);
+        let (path_box_state, path_box) = Self::projected_textbox(TextboxParameters::new(""));
+        let (tmp_file_name_state, tmp_file_name) = Self::projected_textbox(TextboxParameters::new(""));
+        let (up_button_state, up_button) = Self::projected_button(ButtonParameters::new("Up"));
+        let (home_button_state, home_button) = Self::projected_button(ButtonParameters::new("Home"));
+        let (go_button_state, go_button) = Self::projected_button(ButtonParameters::new("Go"));
+        let (ok_button_state, ok_button) = Self::projected_button(ButtonParameters::new("Open"));
+        let (cancel_button_state, cancel_button) = Self::projected_button(ButtonParameters::new("Cancel"));
         let mut dialog = Self {
             current_working_directory,
             file_name: None,
             file_path: None,
-            path_box: widget_handle(Textbox::new("")),
-            tmp_file_name: widget_handle(Textbox::new("")),
+            path_box,
+            path_box_state,
+            tmp_file_name,
+            tmp_file_name_state,
             selected_folder: None,
             root,
             open: ctx.root_visible(root).unwrap_or(false),
             folders: Vec::new(),
             files: Vec::new(),
             folder_items: Vec::new(),
+            folder_item_states: Vec::new(),
             file_items: Vec::new(),
+            file_item_states: Vec::new(),
             folder_item_ids: Vec::new(),
             file_item_ids: Vec::new(),
-            up_button: widget_handle(Button::new("Up")),
-            home_button: widget_handle(Button::new("Home")),
-            go_button: widget_handle(Button::new("Go")),
-            ok_button: widget_handle(Button::new("Open")),
-            cancel_button: widget_handle(Button::new("Cancel")),
+            up_button,
+            up_button_state,
+            home_button,
+            home_button_state,
+            go_button,
+            go_button_state,
+            ok_button,
+            ok_button_state,
+            cancel_button,
+            cancel_button_state,
             up_button_id: NodeId::default(),
             home_button_id: NodeId::default(),
             path_box_id: NodeId::default(),
             go_button_id: NodeId::default(),
             ok_button_id: NodeId::default(),
             cancel_button_id: NodeId::default(),
-            folders_label: widget_handle(ListItem::with_opt("Folders", WidgetOption::NO_INTERACT)),
-            no_folders_label: widget_handle(ListItem::with_opt("No folders", WidgetOption::NO_INTERACT)),
-            files_label: widget_handle(ListItem::with_opt("Files", WidgetOption::NO_INTERACT)),
-            no_files_label: widget_handle(ListItem::with_opt("No Files", WidgetOption::NO_INTERACT)),
-            file_name_label: widget_handle(ListItem::with_opt("File name:", WidgetOption::NO_INTERACT)),
-            spacer_label: widget_handle(ListItem::with_opt("", WidgetOption::NO_INTERACT)),
+            folders_label: Self::projected_static_list_item(ListItemParameters::with_opt("Folders", WidgetOption::NO_INTERACT)),
+            no_folders_label: Self::projected_static_list_item(ListItemParameters::with_opt("No folders", WidgetOption::NO_INTERACT)),
+            files_label: Self::projected_static_list_item(ListItemParameters::with_opt("Files", WidgetOption::NO_INTERACT)),
+            no_files_label: Self::projected_static_list_item(ListItemParameters::with_opt("No Files", WidgetOption::NO_INTERACT)),
+            file_name_label: Self::projected_static_list_item(ListItemParameters::with_opt("File name:", WidgetOption::NO_INTERACT)),
+            spacer_label: Self::projected_static_list_item(ListItemParameters::with_opt("", WidgetOption::NO_INTERACT)),
             tree: UiNodeSet::default(),
         };
-        dialog.path_box.update(|path_box| {
-            path_box.set_text(dialog.current_working_directory.clone());
-        });
+        let _ = dialog
+            .path_box_state
+            .try_update_with(dialog.current_working_directory.clone(), |path_box, path| path_box.set_text(path));
         dialog.refresh_entries();
         dialog.sync_retained_root(ctx);
         dialog
@@ -514,10 +573,9 @@ impl FileDialogState {
 
     /// Renders the dialog and updates the selected file when confirmed.
     pub fn eval<B: RendererBackend>(&mut self, ctx: &mut Context<B>) {
-        let results = ctx.committed_results();
-        let needs_refresh = self.apply_navigation_actions(results) || self.apply_folder_actions(results);
-        self.apply_file_actions(results);
-        let close = self.apply_completion_actions(results);
+        let needs_refresh = self.apply_navigation_actions() || self.apply_folder_actions();
+        self.apply_file_actions();
+        let close = self.apply_completion_actions();
         if close {
             ctx.set_root_visible(self.root, false);
         }
@@ -651,7 +709,7 @@ mod tests {
         click_node(&mut ctx, dialog.root, file_node);
         dialog.eval(&mut ctx);
 
-        assert_eq!(dialog.tmp_file_name.read(|tmp| tmp.text().to_string()), "picked.txt");
+        assert_eq!(dialog.tmp_file_name_state.try_read(|tmp| tmp.text().to_string()).as_deref(), Some("picked.txt"));
 
         ctx.mouseup(0, 0, MouseButton::LEFT);
         ctx.update_ui();
@@ -687,7 +745,10 @@ mod tests {
         click_node_without_hover_frame(&mut ctx, dialog.root, file_node);
         dialog.eval(&mut ctx);
 
-        assert_eq!(dialog.tmp_file_name.read(|tmp| tmp.text().to_string()), "batched.txt");
+        assert_eq!(
+            dialog.tmp_file_name_state.try_read(|tmp| tmp.text().to_string()).as_deref(),
+            Some("batched.txt")
+        );
 
         ctx.mouseup(0, 0, MouseButton::LEFT);
         ctx.update_ui();

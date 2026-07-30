@@ -308,10 +308,13 @@ impl UiRuntime {
             let preferred = self.measure_node_ref(root_node, style, &atlas, Dimensioni::new(client.width, remaining_height));
             // Root position must not change sizing semantics: `Auto` keeps its measured height,
             // while callers that want the remaining client height request `Remainder` explicitly.
-            let policy = root_node.state.policy.height;
-            let height = resolve_size(policy, preferred.height, remaining_height, remaining_height, None).max(0);
-            let rect = Recti::new(client.x, y, client.width, height);
-            self.layout_node_ref(root_node, style, &atlas, rect);
+            let policy = root_node.state.policy;
+            let width = resolve_allocated_size(policy.width, preferred.width, client.width, client.width, None);
+            let height = resolve_size(policy.height, preferred.height, remaining_height, remaining_height, None).max(0);
+            let rect = Recti::new(client.x, y, width, height);
+            // Root flow resolves the root node's policies above, so the resulting rectangle is an
+            // allocation rather than an unresolved parent slot.
+            self.layout_allocated_node_ref(root_node, style, &atlas, rect);
             let allocation = root_node.state.layout.allocation;
             let content_size = root_node.state.layout.content_size;
             let unscrolled = Recti::new(
@@ -377,6 +380,26 @@ impl UiRuntime {
             resolve_allocated_size(policy.width, preferred.width, rect.width, rect.width, None),
             resolve_allocated_size(policy.height, preferred.height, rect.height, rect.height, None),
         );
+        self.layout_node_outer_ref(node, style, atlas, framed, outer)
+    }
+
+    /// Lays out a node whose parent/root flow has already resolved its size policy.
+    fn layout_allocated_node_ref(&mut self, node: &mut UiNode, style: &Style, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
+        #[cfg(test)]
+        self.bump_metric(|metrics| metrics.layouts += 1);
+        let framed = match &node.data {
+            UiNodeData::Widget(widget) => widget.is_framed(),
+            UiNodeData::Container(container) => container.is_framed(),
+        };
+        // Preserve the established measure/layout phase contract while keeping the resolved root
+        // allocation authoritative.
+        let _preferred = self.measure_node_ref(node, style, atlas, Dimensioni::new(rect.width, rect.height));
+        let outer = Recti::new(rect.x, rect.y, rect.width.max(0), rect.height.max(0));
+        self.layout_node_outer_ref(node, style, atlas, framed, outer)
+    }
+
+    /// Applies frame/content geometry and delegates layout for one resolved outer allocation.
+    fn layout_node_outer_ref(&mut self, node: &mut UiNode, style: &Style, atlas: &crate::AtlasHandle, framed: bool, outer: Recti) -> Dimensioni {
         let local_outer = Recti::new(0, 0, outer.width, outer.height);
         let frame_geometry = crate::frame::frame_geometry(local_outer, framed, style);
         let content = frame_geometry.content_or_empty();

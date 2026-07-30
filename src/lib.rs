@@ -162,8 +162,12 @@ pub mod prelude {
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
-        Button, ButtonContent, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch, Combo, Custom, ListBox, ListItem, Node,
-        NodeStateValue, Number, Slider, TextArea, TextBlock, Textbox, WidgetConfig,
+        Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch,
+        ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom, CustomBuilder, CustomParameters,
+        ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters, ListItemState, Node, NodeStateValue, Number,
+        NumberBuilder, NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaParameters,
+        TextAreaState, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxParameters, TextboxState,
+        WidgetConfig,
     };
     pub use rs_math3d::{
         Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3,
@@ -190,8 +194,11 @@ pub use widget::{
 };
 pub use ui_node::{ScrollAreaOption, UiInputEvent};
 pub use widgets::{
-    Button, ButtonContent, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch, Combo, Custom, ListBox, ListItem, Node, NodeStateValue,
-    Number, Slider, TextArea, TextBlock, Textbox, WidgetConfig,
+    Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch,
+    ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom, CustomBuilder, CustomParameters,
+    ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters, ListItemState, Node, NodeStateValue, Number,
+    NumberBuilder, NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaParameters,
+    TextAreaState, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxParameters, TextboxState, WidgetConfig,
 };
 
 #[allow(unused_imports)]

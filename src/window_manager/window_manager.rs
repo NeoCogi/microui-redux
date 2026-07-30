@@ -274,6 +274,13 @@ impl<B: RendererBackend> Context<B> {
 
         let mut roots = std::mem::take(&mut self.roots);
         roots.sort_by(|a, b| a.z_index.cmp(&b.z_index));
+        // Per-root focus slots may retain inactive state, but keyboard/text input has one root
+        // authority: the front visible root selected by the window manager.
+        let keyboard_root = roots
+            .iter()
+            .filter(|entry| entry.visible)
+            .max_by_key(|entry| entry.z_index)
+            .map(|entry| entry.id);
         for entry in &mut roots {
             if entry.visible {
                 if entry.kind == WindowKind::Popup {
@@ -293,7 +300,7 @@ impl<B: RendererBackend> Context<B> {
                 entry
                     .runtime
                     .layout_frame_roots(&mut entry.roots, self.style.as_ref(), self.renderer.atlas(), chrome.body);
-                Self::route_entry_input(entry, self.style.as_ref(), &input);
+                Self::route_entry_input(entry, self.style.as_ref(), &input, keyboard_root == Some(entry.id));
                 let atlas = self.renderer.atlas();
                 entry.runtime.update_paint_frame(
                     &mut entry.roots,
@@ -313,12 +320,14 @@ impl<B: RendererBackend> Context<B> {
         self.roots = roots;
     }
 
-    fn route_entry_input(entry: &mut WindowEntry, style: &Style, input: &Input) -> bool {
-        let mut consumed = false;
+    fn route_entry_input(entry: &mut WindowEntry, style: &Style, input: &Input, route_focus_input: bool) {
         if entry.runtime.accepts_pointer_input() || entry.runtime.capture.is_some() {
             for event in pointer_events_from_input(input) {
-                if let Some(captured) = entry.runtime.route_captured_pointer_input_event(&mut entry.roots, style, input, &event) {
-                    consumed |= captured;
+                if entry
+                    .runtime
+                    .route_captured_pointer_input_event(&mut entry.roots, style, input, &event)
+                    .is_some()
+                {
                     continue;
                 }
                 if !entry.runtime.accepts_pointer_input() {
@@ -339,12 +348,13 @@ impl<B: RendererBackend> Context<B> {
 
                 if let Some((owner, result)) = routed {
                     entry.runtime.update_pointer_capture(owner, result, &event, input);
-                    consumed |= result.is_consumed();
                 }
             }
         }
 
-        consumed | entry.runtime.route_focus_input_events(&mut entry.roots, style, input)
+        if route_focus_input {
+            entry.runtime.route_focus_input_events(&mut entry.roots, style, input);
+        }
     }
 
     /// Records the root background and border before retained contents.

@@ -65,16 +65,17 @@ enum Action {
 #[derive(Clone)]
 struct CalcButton {
     action: Action,
+    state: WidgetStateHandle<ButtonState>,
     widget: WidgetHandle<Button>,
-    node_id: NodeId,
 }
 
 impl CalcButton {
     fn new(label: &str, action: Action) -> Self {
+        let (state, runtime) = Button::create(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
         Self {
             action,
-            widget: widget_handle(Button::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)),
-            node_id: NodeId::default(),
+            state,
+            widget: widget_handle(runtime),
         }
     }
 }
@@ -311,7 +312,7 @@ impl Calculator {
 
 struct State {
     _root: RootId,
-    display: WidgetHandle<Textbox>,
+    display: WidgetStateHandle<TextboxState>,
     calculator: Calculator,
     buttons: [CalcButton; 20],
 }
@@ -319,11 +320,12 @@ struct State {
 fn main() {
     let atlas = atlas_assets::load_atlas();
     let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
-        let display = widget_handle(Textbox::with_opt(
+        let (display_state, display_runtime) = Textbox::create(TextboxParameters::with_opt(
             "0",
             WidgetOption::FRAME | WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT,
         ));
-        let mut buttons = [
+        let display = widget_handle(display_runtime);
+        let buttons = [
             CalcButton::new("AC", Action::ClearAll),
             CalcButton::new("CE", Action::ClearEntry),
             CalcButton::new("BS", Action::Backspace),
@@ -345,9 +347,13 @@ fn main() {
             CalcButton::new(".", Action::Dot),
             CalcButton::new("=", Action::Equals),
         ];
-        let mut button_node_ids = [NodeId::default(); 20];
         let tree = UiNodeBuilder::build(|tree| {
-            tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION), |tree| {
+            // The node policy sizes the display band; its single row track fills that allocation.
+            tree.node(NodeOptions::with_policy(Policy::new(
+                SizePolicy::Auto,
+                SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION),
+            )))
+            .row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
                 tree.widget(&display);
             });
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
@@ -360,21 +366,18 @@ fn main() {
                     ];
                     let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
                     tree.grid(&columns, &rows, |tree| {
-                        for (index, button) in buttons.iter().enumerate() {
-                            button_node_ids[index] = tree.widget(&button.widget);
+                        for button in &buttons {
+                            tree.widget(&button.widget);
                         }
                     });
                 });
             });
         });
-        for (button, node_id) in buttons.iter_mut().zip(button_node_ids) {
-            button.node_id = node_id;
-        }
         let root = ctx.create_window("Calculator", rect(0, 0, 320, 420), tree);
         ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_RESIZE | WindowOption::NO_TITLE);
         State {
             _root: root,
-            display,
+            display: display_state,
             calculator: Calculator::new(),
             buttons,
         }
@@ -383,13 +386,12 @@ fn main() {
 
     fw.event_loop(|ctx, state, dim| {
         ctx.set_root_rect(state._root, rect(0, 0, dim.width, dim.height));
-        state.display.update(|display| {
-            display.set_text(state.calculator.display_text());
-        });
+        let _ = state
+            .display
+            .try_update_with(state.calculator.display_text().to_owned(), |display, text| display.set_text(text));
 
-        let results = ctx.committed_results();
         for button in &state.buttons {
-            if results.state_of_retained(RetainedId::root_node(state._root, button.node_id)).is_submitted() {
+            if button.state.try_update(ButtonState::take_submitted).unwrap_or(false) {
                 state.calculator.apply(button.action);
             }
         }

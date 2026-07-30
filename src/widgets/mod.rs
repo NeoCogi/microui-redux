@@ -50,12 +50,11 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Built-in retained widget state.
+//! Built-in retained widgets.
 //!
-//! The widget structs intentionally keep their user-facing state public so applications can update
-//! labels, values, configuration, and local state between frames. Raw input remains owned by
-//! [`crate::Context`], and each widget's `update` path clamps transient invariants such as text
-//! cursors, scroll offsets, selected indices, and numeric ranges before `paint` records commands.
+//! Each leaf widget separates one-shot construction parameters, application-facing persistent
+//! state, and its concrete retained runtime. Applications keep weak [`crate::WidgetStateHandle`]
+//! capabilities while the runtime remains the sole strong owner of state.
 
 use crate::{FontChoice, FontRole, WidgetOption};
 
@@ -90,24 +89,18 @@ impl WidgetConfig {
     }
 }
 
-/// Implements the common [`Widget`] forwarding methods for built-in widget state types.
-macro_rules! implement_widget {
-    ($ty:ty, $update:ident, $paint:ident, $measure:ident) => {
-        impl Widget for $ty {
-            fn widget_opt(&self) -> &WidgetOption {
-                &self.config.opt
-            }
-            fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-                self.$measure(style, atlas, avail)
-            }
-            fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
-                self.$update(ctx, &input)
-            }
-            fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-                self.$paint(ctx);
-            }
-        }
-    };
+/// Records one pending semantic event without wrapping at the counter boundary.
+pub(crate) fn record_pending_event(pending: &mut u32) {
+    *pending = pending.saturating_add(1);
+}
+
+/// Consumes exactly one pending semantic event.
+pub(crate) fn take_pending_event(pending: &mut u32) -> bool {
+    if *pending == 0 {
+        return false;
+    }
+    *pending -= 1;
+    true
 }
 
 // Widget implementations stay grouped here, while the shared execution context now
@@ -121,9 +114,13 @@ mod text_area;
 mod text_edit;
 mod textbox;
 
-pub use core_widgets::{Button, ButtonContent, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, Combo, Custom, ListBox, ListItem};
-pub use display::{ColorSwatch, TextBlock};
+pub use core_widgets::{
+    Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, Combo, ComboBuilder,
+    ComboParameters, ComboState, Custom, CustomBuilder, CustomParameters, ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder,
+    ListItemParameters, ListItemState,
+};
+pub use display::{ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState};
 pub use nodes::{Node, NodeStateValue};
-pub use slider::{Number, Slider};
-pub use text_area::TextArea;
-pub use textbox::Textbox;
+pub use slider::{Number, NumberBuilder, NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState};
+pub use text_area::{TextArea, TextAreaBuilder, TextAreaParameters, TextAreaState};
+pub use textbox::{Textbox, TextboxBuilder, TextboxParameters, TextboxState};
