@@ -45,7 +45,15 @@ This is the sole authoritative UI-node migration plan. It supersedes the obsolet
     defect from the removed `UI-NODE-PLAN.md`, including explicit constraints, one authoritative
     input-dispatch stream, a two-layout frame pipeline, shared axis allocation, scrolling,
     disclosure, and
-    window/transform boundary work.
+    window/transform boundary work;
+15. P1.2 temporarily compiles the file-dialog feature out so the legacy strong-handle leaf adapter
+    can be removed completely without pulling state-owned Row, Stack, and ScrollArea ahead of their
+    dependency order. The implementation and tests in `src/file_dialog.rs` stay in place, and the
+    `src/lib.rs` module/export edges plus `demo-full` integration are commented out with uniform
+    `P1.2 TEMPORARY: restore in P3.2` markers rather than deleted. P3.2 restores and refactors that
+    preserved code after P1.3/P2.0/P2.2 provide its owning-node/container prerequisites. This is an
+    internal migration state only: no merge/tag/release may expose a build without the restored
+    public file dialog.
 
 All common runtime phases belong to `Widget`, including for containers. Public `Container: Widget`
 adds only opaque child visitation, layout, descendant-visibility, and container-specific
@@ -84,6 +92,35 @@ Do not silently preserve, weaken, or discard it. Once resolved, update the appli
 architecture rule, P0 acceptance criterion, implementation owner, migration notes, and affected
 tests together. Known defects remain excluded from the preservation baseline unless an explicit
 decision reclassifies one.
+
+### Temporary internal file-dialog availability exception
+
+**Decision needed: No — explicit plan-owner decision for the P1.2 integration boundary**
+
+`FileDialogState` currently depends on reusable strong leaf handles because
+`FileDialogState::eval` rebuilds and replaces the complete projection. Strict P1.2 direct boxing
+cannot keep that compiled path without either retaining an erased/shared runtime adapter or
+recreating controls and weakening cursor, pending-event, scroll, and weak-handle lifetime. Neither
+is an accepted migration path.
+
+P1.2 therefore comments out only the file-dialog compilation and integration edges. Preserve
+`src/file_dialog.rs` in place with its implementation and tests; do not delete, rename, truncate,
+move, replace with a stub, or mechanically rewrite it merely to make the disabled code compile.
+Comment out `mod file_dialog` and both `FileDialogState` re-exports in `src/lib.rs`, plus the
+file-dialog-owned fields, initialization, evaluation, and visible demo controls in `demo-full`.
+Every commented region must carry the exact searchable marker
+`P1.2 TEMPORARY: restore in P3.2` and enough adjacent code/context to make its restoration owner
+unambiguous. Do not add a Cargo feature whose enabled configuration is known not to compile, and do
+not hide deletion behind an empty compatibility type.
+
+P1.3 supplies the owning `Node`/`Children` foundation but does not prematurely re-enable a reduced
+or reconstruction-based dialog. P2.0 supplies Row/Stack and P2.2 supplies ScrollArea. P3.2 uses the
+preserved source and comment markers as its migration inventory, refactors the implementation in
+place to persistent controls plus local child replacement, restores the crate-root/prelude exports
+and `demo-full` integration, re-enables/adapts all file-dialog tests, and removes every temporary
+marker. The ordinary validation matrix may exclude file-dialog code only from the completed P1.2
+commit through the prerequisites before P3.2. No externally visible release is permitted during
+that interval, and disabled tests are not completion evidence for the restored feature.
 
 ## Deferred post-refactor redesign: keyboard and pointer focus
 
@@ -1869,7 +1906,10 @@ An item is complete only when production code, focused tests, affected examples,
 named obsolete-code removal land together. Temporary adapters must be crate-private and have a named
 deletion point inside the same P1 owner item. P0-P5 remain internal integration milestones until the
 final validation pass; do not merge/tag/release an incomplete migration or leave two externally
-supported widget construction or ownership models.
+supported widget construction or ownership models. The sole availability exception is the
+plan-owner-approved, source-preserving file-dialog disable from P1.2 through P3.2: its implementation
+and tests remain tracked in place behind commented compilation/integration edges, and P3.2 must
+restore them before any release validation can pass.
 
 ## Ordered checklist
 
@@ -3286,6 +3326,15 @@ removal, and focused implementation evidence rather than redefining that behavio
   `erased_widget_state`, widget allocation IDs, and duplicate-state dispatch tracking. Keep existing
   renderer-registry preflight for removed, foreign, or backend-incompatible erased keys.
 
+  Strict completion temporarily disables the file dialog at its compilation and integration edges
+  rather than retaining a file-dialog-only strong-handle adapter. Comment out `mod file_dialog` and
+  both public `FileDialogState` re-exports in `src/lib.rs`, and comment out the corresponding
+  `demo-full` fields, initialization, evaluation, and visible controls. Mark every such region
+  `P1.2 TEMPORARY: restore in P3.2`. Preserve `src/file_dialog.rs` and its tests in place without
+  rewriting them to a transient reconstruction model. Do not add a replacement stub, a known-broken
+  Cargo feature, or a second adapter. P1.2 is an internal-only integration state and cannot be
+  merged, tagged, or released while this public capability is unavailable.
+
   **Acceptance tests**
 
   - Each requested leaf measure/update/paint invocation uses one direct Widget dispatch path; tests
@@ -3301,6 +3350,17 @@ removal, and focused implementation evidence rather than redefining that behavio
     with the derived content rectangle and clip.
   - Removed/foreign custom-render handles fail existing preflight before backend acquisition.
   - `rg` finds no erased state-handle adapter after the temporary bridge is removed.
+  - `src/file_dialog.rs` still contains the complete pre-migration implementation and tests at the
+    same path. Git/source review finds no deletion, truncation, relocation, empty replacement, or
+    mechanical state-recreation rewrite.
+  - `src/lib.rs` and `demo-full` contain searchable `P1.2 TEMPORARY: restore in P3.2` comments at
+    every disabled module, export, field, initialization, evaluation, and visible-control edge;
+    those edges do not compile or appear in rustdoc during this internal interval.
+  - The standard non-file-dialog library, tests, docs, and examples remain green. The validation
+    report explicitly lists file-dialog tests and demo behavior as temporarily excluded rather than
+    treating their absence as passing evidence.
+  - Release checks fail or remain administratively blocked while any P1.2 restoration marker exists
+    or `FileDialogState` is absent from its final crate-root/prelude exports.
 
 - [ ] **P1.3 — Introduce unique `Node` ownership and state-owned container children**
 
@@ -3330,6 +3390,10 @@ removal, and focused implementation evidence rather than redefining that behavio
   `LegacyDisclosureNode` adapter bridges only those two items and is deleted by P2.1. No temporary
   public alias is permitted.
 
+  This item supplies the owning `Node`/`Children` prerequisite for the preserved file-dialog source,
+  but deliberately does not re-enable a reduced Column-only or projection-rebuilding dialog.
+  File-dialog restoration remains owned by P3.2 after P2.0 adds Row/Stack and P2.2 adds ScrollArea.
+
   **Acceptance tests**
 
   - Node creation assigns unique private identity before mounting.
@@ -3351,6 +3415,9 @@ removal, and focused implementation evidence rather than redefining that behavio
     and an external `ContainerBuilder`/`Container` implementation created through
     `ContainerBuilder::create_container` and wrapped with generic `Node::container`; later rollout tests extend
     the constructor assertion to every built-in.
+  - Every `P1.2 TEMPORARY: restore in P3.2` marker and the preserved `src/file_dialog.rs` source/tests
+    remain intact; P1.3 neither silently restores an incomplete dialog nor deletes its migration
+    inventory.
 
 - [ ] **P1.4 — Give each root one persistent `WidgetTree`**
 
@@ -3788,7 +3855,10 @@ change a protected P0 behavior follows the explicit change-control rule.
   exposed container state. Replace every old header/tree `Node` use with the corresponding
   `DisclosureParameters::header`/`tree` construction. Migrate the demonstrated stack-direction
   rebuild to `StackState::set_direction`; move initialization-only visual/font/wrap configuration
-  into Parameters. Do not manufacture or retain meaningless unit/internal-state handles.
+  into Parameters. Do not manufacture or retain meaningless unit/internal-state handles. Preserve
+  the commented `demo-full` file-dialog integration and its
+  `P1.2 TEMPORARY: restore in P3.2` markers while migrating the rest of that example; P3.2 owns the
+  dependency-complete restoration and refactor.
 
   **Acceptance tests**
 
@@ -3797,23 +3867,37 @@ change a protected P0 behavior follows the explicit change-control rule.
   - Custom widgets keep the current Widget method signatures.
   - Calculator/demo behavior remains equivalent under deterministic checks.
   - Glow, Vulkan, and WGPU examples compile separately.
+  - The non-dialog portions of `demo-full` are migrated and green without deleting, moving, or
+    prematurely uncommenting the preserved file-dialog integration regions.
 
-- [ ] **P3.2 — Prove local mutation with the file dialog**
+- [ ] **P3.2 — Re-enable the file dialog and prove local mutation**
 
   **Problem**
 
-  `FileDialogState::eval` rebuilds its complete UI on ordinary evaluation.
+  `FileDialogState::eval` rebuilds its complete UI on ordinary evaluation, so P1.2 could not remove
+  the last strong-handle leaf adapter while preserving control state. The module/export/demo edges
+  have therefore been commented out since P1.2, while `src/file_dialog.rs` and its tests remain in
+  place as the authoritative migration input. The public capability and its executable evidence
+  must now be restored before release.
 
   **Decision needed: No**
 
   **Target contract or migration**
+
+  Start from the preserved `src/file_dialog.rs` implementation and every searchable
+  `P1.2 TEMPORARY: restore in P3.2` marker. Refactor the module in place; do not replace it with a
+  newly authored parallel file or discard its history. Restore the `src/lib.rs` module declaration,
+  crate-root/prelude `FileDialogState` exports, and the complete `demo-full` fields,
+  initialization, controls, evaluation, and result handling represented by those markers.
 
   Construct the shell once. Inputs/buttons and folder/file list containers return state handles
   directly, so retain those typed handles at initialization. On refresh, construct row
   state/widget pairs and replace only list `Children`. Consume actions through button/list state.
   Preserve the existing scroll offset across child replacement, then clamp it to the new content
   range during the post-replacement layout. Do not reset it merely because the directory rows were
-  refreshed.
+  refreshed. Remove each temporary marker only after its corresponding restored path compiles and
+  has executable coverage; no commented-out dialog code, disabled test, compatibility stub, or
+  alternate legacy implementation remains when this item completes.
 
   **Acceptance tests**
 
@@ -3825,6 +3909,17 @@ change a protected P0 behavior follows the explicit change-control rule.
     content clamps it to the nearest valid offset, including zero when no scrolling remains.
   - Removed row handles expire; persistent controls and scroll handles remain live.
   - No root replacement, generated ID, Context editor, or Context token remains.
+  - `FileDialogState` is again exported from the same crate-root and prelude surfaces, appears in
+    rustdoc, and is usable by downstream code without an opt-in migration feature.
+  - `demo-full` again exposes and evaluates the dialog flow, including open, navigation, selection,
+    accept, and cancel behavior, using the restored code regions as migration inventory.
+  - Every preserved file-dialog test is re-enabled and adapted rather than deleted; focused tests
+    cover construction geometry, click-without-hover, navigation, selection, hide/show, idle
+    allocation, refresh allocation/topology, and weak-handle lifetime under the final API.
+  - Repository searches find no `P1.2 TEMPORARY: restore in P3.2` marker, commented-out
+    file-dialog compilation/integration edge, legacy strong handle, or dormant duplicate source.
+  - Release validation treats restored file-dialog API/docs/tests/demo behavior as mandatory rather
+    than accepting the temporarily reduced P1.2 surface.
 
 - [ ] **P3.3 — Align public modules, README, rustdoc, and migration notes**
 
@@ -4161,6 +4256,7 @@ contract or overstate what Rust can prove about arbitrary custom safe APIs.
 | Reentrant state access can panic | Infallible `RefCell` borrow | Checked per-cell handles | P0.2/P1.0 |
 | Application stores handle plus node ID | Generic result lookup | State-local events/commands | P0.4/P1.1 |
 | Typed change/submit delivery is underspecified after leaf results disappear | Generic per-frame flags hid per-widget API and persistence rules | Exact state-local counters, recording points, and silent-setter contract | P0.4/P1.1 |
+| File dialog blocks strict P1.2 adapter removal | Its full-projection rebuild reuses strong leaf handles before state-owned Row/Stack/ScrollArea exist | Preserve and comment out compilation/integration edges during the internal interval; restore through final state-owned containers | P1.2/P1.3/P2.0/P2.2/P3.2 |
 | File dialog rebuilds every evaluation | Projection is only topology API | State-owned Children | P0.3/P3.2 |
 | List interaction follows position | Builder ordinal identity | Persistent unique nodes/state | P1.3/P3.2 |
 | Scroll offset resets/recreates | Root replacement/synthetic state | Persistent scroll state | P2.2/P3.2 |
@@ -4215,6 +4311,13 @@ separately. Where supported, add targeted Miri coverage for same-cell/cross-cell
 lifetime, node/container drop, direct topology mutation, and target sanitization. No Miri test should
 be needed for raw-pointer dereference because the target contains none.
 
+From P1.2 until P3.2, these commands intentionally compile the reduced internal surface because the
+file-dialog module/export/demo edges are commented out. Each validation report in that interval must
+state that `src/file_dialog.rs` and its tests remain preserved but uncompiled, list the exact
+restoration marker count, and must not claim file-dialog coverage. P3.2 restores those edges and
+their tests before rerunning the same matrix. Any release-oriented validation additionally requires
+zero `P1.2 TEMPORARY: restore in P3.2` markers and the final `FileDialogState` exports to be present.
+
 Prefer deterministic assertions for state, consumed events, geometry, event order, focus/capture,
 operation counts, weak liveness, and allocation counts. Screenshots may supplement but not replace
 them.
@@ -4249,8 +4352,10 @@ Update together:
    one unit-state widget end to end.
 3. Apply the fixed constructor/mutation table while splitting the remaining built-ins, defining only
    the listed state-local values, events, and commands.
-4. Store `Box<dyn Widget>` directly, add the final generic `Node::widget`/`Node::custom_render` paths, and delete
-   erased handle dispatch without exposing a raw insertion boundary.
+4. Comment out the tracked file-dialog compilation/export/demo edges with the exact P3.2 restoration
+   marker while preserving `src/file_dialog.rs` and its tests in place; then store `Box<dyn Widget>`
+   directly, add the final generic `Node::widget`/`Node::custom_render` paths, and delete erased
+   handle dispatch without exposing a raw insertion boundary.
 5. Land the uniquely named owning Node, private runtime IDs, placement methods, marker
    `ContainerState`, constructible opaque Children, opaque traversal visitors, Disclosure, and the
    first state-owned column container as one compile-safe public batch.
@@ -4264,7 +4369,9 @@ Update together:
 9. Replace pseudo-unbounded probes and independent Row/Grid/container solvers with explicit private
    constraints and shared axis primitives; centralize chrome conversion in the retained root-chrome
    helper shared with the window boundary.
-10. Migrate the file dialog early as the dynamic-topology proof, then remaining examples/docs.
+10. After Row/Stack/ScrollArea prerequisites exist, use the preserved source and markers to re-enable
+    and migrate the file dialog as the dynamic-topology proof; restore its exports/demo/tests and
+    remove every temporary marker before remaining examples/docs and release validation.
 11. Delete all obsolete ownership/identity/mutation machinery, repeat baselines, and optimize only
     from evidence.
 12. Run R0.0 and the full validation matrix against the P1 concrete-runtime ownership boundary, then and only
@@ -4410,7 +4517,10 @@ The migration is complete when:
 - root visibility and container descendant gating are the only visibility mechanisms; collapsing
   clears descendant transient targets without restoring them on expansion;
 - the file dialog changes only row children on directory refresh, preserves then clamps its scroll
-  offset to the new content range, and performs no idle tree work;
+  offset to the new content range, and performs no idle tree work; `src/file_dialog.rs` was
+  refactored in place, `FileDialogState` is restored at crate root/prelude and in `demo-full`, all
+  preserved tests are active, and no P1.2 restoration marker or commented-out integration edge
+  remains;
 - focus, capture, input, layout, paint, clipping, scrolling, and custom rendering retain the
   supported behavior required by this migration under deterministic tests, subject to the
   explicitly unresolved post-refactor focus-model defect above;
