@@ -2582,7 +2582,7 @@ explicit decision before changing the criterion.
   compile-fail, application-migration, and documentation criteria become executable and green in
   P1.1/P2.5/P3.0-P3.2.
 
-- [ ] **P0.5 — Freeze the process-unique private runtime identity contract**
+- [x] **P0.5 — Freeze the process-unique private runtime identity contract**
 
   **Problem**
 
@@ -2635,7 +2635,9 @@ explicit decision before changing the criterion.
   `Ordering::Relaxed` is sufficient because the operation establishes uniqueness only; it does not
   publish node memory or synchronize frame work. Exhaustion is an explicit invariant panic before a
   new node is returned. Do not make ordinary node construction fallible for an unreachable `u64`
-  process-lifetime limit.
+  process-lifetime limit. Sequential allocations begin at one, are nonzero, and increase
+  monotonically. A private/local arithmetic helper may make the exhaustion boundary testable, but
+  tests never mutate, replace, or reset the process-global allocator.
 
   Public `Node::widget`, `Node::custom_render`, and `Node::container` all allocate the ID immediately
   without a Context or mount step:
@@ -2657,6 +2659,13 @@ explicit decision before changing the criterion.
       }
   }
   ```
+
+  `Node::from_kind` is the only allocation point. `Node::widget`, `Node::custom_render`, and
+  `Node::container` reach it exactly once; built-in container factories do not allocate an
+  additional identity around their returned node. Moving an unmounted node, configuring it through
+  consuming `with_policy`/`with_grid_span`, returning it from a failed `Children::insert`, and
+  mounting it in any Context preserve the original scalar. Dropping even a never-mounted node does
+  not return its ID to the allocator.
 
   Actual focus, hover, capture, and routed input are owned per retained tree, below Context and
   inside its `WindowEntry`. A state type may contain a command such as `focus_requested`, but the
@@ -2693,14 +2702,30 @@ explicit decision before changing the criterion.
   }
   ```
 
+  The same liveness validation applies to `hover` and every key in `routed_events`. A missing hover
+  target is cleared, a missing capture/focus target is cleared before it can direct another event,
+  and queued batches for missing nodes are discarded rather than delivered or transferred. Tree
+  membership is checked by retained-tree traversal; do not add a node registry merely to validate
+  these private scalar targets.
+
   This protects explicit dynamic child removal/insertion; it does not imply projection or root
   rebuilding. Persistent nodes retain their original ID for their entire lifetime. Remove Context
   node counters (but not the separate public `RootId` counter), mount metadata, foreign-handle
-  validation, pointer-derived IDs, and public widget ID composition.
+  validation, pointer-derived IDs, and public widget ID composition. `RootId` keeps its independent
+  public lifecycle role and counter; there is no conversion, equality bridge, scoping composition,
+  or shared allocator between `RootId` and `RuntimeNodeId`. The prohibition on pointer casts applies
+  to runtime node identity allocation and validation rather than unrelated backend implementation
+  details.
 
   **Acceptance tests**
 
-  - IDs are unique across multiple Contexts and node construction streams.
+  - Sequential unit tests observe nonzero monotonically increasing IDs, and IDs remain unique across
+    multiple Contexts and independent node construction streams.
+  - `Node::widget`, `Node::custom_render`, `Node::container`, and every built-in container factory
+    allocate exactly one ID per returned node; private root-chrome construction allocates exactly
+    one ID for its chrome node.
+  - Moving/configuring an unmounted node, a failed insertion that returns it, and mounting it in any
+    Context preserve its original ID. Dropping an unmounted node permanently consumes its ID.
   - Explicitly removing a child and later inserting another never reuses the removed ID; unaffected
     persistent nodes retain their IDs without rebuilding.
   - Counter exhaustion remains an invariant panic before returning a node. It is not a release-gate
@@ -2709,10 +2734,36 @@ explicit decision before changing the criterion.
   - State handles contain no ID and can mutate state regardless of owning Context.
   - Each `WindowEntry`'s `WidgetTree` owns its focus, hover, capture, and routed-event targets; no
     application state or top-level Context field becomes their authoritative owner.
-  - Missing focus/capture/routed targets are cleared and never redirected to a later node.
-  - No Context token, mount state, node registry, or pointer cast exists.
+  - Missing focus, hover, and capture targets are cleared, and every queued routed-event entry for a
+    missing node is discarded; none is redirected or inherited by a later node.
+  - Downstream compile-fail checks prove `RuntimeNodeId` cannot be imported, named, constructed,
+    compared, formatted, or extracted through `Node`/`WidgetStateHandle`; `Node` exposes no public ID
+    accessor.
+  - `RootId` remains public and independently allocated, with no public/private conversion or
+    composed runtime-node identity.
+  - No Context token, mount state, node registry, or pointer-derived runtime identity exists.
   - Rustdoc states that `RuntimeNodeId` is runtime-private and unrelated to public `RootId` and
     `WidgetStateHandle`.
+
+  **Frozen contract evidence (2026-07-29)**
+
+  The normative owning-node and lifecycle sections above now define identity as one private scalar
+  allocated exactly once with each unique `Node`. It survives ordinary Rust moves and pre-insertion
+  configuration, never enters application state, and is never recycled. Each retained tree remains
+  the authoritative owner of its own focus, hover, capture, and routed-event targets; process-wide
+  uniqueness prevents a stale target in any tree from aliasing a replacement or a node in another
+  Context without Context tokens, mount metadata, or a registry.
+
+  Repository inspection confirms that the current `Id` is a public `usize` wrapper constructible
+  from pointers, caller integers, and strings. `UiNodeBuilder` derives public `NodeId` values from
+  scope seeds, node tags, sibling order, and optional keys, then validates duplicate hashes;
+  `WidgetHandle::id` separately casts its strong `Rc` allocation address; `RetainedId::root_node`
+  composes root and builder identities; and scroll-area synthetic descendants hash IDs from their
+  parent and semantic part. The useful current per-root `UiRuntime` ownership of focus, hover,
+  capture, and routed-event maps is retained conceptually, while those public, pointer-derived,
+  scoped, and synthetic ID sources are migration cost rather than compatibility behavior. P0.5
+  intentionally changes no production API: allocator, privacy, preservation, sanitization, and
+  documentation criteria become executable and green in P1.3/P2.4.
 
 - [ ] **P0.6 — Freeze the owning-`Node` name and visibility boundaries**
 
