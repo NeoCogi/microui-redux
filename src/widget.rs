@@ -321,9 +321,6 @@ impl RetainedId {
 
 /// Per-frame widget interaction results keyed by retained identity.
 ///
-/// Retained nodes are the primary storage. Widget handle identities are kept only internally to
-/// catch duplicate `WidgetHandle` dispatch in a single frame.
-///
 /// The storage is split into two generations:
 /// - the committed result set published at the end of the previous frame,
 /// - and the current in-progress result set being written by this frame.
@@ -363,31 +360,16 @@ impl FrameResultStore {
 }
 
 #[derive(Default)]
-/// Detects duplicate widget or retained-id dispatch within one frame.
+/// Detects duplicate retained-id dispatch within one frame.
 struct FrameDispatchTracker {
     /// Dispatch site for each retained ID seen in the current frame.
     retained_sites: HashMap<RetainedId, String>,
-    /// Dispatch site for each widget handle seen in the current frame.
-    widget_sites: HashMap<Id, String>,
 }
 
 impl FrameDispatchTracker {
     /// Clears all dispatch sites before a new frame.
     fn clear(&mut self) {
         self.retained_sites.clear();
-        self.widget_sites.clear();
-    }
-
-    /// Records one widget-handle dispatch and panics on duplicate use.
-    fn record_widget(&mut self, widget_handle_id: Id, dispatch_site: &str) {
-        if let Some(first_site) = self.widget_sites.get(&widget_handle_id) {
-            panic!(
-                "duplicate widget dispatch detected for handle {:?}; a WidgetHandle may only be rendered once per frame. first dispatch: {}. duplicate dispatch: {}.",
-                widget_handle_id, first_site, dispatch_site
-            );
-        }
-
-        self.widget_sites.insert(widget_handle_id, dispatch_site.to_string());
     }
 
     /// Records one retained-id dispatch and panics on duplicate use.
@@ -438,20 +420,7 @@ impl FrameResults {
         self.current_dispatch.clear();
     }
 
-    /// Records a retained node result and checks that its widget handle is not dispatched twice.
-    pub(crate) fn record_retained_with_context(
-        &mut self,
-        retained_id: RetainedId,
-        widget_handle_id: Id,
-        state: ResourceState,
-        dispatch_site: impl Into<String>,
-    ) {
-        let dispatch_site = dispatch_site.into();
-        self.current_dispatch.record_widget(widget_handle_id, &dispatch_site);
-        self.record_retained_id_with_context(retained_id, state, dispatch_site);
-    }
-
-    /// Records a result from a direct runtime without legacy handle identity tracking.
+    /// Records a result from a directly owned runtime.
     pub(crate) fn record_direct_with_context(&mut self, retained_id: RetainedId, state: ResourceState, dispatch_site: impl Into<String>) {
         self.record_retained_id_with_context(retained_id, state, dispatch_site);
     }

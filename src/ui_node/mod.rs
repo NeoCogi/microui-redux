@@ -326,7 +326,7 @@ mod tests {
     use crate::{
         rect, AtlasHandle, AtlasSource, Button, ButtonBuilder, ButtonParameters, ButtonState, CharEntry, CustomBuilder, CustomParameters, FontEntry, Id, Input,
         KeyMode, ListItemBuilder, ListItemParameters, NodeOptions, Policy, ResourceState, SourceFormat, StackDirection, TextboxBuilder, TextboxParameters,
-        WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, UiNodeBuilder, widget_handle,
+        WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, UiNodeBuilder,
     };
     use crate::test_support::{projected_widget, test_atlas, NoopRenderer};
 
@@ -496,15 +496,32 @@ mod tests {
     struct EventRecorder {
         seen: Rc<RefCell<Vec<Vec<UiInputEvent>>>>,
         opt: WidgetOption,
+        state: Rc<RefCell<()>>,
     }
 
     impl EventRecorder {
         fn new(seen: Rc<RefCell<Vec<Vec<UiInputEvent>>>>) -> Self {
-            Self { seen, opt: WidgetOption::NONE }
+            Self {
+                seen,
+                opt: WidgetOption::NONE,
+                state: Rc::new(RefCell::new(())),
+            }
         }
 
         fn with_opt(seen: Rc<RefCell<Vec<Vec<UiInputEvent>>>>, opt: WidgetOption) -> Self {
-            Self { seen, opt }
+            Self {
+                seen,
+                opt,
+                state: Rc::new(RefCell::new(())),
+            }
+        }
+    }
+
+    impl crate::WidgetStateOwner for EventRecorder {
+        type State = ();
+
+        fn state_handle(&self) -> crate::WidgetStateHandle<Self::State> {
+            crate::WidgetStateHandle::new(&self.state)
         }
     }
 
@@ -528,6 +545,15 @@ mod tests {
     struct ScrollRecorder {
         seen: Rc<RefCell<Vec<Option<Vec2i>>>>,
         opt: WidgetOption,
+        state: Rc<RefCell<()>>,
+    }
+
+    impl crate::WidgetStateOwner for ScrollRecorder {
+        type State = ();
+
+        fn state_handle(&self) -> crate::WidgetStateHandle<Self::State> {
+            crate::WidgetStateHandle::new(&self.state)
+        }
     }
 
     impl crate::Widget for ScrollRecorder {
@@ -550,6 +576,15 @@ mod tests {
     struct FrameToggle {
         opt: WidgetOption,
         painted: Rc<RefCell<Vec<Recti>>>,
+        state: Rc<RefCell<()>>,
+    }
+
+    impl crate::WidgetStateOwner for FrameToggle {
+        type State = ();
+
+        fn state_handle(&self) -> crate::WidgetStateHandle<Self::State> {
+            crate::WidgetStateHandle::new(&self.state)
+        }
     }
 
     impl crate::Widget for FrameToggle {
@@ -576,7 +611,7 @@ mod tests {
         let button = projected_widget::<ButtonBuilder>(ButtonParameters::new("child"));
         let tree = UiNodeBuilder::build(|tree| {
             tree.node(crate::NodeOptions::with_policy(Policy::fixed(10, 20))).column(|tree| {
-                tree.widget(button.clone());
+                tree.widget(button);
             });
         });
 
@@ -594,7 +629,7 @@ mod tests {
         let button = projected_widget::<ButtonBuilder>(ButtonParameters::new("framed"));
         let mut button_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
-            button_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(&button);
+            button_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(button);
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
@@ -645,8 +680,8 @@ mod tests {
         let framed = projected_widget::<ButtonBuilder>(ButtonParameters::with_opt("size", WidgetOption::FRAME));
         let flat = projected_widget::<ButtonBuilder>(ButtonParameters::with_opt("size", WidgetOption::NONE));
         let tree = UiNodeBuilder::build(|tree| {
-            tree.widget(&framed);
-            tree.widget(&flat);
+            tree.widget(framed);
+            tree.widget(flat);
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
@@ -722,7 +757,7 @@ mod tests {
         let state = projected_widget::<CustomBuilder>(CustomParameters::with_opt("custom", WidgetOption::FRAME));
         let tree = UiNodeBuilder::build(|tree| {
             tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12)))
-                .custom_render(&state, custom_renderer);
+                .custom_render(state, custom_renderer);
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let style = Style { padding: 0, ..Style::default() };
@@ -745,12 +780,13 @@ mod tests {
     #[test]
     fn post_update_layout_observes_a_changed_frame_option_before_paint() {
         let painted = Rc::new(RefCell::new(Vec::new()));
-        let state = widget_handle(FrameToggle {
+        let state = FrameToggle {
             opt: WidgetOption::NONE,
             painted: painted.clone(),
-        });
+            state: Rc::new(RefCell::new(())),
+        };
         let tree = UiNodeBuilder::build(|tree| {
-            tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(&state);
+            tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(state);
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
@@ -778,9 +814,9 @@ mod tests {
     #[test]
     fn framed_widget_receives_content_local_pointer_coordinates() {
         let seen = Rc::new(RefCell::new(Vec::new()));
-        let widget = widget_handle(EventRecorder::with_opt(seen.clone(), WidgetOption::FRAME));
+        let widget = EventRecorder::with_opt(seen.clone(), WidgetOption::FRAME);
         let tree = UiNodeBuilder::build(|tree| {
-            tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(&widget);
+            tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(widget);
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
@@ -816,12 +852,13 @@ mod tests {
     #[test]
     fn grab_scroll_widget_option_delivers_hovered_scroll_delta() {
         let seen = Rc::new(RefCell::new(Vec::new()));
-        let widget = widget_handle(ScrollRecorder {
+        let widget = ScrollRecorder {
             seen: seen.clone(),
             opt: WidgetOption::GRAB_SCROLL,
-        });
+            state: Rc::new(RefCell::new(())),
+        };
         let tree = UiNodeBuilder::build(|tree| {
-            tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(&widget);
+            tree.node(crate::NodeOptions::with_policy(Policy::fixed(20, 12))).widget(widget);
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
         let atlas = test_atlas();
@@ -887,13 +924,13 @@ mod tests {
     fn retained_widget_key_text_comes_from_focused_routed_event() {
         let focused_seen = Rc::new(RefCell::new(Vec::new()));
         let unfocused_seen = Rc::new(RefCell::new(Vec::new()));
-        let focused_widget = widget_handle(EventRecorder::new(focused_seen.clone()));
-        let unfocused_widget = widget_handle(EventRecorder::new(unfocused_seen.clone()));
+        let focused_widget = EventRecorder::new(focused_seen.clone());
+        let unfocused_widget = EventRecorder::new(unfocused_seen.clone());
         let mut focused_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             tree.column(|tree| {
-                tree.widget(&unfocused_widget);
-                focused_id = tree.widget(&focused_widget);
+                tree.widget(unfocused_widget);
+                focused_id = tree.widget(focused_widget);
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
@@ -986,7 +1023,7 @@ mod tests {
         let button = projected_widget::<ButtonBuilder>(ButtonParameters::new("removed"));
         let mut removed_id = Id::default();
         let first = UiNodeBuilder::build(|tree| {
-            removed_id = tree.widget(button.clone());
+            removed_id = tree.widget(button);
         });
         let mut runtime = TestRuntime::from_ui_nodes(first);
         runtime.focus = Some(removed_id);
@@ -1010,7 +1047,7 @@ mod tests {
         let auto_button = projected_widget::<ButtonBuilder>(ButtonParameters::new("auto"));
         let auto_tree = UiNodeBuilder::build(|tree| {
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
-                tree.widget(&auto_button);
+                tree.widget(auto_button);
             });
         });
         let mut auto_runtime = TestRuntime::from_ui_nodes(auto_tree);
@@ -1027,7 +1064,7 @@ mod tests {
         let fill_button = projected_widget::<ButtonBuilder>(ButtonParameters::new("fill"));
         let fill_tree = UiNodeBuilder::build(|tree| {
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
-                tree.widget(&fill_button);
+                tree.widget(fill_button);
             });
         });
         let mut fill_runtime = TestRuntime::from_ui_nodes(fill_tree);
@@ -1042,7 +1079,7 @@ mod tests {
         let mut button_id = Id::default();
         let tree = UiNodeBuilder::build(|tree| {
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
-                button_id = tree.widget(button.clone());
+                button_id = tree.widget(button);
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
@@ -1079,7 +1116,7 @@ mod tests {
             WidgetOption::FRAME | WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT,
         ));
         let (first_button_state, first_button_runtime) = Button::create(ButtonParameters::new("b"));
-        let mut buttons = vec![widget_handle(first_button_runtime)];
+        let mut buttons = vec![first_button_runtime];
         buttons.extend((1..20).map(|_| projected_widget::<ButtonBuilder>(ButtonParameters::new("b"))));
         let button_ids = std::cell::RefCell::new(Vec::new());
         let mut display_row_id = Id::default();
@@ -1088,14 +1125,14 @@ mod tests {
             display_row_id = tree
                 .node(NodeOptions::with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Fraction(0.20))))
                 .row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
-                    display_id = tree.widget(&display);
+                    display_id = tree.widget(display);
                 });
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
                 tree.column(|tree| {
                     let columns = [SizePolicy::Weight(1.0); 4];
                     let rows = [SizePolicy::Weight(1.0); 5];
                     tree.grid(&columns, &rows, |tree| {
-                        for button in &buttons {
+                        for button in buttons {
                             button_ids.borrow_mut().push(tree.widget(button));
                         }
                     });
@@ -1165,9 +1202,9 @@ mod tests {
         let tree = UiNodeBuilder::build(|tree| {
             let widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
             tree.row(&widths, SizePolicy::Auto, |tree| {
-                tree.widget(&label);
-                middle_id = tree.widget(&middle);
-                right_id = tree.widget(&right);
+                tree.widget(label);
+                middle_id = tree.widget(middle);
+                right_id = tree.widget(right);
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
@@ -1202,9 +1239,9 @@ mod tests {
         let image = projected_widget::<ButtonBuilder>(ButtonParameters::new("image"));
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(67), StackDirection::TopToBottom, |tree| {
-                tree.widget(&small);
+                tree.widget(small);
                 tree.stack(SizePolicy::Fixed(256), SizePolicy::Fixed(256), StackDirection::TopToBottom, |tree| {
-                    tree.widget(&image);
+                    tree.widget(image);
                 });
             });
         });
@@ -1244,8 +1281,8 @@ mod tests {
                 ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
                 |tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(24), StackDirection::TopToBottom, |tree| {
-                        first_id = tree.widget(&first);
-                        for button in &rest {
+                        first_id = tree.widget(first);
+                        for button in rest {
                             tree.widget(button);
                         }
                     });
@@ -1293,7 +1330,7 @@ mod tests {
         let tree = UiNodeBuilder::build(|tree| {
             tree.node(NodeOptions::with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Remainder(0))))
                 .stack(SizePolicy::Fixed(150), SizePolicy::Fixed(24), StackDirection::TopToBottom, |tree| {
-                    for button in &buttons {
+                    for button in buttons {
                         tree.widget(button);
                     }
                 });
@@ -1353,7 +1390,7 @@ mod tests {
         let mut custom_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                custom_id = tree.custom_render(&custom, custom_renderer);
+                custom_id = tree.custom_render(custom, custom_renderer);
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
@@ -1427,8 +1464,8 @@ mod tests {
             scroll_area_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 70))).scroll_area(
                 ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
                 |tree| {
-                    tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 180))).widget(filler.clone());
-                    icon_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 40))).widget(icon_button.clone());
+                    tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 180))).widget(filler);
+                    icon_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed(100, 40))).widget(icon_button);
                 },
             );
         });
@@ -1522,7 +1559,7 @@ mod tests {
         let mut button_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                button_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed_width(48))).widget(&button);
+                button_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed_width(48))).widget(button);
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
@@ -1582,7 +1619,7 @@ mod tests {
         let mut button_id = Id::new(0);
         let tree = UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                button_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed_width(256))).widget(&button);
+                button_id = tree.node(crate::NodeOptions::with_policy(Policy::fixed_width(256))).widget(button);
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
@@ -1622,9 +1659,9 @@ mod tests {
             let columns = [SizePolicy::Fixed(40), SizePolicy::Fixed(50), SizePolicy::Fixed(60)];
             let rows = [SizePolicy::Fixed(20), SizePolicy::Fixed(20)];
             tree.grid(&columns, &rows, |tree| {
-                first_id = tree.node(crate::NodeOptions::with_policy(Policy::fill()).grid_span(2, 1)).widget(first.clone());
-                second_id = tree.node(crate::NodeOptions::with_policy(Policy::fill())).widget(second.clone());
-                third_id = tree.node(crate::NodeOptions::with_policy(Policy::fill())).widget(third.clone());
+                first_id = tree.node(crate::NodeOptions::with_policy(Policy::fill()).grid_span(2, 1)).widget(first);
+                second_id = tree.node(crate::NodeOptions::with_policy(Policy::fill())).widget(second);
+                third_id = tree.node(crate::NodeOptions::with_policy(Policy::fill())).widget(third);
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);

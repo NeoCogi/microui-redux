@@ -3307,7 +3307,7 @@ removal, and focused implementation evidence rather than redefining that behavio
   -- -W clippy::all` completes with the repository's pre-existing warning baseline and no P1.1
   warning remains in the newly split leaf implementations.
 
-- [ ] **P1.2 — Dispatch persistent leaf payloads directly through boxed runtimes**
+- [x] **P1.2 — Dispatch persistent leaf payloads directly through boxed runtimes**
 
   **Problem**
 
@@ -3361,6 +3361,33 @@ removal, and focused implementation evidence rather than redefining that behavio
     treating their absence as passing evidence.
   - Release checks fail or remain administratively blocked while any P1.2 restoration marker exists
     or `FileDialogState` is absent from its final crate-root/prelude exports.
+
+  **Completion evidence (2026-07-30)**
+
+  `WidgetNode` now accepts one concrete `WidgetStateOwner` runtime at generic insertion and owns it
+  as `Box<dyn Widget>` with an optional private `CustomRenderKey`. Measure, update, paint, focus,
+  options, result recording, and custom rendering use that one direct payload; the legacy/direct
+  payload branch, erased state-handle trait and adapter, widget allocation identities, and duplicate
+  widget-state dispatch tracker are deleted. Built-in, downstream, test, README, and shipped-example
+  leaf call sites move non-cloneable concrete runtimes once while retaining only typed weak state
+  handles. Legacy `WidgetHandle<Node>` remains solely for header/tree Disclosure until P1.3/P2.1.
+
+  The file-dialog module and its two exports, plus every full-demo field, initialization,
+  evaluation, and visible-control edge, are commented with 13 exact
+  `P1.2 TEMPORARY: restore in P3.2` markers. `src/file_dialog.rs` and its tests remain byte-for-byte
+  untouched but are intentionally uncompiled, so this evidence does not claim file-dialog test or
+  demo coverage and the repository remains administratively release-blocked until P3.2 restores the
+  capability and removes every marker.
+
+  The reduced non-dialog surface passes `cargo fmt --all -- --check`, `cargo test --all-targets`
+  (186 active library tests and two downstream integration tests passed; two existing manual
+  baselines ignored), `cargo test --doc` (17 passed), `cargo check --no-default-features`, `cargo doc
+  --no-deps`, and separate all-example checks for `example-glow`, `example-vulkan`, and
+  `example-wgpu`. `cargo clippy --lib -- -W clippy::all` completes with the repository's existing 49
+  warnings and no warning in the new direct leaf path. Source audits find none of
+  `WidgetStateHandleDyn`, `erased_widget_state`, `WidgetPayload`, widget handle IDs, duplicate widget
+  dispatch recording, legacy leaf `state_widget`, borrowed leaf insertion, or leaf-runtime
+  `WidgetHandle` storage outside the preserved file-dialog source.
 
 - [ ] **P1.3 — Introduce unique `Node` ownership and state-owned container children**
 

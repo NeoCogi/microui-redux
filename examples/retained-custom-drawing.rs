@@ -33,6 +33,7 @@
 //! through `WidgetPaintCtx::painter`.
 
 use microui_redux::{prelude::*, render::Vertex, AtlasSource};
+use std::{cell::RefCell, rc::Rc};
 
 const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
 
@@ -68,14 +69,25 @@ impl RendererBackend for NoopRenderer {
     fn destroy_texture(&mut self, _id: TextureId) {}
 }
 
-#[derive(Clone)]
 struct RetainedPaint {
+    state: Rc<RefCell<()>>,
     opt: WidgetOption,
 }
 
 impl RetainedPaint {
     fn new() -> Self {
-        Self { opt: WidgetOption::NONE }
+        Self {
+            state: Rc::new(RefCell::new(())),
+            opt: WidgetOption::NONE,
+        }
+    }
+}
+
+impl WidgetStateOwner for RetainedPaint {
+    type State = ();
+
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
     }
 }
 
@@ -85,6 +97,7 @@ impl Widget for RetainedPaint {
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        let _state = self.state.try_borrow().expect("paint state must be available during measure");
         Dimensioni::new(96, 48)
     }
 
@@ -154,9 +167,9 @@ fn make_atlas() -> AtlasHandle {
 fn main() -> Result<(), String> {
     let backend = NoopRenderer { atlas: make_atlas() };
     let mut ctx = Context::new(backend);
-    let paint = widget_handle(RetainedPaint::new());
+    let paint = RetainedPaint::new();
     let tree = UiNodeBuilder::build(move |tree| {
-        tree.widget(&paint);
+        tree.widget(paint);
     });
     ctx.create_window("retained custom drawing", rect(12, 12, 132, 84), tree);
 

@@ -106,7 +106,8 @@
 //! [`render`].
 
 pub mod atlas;
-mod file_dialog;
+// P1.2 TEMPORARY: restore in P3.2
+// mod file_dialog;
 mod frame;
 mod id;
 mod input;
@@ -151,7 +152,8 @@ pub mod prelude {
         AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry, FontId,
         IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON, load_image_bytes,
     };
-    pub use crate::file_dialog::FileDialogState;
+    // P1.2 TEMPORARY: restore in P3.2
+    // pub use crate::file_dialog::FileDialogState;
     pub use crate::input::{ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, WidgetFillOption};
     pub use crate::sizing::{SizePolicy, StackDirection};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame};
@@ -182,7 +184,8 @@ pub use atlas::{
 pub use window_manager::{
     widget_handle, Context, ContextFrame, GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, RootId, WidgetHandle, WindowOption, UiNodeSet, UiNodeBuilder,
 };
-pub use file_dialog::FileDialogState;
+// P1.2 TEMPORARY: restore in P3.2
+// pub use file_dialog::FileDialogState;
 pub use id::Id;
 pub use input::{ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, WidgetFillOption};
 pub use text_layout::TextWrap;

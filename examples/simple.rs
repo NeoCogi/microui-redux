@@ -68,14 +68,10 @@ fn main() {
     let atlas = atlas_assets::load_atlas();
     let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
         let (_, hello_runtime) = Button::create(ButtonParameters::with_opt("Hello World!", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
-        let hello_button = widget_handle(hello_runtime);
-        let tree = UiNodeBuilder::build({
-            let hello_button = hello_button.clone();
-            move |tree| {
-                tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
-                    tree.widget(&hello_button);
-                });
-            }
+        let tree = UiNodeBuilder::build(|tree| {
+            tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
+                tree.widget(hello_runtime);
+            });
         });
         State {
             _root: ctx.create_window("Hello Window", rect(40, 40, 300, 450), tree),

@@ -74,7 +74,6 @@ mod window_manager;
 
 pub use builder::{GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, UiNodeSet, UiNodeBuilder};
 pub use retained::{widget_handle, WidgetHandle};
-pub(crate) use retained::{erased_widget_state, WidgetStateHandleDyn};
 
 bitflags! {
     #[derive(Copy, Clone)]

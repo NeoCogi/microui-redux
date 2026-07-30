@@ -1,30 +1,18 @@
 //! Tests for context root registration, visibility, image loading, and retained results.
 
-use std::{
-    any::Any,
-    panic::{catch_unwind, AssertUnwindSafe},
-};
+use std::{cell::RefCell, rc::Rc};
 
 use super::*;
 use crate::{
     test_support::{projected_widget, recording_backend, test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer, RenderEvent},
     color, widget_handle, AtlasHandle, ButtonBuilder, ButtonParameters, Combo, ComboParameters, ComboState, CustomBuilder, CustomParameters, ListItem,
     ListItemParameters, ListItemState, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId, ScrollAreaOption, SizePolicy,
-    StackDirection, TextBlockBuilder, TextBlockParameters, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, UiNodeBuilder,
+    StackDirection, TextBlockBuilder, TextBlockParameters, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetStateHandle, WidgetStateOwner,
+    WidgetUpdateCtx, UiNodeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
     test_atlas_with_font_sizes(&[("small", 10), ("body", 12), ("title", 16)])
-}
-
-fn panic_message(payload: Box<dyn Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<String>() {
-        return message.clone();
-    }
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        return (*message).to_string();
-    }
-    "<non-string panic payload>".to_string()
 }
 
 fn root_texts(ctx: &Context<NoopRenderer>, root: RootId) -> Vec<String> {
@@ -46,13 +34,26 @@ fn chrome_key(
 }
 
 struct AlwaysSubmitWidget {
+    state: Rc<RefCell<()>>,
     label: &'static str,
     opt: WidgetOption,
 }
 
 impl AlwaysSubmitWidget {
     fn new(label: &'static str) -> Self {
-        Self { label, opt: WidgetOption::NONE }
+        Self {
+            state: Rc::new(RefCell::new(())),
+            label,
+            opt: WidgetOption::NONE,
+        }
+    }
+}
+
+impl WidgetStateOwner for AlwaysSubmitWidget {
+    type State = ();
+
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
     }
 }
 
@@ -118,7 +119,7 @@ fn root_windows_do_not_render_scrollbars_for_overflow_content() {
 
     let text = projected_widget::<TextBlockBuilder>(TextBlockParameters::new("a\na\na\na\na\na"));
     let tree = UiNodeBuilder::build(|tree| {
-        tree.widget(text.clone());
+        tree.widget(text);
     });
     let root = ctx.create_window("window", rect(0, 0, 60, 30), tree);
 
@@ -164,7 +165,7 @@ fn resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
 
     let text = projected_widget::<TextBlockBuilder>(TextBlockParameters::new("aaaaaaaaaaaaaaaaaaaaaaaa\na\na\na\na\na\na\na"));
     let tree = UiNodeBuilder::build(|tree| {
-        tree.widget(text.clone());
+        tree.widget(text);
     });
     let root = ctx.create_window("window", rect(0, 0, 60, 40), tree);
 
@@ -205,7 +206,7 @@ fn active_resize_updates_scroll_area_scrollbars_in_same_frame() {
         scroll_area = tree
             .node(NodeOptions::with_policy(Policy::fill()))
             .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
-                tree.node(NodeOptions::with_policy(Policy::fixed(95, 200))).widget(child.clone());
+                tree.node(NodeOptions::with_policy(Policy::fixed(95, 200))).widget(child);
             });
     });
     let root = ctx.create_window("window", rect(0, 0, 100, 100), tree);
@@ -248,7 +249,7 @@ fn title_drag_does_not_route_pointer_to_scroll_area() {
         scroll_area = tree
             .node(NodeOptions::with_policy(Policy::fill()))
             .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
-                tree.node(NodeOptions::with_policy(Policy::fixed(95, 220))).widget(child.clone());
+                tree.node(NodeOptions::with_policy(Policy::fixed(95, 220))).widget(child);
             });
     });
     let root = ctx.create_window("window", rect(20, 20, 120, 100), tree);
@@ -618,73 +619,26 @@ fn title_option_controls_root_window_title_bar_geometry() {
 }
 
 #[test]
-fn duplicate_widget_dispatch_in_same_tree_panics_with_context() {
+fn distinct_direct_widgets_with_identical_labels_render_normally() {
     let atlas = make_test_atlas();
     let backend = NoopRenderer { atlas };
     let mut ctx = Context::new_test(backend, Dimensioni::new(200, 200));
-    let shared = widget_handle(AlwaysSubmitWidget::new("shared"));
-    let tree = UiNodeBuilder::build(|tree| {
-        tree.widget(shared.clone());
-        tree.widget(shared.clone());
-    });
-    ctx.create_window("primary", rect(0, 0, 80, 40), tree);
-
-    let panic = catch_unwind(AssertUnwindSafe(|| {
-        ctx.update_ui();
-    }))
-    .expect_err("duplicate widget handle should panic");
-    let message = panic_message(panic);
-
-    assert!(ctx.display_list.is_empty(), "ContextFrame drop must clear partial recording");
-    assert!(message.contains("duplicate widget dispatch"));
-    assert!(message.contains("WidgetHandle"));
-    assert!(message.contains("primary"));
-    assert!(message.contains("ui node"));
-}
-
-#[test]
-fn duplicate_widget_dispatch_across_windows_panics() {
-    let atlas = make_test_atlas();
-    let backend = NoopRenderer { atlas };
-    let mut ctx = Context::new_test(backend, Dimensioni::new(200, 200));
-    let shared = widget_handle(AlwaysSubmitWidget::new("shared"));
-    let left_tree = UiNodeBuilder::build(|tree| {
-        tree.widget(shared.clone());
-    });
-    let right_tree = UiNodeBuilder::build(|tree| {
-        tree.widget(shared.clone());
-    });
-    ctx.create_window("left", rect(0, 0, 80, 40), left_tree);
-    ctx.create_window("right", rect(90, 0, 80, 40), right_tree);
-
-    let panic = catch_unwind(AssertUnwindSafe(|| {
-        ctx.update_ui();
-    }))
-    .expect_err("rendering one widget handle in two windows should panic");
-    let message = panic_message(panic);
-
-    assert!(message.contains("duplicate widget dispatch"));
-    assert!(message.contains("left"));
-    assert!(message.contains("right"));
-}
-
-#[test]
-fn distinct_widget_handles_with_identical_labels_render_normally() {
-    let atlas = make_test_atlas();
-    let backend = NoopRenderer { atlas };
-    let mut ctx = Context::new_test(backend, Dimensioni::new(200, 200));
-    let first = widget_handle(AlwaysSubmitWidget::new("same"));
-    let second = widget_handle(AlwaysSubmitWidget::new("same"));
+    let first = AlwaysSubmitWidget::new("same");
+    let second = AlwaysSubmitWidget::new("same");
+    let first_state = first.state_handle();
+    let second_state = second.state_handle();
     let mut first_id = NodeId::default();
     let mut second_id = NodeId::default();
     let tree = UiNodeBuilder::build(|tree| {
-        first_id = tree.widget(first.clone());
-        second_id = tree.widget(second.clone());
+        first_id = tree.widget(first);
+        second_id = tree.widget(second);
     });
 
     let root = ctx.create_window("window", rect(0, 0, 80, 40), tree);
     ctx.update_ui();
 
+    assert!(first_state.is_alive());
+    assert!(second_state.is_alive());
     assert!(ctx.committed_results().state_of_retained(RetainedId::root_node(root, first_id)).is_submitted());
     assert!(ctx.committed_results().state_of_retained(RetainedId::root_node(root, second_id)).is_submitted());
 }
@@ -695,12 +649,8 @@ fn registered_window_renders_across_frames_without_resubmission() {
     let backend = NoopRenderer { atlas };
     let mut ctx = Context::new_test(backend, Dimensioni::new(200, 200));
     let (text_state, text_runtime) = crate::TextBlock::create(TextBlockParameters::new("before"));
-    let text = widget_handle(text_runtime);
-    let tree = UiNodeBuilder::build({
-        let text = text.clone();
-        move |tree| {
-            tree.widget(text.clone());
-        }
+    let tree = UiNodeBuilder::build(|tree| {
+        tree.widget(text_runtime);
     });
     let root = ctx.create_window("retained", rect(0, 0, 90, 50), tree);
 
@@ -794,7 +744,7 @@ fn window_manager_executes_one_z_ordered_display_list_per_ui_frame() {
         .register_custom_renderer(move |_frame, _args| back_log.record_marker("back-content"))
         .unwrap();
     let back_tree = UiNodeBuilder::build(|tree| {
-        tree.custom_render(&back, back_renderer);
+        tree.custom_render(back, back_renderer);
     });
     ctx.create_window("back", rect(0, 0, 90, 60), back_tree);
 
@@ -804,7 +754,7 @@ fn window_manager_executes_one_z_ordered_display_list_per_ui_frame() {
         .register_custom_renderer(move |_frame, _args| front_log.record_marker("front-content"))
         .unwrap();
     let front_tree = UiNodeBuilder::build(|tree| {
-        tree.custom_render(&front, front_renderer);
+        tree.custom_render(front, front_renderer);
     });
     ctx.create_window("front", rect(20, 0, 90, 60), front_tree);
 
@@ -927,14 +877,14 @@ fn root_hover_selection_uses_root_z_order() {
         "left",
         rect(0, 0, 120, 80),
         UiNodeBuilder::build(|tree| {
-            tree.widget(left_button.clone());
+            tree.widget(left_button);
         }),
     );
     let right = ctx.create_window(
         "right",
         rect(40, 0, 120, 80),
         UiNodeBuilder::build(|tree| {
-            tree.widget(right_button.clone());
+            tree.widget(right_button);
         }),
     );
 
@@ -1172,11 +1122,8 @@ fn retained_resize_handle_wins_bottom_right_corner_over_window_scrollbars() {
     ctx.set_style(&style);
 
     let text = projected_widget::<TextBlockBuilder>(TextBlockParameters::new("aaaaaaaaaaaaaaaaaaaaaaaa\na\na\na\na\na\na\na"));
-    let tree = UiNodeBuilder::build({
-        let text = text.clone();
-        move |tree| {
-            tree.widget(text.clone());
-        }
+    let tree = UiNodeBuilder::build(|tree| {
+        tree.widget(text);
     });
     let root = ctx.create_window("retained", rect(0, 0, 60, 40), tree);
     ctx.update_ui();
@@ -1264,32 +1211,27 @@ fn retained_combo_popup_stays_closed_after_mouse_selection() {
         WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
     );
     let (combo_state, combo_runtime) = Combo::create(ComboParameters::new());
-    let combo = widget_handle(combo_runtime);
     let (apple_state, apple_runtime) = ListItem::create(ListItemParameters::new("Apple"));
     let (banana_state, banana_runtime) = ListItem::create(ListItemParameters::new("Banana"));
     let item_states = [apple_state, banana_state];
-    let items = [widget_handle(apple_runtime), widget_handle(banana_runtime)];
+    let items = [apple_runtime, banana_runtime];
     let mut item_ids = [NodeId::default(); 2];
     let main_root = ctx.create_window(
         "combo window",
         rect(0, 0, 120, 80),
-        UiNodeBuilder::build({
-            let combo = combo.clone();
-            move |tree| {
-                tree.row(&[SizePolicy::Fixed(80)], SizePolicy::Auto, |tree| {
-                    tree.widget(combo.clone());
-                });
-            }
+        UiNodeBuilder::build(|tree| {
+            tree.row(&[SizePolicy::Fixed(80)], SizePolicy::Auto, |tree| {
+                tree.widget(combo_runtime);
+            });
         }),
     );
     ctx.set_root_options(main_root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE);
-    let popup_items = items.clone();
     ctx.set_root_nodes(
         popup_root,
         UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                for (index, item) in popup_items.iter().enumerate() {
-                    item_ids[index] = tree.widget(item.clone());
+                for (index, item) in items.into_iter().enumerate() {
+                    item_ids[index] = tree.widget(item);
                 }
             });
         }),
@@ -1368,8 +1310,8 @@ fn node_popup_auto_size_fits_stacked_buttons() {
         "popup",
         UiNodeBuilder::build(|tree| {
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                hello_id = tree.widget(hello.clone());
-                world_id = tree.widget(world.clone());
+                hello_id = tree.widget(hello);
+                world_id = tree.widget(world);
             });
         }),
     );
@@ -1459,7 +1401,7 @@ fn scroll_area_requires_enable_scroll_option() {
         scroll_area = tree
             .node(NodeOptions::with_policy(Policy::fixed(90, 40)))
             .scroll_area(ScrollAreaOption::FRAME, |tree| {
-                tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner.clone());
+                tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner);
             });
     });
     let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
@@ -1495,9 +1437,9 @@ fn node_scroll_area_consumes_wheel_without_root_scroll_fallback() {
         scroll_area =
             tree.node(NodeOptions::with_policy(Policy::fixed(90, 40)))
                 .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
-                    tree.node(NodeOptions::with_policy(Policy::fixed(180, 140))).widget(inner.clone());
+                    tree.node(NodeOptions::with_policy(Policy::fixed(180, 140))).widget(inner);
                 });
-        tree.node(NodeOptions::with_policy(Policy::fixed(90, 180))).widget(bottom.clone());
+        tree.node(NodeOptions::with_policy(Policy::fixed(90, 180))).widget(bottom);
     });
     let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);
     ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE);
@@ -1541,7 +1483,7 @@ fn node_scroll_area_internal_overflow_does_not_expand_root_content() {
         scroll_area =
             tree.node(NodeOptions::with_policy(Policy::fixed(90, 40)))
                 .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
-                    tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner.clone());
+                    tree.node(NodeOptions::with_policy(Policy::fixed(80, 140))).widget(inner);
                 });
     });
     let root = ctx.create_window("window", rect(0, 0, 110, 90), tree);

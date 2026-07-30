@@ -40,11 +40,11 @@ use crate::{
         scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Disclosure, Grid, Row, ScrollArea as UiScrollArea, Stack, UiNode, UiNodeData,
         ScrollAreaOption, UiNodeId, WidgetNode,
     },
-    widget::{Widget, WidgetStateOwner},
+    widget::WidgetStateOwner,
     Node, Recti, TextBlock, TextBlockParameters, TextWrap,
 };
 
-use super::{erased_widget_state, WidgetHandle};
+use super::WidgetHandle;
 
 /// Stable identifier assigned to a retained node.
 pub type NodeId = crate::Id;
@@ -275,24 +275,18 @@ pub struct NodeBuilder<'a> {
 }
 
 impl<'a> NodeBuilder<'a> {
-    /// Adds a widget leaf node.
-    pub fn widget<W: Widget + 'static>(self, widget: impl Into<WidgetHandle<W>>) -> NodeId {
+    /// Adds one concrete state-owning widget runtime as a leaf node.
+    pub fn widget<W: WidgetStateOwner>(self, widget: W) -> NodeId {
         self.builder.insert_widget(self.options, widget)
     }
 
-    /// Adds a concrete state-owning widget through the temporary P1 projection bridge.
-    #[doc(hidden)]
-    pub fn state_widget<W: WidgetStateOwner>(self, widget: W) -> NodeId {
-        self.builder.insert_state_widget(self.options, widget)
-    }
-
     /// Adds a custom-render widget node.
-    pub fn custom_render<B, W>(self, state: impl Into<WidgetHandle<W>>, renderer: CustomRenderHandle<B>) -> NodeId
+    pub fn custom_render<B, W>(self, widget: W, renderer: CustomRenderHandle<B>) -> NodeId
     where
         B: RendererBackend,
-        W: Widget + 'static,
+        W: WidgetStateOwner,
     {
-        self.builder.insert_custom_render(self.options, state, renderer)
+        self.builder.insert_custom_render(self.options, widget, renderer)
     }
 
     /// Adds a scroll-area node; [`ScrollAreaOption::ENABLE_SCROLL`] enables overflow scrolling.
@@ -379,68 +373,49 @@ impl UiNodeBuilder {
         NodeBuilder { builder: self, options }
     }
 
-    /// Adds an unkeyed widget leaf node.
-    pub fn widget<W: Widget + 'static>(&mut self, widget: impl Into<WidgetHandle<W>>) -> NodeId {
+    /// Adds one concrete state-owning widget runtime as an unkeyed leaf node.
+    pub fn widget<W: WidgetStateOwner>(&mut self, widget: W) -> NodeId {
         self.insert_widget(NodeOptions::new(), widget)
     }
 
-    /// Adds a concrete state-owning widget through the temporary P1 projection bridge.
-    ///
-    /// The final owning [`crate::Node`] insertion surface replaces this staging method in P1.3.
-    #[doc(hidden)]
-    pub fn state_widget<W: WidgetStateOwner>(&mut self, widget: W) -> NodeId {
-        self.insert_state_widget(NodeOptions::new(), widget)
-    }
-
     /// Adds a widget leaf node with optional identity and placement metadata.
-    fn insert_widget<W: Widget + 'static>(&mut self, options: NodeOptions, widget: impl Into<WidgetHandle<W>>) -> NodeId {
-        let widget = widget.into();
-        self.push_leaf(
-            options,
-            TAG_WIDGET,
-            UiNodeData::Widget(Box::new(WidgetNode::legacy(erased_widget_state(widget), None))),
-        )
-    }
-
-    /// Erases a concrete state-owning runtime only at the existing projection boundary.
-    fn insert_state_widget<W: WidgetStateOwner>(&mut self, options: NodeOptions, widget: W) -> NodeId {
-        self.push_leaf(options, TAG_WIDGET, UiNodeData::Widget(Box::new(WidgetNode::direct(widget))))
+    fn insert_widget<W: WidgetStateOwner>(&mut self, options: NodeOptions, widget: W) -> NodeId {
+        self.push_leaf(options, TAG_WIDGET, UiNodeData::Widget(Box::new(WidgetNode::new(widget, None))))
     }
 
     /// Adds a text block without wrapping.
     pub fn text(&mut self, text: impl Into<String>) -> NodeId {
         let text = text.into();
         let (_, runtime) = TextBlock::create(TextBlockParameters::new(text));
-        self.state_widget(runtime)
+        self.widget(runtime)
     }
 
     /// Adds a wrapped text block.
     pub fn text_with_wrap(&mut self, text: impl Into<String>, wrap: TextWrap) -> NodeId {
         let text = text.into();
         let (_, runtime) = TextBlock::create(TextBlockParameters::with_wrap(text, wrap));
-        self.state_widget(runtime)
+        self.widget(runtime)
     }
 
     /// Adds a custom-render widget node.
-    pub fn custom_render<B, W>(&mut self, state: impl Into<WidgetHandle<W>>, renderer: CustomRenderHandle<B>) -> NodeId
+    pub fn custom_render<B, W>(&mut self, widget: W, renderer: CustomRenderHandle<B>) -> NodeId
     where
         B: RendererBackend,
-        W: Widget + 'static,
+        W: WidgetStateOwner,
     {
-        self.insert_custom_render(NodeOptions::new(), state, renderer)
+        self.insert_custom_render(NodeOptions::new(), widget, renderer)
     }
 
     /// Adds a custom-render widget node with optional identity and placement metadata.
-    fn insert_custom_render<B, W>(&mut self, options: NodeOptions, state: impl Into<WidgetHandle<W>>, renderer: CustomRenderHandle<B>) -> NodeId
+    fn insert_custom_render<B, W>(&mut self, options: NodeOptions, widget: W, renderer: CustomRenderHandle<B>) -> NodeId
     where
         B: RendererBackend,
-        W: Widget + 'static,
+        W: WidgetStateOwner,
     {
-        let state = state.into();
         self.push_leaf(
             options,
             TAG_CUSTOM_RENDER,
-            UiNodeData::Widget(Box::new(WidgetNode::legacy(erased_widget_state(state), Some(renderer.key)))),
+            UiNodeData::Widget(Box::new(WidgetNode::new(widget, Some(renderer.key)))),
         )
     }
 

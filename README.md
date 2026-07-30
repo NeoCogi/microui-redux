@@ -189,10 +189,10 @@ let cube_renderer = ctx.register_custom_renderer({
     }
 })?;
 
-let cube = widget_handle(CubeWidget::new());
+let cube = CubeWidget::new();
 let tree = UiNodeBuilder::build(move |tree| {
     tree.node(NodeOptions::with_policy(Policy::fill()))
-        .custom_render(&cube, cube_renderer);
+        .custom_render(cube, cube_renderer);
 });
 ctx.create_window("Cube", rect(40, 40, 360, 360), tree);
 ```
@@ -240,11 +240,10 @@ Per-frame root submission APIs have been removed from the public surface. Root t
 
 ```rust
 let (name_state, name_runtime) = Textbox::create(TextboxParameters::new(""));
-let name = widget_handle(name_runtime);
 let tree = UiNodeBuilder::build(|tree| {
     tree.row(&[SizePolicy::Fixed(120), SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
         tree.text("Name");
-        tree.widget(&name);
+        tree.widget(name_runtime);
     });
 });
 
@@ -257,7 +256,10 @@ if name_state.try_update(TextboxState::take_submitted).unwrap_or(false) {
 }
 ```
 
-Retained trees are the supported public authoring path. Built-in values, consumable events, and commands are accessed through their typed weak state handles; temporary `WidgetHandle` projections continue to own concrete runtimes during the ongoing node-ownership migration.
+Retained trees are the supported public authoring path. Each leaf node owns its concrete runtime,
+while built-in values, consumable events, and commands are accessed through typed weak state
+handles. `WidgetHandle<Node>` remains temporarily for the legacy header/tree disclosure API and is
+not a leaf-widget ownership mechanism.
 
 ```rust
 let info = FrameInfo::try_new(Dimensioni::new(800, 600), color(20, 22, 26, 255))?;

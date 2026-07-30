@@ -34,11 +34,24 @@ enum Phase {
 struct PhaseWidget {
     phases: Rc<RefCell<Vec<Phase>>>,
     opt: WidgetOption,
+    state: Rc<RefCell<()>>,
 }
 
 impl PhaseWidget {
     fn new(phases: Rc<RefCell<Vec<Phase>>>) -> Self {
-        Self { phases, opt: WidgetOption::NONE }
+        Self {
+            phases,
+            opt: WidgetOption::NONE,
+            state: Rc::new(RefCell::new(())),
+        }
+    }
+}
+
+impl crate::WidgetStateOwner for PhaseWidget {
+    type State = ();
+
+    fn state_handle(&self) -> crate::WidgetStateHandle<Self::State> {
+        crate::WidgetStateHandle::new(&self.state)
     }
 }
 
@@ -65,9 +78,9 @@ impl Widget for PhaseWidget {
 #[test]
 fn p0_widget_phase_order_and_three_layouts_are_explicit() {
     let phases = Rc::new(RefCell::new(Vec::new()));
-    let widget = widget_handle(PhaseWidget::new(phases.clone()));
+    let widget = PhaseWidget::new(phases.clone());
     let tree = UiNodeBuilder::build(|tree| {
-        tree.widget(&widget);
+        tree.widget(widget);
     });
     let mut ctx = context(160, 100);
     let root = ctx.create_window("phase order", rect(0, 0, 120, 70), tree);
@@ -101,23 +114,21 @@ fn p0_widget_phase_order_and_three_layouts_are_explicit() {
 #[test]
 fn p0_existing_typed_widget_mutations_remain_observable() {
     let (checkbox, _checkbox_widget) = Checkbox::create(CheckboxParameters::new("check", false));
-    let (_, button_runtime) = Button::create(ButtonParameters::new("after"));
-    let button = widget_handle(button_runtime);
+    let (_, button) = Button::create(ButtonParameters::new("after"));
     let (list_item_state, list_item_runtime) = ListItem::create(ListItemParameters::new("before"));
-    let list_item = widget_handle(list_item_runtime);
-    let (_, list_box_runtime) = ListBox::create(ListBoxParameters::new("after box", None));
-    let list_box = widget_handle(list_box_runtime);
+    let list_item = list_item_runtime;
+    let (_, list_box) = ListBox::create(ListBoxParameters::new("after box", None));
     let (combo_state, _combo_runtime) = Combo::create(ComboParameters::new());
     let (text_state, text_runtime) = TextBlock::create(TextBlockParameters::new("before"));
-    let text = widget_handle(text_runtime);
+    let text = text_runtime;
     let (swatch_state, swatch_runtime) = ColorSwatch::create(ColorSwatchParameters::new(color(1, 2, 3, 255)));
-    let swatch = widget_handle(swatch_runtime);
+    let swatch = swatch_runtime;
     let (slider_state, _slider_runtime) = crate::Slider::create(SliderParameters::new(0.0, 0.0, 10.0));
     let (number_state, _number_runtime) = Number::create(NumberParameters::new(0.0, 1.0, 0));
     let (textbox_state, textbox_runtime) = Textbox::create(TextboxParameters::new("before"));
-    let textbox = widget_handle(textbox_runtime);
+    let textbox = textbox_runtime;
     let (text_area_state, text_area_runtime) = TextArea::create(TextAreaParameters::new("before"));
-    let text_area = widget_handle(text_area_runtime);
+    let text_area = text_area_runtime;
     let disclosure = widget_handle(Node::header("section", NodeStateValue::Closed));
 
     checkbox.try_update(CheckboxState::check).unwrap();
@@ -162,13 +173,13 @@ fn p0_existing_typed_widget_mutations_remain_observable() {
 
     let tree = UiNodeBuilder::build(|tree| {
         tree.column(|tree| {
-            tree.widget(&button);
-            tree.widget(&list_item);
-            tree.widget(&list_box);
-            tree.widget(&text);
-            tree.widget(&swatch);
-            tree.widget(&textbox);
-            tree.widget(&text_area);
+            tree.widget(button);
+            tree.widget(list_item);
+            tree.widget(list_box);
+            tree.widget(text);
+            tree.widget(swatch);
+            tree.widget(textbox);
+            tree.widget(text_area);
         });
     });
     let mut ctx = context(300, 240);
@@ -185,7 +196,7 @@ fn p1_checkbox_runtime_preserves_projection_geometry_paint_and_click_behavior() 
     let (checkbox, widget) = Checkbox::create(CheckboxParameters::with_opt("retained checkbox", false, WidgetOption::FRAME));
     let mut checkbox_id = NodeId::default();
     let tree = UiNodeBuilder::build(|tree| {
-        checkbox_id = tree.state_widget(widget);
+        checkbox_id = tree.widget(widget);
     });
 
     let node = tree.node(checkbox_id).expect("checkbox projection node");
@@ -214,7 +225,7 @@ fn p1_checkbox_runtime_preserves_projection_geometry_paint_and_click_behavior() 
 fn p1_checkbox_reports_reentrant_rendering_as_a_state_invariant_violation() {
     let (checkbox, widget) = Checkbox::create(CheckboxParameters::new("reentrant", false));
     let tree = UiNodeBuilder::build(|tree| {
-        tree.state_widget(widget);
+        tree.widget(widget);
     });
     let mut ctx = context(160, 100);
     ctx.create_window("reentrant checkbox", rect(0, 0, 120, 70), tree);
@@ -225,15 +236,13 @@ fn p1_checkbox_reports_reentrant_rendering_as_a_state_invariant_violation() {
 #[test]
 fn p0_committed_button_and_textbox_submissions_follow_focus() {
     let (button_state, button_runtime) = Button::create(ButtonParameters::new("submit"));
-    let button = widget_handle(button_runtime);
     let (textbox_state, textbox_runtime) = Textbox::create(TextboxParameters::new(""));
-    let textbox = widget_handle(textbox_runtime);
     let mut button_id = NodeId::default();
     let mut textbox_id = NodeId::default();
     let tree = UiNodeBuilder::build(|tree| {
         tree.column(|tree| {
-            button_id = tree.widget(&button);
-            textbox_id = tree.widget(&textbox);
+            button_id = tree.widget(button_runtime);
+            textbox_id = tree.widget(textbox_runtime);
         });
     });
     let mut ctx = context(220, 140);
@@ -272,16 +281,14 @@ fn p0_committed_button_and_textbox_submissions_follow_focus() {
 #[test]
 fn keyboard_text_routes_to_only_the_front_roots_focused_widget() {
     let (first_state, first_runtime) = Textbox::create(TextboxParameters::new(""));
-    let first = widget_handle(first_runtime);
     let (second_state, second_runtime) = Textbox::create(TextboxParameters::new(""));
-    let second = widget_handle(second_runtime);
     let mut first_id = NodeId::default();
     let mut second_id = NodeId::default();
     let first_tree = UiNodeBuilder::build(|tree| {
-        first_id = tree.widget(&first);
+        first_id = tree.widget(first_runtime);
     });
     let second_tree = UiNodeBuilder::build(|tree| {
-        second_id = tree.widget(&second);
+        second_id = tree.widget(second_runtime);
     });
     let mut ctx = context(300, 120);
     let first_root = ctx.create_window("first", rect(0, 0, 120, 90), first_tree);
@@ -311,9 +318,7 @@ fn keyboard_text_routes_to_only_the_front_roots_focused_widget() {
 fn p0_container_disclosure_scroll_and_dynamic_list_outcomes_are_stable() {
     let disclosure = widget_handle(Node::header("section", NodeStateValue::Closed));
     let (_, first_runtime) = ListItem::create(ListItemParameters::new("first"));
-    let first = widget_handle(first_runtime);
     let (_, second_runtime) = ListItem::create(ListItemParameters::new("second"));
-    let second = widget_handle(second_runtime);
     let mut disclosure_id = NodeId::default();
     let mut scroll_id = NodeId::default();
     let mut second_id = NodeId::default();
@@ -332,8 +337,8 @@ fn p0_container_disclosure_scroll_and_dynamic_list_outcomes_are_stable() {
                 scroll_id = tree.node(NodeOptions::with_policy(Policy::fixed(100, 50))).scroll_area(
                     ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
                     |tree| {
-                        tree.node(NodeOptions::keyed("first")).widget(&first);
-                        second_id = tree.node(NodeOptions::keyed("second")).widget(&second);
+                        tree.node(NodeOptions::keyed("first")).widget(first_runtime);
+                        second_id = tree.node(NodeOptions::keyed("second")).widget(second_runtime);
                         for index in 0..12 {
                             tree.text(format!("row-{index}"));
                         }
@@ -374,17 +379,15 @@ fn p0_container_disclosure_scroll_and_dynamic_list_outcomes_are_stable() {
 }
 
 #[test]
-fn p0_keyed_dynamic_list_reorder_preserves_typed_state_and_visual_order() {
+fn p1_direct_leaf_state_survives_frames_without_projection_rebuild() {
     let (first_state, first_runtime) = ListItem::create(ListItemParameters::new("first"));
-    let first = widget_handle(first_runtime);
     let (_, second_runtime) = ListItem::create(ListItemParameters::new("second"));
-    let second = widget_handle(second_runtime);
     let mut first_id = NodeId::default();
     let mut second_id = NodeId::default();
     let initial = UiNodeBuilder::build(|tree| {
         tree.column(|tree| {
-            first_id = tree.node(NodeOptions::keyed("first")).widget(&first);
-            second_id = tree.node(NodeOptions::keyed("second")).widget(&second);
+            first_id = tree.node(NodeOptions::keyed("first")).widget(first_runtime);
+            second_id = tree.node(NodeOptions::keyed("second")).widget(second_runtime);
         });
     });
     let mut ctx = context(180, 140);
@@ -393,16 +396,9 @@ fn p0_keyed_dynamic_list_reorder_preserves_typed_state_and_visual_order() {
     assert!(ctx.debug_root_node_rect(root, first_id).unwrap().y < ctx.debug_root_node_rect(root, second_id).unwrap().y);
 
     first_state.try_update(|state| state.set_label("first retained")).unwrap();
-    let reordered = UiNodeBuilder::build(|tree| {
-        tree.column(|tree| {
-            second_id = tree.node(NodeOptions::keyed("second")).widget(&second);
-            first_id = tree.node(NodeOptions::keyed("first")).widget(&first);
-        });
-    });
-    ctx.set_root_nodes(root, reordered);
     ctx.update_ui();
 
-    assert!(ctx.debug_root_node_rect(root, second_id).unwrap().y < ctx.debug_root_node_rect(root, first_id).unwrap().y);
+    assert!(ctx.debug_root_node_rect(root, first_id).unwrap().y < ctx.debug_root_node_rect(root, second_id).unwrap().y);
     assert!(ctx.debug_root_texts(root).iter().any(|text| text == "first retained"));
 }
 
@@ -454,15 +450,16 @@ fn p0_root_lifecycle_and_projection_replacement_are_observable() {
 
 #[test]
 fn p0_known_structural_costs_are_evidence_not_compatibility() {
-    let (_, runtime) = TextBlock::create(TextBlockParameters::new("owned twice"));
-    let widget = widget_handle(runtime);
-    assert_eq!(widget.debug_strong_count(), 1);
+    let (state, runtime) = TextBlock::create(TextBlockParameters::new("owned directly"));
+    assert!(state.is_alive());
     let tree = UiNodeBuilder::build(|tree| {
-        tree.widget(&widget);
+        tree.widget(runtime);
     });
-    assert_eq!(widget.debug_strong_count(), 2);
+    assert!(state.is_alive());
     let roots = tree.into_roots();
-    assert_eq!(roots.iter().map(UiNode::debug_erased_adapter_count).sum::<usize>(), 1);
+    assert_eq!(roots.iter().map(UiNode::debug_erased_adapter_count).sum::<usize>(), 0);
+    drop(roots);
+    assert!(!state.is_alive());
 
     let scroll = UiNodeBuilder::build(|tree| {
         tree.scroll_area(ScrollAreaOption::ENABLE_SCROLL, |tree| {
@@ -506,6 +503,15 @@ fn p0_known_structural_costs_are_evidence_not_compatibility() {
 struct ConstraintProbe {
     heights: Rc<RefCell<Vec<i32>>>,
     opt: WidgetOption,
+    state: Rc<RefCell<()>>,
+}
+
+impl crate::WidgetStateOwner for ConstraintProbe {
+    type State = ();
+
+    fn state_handle(&self) -> crate::WidgetStateHandle<Self::State> {
+        crate::WidgetStateHandle::new(&self.state)
+    }
 }
 
 impl Widget for ConstraintProbe {
@@ -528,13 +534,14 @@ impl Widget for ConstraintProbe {
 #[test]
 fn p0_auto_size_probe_and_raw_routed_duplication_are_measured() {
     let heights = Rc::new(RefCell::new(Vec::new()));
-    let probe = widget_handle(ConstraintProbe {
+    let probe = ConstraintProbe {
         heights: heights.clone(),
         opt: WidgetOption::NONE,
-    });
+        state: Rc::new(RefCell::new(())),
+    };
     let mut probe_id = NodeId::default();
     let tree = UiNodeBuilder::build(|tree| {
-        probe_id = tree.widget(&probe);
+        probe_id = tree.widget(probe);
     });
     let mut ctx = context(160, 100);
     let root = ctx.create_window("probe", rect(0, 0, 100, 70), tree);
@@ -649,7 +656,7 @@ fn ui_node_p0_baseline_runtime() {
         assert!(result.metrics.paints > 0);
     }
 
-    assert_eq!((one.nodes, one.erased_adapters), (1, 1));
-    assert_eq!((hundred.nodes, hundred.erased_adapters), (100, 99));
-    assert_eq!((scroll.nodes, scroll.erased_adapters), (25, 20));
+    assert_eq!((one.nodes, one.erased_adapters), (1, 0));
+    assert_eq!((hundred.nodes, hundred.erased_adapters), (100, 0));
+    assert_eq!((scroll.nodes, scroll.erased_adapters), (25, 0));
 }

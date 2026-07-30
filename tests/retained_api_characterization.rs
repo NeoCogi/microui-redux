@@ -45,31 +45,6 @@ impl RendererBackend for MarkerBackend {
     fn destroy_texture(&mut self, _id: TextureId) {}
 }
 
-struct DownstreamWidget {
-    value: usize,
-    log: Rc<RefCell<Vec<&'static str>>>,
-    opt: WidgetOption,
-}
-
-impl Widget for DownstreamWidget {
-    fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
-    }
-
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        Dimensioni::new(32, 16)
-    }
-
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
-        self.log.borrow_mut().push("update");
-        ResourceState::NONE
-    }
-
-    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {
-        self.log.borrow_mut().push("paint");
-    }
-}
-
 struct P1Parameters {
     value: usize,
     log: Rc<RefCell<Vec<&'static str>>>,
@@ -241,8 +216,8 @@ fn downstream_four_role_widget_path_uses_the_runtime_owned_state_cell() {
 
     assert_eq!(state.try_read(|state| state.value), Some(41));
     let tree = UiNodeBuilder::build(|tree| {
-        tree.state_widget(widget);
-        tree.state_widget(unit_widget);
+        tree.widget(widget);
+        tree.widget(unit_widget);
     });
     let backend = MarkerBackend {
         atlas: atlas(),
@@ -291,27 +266,24 @@ fn downstream_widget_custom_render_and_legacy_node_are_public() {
         })
         .unwrap();
 
-    let widget = widget_handle(DownstreamWidget {
-        value: 1,
-        log: log.clone(),
-        opt: WidgetOption::NONE,
-    });
-    widget.update(|state| state.value = 2);
+    let widget = P1Builder::create_widget(P1Parameters { value: 1, log: log.clone() });
+    let widget_state = widget.state_handle();
+    widget_state.try_update(|state| state.value = 2).unwrap();
 
     let legacy_node: Node = Node::header("legacy", NodeStateValue::Closed);
     assert!(legacy_node.is_header());
 
     let tree = UiNodeBuilder::build(|tree| {
-        tree.custom_render(&widget, custom);
+        tree.custom_render(widget, custom);
     });
     ctx.create_window("downstream", rect(0, 0, 100, 70), tree);
     let info = FrameInfo::try_new(Dimensioni::new(120, 90), color(0, 0, 0, 0)).unwrap();
     ctx.frame(info).render_ui().unwrap();
 
-    assert_eq!(widget.read(|state| state.value), 2);
+    assert_eq!(widget_state.try_read(|state| state.value), Some(3));
     let log = log.borrow();
-    let update = log.iter().position(|event| *event == "update").unwrap();
-    let paint = log.iter().position(|event| *event == "paint").unwrap();
+    let update = log.iter().position(|event| *event == "p1-update").unwrap();
+    let paint = log.iter().position(|event| *event == "p1-paint").unwrap();
     let custom = log.iter().position(|event| *event == "custom").unwrap();
     assert!(update < paint && paint < custom, "unexpected downstream phase order: {log:?}");
     let geometry = geometry.borrow();
@@ -320,6 +292,6 @@ fn downstream_widget_custom_render_and_legacy_node_are_public() {
     };
     assert_eq!(*dimensions, (120, 90));
     assert_eq!(content, view);
-    assert!(content.0 >= 0 && content.1 >= 0 && content.2 > 0 && content.3 == 16);
+    assert!(content.0 >= 0 && content.1 >= 0 && content.2 > 0 && content.3 == 12);
     assert!(content.0 + content.2 <= dimensions.0 && content.1 + content.3 <= dimensions.1);
 }

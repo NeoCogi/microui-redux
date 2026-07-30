@@ -8,17 +8,14 @@ use super::*;
 
 #[test]
 fn unkeyed_widget_ids_are_stable_for_same_shape() {
-    let button_a = projected_widget::<ButtonBuilder>(ButtonParameters::new("A"));
-    let button_b = projected_widget::<ButtonBuilder>(ButtonParameters::new("B"));
-
     let tree_a = UiNodeBuilder::build(|builder| {
-        builder.widget(button_a.clone());
-        builder.widget(button_b.clone());
+        builder.widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("A")));
+        builder.widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("B")));
     });
     let tree_a_ids: Vec<NodeId> = tree_a.roots().to_vec();
     let tree_b = UiNodeBuilder::build(|builder| {
-        builder.widget(button_a.clone());
-        builder.widget(button_b.clone());
+        builder.widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("A")));
+        builder.widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("B")));
     });
     let tree_b_ids: Vec<NodeId> = tree_b.roots().to_vec();
 
@@ -28,17 +25,22 @@ fn unkeyed_widget_ids_are_stable_for_same_shape() {
 
 #[test]
 fn keyed_widgets_keep_ids_across_reorder() {
-    let button_a = projected_widget::<ButtonBuilder>(ButtonParameters::new("A"));
-    let button_b = projected_widget::<ButtonBuilder>(ButtonParameters::new("B"));
-
     let tree_a = UiNodeBuilder::build(|builder| {
-        builder.node(NodeOptions::keyed("a")).widget(button_a.clone());
-        builder.node(NodeOptions::keyed("b")).widget(button_b.clone());
+        builder
+            .node(NodeOptions::keyed("a"))
+            .widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("A")));
+        builder
+            .node(NodeOptions::keyed("b"))
+            .widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("B")));
     });
     let ids_a: Vec<NodeId> = tree_a.roots().to_vec();
     let tree_b = UiNodeBuilder::build(|builder| {
-        builder.node(NodeOptions::keyed("b")).widget(button_b.clone());
-        builder.node(NodeOptions::keyed("a")).widget(button_a.clone());
+        builder
+            .node(NodeOptions::keyed("b"))
+            .widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("B")));
+        builder
+            .node(NodeOptions::keyed("a"))
+            .widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("A")));
     });
     let ids_b: Vec<NodeId> = tree_b.roots().to_vec();
 
@@ -48,20 +50,18 @@ fn keyed_widgets_keep_ids_across_reorder() {
 
 #[test]
 fn inserting_keyed_widget_does_not_shift_later_unkeyed_ids() {
-    let button_a = projected_widget::<ButtonBuilder>(ButtonParameters::new("A"));
-    let button_b = projected_widget::<ButtonBuilder>(ButtonParameters::new("B"));
-    let keyed = projected_widget::<ButtonBuilder>(ButtonParameters::new("keyed"));
-
     let tree_a = UiNodeBuilder::build(|builder| {
-        builder.widget(button_a.clone());
-        builder.widget(button_b.clone());
+        builder.widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("A")));
+        builder.widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("B")));
     });
     let ids_a: Vec<NodeId> = tree_a.roots().to_vec();
 
     let tree_b = UiNodeBuilder::build(|builder| {
-        builder.widget(button_a.clone());
-        builder.node(NodeOptions::keyed("inserted")).widget(keyed.clone());
-        builder.widget(button_b.clone());
+        builder.widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("A")));
+        builder
+            .node(NodeOptions::keyed("inserted"))
+            .widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("keyed")));
+        builder.widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("B")));
     });
     let ids_b: Vec<NodeId> = tree_b.roots().to_vec();
 
@@ -76,8 +76,8 @@ fn duplicate_keyed_sibling_ids_are_rejected_at_build_time() {
     let button_b = projected_widget::<ButtonBuilder>(ButtonParameters::new("B"));
 
     UiNodeBuilder::build(|builder| {
-        builder.node(NodeOptions::keyed("same")).widget(&button_a);
-        builder.node(NodeOptions::keyed("same")).widget(&button_b);
+        builder.node(NodeOptions::keyed("same")).widget(button_a);
+        builder.node(NodeOptions::keyed("same")).widget(button_b);
     });
 }
 
@@ -90,10 +90,10 @@ fn matching_child_keys_in_different_scopes_remain_distinct() {
 
     UiNodeBuilder::build(|builder| {
         builder.row(&[SizePolicy::Auto], SizePolicy::Auto, |builder| {
-            first_child = builder.node(NodeOptions::keyed("same")).widget(&button_a);
+            first_child = builder.node(NodeOptions::keyed("same")).widget(button_a);
         });
         builder.row(&[SizePolicy::Auto], SizePolicy::Auto, |builder| {
-            second_child = builder.node(NodeOptions::keyed("same")).widget(&button_b);
+            second_child = builder.node(NodeOptions::keyed("same")).widget(button_b);
         });
     });
 
@@ -109,8 +109,8 @@ fn row_nodes_capture_children_and_track_policy() {
         builder
             .node(NodeOptions::with_policy(Policy::fill()))
             .row(&[SizePolicy::Fixed(40), SizePolicy::Remainder(0)], SizePolicy::Fixed(24), |builder| {
-                builder.widget(button_a.clone());
-                builder.widget(button_b.clone());
+                builder.widget(button_a);
+                builder.widget(button_b);
             });
     });
 
@@ -123,13 +123,11 @@ fn row_nodes_capture_children_and_track_policy() {
 
 #[test]
 fn scroll_area_nodes_store_viewport_and_chrome_children() {
-    let leaf = widget_handle(crate::WidgetOption::NONE);
-
     let tree = UiNodeBuilder::build(|builder| {
         builder.node(NodeOptions::with_policy(Policy::fill())).scroll_area(
             crate::ScrollAreaOption::FRAME | crate::ScrollAreaOption::ENABLE_SCROLL,
             |builder| {
-                builder.widget(leaf.clone());
+                builder.text("leaf");
             },
         );
     });

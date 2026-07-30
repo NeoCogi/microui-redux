@@ -176,6 +176,8 @@ impl<B: RendererBackend> Context<B> {
             .map(|state| state.content_size)
     }
 
+    // Used by the preserved file-dialog implementation while that module is temporarily uncompiled.
+    #[allow(dead_code)]
     pub(crate) fn root_spacing(&self) -> i32 {
         self.style.spacing.max(0)
     }

@@ -148,11 +148,19 @@ fn assert_vec2f_eq(actual: Vec2f, expected: Vec2f) {
     assert!((actual.y - expected.y).abs() < 1.0e-6, "expected y {}, got {}", expected.y, actual.y);
 }
 
-#[derive(Clone)]
 struct TextureClippingProbe {
+    state: Rc<RefCell<()>>,
     texture: TextureId,
     options: WidgetOption,
     screen_content: Rc<RefCell<Option<Recti>>>,
+}
+
+impl WidgetStateOwner for TextureClippingProbe {
+    type State = ();
+
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
+    }
 }
 
 impl Widget for TextureClippingProbe {
@@ -161,6 +169,7 @@ impl Widget for TextureClippingProbe {
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        let _state = self.state.try_borrow().expect("probe state must be available during measure");
         Dimensioni::new(64, 64)
     }
 
@@ -186,13 +195,14 @@ fn main() -> Result<(), String> {
     let mut ctx = Context::new(backend);
     let texture = ctx.try_load_image_rgba(16, 12, &[0xFF; 16 * 12 * 4])?;
     let screen_content = Rc::new(RefCell::new(None));
-    let probe = widget_handle(TextureClippingProbe {
+    let probe = TextureClippingProbe {
+        state: Rc::new(RefCell::new(())),
         texture,
         options: WidgetOption::NO_INTERACT,
         screen_content: screen_content.clone(),
-    });
+    };
     let tree = UiNodeBuilder::build(move |tree| {
-        tree.node(NodeOptions::with_policy(Policy::fixed(64, 64))).widget(&probe);
+        tree.node(NodeOptions::with_policy(Policy::fixed(64, 64))).widget(probe);
     });
     let root = ctx.create_window("texture clipping smoke", rect(0, 0, 64, 64), tree);
     ctx.set_root_options(root, WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE);

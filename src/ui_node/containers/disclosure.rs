@@ -1,4 +1,4 @@
-use crate::{Dimensioni, Node, Recti, WidgetHandle};
+use crate::{Dimensioni, Node, Recti, Widget, WidgetHandle};
 
 use super::{Column, Container, InputCtx, InputResult, LayoutCtx, MeasureCtx, NodeBehavior, PaintCtx, UiInputEvent, UpdateCtx};
 use crate::ui_node::{UiNode, UiNodeState};
@@ -17,11 +17,11 @@ pub(crate) struct Disclosure {
 
 impl NodeBehavior for Disclosure {
     fn measure(&self, ctx: &MeasureCtx<'_>, state: &UiNodeState, available: Dimensioni) -> Dimensioni {
-        let widget = crate::window_manager::erased_widget_state(self.state.clone());
-        let framed = widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME);
+        let framed = self.state.read(Widget::effective_widget_opt).intersects(crate::WidgetOption::FRAME);
         let border_width = if framed { ctx.style.frame_border().width } else { 0 };
         let header_size = crate::frame::outer_preferred(
-            widget.measure(ctx.style, ctx.atlas, crate::frame::content_available(available, border_width)),
+            self.state
+                .read(|widget| widget.measure(ctx.style, ctx.atlas, crate::frame::content_available(available, border_width))),
             border_width,
         );
         if !self.state.read(|state| state.state).is_expanded() {
@@ -45,15 +45,16 @@ impl NodeBehavior for Disclosure {
     }
 
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, state: &mut UiNodeState, rect: Recti) {
-        let widget = crate::window_manager::erased_widget_state(self.state.clone());
-        let framed = widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME);
+        let framed = self.state.read(Widget::effective_widget_opt).intersects(crate::WidgetOption::FRAME);
         let border_width = if framed { ctx.style.frame_border().width } else { 0 };
         let header_preferred = crate::frame::outer_preferred(
-            widget.measure(
-                ctx.style,
-                ctx.atlas,
-                crate::frame::content_available(Dimensioni::new(rect.width, rect.height), border_width),
-            ),
+            self.state.read(|widget| {
+                widget.measure(
+                    ctx.style,
+                    ctx.atlas,
+                    crate::frame::content_available(Dimensioni::new(rect.width, rect.height), border_width),
+                )
+            }),
             border_width,
         );
         let header_height = header_preferred
@@ -78,18 +79,18 @@ impl NodeBehavior for Disclosure {
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, state: &mut UiNodeState) -> bool {
-        ctx.update_container_widget_in_rect(state, self.header_rect, self.state.clone(), "ui node disclosure");
+        ctx.update_container_widget_in_rect(state, self.header_rect, &self.state, "ui node disclosure");
         self.state.read(|state| state.state).is_expanded()
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, state: &mut UiNodeState) -> bool {
-        ctx.paint_container_widget_in_rect(state, self.header_rect, self.state.clone());
+        ctx.paint_container_widget_in_rect(state, self.header_rect, &self.state);
         self.state.read(|state| state.state).is_expanded()
     }
 
     fn update_on(&mut self, ctx: &mut InputCtx<'_>, state: &mut UiNodeState, event: &UiInputEvent) -> InputResult {
-        let widget = crate::window_manager::erased_widget_state(self.state.clone());
-        ctx.route_widget_input(state, self.header_rect, widget.effective_widget_opt(), event)
+        let opt = self.state.read(Widget::effective_widget_opt);
+        ctx.route_widget_input(state, self.header_rect, opt, event)
     }
 }
 

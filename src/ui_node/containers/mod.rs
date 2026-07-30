@@ -1,7 +1,6 @@
 use crate::{Widget, WidgetOption, WidgetStateOwner};
 use crate::render::{CustomRenderKey, DisplayList, Painter};
 use crate::widget_ctx::{localize_events, WidgetPaintCtx, WidgetUpdateCtx};
-use crate::window_manager::{erased_widget_state, WidgetStateHandleDyn};
 use crate::{Dimensioni, FocusPolicy, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
 
 use super::{NodeLayout, UiNode, UiNodeId, UiNodeState, UiRuntime};
@@ -92,94 +91,20 @@ pub(crate) trait Container: NodeBehavior {
 
 /// Retained widget adapter behind the internal node behavior interface.
 pub(crate) struct WidgetNode {
-    /// Legacy erased handle or a directly boxed state-owning runtime during the P1 migration.
-    widget: WidgetPayload,
+    /// Concrete state-owning runtime erased only after generic insertion validates its owner.
+    widget: Box<dyn Widget>,
     /// Optional custom backend render callback for custom-render leaves.
     custom_render: Option<CustomRenderKey>,
 }
 
-/// Compile-safe projection payload while P1.2 migrates every leaf to direct runtime ownership.
-enum WidgetPayload {
-    /// Existing strong-handle adapter retained for built-ins not yet split by P1.1.
-    Legacy(Box<dyn WidgetStateHandleDyn>),
-    /// Final concrete-runtime ownership shape used by the Checkbox vertical slice.
-    Direct(Box<dyn Widget>),
-}
-
 impl WidgetNode {
-    /// Creates the existing erased-handle projection path.
-    pub(crate) fn legacy(widget: Box<dyn WidgetStateHandleDyn>, custom_render: Option<CustomRenderKey>) -> Self {
-        Self {
-            widget: WidgetPayload::Legacy(widget),
-            custom_render,
-        }
-    }
-
-    /// Creates the temporary projection bridge by erasing a concrete state-owning runtime.
-    pub(crate) fn direct<W: WidgetStateOwner>(widget: W) -> Self {
-        Self {
-            widget: WidgetPayload::Direct(Box::new(widget)),
-            custom_render: None,
-        }
-    }
-}
-
-impl WidgetPayload {
-    /// Returns the legacy allocation identity while that migration path exists.
-    fn legacy_handle_id(&self) -> Option<crate::Id> {
-        match self {
-            Self::Legacy(widget) => Some(widget.widget_handle_id()),
-            Self::Direct(_) => None,
-        }
-    }
-
-    /// Returns effective widget options through either retained payload shape.
-    fn effective_widget_opt(&self) -> WidgetOption {
-        match self {
-            Self::Legacy(widget) => widget.effective_widget_opt(),
-            Self::Direct(widget) => widget.effective_widget_opt(),
-        }
-    }
-
-    /// Returns focus policy through either retained payload shape.
-    fn focus_policy(&self) -> FocusPolicy {
-        match self {
-            Self::Legacy(widget) => widget.focus_policy(),
-            Self::Direct(widget) => widget.focus_policy(),
-        }
-    }
-
-    /// Measures through either retained payload shape.
-    fn measure(&self, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
-        match self {
-            Self::Legacy(widget) => widget.measure(style, atlas, available),
-            Self::Direct(widget) => widget.measure(style, atlas, available),
-        }
-    }
-
-    /// Updates through either retained payload shape.
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, events: Vec<UiInputEvent>) -> crate::ResourceState {
-        match self {
-            Self::Legacy(widget) => widget.update(ctx, events),
-            Self::Direct(widget) => widget.update(ctx, events),
-        }
-    }
-
-    /// Paints through either retained payload shape.
-    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        match self {
-            Self::Legacy(widget) => widget.paint(ctx),
-            Self::Direct(widget) => widget.paint(ctx),
-        }
+    /// Erases one concrete state-owning runtime at the retained leaf boundary.
+    pub(crate) fn new<W: WidgetStateOwner>(widget: W, custom_render: Option<CustomRenderKey>) -> Self {
+        Self { widget: Box::new(widget), custom_render }
     }
 }
 
 impl NodeBehavior for WidgetNode {
-    #[cfg(test)]
-    fn debug_is_erased_widget_adapter(&self) -> bool {
-        matches!(self.widget, WidgetPayload::Legacy(_))
-    }
-
     fn is_framed(&self) -> bool {
         self.widget.effective_widget_opt().intersects(WidgetOption::FRAME)
     }
@@ -220,11 +145,7 @@ impl NodeBehavior for WidgetNode {
 
         let retained_id = RetainedId::root_node(ctx.root_id, id);
         let dispatch_site = format!("root {:?} ui node {:?}", ctx.root_name, id);
-        if let Some(widget_handle_id) = self.widget.legacy_handle_id() {
-            ctx.results.record_retained_with_context(retained_id, widget_handle_id, result, dispatch_site);
-        } else {
-            ctx.results.record_direct_with_context(retained_id, result, dispatch_site);
-        }
+        ctx.results.record_direct_with_context(retained_id, result, dispatch_site);
         false
     }
 
@@ -550,14 +471,13 @@ impl UpdateCtx<'_> {
         self.screen_rect(self.content_clip)
     }
 
-    pub(crate) fn update_container_widget_in_rect(&mut self, state: &mut UiNodeState, local_rect: Recti, handle: WidgetHandle<Node>, label: &str) {
+    pub(crate) fn update_container_widget_in_rect(&mut self, state: &mut UiNodeState, local_rect: Recti, handle: &WidgetHandle<Node>, label: &str) {
         let id = state.id();
         let rect = self.screen_rect(local_rect);
-        let widget = erased_widget_state(handle.clone());
-        let opt = widget.effective_widget_opt();
+        let opt = handle.read(Widget::effective_widget_opt);
         let local_content_rect = crate::frame::frame_geometry(local_rect, opt.intersects(WidgetOption::FRAME), self.style).content_or_empty();
         let content_rect = self.screen_rect(local_content_rect);
-        let focus_policy = widget.focus_policy();
+        let focus_policy = handle.read(Widget::focus_policy);
         let content_clip = self.screen_clip();
         let (hovered, focused, clicked, active, scroll_delta) = self.runtime.interaction_for(id, rect, content_clip, self.input, opt, focus_policy);
         state.hovered = hovered;
@@ -580,10 +500,10 @@ impl UpdateCtx<'_> {
             active,
             scroll_delta,
         );
-        let result = widget.update(&mut ctx, events);
+        let result = handle.update(|widget| widget.update(&mut ctx, events));
 
         self.results
-            .record_retained_with_context(RetainedId::root_node(self.root_id, id), handle.id(), result, format!("{label} {:?}", id));
+            .record_direct_with_context(RetainedId::root_node(self.root_id, id), result, format!("{label} {:?}", id));
     }
 }
 
@@ -668,10 +588,9 @@ impl PaintCtx<'_> {
         self.painter().fill_rect(rect, fill);
     }
 
-    pub(crate) fn paint_container_widget_in_rect(&mut self, state: &UiNodeState, local_rect: Recti, handle: WidgetHandle<Node>) {
+    pub(crate) fn paint_container_widget_in_rect(&mut self, state: &UiNodeState, local_rect: Recti, handle: &WidgetHandle<Node>) {
         let (hovered, focused, clicked, active, scroll_delta) = (state.hovered, state.focused, state.clicked, state.active, state.scroll_delta);
-        let widget = erased_widget_state(handle);
-        let framed = widget.effective_widget_opt().intersects(WidgetOption::FRAME);
+        let framed = handle.read(Widget::effective_widget_opt).intersects(WidgetOption::FRAME);
         let geometry = crate::frame::frame_geometry(local_rect, framed, self.style);
         if framed {
             let screen_rect = self.screen_rect(local_rect);
@@ -693,6 +612,6 @@ impl PaintCtx<'_> {
             active,
             scroll_delta,
         );
-        widget.paint(&mut ctx);
+        handle.update(|widget| widget.paint(&mut ctx));
     }
 }

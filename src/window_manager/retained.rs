@@ -50,29 +50,17 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Retained widget handles and erased dispatch adapters.
+//! Transitional retained handles used by legacy disclosure containers.
 
 use std::{cell::RefCell, rc::Rc};
 
-use rs_math3d::Dimensioni;
-
-use crate::{
-    atlas::AtlasHandle,
-    id::Id,
-    input::ResourceState,
-    style::Style,
-    ui_node::UiInputEvent,
-    widget::{FocusPolicy, Widget, WidgetOption},
-    widget_ctx::{WidgetPaintCtx, WidgetUpdateCtx},
-};
-
-/// Shared ownership handle for retained widget state.
+/// Shared ownership handle for transitional legacy disclosure state.
 ///
-/// Cloning a handle shares one widget state object. Handles may be cloned freely for ownership
-/// convenience, but the same handle must not be rendered in multiple tree positions during one
-/// frame; duplicate dispatch will panic. The reference-counting and interior-mutability storage is
-/// intentionally private; callers should use [`WidgetHandle::read`], [`WidgetHandle::update`], or
-/// [`WidgetHandle::replace`] instead of depending on the handle representation.
+/// Leaf nodes own concrete state-owning runtimes directly. This handle remains only for legacy
+/// header/tree [`crate::Node`] state until those containers migrate to framework-owned state. Its
+/// reference-counting and interior-mutability storage is intentionally private; callers should use
+/// [`WidgetHandle::read`], [`WidgetHandle::update`], or [`WidgetHandle::replace`] instead of
+/// depending on the handle representation.
 pub struct WidgetHandle<T> {
     /// Shared retained widget state.
     inner: Rc<RefCell<T>>,
@@ -96,11 +84,6 @@ impl<T> WidgetHandle<T> {
         Self { inner: Rc::new(RefCell::new(value)) }
     }
 
-    /// Returns the stable identity of this widget state allocation.
-    pub fn id(&self) -> Id {
-        Id::new(Rc::as_ptr(&self.inner) as *const () as usize as u64)
-    }
-
     /// Runs `f` with read-only access to the widget state.
     pub fn read<R>(&self, f: impl FnOnce(&T) -> R) -> R {
         let state = self.inner.borrow();
@@ -117,78 +100,12 @@ impl<T> WidgetHandle<T> {
     pub fn replace(&self, value: T) -> T {
         self.inner.replace(value)
     }
-
-    /// Returns the current strong owner count for structural characterization.
-    #[cfg(test)]
-    pub(crate) fn debug_strong_count(&self) -> usize {
-        Rc::strong_count(&self.inner)
-    }
 }
 
-/// Wraps widget state into a retained handle.
+/// Wraps legacy disclosure state into a retained handle.
 ///
-/// The returned handle may be cloned to share ownership, but each frame may dispatch that handle
-/// at most once.
+/// The returned handle may be cloned to share one header/tree state during the temporary legacy
+/// disclosure migration.
 pub fn widget_handle<T>(value: T) -> WidgetHandle<T> {
     WidgetHandle::new(value)
-}
-
-/// Uses the shared handle allocation address as the stable widget-state id.
-pub(crate) fn widget_handle_id<W>(handle: &WidgetHandle<W>) -> Id {
-    handle.id()
-}
-
-/// Type-erased adapter for retained widget state handles.
-pub(crate) trait WidgetStateHandleDyn {
-    /// Returns the stable id of the wrapped widget handle.
-    fn widget_handle_id(&self) -> Id;
-    /// Returns the widget options after applying widget-specific effective-state overrides.
-    fn effective_widget_opt(&self) -> WidgetOption;
-    /// Returns how the widget wants focus to be retained or released.
-    fn focus_policy(&self) -> FocusPolicy;
-    /// Measures the widget without mutating it.
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
-    /// Updates the widget through interior mutability.
-    fn update(&self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState;
-    /// Paints the widget through interior mutability.
-    fn paint(&self, ctx: &mut WidgetPaintCtx<'_>);
-}
-
-/// Concrete erased adapter around a strongly typed widget handle.
-struct WidgetStateHandle<W: Widget + 'static> {
-    /// Strongly typed handle being erased.
-    handle: WidgetHandle<W>,
-}
-
-impl<W: Widget + 'static> WidgetStateHandleDyn for WidgetStateHandle<W> {
-    fn widget_handle_id(&self) -> Id {
-        widget_handle_id(&self.handle)
-    }
-
-    fn effective_widget_opt(&self) -> WidgetOption {
-        self.handle.read(Widget::effective_widget_opt)
-    }
-
-    fn focus_policy(&self) -> FocusPolicy {
-        self.handle.read(Widget::focus_policy)
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.handle.read(|widget| widget.measure(style, atlas, avail))
-    }
-
-    fn update(&self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
-        // Borrow only for the duration of dispatch so later result recording cannot hold state.
-        self.handle.update(|widget| widget.update(ctx, input))
-    }
-
-    fn paint(&self, ctx: &mut WidgetPaintCtx<'_>) {
-        // Paint may mutate retained widget state for caches such as text layout.
-        self.handle.update(|widget| widget.paint(ctx));
-    }
-}
-
-/// Boxes a typed widget handle behind the retained traversal's erased dispatch trait.
-pub(crate) fn erased_widget_state<W: Widget + 'static>(handle: WidgetHandle<W>) -> Box<dyn WidgetStateHandleDyn> {
-    Box::new(WidgetStateHandle { handle })
 }

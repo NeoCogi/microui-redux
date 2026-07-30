@@ -62,21 +62,16 @@ enum Action {
     Backspace,
 }
 
-#[derive(Clone)]
 struct CalcButton {
     action: Action,
     state: WidgetStateHandle<ButtonState>,
-    widget: WidgetHandle<Button>,
+    widget: Option<Button>,
 }
 
 impl CalcButton {
     fn new(label: &str, action: Action) -> Self {
         let (state, runtime) = Button::create(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
-        Self {
-            action,
-            state,
-            widget: widget_handle(runtime),
-        }
+        Self { action, state, widget: Some(runtime) }
     }
 }
 
@@ -324,8 +319,7 @@ fn main() {
             "0",
             WidgetOption::FRAME | WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT,
         ));
-        let display = widget_handle(display_runtime);
-        let buttons = [
+        let mut buttons = [
             CalcButton::new("AC", Action::ClearAll),
             CalcButton::new("CE", Action::ClearEntry),
             CalcButton::new("BS", Action::Backspace),
@@ -354,7 +348,7 @@ fn main() {
                 SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION),
             )))
             .row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
-                tree.widget(&display);
+                tree.widget(display_runtime);
             });
             tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
                 tree.column(|tree| {
@@ -366,8 +360,8 @@ fn main() {
                     ];
                     let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
                     tree.grid(&columns, &rows, |tree| {
-                        for button in &buttons {
-                            tree.widget(&button.widget);
+                        for button in &mut buttons {
+                            tree.widget(button.widget.take().expect("calculator tree is built once"));
                         }
                     });
                 });
