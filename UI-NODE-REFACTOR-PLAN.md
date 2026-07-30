@@ -2074,7 +2074,7 @@ explicit decision before changing the criterion.
   protected specifications that become executable and green in their named P1.0/P1.1/P1.3/P2.3
   owner batches, with the public container surface landing atomically rather than partially.
 
-- [ ] **P0.2 — Freeze the optional weak-exposure contract**
+- [x] **P0.2 — Freeze the optional weak-exposure contract**
 
   **Problem**
 
@@ -2092,9 +2092,8 @@ explicit decision before changing the criterion.
   `create_widget`/`create_container` returns `Some(WidgetStateHandle<T>)` when the concrete builder's
   fixed `EXPOSE_STATE` policy permits application access and `None` when it keeps that capability
   private. The opaque owned wrapper retains the strong `Rc<RefCell<T>>` in both exposure cases.
-  Present handles are weak, so node
-  lifetime remains authoritative. Neither the strong owner nor the weak handle is a Context
-  capability or a lock.
+  Present handles are weak, so node lifetime remains authoritative. Neither the strong owner nor
+  the weak handle is a Context capability or a lock.
 
   Mandatory exposure was rejected because it leaks implementation-only state or creates a
   meaningless public capability. Strong application handles were rejected because they keep
@@ -2104,16 +2103,20 @@ explicit decision before changing the criterion.
 
   Implement `WidgetStateHandle<T>`, `StateAccessError`, input-preserving
   `StateAccessFailure<I>`/`try_update_with`, the associated builders, and the required
-  optional-returning framework factories. Each factory creates one `Rc<RefCell<Self::State>>`,
-  supplies the runtime a weak handle to it, and moves the strong owner into `OwnedWidget` or
-  `OwnedContainer`. `WidgetStateHandle::from_owner` is crate-private; the application receives a
-  weak clone only for the `Some` path. Each concrete widget or container constructor makes one fixed, documented
+  optional-returning framework factories. Each factory creates one `Rc<RefCell<B::State>>` for its
+  concrete builder `B`, supplies the runtime a weak handle to it, and moves the strong owner into
+  `OwnedWidget` or `OwnedContainer`. `WidgetStateHandle::from_owner` is crate-private; the
+  application receives a weak clone only for the `Some` path. `is_alive` reports whether that weak
+  cell can still be upgraded without borrowing its contents; an already-active access operation's
+  temporary upgrade therefore keeps it true after the opaque owner is dropped and until that
+  operation returns. Each concrete widget or container constructor makes one fixed, documented
   exposure choice; Parameters do not contain a generic exposure selector and exposure cannot
-  change after construction. Handles contain only `Weak<RefCell<T>>`; use `try_borrow` APIs and
-  remove `replace`. Document that access closures may not invoke retained traversal/rendering, and
-  use the shared internal runtime-borrow diagnostic for built-ins instead of adding a
-  frame/state-access gate. The application top-level-render prohibition explicitly exempts
-  framework-created child measurement/layout/visitor recursion.
+  change after construction. Handles contain only `Weak<RefCell<T>>`; `try_read` and `try_update`
+  use checked borrows, return the closure result, and expose only `Dropped`/`Borrowed`; remove
+  `replace`. Document that access closures may not invoke retained traversal/rendering, and use the
+  shared internal runtime-borrow diagnostic for built-ins instead of adding a frame/state-access
+  gate. The application top-level-render prohibition explicitly exempts framework-created child
+  measurement/layout/visitor recursion.
 
   **Acceptance tests**
 
@@ -2121,11 +2124,20 @@ explicit decision before changing the criterion.
   - A compile-time test clones `WidgetStateHandle<NonCloneState>` and proves the handle's `Clone`
     implementation has no `T: Clone` bound.
   - Dropping Checkbox's returned `OwnedWidget` makes an idle handle report `Dropped`.
-  - A hidden widget and a fixed hidden container return `None`, but each returned opaque wrapper
-    owns its strong state `Rc`.
-  - Classification tests pin the fixed outcome of every built-in constructor: Checkbox and the
-    public dynamic layout containers return `Some`; a hidden leaf and a crate-private fixed
-    container proof implementation return `None`.
+  - `is_alive` does not borrow state: it remains true during an existing read or mutable access,
+    remains true after that closure drops the opaque owner because the active operation holds a
+    temporary upgrade, and becomes false when the final owner/active upgrade is gone.
+  - `try_read` and `try_update` return their closure results; an expired cell returns `Dropped`, and
+    an unavailable live cell returns `Borrowed` without invoking the closure.
+  - `StateAccessFailure::error`, `into_input`, and `into_parts` report the original error and return
+    the exact uncommitted input without cloning or substitution.
+  - `Custom` and a crate-private fixed-container proof implementation return `None`, but each
+    returned opaque wrapper owns its strong state `Rc`.
+  - Classification tests pin the complete fixed built-in outcome: `Checkbox`, `Button`, `ListItem`,
+    `ListBox`, `Combo`, `TextBlock`, `ColorSwatch`, `Slider`, `Number`, `Textbox`, and `TextArea`
+    return `Some`; `Custom` returns `None`; and every public dynamic container (`Column`, `Row`,
+    `Grid`, `Stack`, `Disclosure`, and `ScrollArea`) returns `Some`. The old header/tree `Node` is
+    retired rather than assigned an exposure outcome.
   - Repeated calls to the same constructor have the same exposure outcome regardless of parameter
     values or how the caller uses the result.
   - No public Parameters type contains a generic exposure flag, and no exposure-selector type or
@@ -2143,8 +2155,27 @@ explicit decision before changing the criterion.
     `ContainerLayoutCtx::layout_child`, and visitor traversal while its parent state borrow is active
     without triggering the top-level-reentrancy diagnostic.
   - No frame/state-access flag or gate is added to enforce the reentrancy precondition.
-  - No Context token, frame flag, mount metadata, strong `Rc`, or raw `Weak` is returned as the
-    application state capability or consulted during access.
+  - Compile-fail checks prove ordinary downstream code cannot construct a state handle from a raw
+    `Weak`, extract its `Rc`/`Weak`, or access `WidgetStateHandle::from_owner`; no Context token,
+    frame flag, mount metadata, strong `Rc`, or raw `Weak` is returned as the application state
+    capability or consulted during access.
+
+  **Frozen contract evidence (2026-07-29)**
+
+  The normative ownership and access sections above now define the complete optional-exposure
+  contract. Factories always allocate and retain one strong state cell inside the opaque owner;
+  `EXPOSE_STATE` controls only whether the application receives another weak typed capability.
+  Liveness is allocation-based, borrow conflicts are per cell, failed ownership-moving updates
+  return their exact input, and neither frame existence nor Context identity participates in state
+  access. The fixed built-in table is the exhaustive exposure compatibility boundary.
+
+  Repository inspection confirms that the current `WidgetHandle<T>` instead stores and clones a
+  strong `Rc<RefCell<T>>`, exposes allocation-derived identity, uses panicking `borrow`/`borrow_mut`,
+  offers whole-value `replace`, and is cloned again by `WidgetStateHandleDyn` for runtime dispatch.
+  Those properties explain the migration but are not preserved behavior. P0.2 intentionally changes
+  no production API: its compile-time, lifetime, borrow, and input-preservation criteria become
+  executable and green in P1.0/P1.3, including the hidden-state proof implementations needed to
+  inspect otherwise unexposed ownership.
 
 - [ ] **P0.3 — Freeze the state-owned `Children` contract**
 
