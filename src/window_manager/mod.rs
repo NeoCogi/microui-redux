@@ -154,6 +154,9 @@ pub struct Context<B: RendererBackend> {
     /// Drawable size used by retained behavior tests that drive complete frames tersely.
     #[cfg(test)]
     test_dimensions: Dimensioni,
+    /// Number of successful whole-root projection replacements.
+    #[cfg(test)]
+    root_projection_replacements: u64,
 }
 
 impl<B: RendererBackend> Context<B> {
@@ -175,6 +178,8 @@ impl<B: RendererBackend> Context<B> {
             input: Rc::new(RefCell::new(Input::default())),
             #[cfg(test)]
             test_dimensions: Dimensioni::new(1, 1),
+            #[cfg(test)]
+            root_projection_replacements: 0,
         }
     }
 
@@ -191,6 +196,12 @@ impl<B: RendererBackend> Context<B> {
     pub(crate) fn update_ui(&mut self) {
         let info = FrameInfo::try_new(self.test_dimensions, crate::color(0, 0, 0, 0)).expect("test Context dimensions must be positive");
         self.frame(info).render_ui().expect("test backend frame should render");
+    }
+
+    /// Returns how many complete root projections have been replaced.
+    #[cfg(test)]
+    pub(crate) fn debug_root_projection_replacements(&self) -> u64 {
+        self.root_projection_replacements
     }
 }
 
@@ -217,6 +228,8 @@ pub struct ContextFrame<'a, B: RendererBackend> {
 
 #[cfg(test)]
 mod builder_tests;
+#[cfg(test)]
+mod characterization_tests;
 #[cfg(test)]
 mod tests;
 

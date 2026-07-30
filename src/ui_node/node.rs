@@ -246,6 +246,22 @@ impl UiNode {
         matches!(self.data, UiNodeData::Container(_))
     }
 
+    /// Counts this node and every retained descendant.
+    #[cfg(test)]
+    pub(crate) fn debug_node_count(&self) -> usize {
+        1 + self.children().iter().map(Self::debug_node_count).sum::<usize>()
+    }
+
+    /// Counts old erased public-widget adapters in this subtree.
+    #[cfg(test)]
+    pub(crate) fn debug_erased_adapter_count(&self) -> usize {
+        let here = match &self.data {
+            UiNodeData::Widget(widget) => usize::from(widget.debug_is_erased_widget_adapter()),
+            UiNodeData::Container(container) => usize::from(container.debug_is_erased_widget_adapter()),
+        };
+        here + self.children().iter().map(Self::debug_erased_adapter_count).sum::<usize>()
+    }
+
     /// Finds a node in this subtree.
     pub(crate) fn find(&self, id: UiNodeId) -> Option<&UiNode> {
         if self.id() == id {

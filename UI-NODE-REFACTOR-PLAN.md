@@ -1901,7 +1901,7 @@ This freeze is a change-control baseline, not an immutable promise. If an owner 
 trade-off, it must follow “Document authority and behavior change control” above and obtain an
 explicit decision before changing the criterion.
 
-- [ ] **P0.0 — Characterize current supported behavior and structural cost**
+- [x] **P0.0 — Characterize current supported behavior and structural cost**
 
   **Problem**
 
@@ -1930,6 +1930,65 @@ explicit decision before changing the criterion.
     `UiNodeState::visible` has no behavioral effect, whole `Children` swapping is currently possible
     through the proposed raw mutation API, and no typed root-state/destruction API currently exists.
   - Every known defect is assigned below rather than frozen as desired output.
+
+  **Recorded evidence (2026-07-29)**
+
+  The pre-migration gate passed before the P0.0 additions with 164 tests passed, zero failed, and
+  the existing manual render benchmark ignored. The completed characterization adds green tests
+  for the current widget phase sequence, typed built-in mutation, committed button/textbox events,
+  focus, row/grid/stack geometry, keyed dynamic-list reorder, disclosure gating, scrolling, root
+  lifecycle/replacement, and downstream public custom-widget/custom-render integration. These
+  tests assert state, geometry, rendered content, event results, and callback order rather than
+  builder hash values.
+
+  After adding the characterization, `cargo test --all-targets` passes 172 unit tests and one
+  downstream integration test with zero failures; the existing render baseline and two new UI-node
+  baselines are intentionally ignored in the ordinary suite.
+
+  Test-only runtime counters record the current common traversal phases without changing production
+  control flow. One leaf frame performs three tree layouts, six runtime measurement requests, three
+  layout dispatches, one update, and one paint. The concrete old widget adapter performs three
+  additional widget measurements from its layout forwarding path, yielding the characterized
+  `measure x6 -> update -> measure x3 -> paint` widget-call sequence. A pointer press on that leaf
+  produces both routed-event dispatch and a raw-input interaction derivation in the same frame.
+
+  The following release baseline was recorded with Rust 1.97.1
+  (`x86_64-unknown-linux-gnu`, LLVM 22.1.6). Allocation columns count successful heap allocation or
+  reallocation calls and requested bytes. Construction covers tree/root creation after Context
+  setup; steady frames are measured after two warm-up frames. Timing is informational and is not a
+  compatibility threshold.
+
+  | Scenario | Nodes | Erased adapters | Build allocs | Build bytes | Steady allocs | Steady bytes | Tree layouts | Measures | Layouts | Updates | Paints | ns/frame |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | One widget | 1 | 1 | 14 | 2,821 | 19 | 1,397 | 3 | 6 | 3 | 1 | 1 | 9,451 |
+  | 100-node tree | 100 | 99 | 717 | 88,691 | 1,957 | 172,364 | 3 | 1,194 | 300 | 100 | 100 | 1,286,853 |
+  | Scroll area with 20 content widgets | 25 | 20 | 258 | 32,749 | 497 | 42,244 | 3 | 324 | 75 | 25 | 25 | 294,298 |
+
+  File-dialog measurements cover `eval` plus the resulting rendered frame. The refresh row also
+  includes deterministic directory enumeration after adding one entry. Both paths replace the
+  complete root projection once per evaluation.
+
+  | Scenario | Nodes | Erased adapters | Allocs | Bytes | Root rebuilds | Tree layouts | Measures | Layouts | Updates | Paints | ns/eval+frame |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | File dialog idle | 41 | 24 | 612 | 57,782 | 1 | 3 | 861 | 123 | 41 | 41 | 874,403 |
+  | File dialog refresh | 42 | 25 | 718 | 63,511 | 1 | 3 | 894 | 126 | 42 | 42 | 837,152 |
+
+  The structural characterization separately pins facts that are evidence of migration cost, not
+  desired compatibility: projecting one retained application handle raises its strong owner count
+  from one to two; each ordinary projected leaf adds one `WidgetStateHandleDyn` adapter; a scroll
+  area adds one viewport, two scrollbar tracks, and one corner synthetic descendant; auto-size
+  supplies the numeric `10_000` height probe; `UiNodeState::visible = false` does not suppress
+  traversal; and the current raw `children_mut` surface permits swapping whole child collections.
+  The downstream test confirms that the old header/tree `Node` remains publicly exported. Source
+  inspection confirms there is no public typed `RootState`, `RootHandle`, or `destroy_root` API.
+
+  Reproduce the complete P0.0 evidence with:
+
+  ```text
+  cargo fmt --all -- --check
+  cargo test --all-targets
+  cargo test --release ui_node_p0_baseline -- --ignored --nocapture --test-threads=1
+  ```
 
 - [ ] **P0.1 — Freeze the runtime/state separation contract**
 

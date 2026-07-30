@@ -25,6 +25,12 @@ pub(crate) use stack::Stack;
 
 /// Internal runtime behavior for any retained node, including widget adapters and containers.
 pub(crate) trait NodeBehavior {
+    /// Reports whether this behavior is the erased public-widget adapter used by the old runtime.
+    #[cfg(test)]
+    fn debug_is_erased_widget_adapter(&self) -> bool {
+        false
+    }
+
     /// Returns whether the runtime owns an outer frame for this node.
     fn is_framed(&self) -> bool {
         false
@@ -102,6 +108,11 @@ impl Clone for WidgetNode {
 }
 
 impl NodeBehavior for WidgetNode {
+    #[cfg(test)]
+    fn debug_is_erased_widget_adapter(&self) -> bool {
+        true
+    }
+
     fn is_framed(&self) -> bool {
         self.widget.effective_widget_opt().intersects(WidgetOption::FRAME)
     }

@@ -28,6 +28,8 @@ mod node;
 pub(crate) use node::{NodeLayout, Transform, UiNode, UiNodeData, UiNodeId, UiNodeState};
 mod runtime;
 pub(crate) use runtime::UiRuntime;
+#[cfg(test)]
+pub(crate) use runtime::RuntimeMetrics;
 mod containers;
 pub(crate) use containers::{
     scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Container, Disclosure, Grid, InputCtx, InputResult, LayoutCtx, MeasureCtx,

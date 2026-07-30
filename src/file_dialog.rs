@@ -535,10 +535,10 @@ impl FileDialogState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{test_atlas, NoopRenderer};
+    use crate::test_support::{AllocationMeasurement, NoopRenderer, test_atlas};
     use std::{
         fs,
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Instant, SystemTime, UNIX_EPOCH},
     };
 
     fn unique_temp_dir(name: &str) -> std::path::PathBuf {
@@ -700,5 +700,95 @@ mod tests {
 
         let _ = fs::remove_file(file_path);
         let _ = fs::remove_dir(dir);
+    }
+
+    #[test]
+    #[ignore = "manual serial release-mode P0/P5 UI-node baseline"]
+    fn ui_node_p0_baseline_file_dialog() {
+        let dir = unique_temp_dir("file-dialog-baseline");
+        fs::create_dir_all(&dir).unwrap();
+        for index in 0..8 {
+            fs::write(dir.join(format!("file-{index}.txt")), b"baseline").unwrap();
+        }
+        for index in 0..4 {
+            fs::create_dir(dir.join(format!("folder-{index}"))).unwrap();
+        }
+
+        let backend = NoopRenderer { atlas: test_atlas() };
+        let mut ctx = Context::new_test(backend, Dimensioni::new(800, 600));
+        let mut dialog = FileDialogState::new(&mut ctx);
+        dialog.current_working_directory = dir.to_string_lossy().to_string();
+        dialog.refresh_entries();
+        dialog.open(&mut ctx);
+        dialog.eval(&mut ctx);
+        ctx.update_ui();
+        dialog.eval(&mut ctx);
+        ctx.update_ui();
+
+        let replacements_before_idle = ctx.debug_root_projection_replacements();
+        let idle_started = Instant::now();
+        let idle_measurement = AllocationMeasurement::begin();
+        dialog.eval(&mut ctx);
+        ctx.update_ui();
+        let idle_allocations = idle_measurement.finish();
+        let idle_elapsed = idle_started.elapsed();
+        let idle_replacements = ctx.debug_root_projection_replacements() - replacements_before_idle;
+        let idle_metrics = ctx.debug_root_runtime_metrics(dialog.root).unwrap();
+        let idle_structure = ctx.debug_root_structure(dialog.root).unwrap();
+
+        fs::write(dir.join("new-file.txt"), b"refresh").unwrap();
+        let replacements_before_refresh = ctx.debug_root_projection_replacements();
+        let refresh_started = Instant::now();
+        let refresh_measurement = AllocationMeasurement::begin();
+        dialog.refresh_entries();
+        dialog.eval(&mut ctx);
+        ctx.update_ui();
+        let refresh_allocations = refresh_measurement.finish();
+        let refresh_elapsed = refresh_started.elapsed();
+        let refresh_replacements = ctx.debug_root_projection_replacements() - replacements_before_refresh;
+        let refresh_metrics = ctx.debug_root_runtime_metrics(dialog.root).unwrap();
+        let refresh_structure = ctx.debug_root_structure(dialog.root).unwrap();
+
+        println!(
+            "| scenario | nodes | erased adapters | allocs | bytes | root rebuilds | tree layouts | measures | layouts | updates | paints | ns/eval+frame |"
+        );
+        println!("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+        println!(
+            "| file dialog idle | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            idle_structure.0,
+            idle_structure.1,
+            idle_allocations.events,
+            idle_allocations.bytes,
+            idle_replacements,
+            idle_metrics.tree_layouts,
+            idle_metrics.measures,
+            idle_metrics.layouts,
+            idle_metrics.updates,
+            idle_metrics.paints,
+            idle_elapsed.as_nanos(),
+        );
+        println!(
+            "| file dialog refresh | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            refresh_structure.0,
+            refresh_structure.1,
+            refresh_allocations.events,
+            refresh_allocations.bytes,
+            refresh_replacements,
+            refresh_metrics.tree_layouts,
+            refresh_metrics.measures,
+            refresh_metrics.layouts,
+            refresh_metrics.updates,
+            refresh_metrics.paints,
+            refresh_elapsed.as_nanos(),
+        );
+
+        assert_eq!(idle_replacements, 1);
+        assert_eq!(refresh_replacements, 1);
+        assert_eq!(idle_metrics.tree_layouts, 3);
+        assert_eq!(refresh_metrics.tree_layouts, 3);
+        assert!(idle_allocations.events > 0);
+        assert!(refresh_allocations.events > idle_allocations.events);
+
+        fs::remove_dir_all(dir).unwrap();
     }
 }

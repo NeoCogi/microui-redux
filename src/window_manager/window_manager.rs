@@ -198,6 +198,10 @@ impl<B: RendererBackend> Context<B> {
             let mut next_runtime = UiRuntime::new();
             next_runtime.transfer_runtime_state_from(&mut entry.roots, &previous_roots, &entry.runtime);
             entry.runtime = next_runtime;
+            #[cfg(test)]
+            {
+                self.root_projection_replacements += 1;
+            }
         }
     }
 
@@ -495,6 +499,20 @@ impl<B: RendererBackend> Context<B> {
             .iter()
             .find(|entry| entry.id == root)
             .map(|entry| entry.runtime.debug_root_content_size())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_runtime_metrics(&self, root: RootId) -> Option<crate::ui_node::RuntimeMetrics> {
+        self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.runtime.debug_metrics())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_structure(&self, root: RootId) -> Option<(usize, usize)> {
+        let entry = self.roots.iter().find(|entry| entry.id == root)?;
+        Some((
+            entry.roots.iter().map(UiNode::debug_node_count).sum(),
+            entry.roots.iter().map(UiNode::debug_erased_adapter_count).sum(),
+        ))
     }
 
     #[cfg(test)]

@@ -4,6 +4,93 @@ use crate::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Verte
 use crate::{AtlasHandle, AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, TextureId, Vec2i};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::{
+    alloc::{GlobalAlloc, Layout, System},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+};
+
+/// Test-process allocator whose counters are enabled only inside an explicit measurement window.
+pub(crate) struct CountingAllocator;
+
+#[global_allocator]
+static ALLOCATOR: CountingAllocator = CountingAllocator;
+
+static MEASURE_ALLOCATIONS: AtomicBool = AtomicBool::new(false);
+static ALLOCATION_EVENTS: AtomicU64 = AtomicU64::new(0);
+static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
+
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let pointer = unsafe { System.alloc(layout) };
+        count_allocation(pointer, layout.size());
+        pointer
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        let pointer = unsafe { System.alloc_zeroed(layout) };
+        count_allocation(pointer, layout.size());
+        pointer
+    }
+
+    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(pointer, layout) };
+    }
+
+    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        let pointer = unsafe { System.realloc(pointer, layout, new_size) };
+        count_allocation(pointer, new_size);
+        pointer
+    }
+}
+
+fn count_allocation(pointer: *mut u8, bytes: usize) {
+    if !pointer.is_null() && MEASURE_ALLOCATIONS.load(Ordering::Relaxed) {
+        ALLOCATION_EVENTS.fetch_add(1, Ordering::Relaxed);
+        ALLOCATED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+}
+
+/// Aggregate allocation and reallocation activity from one isolated test window.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct AllocationCount {
+    pub(crate) events: u64,
+    pub(crate) bytes: u64,
+}
+
+/// Enables global allocation counters until [`AllocationMeasurement::finish`] is called or the
+/// guard is dropped. Callers must run allocation baselines serially.
+pub(crate) struct AllocationMeasurement {
+    active: bool,
+}
+
+impl AllocationMeasurement {
+    pub(crate) fn begin() -> Self {
+        assert!(
+            !MEASURE_ALLOCATIONS.swap(true, Ordering::AcqRel),
+            "allocation measurement windows must not overlap"
+        );
+        ALLOCATION_EVENTS.store(0, Ordering::Relaxed);
+        ALLOCATED_BYTES.store(0, Ordering::Relaxed);
+        Self { active: true }
+    }
+
+    pub(crate) fn finish(mut self) -> AllocationCount {
+        self.active = false;
+        MEASURE_ALLOCATIONS.store(false, Ordering::Release);
+        AllocationCount {
+            events: ALLOCATION_EVENTS.load(Ordering::Relaxed),
+            bytes: ALLOCATED_BYTES.load(Ordering::Relaxed),
+        }
+    }
+}
+
+impl Drop for AllocationMeasurement {
+    fn drop(&mut self) {
+        if self.active {
+            MEASURE_ALLOCATIONS.store(false, Ordering::Release);
+        }
+    }
+}
 
 const ICON_NAMES: [&str; 9] = [
     "white",

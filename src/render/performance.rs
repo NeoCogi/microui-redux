@@ -5,16 +5,9 @@
 //! `cargo test --release render_performance_baseline -- --ignored --nocapture --test-threads=1`
 
 use super::{CustomRenderHandle, DisplayList, FrameError, FrameInfo, Painter, Renderer, RendererBackend, RendererFrame, Vertex};
-use crate::{AtlasSource, CharEntry, FontEntry, FontId, SourceFormat, TextureId, color};
+use crate::{test_support::AllocationMeasurement, AtlasSource, CharEntry, FontEntry, FontId, SourceFormat, TextureId, color};
 use rs_math3d::{Dimensioni, Recti, Vec2f, Vec2i};
-use std::{
-    alloc::{GlobalAlloc, Layout, System},
-    cell::Cell,
-    hint::black_box,
-    rc::Rc,
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
-    time::Instant,
-};
+use std::{cell::Cell, hint::black_box, rc::Rc, time::Instant};
 
 const VIEW_SIZE: i32 = 4_096;
 const RECTANGLE_COUNT: usize = 4_096;
@@ -24,73 +17,6 @@ const NESTED_CLIP_DEPTH: usize = 32;
 const EXTERNAL_TEXTURE_PAIR_COUNT: usize = 2_048;
 const CUSTOM_BARRIER_COUNT: usize = 8;
 const ITERATIONS: u64 = 200;
-
-/// Allocator wrapper enabled only around one benchmark measurement window.
-struct CountingAllocator;
-
-#[global_allocator]
-static ALLOCATOR: CountingAllocator = CountingAllocator;
-
-static MEASURE_ALLOCATIONS: AtomicBool = AtomicBool::new(false);
-static ALLOCATION_EVENTS: AtomicU64 = AtomicU64::new(0);
-static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let pointer = unsafe { System.alloc(layout) };
-        count_allocation(pointer, layout.size());
-        pointer
-    }
-
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        let pointer = unsafe { System.alloc_zeroed(layout) };
-        count_allocation(pointer, layout.size());
-        pointer
-    }
-
-    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(pointer, layout) };
-    }
-
-    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let pointer = unsafe { System.realloc(pointer, layout, new_size) };
-        count_allocation(pointer, new_size);
-        pointer
-    }
-}
-
-/// Counts one successful allocation or reallocation during an active measurement.
-fn count_allocation(pointer: *mut u8, bytes: usize) {
-    if !pointer.is_null() && MEASURE_ALLOCATIONS.load(Ordering::Relaxed) {
-        ALLOCATION_EVENTS.fetch_add(1, Ordering::Relaxed);
-        ALLOCATED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
-    }
-}
-
-/// Starts an isolated allocation measurement window.
-fn begin_allocation_measurement() {
-    ALLOCATION_EVENTS.store(0, Ordering::Relaxed);
-    ALLOCATED_BYTES.store(0, Ordering::Relaxed);
-    MEASURE_ALLOCATIONS.store(true, Ordering::Release);
-}
-
-/// Ends the current allocation measurement window.
-fn end_allocation_measurement() -> AllocationCount {
-    MEASURE_ALLOCATIONS.store(false, Ordering::Release);
-    AllocationCount {
-        events: ALLOCATION_EVENTS.load(Ordering::Relaxed),
-        bytes: ALLOCATED_BYTES.load(Ordering::Relaxed),
-    }
-}
-
-/// Aggregate allocation activity observed by the counting allocator.
-#[derive(Clone, Copy)]
-struct AllocationCount {
-    /// Allocation and reallocation calls.
-    events: u64,
-    /// Bytes requested by those calls.
-    bytes: u64,
-}
 
 /// Backend submission counters for one scenario.
 #[derive(Clone, Copy, Default)]
@@ -391,13 +317,13 @@ fn measure_scenario(scenario: Scenario, text: &str) -> ScenarioResult {
     submissions.set(SubmissionCount::default());
 
     let started = Instant::now();
-    begin_allocation_measurement();
+    let allocation_measurement = AllocationMeasurement::begin();
     for _ in 0..ITERATIONS {
         let current = record_scenario(scenario, &mut list, font, text, texture, custom_renderer);
         black_box((current.operations, current.triangles));
         renderer.render(frame_info, &mut list).unwrap();
     }
-    let allocations = end_allocation_measurement();
+    let allocations = allocation_measurement.finish();
     let elapsed = started.elapsed();
     let submissions = submissions.get();
     assert_eq!(submissions.frames, ITERATIONS);

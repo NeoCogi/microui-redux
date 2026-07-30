@@ -117,6 +117,12 @@ impl<T> WidgetHandle<T> {
     pub fn replace(&self, value: T) -> T {
         self.inner.replace(value)
     }
+
+    /// Returns the current strong owner count for structural characterization.
+    #[cfg(test)]
+    pub(crate) fn debug_strong_count(&self) -> usize {
+        Rc::strong_count(&self.inner)
+    }
 }
 
 /// Wraps widget state into a retained handle.

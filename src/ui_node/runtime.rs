@@ -1,5 +1,20 @@
 use super::*;
 use std::collections::HashMap;
+#[cfg(test)]
+use std::cell::Cell;
+
+/// Test-only counters for one retained root's most recent frame.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct RuntimeMetrics {
+    pub(crate) tree_layouts: u64,
+    pub(crate) measures: u64,
+    pub(crate) layouts: u64,
+    pub(crate) updates: u64,
+    pub(crate) paints: u64,
+    pub(crate) routed_input_dispatches: u64,
+    pub(crate) raw_interaction_derivations: u64,
+}
 
 pub(crate) struct UiRuntime {
     /// Aggregate root content size in root body coordinates.
@@ -24,6 +39,9 @@ pub(crate) struct UiRuntime {
     pub(super) updated_focus: bool,
     /// Input events routed to each node during the current frame, consumed by update.
     routed_events: HashMap<UiNodeId, Vec<UiInputEvent>>,
+    /// Structural phase counters used by P0/P5 characterization.
+    #[cfg(test)]
+    metrics: Cell<RuntimeMetrics>,
 }
 
 impl Default for UiRuntime {
@@ -41,6 +59,8 @@ impl Default for UiRuntime {
             debug_rects: Vec::new(),
             updated_focus: false,
             routed_events: HashMap::new(),
+            #[cfg(test)]
+            metrics: Cell::new(RuntimeMetrics::default()),
         }
     }
 }
@@ -98,6 +118,8 @@ impl UiRuntime {
         self.updated_focus = false;
         self.routed_events.clear();
         self.pointer_input_enabled = pointer_input_enabled;
+        #[cfg(test)]
+        self.metrics.set(RuntimeMetrics::default());
     }
 
     /// Records one routed event for a node-local widget update.
@@ -184,6 +206,19 @@ impl UiRuntime {
         self.root_content_size
     }
 
+    /// Returns structural phase counters for the most recently completed frame.
+    #[cfg(test)]
+    pub(crate) fn debug_metrics(&self) -> RuntimeMetrics {
+        self.metrics.get()
+    }
+
+    #[cfg(test)]
+    fn bump_metric(&self, update: impl FnOnce(&mut RuntimeMetrics)) {
+        let mut metrics = self.metrics.get();
+        update(&mut metrics);
+        self.metrics.set(metrics);
+    }
+
     /// Returns whether this runtime accepts pointer hit routing for the current frame.
     pub(crate) fn accepts_pointer_input(&self) -> bool {
         self.pointer_input_enabled
@@ -264,6 +299,8 @@ impl UiRuntime {
 
     /// Lays out root nodes inside an already resolved root client area.
     pub(super) fn layout_roots_in_view(&mut self, roots: &mut [UiNode], style: &Style, atlas: crate::AtlasHandle, client: Recti) -> Dimensioni {
+        #[cfg(test)]
+        self.bump_metric(|metrics| metrics.tree_layouts += 1);
         let mut y = client.y;
         let mut content_bounds = None;
         for root_node in roots.iter_mut() {
@@ -299,6 +336,8 @@ impl UiRuntime {
 
     /// Measures one already-borrowed node's preferred size.
     pub(super) fn measure_node_ref(&self, node: &UiNode, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+        #[cfg(test)]
+        self.bump_metric(|metrics| metrics.measures += 1);
         let framed = match &node.data {
             UiNodeData::Widget(widget) => widget.is_framed(),
             UiNodeData::Container(container) => container.is_framed(),
@@ -324,6 +363,8 @@ impl UiRuntime {
 
     /// Lays out one already-borrowed node through its behavior.
     pub(super) fn layout_node_ref(&mut self, node: &mut UiNode, style: &Style, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
+        #[cfg(test)]
+        self.bump_metric(|metrics| metrics.layouts += 1);
         let framed = match &node.data {
             UiNodeData::Widget(widget) => widget.is_framed(),
             UiNodeData::Container(container) => container.is_framed(),
@@ -388,6 +429,8 @@ impl UiRuntime {
         input: &Input,
         results: &mut FrameResults,
     ) {
+        #[cfg(test)]
+        self.bump_metric(|metrics| metrics.updates += 1);
         let framed = node_is_framed(node);
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);
         let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
@@ -447,6 +490,8 @@ impl UiRuntime {
         opt: WidgetOption,
         focus_policy: FocusPolicy,
     ) -> (bool, bool, bool, bool, Option<Vec2i>) {
+        #[cfg(test)]
+        self.bump_metric(|metrics| metrics.raw_interaction_derivations += 1);
         if opt.intersects(WidgetOption::NO_INTERACT) {
             return (false, false, false, false, None);
         }
@@ -567,6 +612,8 @@ impl UiRuntime {
 
     /// Routes an event to exactly one borrowed node behavior without traversing descendants.
     fn route_input_event_to_node_only_ref(&mut self, node: &mut UiNode, parent_transform: Transform, style: &Style, event: &UiInputEvent) -> InputResult {
+        #[cfg(test)]
+        self.bump_metric(|metrics| metrics.routed_input_dispatches += 1);
         let framed = node_is_framed(node);
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);
         let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
@@ -603,6 +650,8 @@ impl UiRuntime {
         style: &Style,
         atlas: crate::AtlasHandle,
     ) {
+        #[cfg(test)]
+        self.bump_metric(|metrics| metrics.paints += 1);
         let framed = node_is_framed(node);
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);
         let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
