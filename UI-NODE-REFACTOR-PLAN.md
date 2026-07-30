@@ -2765,7 +2765,7 @@ explicit decision before changing the criterion.
   intentionally changes no production API: allocator, privacy, preservation, sanitization, and
   documentation criteria become executable and green in P1.3/P2.4.
 
-- [ ] **P0.6 — Freeze the owning-`Node` name and visibility boundaries**
+- [x] **P0.6 — Freeze the owning-`Node` name and visibility boundaries**
 
   **Problem**
 
@@ -2777,29 +2777,115 @@ explicit decision before changing the criterion.
 
   **Implementation owner: P1.3, P2.1, and P2.4**
 
+  **Settled decision and rationale**
+
+  Reserve `Node` for the unique owning tree value and retire the old header/tree widget name
+  completely. Keeping both concepts through a deprecated alias was rejected because it would leave
+  two incompatible ownership meanings in the public API during an already-breaking migration.
+  Renaming the owner to `RetainedNode` or `UiNode` was rejected because the persistent value is the
+  fundamental tree node, while the old type is one disclosure presentation whose behavior already
+  belongs in a stateful container.
+
+  Do not turn the current `UiNodeState::visible` field into a feature. It has no public mutation path
+  and does not gate any current traversal phase, so preserving it would invent behavior rather than
+  retain supported behavior. Root visibility and container-owned descendant gating have different
+  owners, lifecycle effects, and sanitization rules; keeping those two explicit mechanisms avoids a
+  third generic hide/show command and the identity or handle machinery it would require.
+
   **Wanted behavior and contract**
 
-  Reserve crate-root/prelude `Node` for the unique owning tree node. Remove the old public
-  `widgets::Node`, `NodeStateValue`, `Node::header`, and `Node::tree` surface without a compatibility
-  alias. P1.1 classifies those symbols explicitly; P2.1 moves their header/tree visual behavior and
-  expanded state into `DisclosureParameters`/`DisclosureState`.
+  Reserve crate-root, `retained`, and prelude `Node` for the same unique, opaque, non-cloneable owning
+  tree type. The `widgets` module does not export another `Node`. Remove the old public
+  `widgets::Node`, `NodeStateValue`, `Node::header`, and `Node::tree` surface without a deprecated
+  alias, wrapper, or second public construction path. P1.3 and P2.1 land the removal and owning-node
+  export atomically; any compile-safe legacy bridge between those owner items remains crate-private
+  and is deleted in that same batch.
+
+  P1.1's public-symbol classification and P2.1's implementation preserve the old disclosure
+  capability through this exact mapping:
+
+  | Old header/tree surface | Final classification or replacement |
+  |---|---|
+  | `Node::header` plus builder-owned children | `DisclosureParameters::header(label, expanded, children)` |
+  | `Node::tree` plus builder-owned children | `DisclosureParameters::tree(label, expanded, children)` |
+  | `NodeStateValue::{Expanded, Closed}` and direct `state` mutation | private `bool` state changed through `DisclosureState::{is_expanded, is_collapsed, expand, collapse, toggle}` |
+  | public `label`, `config`, and `with_options` | initialization-only `DisclosureParameters` data and private runtime configuration; not mounted state |
+  | `is_header` / `is_tree` | no mounted query; the constructor selects a private visual variant |
+  | click toggling, label/icon paint, header framing, tree hover treatment, and tree indentation | one `Disclosure` container runtime with the P2.1 phase and routing contract |
+
+  Header construction retains the framed presentation, tree construction retains the unframed and
+  indented presentation, and an explicit parameter option overrides the respective default as it
+  does today. Expansion is the only retained mounted state from `NodeStateValue`; the replacement
+  exposes no public compatibility enum.
 
   `NodeRuntime` stores `Policy`, `GridSpan`, derived layout, and transient interaction flags, but no
   generic visibility bit. Add the exact consuming pre-insertion methods
   `Node::with_policy(Policy)` and `Node::with_grid_span(columns, rows)`, defaulting through
-  `Policy::auto()` and `GridSpan::ONE`. Do not add `Node::show`, `hide`, `set_visible`, or an
-  equivalent handle command. Root hiding remains on Context; descendant gating remains on
-  `Container::children_visible` with the semantics defined above.
+  `Policy::auto()` and `GridSpan::ONE`. Each method changes only its own placement field, so either
+  chaining order preserves the other setting. `with_grid_span` delegates to `GridSpan::new` and
+  clamps each zero component to one. Both methods preserve the node's already-allocated private
+  runtime identity. Policy participates once in parent slot allocation; Grid consumes span while
+  non-grid parents ignore it. There is no mounted policy/span setter or public placement getter that
+  lends runtime state.
+
+  Do not add `Node::show`, `hide`, `set_visible`, `is_visible`, or an equivalent generic handle/state
+  command. Root hide/show remains a Context-coordinated `RootState` mutation with the P0.7 contract.
+  Descendant gating remains the narrower `Container::children_visible` mechanism: a false gate keeps
+  the container itself active and its descendant nodes/state handles owned and live, but descendants
+  contribute no measure/layout and receive no input, update, paint, or custom-render callback.
+  Sanitization clears their focus, hover, capture, and queued routed events without restoring those
+  targets when the gate later reopens. These two mechanisms are independent and neither writes a
+  generic node visibility field.
 
   **Acceptance tests**
 
-  - Crate-root, `retained`, and prelude exports contain exactly one public `Node`, the owning type.
-  - Compile-fail tests prove `NodeStateValue`, `Node::header`, and `Node::tree` no longer exist.
-  - `Node::with_policy` and `with_grid_span` preserve runtime identity, clamp zero spans through
-    `GridSpan::new`, and affect row/column/grid layout through `ContainerLayoutCtx`.
-  - Production searches find no generic node `visible` field or node-level visibility mutation API.
-  - Root hide/show and Disclosure collapse tests cover the two supported visibility mechanisms
-    independently.
+  - Crate-root, `retained`, and prelude exports resolve `Node` to the same owning type; `widgets`
+    exports no type or alias named `Node`, and no second public `Node` definition exists.
+  - Compile-fail/API-surface tests prove `NodeStateValue`, legacy `Node::header`/`Node::tree`, and a
+    clone operation on the owning `Node` no longer exist.
+  - Disclosure header/tree tests pin initial expanded/collapsed state, predicates, explicit
+    expand/collapse/toggle, label/icon paint, framed versus unframed defaults, option override, tree
+    indentation, hover treatment, and click toggling without a public visual-variant enum/query.
+  - `Node::with_policy` and `with_grid_span` preserve runtime identity and one another in either
+    chaining order. Defaults are `Policy::auto()`/`GridSpan::ONE`; zero columns/rows clamp
+    independently through `GridSpan::new`.
+  - Row/Column/Grid tests prove policy is applied once through `ContainerLayoutCtx`, Grid consumes
+    the configured span, and non-grid parents ignore span. Compile-fail/API checks prove there is no
+    mounted placement setter or runtime-state getter.
+  - Production searches find no generic node `visible` field and no node-level `show`, `hide`,
+    `set_visible`, `is_visible`, or equivalent generic state/handle command.
+  - Root hide/show tests prove the complete retained root is gated while state and weak handles stay
+    live. Disclosure collapse tests prove the container remains active, descendants stay owned/live,
+    every descendant phase is skipped, transient targets are cleared, and expansion restores none.
+    The two mechanisms do not alter one another.
+  - Rustdoc and migration notes reserve `Node` for ownership, map every retired header/tree symbol to
+    Disclosure or intentional removal, and distinguish root visibility from descendant gating.
+
+  **Frozen contract evidence (2026-07-29)**
+
+  The normative owning-node, Disclosure, and visibility sections now define one public meaning for
+  `Node`, one pre-insertion placement surface, and exactly two visibility boundaries with explicit
+  owners. The legacy header/tree presentation and expansion behavior survive through Disclosure;
+  the unused generic visibility bit does not become compatibility behavior.
+
+  Repository inspection confirms that `widgets::Node` is currently a cloneable combined
+  state/runtime widget with public `label`, `state`, and `config`, public header/tree constructors and
+  predicates, header `FRAME` and tree `NONE` defaults, and click-driven `NodeStateValue` toggling.
+  It is exported from `widgets`, crate root, and the prelude, while the current `retained` module has
+  no owning `Node` export. The current Disclosure container holds a strong `WidgetHandle<Node>`,
+  recreates an erased widget adapter across phases, and gates its nested Column by reading that
+  expansion state. Characterization and downstream tests exercise those facts as migration evidence.
+
+  `UiNodeState::visible` currently initializes to `true` and is copied during projection-state
+  transfer, but production traversal never reads it; the P0 characterization explicitly sets it to
+  `false` and still observes descendant traversal. Actual current root visibility instead lives on
+  `WindowEntry`, while Disclosure already performs container-local expansion gating. Existing
+  `NodeOptions` also establishes the intended `Policy::auto()`/`GridSpan::ONE` defaults and
+  `GridSpan::new` zero clamping, which move to the unique node rather than changing semantics.
+
+  P0.6 intentionally changes no production API: owning-name/export, legacy Disclosure replacement,
+  placement, visibility removal, traversal gating, target sanitization, compile-fail, and
+  documentation criteria become executable and green in the atomic P1.3/P2.1 batch and P2.4.
 
 - [ ] **P0.7 — Freeze unified root chrome, popup, and destruction behavior**
 
