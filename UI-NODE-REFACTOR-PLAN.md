@@ -2887,7 +2887,7 @@ explicit decision before changing the criterion.
   placement, visibility removal, traversal gating, target sanitization, compile-fail, and
   documentation criteria become executable and green in the atomic P1.3/P2.1 batch and P2.4.
 
-- [ ] **P0.7 — Freeze unified root chrome, popup, and destruction behavior**
+- [x] **P0.7 — Freeze unified root chrome, popup, and destruction behavior**
 
   **Problem**
 
@@ -2897,7 +2897,23 @@ explicit decision before changing the criterion.
 
   **Decision needed: No — protected wanted-behavior baseline**
 
-  **Implementation owner: P1.4, P2.4, and P3.0**
+  **Implementation owner: P1.4, P2.4, P2.5, P3.0, and P4.2**
+
+  **Settled decision and rationale**
+
+  Model every root as retained UI with the same typed weak-state capability and opaque strong owner
+  as ordinary widgets and containers. A parallel `WindowEntry` chrome-state/result API was rejected
+  because it would duplicate geometry, visibility, interaction state, event lifetime, and checked
+  borrowing outside the retained model. Synthetic title/close/resize child nodes were rejected
+  because those chrome regions have no independent application identity or topology and would add
+  routing/lifetime machinery without adding capability.
+
+  Keep hiding and destruction distinct. Hiding is a reversible policy/state transition that retains
+  the root tree, application state, and pending events; destruction is the irreversible lifecycle
+  operation that removes the `WindowEntry` and releases retained ownership. Replacing the one
+  application child while preserving `RootId` was rejected because it would reintroduce root
+  projection replacement and ambiguous weak-handle lifetime. Dynamic content belongs in a
+  persistent application container; changing the literal root type destroys and recreates the root.
 
   **Wanted behavior and contract**
 
@@ -2907,6 +2923,50 @@ explicit decision before changing the criterion.
   to consume one application `Node` and return `RootHandle`; the private container owns that node as
   its one immutable child slot. Remove the complete generic result family rather than retaining a
   root exception.
+
+  `RootHandle` contains the public lifecycle `RootId` and one weak
+  `WidgetStateHandle<RootState>`. Cloning or dropping a handle never changes root lifetime while its
+  Context remains live. The private `RootChromeContainer`'s `OwnedContainer` is the sole persistent
+  strong `RootState` owner; `WindowEntry` retains only a framework-internal weak clone. `RootState`
+  owns the immutable name, current options/rectangle/visibility, mutually exclusive moving/resizing
+  mode, independent saturating change/submission counts, and exactly one application child. It
+  exposes only the query/event methods specified above and no child getter or topology mutation.
+
+  Root lifecycle transitions are fixed as follows:
+
+  | Operation | Retained ownership and state | Events and transient targets |
+  |---|---|---|
+  | `create_window(name, rect, node)` | create a visible `FRAME` root at `rect`, raise it, and return a live `RootHandle` before any frame | no pending event; no interaction targets |
+  | `create_dialog(name, rect, node)` | create a hidden `FRAME` root at `rect` with a live handle | no pending event; no interaction targets |
+  | `create_popup(name, node)` | create a hidden root at `Recti::default()` with `FRAME | AUTO_SIZE | NO_RESIZE | NO_TITLE` and a live handle | no pending event; `just_opened` is not armed until show |
+  | `set_root_visible(id, false)` | retain the complete tree/state and current pending events | silently clear chrome mode plus focus/hover/capture/routed targets |
+  | title close / eligible popup outside press | retain the complete tree/state but make the root hidden | clear chrome/transient targets and record one typed submission |
+  | show a window/dialog | retain its rectangle, make it visible, and raise it | preserve pending events; restore no transient target |
+  | show a hidden popup | atomically hide any visible popup, position the new popup at the pointer with a `1 x 1` seed, raise it, and arm `just_opened` | old popup records nothing; both trees are sanitized; new pending events survive |
+  | show an already-visible popup | raise it without repositioning it or rearming `just_opened` | record nothing and preserve current state |
+  | `destroy_root(id)` | immediately remove the entry and unmount/release its complete tree without returning any owned value | record nothing; all targets disappear and weak handles expire after active access upgrades |
+
+  Root IDs remain independent from private runtime-node IDs and are never reused after creation or
+  destruction. Counter exhaustion is an invariant panic before a new root is registered. Dropping
+  Context releases all remaining roots; while Context remains live, only `destroy_root` ends one
+  registered root's lifetime. Unknown and already-destroyed IDs remain observationally identical.
+
+  All public root reads occur through `RootState`. `set_root_rect`, `set_root_size`,
+  `set_root_options`, and `set_root_visible` return `RootMutationError::UnknownRoot` when no entry
+  exists and `RootMutationError::Borrowed` when the required live state cell is unavailable, without
+  partial mutation. An extant entry whose weak state cannot upgrade is an invariant panic.
+  `bring_root_to_front` and `destroy_root` need no state borrow and return `false` only when the ID is
+  unknown; successful fronting changes z-order only.
+
+  Programmatic rectangle and size setters write the requested geometry silently and preserve an
+  active move/resize baseline. Before the next input on a visible root, the shared geometry path
+  silently enforces the outer minimum; `AUTO_SIZE` instead replaces width/height with measured
+  intrinsic size while preserving origin. A hidden root retains its requested rectangle until it is
+  shown. Option changes are silent and synchronously clear incompatible chrome mode: `NO_TITLE`
+  clears moving, while `NO_RESIZE` or `AUTO_SIZE` clears resizing, with matching tree capture
+  released before another pointer event. Repeating `set_root_visible(false)` is a silent retained
+  no-op after sanitization; repeating `true` still raises a window/dialog, while the already-visible
+  popup behavior is fixed by the table above.
 
   Move chrome measure/layout/routing/update and its paint underlay to `RootChromeContainer` and one
   shared pure geometry helper. After tree paint, let the window compositor append only the chrome
@@ -2918,45 +2978,139 @@ explicit decision before changing the criterion.
   destroy. Programmatic root operations are silent. Add no application-child replacement operation;
   document persistent-container content and root destroy/recreate behavior.
 
+  The one pure `root_chrome_geometry` helper implements the exact normative formula above and is the
+  only source of frame/title/close/body/resize rectangles, intrinsic and minimum outer sizes, and
+  client/outer conversion. Close outranks resize, resize outranks title, and all three outrank body.
+  The retained container paints the frame/window underlay before its application child; after tree
+  paint the compositor reads `RootState` once and adds only the title/close/resize overlay. The
+  window manager owns no second chrome interaction state, hit-test formula, capture flag, or update
+  path. P4.2 finishes the explicit-constraint and backend-viewport verification against this same
+  helper rather than introducing another formula.
+
+  Only a left press can close, start moving, or start resizing. Other pointer-button presses over
+  chrome are consumed without starting an action; body input falls through to the application child.
+  The private root runtime ID participates in ordinary `WidgetTree` capture, so matching drag and
+  release continue outside root bounds. Starting move/resize without a delta changes current mode
+  but records no change. One update records at most one change when its final rectangle differs from
+  its entry rectangle; separate updates accumulate, and release/sanitization/incompatible options/
+  hiding clear current mode. Programmatic mutations and constraint normalization never record an
+  event.
+
+  Popup outside dismissal is the sole cross-root input boundary. `just_opened` suppresses the
+  opening/showing press and clears after the first eligible popup frame. Any later pointer-button
+  press outside the sole visible popup hides and sanitizes it, records exactly one submission through
+  `RootState`, and then routes that same press exactly once to the highest eligible remaining root.
+  Showing popup B while popup A is visible first obtains both checked state borrows; `Borrowed`
+  leaves both roots, z-order, and targets unchanged. Nested popup relationships remain out of scope.
+
   **Acceptance tests**
 
-  - Each window/dialog/popup constructor returns a `RootHandle` whose ID identifies the Context
-    entry and whose weak `RootState` handle observes the same geometry/visibility used by chrome.
-  - Creation tests pin visible/hidden status, initial rectangle, immutable name, and default options
-    for all three root kinds; state handles are usable before any frame.
-  - Cloning/dropping `RootHandle` never changes root lifetime; only `destroy_root` does.
+  - Each window/dialog/popup constructor consumes exactly one non-cloneable application `Node` and
+    returns a `RootHandle` whose ID identifies the Context entry and whose weak `RootState` handle
+    observes the same geometry/visibility/options used by chrome. `RootState` is live before a frame.
+  - Creation tests pin visible/hidden status, initial rectangle, immutable name, exact default
+    options, initial inactive mode, zero pending counters, z-order behavior, and exactly one private
+    chrome node plus one immutable application child for all three root kinds.
+  - Cloning/dropping `RootHandle` changes neither strong owner count nor root lifetime. Dropping
+    Context releases every remaining root; while it remains live, only `destroy_root` removes one.
   - Destroying an existing root returns `true`, immediately unmounts/releases the chrome container
     plus application subtree, and makes root/descendant handles report `Dropped` after active access
     closures finish; a root-state closure is the only temporary reason physical child drop may lag.
-  - Destroying an unknown or already-destroyed root returns `false`; the ID is never reused.
-  - Every Context root setter distinguishes `UnknownRoot` from `Borrowed`; public root reads occur
-    only through the checked `RootState` handle, and no parallel Context query remains.
+    A destroy invoked while that root state is actively borrowed still succeeds and the removed tree
+    can never traverse again.
+  - Destroying an unknown or already-destroyed root returns `false`; later creation never reuses the
+    ID, and exhaustion panics before registration rather than wrapping or aliasing.
+  - Every Context root setter distinguishes `UnknownRoot` from `Borrowed` and is atomic on failure;
+    public root reads occur only through the checked `RootState` handle, and no parallel Context
+    query remains. An internal weak-upgrade failure for an extant entry is an invariant panic.
+  - Rectangle/size setters, minimum normalization, auto-size, options, visibility, fronting,
+    creation, and destruction are event-silent. Tests pin immediate requested geometry, next-visible-
+    frame minimum/auto normalization, preserved drag baseline, and origin preservation under
+    `AUTO_SIZE`.
   - Title close and popup outside-click increment `RootState`'s pending submission count while
-    retaining a hidden tree; a subsequent explicit destroy removes it.
+    retaining a hidden tree; a subsequent explicit destroy removes it. Zero-count takes are stable,
+    separate occurrences accumulate with saturation, and each successful take consumes one.
   - Only left press activates close/move/resize. A popup ignores its opening/showing press for
     outside dismissal, then any later pointer-button press outside dismisses before that press routes
-    to the root behind it.
+    exactly once to the root behind it. Other buttons over ordinary chrome are consumed without
+    activating it.
   - At most one popup is visible per Context. Showing another silently hides the previous popup,
     clears its transient targets without recording a submission, and gives the new popup ordinary
     `just_opened` suppression. The switch is atomic and returns `Borrowed` without changing either
     popup if one of the required state cells is unavailable. Nested popups remain a separate
     feature.
+  - Re-showing an already-visible popup raises it without changing its rectangle or rearming
+    `just_opened`; reopening a hidden popup applies pointer placement and suppression exactly once.
   - Drag/resize exposes current active/moving/resizing state and increments `take_changed` only when
-    user interaction actually changes the rectangle; programmatic operations increment no event.
-  - Multiple root events persist/accumulate under the same saturating-count rules as widget events.
+    user interaction actually changes the rectangle. A press without movement changes mode but not
+    the counter; a batched update records at most one change, separate updates accumulate, movement
+    uses saturating coordinates, and resize uses the shared minimum clamp.
+  - Matching release, hiding, lost/sanitized capture, and incompatible options clear active state;
+    moving and resizing never overlap, and `is_active()` is exactly their union.
+  - Multiple root change/submission events persist across frames and hide/show cycles under the same
+    independent saturating-count rules as widget events, and showing consumes none.
   - Root chrome is exactly one internal semantic container node, with no title/close/resize child
     nodes and no window-manager-owned parallel chrome capture/update state; the compositor retains
     only the documented post-tree overlay step.
   - The shared geometry helper yields identical rectangles for layout, routing, paint, min-size,
-    outer/body conversion, and backend viewport integration.
+    outer/body conversion, and backend viewport integration. Tests cover every WindowOption
+    combination, tiny/negative extents, title-text minimums, frame insets, close/resize precedence,
+    non-negative outputs, and checked-overflow diagnostics.
+  - Phase/order tests prove body input reaches the application child, close suppresses child
+    update/paint in the same frame, captured drag/release works outside bounds, underlay precedes
+    descendants, and the rendering-only overlay follows them.
   - Hiding silently clears transient targets and active chrome state but retains typed state and
-    pending events; showing does not restore cleared targets.
+    pending events; showing does not restore cleared targets. Destruction releases all retained
+    ownership subject only to already-active state upgrades.
   - Programmatic options clear incompatible move/resize capture, popup reopen applies pointer
     positioning/`just_opened`, and auto-size normalization emits no change event.
   - Compile-fail/API-surface tests prove no operation replaces a root `Node` while retaining its
-    `RootId`; a persistent exposed container root supports dynamic content without replacement.
+    `RootId`, no `RootState` child getter exists, and `RootChromeContainer`, `RootInteraction`, and
+    framework transition helpers remain private. A persistent exposed container root supports
+    dynamic content without replacement; literal root-type change requires destroy/recreate.
   - Production/API searches find no `ResourceState`, `FrameResults`, `FrameResultGeneration`,
-    `RetainedId`, `state_of_root`, or `state_of_retained`.
+    `RetainedId`, `state_of_root`, `state_of_retained`, `Context::root_rect`,
+    `Context::root_visible`, `set_root_nodes`, parallel chrome-capture/update state, or second chrome
+    geometry formula.
+  - Rustdoc and migration notes document `RootHandle` weak ownership, state access before first
+    frame, setter failure modes, hide versus destroy, typed event multiplicity, popup ordering,
+    immutable root content, and persistent-container/destroy-recreate alternatives.
+
+  **Frozen contract evidence (2026-07-29)**
+
+  The normative root-chrome section now defines one retained ownership chain, one authoritative
+  typed state, one chrome geometry function, and one ordered input path. Root lifecycle, policy,
+  events, and external backend coordination each have one owner; hiding, typed observation, popup
+  dismissal, and destruction no longer require a root-only result or replacement mechanism.
+
+  Repository inspection confirms that `WindowEntry` currently stores name, rectangle, options,
+  visibility, `just_opened`, `active_chrome`, z-order, a replaceable `Vec<UiNode>`, and a separate
+  `UiRuntime` directly. Window/dialog/popup constructors consume `UiNodeSet` and return only
+  `RootId`; `Context::root_rect`/`root_visible` duplicate reads, setters silently ignore unknown IDs,
+  `bring_root_to_front` returns nothing, `set_root_nodes` replaces the projection and transfers
+  runtime state, and no destruction operation exists. The per-Context root counter begins at one,
+  advances with checked arithmetic, and is not currently recycled.
+
+  Chrome geometry and execution are also split today. `WindowChrome::new`, `root_titlebar_height`,
+  `root_min_size`, frame painting, overlay painting, `UiRuntime::measure_auto_size`, and retained
+  body layout each own part of the formula. `WindowEntry::active_chrome` and
+  `update_window_manager_chrome` independently hit-test raw pointer state, move/resize the rectangle,
+  and hide on close outside retained routing/capture. Close and outside-popup dismissal record no
+  typed root event. `RetainedId::Root` is constructible, but production traversal does not populate a
+  root result entry.
+
+  Current popup code repositions a hidden popup and arms `just_opened`, then later hides it directly
+  when any pressed button is outside. It neither enforces one visible popup nor performs an atomic
+  checked-state switch, and dismissal is interleaved with per-root iteration instead of being the
+  first stage of one dispatcher before routing the same press onward. Existing characterization and
+  chrome/popup tests pin useful creation defaults, geometry, z-order, drag, resize, close, auto-size,
+  and outside-dismissal outcomes; projection replacement, split state, missing destruction, and
+  missing typed events remain migration evidence rather than compatibility behavior.
+
+  P0.7 intentionally changes no production API. Persistent root ownership/chrome/state/destruction
+  land in P1.4; hidden/destroyed target cleanup in P2.4; ordered popup-boundary input in P2.5;
+  projection/result/query removal and application migration in P3.0; and final explicit-constraint,
+  shared-geometry, and backend-boundary verification in P4.2.
 
 ### P1 — Final state ownership and persistent topology
 
