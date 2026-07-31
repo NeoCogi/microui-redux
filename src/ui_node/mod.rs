@@ -4,14 +4,20 @@
 //! It gives the crate one node representation that can own either a widget or a framework
 //! container.
 //!
-//! Topology is assembled from unique owning nodes and concrete state-owned containers, then
-//! traversed by input, update, measure, layout, and paint passes.
+//! Topology is assembled from unique owning nodes and concrete state-owned containers. Update and
+//! paint visit a node before its eligible children in forward sibling order; pointer input visits
+//! eligible children first in reverse sibling order so the deepest, topmost node wins. Measurement
+//! and layout recurse only through a container's scoped child APIs.
 //!
 //! Each node retains an allocation in its parent's child coordinates plus a node-local child
 //! offset and clip. Recursive passes carry one stack-only [`Transform`]. Resolved outer rectangles
 //! and outer clips remain runtime stack locals; phase contexts expose node-local content geometry.
-//! [`NodeBehavior`] is the internal retained-node contract; [`WidgetNode`] adapts the public
-//! [`crate::Widget`] contract to it.
+//! Common widget phases dispatch once through the [`crate::Widget`] owned by each private
+//! `NodeKind` variant. Traversal branches to [`Container`] only for layout, routed input,
+//! descendant visibility, and scoped child visitation. Container update and paint run before the
+//! visibility gate is checked. Each concrete container borrows its directly owned state for the
+//! current runtime method, and each child borrow remains scoped to one opaque visitor call before
+//! recursion continues.
 #![allow(dead_code)]
 
 use crate::render::DisplayList;
@@ -22,13 +28,13 @@ use crate::widget::FocusPolicy;
 
 mod node;
 pub use node::{Children, Node};
-pub(crate) use node::{NodeLayout, Transform, UiNode, UiNodeData, UiNodeId, UiNodeState};
+pub(crate) use node::{NodeKind, NodeLayout, NodeMeasurement, NodeRuntime, RuntimeNodeId, Transform};
 mod runtime;
 pub(crate) use runtime::UiRuntime;
 #[cfg(test)]
 pub(crate) use runtime::RuntimeMetrics;
 mod containers;
-pub(crate) use containers::{InputCtx, InputResult, LayoutCtx, MeasureCtx, NodeBehavior, PaintCtx, UpdateCtx, WidgetNode};
+pub(crate) use containers::{InputResult, WidgetNode};
 pub use containers::{
     ChildrenVisitor, ChildrenVisitorMut, Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState, Container, ContainerBuilder, ContainerInputCtx,
     ContainerInputResult, ContainerLayoutCtx, ContainerState, Disclosure, DisclosureBuilder, DisclosureContainer, DisclosureParameters, DisclosureState, Grid,
@@ -268,7 +274,7 @@ fn resolve_axis_placements(policies: &[SizePolicy], preferred: &[i32], available
 }
 
 /// Returns the screen-space rectangle occupied by a child and any overflow content it measured.
-fn child_content_rect(node: &UiNode) -> Recti {
+fn child_content_rect(node: &Node) -> Recti {
     let allocation = node.state.layout.allocation;
     let content_size = node.state.layout.content_size;
     Recti::new(

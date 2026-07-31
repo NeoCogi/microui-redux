@@ -13,7 +13,6 @@ pub(crate) struct FrameBorder {
 pub(crate) struct FrameGeometry {
     pub(crate) outer: Recti,
     pub(crate) content: Option<Recti>,
-    pub(crate) border_width: i32,
 }
 
 impl FrameGeometry {
@@ -33,7 +32,7 @@ pub(crate) fn frame_geometry(outer: Recti, framed: bool, style: &Style) -> Frame
     } else {
         checked_inset(outer, border_width)
     };
-    FrameGeometry { outer, content, border_width }
+    FrameGeometry { outer, content }
 }
 
 /// Removes a resolved frame from positive measurement constraints while preserving sentinels.
@@ -150,7 +149,6 @@ mod tests {
         let geometry = frame_geometry(Recti::new(10, 20, 30, 40), true, &style);
         assert_eq!(rect_tuple(geometry.outer), (10, 20, 30, 40));
         assert_eq!(geometry.content.map(rect_tuple), Some((12, 22, 26, 36)));
-        assert_eq!(geometry.border_width, 2);
     }
 
     #[test]
@@ -160,7 +158,6 @@ mod tests {
         let outer = Recti::new(10, 20, 30, 40);
         let geometry = frame_geometry(outer, true, &style);
         assert_eq!(geometry.content.map(rect_tuple), Some(rect_tuple(outer)));
-        assert_eq!(geometry.border_width, 0);
     }
 
     #[test]

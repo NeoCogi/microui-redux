@@ -2,13 +2,10 @@ use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::render::{CustomRenderHandle, RendererBackend};
-use crate::{Dimensioni, Recti, Vec2i, WidgetStateOwner};
+use crate::{Dimensioni, Recti, Vec2i, Widget, WidgetStateOwner};
 
 use super::containers::{with_container_children, with_container_children_mut};
-use super::{Container, NodeBehavior, WidgetNode};
-
-/// Stable runtime-only node identifier.
-pub(crate) type UiNodeId = RuntimeNodeId;
+use super::{Container, WidgetNode};
 
 /// Process-wide source of runtime-only node identity.
 ///
@@ -262,7 +259,7 @@ pub(crate) struct NodeRuntime {
 
 impl NodeRuntime {
     /// Returns this node's private process-unique identity.
-    pub(crate) fn id(&self) -> UiNodeId {
+    pub(crate) fn id(&self) -> RuntimeNodeId {
         self.id
     }
 
@@ -343,29 +340,16 @@ impl Node {
     }
 
     /// Returns this node's private identity for runtime-only traversal.
-    pub(crate) fn id(&self) -> UiNodeId {
+    pub(crate) fn id(&self) -> RuntimeNodeId {
         self.state.id()
-    }
-
-    /// Returns this node's shared runtime state.
-    pub(crate) fn state(&self) -> &NodeRuntime {
-        &self.state
-    }
-
-    /// Returns this node's shared runtime state mutably.
-    pub(crate) fn state_mut(&mut self) -> &mut NodeRuntime {
-        &mut self.state
     }
 
     /// Measures this node without requiring a Context or runtime registry.
     ///
     /// Public `Children::measure_child` uses this path so downstream containers can implement the
     /// inherited `Widget::measure` contract while holding their own state borrow.
-    pub(crate) fn measure_without_runtime(&self, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
-        let framed = match &self.data {
-            NodeKind::Widget(widget) => widget.is_framed(),
-            NodeKind::Container(container) => container.effective_widget_opt().intersects(crate::WidgetOption::FRAME),
-        };
+    pub(crate) fn measure(&self, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> NodeMeasurement {
+        let framed = self.data.widget().effective_widget_opt().intersects(crate::WidgetOption::FRAME);
         let border_width = if framed { style.frame_border().width } else { 0 };
         let policy = self.state.policy;
         let outer_available = Dimensioni::new(
@@ -373,15 +357,13 @@ impl Node {
             super::measure_axis_available(policy.height, available.height),
         );
         let content_available = crate::frame::content_available(outer_available, border_width);
-        let preferred_content = match &self.data {
-            NodeKind::Widget(widget) => widget.widget.measure(style, atlas, content_available),
-            NodeKind::Container(container) => container.measure(style, atlas, content_available),
-        };
+        let preferred_content = self.data.widget().measure(style, atlas, content_available);
         let preferred_outer = crate::frame::outer_preferred(preferred_content, border_width);
-        Dimensioni::new(
+        let resolved_outer = Dimensioni::new(
             super::resolve_size(policy.width, preferred_outer.width, available.width, available.width, None),
             super::resolve_size(policy.height, preferred_outer.height, available.height, available.height, None),
-        )
+        );
+        NodeMeasurement { resolved_outer, preferred_outer }
     }
 
     /// Writes layout as the source of truth.
@@ -424,20 +406,16 @@ impl Node {
     /// Counts old erased public-widget adapters in this subtree.
     #[cfg(test)]
     pub(crate) fn debug_erased_adapter_count(&self) -> usize {
-        let here = match &self.data {
-            NodeKind::Widget(widget) => usize::from(widget.debug_is_erased_widget_adapter()),
-            NodeKind::Container(_) => 0,
-        };
-        self.with_children(|children| here + children.iter().map(Self::debug_erased_adapter_count).sum::<usize>())
+        self.with_children(|children| children.iter().map(Self::debug_erased_adapter_count).sum())
     }
 
     /// Runs `f` against one matching node without returning a borrow through the opaque visitor.
-    pub(crate) fn with_node<R>(&self, id: UiNodeId, f: impl FnOnce(&Node) -> R) -> Option<R> {
+    pub(crate) fn with_node<R>(&self, id: RuntimeNodeId, f: impl FnOnce(&Node) -> R) -> Option<R> {
         let mut f = Some(f);
         self.with_node_inner(id, &mut f)
     }
 
-    fn with_node_inner<R, F>(&self, id: UiNodeId, f: &mut Option<F>) -> Option<R>
+    fn with_node_inner<R, F>(&self, id: RuntimeNodeId, f: &mut Option<F>) -> Option<R>
     where
         F: FnOnce(&Node) -> R,
     {
@@ -448,12 +426,12 @@ impl Node {
     }
 
     /// Runs `f` mutably against one matching node without exposing attached storage.
-    pub(crate) fn with_node_mut<R>(&mut self, id: UiNodeId, f: impl FnOnce(&mut Node) -> R) -> Option<R> {
+    pub(crate) fn with_node_mut<R>(&mut self, id: RuntimeNodeId, f: impl FnOnce(&mut Node) -> R) -> Option<R> {
         let mut f = Some(f);
         self.with_node_mut_inner(id, &mut f)
     }
 
-    fn with_node_mut_inner<R, F>(&mut self, id: UiNodeId, f: &mut Option<F>) -> Option<R>
+    fn with_node_mut_inner<R, F>(&mut self, id: RuntimeNodeId, f: &mut Option<F>) -> Option<R>
     where
         F: FnOnce(&mut Node) -> R,
     {
@@ -464,7 +442,7 @@ impl Node {
     }
 
     /// Collects this node id and all descendant ids.
-    pub(crate) fn collect_ids(&self, ids: &mut Vec<UiNodeId>) {
+    pub(crate) fn collect_ids(&self, ids: &mut Vec<RuntimeNodeId>) {
         ids.push(self.id());
         self.with_children(|children| {
             for child in children.iter() {
@@ -480,6 +458,40 @@ pub(crate) enum NodeKind {
     Widget(WidgetNode),
     /// Direct state-owning public container runtime.
     Container(Box<dyn Container>),
+}
+
+impl NodeKind {
+    /// Returns the one common runtime phase object for either node variant.
+    pub(crate) fn widget(&self) -> &dyn Widget {
+        match self {
+            Self::Widget(node) => &*node.widget,
+            Self::Container(container) => &**container,
+        }
+    }
+
+    /// Returns the one mutable common runtime phase object for either node variant.
+    pub(crate) fn widget_mut(&mut self) -> &mut dyn Widget {
+        match self {
+            Self::Widget(node) => &mut *node.widget,
+            Self::Container(container) => &mut **container,
+        }
+    }
+
+    /// Returns the container-specific runtime when this node owns children.
+    pub(crate) fn container(&self) -> Option<&dyn Container> {
+        match self {
+            Self::Widget(_) => None,
+            Self::Container(container) => Some(&**container),
+        }
+    }
+}
+
+/// One authoritative node measurement reused by parent allocation and leaf content sizing.
+pub(crate) struct NodeMeasurement {
+    /// Policy-resolved preferred outer size returned to the parent.
+    pub(crate) resolved_outer: Dimensioni,
+    /// Intrinsic outer size before parent allocation clamps/fills it.
+    pub(crate) preferred_outer: Dimensioni,
 }
 
 /// Opaque ordered owner of unique retained child nodes.
@@ -505,7 +517,7 @@ impl Children {
 
     /// Measures one child by index without exposing the child itself.
     pub fn measure_child(&self, index: usize, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Option<Dimensioni> {
-        self.nodes.get(index).map(|node| node.measure_without_runtime(style, atlas, available))
+        self.nodes.get(index).map(|node| node.measure(style, atlas, available).resolved_outer)
     }
 
     /// Appends one still-unmounted node and commits this collection as its owner.
@@ -572,8 +584,3 @@ impl FromIterator<Node> for Children {
         Self { nodes: iter.into_iter().collect() }
     }
 }
-
-/// Transitional internal names retained while the rest of the runtime migrates in P2/P3.
-pub(crate) type UiNode = Node;
-pub(crate) type UiNodeState = NodeRuntime;
-pub(crate) type UiNodeData = NodeKind;

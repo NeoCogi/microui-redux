@@ -1,9 +1,11 @@
+use crate::render::CustomRenderKey;
+use crate::{Dimensioni, FocusPolicy, KeyCode, KeyMode, MouseButton, Recti, Style, Vec2i};
 use crate::{Widget, WidgetOption, WidgetParameters, WidgetState, WidgetStateOwner};
-use crate::render::{CustomRenderKey, DisplayList, Painter};
-use crate::widget_ctx::{localize_events, WidgetPaintCtx, WidgetUpdateCtx};
-use crate::{Dimensioni, FocusPolicy, Input, KeyCode, KeyMode, MouseButton, Recti, Style, Vec2i};
 
-use super::{Children, Node, NodeLayout, UiNode, UiNodeState, UiRuntime};
+#[cfg(test)]
+use crate::widget_ctx::{WidgetPaintCtx, WidgetUpdateCtx};
+
+use super::{Children, Node, NodeLayout, NodeRuntime, UiRuntime};
 
 mod column;
 mod disclosure;
@@ -18,46 +20,6 @@ pub use grid::{Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridS
 pub use row::{Row, RowBuilder, RowContainer, RowParameters, RowState};
 pub use scroll_area::{ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState};
 pub use stack::{Stack, StackBuilder, StackContainer, StackParameters, StackState};
-
-/// Internal runtime behavior for any retained node, including widget adapters and containers.
-pub(crate) trait NodeBehavior {
-    /// Reports whether this behavior is the erased public-widget adapter used by the old runtime.
-    #[cfg(test)]
-    fn debug_is_erased_widget_adapter(&self) -> bool {
-        false
-    }
-
-    /// Returns whether the runtime owns an outer frame for this node.
-    fn is_framed(&self) -> bool {
-        false
-    }
-
-    /// Returns the standard public-widget interaction policy, when this behavior wraps one.
-    fn interaction_config(&self) -> Option<(WidgetOption, FocusPolicy)> {
-        None
-    }
-
-    /// Measures the preferred size for a node.
-    fn measure(&self, ctx: &MeasureCtx<'_>, state: &UiNodeState, available: Dimensioni) -> Dimensioni;
-
-    /// Assigns rectangles to the node and, for containers, its children.
-    fn layout(&mut self, ctx: &mut LayoutCtx<'_>, state: &mut UiNodeState, rect: Recti);
-
-    /// Updates this node and returns whether children should be traversed.
-    fn update(&mut self, _ctx: &mut UpdateCtx<'_>, _state: &mut UiNodeState) -> bool {
-        true
-    }
-
-    /// Paints this node and returns whether children should be painted.
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _state: &mut UiNodeState) -> bool {
-        true
-    }
-
-    /// Updates this node in response to one routed input event.
-    fn update_on(&mut self, _ctx: &mut InputCtx<'_>, _state: &mut UiNodeState, _event: &UiInputEvent) -> InputResult {
-        InputResult::Ignored
-    }
-}
 
 /// Marker for application-facing state owned by a concrete container runtime.
 ///
@@ -182,7 +144,7 @@ pub trait Container: Widget {
     }
 }
 
-/// Retained widget adapter behind the internal node behavior interface.
+/// Thin retained leaf owner for one erased widget and optional custom-render metadata.
 pub(crate) struct WidgetNode {
     /// Concrete state-owning runtime erased only after generic insertion validates its owner.
     pub(crate) widget: Box<dyn Widget>,
@@ -195,154 +157,14 @@ impl WidgetNode {
     pub(crate) fn new<W: WidgetStateOwner>(widget: W, custom_render: Option<CustomRenderKey>) -> Self {
         Self { widget: Box::new(widget), custom_render }
     }
-}
 
-impl NodeBehavior for WidgetNode {
-    fn is_framed(&self) -> bool {
-        self.widget.effective_widget_opt().intersects(WidgetOption::FRAME)
-    }
-
-    fn interaction_config(&self) -> Option<(WidgetOption, FocusPolicy)> {
-        Some((self.widget.effective_widget_opt(), self.widget.focus_policy()))
-    }
-
-    fn measure(&self, ctx: &MeasureCtx<'_>, state: &UiNodeState, available: Dimensioni) -> Dimensioni {
-        let _ = state;
-        self.widget.measure(ctx.style, ctx.atlas, available)
-    }
-
-    fn layout(&mut self, ctx: &mut LayoutCtx<'_>, state: &mut UiNodeState, rect: Recti) {
-        let preferred = self.widget.measure(ctx.style, ctx.atlas, Dimensioni::new(rect.width, rect.height));
-        ctx.set_widget_content_size(state, preferred);
-    }
-
-    fn update(&mut self, ctx: &mut UpdateCtx<'_>, state: &mut UiNodeState) -> bool {
-        let id = state.id();
-        let events = localize_events(ctx.content_rect, ctx.runtime.take_routed_events(id));
-        let accepts_pointer_input = ctx.runtime.accepts_pointer_input();
-        let content_rect = ctx.screen_rect(ctx.content_rect);
-        let content_clip = ctx.screen_clip();
-        let mut widget_ctx = WidgetUpdateCtx::new_with_content_geometry(
-            content_rect,
-            content_clip,
-            ctx.style,
-            &ctx.atlas,
-            accepts_pointer_input,
-            state.hovered,
-            state.focused,
-            state.clicked,
-            state.active,
-            state.scroll_delta,
-        );
-        self.widget.update(&mut widget_ctx, events);
-        false
-    }
-
-    fn paint(&mut self, ctx: &mut PaintCtx<'_>, state: &mut UiNodeState) -> bool {
-        let rect = ctx.screen_rect(ctx.content_rect);
-        let (hovered, focused, clicked, active, scroll_delta) = (state.hovered, state.focused, state.clicked, state.active, state.scroll_delta);
-        let content_clip = ctx.screen_clip();
-        let mut widget_ctx = WidgetPaintCtx::new_with_content_geometry(
-            rect,
-            &mut *ctx.display_list,
-            content_clip,
-            ctx.style,
-            &ctx.atlas,
-            hovered,
-            focused,
-            clicked,
-            active,
-            scroll_delta,
-        );
-        self.widget.paint(&mut widget_ctx);
-
-        if let Some(renderer) = self.custom_render {
-            ctx.display_list.push_custom(content_clip, renderer, rect);
-        }
-        false
+    /// Returns the private custom-render callback key, when one was supplied at construction.
+    pub(crate) fn custom_render(&self) -> Option<CustomRenderKey> {
+        self.custom_render
     }
 }
 
-/// Compile-safe P1.3 bridge from the final public container contract to the pre-P2.3 traversal
-/// interface. It owns no state and creates no alternate application capability; P2.3 removes
-/// `NodeBehavior` and moves this dispatch directly into `NodeKind` traversal.
-impl NodeBehavior for dyn Container {
-    fn is_framed(&self) -> bool {
-        self.effective_widget_opt().intersects(WidgetOption::FRAME)
-    }
-
-    fn interaction_config(&self) -> Option<(WidgetOption, FocusPolicy)> {
-        Some((self.effective_widget_opt(), self.focus_policy()))
-    }
-
-    fn measure(&self, ctx: &MeasureCtx<'_>, _state: &UiNodeState, available: Dimensioni) -> Dimensioni {
-        Widget::measure(self, ctx.style, ctx.atlas, available)
-    }
-
-    fn layout(&mut self, ctx: &mut LayoutCtx<'_>, state: &mut UiNodeState, rect: Recti) {
-        let mut public_ctx = ContainerLayoutCtx {
-            runtime: &mut *ctx.runtime,
-            style: ctx.style,
-            atlas: ctx.atlas,
-            content: ctx.content,
-            current: state,
-        };
-        Container::layout(self, &mut public_ctx, rect);
-    }
-
-    fn update(&mut self, ctx: &mut UpdateCtx<'_>, state: &mut UiNodeState) -> bool {
-        let id = state.id();
-        let events = localize_events(ctx.content_rect, ctx.runtime.take_routed_events(id));
-        let accepts_pointer_input = ctx.runtime.accepts_pointer_input();
-        let content_rect = ctx.screen_rect(ctx.content_rect);
-        let content_clip = ctx.screen_clip();
-        let mut widget_ctx = WidgetUpdateCtx::new_with_content_geometry(
-            content_rect,
-            content_clip,
-            ctx.style,
-            &ctx.atlas,
-            accepts_pointer_input,
-            state.hovered,
-            state.focused,
-            state.clicked,
-            state.active,
-            state.scroll_delta,
-        );
-        Widget::update(self, &mut widget_ctx, events);
-        Container::children_visible(self)
-    }
-
-    fn paint(&mut self, ctx: &mut PaintCtx<'_>, state: &mut UiNodeState) -> bool {
-        let rect = ctx.screen_rect(ctx.content_rect);
-        let content_clip = ctx.screen_clip();
-        let mut widget_ctx = WidgetPaintCtx::new_with_content_geometry(
-            rect,
-            &mut *ctx.display_list,
-            content_clip,
-            ctx.style,
-            &ctx.atlas,
-            state.hovered,
-            state.focused,
-            state.clicked,
-            state.active,
-            state.scroll_delta,
-        );
-        Widget::paint(self, &mut widget_ctx);
-        Container::children_visible(self)
-    }
-
-    fn update_on(&mut self, ctx: &mut InputCtx<'_>, state: &mut UiNodeState, event: &UiInputEvent) -> InputResult {
-        let mut public_ctx = ContainerInputCtx {
-            runtime: &mut *ctx.runtime,
-            content_rect: ctx.content_rect,
-            content_clip: ctx.content_clip,
-            current: state,
-        };
-        Container::route_input(self, &mut public_ctx, event)
-    }
-}
-
-/// Input event routed to retained node behavior.
+/// Input event routed to one retained widget or container.
 #[derive(Clone, Debug)]
 pub enum UiInputEvent {
     /// Pointer moved without any mouse button held.
@@ -488,7 +310,7 @@ fn event_position(event: &UiInputEvent) -> Option<Vec2i> {
 
 pub(super) fn route_public_widget_input(
     runtime: &mut UiRuntime,
-    state: &UiNodeState,
+    state: &NodeRuntime,
     rect: Recti,
     clip: Recti,
     opt: WidgetOption,
@@ -540,73 +362,6 @@ pub(super) fn route_public_widget_input(
     }
 }
 
-/// Read-only services available while a container measures itself.
-///
-/// Measurement must not mutate child topology.
-pub(crate) struct MeasureCtx<'a> {
-    pub(crate) runtime: &'a UiRuntime,
-    pub(crate) style: &'a Style,
-    pub(crate) atlas: &'a crate::AtlasHandle,
-}
-
-impl MeasureCtx<'_> {
-    pub(crate) fn measure_node_ref(&self, node: &UiNode, available: Dimensioni) -> Dimensioni {
-        self.runtime.measure_node_ref(node, self.style, self.atlas, available)
-    }
-}
-
-/// Mutable geometry services available while a container lays out its children.
-///
-/// Layout may update rectangles and content sizes, but child topology is read-only.
-pub(crate) struct LayoutCtx<'a> {
-    pub(crate) runtime: &'a mut UiRuntime,
-    pub(crate) style: &'a Style,
-    pub(crate) atlas: &'a crate::AtlasHandle,
-    pub(crate) outer: Recti,
-    pub(crate) content: Recti,
-    pub(crate) border_width: i32,
-}
-
-impl LayoutCtx<'_> {
-    pub(crate) fn measure_node_ref(&self, node: &UiNode, available: Dimensioni) -> Dimensioni {
-        self.runtime.measure_node_ref(node, self.style, self.atlas, available)
-    }
-
-    pub(crate) fn layout_node_ref(&mut self, node: &mut UiNode, rect: Recti) -> Dimensioni {
-        self.runtime.layout_node_ref(node, self.style, self.atlas, rect)
-    }
-
-    pub(crate) fn set_content_size(&mut self, state: &mut UiNodeState, content_size: Dimensioni) {
-        let layout = state.layout.with_content_size(content_size);
-        state.set_layout(layout);
-    }
-
-    pub(crate) fn set_widget_content_size(&mut self, state: &mut UiNodeState, preferred_content: Dimensioni) {
-        let preferred_outer = crate::frame::outer_preferred(preferred_content, self.border_width);
-        self.set_content_size(
-            state,
-            Dimensioni::new(
-                self.outer.width.max(preferred_outer.width).max(0),
-                self.outer.height.max(preferred_outer.height).max(0),
-            ),
-        );
-    }
-
-    pub(crate) fn set_child_overflow_propagation(&mut self, state: &mut UiNodeState, propagate_child_overflow: bool) {
-        let layout = state.layout.with_child_overflow_propagation(propagate_child_overflow);
-        state.set_layout(layout);
-    }
-
-    pub(crate) fn set_content_space_geometry(&mut self, state: &mut UiNodeState, _rect: Recti, viewport: Recti, child_offset: Vec2i) {
-        let viewport = viewport
-            .intersect(&self.content)
-            .unwrap_or_else(|| Recti::new(self.content.x, self.content.y, 0, 0));
-        let mut layout = NodeLayout::from_parts(self.outer, viewport, state.layout.content_size);
-        layout.children.offset = child_offset;
-        state.set_layout(layout);
-    }
-}
-
 /// Framework-scoped geometry services available to a public [`Container`] implementation.
 ///
 /// The fields and constructor are private so application code cannot use this context to traverse
@@ -616,10 +371,20 @@ pub struct ContainerLayoutCtx<'a> {
     style: &'a Style,
     atlas: &'a crate::AtlasHandle,
     content: Recti,
-    current: &'a mut UiNodeState,
+    current: &'a mut NodeRuntime,
 }
 
 impl ContainerLayoutCtx<'_> {
+    pub(crate) fn new<'a>(
+        runtime: &'a mut UiRuntime,
+        style: &'a Style,
+        atlas: &'a crate::AtlasHandle,
+        content: Recti,
+        current: &'a mut NodeRuntime,
+    ) -> ContainerLayoutCtx<'a> {
+        ContainerLayoutCtx { runtime, style, atlas, content, current }
+    }
+
     /// Returns the active UI style.
     pub fn style(&self) -> &Style {
         self.style
@@ -665,74 +430,24 @@ impl ContainerLayoutCtx<'_> {
     }
 }
 
-/// Services available while a container updates its own interactive state.
-///
-/// `UpdateCtx` may mutate runtime interaction state. Child topology is owned by concrete container
-/// state and remains stable during runtime traversal. This context intentionally
-/// contains no display list, making the update traversal structurally unable to record paint work.
-pub(crate) struct UpdateCtx<'a> {
-    pub(crate) runtime: &'a mut UiRuntime,
-    pub(super) style: &'a Style,
-    pub(super) atlas: crate::AtlasHandle,
-    pub(super) input: &'a Input,
-    /// Current node origin in screen coordinates, used only by context adapters.
-    pub(super) screen_origin: Vec2i,
-    /// Content surface in node-local coordinates.
-    pub(super) content_rect: Recti,
-    /// Effective content clip in node-local coordinates.
-    pub(super) content_clip: Recti,
-}
-
-impl UpdateCtx<'_> {
-    fn screen_rect(&self, local_rect: Recti) -> Recti {
-        Recti::new(
-            self.screen_origin.x + local_rect.x,
-            self.screen_origin.y + local_rect.y,
-            local_rect.width,
-            local_rect.height,
-        )
-    }
-
-    fn screen_clip(&self) -> Recti {
-        self.screen_rect(self.content_clip)
-    }
-}
-
-/// Services available while a node handles a routed input event.
-///
-/// Input routing may mutate node behavior state, but child topology is read-only.
-pub(crate) struct InputCtx<'a> {
-    pub(crate) runtime: &'a mut UiRuntime,
-    pub(crate) style: &'a Style,
-    /// Content surface in node-local coordinates.
-    pub(super) content_rect: Recti,
-    /// Effective content clip in node-local coordinates.
-    pub(super) content_clip: Recti,
-}
-
-impl InputCtx<'_> {
-    pub(crate) fn content_rect(&self) -> Recti {
-        self.content_rect
-    }
-
-    pub(crate) fn contains(&self, rect: Recti, pos: Vec2i) -> bool {
-        rect.contains(&pos) && self.content_clip.contains(&pos)
-    }
-
-    pub(crate) fn route_widget_input(&mut self, state: &UiNodeState, rect: Recti, opt: WidgetOption, event: &UiInputEvent) -> InputResult {
-        route_public_widget_input(self.runtime, state, rect, self.content_clip, opt, event)
-    }
-}
-
 /// Framework-scoped routed-input services for one public [`Container`] call.
 pub struct ContainerInputCtx<'a> {
     runtime: &'a mut UiRuntime,
     content_rect: Recti,
     content_clip: Recti,
-    current: &'a UiNodeState,
+    current: &'a NodeRuntime,
 }
 
 impl ContainerInputCtx<'_> {
+    pub(crate) fn new<'a>(runtime: &'a mut UiRuntime, content_rect: Recti, content_clip: Recti, current: &'a NodeRuntime) -> ContainerInputCtx<'a> {
+        ContainerInputCtx {
+            runtime,
+            content_rect,
+            content_clip,
+            current,
+        }
+    }
+
     /// Routes through the container's complete local content rectangle.
     pub fn route_widget(&mut self, event: &UiInputEvent, opt: WidgetOption, _focus: FocusPolicy) -> ContainerInputResult {
         route_public_widget_input(self.runtime, self.current, self.content_rect, self.content_clip, opt, event)
@@ -741,62 +456,6 @@ impl ContainerInputCtx<'_> {
     /// Routes through one container-local sub-rectangle intersected with the active clip.
     pub fn route_widget_in_rect(&mut self, event: &UiInputEvent, rect: Recti, opt: WidgetOption, _focus: FocusPolicy) -> ContainerInputResult {
         route_public_widget_input(self.runtime, self.current, rect, self.content_clip, opt, event)
-    }
-}
-
-/// Services available while a container paints its own surface.
-///
-/// Painting appends display-list operations under the traversal-derived clip; child topology is
-/// read-only.
-pub(crate) struct PaintCtx<'a> {
-    pub(super) display_list: &'a mut DisplayList,
-    pub(crate) style: &'a Style,
-    pub(super) atlas: crate::AtlasHandle,
-    /// Current node origin in screen coordinates, used only by painting adapters.
-    pub(super) screen_origin: Vec2i,
-    /// Content surface in node-local coordinates.
-    pub(super) content_rect: Recti,
-    /// Effective content clip in node-local coordinates.
-    pub(super) content_clip: Recti,
-}
-
-impl PaintCtx<'_> {
-    pub(crate) fn content_rect(&self) -> Recti {
-        self.content_rect
-    }
-
-    fn screen_rect(&self, local_rect: Recti) -> Recti {
-        Recti::new(
-            self.screen_origin.x + local_rect.x,
-            self.screen_origin.y + local_rect.y,
-            local_rect.width,
-            local_rect.height,
-        )
-    }
-
-    fn screen_clip(&self) -> Recti {
-        self.screen_rect(self.content_clip)
-    }
-
-    fn painter(&mut self) -> Painter<'_> {
-        let screen_clip = self.screen_clip();
-        Painter::screen_space(&mut *self.display_list, screen_clip)
-    }
-
-    pub(crate) fn draw_internal_frame(&mut self, rect: Recti, color: crate::ControlColor) -> Option<Recti> {
-        let screen_origin = self.screen_origin;
-        let rect = self.screen_rect(rect);
-        let fill = self.style.colors[color as usize];
-        let border = self.style.frame_border();
-        let mut painter = self.painter();
-        crate::frame::paint_internal_frame(&mut painter, rect, Some(fill), border)
-            .map(|content| Recti::new(content.x - screen_origin.x, content.y - screen_origin.y, content.width, content.height))
-    }
-
-    pub(crate) fn draw_flat_rect(&mut self, rect: Recti, color: crate::ControlColor) {
-        let rect = self.screen_rect(rect);
-        let fill = self.style.colors[color as usize];
-        self.painter().fill_rect(rect, fill);
     }
 }
 

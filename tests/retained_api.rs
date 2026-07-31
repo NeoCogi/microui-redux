@@ -1,11 +1,15 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 use microui_redux::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
 use microui_redux::retained::*;
 use microui_redux::prelude::{Dimensioni, Recti};
 use microui_redux::{
-    rect, AtlasHandle, AtlasSource, Column, ColumnParameters, Context, Disclosure, DisclosureParameters, Grid, GridParameters, RootMutationError, Row,
-    RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy, SourceFormat, Stack, StackDirection, StackParameters, Style, TextureId,
+    color, rect, AtlasHandle, AtlasSource, Column, ColumnParameters, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters, Policy,
+    RootMutationError, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy, SourceFormat, Stack, StackDirection,
+    StackParameters, Style, TextureId,
 };
 
 struct TestBackend {
@@ -42,12 +46,19 @@ impl RendererBackend for TestBackend {
 fn context() -> Context<TestBackend> {
     let pixels = [255, 255, 255, 255];
     let icons = [("white", Recti::new(0, 0, 1, 1))];
+    let font = FontEntry {
+        line_size: 10,
+        baseline: 8,
+        font_size: 10,
+        entries: &[],
+    };
+    let fonts = [("default", font)];
     let source = AtlasSource {
         width: 1,
         height: 1,
         pixels: &pixels,
         icons: &icons,
-        fonts: &[],
+        fonts: &fonts,
         format: SourceFormat::Raw,
     };
     Context::new(TestBackend { atlas: AtlasHandle::from(&source) })
@@ -81,6 +92,9 @@ impl WidgetParameters for ExternalParameters {}
 
 struct ExternalState {
     children: Children,
+    measure_calls: Cell<usize>,
+    layout_calls: Cell<usize>,
+    observed_policy: Cell<Option<Policy>>,
 }
 
 impl WidgetState for ExternalState {}
@@ -104,8 +118,13 @@ impl Widget for ExternalContainer {
         &self.options
     }
 
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        Dimensioni::new(20, 20)
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        let state = self.state.try_borrow().expect("external state must not be reentered");
+        state.measure_calls.set(state.measure_calls.get() + 1);
+        state
+            .children
+            .measure_child(0, style, atlas, available)
+            .unwrap_or_else(|| Dimensioni::new(20, 20))
     }
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
@@ -125,6 +144,10 @@ impl Container for ExternalContainer {
 
     fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
         let mut state = self.state.try_borrow_mut().expect("external state must not be reentered");
+        state.layout_calls.set(state.layout_calls.get() + 1);
+        assert!(ctx.child_policy(&state.children, usize::MAX).is_none());
+        assert!(ctx.layout_child(&mut state.children, usize::MAX, rect).is_none());
+        state.observed_policy.set(ctx.child_policy(&state.children, 0));
         if !state.children.is_empty() {
             let _ = ctx.layout_child(&mut state.children, 0, rect);
         }
@@ -139,20 +162,77 @@ impl ContainerBuilder for ExternalBuilder {
 
     fn create_container(parameters: Self::Parameters) -> Self::W {
         ExternalContainer {
-            state: Rc::new(RefCell::new(ExternalState { children: parameters.children })),
+            state: Rc::new(RefCell::new(ExternalState {
+                children: parameters.children,
+                measure_calls: Cell::new(0),
+                layout_calls: Cell::new(0),
+                observed_policy: Cell::new(None),
+            })),
             options: WidgetOption::NONE,
         }
     }
 }
 
+struct ExternalLeaf {
+    state: Rc<RefCell<()>>,
+    options: WidgetOption,
+}
+
+impl ExternalLeaf {
+    fn create() -> (WidgetStateHandle<()>, Self) {
+        let leaf = Self {
+            state: Rc::new(RefCell::new(())),
+            options: WidgetOption::NONE,
+        };
+        let state = leaf.state_handle();
+        (state, leaf)
+    }
+}
+
+impl WidgetStateOwner for ExternalLeaf {
+    type State = ();
+
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
+    }
+}
+
+impl Widget for ExternalLeaf {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.options
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(12, 9)
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
 #[test]
-fn downstream_custom_container_uses_the_same_unique_node_boundary() {
-    let runtime = ExternalBuilder::create_container(ExternalParameters { children: Children::new() });
+fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis() {
+    let (child_state, child) = ExternalLeaf::create();
+    let policy = Policy::fixed(24, 18);
+    let children = [Node::widget(child).with_policy(policy)].into_iter().collect();
+    let runtime = ExternalBuilder::create_container(ExternalParameters { children });
     let state = runtime.state_handle();
     let node = Node::container(runtime);
-    assert!(state.is_alive());
-    drop(node);
+    let mut ctx = context();
+    let root = ctx.create_window("external", rect(10, 20, 100, 80), node);
+    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let frame = FrameInfo::try_new(Dimensioni::new(320, 240), color(0, 0, 0, 255)).unwrap();
+
+    ctx.frame(frame).render_ui().unwrap();
+
+    assert!(state.try_read(|state| state.measure_calls.get()).unwrap() > 0);
+    assert!(state.try_read(|state| state.layout_calls.get()).unwrap() > 0);
+    assert_eq!(state.try_read(|state| state.observed_policy.get()), Some(Some(policy)));
+    assert!(child_state.is_alive());
+    assert!(ctx.destroy_root(root.id()));
     assert!(!state.is_alive());
+    assert!(!child_state.is_alive());
 }
 
 #[test]

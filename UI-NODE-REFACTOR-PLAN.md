@@ -3771,7 +3771,7 @@ change a protected P0 behavior follows the explicit change-control rule.
   paint/input remain in the parent clip. Focused tests pin direct semantic topology, mounted state
   mutation, offset/disable behavior, clipping, and child ownership.
 
-- [ ] **P2.3 — Traverse retained boxes and checked container borrows directly**
+- [x] **P2.3 — Traverse retained boxes and checked container borrows directly**
 
   **Problem**
 
@@ -3806,10 +3806,16 @@ change a protected P0 behavior follows the explicit change-control rule.
   measure-to-content calculation. Move the recursion currently in `UiRuntime::measure_node_ref`
   behind private `Node` measurement, and let public `Children::measure_child` delegate to it; this
   lets inherited `Widget::measure` remain unchanged and requires no container measurement trait.
+  The private node measurement returns enough internal detail for layout to reuse that one
+  `Widget::measure` result when deriving leaf content size; do not retain separate
+  `Node::measure_without_runtime` and `UiRuntime::measure_node_ref` algorithms or remeasure a leaf
+  through a layout adapter. Delete the transitional `UiNode`, `UiNodeData`, `UiNodeState`, and
+  `UiNodeId` aliases and use `Node`, `NodeKind`, `NodeRuntime`, and `RuntimeNodeId` directly.
   Carry transforms/clips/root state on the stack. Once all variants use direct dispatch, delete
   `NodeBehavior`, every implementation and bound of it, and any temporary adapter introduced during
-  P1. Do not replace it with another private catch-all runtime trait or parallel container
-  measure/update/paint adapter.
+  P1. Also delete the private `MeasureCtx`, `LayoutCtx`, `UpdateCtx`, `PaintCtx`, and `InputCtx`
+  adapters that exist only to feed `NodeBehavior`. Do not replace them with another private
+  catch-all runtime trait, phase-context layer, or parallel container measure/update/paint adapter.
 
   Query `children_visible` immediately before each descendant recursion. In particular, update the
   container itself first, then query the gate before updating its children; this gives Disclosure
@@ -3825,6 +3831,9 @@ change a protected P0 behavior follows the explicit change-control rule.
     dispatch and each eligible node receives one update/paint dispatch, with no parallel
     container-phase path. The test permits the specified two layout phases and bounded scroll
     convergence rather than asserting one measure call per frame.
+  - Runtime layout reuses the authoritative private node-measurement result for leaf content size;
+    production source contains no second node-measurement algorithm or layout-time leaf
+    remeasurement adapter.
   - Ordinary containers use the generic `route_widget` default; special container routing only
     queues or declines events, and the single inherited `Widget::update` call performs state changes.
   - Nested scroll boundary and pointer-capture tests prove the pre-update routing result is available
@@ -3852,7 +3861,27 @@ change a protected P0 behavior follows the explicit change-control rule.
     downstream conformance example submit the same authoritative collection through both methods.
   - Runtime module docs state phase, traversal, and borrow order.
   - A production-source search finds no `NodeBehavior` trait, implementation, bound, boxed object,
-    import, or equivalent all-node behavior adapter.
+    import, or equivalent all-node behavior adapter; no transitional `UiNode`, `UiNodeData`,
+    `UiNodeState`, or `UiNodeId` alias remains; and the obsolete private `MeasureCtx`, `LayoutCtx`,
+    `UpdateCtx`, `PaintCtx`, and `InputCtx` adapter types are absent.
+
+  **Completion evidence (2026-07-31)**
+
+  Runtime traversal now matches `NodeKind` directly, dispatches framing, interaction, measure,
+  update, and paint through the variant's one inherited `Widget`, and branches to `Container` only
+  for layout, special input, descendant visibility, and scoped child visitation. Private
+  `Node::measure` is the sole node-measurement algorithm; its `NodeMeasurement` is reused for leaf
+  content sizing. The transitional aliases, `NodeBehavior`, all implementations/bounds, and its
+  five private phase adapters are deleted. Focused tests pin one-dispatch leaf measurement,
+  parent-first/forward update and paint, reverse-z input, same-frame descendant suppression, and a
+  downstream container's public child measurement/policy/layout path including invalid indices.
+
+  The cross-cutting matrix passes formatting, all targets (130 unit and three downstream tests;
+  one existing manual performance test ignored), 17 doctests including seven compile-fail cases,
+  Clippy with the repository's existing warning baseline, no-default-features, generated docs, and
+  separate Glow, Vulkan, and WGPU example checks. Production-source checks find only the intended
+  leaf `Box<dyn Widget>` erasure and the two public scoped container contexts. The file dialog
+  remains deliberately excluded until P3.2 with all 13 exact restoration markers preserved.
 
 - [ ] **P2.4 — Sanitize runtime targets around direct topology changes**
 
