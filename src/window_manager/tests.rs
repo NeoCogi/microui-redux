@@ -5,10 +5,9 @@ use std::{cell::RefCell, rc::Rc};
 use super::*;
 use crate::{
     test_support::{projected_widget, recording_backend, test_atlas as make_test_atlas, test_atlas_with_font_sizes, NoopRenderer, RenderEvent},
-    color, widget_handle, AtlasHandle, ButtonBuilder, ButtonParameters, Combo, ComboParameters, ComboState, CustomBuilder, CustomParameters, ListItem,
-    ListItemParameters, ListItemState, Node, NodeId, NodeOptions, NodeStateValue, Policy, ResourceState, RetainedId, ScrollAreaOption, SizePolicy,
-    StackDirection, TextBlockBuilder, TextBlockParameters, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetStateHandle, WidgetStateOwner,
-    WidgetUpdateCtx, UiNodeBuilder,
+    color, AtlasHandle, ButtonBuilder, ButtonParameters, Combo, ComboParameters, ComboState, CustomBuilder, CustomParameters, ListItem, ListItemParameters,
+    ListItemState, NodeId, NodeOptions, Policy, ResourceState, RetainedId, ScrollAreaOption, SizePolicy, StackDirection, TextBlockBuilder, TextBlockParameters,
+    UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, UiNodeBuilder,
 };
 
 fn make_named_font_test_atlas() -> AtlasHandle {
@@ -477,13 +476,11 @@ fn scroll_area_paints_disclosure_headers_in_screen_space() {
     let atlas = make_test_atlas();
     let backend = NoopRenderer { atlas };
     let mut ctx = Context::new_test(backend, Dimensioni::new(240, 160));
-    let header = widget_handle(Node::header("Visible Header", NodeStateValue::Expanded));
-    let tree_node = widget_handle(Node::tree("Visible Tree", NodeStateValue::Expanded));
     let tree = UiNodeBuilder::build(|tree| {
         tree.node(NodeOptions::with_policy(Policy::fixed(180, 100)))
             .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
-                tree.header(&header, |tree| {
-                    tree.tree_node(&tree_node, |tree| {
+                let _ = tree.header("Visible Header", true, |tree| {
+                    let _ = tree.tree_node("Visible Tree", true, |tree| {
                         tree.text("Visible Child");
                     });
                 });

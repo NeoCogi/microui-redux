@@ -11,9 +11,9 @@ use super::*;
 use crate::{
     test_support::{AllocationCount, AllocationMeasurement, NoopRenderer, test_atlas},
     Button, ButtonParameters, Checkbox, CheckboxParameters, CheckboxState, ColorSwatch, ColorSwatchParameters, Combo, ComboParameters, ComboState, ListBox,
-    ListBoxParameters, ListItem, ListItemParameters, Node, NodeStateValue, Number, NumberParameters, NumberState, ResourceState, RetainedId, ScrollAreaOption,
-    SizePolicy, SliderParameters, SliderState, StackDirection, TextArea, TextAreaParameters, TextBlock, TextBlockParameters, Textbox, TextboxParameters,
-    TextboxState, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, color, widget_handle,
+    Disclosure, DisclosureParameters, DisclosureState, ListBoxParameters, ListItem, ListItemParameters, Number, NumberParameters, NumberState, ResourceState,
+    RetainedId, ScrollAreaOption, SizePolicy, SliderParameters, SliderState, StackDirection, TextArea, TextAreaParameters, TextBlock, TextBlockParameters,
+    Textbox, TextboxParameters, TextboxState, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetStateOwner, WidgetUpdateCtx, color,
 };
 
 fn context(width: i32, height: i32) -> Context<NoopRenderer> {
@@ -129,7 +129,7 @@ fn p0_existing_typed_widget_mutations_remain_observable() {
     let textbox = textbox_runtime;
     let (text_area_state, text_area_runtime) = TextArea::create(TextAreaParameters::new("before"));
     let text_area = text_area_runtime;
-    let disclosure = widget_handle(Node::header("section", NodeStateValue::Closed));
+    let (disclosure, disclosure_node) = Disclosure::create(DisclosureParameters::header("section", false, std::iter::empty()));
 
     checkbox.try_update(CheckboxState::check).unwrap();
     list_item_state.try_update(|state| state.set_label("after item")).unwrap();
@@ -156,7 +156,7 @@ fn p0_existing_typed_widget_mutations_remain_observable() {
             state.set_scroll(crate::vec2(3, 4));
         })
         .unwrap();
-    disclosure.update(|state| state.state = NodeStateValue::Expanded);
+    disclosure.try_update(DisclosureState::expand).unwrap();
 
     assert_eq!(checkbox.try_read(CheckboxState::checked), Some(true));
     assert_eq!(combo_state.try_read(ComboState::selected), Some(1));
@@ -169,7 +169,8 @@ fn p0_existing_typed_widget_mutations_remain_observable() {
     assert_eq!(area_text, "after area");
     assert_eq!(area_cursor, 5);
     assert_eq!((area_scroll.x, area_scroll.y), (3, 4));
-    assert!(disclosure.read(Node::is_expanded));
+    assert_eq!(disclosure.try_read(DisclosureState::is_expanded), Some(true));
+    drop(disclosure_node);
 
     let tree = UiNodeBuilder::build(|tree| {
         tree.column(|tree| {
@@ -199,8 +200,8 @@ fn p1_checkbox_runtime_preserves_projection_geometry_paint_and_click_behavior() 
         checkbox_id = tree.widget(widget);
     });
 
-    let node = tree.node(checkbox_id).expect("checkbox projection node");
-    assert_eq!(node.debug_erased_adapter_count(), 0);
+    tree.with_node(checkbox_id, |node| assert_eq!(node.debug_erased_adapter_count(), 0))
+        .expect("checkbox owning node");
 
     let mut ctx = context(220, 120);
     let root = ctx.create_window("checkbox", rect(0, 0, 180, 90), tree);
@@ -316,9 +317,9 @@ fn keyboard_text_routes_to_only_the_front_roots_focused_widget() {
 
 #[test]
 fn p0_container_disclosure_scroll_and_dynamic_list_outcomes_are_stable() {
-    let disclosure = widget_handle(Node::header("section", NodeStateValue::Closed));
     let (_, first_runtime) = ListItem::create(ListItemParameters::new("first"));
     let (_, second_runtime) = ListItem::create(ListItemParameters::new("second"));
+    let mut disclosure = None;
     let mut disclosure_id = NodeId::default();
     let mut scroll_id = NodeId::default();
     let mut second_id = NodeId::default();
@@ -331,9 +332,11 @@ fn p0_container_disclosure_scroll_and_dynamic_list_outcomes_are_stable() {
                 grid_b_id = tree.text("grid-b");
             });
             tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                disclosure_id = tree.header(&disclosure, |tree| {
+                let (state, id) = tree.header("section", false, |tree| {
                     tree.text("disclosed");
                 });
+                disclosure = Some(state);
+                disclosure_id = id;
                 scroll_id = tree.node(NodeOptions::with_policy(Policy::fixed(100, 50))).scroll_area(
                     ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
                     |tree| {
@@ -347,6 +350,7 @@ fn p0_container_disclosure_scroll_and_dynamic_list_outcomes_are_stable() {
             });
         });
     });
+    let disclosure = disclosure.expect("disclosure state handle missing");
     let mut ctx = context(260, 180);
     let root = ctx.create_window("containers", rect(0, 0, 220, 150), tree);
     ctx.update_ui();
@@ -364,7 +368,7 @@ fn p0_container_disclosure_scroll_and_dynamic_list_outcomes_are_stable() {
     let (disclosure_x, disclosure_y) = center(ctx.debug_root_node_rect(root, disclosure_id).unwrap());
     ctx.mousedown(disclosure_x, disclosure_y, MouseButton::LEFT);
     ctx.update_ui();
-    assert!(disclosure.read(Node::is_expanded));
+    assert_eq!(disclosure.try_read(DisclosureState::is_expanded), Some(true));
     assert!(ctx.debug_root_texts(root).iter().any(|text| text == "disclosed"));
     ctx.mouseup(disclosure_x, disclosure_y, MouseButton::LEFT);
     ctx.update_ui();
@@ -376,6 +380,56 @@ fn p0_container_disclosure_scroll_and_dynamic_list_outcomes_are_stable() {
     let scroll = ctx.scroll_area_scroll(root, scroll_id).unwrap();
     assert_ne!((scroll.x, scroll.y), (0, 0));
     assert_ne!(ctx.debug_root_node_rect(root, second_id).unwrap().y, second_before.y);
+}
+
+#[test]
+fn disclosure_retains_but_fully_gates_collapsed_descendants() {
+    let phases = Rc::new(RefCell::new(Vec::new()));
+    let child = PhaseWidget::new(phases.clone());
+    let child_state = child.state_handle();
+    let mut disclosure_state = None;
+    let mut child_id = NodeId::default();
+    let tree = UiNodeBuilder::build(|tree| {
+        let (state, _) = tree.header("section", false, |tree| {
+            child_id = tree.widget(child);
+        });
+        disclosure_state = Some(state);
+    });
+    let disclosure_state = disclosure_state.expect("disclosure handle missing");
+    let mut ctx = context(180, 120);
+    let root = ctx.create_window("disclosure gate", rect(0, 0, 150, 100), tree);
+
+    ctx.update_ui();
+    assert!(phases.borrow().is_empty(), "collapsed descendants must skip every runtime phase");
+    assert!(child_state.is_alive(), "collapse retains descendant ownership");
+
+    disclosure_state.try_update(DisclosureState::expand).unwrap();
+    ctx.update_ui();
+    assert!(phases.borrow().contains(&Phase::Measure));
+    assert!(phases.borrow().contains(&Phase::Update));
+    assert!(phases.borrow().contains(&Phase::Paint));
+
+    phases.borrow_mut().clear();
+    let entry = ctx.roots.iter_mut().find(|entry| entry.id == root).expect("root missing");
+    entry.runtime.focus = Some(child_id);
+    entry.runtime.hover = Some(child_id);
+    entry.runtime.capture = Some(child_id);
+    disclosure_state.try_update(DisclosureState::collapse).unwrap();
+    ctx.update_ui();
+    assert!(phases.borrow().is_empty());
+    let entry = ctx.roots.iter().find(|entry| entry.id == root).expect("root missing");
+    assert_eq!(entry.runtime.focus, None);
+    assert_eq!(entry.runtime.hover, None);
+    assert_eq!(entry.runtime.capture, None);
+
+    disclosure_state.try_update(DisclosureState::expand).unwrap();
+    ctx.update_ui();
+    let entry = ctx.roots.iter().find(|entry| entry.id == root).expect("root missing");
+    assert_eq!(entry.runtime.focus, None, "expansion must not restore stale interaction targets");
+    assert_eq!(entry.runtime.capture, None);
+
+    disclosure_state.try_update(DisclosureState::clear).unwrap();
+    assert!(!child_state.is_alive(), "removing a disclosure child drops its runtime owner");
 }
 
 #[test]
@@ -467,14 +521,12 @@ fn p0_known_structural_costs_are_evidence_not_compatibility() {
         });
     });
     let scroll_roots = scroll.into_roots();
-    assert_eq!(
-        scroll_roots[0].children().len(),
-        4,
-        "viewport plus two tracks and one corner are synthetic descendants"
-    );
+    scroll_roots[0].with_children(|children| {
+        assert_eq!(children.len(), 4, "viewport plus two tracks and one corner are synthetic descendants");
+    });
     assert_eq!(scroll_roots[0].debug_node_count(), 6);
 
-    let mut swappable = UiNodeBuilder::build(|tree| {
+    let owned = UiNodeBuilder::build(|tree| {
         tree.column(|tree| {
             tree.text("left");
         });
@@ -483,21 +535,16 @@ fn p0_known_structural_costs_are_evidence_not_compatibility() {
         });
     })
     .into_roots();
-    let (left, right) = swappable.split_at_mut(1);
-    let left_child = left[0].children()[0].id();
-    let right_child = right[0].children()[0].id();
-    std::mem::swap(left[0].children_mut().unwrap(), right[0].children_mut().unwrap());
-    assert_eq!(left[0].children()[0].id(), right_child);
-    assert_eq!(right[0].children()[0].id(), left_child);
+    let left_child = owned[0].with_children(|children| children[0].id());
+    let right_child = owned[1].with_children(|children| children[0].id());
+    assert_ne!(left_child, right_child, "each owning Node receives process-unique identity");
 
-    let visible_tree = UiNodeBuilder::build(|tree| {
-        tree.text("still traversed");
-    });
-    let mut ctx = context(120, 80);
-    let root = ctx.create_window("visible bit", rect(0, 0, 100, 70), visible_tree);
-    ctx.roots.iter_mut().find(|entry| entry.id == root).unwrap().roots[0].state.visible = false;
-    ctx.update_ui();
-    assert!(ctx.debug_root_texts(root).iter().any(|text| text == "still traversed"));
+    let (child_state, child_runtime) = TextBlock::create(TextBlockParameters::new("drop with owner"));
+    let (column_state, column_node) = crate::Column::create(crate::ColumnParameters::new([crate::Node::widget(child_runtime)]));
+    assert!(child_state.is_alive());
+    column_state.try_update(crate::ColumnState::clear).unwrap();
+    assert!(!child_state.is_alive(), "clearing state-owned Children drops the runtime and state cell");
+    drop(column_node);
 }
 
 struct ConstraintProbe {

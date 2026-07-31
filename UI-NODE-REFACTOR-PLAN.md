@@ -34,7 +34,8 @@ This is the sole authoritative UI-node migration plan. It supersedes the obsolet
     demonstrated/intended application state, events, and commands, not arbitrary post-mount
     mutation of every field that was public on a combined widget struct;
 11. row/grid/stack layout configuration and scroll enablement are mutable through their exposed
-    container states. `Node` policy and grid span are pre-insertion-only and have no mounted setter;
+    container states. `Node` policy is pre-insertion-only; Grid spans are Grid-owned child-edge
+    state and remain mutable through `GridState` without replacing the child;
 12. moving a unique unmounted value through a state access uses the input-preserving
     `WidgetStateHandle::try_update_with` operation, so unavailable access returns the uncommitted
     input directly instead of dropping an uninvoked closure capture;
@@ -253,7 +254,8 @@ This migration does not initially attempt to:
   struct; the built-in mapping below is the compatibility boundary;
 - preserve the old header/tree `widgets::Node` or `NodeStateValue` names;
 - replace a mounted root `Node` while retaining its `RootId`;
-- mutate an attached node's `Policy` or `GridSpan`;
+- mutate an attached node's `Policy`; Grid placement is not node state and is mutable through its
+  owning `GridState`;
 - add generic per-node hide/show state or public node-visibility mutation;
 - add dirty propagation, retained paint fragments, a node registry, or an arena without measurement;
 - redesign keyboard focus, pointer activity, or cross-root focus ownership before the final retained
@@ -536,12 +538,6 @@ impl ContainerLayoutCtx<'_> {
         index: usize,
     ) -> Option<Policy>;
 
-    pub fn child_grid_span(
-        &self,
-        children: &Children,
-        index: usize,
-    ) -> Option<GridSpan>;
-
     pub fn layout_child(
         &mut self,
         children: &mut Children,
@@ -612,8 +608,9 @@ impl Container for ColumnContainer {
 ```
 
 `Children` exposes safe indexed child measurement needed by implementations of the inherited
-`Widget::measure`. `ContainerLayoutCtx::child_policy` and `child_grid_span` read the unique node's
-private placement metadata without exposing the node. `layout_child` assigns one indexed child
+`Widget::measure`. `ContainerLayoutCtx::child_policy` reads the unique node's generic parent
+placement policy without exposing the node. Parent-specific edge metadata belongs to the owning
+container state and does not pass through this generic context. `layout_child` assigns one indexed child
 rectangle in current-container content coordinates and returns the child's resulting content size,
 or `None` for an invalid index. `set_children_viewport` installs a node-local visible viewport and
 translation for descendants; the runtime intersects the viewport with the current content clip.
@@ -1109,6 +1106,24 @@ impl RowState {
 }
 
 impl GridState {
+    pub fn len(&self) -> usize;
+    pub fn is_empty(&self) -> bool;
+    pub fn push(&mut self, item: impl Into<GridItem>);
+    pub fn insert(
+        &mut self,
+        index: usize,
+        item: GridItem,
+    ) -> Result<(), GridItem>;
+    pub fn remove_drop(&mut self, index: usize) -> bool;
+    pub fn clear(&mut self);
+    pub fn replace<T>(
+        &mut self,
+        items: impl IntoIterator<Item = T>,
+    )
+    where
+        T: Into<GridItem>;
+    pub fn span(&self, index: usize) -> Option<GridSpan>;
+    pub fn set_span(&mut self, index: usize, span: GridSpan) -> bool;
     pub fn column_tracks(&self) -> &[SizePolicy];
     pub fn set_column_tracks(&mut self, tracks: impl IntoIterator<Item = SizePolicy>);
     pub fn row_tracks(&self) -> &[SizePolicy];
@@ -1142,16 +1157,28 @@ before another event can be routed to it. Derived layout hides both bars. `set_o
 negative components immediately and clamps the upper bound during the next layout, when current
 content and viewport extents are known.
 
+`GridItem` is an unmounted insertion value containing one `Node` and one validated `GridSpan`; it
+is not a semantic runtime node and has no ID, layout, or state of its own. `Node` converts to a
+one-cell `GridItem`, while `GridItem::spanned(node, columns, rows)` is explicit at the only call
+site where Grid placement exists. `GridSpan` is defined by the Grid module, has private fields,
+normalizes zero components in `GridSpan::new`, and exposes `columns()`/`rows()` getters.
+
+Privately, `GridState` stores a `GridItems { children: Children, spans: Vec<GridSpan> }` invariant
+wrapper. All topology operations update both index-matched collections, and debug assertions pin
+equal lengths. This split representation exists only because generic traversal operates on opaque
+`Children`; neither collection is publicly exposed. `set_span` changes only edge metadata and
+therefore preserves the child's ID, runtime, widget state, and mounted topology.
+
 Row width entries correspond to children by index; a missing entry is `Auto` and excess entries are
 ignored. An empty grid column list means one `Auto` column. Explicit extra grid column/row tracks
-remain part of grid geometry even when currently empty. Changing grid columns reflows row-major
-placement without changing child IDs or state cells.
+remain part of grid geometry even when currently empty. Changing grid columns or a child span
+reflows row-major placement without changing child IDs or state cells.
 
 Layout precedence is single and directional:
 
 1. the container resolves a slot or shared grid tracks from its state configuration and child
    intrinsic measurements;
-2. a grid applies the child's pre-insertion `GridSpan` to form the offered slot;
+2. a grid applies the matching Grid-owned `GridSpan` to form the offered slot;
 3. `ContainerLayoutCtx::layout_child` applies the child's pre-insertion `Policy` exactly once to
    that slot;
 4. `Auto` fills the offered slot during allocation, while a non-`Auto` policy has final precedence
@@ -1160,10 +1187,11 @@ Layout precedence is single and directional:
    the explicit overflow contract.
 
 Containers may inspect `child_policy` for measurement and slot planning, but must not resolve it and
-then let generic traversal apply it a second time. There is no mounted child-policy/span setter;
-changing either requires constructing and inserting a replacement node. State mutations made before
-pre-input layout affect that frame; mutations during update affect post-update layout; mutations
-after paint become fully visible on the next frame.
+then let generic traversal apply it a second time. There is no mounted child-policy setter; changing
+policy requires constructing and inserting a replacement node. Grid span is different because it
+belongs to the parent-child edge: `GridState::set_span` updates it without replacing the child.
+State mutations made before pre-input layout affect that frame; mutations during update affect
+post-update layout; mutations after paint become fully visible on the next frame.
 
 ### Owning node and internal identity
 
@@ -1193,7 +1221,6 @@ struct WidgetNode {
 struct NodeRuntime {
     // Derived layout and transient hover/focus/capture-related flags, but no visibility bit.
     policy: Policy,
-    grid_span: GridSpan,
     /* private derived/transient fields */
 }
 
@@ -1238,18 +1265,14 @@ impl Node {
         self
     }
 
-    pub fn with_grid_span(mut self, columns: usize, rows: usize) -> Self {
-        self.runtime.grid_span = GridSpan::new(columns, rows);
-        self
-    }
 }
 ```
 
-`Node::from_kind` initializes `Policy::auto()` and `GridSpan::ONE`. `with_policy` and
-`with_grid_span` consume and return the still-unmounted unique node; zero spans clamp through the
-existing `GridSpan::new` rule. There are no mounted-node placement setters. Every built-in
-container follows the single-application policy precedence above; grid additionally consults
-`child_grid_span`, while non-grid parents ignore the span.
+`Node::from_kind` initializes `Policy::auto()`. `with_policy` consumes and returns the
+still-unmounted unique node. There is no mounted-node policy setter. Every built-in container
+follows the single-application policy precedence above. Grid placement is constructed with
+`GridItem`, retained by `GridState`, and never appears in generic `NodeRuntime` or
+`ContainerLayoutCtx`.
 
 `Node::custom_render` is backend-typed at the public construction boundary because it accepts only
 `CustomRenderHandle<B>`, then erases the handle to the existing private `CustomRenderKey` stored in
@@ -1282,8 +1305,9 @@ focus, capture, routed input, liveness validation, and cleanup only. The applica
 receives or reconstructs them. Because IDs are globally unique and never reused, a stale internal
 target cannot alias a node in another Context; no Context token or mount metadata is required.
 
-`Node` is not `Clone`. Placement policy and grid span are configured with the consuming builder
-methods above before insertion. A successful insertion consumes it. Generic node visibility is
+`Node` is not `Clone`. Placement policy is configured with the consuming builder method above
+before insertion. A successful insertion consumes it; Grid placement is supplied by `GridItem` at
+the Grid insertion boundary. Generic node visibility is
 absent: there is no `visible` field, `set_visible`, `show`, or `hide` operation on `Node` or
 `NodeRuntime`.
 
@@ -1738,7 +1762,8 @@ capture removal, and replacement behavior.
 | Application state capability | `WidgetStateHandle<T>` returned explicitly by concrete constructors when meaningful |
 | Construction input and public return shape | specific `Parameters`; each concrete constructor documents whether it returns a handle with the runtime/finished node or only the runtime/node |
 | Container children | `Children` inside the concrete container state cell |
-| Node placement, derived layout, and transient interaction flags | `NodeRuntime`; no generic visibility field |
+| Generic child placement policy, derived layout, and transient interaction flags | `NodeRuntime`; no generic visibility or Grid field |
+| Grid child placement spans and track definitions | `GridState`; private `GridItems` keeps each span index-matched with its owned child |
 | Descendant traversal visibility | concrete `Container::children_visible`, principally `Disclosure` |
 | Focus/hover/capture/routed input | owning `WidgetTree`, keyed by private `RuntimeNodeId` |
 | Widget action/value observation | widget-specific `WidgetState` |
@@ -1870,7 +1895,8 @@ change behavior. Amend the defining contract and its P0 criterion first, then up
     multiple submissions panic with a diagnostic; same-collection consistency is a safe downstream
     conformance obligation.
 24. Container layout state may change after mounting only through the fixed Row/Grid/Stack/Scroll
-    APIs; attached `Policy` and `GridSpan` never change.
+    APIs; attached `Policy` never changes, while Grid-owned `GridSpan` may change through
+    `GridState::set_span` without changing child identity.
 25. Raw input is normalized once. Ordinary retained interaction derives only from routed events;
     cross-root popup outside dismissal is the sole boundary exception and consumes that same ordered
     pointer stream before routing it onward. Each normal frame performs pre-input and post-update
@@ -2270,8 +2296,9 @@ explicit decision before changing the criterion.
   completed `Node`. Callers do not select the return shape through Parameters or a separate API.
   The atomic P1.3/P2.1 compile-safe batch publishes `Container`, constructible `Children`, the opaque
   visitors/contexts, owning `Node`, `ContainerBuilder`, generic `Node::container`, the Column vertical
-  slice, and Disclosure as the old public `Node` replacement. Row/Grid/Stack land in P2.0 and
-  ScrollArea lands in P2.2 using that already-complete foundation. Downstream compile tests exercise
+  slice, and Disclosure as the old public `Node` replacement. Grid's state-owned slice lands as an
+  early P2.0 correction; Row/Stack finish P2.0 and ScrollArea lands in P2.2 using that
+  already-complete foundation. Downstream compile tests exercise
   the Column/Disclosure/custom-container paths in the atomic batch and expand to every built-in as
   each later item lands.
 
@@ -2675,9 +2702,9 @@ explicit decision before changing the criterion.
   `Node::from_kind` is the only allocation point. `Node::widget`, `Node::custom_render`, and
   `Node::container` reach it exactly once; built-in container constructors do not allocate an
   additional identity around their returned node. Moving an unmounted node, configuring it through
-  consuming `with_policy`/`with_grid_span`, returning it from a failed `Children::insert`, and
-  mounting it in any Context preserve the original scalar. Dropping even a never-mounted node does
-  not return its ID to the allocator.
+  consuming `with_policy`, wrapping it in an unmounted `GridItem`, returning it from a failed
+  `Children`/`GridState` insertion, and mounting it in any Context preserve the original scalar.
+  Dropping even a never-mounted node does not return its ID to the allocator.
 
   Actual focus, hover, capture, and routed input are owned per retained tree, below Context and
   inside its `WindowEntry`. Widget state cannot request or clear focus; the authoritative focused
@@ -2830,15 +2857,16 @@ explicit decision before changing the criterion.
   does today. Expansion is the only retained mounted state from `NodeStateValue`; the replacement
   exposes no public compatibility enum.
 
-  `NodeRuntime` stores `Policy`, `GridSpan`, derived layout, and transient interaction flags, but no
-  generic visibility bit. Add the exact consuming pre-insertion methods
-  `Node::with_policy(Policy)` and `Node::with_grid_span(columns, rows)`, defaulting through
-  `Policy::auto()` and `GridSpan::ONE`. Each method changes only its own placement field, so either
-  chaining order preserves the other setting. `with_grid_span` delegates to `GridSpan::new` and
-  clamps each zero component to one. Both methods preserve the node's already-allocated private
-  runtime identity. Policy participates once in parent slot allocation; Grid consumes span while
-  non-grid parents ignore it. There is no mounted policy/span setter or public placement getter that
-  lends runtime state.
+  `NodeRuntime` stores `Policy`, derived layout, and transient interaction flags, but no generic
+  visibility bit or parent-specific metadata. Add the consuming pre-insertion method
+  `Node::with_policy(Policy)`, defaulting through `Policy::auto()` and preserving the node's
+  already-allocated private runtime identity. Policy participates once in parent slot allocation.
+
+  Grid placement is instead an explicit `GridItem { node, span }` insertion value. `GridSpan::new`
+  clamps each zero component to one, and `GridState` owns the index-matched span after insertion.
+  `GridState::set_span` changes that parent-child edge without replacing the attached node. Non-grid
+  parents neither carry nor ignore Grid metadata because it never enters their retained
+  representation.
 
   Do not add `Node::show`, `hide`, `set_visible`, `is_visible`, or an equivalent generic handle/state
   command. Root hide/show remains a Context-coordinated `RootState` mutation with the P0.7 contract.
@@ -2858,12 +2886,12 @@ explicit decision before changing the criterion.
   - Disclosure header/tree tests pin initial expanded/collapsed state, predicates, explicit
     expand/collapse/toggle, label/icon paint, framed versus unframed defaults, option override, tree
     indentation, hover treatment, and click toggling without a public visual-variant enum/query.
-  - `Node::with_policy` and `with_grid_span` preserve runtime identity and one another in either
-    chaining order. Defaults are `Policy::auto()`/`GridSpan::ONE`; zero columns/rows clamp
-    independently through `GridSpan::new`.
-  - Row/Column/Grid tests prove policy is applied once through `ContainerLayoutCtx`, Grid consumes
-    the configured span, and non-grid parents ignore span. Compile-fail/API checks prove there is no
-    mounted placement setter or runtime-state getter.
+  - `Node::with_policy` preserves runtime identity and defaults through `Policy::auto()`.
+    `GridItem::spanned` preserves the same node identity, and zero columns/rows clamp independently
+    through `GridSpan::new`.
+  - Row/Column/Grid tests prove policy is applied once through `ContainerLayoutCtx`; Grid consumes
+    only its state-owned span. Compile-fail/API checks prove generic `Node` and
+    `ContainerLayoutCtx` expose no Grid placement field or accessor.
   - Production searches find no generic node `visible` field and no node-level `show`, `hide`,
     `set_visible`, `is_visible`, or equivalent generic state/handle command.
   - Root hide/show tests prove the complete retained root is gated while state and weak handles stay
@@ -2892,8 +2920,10 @@ explicit decision before changing the criterion.
   transfer, but production traversal never reads it; the P0 characterization explicitly sets it to
   `false` and still observes descendant traversal. Actual current root visibility instead lives on
   `WindowEntry`, while Disclosure already performs container-local expansion gating. Existing
-  `NodeOptions` also establishes the intended `Policy::auto()`/`GridSpan::ONE` defaults and
-  `GridSpan::new` zero clamping, which move to the unique node rather than changing semantics.
+  `NodeOptions` establishes the intended `Policy::auto()`/`GridSpan::ONE` defaults and
+  `GridSpan::new` zero clamping. During the projection bridge, policy moves to the unique node while
+  span stays on private `BuilderChild` edge metadata and is converted to `GridItem` only by a Grid
+  parent. P3.0 deletes this temporary builder span transport.
 
   P0.6 intentionally changes no production API: owning-name/export, legacy Disclosure replacement,
   placement, visibility removal, traversal gating, target sanitization, compile-fail, and
@@ -3389,7 +3419,7 @@ removal, and focused implementation evidence rather than redefining that behavio
   dispatch recording, legacy leaf `state_widget`, borrowed leaf insertion, or leaf-runtime
   `WidgetHandle` storage outside the preserved file-dialog source.
 
-- [ ] **P1.3 — Introduce unique `Node` ownership and state-owned container children**
+- [x] **P1.3 — Introduce unique `Node` ownership and state-owned container children**
 
   **Problem**
 
@@ -3403,12 +3433,13 @@ removal, and focused implementation evidence rather than redefining that behavio
   `RuntimeNodeId`, `NodeRuntime` without generic visibility, opaque constructible `Children`,
   public `Container: Widget`, marker `ContainerState`, opaque visitors, scoped layout/input
   contexts/results, the Column state/runtime vertical slice, and P2.1 Disclosure as the atomic
-  P1.3/P2.1 public API batch. Add exact consuming
-  `Node::with_policy`/`with_grid_span` placement methods; successful child insertion consumes the
-  node. Use the same typed weak `WidgetStateHandle<C>` model for both leaf and container state.
+  P1.3/P2.1 public API batch. Add the consuming `Node::with_policy` placement method; successful
+  child insertion consumes the node. Grid-only placement is excluded from the generic foundation
+  and enters with Grid-owned `GridItem`/`GridState` in P2.0. Use the same typed weak
+  `WidgetStateHandle<C>` model for both leaf and container state.
   Column and Disclosure constructors return `(WidgetStateHandle<C>, Node)` in this batch after using
-  public generic `Node::container` internally. Row/Grid/Stack add the same final shape in P2.0, and
-  ScrollArea does so in P2.2. Downstream custom constructors use
+  public generic `Node::container` internally. Grid adds that final shape in the early P2.0
+  correction, Row/Stack finish P2.0, and ScrollArea does so in P2.2. Downstream custom constructors use
   `ContainerBuilder::create_container` and pass the returned concrete runtime to the same node
   constructor explicitly; no raw container box can enter the tree.
 
@@ -3430,8 +3461,8 @@ removal, and focused implementation evidence rather than redefining that behavio
   - `try_update_with` also returns the exact unmounted node as `Err(node)` whenever target-state
     access is unavailable before insertion begins; examples never move unique nodes into ordinary
     `try_update` closures when access failure must preserve them.
-  - `Node::with_policy` and `with_grid_span` work before insertion; no mounted placement or generic
-    visibility mutator exists.
+  - `Node::with_policy` works before insertion; no mounted policy or generic visibility mutator
+    exists, and generic `Node`/`ContainerLayoutCtx` expose no Grid-only placement API.
   - No `ContainerHandle`, `ContainerEditor`, mounted-state metadata, raw mutable child callback, or
     framework-provided reparent path exists.
   - Column and Disclosure construction has one explicit typed-handle-plus-node return shape;
@@ -3445,6 +3476,43 @@ removal, and focused implementation evidence rather than redefining that behavio
   - Every `P1.2 TEMPORARY: restore in P3.2` marker and the preserved `src/file_dialog.rs` source/tests
     remain intact; P1.3 neither silently restores an incomplete dialog nor deletes its migration
     inventory.
+
+  **Completion evidence (2026-07-30)**
+
+  The public retained API now exports one non-`Clone` owning `Node`, opaque constructible `Children`,
+  marker-only `ContainerState`, associated-type `ContainerBuilder`, object-safe `Container: Widget`,
+  exactly-once opaque child visitors, and the scoped layout/input contexts and result type. Generic
+  `Node::widget`, `Node::custom_render`, and `Node::container` accept only concrete
+  `WidgetStateOwner` runtimes; consuming `with_policy` configures an unmounted owner without
+  exposing mounted mutation or identity. `RuntimeNodeId`, `NodeRuntime`, and
+  `NodeKind` remain private to retained runtime implementation, and generic node visibility is gone.
+
+  `Children` and the built-in Column/Disclosure states expose only the specified safe indexed
+  membership family. Focused tests prove monotonically increasing construction identity, identity
+  preservation across moves/configuration/failed insertion, ordered collection construction,
+  exact-node recovery from invalid insertion and unavailable `try_update_with`, and immediate state
+  expiry when remove/clear/replace drops the corresponding runtime owner. Visitor conformance tests
+  pin the exact zero/multiple-submission diagnostics. A downstream integration constructs and runs a
+  custom state-owned `Container` through `ContainerBuilder::create_container` and generic
+  `Node::container`, using public `Children` measurement, visitors, and indexed layout only; it also
+  covers direct Column/Disclosure `(WidgetStateHandle<C>, Node)` construction and owning custom
+  rendering.
+
+  The projection builder now creates owning nodes directly and no longer reconstructs runtime
+  identity from seeds, sibling ordinals, or keys. Row/Stack and synthetic ScrollArea use an
+  explicitly documented crate-private compatibility bridge until P2.0/P2.2. Grid has already moved
+  to its final state-owned runtime; only its projection-time span remains on private
+  `BuilderChild` edge metadata until P3.0. The public surface has
+  no raw container box, `ContainerHandle`, `ContainerEditor`, node ID accessor, child iterator,
+  detachment/reparent operation, or generic visibility mutator. The old salted UI-node namespaces
+  are deleted. All 13 `P1.2 TEMPORARY: restore in P3.2` markers remain, and `src/file_dialog.rs` is
+  unchanged.
+
+  Validation passes `cargo fmt --all -- --check`, `cargo test --all-targets` (202 active library
+  tests and four downstream integration tests passed; two manual baselines ignored), `cargo test
+  --doc` (17 passed), `cargo check --no-default-features`, `cargo doc --no-deps`, and separate
+  all-example checks for `example-glow`, `example-vulkan`, and `example-wgpu`. `cargo clippy
+  --all-targets -- -W clippy::all` completes with the repository's existing warning baseline.
 
 - [ ] **P1.4 — Give each root one persistent `WidgetTree`**
 
@@ -3504,21 +3572,25 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   **Problem**
 
-  Existing containers own child vectors but are reconstructed by the builder and lack typed state
-  handles for local membership changes.
+  Existing Row/Stack containers own child vectors but are reconstructed by the builder and lack
+  typed state handles for local membership changes. Grid's state-owned portion landed early with
+  the Grid-owned placement correction below.
 
   **Decision needed: No — implements P0.3**
 
   **Target contract or migration**
 
-  Build on the `ColumnState`/Column vertical slice already landed in the atomic P1.3/P2.1 batch.
-  Introduce `RowState`, `GridState`, and `StackState`, each owning `Children` and the exact mounted
-  configuration defined above: Row widths/item height, Grid column/row tracks, and Stack item
-  width/item height/direction; Column adds none. Their private runtimes borrow state for
+  Build on the `ColumnState`/Column vertical slice already landed in the atomic P1.3/P2.1 batch and
+  the state-owned Grid slice landed with this plan correction. Introduce `RowState` and
+  `StackState`; retain the completed `GridState`. Each owns its children and the exact mounted
+  configuration defined above: Row widths/item height, Grid children/spans/column tracks/row tracks,
+  and Stack item width/item height/direction; Column adds none. Their private runtimes borrow state for
   measure/layout and supply children for recursion through opaque visitors with explicit scopes.
   Every public dynamic state exposes the same safe
   `len`/`is_empty`/`push`/`insert`/`remove_drop`/`clear`/`replace` family and no whole-collection
-  getter. Extend constructor-return/ownership conformance from Column/Disclosure to Row/Grid/Stack.
+  getter. Grid accepts `GridItem` for insertion failure recovery and `Into<GridItem>` where no
+  failure value is returned; plain nodes receive `GridSpan::ONE`. Extend
+  constructor-return/ownership conformance from Column/Disclosure/Grid to Row/Stack.
 
   **Acceptance tests**
 
@@ -3528,12 +3600,25 @@ change a protected P0 behavior follows the explicit change-control rule.
   - Missing/excess Row widths, empty/extra Grid tracks, grid reflow, grid span, Style spacing, and
     nested transforms follow the exact target rules.
   - `layout_child` applies `Policy` once after slot/span resolution; a non-`Auto` policy changes only
-    that child allocation and never rewrites a shared track. No mounted policy/span setter exists.
+    that child allocation and never rewrites a shared track. No mounted policy setter exists;
+    `GridState::set_span` reflows placement without replacing the child.
   - Same-container visitor mutation returns `None`; another container mutation follows pinned
     traversal order.
   - Dynamic membership performs no root reconstruction or state transfer.
 
-- [ ] **P2.1 — Make disclosure one stateful container**
+  **Partial completion evidence (2026-07-30)**
+
+  Grid now uses public `GridParameters`, `GridItem`, `GridSpan`, `GridState`, `GridContainer`, and
+  `GridBuilder`. `GridState` is the sole retained authority for opaque children, index-matched
+  spans, and both track axes. Its private `GridItems` wrapper centralizes every topology mutation,
+  and focused tests cover normalization, invalid insertion recovery, child/span synchronization,
+  state-handle access failure, drop behavior, stable child identity, track mutation, post-mount span
+  mutation, placement, and downstream public construction. Generic `NodeRuntime` and
+  `ContainerLayoutCtx` contain no Grid-specific state or accessor. The projection builder converts
+  its temporary private child-edge span directly to `GridItem`; non-grid projections discard it as
+  before. Row and Stack remain outstanding, so P2.0 stays open.
+
+- [x] **P2.1 — Make disclosure one stateful container**
 
   **Problem**
 
@@ -3603,6 +3688,25 @@ change a protected P0 behavior follows the explicit change-control rule.
     and click-toggle behavior cover the old `widgets::Node` capability mapping.
   - Production exports and searches contain no old `widgets::Node`, `NodeStateValue`, or temporary
     `LegacyDisclosureNode`.
+
+  **Completion evidence (2026-07-30)**
+
+  The old header/tree widget module and its `NodeStateValue` export are deleted. One public
+  `Disclosure` family now owns label/options/private visual variant in its concrete runtime and
+  expansion plus opaque children in `DisclosureState`; both header and tree constructors return the
+  standard typed weak handle plus completed owning `Node`. The full demo and retained builder now
+  construct disclosures through label/initial-state parameters and retain a typed handle only when
+  later state mutation is required.
+
+  The container measures, lays out, updates, and paints its header once through the shared Widget
+  phases, routes only the header sub-rectangle, and gates descendant traversal from
+  `children_visible`. Collapsed descendants retain their boxes and weak-handle liveness but are
+  excluded from measure/layout overflow, input, update, paint, and custom rendering. Runtime layout
+  boundaries sanitize hidden/removed hover, focus, capture, and routed-event targets; expansion does
+  not restore them. Tests cover header/tree defaults and option overrides, initial predicates and
+  explicit expand/collapse/toggle, label painting and click toggling, hidden phase exclusion,
+  descendant liveness, target sanitization, and immediate expiry after child removal. Production
+  searches find no `widgets::Node`, `NodeStateValue`, or `LegacyDisclosureNode`.
 
 - [ ] **P2.2 — Make scroll area one container state with direct children**
 
@@ -3708,12 +3812,12 @@ change a protected P0 behavior follows the explicit change-control rule.
     queues or declines events, and the single inherited `Widget::update` call performs state changes.
   - Nested scroll boundary and pointer-capture tests prove the pre-update routing result is available
     without a second Widget update or a container-specific update phase.
-  - A downstream custom container measures children through `Children::measure_child`, reads
-    placement through `child_policy`/`child_grid_span`, and lays them out through `layout_child`
-    without private APIs or a second measure method.
-  - Layout tests cover invalid indices returning `None`, `Policy::auto`/`GridSpan::ONE` defaults,
-    zero-span clamping, viewport intersection, child translation, content size, and overflow
-    propagation.
+  - A downstream custom container measures children through `Children::measure_child`, reads generic
+    placement through `child_policy`, and lays them out through `layout_child` without private APIs
+    or a second measure method. Parent-specific metadata remains in that container's own state.
+  - Layout tests cover invalid indices returning `None`, the `Policy::auto` default, viewport
+    intersection, child translation, content size, and overflow propagation. Grid-specific tests
+    separately cover `GridSpan::ONE`, zero-span normalization, and state-owned span mutation.
   - Disclosure and scroll tests exercise `route_widget_in_rect`; ordinary containers exercise
     `route_widget` over the full content rectangle.
   - Tree walking performs no weak upgrade for identity, topology, lookup, dispatch, or concrete
@@ -3848,8 +3952,10 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   Migrate root creation and all built-in constructors to their fixed typed-handle return shapes and
   concrete runtimes boxed inside unique Nodes. Delete `UiNodeSet`, `UiNodeBuilder`, `NodeBuilder`,
-  builder keys, `set_root_nodes`, and `transfer_runtime_state_from`. Delete the P1 temporary adapter
-  in this item. Delete `ResourceState`, the complete frame-result store/query API, and all public
+  `NodeOptions` (including its Grid span), private `BuilderChild` edge metadata, builder keys,
+  `set_root_nodes`, and `transfer_runtime_state_from`. Delete the P1 temporary adapter
+  in this item. Direct retained Grid construction uses `GridItem`; no replacement metadata
+  transport is introduced. Delete `ResourceState`, the complete frame-result store/query API, and all public
   generated result identity. Migrate root owners from stored `RootId` alone to `RootHandle`, using
   `handle.id()` for Context lifecycle/policy calls and `handle.state()` for typed chrome observation.
   Use explicit `destroy_root` where lifetime, rather than visibility, should end.
@@ -3864,6 +3970,8 @@ change a protected P0 behavior follows the explicit change-control rule.
     node. A literal root type change requires destroy/recreate and a new `RootId`; examples needing
     stable root identity use a persistent container root.
   - Public imports contain one authoring path.
+  - Production searches find no `NodeOptions::grid_span`, `BuilderChild::grid_span`, or equivalent
+    projection-only Grid placement transport.
 
 - [ ] **P3.1 — Migrate examples and external custom widgets**
 
@@ -3971,7 +4079,7 @@ change a protected P0 behavior follows the explicit change-control rule.
   runtime ownership. Examples must not imply that callers select handle exposure through Parameters.
   Document the fixed leaf/container constructor table, the intentional removal of
   arbitrary mounted public-field mutation, exact mounted Row/Grid/Stack/Scroll configuration,
-  input-preserving `try_update_with`, policy/span precedence, no root replacement, the one ordered
+  input-preserving `try_update_with`, generic policy/Grid-owned span precedence, no root replacement, the one ordered
   input dispatcher and popup-boundary exception, the two-layout frame, the complete removal of
   `ResourceState`/frame results, and the
   framework-recursion exemption from the application reentrancy prohibition.
@@ -4298,7 +4406,7 @@ contract or overstate what Rust can prove about arbitrary custom safe APIs.
 | Root lifetime has no destruction operation | WindowEntry can only be hidden | Explicit `destroy_root` with immediate unmount/ownership release and active-access-safe final drop | P0.7/P1.4 |
 | Root/chrome observation would require a parallel result mechanism | Chrome is special-cased outside retained typed state | One private `RootChromeContainer` with public `RootState` and `RootHandle` | P0.7/P1.4/P3.0 |
 | Built-in container callers should not repeat the runtime-to-node wrapping step | Factory returns raw `Box<dyn Container>` | Built-in convenience constructor returns `Node`; custom insertion accepts concrete `Container + WidgetStateOwner` | P0.3/P1.3 |
-| Container rollout previously assigned every built-in to the atomic foundation batch | Foundation and concrete migrations were conflated | Atomic Node/visitor/Column/Disclosure slice; Row/Grid/Stack and ScrollArea extend it later | P1.3/P2.0/P2.1/P2.2 |
+| Container rollout previously assigned every built-in to the atomic foundation batch | Foundation and concrete migrations were conflated | Atomic Node/visitor/Column/Disclosure slice; Grid follows as an early state-owned correction, Row/Stack and ScrollArea extend it later | P1.3/P2.0/P2.1/P2.2 |
 | Runtime phases cannot return a handle-unavailable outcome during render reentrancy | Phase signatures have no state-access outcome channel | Forbid rendering inside state-access closures; local diagnostic only | P0.2/P4.0 |
 | A failed state access can drop a moved, unmounted node before insertion | Plain closure capture gives the handle no way to return ownership | `try_update_with` validates access first and returns the exact input on failure | P0.2/P1.3 |
 | `Widget::update` generic results have no runtime consumer after result removal | `ResourceState` historically fed `FrameResults` | Change update to return `()` and remove the complete generic result family | P0.1/P0.4/P5.0 |
@@ -4307,7 +4415,8 @@ contract or overstate what Rust can prove about arbitrary custom safe APIs.
 | A frame lays out the retained tree three times | Pre-route, pre-update, and post-update layout are separate | One pre-input and one post-update tree layout | P2.5/P4.0 |
 | Auto-size uses a `10_000` pseudo-unbounded probe | Public dimensions encode both bounds and intrinsic requests | Private explicit constraints adapt unbounded axes to the documented public `0` convention | P4.2/P5.0 |
 | Row/Grid measurement can disagree with allocation | Independent policy and track solvers | Shared intrinsic/allocation axis primitives and one Grid placement list | P2.0/P4.2 |
-| Mounted container configuration is underspecified | Old public fields and builder reconstruction blur initialization and state | Exact Row/Grid/Stack/Scroll state setters; immutable node policy/span | P1.1/P2.0/P2.2 |
+| Mounted container configuration is underspecified | Old public fields and builder reconstruction blur initialization and state | Exact Row/Grid/Stack/Scroll state setters; immutable node policy and mutable Grid-owned child span | P1.1/P2.0/P2.2 |
+| Grid span leaks through every generic node and container context | Parent-child edge data was modeled as intrinsic node data | `GridItem` construction plus one `GridState` authority for children, spans, and tracks; private builder-edge bridge only until P3.0 | P1.3/P2.0/P3.0 |
 | A custom container can visit different child collections by phase | Safe Rust cannot relate two opaque visitor calls across methods | Document one-authoritative-`Children` conformance obligation and test examples | P0.1/P2.3 |
 | A visitor can omit or repeat its one child submission | The visitor API has no `Result` channel | Framework invariant panic with container/type/phase diagnostic | P0.1/P2.3 |
 | A mounted root cannot change widget type in place | Stable `RootId` and root replacement have conflicting lifetime semantics | Persistent container root for dynamic content; otherwise destroy/recreate with a new ID | P0.7/P1.4/P3.0 |
@@ -4480,17 +4589,17 @@ The migration is complete when:
   `Node::custom_render<W: WidgetStateOwner, B>(W, CustomRenderHandle<B>)` are the complete leaf
   insertion paths;
   `CustomRenderKey` remains private and registry preflight rejects invalid erased keys;
-- `Node::with_policy` and `with_grid_span` are the complete pre-insertion placement surface, and
-  `NodeRuntime` has no generic visibility field or mutation API; mounted policy/span mutation is
-  unsupported and layout applies the settled slot/span/policy precedence exactly once;
+- `Node::with_policy` is the complete generic pre-insertion placement surface, and `NodeRuntime`
+  has no generic visibility field, Grid span, or mutation API; `GridItem` supplies Grid-only
+  placement and `GridState::set_span` mutates that edge without replacing the child;
 - private process-unique runtime IDs support focus/capture/routing and are never exposed or stored in
   state handles;
 - container runtime state owns a private opaque `Children`; application-dynamic container
   constructors return a weak checked state handle with only safe inherent operations, while
   fixed/internal constructors may return only a completed node;
-- mounted Row widths/item height, Grid tracks, Stack width/height/direction, and Scroll offset/
-  enablement have the exact state getters/setters and edge semantics specified above; Column adds no
-  local layout configuration, Disclosure exposes expansion, and framing/base options remain
+- mounted Row widths/item height, Grid child spans/tracks, Stack width/height/direction, and Scroll
+  offset/enablement have the exact state getters/setters and edge semantics specified above; Column
+  adds no local layout configuration, Disclosure exposes expansion, and framing/base options remain
   construction-only;
 - disabling ScrollArea synchronously resets state-owned drag/offset, while tree sanitization releases
   tree-owned capture before another event is routed; routing queues but does not apply scroll state
@@ -4503,7 +4612,7 @@ The migration is complete when:
 - each container visitor method submits exactly one collection or triggers the specified invariant
   panic diagnostic; downstream containers are documented and tested to submit the same
   authoritative `Children` from immutable and mutable visitor methods;
-- `ContainerLayoutCtx` and `ContainerInputCtx` expose exactly the policy/span/layout/geometry and
+- `ContainerLayoutCtx` and `ContainerInputCtx` expose exactly the generic policy/layout/geometry and
   full/sub-rectangle routing methods specified above, with deterministic invalid-index, clipping,
   and coordinate behavior;
 - successful removal drops nodes rather than returning/detaching them;

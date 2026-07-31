@@ -1,6 +1,7 @@
 //! Tests for basic widget sizing and state behavior.
 
 use super::*;
+use crate::ContainerBuilder;
 use crate::test_support::test_atlas as make_test_atlas;
 use std::rc::Rc;
 
@@ -107,11 +108,8 @@ fn convenience_constructors_store_explicit_outer_frame_policy() {
             .widget_opt()
             .intersects(WidgetOption::FRAME)
     );
-    assert!(
-        crate::Node::header("header", crate::NodeStateValue::Closed)
-            .widget_opt()
-            .intersects(WidgetOption::FRAME)
-    );
+    let header = crate::DisclosureBuilder::create_container(crate::DisclosureParameters::header("header", false, std::iter::empty()));
+    assert!(!header.effective_widget_opt().intersects(WidgetOption::FRAME));
 
     let (_, checkbox) = Checkbox::create(CheckboxParameters::new("checkbox", false));
     assert!(!checkbox.widget_opt().intersects(WidgetOption::FRAME));
@@ -129,11 +127,8 @@ fn convenience_constructors_store_explicit_outer_frame_policy() {
             .widget_opt()
             .intersects(WidgetOption::FRAME)
     );
-    assert!(
-        !crate::Node::tree("tree", crate::NodeStateValue::Closed)
-            .widget_opt()
-            .intersects(WidgetOption::FRAME)
-    );
+    let tree = crate::DisclosureBuilder::create_container(crate::DisclosureParameters::tree("tree", false, std::iter::empty()));
+    assert!(!tree.effective_widget_opt().intersects(WidgetOption::FRAME));
 
     assert!(
         !Button::create(ButtonParameters::with_opt("flat", WidgetOption::ALIGN_CENTER))

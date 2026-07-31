@@ -72,7 +72,7 @@ mod input_api;
 mod retained;
 mod window_manager;
 
-pub use builder::{GridSpan, NodeBuilder, NodeId, NodeOptions, Policy, UiNodeSet, UiNodeBuilder};
+pub use builder::{NodeBuilder, NodeId, NodeOptions, Policy, UiNodeSet, UiNodeBuilder};
 pub use retained::{widget_handle, WidgetHandle};
 
 bitflags! {

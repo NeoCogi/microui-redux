@@ -25,6 +25,7 @@ use crate::sizing::SizePolicy;
 use crate::widget::FocusPolicy;
 
 mod node;
+pub use node::{Children, Node};
 pub(crate) use node::{NodeLayout, Transform, UiNode, UiNodeData, UiNodeId, UiNodeState};
 mod runtime;
 pub(crate) use runtime::UiRuntime;
@@ -32,8 +33,13 @@ pub(crate) use runtime::UiRuntime;
 pub(crate) use runtime::RuntimeMetrics;
 mod containers;
 pub(crate) use containers::{
-    scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, Column, Container, Disclosure, Grid, InputCtx, InputResult, LayoutCtx, MeasureCtx,
-    NodeBehavior, PaintCtx, Row, ScrollArea, Stack, UpdateCtx, WidgetNode,
+    scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, InputCtx, InputResult, LayoutCtx, LegacyContainer, MeasureCtx, NodeBehavior, PaintCtx,
+    Row, ScrollArea, Stack, UpdateCtx, WidgetNode,
+};
+pub use containers::{
+    ChildrenVisitor, ChildrenVisitorMut, Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState, Container, ContainerBuilder, ContainerInputCtx,
+    ContainerInputResult, ContainerLayoutCtx, ContainerState, Disclosure, DisclosureBuilder, DisclosureContainer, DisclosureParameters, DisclosureState, Grid,
+    GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState,
 };
 #[cfg(test)]
 pub(crate) use containers::{scroll_area_state, set_scroll_area_scroll};
@@ -234,6 +240,41 @@ fn resolve_axis_tracks(policies: &[SizePolicy], preferred: &[i32], available: i3
     sizes
 }
 
+/// One linear-axis placement planned by a container.
+///
+/// `offered` is the unresolved extent passed to child layout. `advance` is the amount by which the
+/// container advances its sibling cursor after that child. Keeping these values separate matters
+/// for non-idempotent policies: for example, a `Fraction(0.5)` child advances by half of the
+/// available axis but must still be offered the complete reference axis so `layout_child` applies
+/// the fraction exactly once.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+struct AxisPlacement {
+    offered: i32,
+    advance: i32,
+}
+
+/// Plans sibling cursor movement without feeding policy-resolved extents back into child layout.
+///
+/// The existing track resolver computes the eventual sibling advances, including shared `Weight`
+/// distribution. Most policies can use that extent as their offered slot. `Fraction` needs the
+/// complete reference axis, while `Remainder` needs its pre-margin extent; child layout then remains
+/// the sole operation that applies the node's policy to its offered rectangle.
+fn resolve_axis_placements(policies: &[SizePolicy], preferred: &[i32], available: i32) -> Vec<AxisPlacement> {
+    let available = available.max(0);
+    resolve_axis_tracks(policies, preferred, available)
+        .into_iter()
+        .zip(policies.iter().copied())
+        .map(|(advance, policy)| {
+            let offered = match policy {
+                SizePolicy::Fraction(_) => available,
+                SizePolicy::Remainder(margin) => advance.saturating_add(margin).max(0),
+                SizePolicy::Auto | SizePolicy::Fixed(_) | SizePolicy::Weight(_) => advance,
+            };
+            AxisPlacement { offered, advance }
+        })
+        .collect()
+}
+
 /// Returns the screen-space rectangle occupied by a child and any overflow content it measured.
 fn child_content_rect(node: &UiNode) -> Recti {
     let allocation = node.state.layout.allocation;
@@ -372,8 +413,11 @@ mod tests {
             }
         }
 
-        fn node(&self, id: UiNodeId) -> Option<&UiNode> {
-            self.runtime.node(&self.roots, id)
+        fn with_node<R>(&self, id: UiNodeId, f: impl FnOnce(&UiNode) -> R) -> Option<R> {
+            let mut f = Some(f);
+            self.roots
+                .iter()
+                .find_map(|root| root.with_node(id, |node| f.take().expect("node visitor invoked twice")(node)))
         }
 
         fn contains_node(&self, id: UiNodeId) -> bool {
@@ -389,8 +433,9 @@ mod tests {
         }
 
         fn node_screen_rect(&self, id: UiNodeId) -> Option<Recti> {
-            self.node(id)
-                .map(|node| self.runtime.parent_transform_for_node(&self.roots, id).resolve(node.state.layout.allocation))
+            self.with_node(id, |node| {
+                self.runtime.parent_transform_for_node(&self.roots, id).resolve(node.state.layout.allocation)
+            })
         }
 
         fn replace_ui_nodes(&mut self, tree: UiNodeSet) {
@@ -617,11 +662,59 @@ mod tests {
 
         let runtime = TestRuntime::from_ui_nodes(tree);
         let column_node = runtime.roots.first().expect("column node missing");
-        let child_node = column_node.children().first().expect("child node missing");
-
         assert!(matches!(column_node.data, UiNodeData::Container(_)));
-        assert!(matches!(child_node.data, UiNodeData::Widget(_)));
-        assert!(child_node.children().is_empty());
+        column_node.with_children(|children| {
+            let child_node = children.first().expect("child node missing");
+            assert!(matches!(child_node.data, UiNodeData::Widget(_)));
+            child_node.with_children(|children| assert!(children.is_empty()));
+        });
+    }
+
+    #[test]
+    fn column_applies_fraction_and_remainder_child_policies_once() {
+        fn allocated_child_height(policy: SizePolicy, legacy: bool) -> i32 {
+            let child = Node::widget(EventRecorder::new(Rc::new(RefCell::new(Vec::new())))).with_policy(Policy::new(SizePolicy::Auto, policy));
+            let mut column = if legacy {
+                Node::legacy_container(Box::new(containers::LegacyColumn { children: vec![child] }))
+            } else {
+                let (_, column) = Column::create(ColumnParameters::new([child]));
+                column
+            }
+            .with_policy(Policy::fill());
+
+            let mut runtime = UiRuntime::new();
+            let style = Style { spacing: 0, ..Style::default() };
+            let atlas = test_atlas();
+            runtime.layout_node_ref(&mut column, &style, &atlas, rect(7, 9, 80, 100));
+
+            column.with_children(|children| children.first().expect("column child missing").state.layout.allocation.height)
+        }
+
+        for legacy in [false, true] {
+            // Passing the already-resolved heights (50 and 90) back to child layout produced 25
+            // and 80 respectively. The child must instead receive the policy's reference slot.
+            assert_eq!(allocated_child_height(SizePolicy::Fraction(0.5), legacy), 50);
+            assert_eq!(allocated_child_height(SizePolicy::Remainder(10), legacy), 90);
+        }
+    }
+
+    #[test]
+    fn column_advances_siblings_by_resolved_allocation_instead_of_offered_extent() {
+        let child = |policy| Node::widget(EventRecorder::new(Rc::new(RefCell::new(Vec::new())))).with_policy(Policy::new(SizePolicy::Auto, policy));
+        let (_, column) = Column::create(ColumnParameters::new([child(SizePolicy::Fraction(0.5)), child(SizePolicy::Remainder(0))]));
+        let mut column = column.with_policy(Policy::fill());
+
+        let mut runtime = UiRuntime::new();
+        let style = Style { spacing: 4, ..Style::default() };
+        let atlas = test_atlas();
+        runtime.layout_node_ref(&mut column, &style, &atlas, rect(7, 9, 80, 100));
+
+        column.with_children(|children| {
+            let allocations = children.iter().map(|child| child.state.layout.allocation).map(rect_key).collect::<Vec<_>>();
+            // The children share 96 pixels after spacing. Fraction receives 48 pixels, then the
+            // remainder child starts after that allocation plus the four-pixel style gap.
+            assert_eq!(allocations, vec![(0, 0, 80, 48), (0, 52, 80, 48)]);
+        });
     }
 
     #[test]
@@ -655,10 +748,13 @@ mod tests {
             body,
         );
 
-        let node = runtime.node(button_id).expect("button node missing");
-        assert_eq!(rect_key(node.state.layout.allocation), (0, 0, 20, 12));
-        assert_eq!(rect_key(node.state.layout.children.clip), (1, 1, 18, 10));
-        assert!(node.state.hovered, "the inside border remains part of the hit target");
+        runtime
+            .with_node(button_id, |node| {
+                assert_eq!(rect_key(node.state.layout.allocation), (0, 0, 20, 12));
+                assert_eq!(rect_key(node.state.layout.children.clip), (1, 1, 18, 10));
+                assert!(node.state.hovered, "the inside border remains part of the hit target");
+            })
+            .expect("button node missing");
 
         let border = style.colors[crate::ControlColor::Border as usize];
         let border_ops: Vec<_> = runtime
@@ -714,14 +810,19 @@ mod tests {
         let style = Style::default();
         runtime.runtime.layout_node_ref(&mut runtime.roots[0], &style, &atlas, rect(4, 6, 40, 24));
 
-        let scroll = runtime.node(scroll_id).expect("scroll area missing");
-        assert_eq!(rect_key(scroll.state.layout.allocation), (4, 6, 40, 24));
-        assert_eq!(rect_key(scroll.state.layout.children.clip), (1, 1, 38, 22));
-        let viewport = scroll.children().first().expect("scroll viewport missing");
-        assert!(viewport.state.layout.allocation.x >= 1);
-        assert!(viewport.state.layout.allocation.y >= 1);
-        assert!(viewport.state.layout.allocation.x + viewport.state.layout.allocation.width <= 39);
-        assert!(viewport.state.layout.allocation.y + viewport.state.layout.allocation.height <= 23);
+        runtime
+            .with_node(scroll_id, |scroll| {
+                assert_eq!(rect_key(scroll.state.layout.allocation), (4, 6, 40, 24));
+                assert_eq!(rect_key(scroll.state.layout.children.clip), (1, 1, 38, 22));
+                scroll.with_children(|children| {
+                    let viewport = children.first().expect("scroll viewport missing");
+                    assert!(viewport.state.layout.allocation.x >= 1);
+                    assert!(viewport.state.layout.allocation.y >= 1);
+                    assert!(viewport.state.layout.allocation.x + viewport.state.layout.allocation.width <= 39);
+                    assert!(viewport.state.layout.allocation.y + viewport.state.layout.allocation.height <= 23);
+                });
+            })
+            .expect("scroll area missing");
     }
 
     #[test]
@@ -737,9 +838,12 @@ mod tests {
         let style = Style::default();
         runtime.runtime.layout_node_ref(&mut runtime.roots[0], &style, &atlas, rect(4, 6, 40, 24));
 
-        let scroll = runtime.node(scroll_id).expect("scroll area missing");
-        assert_eq!(rect_key(scroll.state.layout.allocation), (4, 6, 40, 24));
-        assert_eq!(rect_key(scroll.state.layout.children.clip), (0, 0, 40, 24));
+        runtime
+            .with_node(scroll_id, |scroll| {
+                assert_eq!(rect_key(scroll.state.layout.allocation), (4, 6, 40, 24));
+                assert_eq!(rect_key(scroll.state.layout.children.clip), (0, 0, 40, 24));
+            })
+            .expect("scroll area missing");
     }
 
     #[test]
@@ -900,24 +1004,20 @@ mod tests {
     fn key_text_input_routes_only_to_focused_node() {
         let log = Rc::new(RefCell::new(Vec::new()));
         let mut runtime = TestRuntime::new();
-        runtime.roots.push(UiNode::new(
-            Id::new(1),
-            crate::Policy::auto(),
-            UiNodeData::Widget(Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed))),
-        ));
-        runtime.roots.push(UiNode::new(
-            Id::new(2),
-            crate::Policy::auto(),
-            UiNodeData::Widget(Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed))),
-        ));
-        runtime.focus = Some(Id::new(2));
+        runtime
+            .roots
+            .push(UiNode::legacy_widget(Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed))));
+        let focused = UiNode::legacy_widget(Box::new(RecordingBehavior::new(log.clone(), InputResult::Consumed)));
+        let focused_id = focused.id();
+        runtime.roots.push(focused);
+        runtime.focus = Some(focused_id);
 
         let mut input = Input::default();
         input.text("x");
         input.keydown(KeyMode::CTRL);
         assert!(runtime.route_input_events(&Style::default(), &input));
 
-        assert_eq!(&*log.borrow(), &[(Id::new(2), "key_down"), (Id::new(2), "text"), (Id::new(2), "key_state")]);
+        assert_eq!(&*log.borrow(), &[(focused_id, "key_down"), (focused_id, "text"), (focused_id, "key_state")]);
     }
 
     #[test]
@@ -972,35 +1072,27 @@ mod tests {
     fn pointer_capture_routes_without_hover_and_clears_on_release() {
         let log = Rc::new(RefCell::new(Vec::new()));
         let mut runtime = TestRuntime::new();
-        let child_a = UiNode::new(
-            Id::new(2),
-            crate::Policy::auto(),
-            UiNodeData::Widget(Box::new(RecordingBehavior::new(log.clone(), InputResult::Captured))),
-        );
-        let child_b = UiNode::new(
-            Id::new(3),
-            crate::Policy::auto(),
-            UiNodeData::Widget(Box::new(RecordingBehavior::new(log.clone(), InputResult::Ignored))),
-        );
-        runtime.roots.push(UiNode::new(
-            Id::new(1),
-            crate::Policy::auto(),
-            UiNodeData::Container(Box::new(Column { children: vec![child_a, child_b] })),
-        ));
-        runtime.z_order.push(Id::new(1));
+        let child_a = UiNode::legacy_widget(Box::new(RecordingBehavior::new(log.clone(), InputResult::Captured)));
+        let child_a_id = child_a.id();
+        let child_b = UiNode::legacy_widget(Box::new(RecordingBehavior::new(log.clone(), InputResult::Ignored)));
+        let child_b_id = child_b.id();
+        let root = UiNode::legacy_container(Box::new(containers::LegacyColumn { children: vec![child_a, child_b] }));
+        let root_id = root.id();
+        runtime.roots.push(root);
+        runtime.z_order.push(root_id);
         runtime.pointer_input_enabled = true;
 
         let mut input = Input::default();
         input.mousedown(10, 10, MouseButton::LEFT);
         assert!(runtime.route_input_events(&Style::default(), &input));
-        assert_eq!(runtime.capture, Some(Id::new(2)));
+        assert_eq!(runtime.capture, Some(child_a_id));
         input.epilogue();
 
         runtime.pointer_input_enabled = false;
         input.mousemove(20, 10);
         input.prelude();
         assert!(runtime.route_input_events(&Style::default(), &input));
-        assert_eq!(runtime.capture, Some(Id::new(2)));
+        assert_eq!(runtime.capture, Some(child_a_id));
         input.epilogue();
 
         input.mouseup(20, 10, MouseButton::LEFT);
@@ -1010,10 +1102,10 @@ mod tests {
         assert_eq!(
             &*log.borrow(),
             &[
-                (Id::new(3), "mouse_down"),
-                (Id::new(2), "mouse_down"),
-                (Id::new(2), "mouse_drag"),
-                (Id::new(2), "mouse_up"),
+                (child_b_id, "mouse_down"),
+                (child_a_id, "mouse_down"),
+                (child_a_id, "mouse_drag"),
+                (child_a_id, "mouse_up"),
             ]
         );
     }
@@ -1102,7 +1194,7 @@ mod tests {
         );
 
         let button_rect = runtime.node_screen_rect(button_id).expect("button node missing");
-        let button_layout = runtime.node(button_id).expect("button node missing").state.layout.allocation;
+        let button_layout = runtime.with_node(button_id, |node| node.state.layout.allocation).expect("button node missing");
         assert_eq!(button_layout.x, 0, "child allocation is local to its parent node");
         assert!(button_rect.y > 40 + style.title_height);
         assert_eq!(button_rect.x, 40 + style.padding);
@@ -1307,8 +1399,7 @@ mod tests {
             true,
         );
 
-        let first_node = runtime.node(first_id).unwrap();
-        let first_rect = first_node.state.layout.allocation;
+        let first_rect = runtime.with_node(first_id, |node| node.state.layout.allocation).unwrap();
         let first_screen_rect = runtime.node_screen_rect(first_id).unwrap();
         let scroll_state = scroll_area_state(&runtime.roots, scroll_area_id).unwrap();
         let body = scroll_state.body;
@@ -1318,10 +1409,14 @@ mod tests {
         assert!(scroll.y > 0);
         assert!(first_rect.y >= 0);
         assert!(first_screen_rect.y < body.y);
-        let scroll_node = runtime.node(scroll_area_id).unwrap();
-        assert_eq!(scroll_node.children().len(), 4);
-        let viewport_node = &scroll_node.children()[0];
-        assert_eq!(viewport_node.children().len(), 1);
+        runtime
+            .with_node(scroll_area_id, |scroll_node| {
+                scroll_node.with_children(|children| {
+                    assert_eq!(children.len(), 4);
+                    children[0].with_children(|viewport_children| assert_eq!(viewport_children.len(), 1));
+                });
+            })
+            .unwrap();
     }
 
     #[test]
@@ -1502,7 +1597,7 @@ mod tests {
             true,
         );
         let root = &runtime.roots[0];
-        let icon_node = runtime.node(icon_id).unwrap();
+        let icon_clip = runtime.with_node(icon_id, |node| node.state.layout.children.clip).expect("icon node missing");
         let icon_rect = runtime.node_screen_rect(icon_id).unwrap();
         let scroll_state = scroll_area_state(&runtime.roots, scroll_area_id).unwrap();
         let body = scroll_state.body;
@@ -1514,7 +1609,7 @@ mod tests {
         assert!(
             icon_is_visible,
             "icon not visible; root client {:?} content {:?} scroll body {:?} scroll {:?} icon rect {:?} clip {:?}",
-            root.state.layout.allocation, root.state.layout.content_size, body, scroll, icon_rect, icon_node.state.layout.children.clip
+            root.state.layout.allocation, root.state.layout.content_size, body, scroll, icon_rect, icon_clip
         );
     }
 
@@ -1648,6 +1743,42 @@ mod tests {
     }
 
     #[test]
+    fn retained_grid_span_mutation_preserves_children_and_changes_placement() {
+        let child = || Node::widget(EventRecorder::new(Rc::new(RefCell::new(Vec::new())))).with_policy(Policy::fill());
+        let first = child();
+        let first_id = first.id();
+        let second = child();
+        let second_id = second.id();
+        let third = child();
+        let third_id = third.id();
+        let columns = [SizePolicy::Fixed(40), SizePolicy::Fixed(50), SizePolicy::Fixed(60)];
+        let rows = [SizePolicy::Fixed(20), SizePolicy::Fixed(20)];
+        let (grid_state, grid) = Grid::create(GridParameters::new(columns, rows, [first, second, third]));
+        let mut grid = grid.with_policy(Policy::fill());
+        let mut runtime = UiRuntime::new();
+        let style = Style::default();
+        let atlas = test_atlas();
+        let width = 40 + 50 + 60 + style.spacing * 2;
+
+        runtime.layout_node_ref(&mut grid, &style, &atlas, rect(0, 0, width, 40 + style.spacing));
+        let before = grid.with_children(|children| children.iter().map(|child| (child.id(), child.state.layout.allocation)).collect::<Vec<_>>());
+        assert_eq!(before.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [first_id, second_id, third_id]);
+        assert_eq!(before[0].1.width, 40);
+        assert!(before[1].1.x > before[0].1.x);
+        assert!(before[2].1.x > before[1].1.x);
+
+        assert_eq!(grid_state.try_update(|state| state.set_span(0, GridSpan::new(2, 1))), Some(true));
+        runtime.layout_node_ref(&mut grid, &style, &atlas, rect(0, 0, width, 40 + style.spacing));
+
+        let after = grid.with_children(|children| children.iter().map(|child| (child.id(), child.state.layout.allocation)).collect::<Vec<_>>());
+        assert_eq!(after.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [first_id, second_id, third_id]);
+        assert_eq!(after[0].1.width, 40 + style.spacing + 50);
+        assert!(after[1].1.x > after[0].1.x);
+        assert_eq!(after[2].1.x, after[0].1.x);
+        assert!(after[2].1.y > after[0].1.y);
+    }
+
+    #[test]
     fn node_grid_honors_explicit_child_spans() {
         let first = projected_widget::<ButtonBuilder>(ButtonParameters::new("a"));
         let second = projected_widget::<ButtonBuilder>(ButtonParameters::new("b"));
@@ -1665,6 +1796,7 @@ mod tests {
             });
         });
         let mut runtime = TestRuntime::from_ui_nodes(tree);
+        assert!(matches!(runtime.roots.first().expect("Grid root missing").data, UiNodeData::Container(_)));
         let atlas = test_atlas();
         let backend = NoopRenderer { atlas };
         let mut renderer = Renderer::new_test(backend, Dimensioni::new(220, 80));

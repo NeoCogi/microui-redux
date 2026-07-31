@@ -108,7 +108,6 @@ pub(crate) fn take_pending_event(pending: &mut u32) -> bool {
 
 mod core_widgets;
 mod display;
-mod nodes;
 mod slider;
 mod text_area;
 mod text_edit;
@@ -120,7 +119,6 @@ pub use core_widgets::{
     ListItemParameters, ListItemState,
 };
 pub use display::{ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState};
-pub use nodes::{Node, NodeStateValue};
 pub use slider::{Number, NumberBuilder, NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState};
 pub use text_area::{TextArea, TextAreaBuilder, TextAreaParameters, TextAreaState};
 pub use textbox::{Textbox, TextboxBuilder, TextboxParameters, TextboxState};

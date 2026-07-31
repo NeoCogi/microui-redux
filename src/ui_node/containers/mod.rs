@@ -1,9 +1,9 @@
-use crate::{Widget, WidgetOption, WidgetStateOwner};
+use crate::{Widget, WidgetOption, WidgetParameters, WidgetState, WidgetStateOwner};
 use crate::render::{CustomRenderKey, DisplayList, Painter};
 use crate::widget_ctx::{localize_events, WidgetPaintCtx, WidgetUpdateCtx};
-use crate::{Dimensioni, FocusPolicy, FrameResults, Input, KeyCode, KeyMode, MouseButton, Node, Recti, RetainedId, Style, Vec2i, WidgetHandle};
+use crate::{Dimensioni, FocusPolicy, FrameResults, Input, KeyCode, KeyMode, MouseButton, Recti, RetainedId, Style, Vec2i};
 
-use super::{NodeLayout, UiNode, UiNodeId, UiNodeState, UiRuntime};
+use super::{Children, Node, NodeLayout, UiNode, UiNodeId, UiNodeState, UiRuntime};
 
 mod column;
 mod disclosure;
@@ -12,9 +12,10 @@ mod row;
 mod scroll_area;
 mod stack;
 
-pub(crate) use column::Column;
-pub(crate) use disclosure::Disclosure;
-pub(crate) use grid::Grid;
+pub use column::{Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState};
+pub(crate) use column::LegacyColumn;
+pub use disclosure::{Disclosure, DisclosureBuilder, DisclosureContainer, DisclosureParameters, DisclosureState};
+pub use grid::{Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState};
 pub(crate) use row::Row;
 pub(crate) use scroll_area::{scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, ScrollArea};
 #[cfg(test)]
@@ -74,8 +75,11 @@ pub(crate) trait NodeBehavior {
     }
 }
 
-/// Internal behavior interface for widgets that own child nodes.
-pub(crate) trait Container: NodeBehavior {
+/// Temporary behavior interface for containers not yet migrated to state-owned [`Children`].
+///
+/// Row/Stack migrate in P2.0 and ScrollArea in P2.2; Grid already uses the public state-owned
+/// contract. This trait is never public and is removed with the final legacy container.
+pub(crate) trait LegacyContainer: NodeBehavior {
     /// Returns the owned child nodes.
     fn children(&self) -> &[UiNode];
 
@@ -89,10 +93,133 @@ pub(crate) trait Container: NodeBehavior {
     }
 }
 
+/// Marker for application-facing state owned by a concrete container runtime.
+///
+/// The marker deliberately grants no generic child access. Built-in state types expose only their
+/// topology-safe inherent operations.
+pub trait ContainerState: WidgetState {}
+
+/// Associates one-shot parameters with one concrete state-owning container runtime.
+pub trait ContainerBuilder: Sized + 'static {
+    /// One-shot construction input shared with the widget builder model.
+    type Parameters: WidgetParameters;
+    /// Concrete runtime created before generic insertion erases it.
+    type W: Container + WidgetStateOwner;
+
+    /// Consumes parameters and creates the concrete container runtime.
+    fn create_container(parameters: Self::Parameters) -> Self::W;
+}
+
+/// Scoped immutable child visitor constructed only by retained traversal.
+///
+/// A container must submit exactly one authoritative collection. Ordinary callers cannot create a
+/// visitor, install an extraction callback, or retain a child borrow after `visit` returns.
+pub struct ChildrenVisitor<'a> {
+    callback: &'a mut dyn FnMut(&Children),
+    submissions: usize,
+}
+
+impl ChildrenVisitor<'_> {
+    /// Submits this container's authoritative child collection to the active traversal.
+    pub fn visit(&mut self, children: &Children) {
+        if self.submissions != 0 {
+            panic!("Container::visit_children must submit exactly one Children collection");
+        }
+        self.submissions = 1;
+        (self.callback)(children);
+    }
+
+    fn finish(&self) {
+        if self.submissions != 1 {
+            panic!("Container::visit_children must submit exactly one Children collection");
+        }
+    }
+}
+
+/// Scoped mutable child visitor constructed only by retained traversal.
+pub struct ChildrenVisitorMut<'a> {
+    callback: &'a mut dyn FnMut(&mut Children),
+    submissions: usize,
+}
+
+impl ChildrenVisitorMut<'_> {
+    /// Submits this container's authoritative child collection to mutable traversal.
+    pub fn visit(&mut self, children: &mut Children) {
+        if self.submissions != 0 {
+            panic!("Container::visit_children_mut must submit exactly one Children collection");
+        }
+        self.submissions = 1;
+        (self.callback)(children);
+    }
+
+    fn finish(&self) {
+        if self.submissions != 1 {
+            panic!("Container::visit_children_mut must submit exactly one Children collection");
+        }
+    }
+}
+
+/// Runs framework work against one immutable collection without returning its borrow.
+pub(crate) fn with_container_children<R>(container: &dyn Container, f: impl FnOnce(&Children) -> R) -> R {
+    let mut f = Some(f);
+    let mut result = None;
+    {
+        let mut callback = |children: &Children| {
+            let f = f.take().expect("Container::visit_children submitted more than once");
+            result = Some(f(children));
+        };
+        let mut visitor = ChildrenVisitor { callback: &mut callback, submissions: 0 };
+        container.visit_children(&mut visitor);
+        visitor.finish();
+    }
+    result.expect("Container::visit_children did not submit Children")
+}
+
+/// Runs framework work against one mutable collection without returning its borrow.
+pub(crate) fn with_container_children_mut<R>(container: &mut dyn Container, f: impl FnOnce(&mut Children) -> R) -> R {
+    let mut f = Some(f);
+    let mut result = None;
+    {
+        let mut callback = |children: &mut Children| {
+            let f = f.take().expect("Container::visit_children_mut submitted more than once");
+            result = Some(f(children));
+        };
+        let mut visitor = ChildrenVisitorMut { callback: &mut callback, submissions: 0 };
+        container.visit_children_mut(&mut visitor);
+        visitor.finish();
+    }
+    result.expect("Container::visit_children_mut did not submit Children")
+}
+
+/// Runtime contract for a widget that uniquely owns retained children.
+///
+/// Common measurement, update, paint, options, and focus behavior remain inherited from
+/// [`Widget`]. Implementations must submit the same authoritative [`Children`] collection exactly
+/// once from both visitor methods.
+pub trait Container: Widget {
+    /// Supplies the authoritative collection for immutable traversal.
+    fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>);
+    /// Supplies the same authoritative collection for mutable traversal.
+    fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>);
+
+    /// Assigns child rectangles within this container's local content coordinates.
+    fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti);
+
+    /// Reports whether descendants participate in traversal while remaining owned.
+    fn children_visible(&self) -> bool {
+        true
+    }
+
+    /// Routes one event to this container's own interactive surface.
+    fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
+        ctx.route_widget(event, self.effective_widget_opt(), self.focus_policy())
+    }
+}
+
 /// Retained widget adapter behind the internal node behavior interface.
 pub(crate) struct WidgetNode {
     /// Concrete state-owning runtime erased only after generic insertion validates its owner.
-    widget: Box<dyn Widget>,
+    pub(crate) widget: Box<dyn Widget>,
     /// Optional custom backend render callback for custom-render leaves.
     custom_render: Option<CustomRenderKey>,
 }
@@ -171,6 +298,90 @@ impl NodeBehavior for WidgetNode {
             ctx.display_list.push_custom(content_clip, renderer, rect);
         }
         false
+    }
+}
+
+/// Compile-safe P1.3 bridge from the final public container contract to the pre-P2.3 traversal
+/// interface. It owns no state and creates no alternate application capability; P2.3 removes
+/// `NodeBehavior` and moves this dispatch directly into `NodeKind` traversal.
+impl NodeBehavior for dyn Container {
+    fn is_framed(&self) -> bool {
+        self.effective_widget_opt().intersects(WidgetOption::FRAME)
+    }
+
+    fn interaction_config(&self) -> Option<(WidgetOption, FocusPolicy)> {
+        Some((self.effective_widget_opt(), self.focus_policy()))
+    }
+
+    fn measure(&self, ctx: &MeasureCtx<'_>, _state: &UiNodeState, available: Dimensioni) -> Dimensioni {
+        Widget::measure(self, ctx.style, ctx.atlas, available)
+    }
+
+    fn layout(&mut self, ctx: &mut LayoutCtx<'_>, state: &mut UiNodeState, rect: Recti) {
+        let mut public_ctx = ContainerLayoutCtx {
+            runtime: &mut *ctx.runtime,
+            style: ctx.style,
+            atlas: ctx.atlas,
+            content: ctx.content,
+            current: state,
+        };
+        Container::layout(self, &mut public_ctx, rect);
+    }
+
+    fn update(&mut self, ctx: &mut UpdateCtx<'_>, state: &mut UiNodeState) -> bool {
+        let id = state.id();
+        let events = localize_events(ctx.content_rect, ctx.runtime.take_routed_events(id));
+        let accepts_pointer_input = ctx.runtime.accepts_pointer_input();
+        let content_rect = ctx.screen_rect(ctx.content_rect);
+        let content_clip = ctx.screen_clip();
+        let mut widget_ctx = WidgetUpdateCtx::new_with_content_geometry(
+            content_rect,
+            content_clip,
+            ctx.style,
+            &ctx.atlas,
+            accepts_pointer_input,
+            state.hovered,
+            state.focused,
+            state.clicked,
+            state.active,
+            state.scroll_delta,
+        );
+        let result = Widget::update(self, &mut widget_ctx, events);
+        ctx.results.record_direct_with_context(
+            RetainedId::root_node(ctx.root_id, id),
+            result,
+            format!("root {:?} container node {:?}", ctx.root_name, id),
+        );
+        Container::children_visible(self)
+    }
+
+    fn paint(&mut self, ctx: &mut PaintCtx<'_>, state: &mut UiNodeState) -> bool {
+        let rect = ctx.screen_rect(ctx.content_rect);
+        let content_clip = ctx.screen_clip();
+        let mut widget_ctx = WidgetPaintCtx::new_with_content_geometry(
+            rect,
+            &mut *ctx.display_list,
+            content_clip,
+            ctx.style,
+            &ctx.atlas,
+            state.hovered,
+            state.focused,
+            state.clicked,
+            state.active,
+            state.scroll_delta,
+        );
+        Widget::paint(self, &mut widget_ctx);
+        Container::children_visible(self)
+    }
+
+    fn update_on(&mut self, ctx: &mut InputCtx<'_>, state: &mut UiNodeState, event: &UiInputEvent) -> InputResult {
+        let mut public_ctx = ContainerInputCtx {
+            runtime: &mut *ctx.runtime,
+            content_rect: ctx.content_rect,
+            content_clip: ctx.content_clip,
+            current: state,
+        };
+        Container::route_input(self, &mut public_ctx, event)
     }
 }
 
@@ -280,9 +491,9 @@ impl UiInputEvent {
     }
 }
 
-/// Result of routing one input event to a node behavior.
+/// Result of routing one input event to a container or leaf surface.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(crate) enum InputResult {
+pub enum ContainerInputResult {
     /// The node ignored the event.
     Ignored,
     /// The node consumed the event.
@@ -291,12 +502,15 @@ pub(crate) enum InputResult {
     Captured,
 }
 
-impl InputResult {
+impl ContainerInputResult {
     /// Returns whether event traversal should stop.
     pub(crate) fn is_consumed(self) -> bool {
         matches!(self, Self::Consumed | Self::Captured)
     }
 }
+
+/// Transitional internal name used by the pre-P2.5 routing implementation.
+pub(crate) type InputResult = ContainerInputResult;
 
 fn event_position(event: &UiInputEvent) -> Option<Vec2i> {
     match event {
@@ -436,6 +650,64 @@ impl LayoutCtx<'_> {
     }
 }
 
+/// Framework-scoped geometry services available to a public [`Container`] implementation.
+///
+/// The fields and constructor are private so application code cannot use this context to traverse
+/// arbitrary trees or mutate attached topology outside the active container call.
+pub struct ContainerLayoutCtx<'a> {
+    runtime: &'a mut UiRuntime,
+    style: &'a Style,
+    atlas: &'a crate::AtlasHandle,
+    content: Recti,
+    current: &'a mut UiNodeState,
+}
+
+impl ContainerLayoutCtx<'_> {
+    /// Returns the active UI style.
+    pub fn style(&self) -> &Style {
+        self.style
+    }
+
+    /// Returns the active atlas.
+    pub fn atlas(&self) -> &crate::AtlasHandle {
+        self.atlas
+    }
+
+    /// Returns one child's pre-insertion placement policy.
+    pub fn child_policy(&self, children: &Children, index: usize) -> Option<crate::Policy> {
+        children.as_slice().get(index).map(|node| node.state.policy)
+    }
+
+    /// Assigns one indexed child rectangle and returns its resulting content size.
+    pub fn layout_child(&mut self, children: &mut Children, index: usize, rect: Recti) -> Option<Dimensioni> {
+        let node = children.as_mut_slice().get_mut(index)?;
+        Some(self.runtime.layout_node_ref(node, self.style, self.atlas, rect))
+    }
+
+    /// Replaces the current node's derived content size.
+    pub fn set_content_size(&mut self, size: Dimensioni) {
+        let layout = self.current.layout.with_content_size(size);
+        self.current.set_layout(layout);
+    }
+
+    /// Installs the current node's descendant viewport and translation.
+    pub fn set_children_viewport(&mut self, viewport: Recti, offset: Vec2i) {
+        let viewport = viewport
+            .intersect(&self.content)
+            .unwrap_or_else(|| Recti::new(self.content.x, self.content.y, 0, 0));
+        let outer = self.current.layout.allocation;
+        let mut layout = NodeLayout::from_parts(outer, viewport, self.current.layout.content_size);
+        layout.children.offset = offset;
+        self.current.set_layout(layout);
+    }
+
+    /// Controls whether descendant overflow contributes to the parent-visible content extent.
+    pub fn set_child_overflow_propagation(&mut self, propagate: bool) {
+        let layout = self.current.layout.with_child_overflow_propagation(propagate);
+        self.current.set_layout(layout);
+    }
+}
+
 /// Services available while a container updates its own interactive state.
 ///
 /// `UpdateCtx` may mutate runtime interaction state and frame results. Child topology is owned by
@@ -470,41 +742,6 @@ impl UpdateCtx<'_> {
     fn screen_clip(&self) -> Recti {
         self.screen_rect(self.content_clip)
     }
-
-    pub(crate) fn update_container_widget_in_rect(&mut self, state: &mut UiNodeState, local_rect: Recti, handle: &WidgetHandle<Node>, label: &str) {
-        let id = state.id();
-        let rect = self.screen_rect(local_rect);
-        let opt = handle.read(Widget::effective_widget_opt);
-        let local_content_rect = crate::frame::frame_geometry(local_rect, opt.intersects(WidgetOption::FRAME), self.style).content_or_empty();
-        let content_rect = self.screen_rect(local_content_rect);
-        let focus_policy = handle.read(Widget::focus_policy);
-        let content_clip = self.screen_clip();
-        let (hovered, focused, clicked, active, scroll_delta) = self.runtime.interaction_for(id, rect, content_clip, self.input, opt, focus_policy);
-        state.hovered = hovered;
-        state.focused = focused;
-        state.clicked = clicked;
-        state.active = active;
-        state.scroll_delta = scroll_delta;
-
-        let accepts_pointer_input = self.runtime.accepts_pointer_input();
-        let events = localize_events(local_content_rect, self.runtime.take_routed_events(id));
-        let mut ctx = WidgetUpdateCtx::new_with_content_geometry(
-            content_rect,
-            content_clip,
-            self.style,
-            &self.atlas,
-            accepts_pointer_input,
-            hovered,
-            focused,
-            clicked,
-            active,
-            scroll_delta,
-        );
-        let result = handle.update(|widget| widget.update(&mut ctx, events));
-
-        self.results
-            .record_direct_with_context(RetainedId::root_node(self.root_id, id), result, format!("{label} {:?}", id));
-    }
 }
 
 /// Services available while a node handles a routed input event.
@@ -530,6 +767,26 @@ impl InputCtx<'_> {
 
     pub(crate) fn route_widget_input(&mut self, state: &UiNodeState, rect: Recti, opt: WidgetOption, event: &UiInputEvent) -> InputResult {
         route_public_widget_input(self.runtime, state, rect, self.content_clip, opt, event)
+    }
+}
+
+/// Framework-scoped routed-input services for one public [`Container`] call.
+pub struct ContainerInputCtx<'a> {
+    runtime: &'a mut UiRuntime,
+    content_rect: Recti,
+    content_clip: Recti,
+    current: &'a UiNodeState,
+}
+
+impl ContainerInputCtx<'_> {
+    /// Routes through the container's complete local content rectangle.
+    pub fn route_widget(&mut self, event: &UiInputEvent, opt: WidgetOption, _focus: FocusPolicy) -> ContainerInputResult {
+        route_public_widget_input(self.runtime, self.current, self.content_rect, self.content_clip, opt, event)
+    }
+
+    /// Routes through one container-local sub-rectangle intersected with the active clip.
+    pub fn route_widget_in_rect(&mut self, event: &UiInputEvent, rect: Recti, opt: WidgetOption, _focus: FocusPolicy) -> ContainerInputResult {
+        route_public_widget_input(self.runtime, self.current, rect, self.content_clip, opt, event)
     }
 }
 
@@ -587,31 +844,92 @@ impl PaintCtx<'_> {
         let fill = self.style.colors[color as usize];
         self.painter().fill_rect(rect, fill);
     }
+}
 
-    pub(crate) fn paint_container_widget_in_rect(&mut self, state: &UiNodeState, local_rect: Recti, handle: &WidgetHandle<Node>) {
-        let (hovered, focused, clicked, active, scroll_delta) = (state.hovered, state.focused, state.clicked, state.active, state.scroll_delta);
-        let framed = handle.read(Widget::effective_widget_opt).intersects(WidgetOption::FRAME);
-        let geometry = crate::frame::frame_geometry(local_rect, framed, self.style);
-        if framed {
-            let screen_rect = self.screen_rect(local_rect);
-            let border = self.style.frame_border();
-            let mut painter = self.painter();
-            crate::frame::paint_internal_frame(&mut painter, screen_rect, None, border);
+#[cfg(test)]
+mod visitor_tests {
+    use super::*;
+    use std::any::Any;
+
+    struct InvalidVisitorContainer {
+        children: Children,
+        submissions: usize,
+        opt: WidgetOption,
+    }
+
+    impl Widget for InvalidVisitorContainer {
+        fn widget_opt(&self) -> &WidgetOption {
+            &self.opt
         }
-        let content_rect = self.screen_rect(geometry.content_or_empty());
-        let content_clip = self.screen_clip();
-        let mut ctx = WidgetPaintCtx::new_with_content_geometry(
-            content_rect,
-            &mut *self.display_list,
-            content_clip,
-            self.style,
-            &self.atlas,
-            hovered,
-            focused,
-            clicked,
-            active,
-            scroll_delta,
-        );
-        handle.update(|widget| widget.paint(&mut ctx));
+
+        fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+            Dimensioni::default()
+        }
+
+        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> crate::ResourceState {
+            crate::ResourceState::NONE
+        }
+
+        fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+    }
+
+    impl Container for InvalidVisitorContainer {
+        fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>) {
+            for _ in 0..self.submissions {
+                visitor.visit(&self.children);
+            }
+        }
+
+        fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>) {
+            for _ in 0..self.submissions {
+                visitor.visit(&mut self.children);
+            }
+        }
+
+        fn layout(&mut self, _ctx: &mut ContainerLayoutCtx<'_>, _rect: Recti) {}
+    }
+
+    fn invalid(submissions: usize) -> InvalidVisitorContainer {
+        InvalidVisitorContainer {
+            children: Children::new(),
+            submissions,
+            opt: WidgetOption::NONE,
+        }
+    }
+
+    fn panic_message(payload: Box<dyn Any + Send>) -> String {
+        payload
+            .downcast_ref::<&str>()
+            .map(|message| (*message).to_owned())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn immutable_visitor_requires_exactly_one_authoritative_collection() {
+        for submissions in [0, 2] {
+            let container = invalid(submissions);
+            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                with_container_children(&container, |_| ());
+            }))
+            .expect_err("invalid immutable visitor submissions must panic");
+            let message = panic_message(panic);
+            assert!(message.contains("visit_children"), "unexpected diagnostic: {message}");
+            assert!(message.contains("exactly one Children collection"), "unexpected diagnostic: {message}");
+        }
+    }
+
+    #[test]
+    fn mutable_visitor_requires_exactly_one_authoritative_collection() {
+        for submissions in [0, 2] {
+            let mut container = invalid(submissions);
+            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                with_container_children_mut(&mut container, |_| ());
+            }))
+            .expect_err("invalid mutable visitor submissions must panic");
+            let message = panic_message(panic);
+            assert!(message.contains("visit_children_mut"), "unexpected diagnostic: {message}");
+            assert!(message.contains("exactly one Children collection"), "unexpected diagnostic: {message}");
+        }
     }
 }

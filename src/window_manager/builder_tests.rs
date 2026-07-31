@@ -7,7 +7,7 @@ use crate::ui_node::UiNodeData;
 use super::*;
 
 #[test]
-fn unkeyed_widget_ids_are_stable_for_same_shape() {
+fn independently_constructed_widgets_receive_distinct_ids() {
     let tree_a = UiNodeBuilder::build(|builder| {
         builder.widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("A")));
         builder.widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("B")));
@@ -19,12 +19,12 @@ fn unkeyed_widget_ids_are_stable_for_same_shape() {
     });
     let tree_b_ids: Vec<NodeId> = tree_b.roots().to_vec();
 
-    assert_eq!(tree_a_ids[0], tree_b_ids[0]);
-    assert_eq!(tree_a_ids[1], tree_b_ids[1]);
+    assert_ne!(tree_a_ids[0], tree_b_ids[0]);
+    assert_ne!(tree_a_ids[1], tree_b_ids[1]);
 }
 
 #[test]
-fn keyed_widgets_keep_ids_across_reorder() {
+fn transitional_builder_keys_do_not_reconstruct_runtime_ids() {
     let tree_a = UiNodeBuilder::build(|builder| {
         builder
             .node(NodeOptions::keyed("a"))
@@ -44,12 +44,11 @@ fn keyed_widgets_keep_ids_across_reorder() {
     });
     let ids_b: Vec<NodeId> = tree_b.roots().to_vec();
 
-    assert_eq!(ids_a[0], ids_b[1]);
-    assert_eq!(ids_a[1], ids_b[0]);
+    assert!(ids_a.iter().all(|id| !ids_b.contains(id)));
 }
 
 #[test]
-fn inserting_keyed_widget_does_not_shift_later_unkeyed_ids() {
+fn every_builder_insertion_allocates_fresh_identity() {
     let tree_a = UiNodeBuilder::build(|builder| {
         builder.widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("A")));
         builder.widget(projected_widget::<ButtonBuilder>(ButtonParameters::new("B")));
@@ -65,20 +64,19 @@ fn inserting_keyed_widget_does_not_shift_later_unkeyed_ids() {
     });
     let ids_b: Vec<NodeId> = tree_b.roots().to_vec();
 
-    assert_eq!(ids_a[0], ids_b[0]);
-    assert_eq!(ids_a[1], ids_b[2]);
+    assert!(ids_a.iter().all(|id| !ids_b.contains(id)));
 }
 
 #[test]
-#[should_panic(expected = "duplicate retained node id")]
-fn duplicate_keyed_sibling_ids_are_rejected_at_build_time() {
+fn duplicate_transitional_keys_cannot_alias_sibling_runtime_ids() {
     let button_a = projected_widget::<ButtonBuilder>(ButtonParameters::new("A"));
     let button_b = projected_widget::<ButtonBuilder>(ButtonParameters::new("B"));
 
-    UiNodeBuilder::build(|builder| {
+    let tree = UiNodeBuilder::build(|builder| {
         builder.node(NodeOptions::keyed("same")).widget(button_a);
         builder.node(NodeOptions::keyed("same")).widget(button_b);
     });
+    assert_ne!(tree.roots()[0], tree.roots()[1]);
 }
 
 #[test]
@@ -115,10 +113,12 @@ fn row_nodes_capture_children_and_track_policy() {
     });
 
     let row_id = tree.roots()[0];
-    let row = tree.node(row_id).expect("row node missing");
-    assert_eq!(row.state.policy, Policy::fill());
-    assert_eq!(row.children().len(), 2);
-    assert!(matches!(row.data, UiNodeData::Container(_)));
+    tree.with_node(row_id, |row| {
+        assert_eq!(row.state.policy, Policy::fill());
+        row.with_children(|children| assert_eq!(children.len(), 2));
+        assert!(matches!(row.data, UiNodeData::LegacyContainer(_)));
+    })
+    .expect("row node missing");
 }
 
 #[test]
@@ -132,11 +132,14 @@ fn scroll_area_nodes_store_viewport_and_chrome_children() {
         );
     });
 
-    let node = tree.node(tree.roots()[0]).expect("scroll area node missing");
-    assert_eq!(node.children().len(), 4);
-    let viewport = &node.children()[0];
-    assert_eq!(viewport.children().len(), 1);
-    assert!(matches!(node.data, UiNodeData::Container(_)));
+    tree.with_node(tree.roots()[0], |node| {
+        node.with_children(|children| {
+            assert_eq!(children.len(), 4);
+            children[0].with_children(|viewport_children| assert_eq!(viewport_children.len(), 1));
+        });
+        assert!(matches!(node.data, UiNodeData::LegacyContainer(_)));
+    })
+    .expect("scroll area node missing");
 }
 
 #[test]
@@ -146,6 +149,6 @@ fn text_nodes_are_recorded_as_widgets() {
     });
 
     assert_eq!(tree.roots().len(), 1);
-    let node = tree.node(tree.roots()[0]).expect("text node missing");
-    assert!(matches!(node.data, UiNodeData::Widget(_)));
+    tree.with_node(tree.roots()[0], |node| assert!(matches!(node.data, UiNodeData::Widget(_))))
+        .expect("text node missing");
 }

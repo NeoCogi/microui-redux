@@ -1,7 +1,7 @@
 use crate::sizing::SizePolicy;
 use crate::{Dimensioni, Recti};
 
-use super::{Container, LayoutCtx, MeasureCtx, NodeBehavior};
+use super::{LayoutCtx, LegacyContainer, MeasureCtx, NodeBehavior};
 use crate::ui_node::{UiNode, UiNodeState};
 
 /// Row container.
@@ -63,7 +63,7 @@ impl NodeBehavior for Row {
     }
 }
 
-impl Container for Row {
+impl LegacyContainer for Row {
     fn children(&self) -> &[UiNode] {
         &self.children
     }

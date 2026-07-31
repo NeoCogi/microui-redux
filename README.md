@@ -64,14 +64,14 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 
 ## Key Concepts
 - **Context**: owns the high-level `Renderer`, user input, frame results, and retained root windows. Applications deliver input and mutate frame resources first, then `frame(FrameInfo)?.render_ui()?` traverses registered roots and submits one owned frame.
-- **Container**: the internal execution object behind windows, popups, scroll areas, and retained tree nodes. Application code should normally work through `Context`, `ScrollAreaHandle`, and `WidgetTreeBuilder` instead of authoring widgets directly on a container. `ScrollAreaHandle` exposes retained state, focus, and scroll access; direct draw/clip/body mutation is not part of the public application API.
-- **Layout engine + flows**: the engine tracks scope stack, scroll-adjusted coordinates, and content extents, while flows control placement behavior. `WidgetTreeBuilder` exposes retained row/grid/column/stack structure, and widget layout uses each widget's `measure` result so `SizePolicy::Auto` can follow per-widget intrinsic sizing.
-- **Widget**: stateful UI element implementing the `Widget` trait (for example `Button`, `Textbox`, `Slider`). Retained traversal keys widget interaction by stable retained node IDs.
-- **WidgetTree**: retained widget/layout hierarchy built once with `WidgetTreeBuilder` and stored in retained roots through `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)`. Tree nodes cover widgets, scroll areas, headers/tree nodes, row/grid/column/stack layout groups, and custom rendering, so UI structure stays representable as retained data instead of traversal-time callbacks.
+- **Container**: a public `Widget` subtrait for runtimes that own one authoritative opaque `Children` collection. Application-facing container state uses typed weak `WidgetStateHandle` values and safe indexed membership operations.
+- **Layout engine + flows**: parent containers assign child rectangles through scoped `ContainerLayoutCtx` services. `UiNodeBuilder` remains a transitional convenience for row/grid/stack/scroll composition, while `Column` and `Disclosure` already use state-owned children.
+- **Widget**: a runtime UI element implementing `Widget` (for example `Button`, `Textbox`, or `Slider`) and owning its associated state cell.
+- **Node**: the non-cloneable owner of one concrete widget or container runtime. A `Node` receives private process-unique identity when constructed and moves exactly once into a root or `Children` collection.
 - **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and `Renderer` executes it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](src/render/RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
 - **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override `config.font`.
 
-The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained tree/root concepts such as `Context`, `ScrollAreaHandle`, `WidgetTreeBuilder`, `WidgetHandle`, `NodeId`, and `Policy`. Low-level rendering lives under `microui_redux::render`, and atlas construction lives under `microui_redux::atlas::builder`. `Container`, retained cache internals, rect-packing details, and container-level manual drawing are not part of the application authoring surface.
+The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained concepts such as `Node`, `Children`, `Container`, `Column`, `Disclosure`, typed state handles, and `Context`. Low-level rendering lives under `microui_redux::render`, and atlas construction lives under `microui_redux::atlas::builder`.
 
 ### Rendering
 
@@ -256,10 +256,15 @@ if name_state.try_update(TextboxState::take_submitted).unwrap_or(false) {
 }
 ```
 
-Retained trees are the supported public authoring path. Each leaf node owns its concrete runtime,
-while built-in values, consumable events, and commands are accessed through typed weak state
-handles. `WidgetHandle<Node>` remains temporarily for the legacy header/tree disclosure API and is
-not a leaf-widget ownership mechanism.
+Retained trees are the supported public authoring path. Each non-cloneable `Node` owns one concrete
+widget or container runtime. Dynamic `ColumnState`, `DisclosureState`, and `GridState` values own
+opaque children; successful insertion transfers a node, while removal, clearing, or replacement
+drops the removed runtime owners. Grid placement belongs to `GridState`, not to generic nodes:
+plain nodes occupy one cell, while `GridItem::spanned(node, columns, rows)` supplies an explicit
+parent-child span that can later be changed with `GridState::set_span` without replacing the child.
+Built-in values, events, and commands are accessed through typed weak state handles. Disclosure
+headers and tree rows use `DisclosureParameters::{header, tree}` and no longer have a separate
+widget `Node` or `NodeStateValue` API.
 
 ```rust
 let info = FrameInfo::try_new(Dimensioni::new(800, 600), color(20, 22, 26, 255))?;
@@ -271,10 +276,15 @@ if results.state_of_retained(RetainedId::root_node(root, submit_button_node)).is
 }
 ```
 
-### Retained Node IDs
-Retained-tree focus and hover use the stable `NodeId` assigned by `WidgetTreeBuilder`, scoped by the owning root or scroll area, so keyed retained nodes keep interaction continuity even when the backing widget handle changes. `ctx.committed_results().state_of_node(node_id)` exposes the same stable lookup for retained nodes when the node ID is unambiguous; `state_of_retained(RetainedId::root_node(root_id, node_id))` accepts the richer retained key.
+### Retained node identity
 
-For retained focus, keep the `NodeId` returned by `WidgetTreeBuilder` and use `set_focus_node`:
+Each owning `Node` receives a private, process-unique runtime identity before mounting. Moving a
+node, applying consuming `with_policy`, wrapping it in an unmounted `GridItem`, and inserting it
+into `Children` or `GridState` preserve that identity; applications cannot read or construct it.
+The older `UiNodeBuilder` result IDs remain only for APIs that have not yet migrated to typed events
+and persistent roots. Builder keys do not reconstruct or reuse runtime identity.
+
+For the transitional retained-focus API, keep the `NodeId` returned by `UiNodeBuilder` and use `set_focus_node`:
 
 ```rust
 my_window.set_focus_node(textbox_node_id);
@@ -285,11 +295,11 @@ Registered roots can be configured with `Context::set_root_options(...)` and `Wi
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
 - Retained traversal measures committed widget state, allocates widget rectangles, updates the whole retained tree with `Widget::update`, then paints the whole retained tree with `Widget::paint`.
-- Internally, `NodeBehavior` is the runtime contract shared by widget adapters and framework containers. `WidgetNode` adapts the public `Widget` trait to it; application widgets never receive the internal node update/input/paint contexts.
+- Widgets and containers share the public `Widget` phase contract. Containers additionally expose only opaque child visitors, indexed layout services, descendant visibility, and scoped input routing.
 - Parent containers assign each node a retained parent-local allocation; child offsets and clips remain node-local and are resolved through a stack-only transform during traversal.
 - Resolved outer rectangles and clips remain runtime stack locals. Node behavior works against its local content surface, while outer frame painting, standard hit routing, and conversion from screen input remain runtime-owned.
 - A public widget's Painter geometry and routed pointer positions share the derived content-local origin.
-- `WidgetTreeBuilder` exposes retained `row`, `grid`, `column`, `stack`, `header`, `tree_node`, `scroll_area`, and `custom_render` structure so layout stays declarative instead of closure-driven.
+- `UiNodeBuilder` exposes retained `row`, `grid`, `column`, `stack`, `header`, `tree_node`, `scroll_area`, and `custom_render` structure during the staged migration; owning `Node` values can also enter roots directly.
 - `SizePolicy::Weight(value)` distributes available track space by sibling share ratio (spacing accounted for). Use `SizePolicy::Fraction(value)` for explicit `0.0..=1.0` proportional sizing in single-track flows.
 - Returning `<= 0` for either axis from `Widget::measure` still means "use layout fallback/defaults" for that axis.
 

@@ -170,6 +170,102 @@ impl WidgetBuilder for UnitBuilder {
     }
 }
 
+struct ExternalContainerParameters {
+    children: Children,
+}
+
+impl WidgetParameters for ExternalContainerParameters {}
+
+struct ExternalContainerState {
+    children: Children,
+    measure_calls: usize,
+    layout_calls: usize,
+}
+
+impl WidgetState for ExternalContainerState {}
+impl ContainerState for ExternalContainerState {}
+
+struct ExternalContainerBuilder;
+
+struct ExternalContainer {
+    state: Rc<RefCell<ExternalContainerState>>,
+    opt: WidgetOption,
+}
+
+impl Widget for ExternalContainer {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        let mut state = self.state.try_borrow_mut().expect("external container state unavailable during measure");
+        state.measure_calls += 1;
+        let mut preferred = Dimensioni::default();
+        for index in 0..state.children.len() {
+            let child = state.children.measure_child(index, style, atlas, available).unwrap_or_default();
+            preferred.width = preferred.width.max(child.width);
+            preferred.height = preferred.height.saturating_add(child.height);
+        }
+        preferred
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+        ResourceState::NONE
+    }
+
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+impl WidgetStateOwner for ExternalContainer {
+    type State = ExternalContainerState;
+
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
+    }
+}
+
+impl Container for ExternalContainer {
+    fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>) {
+        let state = self.state.try_borrow().expect("external container state unavailable during traversal");
+        visitor.visit(&state.children);
+    }
+
+    fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>) {
+        let mut state = self
+            .state
+            .try_borrow_mut()
+            .expect("external container state unavailable during mutable traversal");
+        visitor.visit(&mut state.children);
+    }
+
+    fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
+        let mut state = self.state.try_borrow_mut().expect("external container state unavailable during layout");
+        state.layout_calls += 1;
+        let count = state.children.len().max(1) as i32;
+        let child_height = rect.height / count;
+        for index in 0..state.children.len() {
+            let y = rect.y + (index as i32) * child_height;
+            let _ = ctx.layout_child(&mut state.children, index, Recti::new(rect.x, y, rect.width, child_height));
+        }
+    }
+}
+
+impl ContainerBuilder for ExternalContainerBuilder {
+    type Parameters = ExternalContainerParameters;
+    type W = ExternalContainer;
+
+    fn create_container(parameters: Self::Parameters) -> Self::W {
+        ExternalContainer {
+            state: Rc::new(RefCell::new(ExternalContainerState {
+                children: parameters.children,
+                measure_calls: 0,
+                layout_calls: 0,
+            })),
+            opt: WidgetOption::NONE,
+        }
+    }
+}
+
 fn atlas() -> AtlasHandle {
     let pixels = [0xFF; 4];
     let icons = [
@@ -245,7 +341,7 @@ fn downstream_four_role_widget_path_uses_the_runtime_owned_state_cell() {
 }
 
 #[test]
-fn downstream_widget_custom_render_and_legacy_node_are_public() {
+fn downstream_owning_node_custom_render_and_disclosure_are_public() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let geometry = Rc::new(RefCell::new(Vec::new()));
     let backend = MarkerBackend { atlas: atlas(), log: log.clone() };
@@ -270,13 +366,15 @@ fn downstream_widget_custom_render_and_legacy_node_are_public() {
     let widget_state = widget.state_handle();
     widget_state.try_update(|state| state.value = 2).unwrap();
 
-    let legacy_node: Node = Node::header("legacy", NodeStateValue::Closed);
-    assert!(legacy_node.is_header());
+    let (disclosure_state, disclosure_node) = Disclosure::create(DisclosureParameters::header("section", false, std::iter::empty()));
+    assert_eq!(disclosure_state.try_read(DisclosureState::is_collapsed), Some(true));
+    drop(disclosure_node);
+    assert!(!disclosure_state.is_alive());
 
-    let tree = UiNodeBuilder::build(|tree| {
-        tree.custom_render(widget, custom);
-    });
-    ctx.create_window("downstream", rect(0, 0, 100, 70), tree);
+    // The finished owning node enters a root directly; no raw runtime box or projection adapter is
+    // involved in the public custom-render path.
+    let node = Node::custom_render(widget, custom);
+    ctx.create_window("downstream", rect(0, 0, 100, 70), node.into());
     let info = FrameInfo::try_new(Dimensioni::new(120, 90), color(0, 0, 0, 0)).unwrap();
     ctx.frame(info).render_ui().unwrap();
 
@@ -294,4 +392,75 @@ fn downstream_widget_custom_render_and_legacy_node_are_public() {
     assert_eq!(content, view);
     assert!(content.0 >= 0 && content.1 >= 0 && content.2 > 0 && content.3 == 12);
     assert!(content.0 + content.2 <= dimensions.0 && content.1 + content.3 <= dimensions.1);
+}
+
+#[test]
+fn downstream_container_uses_only_the_public_state_owned_child_contract() {
+    let (column_state, empty_column) = Column::create(ColumnParameters::default());
+    assert_eq!(column_state.try_read(ColumnState::is_empty), Some(true));
+    drop(empty_column);
+    assert!(!column_state.is_alive());
+
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let child = P1Builder::create_widget(P1Parameters { value: 7, log: log.clone() });
+    let child_state = child.state_handle();
+    let children: Children = [Node::widget(child)].into_iter().collect();
+
+    let container = ExternalContainerBuilder::create_container(ExternalContainerParameters { children });
+    let container_state = container.state_handle();
+    let node = Node::container(container).with_policy(Policy::fixed(80, 24));
+
+    let backend = MarkerBackend {
+        atlas: atlas(),
+        log: Rc::new(RefCell::new(Vec::new())),
+    };
+    let mut ctx = Context::new(backend);
+    ctx.create_window("custom container", rect(0, 0, 100, 70), node.into());
+    let info = FrameInfo::try_new(Dimensioni::new(120, 90), color(0, 0, 0, 0)).unwrap();
+    ctx.frame(info).render_ui().unwrap();
+
+    let (measure_calls, layout_calls, child_count) = container_state
+        .try_read(|state| (state.measure_calls, state.layout_calls, state.children.len()))
+        .expect("custom container state must remain owned by its runtime");
+    assert!(measure_calls > 0);
+    assert!(layout_calls > 0);
+    assert_eq!(child_count, 1);
+    assert_eq!(child_state.try_read(|state| state.value), Some(8));
+
+    drop(ctx);
+    assert!(!container_state.is_alive());
+    assert!(!child_state.is_alive());
+}
+
+#[test]
+fn downstream_grid_owns_placement_without_polluting_node_or_container_context() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let child = P1Builder::create_widget(P1Parameters { value: 10, log });
+    let child_state = child.state_handle();
+    let item = GridItem::spanned(Node::widget(child), 2, 0);
+    assert_eq!(item.span(), GridSpan::new(2, 1));
+
+    let (grid_state, grid_node) = Grid::create(GridParameters::new(
+        [SizePolicy::Fixed(30), SizePolicy::Fixed(40)],
+        [SizePolicy::Fixed(16)],
+        [item],
+    ));
+    assert_eq!(grid_state.try_read(GridState::len), Some(1));
+    assert_eq!(grid_state.try_read(|state| state.span(0)), Some(Some(GridSpan::new(2, 1))));
+    assert_eq!(grid_state.try_update(|state| state.set_span(0, GridSpan::ONE)), Some(true));
+
+    let backend = MarkerBackend {
+        atlas: atlas(),
+        log: Rc::new(RefCell::new(Vec::new())),
+    };
+    let mut ctx = Context::new(backend);
+    ctx.create_window("public Grid", rect(0, 0, 100, 70), grid_node.with_policy(Policy::fixed(74, 16)).into());
+    let info = FrameInfo::try_new(Dimensioni::new(120, 90), color(0, 0, 0, 0)).unwrap();
+    ctx.frame(info).render_ui().unwrap();
+
+    assert_eq!(child_state.try_read(|state| state.value), Some(11));
+    assert_eq!(grid_state.try_read(|state| state.span(0)), Some(Some(GridSpan::ONE)));
+    drop(ctx);
+    assert!(!grid_state.is_alive());
+    assert!(!child_state.is_alive());
 }

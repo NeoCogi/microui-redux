@@ -920,18 +920,6 @@ struct State {
     fps: f32,
     last_frame: Instant,
 
-    window_header: WidgetHandle<Node>,
-    test_buttons_header: WidgetHandle<Node>,
-    background_header: WidgetHandle<Node>,
-    tree_and_text_header: WidgetHandle<Node>,
-    text_area_header: WidgetHandle<Node>,
-    texture_header: WidgetHandle<Node>,
-    combo_header: WidgetHandle<Node>,
-    test1_tn: WidgetHandle<Node>,
-    test1a_tn: WidgetHandle<Node>,
-    test1b_tn: WidgetHandle<Node>,
-    test2_tn: WidgetHandle<Node>,
-    test3_tn: WidgetHandle<Node>,
     submit_button_state: WidgetStateHandle<ButtonState>,
     log_text_state: WidgetStateHandle<TextBlockState>,
     test_button_states: [WidgetStateHandle<ButtonState>; 5],
@@ -1327,18 +1315,6 @@ impl State {
             // dialog_window: FileDialogState::new(ctx),
             fps: 0.0,
             last_frame: Instant::now(),
-            window_header: widget_handle(Node::header("Window Info", NodeStateValue::Closed)),
-            test_buttons_header: widget_handle(Node::header("Test Buttons", NodeStateValue::Expanded)),
-            background_header: widget_handle(Node::header("Background Color", NodeStateValue::Expanded)),
-            tree_and_text_header: widget_handle(Node::header("Tree and Text", NodeStateValue::Expanded)),
-            text_area_header: widget_handle(Node::header("TextArea", NodeStateValue::Expanded)),
-            texture_header: widget_handle(Node::header("Textures", NodeStateValue::Expanded)),
-            combo_header: widget_handle(Node::header("Combo Box", NodeStateValue::Expanded)),
-            test1_tn: widget_handle(Node::tree("Test 1", NodeStateValue::Closed)),
-            test1a_tn: widget_handle(Node::tree("Test 1a", NodeStateValue::Closed)),
-            test1b_tn: widget_handle(Node::tree("Test 1b", NodeStateValue::Closed)),
-            test2_tn: widget_handle(Node::tree("Test 2", NodeStateValue::Closed)),
-            test3_tn: widget_handle(Node::tree("Test 3", NodeStateValue::Closed)),
             submit_button_state,
             log_text_state,
             test_button_states,
@@ -1431,8 +1407,12 @@ impl State {
         }
     }
 
-    fn section(tree: &mut UiNodeBuilder, node: &WidgetHandle<Node>, f: impl FnOnce(&mut UiNodeBuilder)) {
-        tree.header(node, f);
+    /// Adds one disclosure section using the new state-owned container path.
+    ///
+    /// The demo does not mutate these top-level sections externally, so their weak handles can be
+    /// discarded while each retained `DisclosureContainer` keeps its state alive.
+    fn section(tree: &mut UiNodeBuilder, label: &str, expanded: bool, f: impl FnOnce(&mut UiNodeBuilder)) {
+        let _ = tree.header(label, expanded, f);
     }
 
     fn rebuild_trees(&mut self, runtimes: DemoRuntimes) {
@@ -1649,18 +1629,6 @@ impl State {
             });
         });
 
-        let window_header = self.window_header.clone();
-        let test_buttons_header = self.test_buttons_header.clone();
-        let background_header = self.background_header.clone();
-        let tree_and_text_header = self.tree_and_text_header.clone();
-        let text_area_header = self.text_area_header.clone();
-        let texture_header = self.texture_header.clone();
-        let combo_header = self.combo_header.clone();
-        let test1_tn = self.test1_tn.clone();
-        let test1a_tn = self.test1a_tn.clone();
-        let test1b_tn = self.test1b_tn.clone();
-        let test2_tn = self.test2_tn.clone();
-        let test3_tn = self.test3_tn.clone();
         self.demo_tree = UiNodeBuilder::build(|tree| {
             let window_info_row = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
             let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
@@ -1681,7 +1649,7 @@ impl State {
 
             tree.node(NodeOptions::with_policy(Policy::fill()))
                 .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
-                Self::section(tree, &window_header, |tree| {
+                Self::section(tree, "Window Info", false, |tree| {
                     tree.row(&window_info_row, SizePolicy::Auto, |tree| {
                         tree.widget(label_pos);
                         tree.widget(value_pos);
@@ -1696,7 +1664,7 @@ impl State {
                     });
                 });
 
-                Self::section(tree, &test_buttons_header, |tree| {
+                Self::section(tree, "Test Buttons", true, |tree| {
                     tree.row(&button_widths, SizePolicy::Auto, |tree| {
                         tree.widget(test_label0);
                         tree.widget(button0);
@@ -1715,26 +1683,26 @@ impl State {
                     });
                 });
 
-                Self::section(tree, &combo_header, |tree| {
+                Self::section(tree, "Combo Box", true, |tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                         tree.widget(combo);
                     });
                 });
 
-                Self::section(tree, &tree_and_text_header, |tree| {
+                Self::section(tree, "Tree and Text", true, |tree| {
                     tree.row(&tree_widths, SizePolicy::Auto, |tree| {
                         tree.column(|tree| {
-                            tree.tree_node(&test1_tn, |tree| {
-                                tree.tree_node(&test1a_tn, |tree| {
+                            let _ = tree.tree_node("Test 1", false, |tree| {
+                                let _ = tree.tree_node("Test 1a", false, |tree| {
                                     tree.widget(tree_label_hello);
                                     tree.widget(tree_label_world);
                                 });
-                                tree.tree_node(&test1b_tn, |tree| {
+                                let _ = tree.tree_node("Test 1b", false, |tree| {
                                     tree.widget(tree_button0);
                                     tree.widget(tree_button1);
                                 });
                             });
-                            tree.tree_node(&test2_tn, |tree| {
+                            let _ = tree.tree_node("Test 2", false, |tree| {
                                 tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
                                     tree.widget(tree_button2);
                                     tree.widget(tree_button3);
@@ -1744,7 +1712,7 @@ impl State {
                                     tree.widget(tree_button5);
                                 });
                             });
-                            tree.tree_node(&test3_tn, |tree| {
+                            let _ = tree.tree_node("Test 3", false, |tree| {
                                 tree.widget(checkbox0);
                                 tree.widget(checkbox1);
                                 tree.widget(checkbox2);
@@ -1761,13 +1729,13 @@ impl State {
                     });
                 });
 
-                Self::section(tree, &text_area_header, |tree| {
+                Self::section(tree, "TextArea", true, |tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(120), StackDirection::TopToBottom, |tree| {
                         tree.widget(text_area);
                     });
                 });
 
-                Self::section(tree, &background_header, |tree| {
+                Self::section(tree, "Background Color", true, |tree| {
                     tree.row(&background_widths, SizePolicy::Fixed(74), |tree| {
                         tree.column(|tree| {
                             tree.row(&slider_row, SizePolicy::Auto, |tree| {
@@ -1787,7 +1755,7 @@ impl State {
                     });
                 });
 
-                Self::section(tree, &texture_header, |tree| {
+                Self::section(tree, "Textures", true, |tree| {
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
                         tree.widget(texture0);
                         tree.widget(texture1);

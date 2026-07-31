@@ -58,8 +58,6 @@ use std::hash::{Hash, Hasher};
 const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 /// FNV-1a prime used by stable internal id hashing.
 const FNV_PRIME: u64 = 0x100000001b3;
-/// Global salt mixed into scoped framework-generated ids.
-const MICROUI_ID_SALT: u64 = 0x6d69_6372_6f75_695f;
 
 /// Numeric identifier value.
 #[derive(Default, Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -173,36 +171,6 @@ impl Hasher for IdHasher {
 
     fn write_isize(&mut self, value: isize) {
         self.write_i64(value as i64);
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-/// Salted namespace for framework-generated ids.
-pub(crate) struct IdNamespace {
-    /// Namespace-specific salt mixed into every id generated through this value.
-    salt: u64,
-}
-
-impl IdNamespace {
-    /// Namespace used for auto-generated UI nodes.
-    pub(crate) const UINODE_BUILDER: Self = Self::new(0x7769_6467_6574_7472);
-    /// Namespace used for behavior-owned runtime child nodes.
-    pub(crate) const UINODE_INTERNAL: Self = Self::new(0x7569_6e6f_6465_696e);
-
-    /// Creates a namespace from a caller-provided salt.
-    const fn new(salt: u64) -> Self {
-        Self { salt }
-    }
-
-    /// Hashes the provided values into a stable id within this namespace.
-    pub(crate) fn id(self, values: impl IntoIterator<Item = u64>) -> Id {
-        let mut hash = IdHasher::new();
-        MICROUI_ID_SALT.hash(&mut hash);
-        self.salt.hash(&mut hash);
-        for value in values {
-            value.hash(&mut hash);
-        }
-        hash.into_id()
     }
 }
 
