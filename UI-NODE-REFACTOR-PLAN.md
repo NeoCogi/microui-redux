@@ -54,13 +54,21 @@ This is the sole authoritative UI-node migration plan. It supersedes the obsolet
     `P1.2 TEMPORARY: restore in P3.2` markers rather than deleted. P3.2 restores and refactors that
     preserved code after P1.3/P2.0/P2.2 provide its owning-node/container prerequisites. This is an
     internal migration state only: no merge/tag/release may expose a build without the restored
-    public file dialog.
+    public file dialog;
+16. container pointer capture remains owned by `WidgetTree`, while the captured concrete container
+    reports whether its own local captured interaction is still active through the defaulted
+    `Container::retains_pointer_capture` query and clears that local interaction through the
+    defaulted `Container::on_pointer_capture_lost` notification when the tree ends the lease.
+    Ancestors control descendant eligibility only through `children_visible`; there is no
+    `ContainerOption::RETAIN_POINTER_CAPTURE`, parent override, concrete-container downcast, or
+    state-to-tree callback.
 
 All common runtime phases belong to `Widget`, including for containers. Public `Container: Widget`
-adds only opaque child visitation, layout, descendant-visibility, and container-specific
-routed-input hooks; application state belongs to concrete `WidgetState`/marker `ContainerState`
-types. No adapter or alternate trait may transfer phase methods onto state. There is also no
-frame-wide state lock, Context token, or in-frame/out-of-frame state distinction.
+adds only opaque child visitation, layout, descendant-visibility, container-specific routed-input,
+and local pointer-capture-lifecycle hooks; application state belongs to concrete
+`WidgetState`/marker `ContainerState` types. No adapter or alternate trait may transfer phase
+methods onto state. There is also no frame-wide state lock, Context token, or in-frame/out-of-frame
+state distinction.
 
 The target keeps the useful part of the prior direction: one persistent, uniquely owned node tree
 and typed weak application handles. Each concrete runtime owns the sole persistent strong
@@ -177,7 +185,8 @@ typed state:
 - `Widget` remains the object-safe runtime phase trait for both leaves and containers, with
   `update` simplified to return `()`;
 - public `Container: Widget` adds only the object-safe opaque-child-visitation, layout,
-  descendant-visibility, and routed-input contract needed by container nodes;
+  descendant-visibility, routed-input, and local pointer-capture-lifecycle contract needed by
+  container nodes;
 - `WidgetState` marks concrete application state and contains widget-specific operations;
 - `WidgetParameters` represents construction input;
 - `WidgetStateOwner: Widget` associates each concrete runtime with its one state type and returns a
@@ -509,6 +518,12 @@ pub trait Container: Widget {
         true
     }
 
+    fn retains_pointer_capture(&self) -> bool {
+        true
+    }
+
+    fn on_pointer_capture_lost(&mut self) {}
+
     fn route_input(
         &mut self,
         ctx: &mut ContainerInputCtx<'_>,
@@ -551,6 +566,8 @@ impl ContainerLayoutCtx<'_> {
 }
 
 impl ContainerInputCtx<'_> {
+    pub fn has_pointer_capture(&self) -> bool;
+
     pub fn route_widget(
         &mut self,
         event: &UiInputEvent,
@@ -567,6 +584,107 @@ impl ContainerInputCtx<'_> {
     ) -> ContainerInputResult;
 }
 ```
+
+### Keep pointer-capture ownership in `WidgetTree` and its local lifecycle in the captured container
+
+**Decision needed: No — explicit plan-owner decision for P2.4 on 2026-07-31**
+
+The public routed-input contract can acquire tree-owned capture by returning
+`ContainerInputResult::Captured`. Direct state mutation can later invalidate the local interaction
+that justified that capture without producing another input event. Conversely, removal, ancestor
+gating, root hiding, pointer release, or replacement can end tree capture while the captured
+container still has private drag state. The runtime therefore needs a narrow two-way lifecycle at
+the same abstraction boundary: ask only the current captured container whether its local
+interaction remains active, and notify only that container when the tree ends the lease.
+
+Options considered:
+
+1. **Add defaulted local-retention/loss hooks plus a scoped current-owner query — selected.**
+   - Benefits: completes the existing public `Captured` lifecycle at the same abstraction boundary;
+     lets built-in and downstream containers derive the answer from their private state; exposes no
+     ID, parent, `WidgetTree`, Context, state handle, or concrete type; and leaves existing custom
+     implementations source-compatible through the `true`/no-op defaults. The loss notification
+     prevents a structurally gated but still-retained child from keeping a stale private drag mode.
+   - Consequences: adds two public object-safe methods to `Container` and one read-only bool query to
+     `ContainerInputCtx`. A custom container whose local state can revoke an acquired capture must
+     override `retains_pointer_capture`; one that holds a private capture-specific mode must also
+     clear it in `on_pointer_capture_lost`.
+
+   ```rust
+   pub trait Container: Widget {
+       // Existing child/layout/visibility/input methods.
+
+       fn retains_pointer_capture(&self) -> bool {
+           true
+       }
+
+       fn on_pointer_capture_lost(&mut self) {}
+   }
+   ```
+
+2. **Add a dynamic `ContainerOption::RETAIN_POINTER_CAPTURE` flag — rejected.**
+   - Benefits: could encode the same answer if an `effective_container_opt` query recomputed the
+     flag from live state.
+   - Consequences: introduces a speculative option namespace for one live predicate, confuses
+     construction/configuration with current interaction state, and still requires the same dynamic
+     object-safe query. A static flag cannot handle disable/re-enable correctly, and neither form
+     notifies a retained child when ancestor gating or tree policy ends capture first.
+
+   ```rust
+   fn effective_container_opt(&self) -> ContainerOption;
+   // RETAIN_POINTER_CAPTURE would have to change with private drag state.
+   ```
+
+3. **Let the parent decide whether a child retains capture — rejected.**
+   - Benefits: centralizes subtree composition decisions in the parent.
+   - Consequences: requires a parent to inspect or identify a child's private interaction state,
+     contradicts opaque `Children` and private runtime IDs, and couples reusable containers to the
+     concrete behavior of descendants. Parents already have the correct narrower authority:
+     `children_visible == false` makes the complete descendant subtree ineligible.
+
+   ```rust
+   // Rejected: this would expose child identity/state across the ownership boundary.
+   fn child_retains_pointer_capture(&self, child: /* private identity */) -> bool;
+   ```
+
+`WidgetTree` remains the sole owner of `capture: Option<RuntimeNodeId>`. At each safe sanitation
+boundary it first checks that the target still belongs to the tree and is reachable through every
+ancestor `children_visible` gate. If the captured node is a container, it then calls
+`retains_pointer_capture` only on that target. A `false` result clears the tree-owned capture before
+another pointer event is routed; it never transfers capture to a parent, sibling, replacement, or
+new node at the same index.
+
+Every centralized transition away from an existing captured container schedules
+`on_pointer_capture_lost` if that runtime still belongs to the tree, including pointer release,
+local-retention rejection, ancestor gating, root hiding, explicit transient-target clear, or
+replacement by a new capture. Sanitation outside an active routing batch invokes it immediately.
+A routing-time transition clears tree ownership immediately but defers the notification until that
+target's queued `Widget::update` has consumed earlier drag/release events; otherwise the callback
+could erase the mode needed to apply the final queued drag. If the same runtime reacquires capture
+before its update, the obsolete pending notification is coalesced away and the ordered release/new
+pointer-down events establish its final local mode. The private pending-loss list stores only runtime
+IDs and is drained in update order; it is not an application event, result generation, public lease,
+or second capture owner.
+
+If the node was removed, dropping its runtime is the cleanup and no callback is possible or
+required. The hook receives no ID, reason enum, parent, tree, or Context; it only lets the captured
+container clear private capture-specific state. The tree performs this notification directly on the
+captured target, never through an ancestor.
+
+Routing and `Widget::update` remain deliberately separated. `ContainerInputCtx::has_pointer_capture`
+is a read-only answer about the current container, not a handle or ID. It lets a special container
+route later drag/release events in the same ordered input batch after returning `Captured`, before
+its queued pointer-down is applied by `Widget::update`. Sanitation queries established capture
+before the batch and again after update; it does not call `retains_pointer_capture` in the gap
+between acquisition and the update that establishes the container's local mode.
+
+`ScrollAreaContainer` returns `scrolling_enabled && drag_axis.is_some()` and clears `drag_axis` from
+`on_pointer_capture_lost`. Disabling scrolling clears both fields needed for retention, so disabling
+and re-enabling before sanitation cannot resurrect the old capture. `RootChromeContainer` returns
+whether `RootInteraction` is `Moving` or `Resizing` and clears that mode from its loss hook; option
+changes, hiding, release, dismissal, and destruction also clear it through their existing owners.
+Containers that never acquire capture or hold no capture-specific local mode may keep both defaults.
+`WidgetOption`, `FocusPolicy`, and a new `ContainerOption` do not encode this local capture lease.
 
 The opaque visitors scope the state borrow without returning a borrow guard or exposing child
 references to their caller. Their constructors remain crate-private. Each visitor accepts exactly
@@ -623,15 +741,23 @@ performs the same generic geometry/options/focus routing as
 a leaf over the current node's complete content rectangle and queues the accepted event for the
 inherited `Widget::update` batch. `route_widget_in_rect` applies the same rules to a supplied
 container-local sub-rectangle, intersected with the active clip; pointer coordinates remain in the
-container's local content coordinate space. Disclosure uses it for the header, and scroll area uses
-it for viewport/scrollbar hit regions. A special container may instead return `Ignored` at a scroll
-boundary. Routing never applies the widget/container state change itself. The later
+container's local content coordinate space. `has_pointer_capture` reports only whether the current
+container is the tree's captured target so special routing can continue an acquired gesture before
+queued input updates local state. Disclosure uses sub-rectangle routing for the header, and scroll
+area uses it for viewport/scrollbar hit regions. A special container may instead return `Ignored` at
+a scroll boundary. Routing never applies the widget/container state change itself. The later
 `Container::<Widget>::update` consumes the queued event and performs the mutation.
 
 Removing this hook would leave nowhere to return `Ignored`/`Consumed`/`Captured` before update:
 `Widget::update` is deliberately one-way and routing has already selected the recipient. Doing so
 would require reordering updates, invoking them more than once, or adding routing outcomes to the
 common Widget contract. None is part of this migration.
+The two capture hooks are not a second routing or update phase. `retains_pointer_capture` is a
+read-only local-retention query used only when that same container is already the tree's captured
+target; `on_pointer_capture_lost` is a one-shot lifecycle notification used only when the tree ends
+that existing capture. Acquisition still comes only from `ContainerInputResult::Captured`, pointer
+release still belongs to the ordered dispatcher, and removal/ancestor gating still invalidates
+capture independently of the container's answer.
 `ContainerInputCtx` and both child-visitor fields/constructors remain private and expose no IDs, raw
 node storage, Context identity, raw child callback, or unrestricted tree mutation.
 
@@ -649,9 +775,9 @@ dispatch path per requested measurement, update, or paint invocation. This is no
 bounded scroll-constraint convergence, may issue multiple legitimate measurement requests. The
 invariant forbids parallel leaf/container phase paths and duplicate remeasurement inside one
 request. Traversal branches to `Container` only for layout, scoped child recursion,
-container-owned descendant visibility, and special input routing. Generic `NodeRuntime` has no
-visibility bit or hide/show API. There is no shared `NodeBehavior` trait or parallel container phase
-adapter.
+container-owned descendant visibility, special input routing/current-owner inspection, and the
+captured target's local retention/loss hooks. Generic `NodeRuntime` has no visibility bit or
+hide/show API. There is no shared `NodeBehavior` trait or parallel container phase adapter.
 
 Built-in constructors return the completed `Node` for ergonomics, while downstream code may
 construct and insert its own implementation explicitly:
@@ -1152,10 +1278,13 @@ impl ScrollAreaState {
 remain immutable Parameters because `Widget::widget_opt` returns a reference to stable runtime
 configuration. `set_scrolling_enabled(false)` synchronously clears private drag state and resets
 offset to zero; setting an offset while disabled keeps it at zero. Pointer capture belongs to the
-owning `WidgetTree`, not `ScrollAreaState`: target sanitization releases capture for a disabled area
-before another event can be routed to it. Derived layout hides both bars. `set_offset` clamps
-negative components immediately and clamps the upper bound during the next layout, when current
-content and viewport extents are known.
+owning `WidgetTree`, not `ScrollAreaState`: `ScrollAreaContainer::retains_pointer_capture` reports
+`scrolling_enabled && drag_axis.is_some()`, `on_pointer_capture_lost` clears `drag_axis`, and target
+sanitization releases tree-owned capture before another event can be routed when that local
+predicate becomes false. Re-enabling scrolling does not restore capture because disabling or loss
+already cleared `drag_axis`; a later routed pointer-down must acquire a new capture. Derived layout
+hides both bars. `set_offset` clamps negative components immediately and clamps the upper bound
+during the next layout, when current content and viewport extents are known.
 
 `GridItem` is an unmounted insertion value containing one `Node` and one validated `GridSpan`; it
 is not a semantic runtime node and has no ID, layout, or state of its own. `Node` converts to a
@@ -1621,6 +1750,8 @@ interaction path. Its phase contract is exact:
 | `Widget::measure` | measure the one application child through `Children::measure_child`, add title/frame/body extents, and enforce the outer minimum size with explicit constraints |
 | `Container::layout` | use the shared pure chrome-geometry helper to derive title, close, body, and resize rectangles, then lay out the application child in the body rectangle |
 | `Container::route_input` | on left press, give close/title/resize regions precedence, queue the chrome event and return `Consumed` for close or `Captured` for title/resize; consume other pointer presses over chrome without starting an action; return `Ignored` for body events so ordinary child routing descends into the application node |
+| `Container::retains_pointer_capture` | report whether `RootInteraction` is currently `Moving` or `Resizing`; the tree clears its capture if this local mode was invalidated by options, hiding, release, dismissal, or sanitization |
+| `Container::on_pointer_capture_lost` | clear `RootInteraction` when the tree ends capture because of release, hiding, gating, transient-target sanitation, or replacement; receive no target ID or loss reason |
 | `Widget::update` | consume the routed chrome events, hide/submit on close, enter or leave moving/resizing state, mutate the rectangle during captured drag, and record a change only for an actual user-driven rectangle change |
 | `Widget::paint` | paint the window/frame background underlay before descendants from the shared geometry; ordinary traversal paints the application child in the body clip |
 | `Container::children_visible` | return the current `RootState::is_visible` value, allowing a close handled by the parent update to suppress application-child traversal in that same frame |
@@ -1679,8 +1810,11 @@ update/paint and unnecessary post-layout are skipped for that root.
 
 Generic `WidgetTree` capture owns title drag and resizing just as it owns container capture. The
 captured private root runtime ID receives matching left-button drag/release events outside its
-current bounds without a second hit test; release or capture sanitization clears both tree capture
-and `RootState.interaction`. Sanitization also clears either half if the other can no longer be valid.
+current bounds without a second hit test. `RootChromeContainer::retains_pointer_capture` reads its
+own `RootInteraction`, while the tree remains the sole owner of the captured ID. Every centralized
+tree transition away from that capture invokes `on_pointer_capture_lost` if the runtime remains
+mounted; release and sanitation therefore clear the tree ID and local interaction without a second
+window-manager owner.
 The window manager must not keep a second chrome-capture flag or independently reinterpret raw
 pointer input. Chrome hit regions outrank the body only within the front eligible root, after
 cross-root/modal gating by the window manager.
@@ -1756,7 +1890,7 @@ capture removal, and replacement behavior.
 | Datum | Authoritative owner |
 |---|---|
 | Common measure/update/paint/options/focus behavior | concrete runtime implementing `Widget`, including every `Container: Widget` runtime |
-| Container-only child/layout/special-input behavior | concrete runtime implementing `Container` |
+| Container-only child/layout/special-input/local-capture-lifecycle behavior | concrete runtime implementing `Container` |
 | Widget/container state lifetime | the concrete `WidgetStateOwner` runtime's private strong `Rc<RefCell<T>>` |
 | Hidden runtime-only caches/configuration | ordinary concrete boxed widget/container fields |
 | Application state capability | `WidgetStateHandle<T>` returned explicitly by concrete constructors when meaningful |
@@ -1766,6 +1900,7 @@ capture removal, and replacement behavior.
 | Grid child placement spans and track definitions | `GridState`; private `GridItems` keeps each span index-matched with its owned child |
 | Descendant traversal visibility | concrete `Container::children_visible`, principally `Disclosure` |
 | Focus/hover/capture/routed input | owning `WidgetTree`, keyed by private `RuntimeNodeId` |
+| Whether a captured container's own local interaction remains active, and how that local mode ends when tree capture is lost | that captured concrete container through `Container::retains_pointer_capture` and `Container::on_pointer_capture_lost`; ancestors only gate descendant eligibility |
 | Widget action/value observation | widget-specific `WidgetState` |
 | Root application content | private `RootState.children`, containing exactly one application `Node` and exposing no public topology mutation |
 | Root geometry/visibility/chrome interaction/events | `RootState`, strongly owned by the private `RootChromeContainer` and exposed weakly through `RootHandle` |
@@ -1841,9 +1976,12 @@ change behavior. Amend the defining contract and its P0 criterion first, then up
 
 1. `Widget` is the only common runtime phase contract for leaves and containers, and its final
    `update` method returns `()` rather than a generic leaf result.
-2. Public `Container: Widget` adds only opaque child visitation, layout, descendant visibility, and
-   special routed-input behavior and is implementable downstream; it does not redeclare
-   measure/update/paint or lend raw child collections to ordinary callers.
+2. Public `Container: Widget` adds only opaque child visitation, layout, descendant visibility,
+   special routed-input behavior/current-owner inspection, and the defaulted local
+   `retains_pointer_capture`/`on_pointer_capture_lost` hooks and is implementable downstream; it
+   does not redeclare measure/update/paint or lend raw child collections to ordinary callers.
+   Returning `Captured` acquires tree-owned capture; the hooks can only report or clear that
+   container's local mode and cannot acquire, transfer, or identify tree capture.
 3. `WidgetState` is data only and `ContainerState: WidgetState` is marker-only; implementing either
    does not implement runtime phases or grant generic child access.
 4. `WidgetBuilder` associates one concrete parameter type with one concrete
@@ -1870,6 +2008,9 @@ change behavior. Amend the defining contract and its P0 criterion first, then up
 13. `RuntimeNodeId` is private, globally unique for the process lifetime, and never stored in state
     handles.
 14. Runtime targets are validated before use and stale IDs never alias replacement nodes.
+    Ancestor `children_visible` gates decide descendant eligibility; only the current captured
+    container reports its own local continuation state through `retains_pointer_capture` and clears
+    it through `on_pointer_capture_lost`, while `WidgetTree` remains the authoritative capture owner.
 15. Widget actions, values, and application commands are observed through typed state, not public
     node identity. Built-in event kinds use saturating pending counts consumed one occurrence at a
     time; ordinary programmatic setters are silent.
@@ -2049,7 +2190,7 @@ explicit decision before changing the criterion.
 
   **Decision needed: No — protected wanted-behavior baseline**
 
-  **Implementation owner: P1.0, P1.1, P1.3, and P2.3**
+  **Implementation owner: P1.0, P1.1, P1.3, P2.3, and the P2.4 capture-lifecycle amendment**
 
   **Wanted behavior and contract**
 
@@ -2075,7 +2216,8 @@ explicit decision before changing the criterion.
   final public object-safe
   `Container: Widget`. Keep `ContainerState` as the separate marker-only data trait. Add only the
   container-specific opaque child visitors, exact indexed layout services, descendant visibility,
-  and full/sub-rectangle routed-input hooks shown above; do not
+  full/sub-rectangle routed-input/current-owner hooks, and defaulted local
+  pointer-capture-retention/loss hooks shown above; do not
   duplicate `Widget` measurement, update, paint, option, or focus methods. Public `Container` must
   be implementable by downstream crates without exposing private tree machinery; P2.3 deletes
   `NodeBehavior` after direct `NodeKind`/`Widget` dispatch lands. This P0 item freezes those
@@ -2108,6 +2250,16 @@ explicit decision before changing the criterion.
     child callback, or obtain a `Children` borrow from `ContainerState`.
   - A compile-time supertrait check proves every `Container` is a `Widget`; `Container` declares no
     second measure/update/paint methods.
+  - A downstream container that returns `Captured` may override
+    `retains_pointer_capture` using only its private local state and
+    `on_pointer_capture_lost` to clear that state when the tree ends capture. The defaults keep
+    ordinary capture valid and make loss notification a no-op, and neither hook can acquire,
+    transfer, inspect, or clear the tree-owned capture ID.
+  - `ContainerInputCtx::has_pointer_capture` reports only whether the current container owns tree
+    capture, allowing same-batch drag/release routing before queued pointer-down update; it exposes
+    no ID and cannot mutate capture.
+  - Public API/source checks find no `ContainerOption::RETAIN_POINTER_CAPTURE`, parent capture
+    override, concrete-container downcast, or state-to-tree/Context capture callback.
 
   **Frozen contract evidence (2026-07-29)**
 
@@ -2121,10 +2273,24 @@ explicit decision before changing the criterion.
   Repository inspection confirms that the current implementation still returns `ResourceState`
   from `Widget::update`, stores application/runtime state together, clones strong `WidgetHandle`
   values into `WidgetStateHandleDyn`, and couples crate-private `Container` to `NodeBehavior` with
-  raw child-slice access. These are recorded migration gaps rather than preserved behavior. P0.1
-  intentionally changes no production API: its compile-time and runtime acceptance criteria are
+  raw child-slice access. These are recorded migration gaps rather than preserved behavior. At the
+  original freeze, P0.1 intentionally changed no production API: its compile-time and runtime
+  acceptance criteria are
   protected specifications that become executable and green in their named P1.0/P1.1/P1.3/P2.3
   owner batches, with the public container surface landing atomically rather than partially.
+
+  **P2.4 capture-lifecycle amendment (2026-07-31)**
+
+  The plan owner explicitly selected the defaulted public
+  `Container::retains_pointer_capture` and `Container::on_pointer_capture_lost` hooks as the missing
+  lifecycle half of `ContainerInputResult::Captured`, plus the current-owner-only
+  `ContainerInputCtx::has_pointer_capture` query needed by route-before-update batching. P2.4 adds
+  that narrow surface after the initial public container contract: `WidgetTree` keeps sole ownership
+  of the capture ID, the captured container reports and clears only its private local interaction,
+  and ancestors retain only their existing `children_visible` subtree-gating authority. A dynamic
+  `ContainerOption`, parent-controlled retention, routing-as-validity-probe, synthetic input event,
+  and concrete downcast are rejected by the normative decision above. This amendment changes no
+  common `Widget` phase and adds no second container phase.
 
 - [x] **P0.2 — Freeze the runtime-owned weak-state contract**
 
@@ -3013,7 +3179,10 @@ explicit decision before changing the criterion.
   Move chrome measure/layout/routing/update and its paint underlay to `RootChromeContainer` and one
   shared pure geometry helper. After tree paint, let the window compositor append only the chrome
   overlay from that helper so title/close/resize remain above descendants. Use ordinary `WidgetTree`
-  capture for moving/resizing. Keep only cross-root/modal selection, z-order, backend viewport
+  capture for moving/resizing. `RootChromeContainer::retains_pointer_capture` reports whether its
+  private `RootInteraction` is still moving/resizing, and `on_pointer_capture_lost` clears that mode
+  when the tree ends capture, without either hook owning or receiving the captured ID.
+  Keep only cross-root/modal selection, z-order, backend viewport
   coordination, popup outside-hit detection, and this post-tree compositing boundary in the window
   manager; outside dismissal calls the framework-private `RootState` operation before routing the
   press elsewhere. Title close and popup dismissal hide and record a typed submission; they do not
@@ -3092,6 +3261,11 @@ explicit decision before changing the criterion.
     uses saturating coordinates, and resize uses the shared minimum clamp.
   - Matching release, hiding, lost/sanitized capture, and incompatible options clear active state;
     moving and resizing never overlap, and `is_active()` is exactly their union.
+  - Root chrome returns `true` from `retains_pointer_capture` exactly while moving/resizing is
+    locally active. Clearing that mode causes `WidgetTree` to release its captured root ID before
+    another pointer event. When the tree ends capture first, `on_pointer_capture_lost` clears the
+    mode at the specified immediate/deferred lifecycle boundary; the container never receives or
+    mutates that ID.
   - Multiple root change/submission events persist across frames and hide/show cycles under the same
     independent saturating-count rules as widget events, and showing consumes none.
   - Root chrome is exactly one internal semantic container node, with no title/close/resize child
@@ -3730,7 +3904,10 @@ change a protected P0 behavior follows the explicit change-control rule.
   Add one `ScrollAreaState` with direct `Children`, public offset/scrolling-enabled state, private
   drag/derived geometry, and immutable parameter-owned framing/base options. Disabling scrolling
   synchronously clears private drag state and resets offset to zero; tree target sanitization clears
-  capture before another event is routed to the disabled area, and derived layout hides bars.
+  capture before another event is routed to the disabled area, and derived layout hides bars. P2.4
+  adds `ScrollAreaContainer::retains_pointer_capture`, which reports
+  `scrolling_enabled && drag_axis.is_some()`, and `on_pointer_capture_lost`, which clears
+  `drag_axis`, without giving state tree authority.
   Requested offsets clamp as specified above. The runtime owns clipping, translation,
   panel/bar/thumb/corner paint, wheel fallback, drag capture, and range clamping. Routing reads the
   current offset/geometry to decide whole-event consumption or capture and queues the localized
@@ -3755,6 +3932,10 @@ change a protected P0 behavior follows the explicit change-control rule.
   - Disabling scrolling clears drag/offset synchronously; before any later routed event, tree
     sanitization releases capture owned by that area. Re-enabling restores none of them, and framing
     remains construction-only.
+  - Disable followed by re-enable before sanitation still reports no local capture retention because
+    disabling cleared `drag_axis`; only a later matching pointer-down can acquire new tree capture.
+  - Collapsing an ancestor while scrollbar capture is active invokes the captured area's loss hook,
+    clears `drag_axis`, and prevents expansion or an unpaired drag from continuing the old gesture.
   - Routing a wheel/drag event does not mutate `ScrollAreaState`; it queues exactly one localized
     event, and the subsequent `Widget::update` applies the state change once.
   - Sub-rectangle routing intersects the active clip, preserves container-local pointer
@@ -3799,7 +3980,9 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   Use that shared path exactly once per requested common-phase invocation. Branch on
   `NodeKind::Container` only to call
-  `Container::layout`, `Container::route_input`, check `children_visible`, and hold the scoped
+  `Container::layout`, `Container::route_input`, check `children_visible`, service
+  `has_pointer_capture` for the current routing target, invoke the P2.4 local capture lifecycle only
+  on the currently captured target, and hold the scoped
   framework-created `ChildrenVisitor`/`ChildrenVisitorMut` borrow during recursion. The runtime uses crate-private
   double-ended `Children` iteration: forward for update/layout/paint and reverse for deepest-first
   input routing. Leaf layout remains the generic
@@ -3850,6 +4033,9 @@ change a protected P0 behavior follows the explicit change-control rule.
     runtime state access and performs no hash lookup, registry access, or downcast. A concrete
     runtime borrows its directly owned state cell at most once per runtime method invocation that
     needs state.
+  - P2.4's capture sanitation calls `retains_pointer_capture` and, on loss, the centralized
+    `on_pointer_capture_lost` transition only on the current captured container, without a full-tree
+    concrete-state query, downcast, registry, or parent callback.
   - Nested geometry remains correct at nonzero origins.
   - Update/layout/paint visit siblings forward; pointer routing visits siblings in reverse z-order.
   - Downstream compile-fail tests prove ordinary callers cannot construct the opaque visitors,
@@ -3868,9 +4054,11 @@ change a protected P0 behavior follows the explicit change-control rule.
   **Completion evidence (2026-07-31)**
 
   Runtime traversal now matches `NodeKind` directly, dispatches framing, interaction, measure,
-  update, and paint through the variant's one inherited `Widget`, and branches to `Container` only
-  for layout, special input, descendant visibility, and scoped child visitation. Private
-  `Node::measure` is the sole node-measurement algorithm; its `NodeMeasurement` is reused for leaf
+  update, and paint through the variant's one inherited `Widget`, and, as completed in P2.3,
+  branches to `Container` only for layout, special input, descendant visibility, and scoped child
+  visitation. P2.4 adds only the subsequently approved current-capture lifecycle hooks and scoped
+  current-owner query; it does not reintroduce a common-phase adapter. Private `Node::measure` is
+  the sole node-measurement algorithm; its `NodeMeasurement` is reused for leaf
   content sizing. The transitional aliases, `NodeBehavior`, all implementations/bounds, and its
   five private phase adapters are deleted. Focused tests pin one-dispatch leaf measurement,
   parent-first/forward update and paint, reverse-z input, same-frame descendant suppression, and a
@@ -3883,39 +4071,150 @@ change a protected P0 behavior follows the explicit change-control rule.
   leaf `Box<dyn Widget>` erasure and the two public scoped container contexts. The file dialog
   remains deliberately excluded until P3.2 with all 13 exact restoration markers preserved.
 
-- [ ] **P2.4 — Sanitize runtime targets around direct topology changes**
+- [x] **P2.4 — Sanitize runtime targets around direct topology changes**
 
   **Problem**
 
   Direct child mutation cannot synchronously call Context to clear focus/capture/routed events.
 
-  **Decision needed: No — implements P0.3, P0.5, P0.6, and P0.7**
+  **Decision needed: No — implements P0.1, P0.3, P0.5, P0.6, and P0.7 using the approved captured-container lifecycle contract**
 
   **Target contract or migration**
 
-  Validate private targets before routing and sanitize missing IDs at the next safe tree boundary.
-  Rebuild per-frame live-target data rather than retaining removed widget entries. Never resolve an
-  ID through a pointer or reuse an ID. A `children_visible == false` subtree is ineligible for
-  focus/hover/capture/routed targets even though its IDs remain live. A ScrollArea whose exposed
-  state has disabled scrolling is ineligible to retain pointer capture; sanitization reads that
-  state and releases its tree-owned capture before routing. A hidden root similarly clears
-  focus/hover/capture/routed targets while retaining the tree; root destruction releases complete
-  retained runtime ownership. There are no result generations to sanitize.
+  Add the defaulted public `Container::retains_pointer_capture(&self) -> bool` and
+  `Container::on_pointer_capture_lost(&mut self)` methods plus
+  `ContainerInputCtx::has_pointer_capture(&self) -> bool` exactly as settled in the normative
+  container contract. Do not add `ContainerOption`, overload `WidgetOption::NO_INTERACT`, use
+  `FocusPolicy` as a capture lease, ask a parent to inspect a child, synthesize a fake release event,
+  downcast `dyn Container`, or give state a `WidgetTree`/Context callback.
+
+  Validate private targets before routing and sanitize missing or ineligible IDs at the next safe
+  tree boundary. Rebuild the current live-target view from direct retained traversal rather than
+  retaining node entries or a registry across frames. Never resolve an ID through a pointer or reuse
+  an ID. A target is structurally eligible only when it still belongs to that tree and every
+  ancestor container on its path currently returns `children_visible == true`; the container node
+  owning a closed gate remains eligible while its descendants do not.
+
+  Focus, hover, and routed-event targets require structural eligibility. Capture requires the same
+  structural eligibility and, when the captured node is a container, one
+  `retains_pointer_capture` call on that target. The query's `true` default means only “this
+  container does not locally revoke its existing capture”; it cannot acquire capture, see its ID,
+  transfer it, or override a closed ancestor gate. A `false` result makes `WidgetTree` clear its own
+  capture before another pointer event is routed. A replacement node at the same child index has a
+  different never-reused ID and receives none of the removed node's targets or queued events.
+
+  Centralize every `Some(old_capture) -> None` or different-owner transition in `WidgetTree`. Locate
+  that exact target without treating a closed ancestor gate as removal. Outside an active routing
+  batch, call `on_pointer_capture_lost` immediately if the captured runtime still exists and is a
+  container. During routing, clear the capture ID immediately but add the old target to a private
+  pending-loss list; after that target's queued `Widget::update`, call the hook if it still exists
+  and has not reacquired capture. This preserves final queued drag/release effects and coalesces an
+  obsolete loss when the same runtime releases and reacquires within one batch. A removed runtime
+  receives no notification because dropping it is definitive cleanup. The hook receives no cause or
+  identity and cannot affect parent/tree policy. This closes the local lifecycle when capture ends
+  because of pointer release, local rejection, ancestor gating, root hiding, transient-target
+  clearing, or capture replacement.
+
+  If sanitation invalidates capture before that pointer stream's drag/release is routed, retain one
+  private tree-runtime discard marker after clearing the captured ID. A subsequent drag or release
+  is reported as handled without routing it to any target, so ordinary hit routing cannot redirect
+  stale input to a parent, sibling, or replacement; the release clears the marker. A fresh
+  pointer-down also clears the marker and proceeds through ordinary routing as a new interaction.
+  This is stream sanitation owned wholly by `WidgetTree`, not another container option, capture
+  owner, identity-bearing token, or parent policy hook.
+
+  `ScrollAreaContainer::retains_pointer_capture` reads its directly owned state once and returns
+  `scrolling_enabled && drag_axis.is_some()`. `set_scrolling_enabled(false)` has already cleared
+  `drag_axis`, so even a disable/re-enable sequence before sanitation returns false and cannot revive
+  capture; only a later matching routed pointer-down can acquire it again.
+  `ScrollAreaContainer::on_pointer_capture_lost` clears `drag_axis` without changing offset.
+  `RootChromeContainer::retains_pointer_capture` returns whether `RootInteraction` is `Moving` or
+  `Resizing`; its loss hook clears that interaction. Existing incompatible-option, hide, dismissal,
+  and destruction transitions also clear the local mode; the tree remains the only captured-ID
+  owner.
+
+  Run sanitation after the pre-input layout and before any target-directed routing, again after
+  update/direct topology changes before paint, and defensively at focused/captured direct-delivery
+  entry points. Do not query a capture newly acquired during an ordered routing batch before the
+  later `Widget::update` applies its queued pointer-down; subsequent events in that batch use
+  `ContainerInputCtx::has_pointer_capture` to identify the current container without exposing its
+  ID. Hidden roots clear focus/hover/capture/routed targets while retaining their tree; root
+  destruction releases complete retained runtime ownership. There are no result generations to
+  sanitize. Debug builds assert after sanitation that every remaining scalar/map target is
+  structurally eligible and that a captured container still reports local retention.
 
   **Acceptance tests**
 
   - Removing a focused/captured target before a frame clears it before new input routing.
-  - Cross-subtree removal during update cannot route later input to the removed or replacement node.
-  - Pointer release after target removal is ignored safely.
+  - Removing a hovered target or a target with queued routed events clears every corresponding
+    scalar/map entry at the same safe boundary.
+  - Cross-subtree removal during update cannot route later input to the removed or replacement node;
+    unaffected persistent targets remain unchanged.
+  - Pointer release after target removal is ignored safely and is not redirected to a parent,
+    sibling, or replacement.
   - Hidden roots preserve widget/application state but clear focus/hover/capture/routed targets;
     showing does not restore those transient targets. Destroyed roots unmount all tree state and
     release it subject only to already-active state upgrades.
   - Collapsing Disclosure clears descendant focus/hover/capture/routed events, and expanding does
-    not restore them automatically.
+    not restore them automatically. The Disclosure controls only structural subtree eligibility; it
+    never answers retention on behalf of the captured descendant. If that descendant still exists,
+    `WidgetTree` invokes its loss hook directly so private drag state cannot survive re-expansion.
   - Disabling a captured ScrollArea through its state handle releases capture before the next routed
     event without giving the state setter a `WidgetTree` or Context capability.
+  - Disabling and re-enabling that ScrollArea before sanitation still releases the old capture
+    because its private drag axis was cleared; a new matching pointer-down can acquire a fresh
+    capture normally.
+  - Ancestor collapse, root hiding, and explicit transient clearing call
+    `on_pointer_capture_lost` immediately on a still-mounted captured container. Routing-time release
+    clears the tree ID immediately but invokes the hook only after that target's queued update has
+    applied all preceding drag/release events; removal drops the runtime without fabricating a
+    callback or input event.
+  - A pointer-down that newly acquires capture followed by drag/release in the same ordered routing
+    batch remains routable through `has_pointer_capture`; retention is checked after update has
+    applied the queued acquisition event, not in the route/update gap.
+  - Drag followed by release in one batch applies the final drag before the loss hook clears local
+    mode. Release followed by a new matching pointer-down on the same container coalesces the stale
+    pending loss, retains the newly acquired capture, and leaves the new local mode active.
+  - `RootChromeContainer` retains capture exactly while its private interaction is moving/resizing;
+    incompatible options, hiding, matching release, and dismissal clear the local mode and the tree
+    capture without a second window-manager capture owner.
+  - A downstream custom container can rely on the `true` default for ordinary release-bounded
+    capture and the no-op loss default when it has no local capture mode. It can override both hooks
+    using only private local state when its interaction is externally revocable. The query,
+    notification, and scoped current-owner check receive no ID, parent, Context, or tree capability.
   - Destroyed roots expire `RootState` and descendant handles; hidden roots keep those handles live.
-  - Debug integrity checks find no live target absent from its tree after sanitization.
+  - Debug integrity checks find no remaining target absent from its tree, behind an ancestor gate,
+    or locally rejected by the captured container after sanitization.
+  - Public API/source checks find no `ContainerOption::RETAIN_POINTER_CAPTURE`, dynamic container
+    option/status bag, parent capture-retention override, concrete-container downcast, capture ID in
+    state, synthetic capture-loss input, or state-to-tree/Context callback.
+
+  **Completion evidence (2026-07-31)**
+
+  `Container` now exposes only the two defaulted, identity-free local lifecycle methods, and
+  `ContainerInputCtx` exposes the scoped current-owner boolean needed by route-before-update
+  batching. `UiRuntime` rebuilds structural eligibility by direct retained traversal before direct
+  delivery and after layout/update topology boundaries. It owns newly-acquired capture deferral,
+  ordered pending-loss delivery, same-owner reacquisition coalescing, and the private stale-stream
+  discard marker; removed runtimes are dropped without callback, while still-mounted targets behind
+  a closed ancestor gate receive direct local cleanup. No registry, parent retention decision,
+  option bag, downcast, synthetic input, or state-to-tree callback was introduced.
+
+  `ScrollAreaContainer` retains capture exactly while scrolling is enabled and a private drag axis
+  exists, clears only that axis on loss, and uses the scoped owner query for same-batch drag/release.
+  `RootChromeContainer` does the equivalent for move/resize interaction. Focused tests cover local
+  rejection, disable/re-enable, newly acquired same-batch routing, ordered drag/release cleanup,
+  release/reacquisition coalescing, ancestor gating, same-index replacement without target transfer,
+  stale drag/release suppression, cross-subtree removal during update, root hide/show, and downstream
+  custom-container use of the public defaults and overrides.
+
+  Formatting and `git diff --check` pass. All targets pass with 140 unit tests and three downstream
+  API tests; the existing manual render-performance test remains ignored. All 17 doctests pass,
+  including seven compile-fail cases. The no-default-features build, generated docs, and separate
+  Glow, Vulkan, and WGPU example configurations pass. Clippy reports only the repository's existing
+  warning baseline. Source checks find none of the forbidden capture-policy mechanisms. The file
+  dialog remains deliberately excluded until P3.2, with its preserved implementation/tests and all
+  13 exact restoration markers unchanged.
 
 - [ ] **P2.5 — Make routed events authoritative and reduce the frame to two tree layouts**
 
@@ -3946,6 +4245,13 @@ change a protected P0 behavior follows the explicit change-control rule.
   routes the same press to the newly eligible front root. It must not derive another click/drag/
   wheel snapshot or let retained widget update inspect raw `Input`.
 
+  Within one ordered routing batch, tree capture changes immediately. Special containers use only
+  `ContainerInputCtx::has_pointer_capture` to route drag/release events that follow their acquiring
+  pointer-down before update has established private local mode. A routing-time loss queues the
+  P2.4 private capture-lost notification until the old target's event batch has been applied; a
+  same-target reacquisition coalesces that obsolete notification. No synthetic `UiInputEvent`,
+  public capture token, or extra `Widget::update` invocation is introduced.
+
   Use this ordinary frame pipeline:
 
   ```text
@@ -3970,6 +4276,9 @@ change a protected P0 behavior follows the explicit change-control rule.
     outcome; popup outside dismissal is decided there before the same press is routed onward.
   - Widget update receives exactly the localized events selected by routing; hover/click/active,
     focus/capture, and wheel state cannot disagree with those events.
+  - Same-batch capture/acquire/drag/release and release/reacquire sequences preserve event order,
+    apply the final drag, and leave tree/local capture state matching the last transition without a
+    synthetic event or second update.
   - Production searches find no raw `Input` in retained node update contexts, no
     `UiRuntime::interaction_for`, no context-level `scroll_delta` accessor/storage, and no duplicate
     scroll derivation; `WidgetInputEvents::scroll_delta()` reads only the routed batch.
@@ -4134,7 +4443,9 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   Document `Widget`, `WidgetState`, `WidgetParameters`, `WidgetBuilder`, public
   `Container: Widget`, marker `ContainerState`, opaque child visitors, the exact container-only
-  layout/input methods, the final concrete-runtime ownership rule, typed weak handles, built-in
+  layout/input methods, the defaulted `retains_pointer_capture`/`on_pointer_capture_lost` contract
+  and scoped `has_pointer_capture` query, the final concrete-runtime ownership rule, typed weak
+  handles, built-in
   state/parameter types, owning `Node`/opaque `Children`, `Disclosure` as the old header/tree
   replacement, the absence of generic node visibility, unified
   `RootHandle`/`RootState`/`RootMutationError` chrome and explicit root destruction, state-local
@@ -4155,6 +4466,10 @@ change a protected P0 behavior follows the explicit change-control rule.
   - `cargo doc` exposes `Container: Widget` without parallel container measure/update/paint methods
     and exposes no private IDs, cells, legacy container adapter traits, or obsolete builders;
     production-source checks confirm that `NodeBehavior` itself was deleted in P2.3.
+  - Container docs distinguish tree ownership of the captured ID, captured-container ownership of
+    local retention/loss state, and ancestor ownership of descendant eligibility. They document the
+    default/override obligation and route-before-update ordering without introducing
+    `ContainerOption` or parent-controlled capture.
   - Docs explicitly state that ContextFrame does not lock state and that no Context token exists.
   - Docs distinguish initialization Parameters from mutable State with concrete examples.
   - Root docs distinguish hide from destroy, document `RootHandle` weak ownership, and define
@@ -4432,8 +4747,10 @@ contract or overstate what Rust can prove about arbitrary custom safe APIs.
 - The public `Widget` trait has exactly its P0-frozen runtime methods, including
   `Widget::update -> ()`, and remains distinct from `WidgetState`.
 - Public `Container` still has `Widget` as its supertrait; its concrete runtime dispatches inherited
-  `Widget` calls once and opaque child visitors reach the same directly owned state. No raw child
-  callback reappears.
+  `Widget` calls once and opaque child visitors reach the same directly owned state. Its defaulted
+  capture lifecycle hooks expose no ID/tree/parent capability, read/clear only the captured
+  container's local state when overridden, and the scoped current-owner query returns only a bool.
+  No raw child callback reappears.
 - Final documentation/examples explain that the concrete runtime is the retained widget/state owner,
   that convenience-constructor return shape controls whether a handle is immediately returned, and
   that custom builders must preserve the `WidgetStateOwner` conformance contract. They contain no
@@ -4461,7 +4778,9 @@ contract or overstate what Rust can prove about arbitrary custom safe APIs.
 | List interaction follows position | Builder ordinal identity | Persistent unique nodes/state | P1.3/P3.2 |
 | Scroll offset resets/recreates | Root replacement/synthetic state | Persistent scroll state | P2.2/P3.2 |
 | Scroll area has synthetic semantic nodes | Decoration modeled as nodes | One container runtime | P2.2/P4.1 |
-| Scroll disable cannot synchronously clear tree-owned capture | State setter has no tree capability | State resets local drag/offset; target sanitization releases capture before routing | P2.2/P2.4 |
+| A container can acquire capture but cannot report later local invalidation | `ContainerInputResult::Captured` has no matching state-derived retention query | Defaulted `Container::retains_pointer_capture`; captured container declares local continuation while `WidgetTree` owns/clears the ID | P0.1/P2.4 |
+| Tree capture can end while a retained container keeps stale local drag state | Ancestor gating/release clears the runtime ID without notifying the captured abstraction | Defaulted `Container::on_pointer_capture_lost`; `WidgetTree` notifies only the old captured target if it still exists | P0.1/P2.4 |
+| Scroll disable cannot synchronously clear tree-owned capture | State setter correctly has no tree capability | State resets local drag/offset; `ScrollAreaContainer::retains_pointer_capture` reports false; target sanitization releases capture before routing | P2.2/P2.4 |
 | Scroll routing is described as both non-mutating and offset-mutating | Routing and update responsibilities were conflated | Routing decides/queues; unit-returning Widget update mutates state | P2.2/P2.5 |
 | Public header/tree `Node` collides with owning `Node` | Old widget was not classified | Reserve `Node`; absorb behavior into Disclosure | P0.6/P1.1/P2.1 |
 | Disclosure recreates adapters | Strong handle adapted per phase | One state-owning runtime | P2.1 |
@@ -4527,8 +4846,9 @@ Update together:
 
 - crate-level retained UI documentation and prelude;
 - rustdoc for all four widget roles, `WidgetStateOwner`, public `Container: Widget`, marker
-  `ContainerState`, opaque child visitors, the exact container-only scoped context methods,
-  runtime/handle access, owning `Node`/opaque `Children`, Disclosure, visibility boundaries,
+  `ContainerState`, opaque child visitors, the exact container-only scoped context methods and
+  `retains_pointer_capture`/`on_pointer_capture_lost` lifecycle hooks, runtime/handle access, owning
+  `Node`/opaque `Children`, Disclosure, visibility boundaries,
   exact mounted container configuration, input-preserving access, and unified
   `RootHandle`/`RootState`/`RootMutationError` chrome and lifecycle;
 - README construction, state mutation, event consumption, dynamic list, custom-render construction,
@@ -4540,8 +4860,9 @@ Update together:
   failure-preserving owned input, traversal order, root hide versus destroy, unsupported root
   replacement, typed root chrome and removal of all frame results, unit-returning widget update,
   absence of generic node
-  visibility, immutable node placement, the ordered input dispatcher/popup-boundary exception, the
-  two-layout frame, explicit
+  visibility, immutable node placement, tree-owned capture versus captured-container local
+  retention/loss versus parent descendant gating, the ordered input dispatcher/popup-boundary
+  exception, the two-layout frame, explicit
   intrinsic constraints/shared axis allocation, removal of public widget IDs/results, and the one
   externally visible generic state-owning-runtime insertion boundary.
 
@@ -4563,9 +4884,10 @@ Update together:
 6. Convert the other containers with the exact mutable configuration APIs, then establish one
    private `RootChromeContainer` per WindowEntry with `RootHandle`/`RootState`, explicit destruction,
    no application-child replacement, and no frame-result channel.
-7. Switch traversal, target sanitization, Disclosure, and scroll area to direct ownership; remove
-   generic node visibility, make routed events authoritative, and reduce the frame to two tree
-   layouts.
+7. Switch traversal, target sanitization, Disclosure, and scroll area to direct ownership; complete
+   container capture acquisition with the defaulted local-retention/loss hooks and scoped
+   current-owner query while keeping the ID in `WidgetTree`, remove generic node visibility, make
+   routed events authoritative, and reduce the frame to two tree layouts.
 8. Remove public projection/root replacement and migrate one small example completely.
 9. Replace pseudo-unbounded probes and independent Row/Grid/container solvers with explicit private
    constraints and shared axis primitives; centralize chrome conversion in the retained root-chrome
@@ -4594,8 +4916,9 @@ The migration is complete when:
 - the public `Widget` trait remains the only common phase contract for leaves and containers, and
   its final `update` method returns `()`;
 - public `Container: Widget` is implementable by downstream custom containers, adds only
-  opaque child visitation/layout/descendant-visibility/special-input behavior, and redeclares none
-  of the common `Widget` phases;
+  opaque child visitation/layout/descendant-visibility/special-input behavior plus the defaulted
+  local pointer-capture-retention/loss hooks and scoped current-owner query, and redeclares none of
+  the common `Widget` phases;
 - `NodeBehavior`, its implementations/bounds, and any equivalent catch-all runtime adapter are
   absent; private traversal dispatches common phases once through `Widget` and branches to
   `Container` only for container-specific work;
@@ -4667,8 +4990,10 @@ The migration is complete when:
   adds no local layout configuration, Disclosure exposes expansion, and framing/base options remain
   construction-only;
 - disabling ScrollArea synchronously resets state-owned drag/offset, while tree sanitization releases
-  tree-owned capture before another event is routed; routing queues but does not apply scroll state
-  changes;
+  tree-owned capture before another event is routed by observing
+  `ScrollAreaContainer::retains_pointer_capture == false`; disable/re-enable cannot resurrect the
+  cleared drag/capture, `on_pointer_capture_lost` clears drag after externally caused loss, and
+  routing queues but does not apply scroll state changes;
 - `Children::new`/`Default`/`FromIterator<Node>` support downstream construction, but built-in
   states expose no whole collection and no framework-provided API returns an attached node;
 - only framework-created opaque visitors reach container child collections; ordinary callers cannot
@@ -4677,12 +5002,19 @@ The migration is complete when:
 - each container visitor method submits exactly one collection or triggers the specified invariant
   panic diagnostic; downstream containers are documented and tested to submit the same
   authoritative `Children` from immutable and mutable visitor methods;
-- `ContainerLayoutCtx` and `ContainerInputCtx` expose exactly the generic policy/layout/geometry and
-  full/sub-rectangle routing methods specified above, with deterministic invalid-index, clipping,
-  and coordinate behavior;
+- `ContainerLayoutCtx` and `ContainerInputCtx` expose exactly the generic policy/layout/geometry,
+  current-container capture bool, and full/sub-rectangle routing methods specified above, with
+  deterministic invalid-index, clipping, and coordinate behavior;
 - successful removal drops nodes rather than returning/detaching them;
 - stale runtime targets are validated and sanitized without a registry, pointer, Context token, or
   eager editor callback;
+- `WidgetTree` is the sole owner of the captured runtime ID; only the current captured container may
+  report whether its own local interaction remains active through `retains_pointer_capture` and
+  clear that mode through `on_pointer_capture_lost`; ancestors affect descendants only through
+  `children_visible` and cannot inspect, mutate, or override a child's local capture state;
+- no `ContainerOption::RETAIN_POINTER_CAPTURE`, dynamic container status/option bag, concrete
+  container downcast, parent-controlled retention hook, or state-to-tree/Context capture callback
+  exists;
 - each WindowEntry owns one persistent tree rooted by exactly one private `RootChromeContainer`;
   that container strongly owns public `RootState` and exactly one immutable application-child slot,
   while WindowEntry retains only a framework-private weak state clone;
@@ -4706,10 +5038,12 @@ The migration is complete when:
 - each Context has at most one visible popup; showing another silently hides and sanitizes the
   previous popup without recording a submission, while nested popup behavior remains out of scope;
 - root measure/layout/routing/update and paint underlay use the ordinary retained-container path,
-  generic tree capture owns moving/resizing, and one pure chrome geometry helper supplies all phase,
-  compositor, and backend rectangles; only popup outside-hit detection records across the tree
-  boundary, while the documented post-tree chrome overlay is rendering-only and reads the same
-  `RootState`;
+  generic tree capture owns the moving/resizing target,
+  `RootChromeContainer::retains_pointer_capture` reports only its local interaction mode and
+  `on_pointer_capture_lost` clears it without receiving an ID, and one pure chrome geometry helper
+  supplies all phase, compositor, and backend rectangles; only popup outside-hit detection records
+  across the tree boundary, while the documented post-tree chrome overlay is rendering-only and
+  reads the same `RootState`;
 - `ResourceState`, `FrameResults`, `FrameResultGeneration`, `RetainedId`, and all generic/root result
   lookup are absent;
 - Disclosure and scroll area each have one direct container runtime and one associated state owner;

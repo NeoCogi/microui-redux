@@ -484,6 +484,14 @@ impl NodeKind {
             Self::Container(container) => Some(&**container),
         }
     }
+
+    /// Returns the mutable container-specific runtime for lifecycle notification.
+    pub(crate) fn container_mut(&mut self) -> Option<&mut dyn Container> {
+        match self {
+            Self::Widget(_) => None,
+            Self::Container(container) => Some(&mut **container),
+        }
+    }
 }
 
 /// One authoritative node measurement reused by parent allocation and leaf content sizing.

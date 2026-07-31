@@ -95,6 +95,8 @@ struct ExternalState {
     measure_calls: Cell<usize>,
     layout_calls: Cell<usize>,
     observed_policy: Cell<Option<Policy>>,
+    retain_capture: Cell<bool>,
+    capture_losses: Cell<usize>,
 }
 
 impl WidgetState for ExternalState {}
@@ -152,6 +154,16 @@ impl Container for ExternalContainer {
             let _ = ctx.layout_child(&mut state.children, 0, rect);
         }
     }
+
+    fn retains_pointer_capture(&self) -> bool {
+        self.state.try_borrow().expect("external state must not be reentered").retain_capture.get()
+    }
+
+    fn on_pointer_capture_lost(&mut self) {
+        let state = self.state.try_borrow().expect("external state must not be reentered");
+        state.retain_capture.set(false);
+        state.capture_losses.set(state.capture_losses.get() + 1);
+    }
 }
 
 struct ExternalBuilder;
@@ -167,6 +179,8 @@ impl ContainerBuilder for ExternalBuilder {
                 measure_calls: Cell::new(0),
                 layout_calls: Cell::new(0),
                 observed_policy: Cell::new(None),
+                retain_capture: Cell::new(true),
+                capture_losses: Cell::new(0),
             })),
             options: WidgetOption::NONE,
         }
@@ -215,8 +229,17 @@ fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis(
     let (child_state, child) = ExternalLeaf::create();
     let policy = Policy::fixed(24, 18);
     let children = [Node::widget(child).with_policy(policy)].into_iter().collect();
-    let runtime = ExternalBuilder::create_container(ExternalParameters { children });
+    let mut runtime = ExternalBuilder::create_container(ExternalParameters { children });
     let state = runtime.state_handle();
+    assert!(runtime.retains_pointer_capture());
+    state.try_update(|state| state.retain_capture.set(false)).unwrap();
+    assert!(!runtime.retains_pointer_capture());
+    state.try_update(|state| state.retain_capture.set(true)).unwrap();
+    runtime.on_pointer_capture_lost();
+    assert_eq!(
+        state.try_read(|state| (state.retain_capture.get(), state.capture_losses.get())),
+        Some((false, 1))
+    );
     let node = Node::container(runtime);
     let mut ctx = context();
     let root = ctx.create_window("external", rect(10, 20, 100, 80), node);

@@ -319,9 +319,20 @@ impl Container for RootChromeContainer {
         runtime_read_state(&self.state, "RootChrome::children_visible", RootState::is_visible)
     }
 
+    fn retains_pointer_capture(&self) -> bool {
+        runtime_read_state(&self.state, "RootChrome::retains_pointer_capture", RootState::is_active)
+    }
+
+    fn on_pointer_capture_lost(&mut self) {
+        runtime_update_state(&self.state, "RootChrome::on_pointer_capture_lost", |state| {
+            state.interaction = RootInteraction::None;
+        });
+    }
+
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
+        let has_pointer_capture = ctx.has_pointer_capture();
         let (surface, part) = runtime_read_state(&self.state, "RootChrome::route_input", |state| {
-            if state.interaction != RootInteraction::None && matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. }) {
+            if has_pointer_capture && matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. }) {
                 (Some(state.geometry.outer), None)
             } else {
                 let part = event_position(event).and_then(|pos| state.geometry.hit_test(pos));
@@ -346,6 +357,34 @@ fn event_position(event: &UiInputEvent) -> Option<Vec2i> {
         | UiInputEvent::MouseUp { pos, .. }
         | UiInputEvent::Scroll { pos, .. } => Some(*pos),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::*;
+    use crate::{Custom, CustomParameters};
+
+    #[test]
+    fn root_chrome_retains_capture_only_for_local_move_or_resize_mode() {
+        let content = Node::widget(Custom::create(CustomParameters::new("content")));
+        let mut container = RootChromeBuilder::create_container(RootChromeParameters {
+            name: "root".to_owned(),
+            options: WindowOption::FRAME,
+            rect: Recti::new(10, 20, 100, 80),
+            visible: true,
+            content,
+        });
+
+        assert!(!container.retains_pointer_capture());
+        container.state.borrow_mut().interaction = RootInteraction::Moving;
+        assert!(container.retains_pointer_capture());
+        container.on_pointer_capture_lost();
+        assert!(!container.retains_pointer_capture());
+        assert!(!container.state.borrow().is_active());
+
+        container.state.borrow_mut().interaction = RootInteraction::Resizing;
+        assert!(container.retains_pointer_capture());
     }
 }
 

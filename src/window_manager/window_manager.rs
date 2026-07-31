@@ -21,6 +21,12 @@ pub(super) struct WidgetTree {
     pub(super) runtime: UiRuntime,
 }
 
+impl WidgetTree {
+    fn clear_transient_targets(&mut self) {
+        self.runtime.clear_transient_targets(std::slice::from_mut(&mut self.root));
+    }
+}
+
 /// Lifecycle and cross-root metadata for one retained tree.
 pub(super) struct WindowEntry {
     pub(super) id: RootId,
@@ -99,7 +105,7 @@ impl<B: RendererBackend> Context<B> {
             .try_read(RootState::is_active)
             .unwrap_or_else(|| self.root_access_failure(index));
         if was_active && !active {
-            self.roots[index].tree.runtime.clear_transient_targets();
+            self.roots[index].tree.clear_transient_targets();
         }
         Ok(())
     }
@@ -137,7 +143,7 @@ impl<B: RendererBackend> Context<B> {
                     .is_some()
                 });
                 match changed {
-                    Some(true) => self.roots[other].tree.runtime.clear_transient_targets(),
+                    Some(true) => self.roots[other].tree.clear_transient_targets(),
                     Some(false) | None => return Err(RootMutationError::Borrowed),
                 }
             } else {
@@ -157,7 +163,7 @@ impl<B: RendererBackend> Context<B> {
             self.last_zindex = self.last_zindex.saturating_add(1);
             self.roots[target].z_index = self.last_zindex;
         } else {
-            self.roots[target].tree.runtime.clear_transient_targets();
+            self.roots[target].tree.clear_transient_targets();
         }
         Ok(())
     }
@@ -266,7 +272,7 @@ impl<B: RendererBackend> Context<B> {
                 .try_read(|state| (state.is_visible(), state.rect()))
                 .expect("registered root state unavailable during frame");
             if !visible {
-                entry.tree.runtime.clear_transient_targets();
+                entry.tree.clear_transient_targets();
                 continue;
             }
 
@@ -290,7 +296,7 @@ impl<B: RendererBackend> Context<B> {
                 .try_read(|state| (state.is_visible(), state.rect()))
                 .expect("registered root state unavailable after root update");
             if !visible {
-                entry.tree.runtime.clear_transient_targets();
+                entry.tree.clear_transient_targets();
                 continue;
             }
             entry
@@ -326,7 +332,7 @@ impl<B: RendererBackend> Context<B> {
                 .root_state
                 .try_update(RootState::dismiss_popup)
                 .unwrap_or_else(|| self.root_access_failure(index));
-            self.roots[index].tree.runtime.clear_transient_targets();
+            self.roots[index].tree.clear_transient_targets();
         }
     }
 
@@ -421,6 +427,14 @@ impl<B: RendererBackend> Context<B> {
     #[cfg(test)]
     pub(crate) fn debug_root_runtime_metrics(&self, root: RootId) -> Option<crate::ui_node::RuntimeMetrics> {
         self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.tree.runtime.debug_metrics())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_has_pointer_capture(&self, root: RootId) -> Option<bool> {
+        self.roots
+            .iter()
+            .find(|entry| entry.id == root)
+            .map(|entry| entry.tree.runtime.capture.is_some())
     }
 
     #[cfg(test)]

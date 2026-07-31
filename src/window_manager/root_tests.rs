@@ -226,6 +226,28 @@ fn title_drag_and_close_record_typed_root_events() {
 }
 
 #[test]
+fn hiding_and_showing_root_does_not_restore_chrome_capture() {
+    let mut ctx = context();
+    let root = ctx.create_window("window", rect(30, 30, 140, 100), empty_content());
+    ctx.update_ui();
+    let title = ctx.debug_root_chrome(root.id()).unwrap().0.unwrap();
+
+    ctx.mousedown(title.x + 2, title.y + 2, MouseButton::LEFT);
+    ctx.update_ui();
+    assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(true));
+    assert_eq!(root.state().try_read(RootState::is_moving), Some(true));
+
+    ctx.set_root_visible(root.id(), false).unwrap();
+    assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(false));
+    assert_eq!(root.state().try_read(RootState::is_active), Some(false));
+
+    ctx.set_root_visible(root.id(), true).unwrap();
+    ctx.update_ui();
+    assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(false));
+    assert_eq!(root.state().try_read(RootState::is_active), Some(false));
+}
+
+#[test]
 fn chrome_geometry_exposes_one_body_and_auto_size_tracks_content() {
     let mut ctx = context();
     let (_, text) = crate::TextBlock::create(crate::TextBlockParameters::new("window content"));

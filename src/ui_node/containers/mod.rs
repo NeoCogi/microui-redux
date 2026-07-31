@@ -138,6 +138,20 @@ pub trait Container: Widget {
         true
     }
 
+    /// Reports whether this container's current local pointer-capture interaction remains active.
+    ///
+    /// The retained runtime owns the captured node identity. This query can only revoke capture
+    /// already owned by this container; it receives no identity or tree capability.
+    fn retains_pointer_capture(&self) -> bool {
+        true
+    }
+
+    /// Clears container-local interaction state after the runtime ends this container's capture.
+    ///
+    /// The default is appropriate for containers without capture-specific local state. The runtime
+    /// invokes this only for the captured container itself, never through an ancestor.
+    fn on_pointer_capture_lost(&mut self) {}
+
     /// Routes one event to this container's own interactive surface.
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
         ctx.route_widget(event, self.effective_widget_opt(), self.focus_policy())
@@ -446,6 +460,13 @@ impl ContainerInputCtx<'_> {
             content_clip,
             current,
         }
+    }
+
+    /// Returns whether the current container owns runtime pointer capture.
+    ///
+    /// This exposes no node identity and cannot acquire, release, or transfer capture.
+    pub fn has_pointer_capture(&self) -> bool {
+        self.runtime.capture == Some(self.current.id())
     }
 
     /// Routes through the container's complete local content rectangle.

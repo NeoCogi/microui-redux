@@ -27,6 +27,12 @@ pub(crate) struct UiRuntime {
     pub(crate) hover: Option<RuntimeNodeId>,
     /// Pointer-capturing node.
     pub(crate) capture: Option<RuntimeNodeId>,
+    /// Newly acquired capture whose queued pointer-down has not reached Widget::update yet.
+    capture_awaiting_update: Option<RuntimeNodeId>,
+    /// Routing-time capture losses delivered after each old target consumes its queued events.
+    pending_capture_losses: Vec<RuntimeNodeId>,
+    /// Whether drag/release events from an externally invalidated capture must be discarded.
+    discard_invalidated_capture_events: bool,
     /// Whether this runtime accepts pointer routing for the frame.
     pub(super) pointer_input_enabled: bool,
     /// Snapshot of text operations from the most recently recorded display list.
@@ -52,6 +58,9 @@ impl Default for UiRuntime {
             focus: None,
             hover: None,
             capture: None,
+            capture_awaiting_update: None,
+            pending_capture_losses: Vec::new(),
+            discard_invalidated_capture_events: false,
             pointer_input_enabled: false,
             #[cfg(test)]
             debug_texts: Vec::new(),
@@ -115,6 +124,8 @@ impl UiRuntime {
 
     /// Clears frame-local runtime state before layout/input/update/paint passes.
     pub(crate) fn begin_frame(&mut self, pointer_input_enabled: bool) {
+        debug_assert!(self.capture_awaiting_update.is_none(), "new pointer capture was not confirmed by update");
+        debug_assert!(self.pending_capture_losses.is_empty(), "pointer-capture loss was not delivered after update");
         self.updated_focus = false;
         self.routed_events.clear();
         self.pointer_input_enabled = pointer_input_enabled;
@@ -123,12 +134,12 @@ impl UiRuntime {
     }
 
     /// Clears focus, hover, capture, and queued input while preserving retained node state.
-    pub(crate) fn clear_transient_targets(&mut self) {
+    pub(crate) fn clear_transient_targets(&mut self, roots: &mut [Node]) {
         self.focus = None;
         self.hover = None;
-        self.capture = None;
         self.routed_events.clear();
         self.updated_focus = false;
+        self.clear_all_pointer_capture(roots);
     }
 
     /// Measures one persistent root node without introducing a parallel root projection.
@@ -143,12 +154,15 @@ impl UiRuntime {
         self.root_transform = Transform::root(viewport);
         self.layout_allocated_node_ref(root, style, &atlas, outer);
         self.root_content_size = root.state.layout.content_size;
-        self.sanitize_transient_targets(std::slice::from_ref(root));
+        self.sanitize_transient_targets(std::slice::from_mut(root));
     }
 
     /// Updates one persistent root node and its eligible descendants.
     pub(crate) fn update_tree_root(&mut self, root: &mut Node, style: &Style, atlas: crate::AtlasHandle, input: &Input) {
         self.update_node_ref(root, self.root_transform, style, atlas, input);
+        let roots = std::slice::from_mut(root);
+        self.flush_pending_capture_losses(roots);
+        self.sanitize_transient_targets(roots);
     }
 
     /// Paints one persistent root node and its eligible descendants.
@@ -208,6 +222,9 @@ impl UiRuntime {
             root_index += 1;
         }
 
+        self.flush_pending_capture_losses(roots);
+        self.sanitize_transient_targets(roots);
+
         self.layout_roots_in_view(roots, style, atlas.clone(), body_view);
         self.sanitize_transient_targets(roots);
 
@@ -230,13 +247,104 @@ impl UiRuntime {
 
     /// Clears interaction state that points at a removed or container-gated descendant.
     ///
-    /// Sanitization runs only at layout boundaries, when no container state borrow is active. A
-    /// replacement node cannot inherit a stale target because every owning node has a fresh ID.
-    fn sanitize_transient_targets(&mut self, roots: &[Node]) {
+    /// Sanitization runs at layout/update boundaries and before direct target delivery, when no
+    /// container state borrow is active. A replacement node cannot inherit a stale target because
+    /// every owning node has a fresh ID.
+    fn sanitize_transient_targets(&mut self, roots: &mut [Node]) {
         self.focus = self.focus.filter(|id| contains_active_node_in(roots, *id));
         self.hover = self.hover.filter(|id| contains_active_node_in(roots, *id));
-        self.capture = self.capture.filter(|id| contains_active_node_in(roots, *id));
         self.routed_events.retain(|id, _| contains_active_node_in(roots, *id));
+
+        let capture_valid = self.capture.is_none_or(|id| {
+            contains_active_node_in(roots, id) && (self.capture_awaiting_update == Some(id) || captured_target_retains_pointer_capture(roots, id))
+        });
+        if !capture_valid {
+            self.clear_current_pointer_capture(roots);
+        }
+
+        debug_assert!(self.focus.is_none_or(|id| contains_active_node_in(roots, id)));
+        debug_assert!(self.hover.is_none_or(|id| contains_active_node_in(roots, id)));
+        debug_assert!(self.routed_events.keys().all(|id| contains_active_node_in(roots, *id)));
+        debug_assert!(self.capture.is_none() || capture_valid);
+    }
+
+    /// Ends current capture immediately and notifies the still-retained target directly.
+    fn clear_current_pointer_capture(&mut self, roots: &mut [Node]) {
+        let Some(owner) = self.capture.take() else {
+            return;
+        };
+        if self.capture_awaiting_update == Some(owner) {
+            self.capture_awaiting_update = None;
+        }
+        self.pending_capture_losses.retain(|pending| *pending != owner);
+        self.discard_invalidated_capture_events = true;
+        notify_pointer_capture_lost(roots, owner);
+    }
+
+    /// Clears current and deferred capture state for an explicitly ineligible retained tree.
+    fn clear_all_pointer_capture(&mut self, roots: &mut [Node]) {
+        let mut losses = std::mem::take(&mut self.pending_capture_losses);
+        if let Some(owner) = self.capture.take() {
+            self.discard_invalidated_capture_events = true;
+            if !losses.contains(&owner) {
+                losses.push(owner);
+            }
+        }
+        self.capture_awaiting_update = None;
+        for owner in losses {
+            notify_pointer_capture_lost(roots, owner);
+        }
+    }
+
+    /// Clears tree ownership now while deferring local cleanup until queued update has run.
+    fn defer_current_pointer_capture_loss(&mut self) {
+        let Some(owner) = self.capture.take() else {
+            return;
+        };
+        if self.capture_awaiting_update == Some(owner) {
+            self.capture_awaiting_update = None;
+        }
+        if !self.pending_capture_losses.contains(&owner) {
+            self.pending_capture_losses.push(owner);
+        }
+    }
+
+    /// Acquires capture for one routed owner and cancels obsolete same-owner loss notification.
+    fn acquire_pointer_capture(&mut self, owner: RuntimeNodeId) {
+        if self.capture == Some(owner) {
+            return;
+        }
+        self.defer_current_pointer_capture_loss();
+        self.pending_capture_losses.retain(|pending| *pending != owner);
+        self.capture = Some(owner);
+        self.capture_awaiting_update = Some(owner);
+        self.discard_invalidated_capture_events = false;
+    }
+
+    /// Completes capture lifecycle work after one target consumes its routed event batch.
+    fn finish_pointer_capture_update(&mut self, node: &mut Node) {
+        let id = node.id();
+        if self.capture_awaiting_update == Some(id) {
+            self.capture_awaiting_update = None;
+        }
+        let had_pending_loss = self.pending_capture_losses.contains(&id);
+        self.pending_capture_losses.retain(|pending| *pending != id);
+        if had_pending_loss
+            && self.capture != Some(id)
+            && let Some(container) = node.data.container_mut()
+        {
+            container.on_pointer_capture_lost();
+        }
+    }
+
+    /// Delivers losses for targets skipped by update because an ancestor closed its gate.
+    fn flush_pending_capture_losses(&mut self, roots: &mut [Node]) {
+        let losses = std::mem::take(&mut self.pending_capture_losses);
+        for owner in losses {
+            if self.capture != Some(owner) {
+                notify_pointer_capture_lost(roots, owner);
+            }
+        }
     }
 
     /// Returns text commands recorded by the most recent frame.
@@ -503,6 +611,7 @@ impl UiRuntime {
             node.state.scroll_delta,
         );
         node.data.widget_mut().update(&mut widget_ctx, events);
+        self.finish_pointer_capture_update(node);
         let traverse_children = node.data.container().is_some_and(Container::children_visible);
         if traverse_children {
             node.with_children_mut(|children| {
@@ -570,6 +679,7 @@ impl UiRuntime {
 
     /// Routes focus input events to the focused node.
     pub(crate) fn route_focus_input_events(&mut self, roots: &mut [Node], style: &Style, input: &Input) -> bool {
+        self.sanitize_transient_targets(roots);
         let mut consumed = false;
         for event in focus_events_from_input(input) {
             consumed |= self.route_focus_input_event(roots, style, &event);
@@ -582,7 +692,24 @@ impl UiRuntime {
 
     /// Routes one pointer event to the capturing node, if there is one.
     pub(crate) fn route_captured_pointer_input_event(&mut self, roots: &mut [Node], style: &Style, input: &Input, event: &UiInputEvent) -> Option<bool> {
-        let capture = self.capture.filter(|id| contains_active_node_in(roots, *id))?;
+        self.sanitize_transient_targets(roots);
+
+        if self.capture.is_none() && self.discard_invalidated_capture_events {
+            match event {
+                UiInputEvent::MouseDrag { .. } => return Some(false),
+                UiInputEvent::MouseUp { .. } => {
+                    self.discard_invalidated_capture_events = false;
+                    return Some(false);
+                }
+                UiInputEvent::MouseDown { .. } => {
+                    self.discard_invalidated_capture_events = false;
+                }
+                UiInputEvent::MouseMove { .. } | UiInputEvent::Scroll { .. } => {}
+                _ => unreachable!("only pointer events are routed through pointer capture"),
+            }
+        }
+
+        let capture = self.capture?;
         let parent_transform = self.parent_transform_for_node(roots, capture);
         let result = self.route_input_event_to_node_only(roots, capture, parent_transform, style, event);
         self.update_pointer_capture(capture, result, event, input);
@@ -601,11 +728,11 @@ impl UiRuntime {
     /// Applies runtime pointer-capture ownership from one routed event result.
     pub(crate) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: InputResult, event: &UiInputEvent, input: &Input) {
         if event.is_pointer_release() && input.mouse_down.is_empty() {
-            self.capture = None;
+            self.defer_current_pointer_capture_loss();
         } else if result == InputResult::Captured {
-            self.capture = Some(owner);
+            self.acquire_pointer_capture(owner);
         } else if self.capture == Some(owner) && input.mouse_down.is_empty() {
-            self.capture = None;
+            self.defer_current_pointer_capture_loss();
         }
     }
 
@@ -780,6 +907,18 @@ fn with_node<R>(roots: &[Node], id: RuntimeNodeId, f: impl FnOnce(&Node) -> R) -
 fn with_node_mut<R>(roots: &mut [Node], id: RuntimeNodeId, f: impl FnOnce(&mut Node) -> R) -> Option<R> {
     let index = roots.iter().position(|root| root.with_node(id, |_| ()).is_some())?;
     roots[index].with_node_mut(id, f)
+}
+
+fn captured_target_retains_pointer_capture(roots: &[Node], id: RuntimeNodeId) -> bool {
+    with_node(roots, id, |node| node.data.container().is_none_or(Container::retains_pointer_capture)).unwrap_or(false)
+}
+
+fn notify_pointer_capture_lost(roots: &mut [Node], id: RuntimeNodeId) {
+    let _ = with_node_mut(roots, id, |node| {
+        if let Some(container) = node.data.container_mut() {
+            container.on_pointer_capture_lost();
+        }
+    });
 }
 
 fn contains_node_in(roots: &[Node], id: RuntimeNodeId) -> bool {
@@ -1002,6 +1141,147 @@ mod tests {
         }
     }
 
+    struct CaptureState {
+        children: Children,
+        active: bool,
+        losses: usize,
+        drags: usize,
+        saw_capture_during_drag: bool,
+    }
+
+    impl WidgetState for CaptureState {}
+    impl ContainerState for CaptureState {}
+
+    struct CaptureContainer {
+        state: Rc<RefCell<CaptureState>>,
+        opt: WidgetOption,
+    }
+
+    impl CaptureContainer {
+        fn new() -> (Self, Rc<RefCell<CaptureState>>) {
+            let state = Rc::new(RefCell::new(CaptureState {
+                children: Children::new(),
+                active: false,
+                losses: 0,
+                drags: 0,
+                saw_capture_during_drag: false,
+            }));
+            (
+                Self {
+                    state: state.clone(),
+                    opt: WidgetOption::NONE,
+                },
+                state,
+            )
+        }
+    }
+
+    impl WidgetStateOwner for CaptureContainer {
+        type State = CaptureState;
+
+        fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+            WidgetStateHandle::new(&self.state)
+        }
+    }
+
+    impl Widget for CaptureContainer {
+        fn widget_opt(&self) -> &WidgetOption {
+            &self.opt
+        }
+
+        fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+            Dimensioni::new(20, 20)
+        }
+
+        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
+            let mut state = self.state.try_borrow_mut().expect("capture state must be available during update");
+            for event in input {
+                match event {
+                    UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT) => state.active = true,
+                    UiInputEvent::MouseDrag { buttons, .. } if buttons.intersects(MouseButton::LEFT) && state.active => state.drags += 1,
+                    UiInputEvent::MouseUp { button, .. } if button.intersects(MouseButton::LEFT) => state.active = false,
+                    _ => {}
+                }
+            }
+        }
+
+        fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+    }
+
+    impl Container for CaptureContainer {
+        fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>) {
+            let state = self.state.try_borrow().expect("capture state must be available during visitation");
+            visitor.visit(&state.children);
+        }
+
+        fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>) {
+            let mut state = self.state.try_borrow_mut().expect("capture state must be available during mutable visitation");
+            visitor.visit(&mut state.children);
+        }
+
+        fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
+            ctx.set_content_size(Dimensioni::new(rect.width.max(0), rect.height.max(0)));
+        }
+
+        fn retains_pointer_capture(&self) -> bool {
+            self.state.try_borrow().expect("capture state must be available for retention").active
+        }
+
+        fn on_pointer_capture_lost(&mut self) {
+            let mut state = self.state.try_borrow_mut().expect("capture state must be available for loss notification");
+            state.active = false;
+            state.losses += 1;
+        }
+
+        fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
+            if matches!(event, UiInputEvent::MouseDrag { .. }) && ctx.has_pointer_capture() {
+                self.state
+                    .try_borrow_mut()
+                    .expect("capture state must be available during routing")
+                    .saw_capture_during_drag = true;
+            }
+            ctx.route_widget(event, self.opt, FocusPolicy::DragCapture)
+        }
+    }
+
+    struct CrossSubtreeRemover {
+        state: Rc<RefCell<()>>,
+        target: Rc<RefCell<TraversalState>>,
+        removed: bool,
+        opt: WidgetOption,
+    }
+
+    impl WidgetStateOwner for CrossSubtreeRemover {
+        type State = ();
+
+        fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+            WidgetStateHandle::new(&self.state)
+        }
+    }
+
+    impl Widget for CrossSubtreeRemover {
+        fn widget_opt(&self) -> &WidgetOption {
+            &self.opt
+        }
+
+        fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+            Dimensioni::new(10, 10)
+        }
+
+        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {
+            if !self.removed {
+                self.target
+                    .try_borrow_mut()
+                    .expect("cross-subtree target state must be independently available")
+                    .children
+                    .clear();
+                self.removed = true;
+            }
+        }
+
+        fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+    }
+
     fn layout_root(runtime: &mut UiRuntime, root: &mut Node, style: &Style, atlas: crate::AtlasHandle) {
         runtime.layout_tree_root(root, style, atlas, Recti::new(10, 20, 80, 60), Recti::new(0, 0, 320, 240));
     }
@@ -1096,5 +1376,295 @@ mod tests {
 
         assert_eq!(first_counts.routed_events.get(), 0);
         assert_eq!(second_counts.routed_events.get(), 1);
+    }
+
+    #[test]
+    fn captured_container_reports_local_retention_and_receives_loss_notification() {
+        let (container, state) = CaptureContainer::new();
+        let mut root = Node::container(container);
+        let id = root.id();
+        let mut runtime = UiRuntime::new();
+        let style = Style::default();
+        let atlas = test_atlas();
+
+        runtime.begin_frame(true);
+        layout_root(&mut runtime, &mut root, &style, atlas.clone());
+
+        let mut input = Input::default();
+        input.mousedown(20, 30, MouseButton::LEFT);
+        let down = UiInputEvent::MouseDown {
+            pos: Vec2i::new(20, 30),
+            button: MouseButton::LEFT,
+        };
+        let (owner, result) = runtime
+            .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &down)
+            .expect("container pointer-down must route");
+        runtime.update_pointer_capture(owner, result, &down, &input);
+        assert_eq!(runtime.capture, Some(id));
+        assert_eq!(runtime.capture_awaiting_update, Some(id));
+
+        let drag = UiInputEvent::MouseDrag {
+            pos: Vec2i::new(200, 180),
+            delta: Vec2i::new(5, 7),
+            buttons: MouseButton::LEFT,
+        };
+        assert_eq!(
+            runtime.route_captured_pointer_input_event(std::slice::from_mut(&mut root), &style, &input, &drag),
+            Some(true)
+        );
+        assert!(state.borrow().saw_capture_during_drag);
+
+        runtime.update_tree_root(&mut root, &style, atlas, &input);
+        assert_eq!(runtime.capture, Some(id));
+        assert_eq!(runtime.capture_awaiting_update, None);
+        assert!(state.borrow().active);
+        assert_eq!(state.borrow().drags, 1);
+
+        state.borrow_mut().active = false;
+        layout_root(&mut runtime, &mut root, &style, test_atlas());
+        assert_eq!(runtime.capture, None);
+        assert_eq!(state.borrow().losses, 1);
+        assert!(!state.borrow().active);
+    }
+
+    #[test]
+    fn routing_time_release_defers_loss_until_queued_drag_update_finishes() {
+        let (container, state) = CaptureContainer::new();
+        state.borrow_mut().active = true;
+        let mut root = Node::container(container);
+        let id = root.id();
+        let mut runtime = UiRuntime::new();
+        let style = Style::default();
+        let atlas = test_atlas();
+
+        runtime.begin_frame(true);
+        layout_root(&mut runtime, &mut root, &style, atlas.clone());
+        runtime.capture = Some(id);
+
+        let mut drag_input = Input::default();
+        drag_input.mousedown(20, 30, MouseButton::LEFT);
+        let drag = UiInputEvent::MouseDrag {
+            pos: Vec2i::new(200, 180),
+            delta: Vec2i::new(4, 6),
+            buttons: MouseButton::LEFT,
+        };
+        assert_eq!(
+            runtime.route_captured_pointer_input_event(std::slice::from_mut(&mut root), &style, &drag_input, &drag),
+            Some(true)
+        );
+
+        let mut release_input = Input::default();
+        release_input.mouseup(200, 180, MouseButton::LEFT);
+        let release = UiInputEvent::MouseUp {
+            pos: Vec2i::new(200, 180),
+            button: MouseButton::LEFT,
+        };
+        assert_eq!(
+            runtime.route_captured_pointer_input_event(std::slice::from_mut(&mut root), &style, &release_input, &release),
+            Some(true)
+        );
+        assert_eq!(runtime.capture, None);
+        assert!(runtime.pending_capture_losses.contains(&id));
+        assert!(state.borrow().active, "loss must wait until queued drag/release update");
+        assert_eq!(state.borrow().losses, 0);
+
+        runtime.update_tree_root(&mut root, &style, atlas, &release_input);
+        assert_eq!(state.borrow().drags, 1, "the final queued drag must be applied before loss");
+        assert!(!state.borrow().active);
+        assert_eq!(state.borrow().losses, 1);
+        assert!(runtime.pending_capture_losses.is_empty());
+    }
+
+    #[test]
+    fn same_target_reacquisition_coalesces_obsolete_pending_loss() {
+        let (container, state) = CaptureContainer::new();
+        state.borrow_mut().active = true;
+        let mut root = Node::container(container);
+        let id = root.id();
+        let mut runtime = UiRuntime::new();
+        let style = Style::default();
+        let atlas = test_atlas();
+
+        runtime.begin_frame(true);
+        layout_root(&mut runtime, &mut root, &style, atlas.clone());
+        runtime.capture = Some(id);
+
+        let mut release_input = Input::default();
+        release_input.mouseup(20, 30, MouseButton::LEFT);
+        let release = UiInputEvent::MouseUp {
+            pos: Vec2i::new(20, 30),
+            button: MouseButton::LEFT,
+        };
+        assert_eq!(
+            runtime.route_captured_pointer_input_event(std::slice::from_mut(&mut root), &style, &release_input, &release),
+            Some(true)
+        );
+        assert!(runtime.pending_capture_losses.contains(&id));
+
+        let mut down_input = Input::default();
+        down_input.mousedown(20, 30, MouseButton::LEFT);
+        let down = UiInputEvent::MouseDown {
+            pos: Vec2i::new(20, 30),
+            button: MouseButton::LEFT,
+        };
+        let (owner, result) = runtime
+            .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &down)
+            .expect("same target must reacquire capture");
+        runtime.update_pointer_capture(owner, result, &down, &down_input);
+        assert_eq!(runtime.capture, Some(id));
+        assert!(runtime.pending_capture_losses.is_empty());
+
+        runtime.update_tree_root(&mut root, &style, atlas, &down_input);
+        assert_eq!(runtime.capture, Some(id));
+        assert!(state.borrow().active);
+        assert_eq!(state.borrow().losses, 0);
+    }
+
+    #[test]
+    fn ancestor_gate_clears_all_descendant_targets_and_local_capture_mode() {
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let (captured, capture_state) = CaptureContainer::new();
+        capture_state.borrow_mut().active = true;
+        let captured = Node::container(captured);
+        let captured_id = captured.id();
+        let gate = TraversalContainer::new([captured], false, log);
+        let gate_state = gate.state.clone();
+        let mut root = Node::container(gate);
+        let mut runtime = UiRuntime::new();
+        let style = Style::default();
+
+        runtime.begin_frame(true);
+        layout_root(&mut runtime, &mut root, &style, test_atlas());
+        runtime.focus = Some(captured_id);
+        runtime.hover = Some(captured_id);
+        runtime.capture = Some(captured_id);
+        runtime.push_routed_event(
+            captured_id,
+            UiInputEvent::MouseMove {
+                pos: Vec2i::new(20, 30),
+                delta: Vec2i::default(),
+            },
+        );
+
+        gate_state.borrow_mut().visible = false;
+        layout_root(&mut runtime, &mut root, &style, test_atlas());
+        assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
+        assert!(runtime.take_routed_events(captured_id).is_empty());
+        assert!(!capture_state.borrow().active);
+        assert_eq!(capture_state.borrow().losses, 1);
+
+        gate_state.borrow_mut().visible = true;
+        layout_root(&mut runtime, &mut root, &style, test_atlas());
+        assert_eq!(runtime.capture, None, "expansion must not restore old capture");
+        assert!(!capture_state.borrow().active, "expansion must not restore old local mode");
+    }
+
+    #[test]
+    fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() {
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let (removed, removed_state) = CaptureContainer::new();
+        removed_state.borrow_mut().active = true;
+        let removed = Node::container(removed);
+        let removed_id = removed.id();
+        let (replacement, replacement_state) = CaptureContainer::new();
+        let replacement = Node::container(replacement);
+        let replacement_id = replacement.id();
+        let parent = TraversalContainer::new([removed], false, log);
+        let parent_state = parent.state.clone();
+        let mut root = Node::container(parent);
+        let mut runtime = UiRuntime::new();
+        let style = Style::default();
+
+        runtime.begin_frame(true);
+        layout_root(&mut runtime, &mut root, &style, test_atlas());
+        runtime.focus = Some(removed_id);
+        runtime.hover = Some(removed_id);
+        runtime.capture = Some(removed_id);
+        runtime.push_routed_event(
+            removed_id,
+            UiInputEvent::MouseMove {
+                pos: Vec2i::new(20, 30),
+                delta: Vec2i::default(),
+            },
+        );
+
+        parent_state.borrow_mut().children.replace([replacement]);
+        layout_root(&mut runtime, &mut root, &style, test_atlas());
+
+        assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
+        assert!(runtime.take_routed_events(removed_id).is_empty());
+        assert!(runtime.take_routed_events(replacement_id).is_empty());
+        assert_eq!(removed_state.borrow().losses, 0, "removed runtimes are dropped rather than notified");
+        assert!(!replacement_state.borrow().active);
+        assert_eq!(replacement_state.borrow().losses, 0);
+
+        let mut drag_input = Input::default();
+        drag_input.mousedown(20, 30, MouseButton::LEFT);
+        let drag = UiInputEvent::MouseDrag {
+            pos: Vec2i::new(20, 30),
+            delta: Vec2i::new(2, 3),
+            buttons: MouseButton::LEFT,
+        };
+        assert_eq!(
+            runtime.route_captured_pointer_input_event(std::slice::from_mut(&mut root), &style, &drag_input, &drag),
+            Some(false),
+            "the stale drag must be swallowed while awaiting its release"
+        );
+        assert!(runtime.discard_invalidated_capture_events);
+
+        let mut release_input = Input::default();
+        release_input.mouseup(20, 30, MouseButton::LEFT);
+        let release = UiInputEvent::MouseUp {
+            pos: Vec2i::new(20, 30),
+            button: MouseButton::LEFT,
+        };
+        assert_eq!(
+            runtime.route_captured_pointer_input_event(std::slice::from_mut(&mut root), &style, &release_input, &release),
+            Some(false),
+            "the stale release must be swallowed instead of falling back to replacement hit routing"
+        );
+        assert!(!runtime.discard_invalidated_capture_events);
+        assert!(runtime.take_routed_events(replacement_id).is_empty());
+    }
+
+    #[test]
+    fn cross_subtree_removal_during_update_sanitizes_before_later_delivery() {
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let (captured, captured_state) = CaptureContainer::new();
+        captured_state.borrow_mut().active = true;
+        let captured = Node::container(captured);
+        let captured_id = captured.id();
+        let target_parent = TraversalContainer::new([captured], false, log.clone());
+        let target_state = target_parent.state.clone();
+        let remover = CrossSubtreeRemover {
+            state: Rc::new(RefCell::new(())),
+            target: target_state,
+            removed: false,
+            opt: WidgetOption::NONE,
+        };
+        let root_container = TraversalContainer::new([Node::widget(remover), Node::container(target_parent)], false, log);
+        let mut root = Node::container(root_container);
+        let mut runtime = UiRuntime::new();
+        let style = Style::default();
+        let atlas = test_atlas();
+
+        runtime.begin_frame(true);
+        layout_root(&mut runtime, &mut root, &style, atlas.clone());
+        runtime.focus = Some(captured_id);
+        runtime.hover = Some(captured_id);
+        runtime.capture = Some(captured_id);
+        runtime.push_routed_event(
+            captured_id,
+            UiInputEvent::MouseMove {
+                pos: Vec2i::new(20, 30),
+                delta: Vec2i::default(),
+            },
+        );
+
+        runtime.update_tree_root(&mut root, &style, atlas, &Input::default());
+
+        assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
+        assert!(runtime.take_routed_events(captured_id).is_empty());
+        assert_eq!(captured_state.borrow().losses, 0, "removed runtime must not receive a loss callback");
     }
 }

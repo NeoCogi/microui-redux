@@ -199,8 +199,21 @@ impl Container for ScrollAreaContainer {
         runtime_update_state(&self.state, "ScrollArea::layout", |state| layout_scroll_area(state, ctx, rect));
     }
 
+    fn retains_pointer_capture(&self) -> bool {
+        runtime_read_state(&self.state, "ScrollArea::retains_pointer_capture", |state| {
+            state.scrolling_enabled && state.drag_axis.is_some()
+        })
+    }
+
+    fn on_pointer_capture_lost(&mut self) {
+        runtime_update_state(&self.state, "ScrollArea::on_pointer_capture_lost", |state| {
+            state.drag_axis = None;
+        });
+    }
+
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
-        let surface = runtime_read_state(&self.state, "ScrollArea::route_input", |state| route_surface(state, event));
+        let has_pointer_capture = ctx.has_pointer_capture();
+        let surface = runtime_read_state(&self.state, "ScrollArea::route_input", |state| route_surface(state, event, has_pointer_capture));
         let Some(surface) = surface else { return ContainerInputResult::Ignored };
         ctx.route_widget_in_rect(event, surface, self.effective_widget_opt(), FocusPolicy::DragCapture)
     }
@@ -345,11 +358,11 @@ fn event_position(event: &UiInputEvent) -> Option<Vec2i> {
     }
 }
 
-fn route_surface(state: &ScrollAreaState, event: &UiInputEvent) -> Option<Recti> {
+fn route_surface(state: &ScrollAreaState, event: &UiInputEvent, has_pointer_capture: bool) -> Option<Recti> {
     if !state.scrolling_enabled {
         return None;
     }
-    if state.drag_axis.is_some() && matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. }) {
+    if has_pointer_capture && matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. }) {
         return Some(state.rect);
     }
     let pos = event_position(event)?;
@@ -492,5 +505,45 @@ mod tests {
         assert!(!child_state.is_alive());
         drop(node);
         assert!(!scroll.is_alive());
+    }
+
+    #[test]
+    fn capture_retention_tracks_enabled_drag_and_loss_clears_only_drag_mode() {
+        let mut container = ScrollAreaBuilder::create_container(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, []));
+        {
+            let mut state = container.state.borrow_mut();
+            state.drag_axis = Some(DragAxis::Vertical);
+            state.offset = Vec2i::new(3, 7);
+            state.rect = Recti::new(0, 0, 80, 60);
+        }
+        assert!(container.retains_pointer_capture());
+
+        container.on_pointer_capture_lost();
+        assert!(!container.retains_pointer_capture());
+        assert_eq!((container.state.borrow().offset.x, container.state.borrow().offset.y), (3, 7));
+
+        {
+            let mut state = container.state.borrow_mut();
+            state.drag_axis = Some(DragAxis::Horizontal);
+            state.set_scrolling_enabled(false);
+            state.set_scrolling_enabled(true);
+        }
+        assert!(!container.retains_pointer_capture(), "disable/re-enable must not resurrect the old drag");
+    }
+
+    #[test]
+    fn captured_route_surface_does_not_wait_for_queued_pointer_down_update() {
+        let container = ScrollAreaBuilder::create_container(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, []));
+        let mut state = container.state.borrow_mut();
+        state.rect = Recti::new(0, 0, 80, 60);
+        let drag = UiInputEvent::MouseDrag {
+            pos: Vec2i::new(200, 180),
+            delta: Vec2i::new(1, 2),
+            buttons: MouseButton::LEFT,
+        };
+
+        let captured = route_surface(&state, &drag, true).expect("captured drag must route before local update");
+        assert_eq!((captured.x, captured.y, captured.width, captured.height), (0, 0, 80, 60));
+        assert!(route_surface(&state, &drag, false).is_none());
     }
 }
