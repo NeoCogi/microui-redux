@@ -81,9 +81,18 @@ struct CubeWidget {
     config: WidgetConfig,
 }
 
-impl CubeWidget {
-    fn new() -> Self {
-        Self {
+struct CubeParameters;
+
+impl WidgetParameters for CubeParameters {}
+
+struct CubeBuilder;
+
+impl WidgetBuilder for CubeBuilder {
+    type Parameters = CubeParameters;
+    type W = CubeWidget;
+
+    fn create_widget(_parameters: Self::Parameters) -> Self::W {
+        CubeWidget {
             state: Rc::new(RefCell::new(())),
             config: WidgetConfig::new(WidgetOption::NO_INTERACT),
         }
@@ -108,9 +117,7 @@ impl Widget for CubeWidget {
         Dimensioni::new(300, 300)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
-        ResourceState::NONE
-    }
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {
         // The custom-render callback is the paint path for this node.
@@ -211,10 +218,8 @@ fn main() {
             })
             .expect("register cube renderer");
 
-        let cube = CubeWidget::new();
-        let tree = UiNodeBuilder::build(move |tree| {
-            tree.node(NodeOptions::with_policy(Policy::fill())).custom_render(cube, cube_renderer);
-        });
+        let cube = CubeBuilder::create_widget(CubeParameters);
+        let tree = Node::custom_render(cube, cube_renderer).with_policy(Policy::fill());
         ctx.create_window("Typed backend-frame cube", rect(40, 40, 360, 360), tree);
 
         State { angle }

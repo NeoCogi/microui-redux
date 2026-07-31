@@ -71,20 +71,16 @@
     clippy::wildcard_imports
 )]
 //! `microui-redux` provides a GUI toolkit inspired by [rxi/microui](https://github.com/rxi/microui).
-//! The crate uses unique owning [`Node`] values and retained [`UiNodeSet`] roots as its public UI
-//! authoring input while keeping Microui's compact frame-driven execution and renderer integration.
-//! It exposes the core context, retained node builders, widget state types, rendering types,
+//! The crate uses unique owning [`Node`] values as its public UI authoring input; each root consumes
+//! one persistent node while keeping Microui's compact frame-driven execution and renderer
+//! integration. It exposes the core context, state-owned containers, widget state types, rendering types,
 //! styles, and image APIs needed to embed a UI inside custom render backends while remaining
 //! allocator- and platform-agnostic.
 //! Built-in widget placement is driven by each widget's `measure` result, so auto-sized rows can use
 //! per-widget intrinsic text/icon metrics instead of a single shared control size.
 //! Retained layout is resolved from context-owned UI nodes, container sizing policies, and widget
 //! measurement results.
-//! Per-frame interaction results are collected internally and published as a committed
-//! generation through [`Context::committed_results`].
-//! Retained application/business logic reacts through
-//! [`Context::committed_results`], which exposes the previous frame's published
-//! interaction generation as the crate's public retained contract.
+//! Retained application logic observes typed widget state handles returned by constructors.
 //!
 //! # Rendering pipeline
 //!
@@ -109,7 +105,6 @@ pub mod atlas;
 // P1.2 TEMPORARY: restore in P3.2
 // mod file_dialog;
 mod frame;
-mod id;
 mod input;
 mod rect_packer;
 pub mod render;
@@ -118,8 +113,6 @@ mod sizing;
 mod style;
 #[cfg(test)]
 mod test_support;
-#[cfg(test)]
-mod tests;
 mod text_layout;
 mod ui_node;
 mod widget;
@@ -133,18 +126,20 @@ mod window_manager;
 /// low-level renderer details or manual container drawing helpers through default imports.
 pub mod retained {
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
+    pub use crate::sizing::{Policy, SizePolicy, StackDirection};
     pub use crate::text_layout::TextWrap;
     pub use crate::ui_node::{
         Children, ChildrenVisitor, ChildrenVisitorMut, Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState, Container, ContainerBuilder,
         ContainerInputCtx, ContainerInputResult, ContainerLayoutCtx, ContainerState, Disclosure, DisclosureBuilder, DisclosureContainer, DisclosureParameters,
-        DisclosureState, Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState, Node, ScrollAreaOption, UiInputEvent,
+        DisclosureState, Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState, Node, Row, RowBuilder, RowContainer, RowParameters,
+        RowState, ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, Stack, StackBuilder,
+        StackContainer, StackParameters, StackState, UiInputEvent,
     };
-    pub use crate::window_manager::{Context, ContextFrame, RootId, WindowOption};
+    pub use crate::window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
     pub use crate::widget::{
-        FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetBuilder, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState,
-        WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+        FocusPolicy, Widget, WidgetBuilder, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
+        WidgetStateOwner, WidgetUpdateCtx,
     };
-    pub use crate::window_manager::{widget_handle, NodeBuilder, NodeId, NodeOptions, Policy, WidgetHandle, UiNodeSet, UiNodeBuilder};
 }
 
 /// Common imports for retained UI applications.
@@ -158,16 +153,17 @@ pub mod prelude {
     };
     // P1.2 TEMPORARY: restore in P3.2
     // pub use crate::file_dialog::FileDialogState;
-    pub use crate::input::{ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, WidgetFillOption};
-    pub use crate::sizing::{SizePolicy, StackDirection};
+    pub use crate::input::{ControlColor, Input, KeyCode, KeyMode, MouseButton, WidgetFillOption};
+    pub use crate::sizing::{Policy, SizePolicy, StackDirection};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame};
     pub use crate::retained::{
         Children, ChildrenVisitor, ChildrenVisitorMut, Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState, Container, ContainerBuilder,
         ContainerInputCtx, ContainerInputResult, ContainerLayoutCtx, ContainerState, Context, ContextFrame, CustomRenderArgs, CustomRenderHandle, Disclosure,
-        DisclosureBuilder, DisclosureContainer, DisclosureParameters, DisclosureState, FocusPolicy, FrameResultGeneration, Grid, GridBuilder, GridContainer,
-        GridItem, GridParameters, GridSpan, GridState, Node, NodeBuilder, NodeId, NodeOptions, Policy, RetainedId, RootId, ScrollAreaOption, TextWrap,
-        UiInputEvent, UiNodeBuilder, UiNodeSet, Widget, WidgetBuilder, WidgetHandle, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetParameters,
-        WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, WindowOption, widget_handle,
+        DisclosureBuilder, DisclosureContainer, DisclosureParameters, DisclosureState, FocusPolicy, Grid, GridBuilder, GridContainer, GridItem, GridParameters,
+        GridSpan, GridState, Node, RootHandle, RootId, RootMutationError, RootState, Row, RowBuilder, RowContainer, RowParameters, RowState, ScrollArea,
+        ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, Stack, StackBuilder, StackContainer, StackParameters,
+        StackState, TextWrap, UiInputEvent, Widget, WidgetBuilder, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState,
+        WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, WindowOption,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
@@ -187,24 +183,23 @@ pub use atlas::{
     AtlasHandle, AtlasSource, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry,
     FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON, load_image_bytes,
 };
-pub use window_manager::{
-    widget_handle, Context, ContextFrame, NodeBuilder, NodeId, NodeOptions, Policy, RootId, WidgetHandle, WindowOption, UiNodeSet, UiNodeBuilder,
-};
+pub use window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
 // P1.2 TEMPORARY: restore in P3.2
 // pub use file_dialog::FileDialogState;
-pub use id::Id;
-pub use input::{ControlColor, Input, KeyCode, KeyMode, MouseButton, ResourceState, WidgetFillOption};
+pub use input::{ControlColor, Input, KeyCode, KeyMode, MouseButton, WidgetFillOption};
 pub use text_layout::TextWrap;
-pub use sizing::{SizePolicy, StackDirection};
+pub use sizing::{Policy, SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
 pub use widget::{
-    FocusPolicy, FrameResultGeneration, RetainedId, Widget, WidgetBuilder, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState,
-    WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    FocusPolicy, Widget, WidgetBuilder, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner,
+    WidgetUpdateCtx,
 };
 pub use ui_node::{
     Children, ChildrenVisitor, ChildrenVisitorMut, Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState, Container, ContainerBuilder,
     ContainerInputCtx, ContainerInputResult, ContainerLayoutCtx, ContainerState, Disclosure, DisclosureBuilder, DisclosureContainer, DisclosureParameters,
-    DisclosureState, Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState, Node, ScrollAreaOption, UiInputEvent,
+    DisclosureState, Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState, Node, Row, RowBuilder, RowContainer, RowParameters,
+    RowState, ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, Stack, StackBuilder, StackContainer,
+    StackParameters, StackState, UiInputEvent,
 };
 pub use widgets::{
     Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch,
@@ -222,4 +217,3 @@ pub(crate) use rs_math3d::{
 pub(crate) use std::{cmp::max, hash::Hash, rc::Rc};
 pub(crate) use style::UNCLIPPED_RECT;
 pub(crate) use ui_node::UiRuntime;
-pub(crate) use widget::FrameResults;

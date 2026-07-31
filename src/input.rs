@@ -114,43 +114,6 @@ impl ControlColor {
 }
 
 bitflags! {
-    #[derive(Copy, Clone, Debug)]
-    /// State bits returned by widgets to describe their interaction outcome.
-    pub struct ResourceState : u32 {
-        /// Indicates that the widget's data changed.
-        const CHANGE = 4;
-        /// Indicates that the widget was submitted (e.g. button clicked).
-        const SUBMIT = 2;
-        /// Indicates that the widget is currently active.
-        const ACTIVE = 1;
-        /// Indicates no interaction.
-        const NONE = 0;
-    }
-}
-
-impl ResourceState {
-    /// Returns `true` if the widget's data changed.
-    pub fn is_changed(&self) -> bool {
-        self.intersects(Self::CHANGE)
-    }
-
-    /// Returns `true` if the widget signaled submission.
-    pub fn is_submitted(&self) -> bool {
-        self.intersects(Self::SUBMIT)
-    }
-
-    /// Returns `true` if the widget is active.
-    pub fn is_active(&self) -> bool {
-        self.intersects(Self::ACTIVE)
-    }
-
-    /// Returns `true` if the state contains no flags.
-    pub fn is_none(&self) -> bool {
-        self.bits() == 0
-    }
-}
-
-bitflags! {
     #[derive(Copy, Clone)]
     /// Controls which widget states should draw a filled background.
     pub struct WidgetFillOption : u32 {

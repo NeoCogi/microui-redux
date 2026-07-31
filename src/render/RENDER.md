@@ -119,9 +119,7 @@ impl Widget for PaintedSwatch {
         &mut self,
         _ctx: &mut WidgetUpdateCtx<'_>,
         _events: Vec<UiInputEvent>,
-    ) -> ResourceState {
-        ResourceState::NONE
-    }
+    ) {}
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let hovered = ctx.hovered();

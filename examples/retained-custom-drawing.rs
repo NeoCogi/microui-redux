@@ -74,9 +74,18 @@ struct RetainedPaint {
     opt: WidgetOption,
 }
 
-impl RetainedPaint {
-    fn new() -> Self {
-        Self {
+struct RetainedPaintParameters;
+
+impl WidgetParameters for RetainedPaintParameters {}
+
+struct RetainedPaintBuilder;
+
+impl WidgetBuilder for RetainedPaintBuilder {
+    type Parameters = RetainedPaintParameters;
+    type W = RetainedPaint;
+
+    fn create_widget(_parameters: Self::Parameters) -> Self::W {
+        RetainedPaint {
             state: Rc::new(RefCell::new(())),
             opt: WidgetOption::NONE,
         }
@@ -101,9 +110,7 @@ impl Widget for RetainedPaint {
         Dimensioni::new(96, 48)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
-        ResourceState::NONE
-    }
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let hovered = ctx.hovered();
@@ -167,10 +174,8 @@ fn make_atlas() -> AtlasHandle {
 fn main() -> Result<(), String> {
     let backend = NoopRenderer { atlas: make_atlas() };
     let mut ctx = Context::new(backend);
-    let paint = RetainedPaint::new();
-    let tree = UiNodeBuilder::build(move |tree| {
-        tree.widget(paint);
-    });
+    let paint = RetainedPaintBuilder::create_widget(RetainedPaintParameters);
+    let tree = Node::widget(paint);
     ctx.create_window("retained custom drawing", rect(12, 12, 132, 84), tree);
 
     let info = FrameInfo::try_new(Dimensioni::new(160, 100), color(18, 20, 22, 255)).map_err(|error| error.to_string())?;

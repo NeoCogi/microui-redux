@@ -145,16 +145,15 @@ impl Widget for Checkbox {
         self.preferred_size(style, atlas)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {
         if !ctx.clicked() {
-            return ResourceState::NONE;
+            return;
         }
 
         runtime_update_state(&self.state, "Checkbox::update", |state| {
             state.checked = !state.checked;
             crate::widgets::record_pending_event(&mut state.pending_changes);
         });
-        ResourceState::CHANGE
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {

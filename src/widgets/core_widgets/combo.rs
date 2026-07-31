@@ -62,8 +62,6 @@ pub struct ComboState {
     pending_changes: u32,
     /// User header submissions waiting to be consumed.
     pending_submissions: u32,
-    /// Temporary compatibility bit emitted through legacy frame results on the next update.
-    legacy_clamped: bool,
 }
 
 impl WidgetState for ComboState {}
@@ -101,11 +99,9 @@ impl ComboState {
 
     /// Updates the cached label and clamps the selected index to the provided items.
     pub fn update_items<S: AsRef<str>>(&mut self, items: &[S]) {
-        self.legacy_clamped = false;
         if items.is_empty() {
             if self.selected != 0 {
                 self.selected = 0;
-                self.legacy_clamped = true;
                 record_pending_event(&mut self.pending_changes);
             }
             self.label.clear();
@@ -115,7 +111,6 @@ impl ComboState {
         if self.selected >= items.len() {
             // Clamp stale selections after the backing item list changes.
             self.selected = items.len() - 1;
-            self.legacy_clamped = true;
             record_pending_event(&mut self.pending_changes);
         }
 
@@ -187,24 +182,13 @@ impl Combo {
         })
     }
 
-    /// Updates popup open state and reports submit/active transitions.
-    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>) -> ResourceState {
+    /// Updates popup open state and records header submissions.
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>) {
         runtime_update_state(&self.state, "Combo::update", |state| {
-            let mut res = ResourceState::NONE;
-            if state.legacy_clamped {
-                res |= ResourceState::CHANGE;
-                state.legacy_clamped = false;
-            }
-
             if ctx.clicked() {
                 state.open = !state.open;
                 record_pending_event(&mut state.pending_submissions);
-                res |= ResourceState::SUBMIT | ResourceState::ACTIVE;
             }
-            if state.open {
-                res |= ResourceState::ACTIVE;
-            }
-            res
         })
     }
 
@@ -245,7 +229,7 @@ impl Widget for Combo {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {
         self.update_widget(ctx)
     }
 
@@ -280,7 +264,6 @@ impl WidgetBuilder for ComboBuilder {
                 last_anchor: Recti::default(),
                 pending_changes: 0,
                 pending_submissions: 0,
-                legacy_clamped: false,
             })),
         }
     }

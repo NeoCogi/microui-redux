@@ -74,9 +74,7 @@ use rs_math3d::{Recti, Vec2f, Vec2i, color4b};
 ///         &mut self,
 ///         _ctx: &mut WidgetUpdateCtx<'_>,
 ///         _events: Vec<UiInputEvent>,
-///     ) -> ResourceState {
-///         ResourceState::NONE
-///     }
+///     ) {}
 ///
 ///     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
 ///         let mut painter = ctx.painter();

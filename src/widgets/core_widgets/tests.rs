@@ -5,7 +5,7 @@ use crate::ContainerBuilder;
 use crate::test_support::test_atlas as make_test_atlas;
 use std::rc::Rc;
 
-fn run_click<W: Widget>(widget: &mut W) -> ResourceState {
+fn run_click<W: Widget>(widget: &mut W) {
     let atlas = make_test_atlas();
     let style = Style::default();
     let bounds = rect(0, 0, 100, 20);
@@ -147,11 +147,11 @@ fn typed_click_events_accumulate_and_consume_one_occurrence_at_a_time() {
     let (combo_state, mut combo) = Combo::create(ComboParameters::new());
 
     for _ in 0..2 {
-        assert!(run_click(&mut checkbox).is_changed());
-        assert!(run_click(&mut button).is_submitted());
-        assert!(run_click(&mut item).is_submitted());
-        assert!(run_click(&mut list).is_submitted());
-        assert!(run_click(&mut combo).is_submitted());
+        run_click(&mut checkbox);
+        run_click(&mut button);
+        run_click(&mut item);
+        run_click(&mut list);
+        run_click(&mut combo);
     }
 
     for _ in 0..2 {

@@ -1,9 +1,9 @@
 use crate::{Widget, WidgetOption, WidgetParameters, WidgetState, WidgetStateOwner};
 use crate::render::{CustomRenderKey, DisplayList, Painter};
 use crate::widget_ctx::{localize_events, WidgetPaintCtx, WidgetUpdateCtx};
-use crate::{Dimensioni, FocusPolicy, FrameResults, Input, KeyCode, KeyMode, MouseButton, Recti, RetainedId, Style, Vec2i};
+use crate::{Dimensioni, FocusPolicy, Input, KeyCode, KeyMode, MouseButton, Recti, Style, Vec2i};
 
-use super::{Children, Node, NodeLayout, UiNode, UiNodeId, UiNodeState, UiRuntime};
+use super::{Children, Node, NodeLayout, UiNode, UiNodeState, UiRuntime};
 
 mod column;
 mod disclosure;
@@ -13,15 +13,11 @@ mod scroll_area;
 mod stack;
 
 pub use column::{Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState};
-pub(crate) use column::LegacyColumn;
 pub use disclosure::{Disclosure, DisclosureBuilder, DisclosureContainer, DisclosureParameters, DisclosureState};
 pub use grid::{Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState};
-pub(crate) use row::Row;
-pub(crate) use scroll_area::{scroll_viewport_node, scrollbar_nodes, shared_scroll_area_state, ScrollArea};
-#[cfg(test)]
-pub(crate) use scroll_area::{scroll_area_state, set_scroll_area_scroll, ScrollAreaState};
-pub use scroll_area::ScrollAreaOption;
-pub(crate) use stack::Stack;
+pub use row::{Row, RowBuilder, RowContainer, RowParameters, RowState};
+pub use scroll_area::{ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState};
+pub use stack::{Stack, StackBuilder, StackContainer, StackParameters, StackState};
 
 /// Internal runtime behavior for any retained node, including widget adapters and containers.
 pub(crate) trait NodeBehavior {
@@ -60,36 +56,6 @@ pub(crate) trait NodeBehavior {
     /// Updates this node in response to one routed input event.
     fn update_on(&mut self, _ctx: &mut InputCtx<'_>, _state: &mut UiNodeState, _event: &UiInputEvent) -> InputResult {
         InputResult::Ignored
-    }
-
-    /// Returns scroll-area state for tests when this behavior owns it.
-    #[cfg(test)]
-    fn debug_scroll_area_state(&self) -> Option<ScrollAreaState> {
-        None
-    }
-
-    /// Replaces scroll-area offset for tests when this behavior owns it.
-    #[cfg(test)]
-    fn debug_set_scroll_area_scroll(&mut self, _scroll: Vec2i) -> bool {
-        false
-    }
-}
-
-/// Temporary behavior interface for containers not yet migrated to state-owned [`Children`].
-///
-/// Row/Stack migrate in P2.0 and ScrollArea in P2.2; Grid already uses the public state-owned
-/// contract. This trait is never public and is removed with the final legacy container.
-pub(crate) trait LegacyContainer: NodeBehavior {
-    /// Returns the owned child nodes.
-    fn children(&self) -> &[UiNode];
-
-    /// Returns the owned child nodes mutably.
-    fn children_mut(&mut self) -> &mut Vec<UiNode>;
-
-    /// Removes and returns an owned child node by id.
-    fn remove_child(&mut self, child: UiNodeId) -> Option<UiNode> {
-        let index = self.children().iter().position(|node| node.id() == child)?;
-        Some(self.children_mut().remove(index))
     }
 }
 
@@ -268,11 +234,7 @@ impl NodeBehavior for WidgetNode {
             state.active,
             state.scroll_delta,
         );
-        let result = self.widget.update(&mut widget_ctx, events);
-
-        let retained_id = RetainedId::root_node(ctx.root_id, id);
-        let dispatch_site = format!("root {:?} ui node {:?}", ctx.root_name, id);
-        ctx.results.record_direct_with_context(retained_id, result, dispatch_site);
+        self.widget.update(&mut widget_ctx, events);
         false
     }
 
@@ -346,12 +308,7 @@ impl NodeBehavior for dyn Container {
             state.active,
             state.scroll_delta,
         );
-        let result = Widget::update(self, &mut widget_ctx, events);
-        ctx.results.record_direct_with_context(
-            RetainedId::root_node(ctx.root_id, id),
-            result,
-            format!("root {:?} container node {:?}", ctx.root_name, id),
-        );
+        Widget::update(self, &mut widget_ctx, events);
         Container::children_visible(self)
     }
 
@@ -710,17 +667,14 @@ impl ContainerLayoutCtx<'_> {
 
 /// Services available while a container updates its own interactive state.
 ///
-/// `UpdateCtx` may mutate runtime interaction state and frame results. Child topology is owned by
-/// the window-manager/builder path and remains stable during runtime traversal. It intentionally
+/// `UpdateCtx` may mutate runtime interaction state. Child topology is owned by concrete container
+/// state and remains stable during runtime traversal. This context intentionally
 /// contains no display list, making the update traversal structurally unable to record paint work.
 pub(crate) struct UpdateCtx<'a> {
     pub(crate) runtime: &'a mut UiRuntime,
-    pub(super) root_id: crate::RootId,
-    pub(super) root_name: &'a str,
     pub(super) style: &'a Style,
     pub(super) atlas: crate::AtlasHandle,
     pub(super) input: &'a Input,
-    pub(super) results: &'a mut FrameResults,
     /// Current node origin in screen coordinates, used only by context adapters.
     pub(super) screen_origin: Vec2i,
     /// Content surface in node-local coordinates.
@@ -866,9 +820,7 @@ mod visitor_tests {
             Dimensioni::default()
         }
 
-        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> crate::ResourceState {
-            crate::ResourceState::NONE
-        }
+        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
 
         fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
     }

@@ -2,8 +2,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::widget::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, COLLAPSE_ICON, ControlColor, Dimensioni, EXPAND_ICON, MouseButton, Recti, ResourceState, Style, UiInputEvent, Widget, WidgetOption,
-    WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    AtlasHandle, COLLAPSE_ICON, ControlColor, Dimensioni, EXPAND_ICON, MouseButton, Recti, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx,
+    WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 
 use super::{
@@ -204,15 +204,14 @@ impl Widget for DisclosureContainer {
         })
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
         let submitted = input
             .iter()
             .any(|event| matches!(event, UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT)));
         if !submitted {
-            return ResourceState::NONE;
+            return;
         }
         runtime_update_state(&self.state, "Disclosure::update", DisclosureState::toggle);
-        ResourceState::CHANGE
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {

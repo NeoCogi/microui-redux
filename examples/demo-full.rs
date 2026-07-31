@@ -76,7 +76,7 @@ use common::wgpu_renderer::WgpuRenderer as SelectedBackend;
 #[cfg(feature = "builder")]
 use microui_redux::atlas::builder;
 use microui_redux::{prelude::*, render::Vertex};
-use std::{cell::RefCell, f32::consts::PI, fs, mem, path::PathBuf, rc::Rc, time::Instant};
+use std::{cell::RefCell, f32::consts::PI, fs, path::PathBuf, rc::Rc, time::Instant};
 
 type SelectedFrame<'a> = <SelectedBackend as RendererBackend>::Frame<'a>;
 
@@ -112,9 +112,18 @@ struct PainterDemo {
     opt: WidgetOption,
 }
 
-impl PainterDemo {
-    fn new() -> Self {
-        Self {
+struct PainterDemoParameters;
+
+impl WidgetParameters for PainterDemoParameters {}
+
+struct PainterDemoBuilder;
+
+impl WidgetBuilder for PainterDemoBuilder {
+    type Parameters = PainterDemoParameters;
+    type W = PainterDemo;
+
+    fn create_widget(_parameters: Self::Parameters) -> Self::W {
+        PainterDemo {
             state: Rc::new(RefCell::new(())),
             phase: 0.0,
             star_center: None,
@@ -141,12 +150,12 @@ impl Widget for PainterDemo {
         Dimensioni::new(240, 200)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
         let bounds = ctx.local_rect();
         let local_width = bounds.width.max(0) as f32;
         let local_height = bounds.height.max(0) as f32;
         if local_width <= 0.0 || local_height <= 0.0 {
-            return ResourceState::NONE;
+            return;
         }
 
         self.phase = (self.phase + 0.025) % (PI * 2.0);
@@ -166,7 +175,6 @@ impl Widget for PainterDemo {
         } else {
             self.star_center = None;
         }
-        ResourceState::NONE
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -278,9 +286,18 @@ struct FalloffEditor {
     opt: WidgetOption,
 }
 
-impl FalloffEditor {
-    fn new() -> Self {
-        let mut editor = Self {
+struct FalloffEditorParameters;
+
+impl WidgetParameters for FalloffEditorParameters {}
+
+struct FalloffEditorBuilder;
+
+impl WidgetBuilder for FalloffEditorBuilder {
+    type Parameters = FalloffEditorParameters;
+    type W = FalloffEditor;
+
+    fn create_widget(_parameters: Self::Parameters) -> Self::W {
+        let mut editor = FalloffEditor {
             state: Rc::new(RefCell::new(())),
             nodes: vec![
                 FalloffNode {
@@ -319,7 +336,9 @@ impl FalloffEditor {
         editor.sanitize();
         editor
     }
+}
 
+impl FalloffEditor {
     // The editor keeps a small inner margin so markers and thick strokes can sit inside the
     // widget without fighting the outer container frame.
     fn graph_rect(bounds: Recti) -> Recti {
@@ -546,11 +565,11 @@ impl Widget for FalloffEditor {
         Dimensioni::new(300, 220)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
         let bounds = ctx.local_rect();
         let graph = Self::graph_rect(bounds);
         if graph.width <= 0 || graph.height <= 0 {
-            return ResourceState::NONE;
+            return;
         }
 
         let mut changed = false;
@@ -582,17 +601,7 @@ impl Widget for FalloffEditor {
             }
         }
 
-        if self.active.is_some() {
-            let mut state = ResourceState::ACTIVE;
-            if changed {
-                state |= ResourceState::CHANGE;
-            }
-            state
-        } else if changed {
-            ResourceState::CHANGE
-        } else {
-            ResourceState::NONE
-        }
+        let _ = changed;
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -725,11 +734,22 @@ struct SuzanneWidget {
     config: WidgetConfig,
 }
 
-impl SuzanneWidget {
-    fn new(data: Rc<RefCell<SuzanneData>>) -> Self {
-        Self {
+struct SuzanneWidgetParameters {
+    data: Rc<RefCell<SuzanneData>>,
+}
+
+impl WidgetParameters for SuzanneWidgetParameters {}
+
+struct SuzanneWidgetBuilder;
+
+impl WidgetBuilder for SuzanneWidgetBuilder {
+    type Parameters = SuzanneWidgetParameters;
+    type W = SuzanneWidget;
+
+    fn create_widget(parameters: Self::Parameters) -> Self::W {
+        SuzanneWidget {
             state: Rc::new(RefCell::new(())),
-            data,
+            data: parameters.data,
             config: WidgetConfig::new(WidgetOption::HOLD_FOCUS | WidgetOption::GRAB_SCROLL),
         }
     }
@@ -753,10 +773,10 @@ impl Widget for SuzanneWidget {
         Dimensioni::new(80, 24)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
         let bounds = ctx.local_rect();
         if bounds.width <= 0 || bounds.height <= 0 {
-            return ResourceState::NONE;
+            return;
         }
 
         let mut suzanne = self.data.borrow_mut();
@@ -812,21 +832,143 @@ impl Widget for SuzanneWidget {
                 }
             }
         }
-
-        ResourceState::ACTIVE
     }
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
-fn projected_leaf<B: WidgetBuilder>(parameters: B::Parameters) -> (WidgetStateHandle<<B::W as WidgetStateOwner>::State>, B::W) {
+fn stateful_leaf<B: WidgetBuilder>(parameters: B::Parameters) -> (WidgetStateHandle<<B::W as WidgetStateOwner>::State>, B::W) {
     let runtime = B::create_widget(parameters);
     let state = runtime.state_handle();
     (state, runtime)
 }
 
+/// Small example-local authoring scope that immediately moves unique nodes into concrete
+/// state-owned containers. It carries no identity or reconciliation metadata.
+#[derive(Default)]
+struct DemoNodes {
+    nodes: Vec<Node>,
+}
+
+impl DemoNodes {
+    fn build(f: impl FnOnce(&mut Self)) -> Vec<Node> {
+        let mut nodes = Self::default();
+        f(&mut nodes);
+        nodes.nodes
+    }
+
+    fn children(f: impl FnOnce(&mut Self)) -> Vec<Node> {
+        Self::build(f)
+    }
+
+    fn push(&mut self, node: Node) {
+        self.nodes.push(node);
+    }
+
+    fn with_policy(&mut self, policy: Policy) -> DemoNode<'_> {
+        DemoNode { nodes: self, policy }
+    }
+
+    fn widget<W: WidgetStateOwner>(&mut self, widget: W) {
+        self.push(Node::widget(widget));
+    }
+
+    fn text_with_wrap(&mut self, text: impl Into<String>, wrap: TextWrap) {
+        let (_, widget) = TextBlock::create(TextBlockParameters::with_wrap(text, wrap));
+        self.widget(widget);
+    }
+
+    fn custom_render<B, W>(&mut self, widget: W, renderer: CustomRenderHandle<B>)
+    where
+        B: RendererBackend,
+        W: WidgetStateOwner,
+    {
+        self.push(Node::custom_render(widget, renderer));
+    }
+
+    fn scroll_area(&mut self, opt: ScrollAreaOption, f: impl FnOnce(&mut Self)) {
+        let (_, node) = ScrollArea::create(ScrollAreaParameters::new(opt, Self::children(f)));
+        self.push(node);
+    }
+
+    fn header(&mut self, label: impl Into<String>, expanded: bool, f: impl FnOnce(&mut Self)) -> WidgetStateHandle<DisclosureState> {
+        let (state, node) = Disclosure::create(DisclosureParameters::header(label, expanded, Self::children(f)));
+        self.push(node);
+        state
+    }
+
+    fn tree_node(&mut self, label: impl Into<String>, expanded: bool, f: impl FnOnce(&mut Self)) -> WidgetStateHandle<DisclosureState> {
+        let (state, node) = Disclosure::create(DisclosureParameters::tree(label, expanded, Self::children(f)));
+        self.push(node);
+        state
+    }
+
+    fn row(&mut self, widths: &[SizePolicy], height: SizePolicy, f: impl FnOnce(&mut Self)) {
+        let (_, node) = Row::create(RowParameters::new(widths.iter().copied(), height, Self::children(f)));
+        self.push(node.with_policy(Policy::new(SizePolicy::Auto, height)));
+    }
+
+    fn grid(&mut self, widths: &[SizePolicy], heights: &[SizePolicy], f: impl FnOnce(&mut Self)) {
+        let items = Self::children(f).into_iter().map(GridItem::new);
+        let (_, node) = Grid::create(GridParameters::new(widths.iter().copied(), heights.iter().copied(), items));
+        self.push(node);
+    }
+
+    fn column(&mut self, f: impl FnOnce(&mut Self)) {
+        let (_, node) = Column::create(ColumnParameters::new(Self::children(f)));
+        self.push(node);
+    }
+
+    fn stack(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: impl FnOnce(&mut Self)) -> WidgetStateHandle<StackState> {
+        let (state, node) = Stack::create(StackParameters::new(width, height, direction, Self::children(f)));
+        self.push(node);
+        state
+    }
+}
+
+struct DemoNode<'a> {
+    nodes: &'a mut DemoNodes,
+    policy: Policy,
+}
+
+impl DemoNode<'_> {
+    fn widget<W: WidgetStateOwner>(self, widget: W) {
+        self.nodes.push(Node::widget(widget).with_policy(self.policy));
+    }
+
+    fn scroll_area(self, opt: ScrollAreaOption, f: impl FnOnce(&mut DemoNodes)) {
+        let (_, node) = ScrollArea::create(ScrollAreaParameters::new(opt, DemoNodes::children(f)));
+        self.nodes.push(node.with_policy(self.policy));
+    }
+}
+
+struct DemoRootContents {
+    style: WidgetStateHandle<ColumnState>,
+    log: WidgetStateHandle<ColumnState>,
+    typography: WidgetStateHandle<ColumnState>,
+    triangle: WidgetStateHandle<ColumnState>,
+    painter: WidgetStateHandle<ColumnState>,
+    falloff: WidgetStateHandle<ColumnState>,
+    suzanne: WidgetStateHandle<ColumnState>,
+    stack_direction: WidgetStateHandle<ColumnState>,
+    weight: WidgetStateHandle<ColumnState>,
+    demo: WidgetStateHandle<ColumnState>,
+    combo: WidgetStateHandle<ColumnState>,
+    popup: WidgetStateHandle<ColumnState>,
+}
+
+fn root_content() -> (WidgetStateHandle<ColumnState>, Node) {
+    Column::create(ColumnParameters::default())
+}
+
+fn replace_root_content(root: &WidgetStateHandle<ColumnState>, nodes: Vec<Node>, name: &str) {
+    if root.try_update_with(nodes, ColumnState::replace).is_err() {
+        panic!("{name} root content state unavailable");
+    }
+}
+
 fn retained_leaf<B: WidgetBuilder>(parameters: B::Parameters) -> B::W {
-    projected_leaf::<B>(parameters).1
+    stateful_leaf::<B>(parameters).1
 }
 
 fn static_label(text: impl Into<String>) -> ListItem {
@@ -834,7 +976,7 @@ fn static_label(text: impl Into<String>) -> ListItem {
 }
 
 fn centered_button(label: impl Into<String>) -> (WidgetStateHandle<ButtonState>, Button) {
-    projected_leaf::<ButtonBuilder>(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER))
+    stateful_leaf::<ButtonBuilder>(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER))
 }
 
 fn set_slider_value(state: &WidgetStateHandle<SliderState>, value: Real) {
@@ -902,18 +1044,9 @@ struct State {
     window_info_value_states: [WidgetStateHandle<ListItemState>; 3],
     style: Style,
 
-    demo_root: RootId,
-    style_root: RootId,
-    log_root: RootId,
-    combo_popup_root: RootId,
-    popup_root: RootId,
-    typography_root: RootId,
-    triangle_root: RootId,
-    painter_root: RootId,
-    falloff_root: RootId,
-    suzanne_root: RootId,
-    stack_direction_root: RootId,
-    weight_root: RootId,
+    demo_root: RootHandle,
+    combo_popup_root: RootHandle,
+    popup_root: RootHandle,
 
     // P1.2 TEMPORARY: restore in P3.2
     // dialog_window: FileDialogState,
@@ -932,18 +1065,6 @@ struct State {
     // open_dialog: bool,
     triangle_data: Rc<RefCell<TriangleState>>,
     background_swatch_state: WidgetStateHandle<ColorSwatchState>,
-    style_tree: UiNodeSet,
-    log_tree: UiNodeSet,
-    typography_tree: UiNodeSet,
-    triangle_tree: UiNodeSet,
-    painter_tree: UiNodeSet,
-    falloff_tree: UiNodeSet,
-    suzanne_tree: UiNodeSet,
-    stack_direction_tree: UiNodeSet,
-    weight_tree: UiNodeSet,
-    demo_tree: UiNodeSet,
-    combo_tree: UiNodeSet,
-    popup_tree: UiNodeSet,
 }
 
 impl State {
@@ -1049,7 +1170,7 @@ impl State {
             ))
         });
         let style_color_slider_pairs = std::array::from_fn(|_| {
-            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
                 0.0,
                 0.0,
                 255.0,
@@ -1060,11 +1181,11 @@ impl State {
         });
         let style_color_slider_states = style_color_slider_pairs.each_ref().map(|(state, _)| state.clone());
         let style_color_sliders = style_color_slider_pairs.map(|(_, runtime)| runtime);
-        let style_color_swatch_pairs = std::array::from_fn(|_| projected_leaf::<ColorSwatchBuilder>(ColorSwatchParameters::new(color(0, 0, 0, 0xFF))));
+        let style_color_swatch_pairs = std::array::from_fn(|_| stateful_leaf::<ColorSwatchBuilder>(ColorSwatchParameters::new(color(0, 0, 0, 0xFF))));
         let style_color_swatch_states = style_color_swatch_pairs.each_ref().map(|(state, _)| state.clone());
         let style_color_swatches = style_color_swatch_pairs.map(|(_, runtime)| runtime);
         let style_value_slider_pairs = [
-            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
                 0.0,
                 0.0,
                 16.0,
@@ -1072,7 +1193,7 @@ impl State {
                 0,
                 WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
             )),
-            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
                 0.0,
                 0.0,
                 16.0,
@@ -1080,7 +1201,7 @@ impl State {
                 0,
                 WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
             )),
-            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
                 0.0,
                 0.0,
                 128.0,
@@ -1088,7 +1209,7 @@ impl State {
                 0,
                 WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
             )),
-            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
                 0.0,
                 0.0,
                 128.0,
@@ -1096,7 +1217,7 @@ impl State {
                 0,
                 WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
             )),
-            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
                 0.0,
                 0.0,
                 128.0,
@@ -1108,7 +1229,7 @@ impl State {
         let style_value_slider_states = style_value_slider_pairs.each_ref().map(|(state, _)| state.clone());
         let style_value_sliders = style_value_slider_pairs.map(|(_, runtime)| runtime);
         let bg_slider_pairs = std::array::from_fn(|_| {
-            projected_leaf::<SliderBuilder>(SliderParameters::with_opt(
+            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
                 0.0,
                 0.0,
                 255.0,
@@ -1125,8 +1246,8 @@ impl State {
             )
             .wrap(TextWrap::Word),
         );
-        let (submit_buf_state, submit_buf) = projected_leaf::<TextboxBuilder>(TextboxParameters::new("").font(FontRole::Mono.into()));
-        let (log_text_state, log_text) = projected_leaf::<TextBlockBuilder>(TextBlockParameters::new("").font(FontRole::Mono.into()));
+        let (submit_buf_state, submit_buf) = stateful_leaf::<TextboxBuilder>(TextboxParameters::new("").font(FontRole::Mono.into()));
+        let (log_text_state, log_text) = stateful_leaf::<TextBlockBuilder>(TextBlockParameters::new("").font(FontRole::Mono.into()));
         let typography_heading = retained_leaf::<TextBlockBuilder>(TextBlockParameters::new("NORMAL.ttf at 18px").font(FontRole::Heading.into()));
         let typography_body = retained_leaf::<TextBlockBuilder>(
             TextBlockParameters::with_wrap(
@@ -1136,37 +1257,65 @@ impl State {
             .font(FontRole::Body.into()),
         );
         let style = Style::default().with_named_fonts(&ctx.renderer().atlas());
-        let demo_root = ctx.create_window("Demo Window", rect(40, 40, 300, 450), UiNodeSet::default());
-        let style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), UiNodeSet::default());
-        let log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), UiNodeSet::default());
-        let combo_popup_root = ctx.create_popup("Combo Box Popup", UiNodeSet::default());
+        let (demo_content, demo_node) = root_content();
+        let (style_content, style_node) = root_content();
+        let (log_content, log_node) = root_content();
+        let (combo_content, combo_node) = root_content();
+        let (popup_content, popup_node) = root_content();
+        let (typography_content, typography_node) = root_content();
+        let (triangle_content, triangle_node) = root_content();
+        let (painter_content, painter_node) = root_content();
+        let (falloff_content, falloff_node) = root_content();
+        let (suzanne_content, suzanne_node) = root_content();
+        let (stack_direction_content, stack_direction_node) = root_content();
+        let (weight_content, weight_node) = root_content();
+        let root_contents = DemoRootContents {
+            style: style_content,
+            log: log_content,
+            typography: typography_content,
+            triangle: triangle_content,
+            painter: painter_content,
+            falloff: falloff_content,
+            suzanne: suzanne_content,
+            stack_direction: stack_direction_content,
+            weight: weight_content,
+            demo: demo_content,
+            combo: combo_content,
+            popup: popup_content,
+        };
+
+        let demo_root = ctx.create_window("Demo Window", rect(40, 40, 300, 450), demo_node);
+        let _style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), style_node);
+        let _log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), log_node);
+        let combo_popup_root = ctx.create_popup("Combo Box Popup", combo_node);
         ctx.set_root_options(
-            combo_popup_root,
+            combo_popup_root.id(),
             WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
-        );
-        let popup_root = ctx.create_popup("Test Popup", UiNodeSet::default());
+        )
+        .expect("combo popup root must exist");
+        let popup_root = ctx.create_popup("Test Popup", popup_node);
         ctx.set_root_options(
-            popup_root,
+            popup_root.id(),
             WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
-        );
-        ctx.set_root_visible(popup_root, false);
-        let typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), UiNodeSet::default());
-        let triangle_root = ctx.create_window("Triangle Window", rect(200, 100, 200, 200), UiNodeSet::default());
-        let painter_root = ctx.create_window("Painter Window", rect(820, 40, 280, 240), UiNodeSet::default());
-        let falloff_root = ctx.create_window("Brush Falloff", rect(820, 300, 320, 260), UiNodeSet::default());
-        let suzanne_root = ctx.create_window("Suzanne Window", rect(220, 220, 300, 300), UiNodeSet::default());
-        let stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), UiNodeSet::default());
-        let weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), UiNodeSet::default());
-        let (combo_typed_state, combo_state) = projected_leaf::<ComboBuilder>(ComboParameters::new());
+        )
+        .expect("test popup root must exist");
+        let _typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), typography_node);
+        let _triangle_root = ctx.create_window("Triangle Window", rect(200, 100, 200, 200), triangle_node);
+        let _painter_root = ctx.create_window("Painter Window", rect(820, 40, 280, 240), painter_node);
+        let _falloff_root = ctx.create_window("Brush Falloff", rect(820, 300, 320, 260), falloff_node);
+        let _suzanne_root = ctx.create_window("Suzanne Window", rect(220, 220, 300, 300), suzanne_node);
+        let _stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), stack_direction_node);
+        let _weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), weight_node);
+        let (combo_typed_state, combo_state) = stateful_leaf::<ComboBuilder>(ComboParameters::new());
         let combo_item_pairs = [
-            projected_leaf::<ListItemBuilder>(ListItemParameters::new("Apple")),
-            projected_leaf::<ListItemBuilder>(ListItemParameters::new("Banana")),
-            projected_leaf::<ListItemBuilder>(ListItemParameters::new("Cherry")),
-            projected_leaf::<ListItemBuilder>(ListItemParameters::new("Date")),
+            stateful_leaf::<ListItemBuilder>(ListItemParameters::new("Apple")),
+            stateful_leaf::<ListItemBuilder>(ListItemParameters::new("Banana")),
+            stateful_leaf::<ListItemBuilder>(ListItemParameters::new("Cherry")),
+            stateful_leaf::<ListItemBuilder>(ListItemParameters::new("Date")),
         ];
         let combo_item_states = combo_item_pairs.each_ref().map(|(state, _)| state.clone());
         let combo_items = combo_item_pairs.map(|(_, runtime)| runtime);
-        let window_info_value_pairs = std::array::from_fn(|_| projected_leaf::<ListItemBuilder>(ListItemParameters::with_opt("", WidgetOption::NO_INTERACT)));
+        let window_info_value_pairs = std::array::from_fn(|_| stateful_leaf::<ListItemBuilder>(ListItemParameters::with_opt("", WidgetOption::NO_INTERACT)));
         let window_info_value_states = window_info_value_pairs.each_ref().map(|(state, _)| state.clone());
         let window_info_values = window_info_value_pairs.map(|(_, runtime)| runtime);
         let (submit_button_state, submit_button) = centered_button("Submit");
@@ -1218,7 +1367,7 @@ impl State {
         ];
         let weight_button_states = weight_button_pairs.each_ref().map(|(state, _)| state.clone());
         let weight_buttons = weight_button_pairs.map(|(_, runtime)| runtime);
-        let (background_swatch_state, background_swatch) = projected_leaf::<ColorSwatchBuilder>(ColorSwatchParameters::new(color(90, 95, 100, 0xFF)));
+        let (background_swatch_state, background_swatch) = stateful_leaf::<ColorSwatchBuilder>(ColorSwatchParameters::new(color(90, 95, 100, 0xFF)));
         let runtimes = DemoRuntimes {
             bg_sliders,
             style_color_sliders,
@@ -1282,9 +1431,9 @@ impl State {
             triangle_renderer,
             suzanne_renderer,
             triangle_widget: Custom::create(CustomParameters::with_opt("Triangle", WidgetOption::HOLD_FOCUS)),
-            painter_widget: PainterDemo::new(),
-            falloff_widget: FalloffEditor::new(),
-            suzanne_widget: SuzanneWidget::new(suzanne_data.clone()),
+            painter_widget: PainterDemoBuilder::create_widget(PainterDemoParameters),
+            falloff_widget: FalloffEditorBuilder::create_widget(FalloffEditorParameters),
+            suzanne_widget: SuzanneWidgetBuilder::create_widget(SuzanneWidgetParameters { data: suzanne_data.clone() }),
             background_swatch,
         };
         let mut state = Self {
@@ -1300,17 +1449,8 @@ impl State {
             window_info_value_states,
             style,
             demo_root,
-            style_root,
-            log_root,
             combo_popup_root,
             popup_root,
-            typography_root,
-            triangle_root,
-            painter_root,
-            falloff_root,
-            suzanne_root,
-            stack_direction_root,
-            weight_root,
             // P1.2 TEMPORARY: restore in P3.2
             // dialog_window: FileDialogState::new(ctx),
             fps: 0.0,
@@ -1327,23 +1467,10 @@ impl State {
             // open_dialog: false,
             triangle_data,
             background_swatch_state,
-            style_tree: UiNodeSet::default(),
-            log_tree: UiNodeSet::default(),
-            typography_tree: UiNodeSet::default(),
-            triangle_tree: UiNodeSet::default(),
-            painter_tree: UiNodeSet::default(),
-            falloff_tree: UiNodeSet::default(),
-            suzanne_tree: UiNodeSet::default(),
-            stack_direction_tree: UiNodeSet::default(),
-            weight_tree: UiNodeSet::default(),
-            demo_tree: UiNodeSet::default(),
-            combo_tree: UiNodeSet::default(),
-            popup_tree: UiNodeSet::default(),
         };
         state.sync_background_controls_from_bg();
         state.sync_style_controls_from_style();
-        state.rebuild_trees(runtimes);
-        state.install_root_nodes(ctx);
+        state.build_root_contents(runtimes, root_contents);
         state
     }
 
@@ -1382,21 +1509,6 @@ impl State {
         set_slider_value(&self.style_value_slider_states[4], self.style.scrollbar_size as Real);
     }
 
-    fn install_root_nodes(&mut self, ctx: &mut Context<SelectedBackend>) {
-        ctx.set_root_nodes(self.style_root, mem::take(&mut self.style_tree));
-        ctx.set_root_nodes(self.log_root, mem::take(&mut self.log_tree));
-        ctx.set_root_nodes(self.typography_root, mem::take(&mut self.typography_tree));
-        ctx.set_root_nodes(self.triangle_root, mem::take(&mut self.triangle_tree));
-        ctx.set_root_nodes(self.painter_root, mem::take(&mut self.painter_tree));
-        ctx.set_root_nodes(self.falloff_root, mem::take(&mut self.falloff_tree));
-        ctx.set_root_nodes(self.suzanne_root, mem::take(&mut self.suzanne_tree));
-        ctx.set_root_nodes(self.stack_direction_root, mem::take(&mut self.stack_direction_tree));
-        ctx.set_root_nodes(self.weight_root, mem::take(&mut self.weight_tree));
-        ctx.set_root_nodes(self.demo_root, mem::take(&mut self.demo_tree));
-        ctx.set_root_nodes(self.combo_popup_root, mem::take(&mut self.combo_tree));
-        ctx.set_root_nodes(self.popup_root, mem::take(&mut self.popup_tree));
-    }
-
     fn write_log(&mut self, text: &str) {
         let mut logbuf = self.logbuf.borrow_mut();
         if !logbuf.is_empty() {
@@ -1411,11 +1523,11 @@ impl State {
     ///
     /// The demo does not mutate these top-level sections externally, so their weak handles can be
     /// discarded while each retained `DisclosureContainer` keeps its state alive.
-    fn section(tree: &mut UiNodeBuilder, label: &str, expanded: bool, f: impl FnOnce(&mut UiNodeBuilder)) {
+    fn section(tree: &mut DemoNodes, label: &str, expanded: bool, f: impl FnOnce(&mut DemoNodes)) {
         let _ = tree.header(label, expanded, f);
     }
 
-    fn rebuild_trees(&mut self, runtimes: DemoRuntimes) {
+    fn build_root_contents(&mut self, runtimes: DemoRuntimes, roots: DemoRootContents) {
         let DemoRuntimes {
             bg_sliders,
             style_color_sliders,
@@ -1455,199 +1567,252 @@ impl State {
             suzanne_widget,
             background_swatch,
         } = runtimes;
-        self.style_tree = UiNodeBuilder::build(move |tree| {
-            let color_row = [
-                SizePolicy::Fixed(80),
-                SizePolicy::Weight(1.0),
-                SizePolicy::Weight(1.0),
-                SizePolicy::Weight(1.0),
-                SizePolicy::Weight(1.0),
-                SizePolicy::Weight(1.0),
-            ];
-            let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Remainder(0)];
+        replace_root_content(
+            &roots.style,
+            DemoNodes::build(move |tree| {
+                let color_row = [
+                    SizePolicy::Fixed(80),
+                    SizePolicy::Weight(1.0),
+                    SizePolicy::Weight(1.0),
+                    SizePolicy::Weight(1.0),
+                    SizePolicy::Weight(1.0),
+                    SizePolicy::Weight(1.0),
+                ];
+                let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Remainder(0)];
 
-            tree.node(NodeOptions::with_policy(Policy::fill()))
-                .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
-                    let mut sliders = style_color_sliders.into_iter();
-                    for ((label, swatch), [red, green, blue, alpha]) in
-                        style_color_labels
-                            .into_iter()
-                            .zip(style_color_swatches)
-                            .zip(std::array::from_fn::<_, 14, _>(|_| {
-                                [
-                                    sliders.next().expect("red style slider"),
-                                    sliders.next().expect("green style slider"),
-                                    sliders.next().expect("blue style slider"),
-                                    sliders.next().expect("alpha style slider"),
-                                ]
-                            }))
-                    {
-                        tree.row(&color_row, SizePolicy::Auto, |tree| {
-                            tree.widget(label);
-                            tree.widget(red);
-                            tree.widget(green);
-                            tree.widget(blue);
-                            tree.widget(alpha);
-                            tree.widget(swatch);
+                tree.with_policy(Policy::fill())
+                    .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
+                        let mut sliders = style_color_sliders.into_iter();
+                        for ((label, swatch), [red, green, blue, alpha]) in
+                            style_color_labels
+                                .into_iter()
+                                .zip(style_color_swatches)
+                                .zip(std::array::from_fn::<_, 14, _>(|_| {
+                                    [
+                                        sliders.next().expect("red style slider"),
+                                        sliders.next().expect("green style slider"),
+                                        sliders.next().expect("blue style slider"),
+                                        sliders.next().expect("alpha style slider"),
+                                    ]
+                                }))
+                        {
+                            tree.row(&color_row, SizePolicy::Auto, |tree| {
+                                tree.widget(label);
+                                tree.widget(red);
+                                tree.widget(green);
+                                tree.widget(blue);
+                                tree.widget(alpha);
+                                tree.widget(swatch);
+                            });
+                        }
+
+                        for (label, slider) in style_metric_labels.into_iter().zip(style_value_sliders) {
+                            tree.row(&metrics_row, SizePolicy::Auto, |tree| {
+                                tree.widget(label);
+                                tree.widget(slider);
+                            });
+                        }
+                    });
+            }),
+            "style",
+        );
+
+        replace_root_content(
+            &roots.log,
+            DemoNodes::build(|tree| {
+                let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
+                    tree.scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
+                        tree.widget(log_text);
+                    });
+                });
+                tree.row(&submit_row, SizePolicy::Auto, |tree| {
+                    tree.widget(submit_buf);
+                    tree.widget(submit_button);
+                });
+            }),
+            "log",
+        );
+
+        replace_root_content(
+            &roots.typography,
+            DemoNodes::build(move |tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                    tree.widget(typography_heading);
+                    tree.widget(typography_body);
+                    tree.widget(typography_button);
+                });
+            }),
+            "typography",
+        );
+
+        replace_root_content(
+            &roots.triangle,
+            DemoNodes::build(move |tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
+                    tree.custom_render(triangle_widget, triangle_renderer);
+                });
+            }),
+            "triangle",
+        );
+
+        replace_root_content(
+            &roots.suzanne,
+            DemoNodes::build(move |tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
+                    tree.custom_render(suzanne_widget, suzanne_renderer);
+                });
+            }),
+            "Suzanne",
+        );
+
+        replace_root_content(
+            &roots.painter,
+            DemoNodes::build(move |tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
+                    tree.widget(painter_widget);
+                });
+            }),
+            "painter",
+        );
+
+        replace_root_content(
+            &roots.falloff,
+            DemoNodes::build(move |tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
+                    tree.widget(falloff_widget);
+                });
+            }),
+            "falloff",
+        );
+
+        let mut bottom_stack = None;
+        replace_root_content(
+            &roots.stack_direction,
+            DemoNodes::build(|tree| {
+                let columns = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
+                let [label_top, label_bottom] = stack_direction_labels;
+                let [button_top_0, button_top_1, button_top_2, button_bottom_0, button_bottom_1, button_bottom_2] = stack_direction_buttons;
+                tree.row(&columns, SizePolicy::Auto, |tree| {
+                    tree.widget(label_top);
+                    tree.widget(label_bottom);
+                });
+                tree.row(&columns, SizePolicy::Fixed(120), |tree| {
+                    tree.column(|tree| {
+                        tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, |tree| {
+                            tree.widget(button_top_0);
+                            tree.widget(button_top_1);
+                            tree.widget(button_top_2);
                         });
-                    }
+                    });
+                    tree.column(|tree| {
+                        bottom_stack = Some(
+                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, |tree| {
+                                tree.widget(button_bottom_0);
+                                tree.widget(button_bottom_1);
+                                tree.widget(button_bottom_2);
+                            }),
+                        );
+                    });
+                });
+            }),
+            "stack direction",
+        );
+        bottom_stack
+            .expect("bottom stack must be constructed")
+            .try_update(|stack| stack.set_direction(StackDirection::BottomToTop))
+            .expect("bottom stack state unavailable");
 
-                    for (label, slider) in style_metric_labels.into_iter().zip(style_value_sliders) {
-                        tree.row(&metrics_row, SizePolicy::Auto, |tree| {
-                            tree.widget(label);
-                            tree.widget(slider);
+        replace_root_content(
+            &roots.weight,
+            DemoNodes::build(|tree| {
+                let [row_weight_label, grid_weight_label] = weight_labels;
+                let [
+                    button_row_0,
+                    button_row_1,
+                    button_row_2,
+                    button_grid_0,
+                    button_grid_1,
+                    button_grid_2,
+                    button_grid_3,
+                    button_grid_4,
+                    button_grid_5,
+                ] = weight_buttons;
+                let row = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0), SizePolicy::Weight(3.0)];
+                let cols = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
+                let rows = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
+                tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
+                    tree.widget(row_weight_label);
+                });
+                tree.row(&row, SizePolicy::Fixed(28), |tree| {
+                    tree.widget(button_row_0);
+                    tree.widget(button_row_1);
+                    tree.widget(button_row_2);
+                });
+                tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |tree| {
+                    tree.widget(grid_weight_label);
+                });
+                tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |tree| {
+                    tree.column(|tree| {
+                        tree.grid(&cols, &rows, |tree| {
+                            tree.widget(button_grid_0);
+                            tree.widget(button_grid_1);
+                            tree.widget(button_grid_2);
+                            tree.widget(button_grid_3);
+                            tree.widget(button_grid_4);
+                            tree.widget(button_grid_5);
                         });
+                    });
+                });
+            }),
+            "weight",
+        );
+
+        replace_root_content(
+            &roots.combo,
+            DemoNodes::build(|tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                    for item in combo_items {
+                        tree.widget(item);
                     }
                 });
-        });
+            }),
+            "combo popup",
+        );
 
-        self.log_tree = UiNodeBuilder::build(|tree| {
-            let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
-            tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
-                tree.scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
-                    tree.widget(log_text);
+        replace_root_content(
+            &roots.popup,
+            DemoNodes::build(|tree| {
+                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                    for button in popup_buttons {
+                        tree.widget(button);
+                    }
                 });
-            });
-            tree.row(&submit_row, SizePolicy::Auto, |tree| {
-                tree.widget(submit_buf);
-                tree.widget(submit_button);
-            });
-        });
+            }),
+            "test popup",
+        );
 
-        self.typography_tree = UiNodeBuilder::build(move |tree| {
-            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                tree.widget(typography_heading);
-                tree.widget(typography_body);
-                tree.widget(typography_button);
-            });
-        });
+        replace_root_content(
+            &roots.demo,
+            DemoNodes::build(|tree| {
+                let window_info_row = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
+                let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
+                let tree_widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
+                let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
+                let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
+                let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
+                let [label_pos, label_size, label_fps] = window_info_labels;
+                let [value_pos, value_size, value_fps] = window_info_values;
+                let [button0, button1, button2, button3, button4] = test_buttons;
+                let [test_label0, test_label1, test_label2] = test_button_labels;
+                let [tree_button0, tree_button1, tree_button2, tree_button3, tree_button4, tree_button5] = tree_buttons;
+                let [checkbox0, checkbox1, checkbox2] = checkboxes;
+                let [tree_label_hello, tree_label_world] = tree_labels;
+                let [slider_red, slider_green, slider_blue] = bg_sliders;
+                let [label_red, label_green, label_blue] = background_labels;
+                let [texture0, texture1, texture2, texture3] = texture_buttons;
 
-        self.triangle_tree = UiNodeBuilder::build(move |tree| {
-            tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                tree.custom_render(triangle_widget, triangle_renderer);
-            });
-        });
-
-        self.suzanne_tree = UiNodeBuilder::build(move |tree| {
-            tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                tree.custom_render(suzanne_widget, suzanne_renderer);
-            });
-        });
-
-        self.painter_tree = UiNodeBuilder::build(move |tree| {
-            tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                tree.widget(painter_widget);
-            });
-        });
-
-        self.falloff_tree = UiNodeBuilder::build(move |tree| {
-            tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                tree.widget(falloff_widget);
-            });
-        });
-
-        self.stack_direction_tree = UiNodeBuilder::build(|tree| {
-            let columns = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
-            let [label_top, label_bottom] = stack_direction_labels;
-            let [button_top_0, button_top_1, button_top_2, button_bottom_0, button_bottom_1, button_bottom_2] = stack_direction_buttons;
-            tree.row(&columns, SizePolicy::Auto, |tree| {
-                tree.widget(label_top);
-                tree.widget(label_bottom);
-            });
-            tree.row(&columns, SizePolicy::Fixed(120), |tree| {
-                tree.column(|tree| {
-                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, |tree| {
-                        tree.widget(button_top_0);
-                        tree.widget(button_top_1);
-                        tree.widget(button_top_2);
-                    });
-                });
-                tree.column(|tree| {
-                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::BottomToTop, |tree| {
-                        tree.widget(button_bottom_0);
-                        tree.widget(button_bottom_1);
-                        tree.widget(button_bottom_2);
-                    });
-                });
-            });
-        });
-
-        self.weight_tree = UiNodeBuilder::build(|tree| {
-            let [row_weight_label, grid_weight_label] = weight_labels;
-            let [
-                button_row_0,
-                button_row_1,
-                button_row_2,
-                button_grid_0,
-                button_grid_1,
-                button_grid_2,
-                button_grid_3,
-                button_grid_4,
-                button_grid_5,
-            ] = weight_buttons;
-            let row = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0), SizePolicy::Weight(3.0)];
-            let cols = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
-            let rows = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
-            tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
-                tree.widget(row_weight_label);
-            });
-            tree.row(&row, SizePolicy::Fixed(28), |tree| {
-                tree.widget(button_row_0);
-                tree.widget(button_row_1);
-                tree.widget(button_row_2);
-            });
-            tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |tree| {
-                tree.widget(grid_weight_label);
-            });
-            tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |tree| {
-                tree.column(|tree| {
-                    tree.grid(&cols, &rows, |tree| {
-                        tree.widget(button_grid_0);
-                        tree.widget(button_grid_1);
-                        tree.widget(button_grid_2);
-                        tree.widget(button_grid_3);
-                        tree.widget(button_grid_4);
-                        tree.widget(button_grid_5);
-                    });
-                });
-            });
-        });
-
-        self.combo_tree = UiNodeBuilder::build(|tree| {
-            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                for item in combo_items {
-                    tree.widget(item);
-                }
-            });
-        });
-
-        self.popup_tree = UiNodeBuilder::build(|tree| {
-            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                for button in popup_buttons {
-                    tree.widget(button);
-                }
-            });
-        });
-
-        self.demo_tree = UiNodeBuilder::build(|tree| {
-            let window_info_row = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
-            let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
-            let tree_widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
-            let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
-            let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
-            let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
-            let [label_pos, label_size, label_fps] = window_info_labels;
-            let [value_pos, value_size, value_fps] = window_info_values;
-            let [button0, button1, button2, button3, button4] = test_buttons;
-            let [test_label0, test_label1, test_label2] = test_button_labels;
-            let [tree_button0, tree_button1, tree_button2, tree_button3, tree_button4, tree_button5] = tree_buttons;
-            let [checkbox0, checkbox1, checkbox2] = checkboxes;
-            let [tree_label_hello, tree_label_world] = tree_labels;
-            let [slider_red, slider_green, slider_blue] = bg_sliders;
-            let [label_red, label_green, label_blue] = background_labels;
-            let [texture0, texture1, texture2, texture3] = texture_buttons;
-
-            tree.node(NodeOptions::with_policy(Policy::fill()))
+                tree.with_policy(Policy::fill())
                 .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                 Self::section(tree, "Window Info", false, |tree| {
                     tree.row(&window_info_row, SizePolicy::Auto, |tree| {
@@ -1761,7 +1926,7 @@ impl State {
                         tree.widget(texture1);
                         tree.widget(texture2);
                         if let Some(button) = external_image_button {
-                            tree.node(NodeOptions::with_policy(Policy::fixed_width(256))).widget(button);
+                            tree.with_policy(Policy::fixed_width(256)).widget(button);
                         }
                     });
                     tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
@@ -1769,7 +1934,9 @@ impl State {
                     });
                 });
                 });
-        });
+            }),
+            "demo",
+        );
     }
 
     fn style_window(&mut self, ctx: &mut Context<SelectedBackend>) {
@@ -1868,10 +2035,10 @@ impl State {
 
     fn test_window(&mut self, ctx: &mut Context<SelectedBackend>) {
         {
-            let mut win = ctx.root_rect(self.demo_root).unwrap_or_else(|| rect(40, 40, 300, 450));
+            let mut win = self.demo_root.state().try_read(RootState::rect).unwrap_or_else(|| rect(40, 40, 300, 450));
             win.width = win.width.max(240);
             win.height = win.height.max(300);
-            ctx.set_root_rect(self.demo_root, win);
+            ctx.set_root_rect(self.demo_root.id(), win).expect("demo root must exist");
 
             let [value_pos, value_size, value_fps] = &self.window_info_value_states;
             value_pos
@@ -1955,10 +2122,11 @@ impl State {
             }
         }
         if self.combo_typed_state.try_read(ComboState::is_open).expect("combo state unavailable") {
-            ctx.set_root_visible(self.combo_popup_root, true);
-            ctx.set_root_rect(self.combo_popup_root, combo_anchor);
+            ctx.set_root_visible(self.combo_popup_root.id(), true).expect("combo popup root must exist");
+            ctx.set_root_rect(self.combo_popup_root.id(), combo_anchor)
+                .expect("combo popup root must exist");
         } else {
-            ctx.set_root_visible(self.combo_popup_root, false);
+            ctx.set_root_visible(self.combo_popup_root.id(), false).expect("combo popup root must exist");
         }
         if let Some(label) = combo_log {
             let msg = format!("Selected: {label}");
@@ -1967,8 +2135,9 @@ impl State {
 
         if self.open_popup {
             let popup_width = (self.style.default_cell_width + self.style.padding.max(0) * 2).max(80);
-            ctx.set_root_visible(self.popup_root, true);
-            ctx.set_root_size(self.popup_root, &Dimensioni::new(popup_width, 1));
+            ctx.set_root_visible(self.popup_root.id(), true).expect("test popup root must exist");
+            ctx.set_root_size(self.popup_root.id(), Dimensioni::new(popup_width, 1))
+                .expect("test popup root must exist");
             self.open_popup = false;
         }
 

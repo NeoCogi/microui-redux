@@ -2,15 +2,11 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::widget::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, Dimensioni, Recti, ResourceState, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
+    AtlasHandle, Dimensioni, Recti, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
     WidgetStateOwner, WidgetUpdateCtx,
 };
 
-use super::{
-    Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerLayoutCtx, ContainerState, LayoutCtx, LegacyContainer, MeasureCtx,
-    Node, NodeBehavior,
-};
-use crate::ui_node::UiNodeState;
+use super::{Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerLayoutCtx, ContainerState, Node};
 
 /// One-shot construction input for a vertical [`Column`].
 #[derive(Default)]
@@ -105,9 +101,7 @@ impl Widget for ColumnContainer {
         })
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
-        ResourceState::NONE
-    }
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
@@ -189,58 +183,5 @@ fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect
         let child_rect = Recti::new(rect.x, y, rect.width, placement.offered);
         let _ = ctx.layout_child(children, index, child_rect);
         y = y.saturating_add(placement.advance).saturating_add(spacing);
-    }
-}
-
-/// Temporary column implementation retained only inside the pre-P2.2 synthetic ScrollArea.
-///
-/// Public columns always use `ColumnContainer` and state-owned `Children` above.
-#[derive(Default)]
-pub(crate) struct LegacyColumn {
-    pub(crate) children: Vec<Node>,
-}
-
-impl NodeBehavior for LegacyColumn {
-    fn measure(&self, ctx: &MeasureCtx<'_>, _state: &UiNodeState, available: Dimensioni) -> Dimensioni {
-        let mut width = 0;
-        let mut height: i32 = 0;
-        for (index, child) in self.children.iter().enumerate() {
-            let child_size = ctx.measure_node_ref(child, available);
-            width = width.max(child_size.width);
-            height = height.saturating_add(child_size.height);
-            if index + 1 < self.children.len() {
-                height = height.saturating_add(ctx.style.spacing);
-            }
-        }
-        Dimensioni::new(width.max(0), height.max(0))
-    }
-
-    fn layout(&mut self, ctx: &mut LayoutCtx<'_>, _state: &mut UiNodeState, rect: Recti) {
-        let count = self.children.len();
-        let available_height = rect.height.saturating_sub(ctx.style.spacing.saturating_mul(count.saturating_sub(1) as i32));
-        let mut preferred = Vec::with_capacity(count);
-        let mut policies = Vec::with_capacity(count);
-        for child in &self.children {
-            let child_size = ctx.measure_node_ref(child, Dimensioni::new(rect.width, available_height));
-            preferred.push(child_size.height);
-            policies.push(child.state.policy.height);
-        }
-        let placements = super::super::resolve_axis_placements(&policies, &preferred, available_height);
-        let mut y = rect.y;
-        for (index, child) in self.children.iter_mut().enumerate() {
-            let placement = placements.get(index).copied().unwrap_or_default();
-            ctx.layout_node_ref(child, Recti::new(rect.x, y, rect.width, placement.offered));
-            y = y.saturating_add(placement.advance).saturating_add(ctx.style.spacing);
-        }
-    }
-}
-
-impl LegacyContainer for LegacyColumn {
-    fn children(&self) -> &[Node] {
-        &self.children
-    }
-
-    fn children_mut(&mut self) -> &mut Vec<Node> {
-        &mut self.children
     }
 }

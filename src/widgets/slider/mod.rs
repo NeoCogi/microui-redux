@@ -89,15 +89,6 @@ fn number_preferred_size(
     Dimensioni::new(width, height)
 }
 
-/// Keeps numeric widgets active while dragging, editing, or after local state changes.
-fn number_active_result(ctx: &WidgetUpdateCtx<'_>, editing: bool, changed: bool) -> ResourceState {
-    if ctx.active() || editing || changed {
-        ResourceState::ACTIVE
-    } else {
-        ResourceState::NONE
-    }
-}
-
 /// Adds hold-focus while the inline numeric textbox is active.
 fn number_effective_widget_opt(opt: WidgetOption, editing: bool) -> WidgetOption {
     if editing { opt | WidgetOption::HOLD_FOCUS } else { opt }
@@ -242,17 +233,14 @@ impl Slider {
     }
 
     /// Updates slider value from shift-click text entry, scroll, or pointer drag.
-    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) {
         let base = ctx.local_rect();
         let font = ctx.style().resolve_font_choice(self.font);
         runtime_update_state(&self.state, "Slider::update", |state| {
-            let old_value = state.value;
-            let old_edit = state.edit.clone();
-            let mut res = ResourceState::NONE;
             let last = state.value;
             let mut v = last;
-            if !number_textbox_update(ctx, input, &mut state.edit, self.precision, font, &mut v).is_none() {
-                return number_active_result(ctx, state.edit.editing, state.edit != old_edit);
+            if number_textbox_update(ctx, input, &mut state.edit, self.precision, font, &mut v) {
+                return;
             }
             if let Some(delta) = input.scroll_delta() {
                 let range = state.high - state.low;
@@ -281,10 +269,8 @@ impl Slider {
             v = clamp_slider_value(v, state.low, state.high);
             state.value = v;
             if last != v {
-                res |= ResourceState::CHANGE;
                 crate::widgets::record_pending_event(&mut state.pending_changes);
             }
-            res | number_active_result(ctx, state.edit.editing, state.value != old_value || state.edit != old_edit)
         })
     }
 
@@ -342,7 +328,7 @@ fn number_textbox_update(
     precision: usize,
     font: FontId,
     value: &mut Real,
-) -> ResourceState {
+) -> bool {
     let shift_click = { input.mouse_pressed().intersects(MouseButton::LEFT) && input.key_mods().intersects(KeyMode::SHIFT) && ctx.hovered() };
 
     if shift_click {
@@ -355,7 +341,7 @@ fn number_textbox_update(
 
     if edit.editing {
         let res = textbox_update(ctx, input, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE, font);
-        if res.is_submitted() || !ctx.focused() {
+        if res.submitted || !ctx.focused() {
             if let Ok(v) = edit.buf.parse::<f32>() {
                 *value = v as Real;
             }
@@ -363,10 +349,10 @@ fn number_textbox_update(
             edit.editing = false;
             edit.cursor = 0;
         } else {
-            return ResourceState::ACTIVE;
+            return true;
         }
     }
-    ResourceState::NONE
+    false
 }
 
 /// Paints the shared textbox editor for a numeric widget.
@@ -383,7 +369,7 @@ impl Widget for Slider {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
         self.update_widget(ctx, &input)
     }
 
@@ -545,14 +531,11 @@ impl Number {
     }
 
     /// Updates number value from shift-click text entry or horizontal drag.
-    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) {
         let font = ctx.style().resolve_font_choice(self.font);
         runtime_update_state(&self.state, "Number::update", |state| {
-            let old_value = state.value;
-            let old_edit = state.edit.clone();
-            let mut res = ResourceState::NONE;
             let last = state.value;
-            if number_textbox_update(ctx, input, &mut state.edit, self.precision, font, &mut state.value).is_none() {
+            if !number_textbox_update(ctx, input, &mut state.edit, self.precision, font, &mut state.value) {
                 if ctx.focused() && input.mouse_down().intersects(MouseButton::LEFT) {
                     state.set_value(state.value + input.mouse_delta().x as Real * self.step);
                 } else {
@@ -563,10 +546,8 @@ impl Number {
                 state.set_value(state.value);
             }
             if state.value != last {
-                res |= ResourceState::CHANGE;
                 crate::widgets::record_pending_event(&mut state.pending_changes);
             }
-            res | number_active_result(ctx, state.edit.editing, state.value != old_value || state.edit != old_edit)
         })
     }
 
@@ -596,7 +577,7 @@ impl Widget for Number {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
         self.update_widget(ctx, &input)
     }
 

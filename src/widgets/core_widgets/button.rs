@@ -224,14 +224,13 @@ impl Widget for Button {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {
         if !ctx.clicked() {
-            return ResourceState::NONE;
+            return;
         }
         runtime_update_state(&self.state, "Button::update", |state| {
             record_pending_event(&mut state.pending_submissions);
         });
-        ResourceState::SUBMIT
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {

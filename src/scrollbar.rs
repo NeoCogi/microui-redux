@@ -56,7 +56,7 @@
 //! base tracks, thumb rectangles, and drag-to-scroll conversion independent of that state.
 use crate::{Recti, Vec2i};
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 /// Axis selector used by shared scrollbar geometry helpers.
 pub(crate) enum ScrollAxis {
     /// Vertical scrollbar operating on y offsets.

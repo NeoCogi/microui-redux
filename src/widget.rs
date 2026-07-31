@@ -54,16 +54,12 @@
 
 use std::cell::RefCell;
 use std::cmp::max;
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use bitflags::bitflags;
 use rs_math3d::Dimensioni;
 
 use crate::atlas::{AtlasHandle, EXPAND_DOWN_ICON};
-use crate::window_manager::RootId;
-use crate::id::Id;
-use crate::input::ResourceState;
 use crate::style::Style;
 use crate::ui_node::UiInputEvent;
 pub use crate::widget_ctx::{WidgetInputEvents, WidgetPaintCtx, WidgetUpdateCtx};
@@ -243,8 +239,7 @@ pub(crate) fn runtime_update_state<T: WidgetState, R>(state: &Rc<RefCell<T>>, ph
 ///
 /// Widgets participate in three retained execution phases:
 /// 1. `measure`, which reports intrinsic size for the current frame's layout pass.
-/// 2. `update`, which samples interaction, mutates widget-local state, and produces the current
-///    frame result.
+/// 2. `update`, which samples interaction and mutates widget-local state.
 /// 3. `paint`, which records paint commands for the updated widget state.
 pub trait Widget {
     /// Returns the widget options for this state.
@@ -254,13 +249,13 @@ pub trait Widget {
     /// `avail` reports the current container body size visible to the widget.
     /// Values less than or equal to zero are treated as "use layout defaults" for that axis.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
-    /// Updates retained widget state for the current frame and returns its interaction result.
+    /// Updates retained widget state for the current frame.
     ///
     /// Pointer positions in `input` are relative to the widget's derived content rectangle, using
     /// the same origin as [`WidgetUpdateCtx::local_rect`]. Outer frame pixels remain part of the
     /// runtime hit target, so a pointer event on the border may lie just outside the local content
     /// bounds. The update context intentionally cannot record drawing commands.
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState;
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>);
     /// Records paint commands for the current frame through paint-only capabilities.
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>);
     /// Returns the effective widget options used by generic dispatch.
@@ -272,181 +267,6 @@ pub trait Widget {
     /// Returns the focus behavior used by generic dispatch.
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::from_widget_options(self.effective_widget_opt())
-    }
-}
-
-/// Retained interaction identity used by focus, hover, and frame results.
-///
-/// Normal retained traversal uses `Node` identities. `Root` is available for root-level results
-/// and future framework controls that do not naturally belong to a plain widget node.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub enum RetainedId {
-    /// Stable root-window, dialog, or popup identity.
-    Root(RootId),
-    /// Stable retained-tree node identity.
-    Node(Id),
-    /// Stable retained-tree node identity scoped to the owning root or scroll area.
-    ScopedNode {
-        /// Stable owner/root/scroll-area scope.
-        scope: Id,
-        /// Stable node ID within that scope.
-        node: Id,
-    },
-}
-
-impl RetainedId {
-    /// Creates a retained root interaction ID.
-    pub const fn root(root_id: RootId) -> Self {
-        Self::Root(root_id)
-    }
-
-    /// Creates a retained node interaction ID.
-    pub const fn node(node_id: Id) -> Self {
-        Self::Node(node_id)
-    }
-
-    /// Creates a scoped retained node interaction ID.
-    ///
-    /// Root containers use a scope derived from their `RootId`; retained scroll areas use their
-    /// node ID as the child-container scope.
-    pub const fn scoped_node(scope: Id, node_id: Id) -> Self {
-        Self::ScopedNode { scope, node: node_id }
-    }
-
-    /// Creates a retained node ID scoped to a registered root.
-    pub fn root_node(root_id: RootId, node_id: Id) -> Self {
-        Self::scoped_node(Id::new(root_id.raw() as u64), node_id)
-    }
-}
-
-/// Per-frame widget interaction results keyed by retained identity.
-///
-/// The storage is split into two generations:
-/// - the committed result set published at the end of the previous frame,
-/// - and the current in-progress result set being written by this frame.
-#[derive(Default)]
-pub(crate) struct FrameResults {
-    /// Result generation published after the previous frame.
-    committed: FrameResultStore,
-    /// Result generation being written by the current frame.
-    current: FrameResultStore,
-    /// Duplicate-dispatch detector for the current frame.
-    current_dispatch: FrameDispatchTracker,
-}
-
-#[derive(Default)]
-/// Mutable storage for one frame-result generation.
-struct FrameResultStore {
-    /// Primary public result storage keyed by fully scoped retained identity.
-    entries: HashMap<RetainedId, ResourceState>,
-}
-
-impl FrameResultStore {
-    /// Clears retained results.
-    fn clear(&mut self) {
-        self.entries.clear();
-    }
-
-    /// Records the state produced by one retained widget dispatch.
-    fn record_retained(&mut self, retained_id: RetainedId, state: ResourceState) {
-        let prev_state = self.entries.insert(retained_id, state);
-        debug_assert!(prev_state.is_none(), "retained result for {:?} was recorded more than once", retained_id);
-    }
-
-    /// Returns a read-only view over this generation.
-    fn generation(&self) -> FrameResultGeneration<'_> {
-        FrameResultGeneration::new(&self.entries)
-    }
-}
-
-#[derive(Default)]
-/// Detects duplicate retained-id dispatch within one frame.
-struct FrameDispatchTracker {
-    /// Dispatch site for each retained ID seen in the current frame.
-    retained_sites: HashMap<RetainedId, String>,
-}
-
-impl FrameDispatchTracker {
-    /// Clears all dispatch sites before a new frame.
-    fn clear(&mut self) {
-        self.retained_sites.clear();
-    }
-
-    /// Records one retained-id dispatch and panics on duplicate use.
-    fn record_retained(&mut self, retained_id: RetainedId, dispatch_site: String) {
-        if let Some(first_site) = self.retained_sites.get(&retained_id) {
-            panic!(
-                "duplicate retained dispatch detected for {:?}. first dispatch: {}. duplicate dispatch: {}.",
-                retained_id, first_site, dispatch_site
-            );
-        }
-
-        self.retained_sites.insert(retained_id, dispatch_site);
-    }
-}
-
-/// Read-only view over one frame-result generation.
-#[derive(Copy, Clone)]
-pub struct FrameResultGeneration<'a> {
-    /// Retained result map for this generation.
-    entries: &'a HashMap<RetainedId, ResourceState>,
-}
-
-impl<'a> FrameResultGeneration<'a> {
-    /// Creates a read-only view over a specific result generation.
-    fn new(entries: &'a HashMap<RetainedId, ResourceState>) -> Self {
-        Self { entries }
-    }
-
-    /// Returns the state for a retained interaction ID in this generation.
-    pub fn state_of_retained(&self, retained_id: RetainedId) -> ResourceState {
-        self.entries.get(&retained_id).copied().unwrap_or(ResourceState::NONE)
-    }
-}
-
-impl FrameResults {
-    /// Clears the in-progress frame results for a new frame.
-    ///
-    /// Previously committed results remain available through [`FrameResults::committed`].
-    pub(crate) fn begin_frame(&mut self) {
-        self.current.clear();
-        self.current_dispatch.clear();
-    }
-
-    /// Publishes the current frame as the next committed result generation.
-    pub(crate) fn finish_frame(&mut self) {
-        std::mem::swap(&mut self.committed, &mut self.current);
-        self.current.clear();
-        self.current_dispatch.clear();
-    }
-
-    /// Records a result from a directly owned runtime.
-    pub(crate) fn record_direct_with_context(&mut self, retained_id: RetainedId, state: ResourceState, dispatch_site: impl Into<String>) {
-        self.record_retained_id_with_context(retained_id, state, dispatch_site);
-    }
-
-    /// Records an internal retained node result without a legacy widget identity.
-    #[cfg(test)]
-    pub(crate) fn record_node_with_context(&mut self, retained_id: RetainedId, state: ResourceState, dispatch_site: impl Into<String>) {
-        self.record_retained_id_with_context(retained_id, state, dispatch_site);
-    }
-
-    /// Records a retained id after duplicate-dispatch validation.
-    fn record_retained_id_with_context(&mut self, retained_id: RetainedId, state: ResourceState, dispatch_site: impl Into<String>) {
-        let dispatch_site = dispatch_site.into();
-        self.current_dispatch.record_retained(retained_id, dispatch_site);
-        self.current.record_retained(retained_id, state);
-    }
-
-    /// Returns the committed result generation published by the previous frame.
-    pub(crate) fn committed(&self) -> FrameResultGeneration<'_> {
-        self.committed.generation()
-    }
-
-    /// Returns the in-progress result generation for the current frame.
-    #[cfg(test)]
-    pub(crate) fn current(&self) -> FrameResultGeneration<'_> {
-        self.current.generation()
     }
 }
 
@@ -467,9 +287,7 @@ impl Widget for WidgetOption {
         Dimensioni::new(width, height)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
-        ResourceState::NONE
-    }
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
@@ -510,9 +328,8 @@ mod state_ownership_tests {
             Dimensioni::new(1, 1)
         }
 
-        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {
             runtime_update_state(&self.state, "TestWidget::update", |state| state.value += 1);
-            ResourceState::NONE
         }
 
         fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {
@@ -568,9 +385,8 @@ mod state_ownership_tests {
             runtime_read_state(&self.state, "UnitWidget::measure", |_| Dimensioni::new(1, 1))
         }
 
-        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
+        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {
             runtime_update_state(&self.state, "UnitWidget::update", |_| ());
-            ResourceState::NONE
         }
 
         fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {

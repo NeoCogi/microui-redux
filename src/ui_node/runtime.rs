@@ -122,6 +122,45 @@ impl UiRuntime {
         self.metrics.set(RuntimeMetrics::default());
     }
 
+    /// Clears focus, hover, capture, and queued input while preserving retained node state.
+    pub(crate) fn clear_transient_targets(&mut self) {
+        self.focus = None;
+        self.hover = None;
+        self.capture = None;
+        self.routed_events.clear();
+        self.updated_focus = false;
+    }
+
+    /// Measures one persistent root node without introducing a parallel root projection.
+    pub(crate) fn measure_tree_root(&self, root: &UiNode, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+        self.measure_node_ref(root, style, atlas, available)
+    }
+
+    /// Lays out one persistent root node at its authoritative screen-space rectangle.
+    pub(crate) fn layout_tree_root(&mut self, root: &mut UiNode, style: &Style, atlas: crate::AtlasHandle, outer: Recti, viewport: Recti) {
+        #[cfg(test)]
+        self.bump_metric(|metrics| metrics.tree_layouts += 1);
+        self.root_transform = Transform::root(viewport);
+        self.layout_allocated_node_ref(root, style, &atlas, outer);
+        self.root_content_size = root.state.layout.content_size;
+        self.sanitize_transient_targets(std::slice::from_ref(root));
+    }
+
+    /// Updates one persistent root node and its eligible descendants.
+    pub(crate) fn update_tree_root(&mut self, root: &mut UiNode, style: &Style, atlas: crate::AtlasHandle, input: &Input) {
+        self.update_node_ref(root, self.root_transform, style, atlas, input);
+    }
+
+    /// Paints one persistent root node and its eligible descendants.
+    pub(crate) fn paint_tree_root(&mut self, root: &mut UiNode, display_list: &mut DisplayList, style: &Style, atlas: crate::AtlasHandle) {
+        self.paint_node_ref(root, self.root_transform, display_list, style, atlas);
+        #[cfg(test)]
+        {
+            self.debug_texts = display_list.debug_texts();
+            self.debug_rects = display_list.debug_rects();
+        }
+    }
+
     /// Records one routed event for a node-local widget update.
     pub(crate) fn push_routed_event(&mut self, node: UiNodeId, event: UiInputEvent) {
         self.routed_events.entry(node).or_default().push(event);
@@ -149,13 +188,10 @@ impl UiRuntime {
     pub(crate) fn update_paint_frame(
         &mut self,
         roots: &mut [UiNode],
-        root_id: crate::RootId,
-        root_name: &str,
         display_list: &mut DisplayList,
         atlas: crate::AtlasHandle,
         style: &Style,
         input: &Input,
-        results: &mut FrameResults,
         body: Recti,
     ) {
         self.set_root_body(body);
@@ -168,7 +204,7 @@ impl UiRuntime {
         let mut root_index = 0;
         while root_index < roots.len() {
             let root = &mut roots[root_index];
-            self.update_node_ref(root_id, root_name, root, self.root_transform, style, atlas.clone(), input, results);
+            self.update_node_ref(root, self.root_transform, style, atlas.clone(), input);
             root_index += 1;
         }
 
@@ -295,19 +331,6 @@ impl UiRuntime {
         })
     }
 
-    /// Carries live runtime-only state into a newly submitted projection.
-    pub(crate) fn transfer_runtime_state_from(&mut self, roots: &mut [UiNode], previous_roots: &[UiNode], previous: &UiRuntime) {
-        for node in roots.iter_mut() {
-            transfer_node_runtime_state(node, previous_roots);
-        }
-
-        self.focus = previous.focus.filter(|id| contains_active_node_in(roots, *id));
-        self.hover = previous.hover.filter(|id| contains_active_node_in(roots, *id));
-        self.capture = previous.capture.filter(|id| contains_active_node_in(roots, *id));
-        self.pointer_input_enabled = previous.pointer_input_enabled;
-        self.updated_focus = previous.updated_focus && self.focus.is_some();
-    }
-
     /// Lays out root nodes inside an already resolved root client area.
     pub(super) fn layout_roots_in_view(&mut self, roots: &mut [UiNode], style: &Style, atlas: crate::AtlasHandle, client: Recti) -> Dimensioni {
         #[cfg(test)]
@@ -355,8 +378,6 @@ impl UiRuntime {
         let framed = match &node.data {
             UiNodeData::Widget(widget) => widget.is_framed(),
             UiNodeData::Container(container) => NodeBehavior::is_framed(&**container),
-            UiNodeData::LegacyContainer(container) => container.is_framed(),
-            UiNodeData::LegacyWidget(widget) => widget.is_framed(),
         };
         let border_width = if framed { style.frame_border().width } else { 0 };
         let policy = node.state.policy;
@@ -369,8 +390,6 @@ impl UiRuntime {
         let preferred_content = match &node.data {
             UiNodeData::Widget(widget) => widget.measure(&ctx, node.state(), content_available),
             UiNodeData::Container(container) => NodeBehavior::measure(&**container, &ctx, node.state(), content_available),
-            UiNodeData::LegacyContainer(container) => container.measure(&ctx, node.state(), content_available),
-            UiNodeData::LegacyWidget(widget) => widget.measure(&ctx, node.state(), content_available),
         };
         let preferred_outer = crate::frame::outer_preferred(preferred_content, border_width);
         Dimensioni::new(
@@ -386,8 +405,6 @@ impl UiRuntime {
         let framed = match &node.data {
             UiNodeData::Widget(widget) => widget.is_framed(),
             UiNodeData::Container(container) => NodeBehavior::is_framed(&**container),
-            UiNodeData::LegacyContainer(container) => container.is_framed(),
-            UiNodeData::LegacyWidget(widget) => widget.is_framed(),
         };
         let preferred = self.measure_node_ref(node, style, atlas, Dimensioni::new(rect.width, rect.height));
         let policy = node.state.policy;
@@ -407,8 +424,6 @@ impl UiRuntime {
         let framed = match &node.data {
             UiNodeData::Widget(widget) => widget.is_framed(),
             UiNodeData::Container(container) => NodeBehavior::is_framed(&**container),
-            UiNodeData::LegacyContainer(container) => container.is_framed(),
-            UiNodeData::LegacyWidget(widget) => widget.is_framed(),
         };
         // Preserve the established measure/layout phase contract while keeping the resolved root
         // allocation authoritative.
@@ -436,8 +451,6 @@ impl UiRuntime {
         match &mut node.data {
             UiNodeData::Widget(widget) => widget.layout(&mut ctx, &mut node.state, content),
             UiNodeData::Container(container) => NodeBehavior::layout(&mut **container, &mut ctx, &mut node.state, content),
-            UiNodeData::LegacyContainer(container) => container.layout(&mut ctx, &mut node.state, content),
-            UiNodeData::LegacyWidget(widget) => widget.layout(&mut ctx, &mut node.state, content),
         }
 
         node.state.layout.allocation = outer;
@@ -462,17 +475,7 @@ impl UiRuntime {
     }
 
     /// Updates one already-borrowed node and descendants.
-    pub(super) fn update_node_ref(
-        &mut self,
-        root_id: crate::RootId,
-        root_name: &str,
-        node: &mut UiNode,
-        parent_transform: Transform,
-        style: &Style,
-        atlas: crate::AtlasHandle,
-        input: &Input,
-        results: &mut FrameResults,
-    ) {
+    pub(super) fn update_node_ref(&mut self, node: &mut UiNode, parent_transform: Transform, style: &Style, atlas: crate::AtlasHandle, input: &Input) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.updates += 1);
         let framed = node_is_framed(node);
@@ -483,7 +486,10 @@ impl UiRuntime {
         let content_rect = frame_geometry.content_or_empty();
         let screen_clip = parent_transform.clip.intersect(&screen_rect).unwrap_or_default();
         let child_transform = parent_transform.push(node.state.layout);
-        let content_clip = rect_relative_to(child_transform.clip, screen_origin);
+        let local_clip = rect_relative_to(screen_clip, screen_origin);
+        let content_clip = local_clip
+            .intersect(&content_rect)
+            .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
 
         if let Some((opt, focus_policy)) = node_interaction_config(node) {
             let id = node.id();
@@ -498,12 +504,9 @@ impl UiRuntime {
         let traverse_children = {
             let mut ctx = UpdateCtx {
                 runtime: self,
-                root_id,
-                root_name,
                 style,
                 atlas: atlas.clone(),
                 input,
-                results,
                 screen_origin,
                 content_rect,
                 content_clip,
@@ -511,8 +514,6 @@ impl UiRuntime {
             match &mut node.data {
                 UiNodeData::Widget(widget) => widget.update(&mut ctx, &mut node.state),
                 UiNodeData::Container(container) => NodeBehavior::update(&mut **container, &mut ctx, &mut node.state),
-                UiNodeData::LegacyContainer(container) => container.update(&mut ctx, &mut node.state),
-                UiNodeData::LegacyWidget(widget) => widget.update(&mut ctx, &mut node.state),
             }
         };
         if traverse_children {
@@ -520,7 +521,7 @@ impl UiRuntime {
                 for child in children {
                     // Update recursion carries interaction and layout state only. Rendering enters
                     // the tree later through the distinct paint traversal below.
-                    self.update_node_ref(root_id, root_name, child, child_transform, style, atlas.clone(), input, results);
+                    self.update_node_ref(child, child_transform, style, atlas.clone(), input);
                 }
             });
         }
@@ -672,8 +673,9 @@ impl UiRuntime {
         let content_rect = crate::frame::frame_geometry(local_rect, framed, style).content_or_empty();
         let screen_clip = parent_transform.clip.intersect(&screen_rect).unwrap_or_default();
         let local_clip = rect_relative_to(screen_clip, screen_origin);
-        let child_transform = parent_transform.push(node.state.layout);
-        let content_clip = rect_relative_to(child_transform.clip, screen_origin);
+        let content_clip = local_clip
+            .intersect(&content_rect)
+            .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
         let local_event = crate::widget_ctx::localize_event(screen_origin, event.clone());
 
         if matches!(&node.data, UiNodeData::Widget(_)) {
@@ -690,8 +692,6 @@ impl UiRuntime {
         match &mut node.data {
             UiNodeData::Widget(widget) => widget.update_on(&mut ctx, &mut node.state, &local_event),
             UiNodeData::Container(container) => NodeBehavior::update_on(&mut **container, &mut ctx, &mut node.state, &local_event),
-            UiNodeData::LegacyContainer(container) => container.update_on(&mut ctx, &mut node.state, &local_event),
-            UiNodeData::LegacyWidget(widget) => widget.update_on(&mut ctx, &mut node.state, &local_event),
         }
     }
 
@@ -718,7 +718,10 @@ impl UiRuntime {
             crate::frame::paint_internal_frame(&mut painter, screen_rect, None, style.frame_border());
         }
         let child_transform = parent_transform.push(node.state.layout);
-        let content_clip = rect_relative_to(child_transform.clip, screen_origin);
+        let local_clip = rect_relative_to(screen_clip, screen_origin);
+        let content_clip = local_clip
+            .intersect(&content_rect)
+            .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
         let traverse_children = {
             let mut ctx = PaintCtx {
                 display_list,
@@ -731,8 +734,6 @@ impl UiRuntime {
             match &mut node.data {
                 UiNodeData::Widget(widget) => widget.paint(&mut ctx, &mut node.state),
                 UiNodeData::Container(container) => NodeBehavior::paint(&mut **container, &mut ctx, &mut node.state),
-                UiNodeData::LegacyContainer(container) => container.paint(&mut ctx, &mut node.state),
-                UiNodeData::LegacyWidget(widget) => widget.paint(&mut ctx, &mut node.state),
             }
         };
         if traverse_children {
@@ -809,7 +810,7 @@ fn contains_active_node(node: &UiNode, id: UiNodeId) -> bool {
 fn node_children_visible(node: &UiNode) -> bool {
     match &node.data {
         UiNodeData::Container(container) => Container::children_visible(&**container),
-        UiNodeData::Widget(_) | UiNodeData::LegacyContainer(_) | UiNodeData::LegacyWidget(_) => true,
+        UiNodeData::Widget(_) => true,
     }
 }
 
@@ -817,8 +818,6 @@ fn node_is_framed(node: &UiNode) -> bool {
     match &node.data {
         UiNodeData::Widget(widget) => widget.is_framed(),
         UiNodeData::Container(container) => NodeBehavior::is_framed(&**container),
-        UiNodeData::LegacyContainer(container) => container.is_framed(),
-        UiNodeData::LegacyWidget(widget) => widget.is_framed(),
     }
 }
 
@@ -826,38 +825,11 @@ fn node_interaction_config(node: &UiNode) -> Option<(WidgetOption, FocusPolicy)>
     match &node.data {
         UiNodeData::Widget(widget) => widget.interaction_config(),
         UiNodeData::Container(container) => NodeBehavior::interaction_config(&**container),
-        UiNodeData::LegacyContainer(container) => container.interaction_config(),
-        UiNodeData::LegacyWidget(widget) => widget.interaction_config(),
     }
 }
 
 fn rect_relative_to(rect: Recti, origin: Vec2i) -> Recti {
     Recti::new(rect.x - origin.x, rect.y - origin.y, rect.width, rect.height)
-}
-
-fn transfer_node_runtime_state(node: &mut UiNode, previous_roots: &[UiNode]) {
-    if let Some(previous) = with_node(previous_roots, node.id(), |previous_node| {
-        (
-            previous_node.state.layout,
-            previous_node.state.hovered,
-            previous_node.state.focused,
-            previous_node.state.clicked,
-            previous_node.state.active,
-            previous_node.state.scroll_delta,
-        )
-    }) {
-        node.state.layout = previous.0;
-        node.state.hovered = previous.1;
-        node.state.focused = previous.2;
-        node.state.clicked = previous.3;
-        node.state.active = previous.4;
-        node.state.scroll_delta = previous.5;
-    }
-    node.with_children_mut(|children| {
-        for child in children {
-            transfer_node_runtime_state(child, previous_roots);
-        }
-    });
 }
 
 fn child_content_bounds_from_children(children: &[UiNode]) -> Option<Recti> {

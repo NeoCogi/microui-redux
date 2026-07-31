@@ -63,9 +63,9 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 ![random](res/microui-0.6.png)
 
 ## Key Concepts
-- **Context**: owns the high-level `Renderer`, user input, frame results, and retained root windows. Applications deliver input and mutate frame resources first, then `frame(FrameInfo)?.render_ui()?` traverses registered roots and submits one owned frame.
+- **Context**: owns the high-level `Renderer`, user input, and retained root windows. Applications deliver input and mutate typed state first, then `frame(FrameInfo)?.render_ui()?` traverses registered roots and submits one owned frame.
 - **Container**: a public `Widget` subtrait for runtimes that own one authoritative opaque `Children` collection. Application-facing container state uses typed weak `WidgetStateHandle` values and safe indexed membership operations.
-- **Layout engine + flows**: parent containers assign child rectangles through scoped `ContainerLayoutCtx` services. `UiNodeBuilder` remains a transitional convenience for row/grid/stack/scroll composition, while `Column` and `Disclosure` already use state-owned children.
+- **Layout engine + flows**: parent containers assign child rectangles through scoped `ContainerLayoutCtx` services. Row, Grid, Column, Stack, Disclosure, and ScrollArea all own persistent children behind typed container state.
 - **Widget**: a runtime UI element implementing `Widget` (for example `Button`, `Textbox`, or `Slider`) and owning its associated state cell.
 - **Node**: the non-cloneable owner of one concrete widget or container runtime. A `Node` receives private process-unique identity when constructed and moves exactly once into a root or `Children` collection.
 - **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and `Renderer` executes it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](src/render/RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
@@ -190,19 +190,16 @@ let cube_renderer = ctx.register_custom_renderer({
 })?;
 
 let cube = CubeWidget::new();
-let tree = UiNodeBuilder::build(move |tree| {
-    tree.node(NodeOptions::with_policy(Policy::fill()))
-        .custom_render(cube, cube_renderer);
-});
-ctx.create_window("Cube", rect(40, 40, 360, 360), tree);
+let tree = Node::custom_render(cube, cube_renderer).with_policy(Policy::fill());
+let _root = ctx.create_window("Cube", rect(40, 40, 360, 360), tree);
 ```
 
 `register_custom_renderer` accepts a callback valid for every frame borrow lifetime. In expanded
 form its important bound is `for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs)`. That
 higher-ranked lifetime means the callback can use the active frame but cannot save it in captured
 state. The returned `CustomRenderHandle<B>` is tagged with `B`, so registration and removal through
-a Context using another backend type fail at compile time. `UiNodeBuilder` deliberately erases the
-handle to its backend-neutral registry key when constructing a tree; a key originating from any
+a Context using another backend type fail at compile time. `Node::custom_render` erases the handle
+to its backend-neutral registry key after checking the backend type; a key originating from any
 other Context is rejected by its foreign registry namespace during renderer preflight before a
 backend frame is acquired.
 
@@ -236,18 +233,20 @@ cargo run --example backend-frame-cube --features example-wgpu
 
 The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate built-in state through typed `WidgetStateHandle` values, and drive frames with `Context::frame(FrameInfo).render_ui()?`.
 
-Per-frame root submission APIs have been removed from the public surface. Root trees are registered or replaced explicitly with `create_window`, `create_dialog`, `create_popup`, and `set_root_nodes`; visibility is controlled with `set_root_visible`.
+Root creation consumes one persistent application `Node` and returns a non-owning `RootHandle`.
+Roots cannot be replaced while retaining their identity: mutate descendants through a state-owned
+container, or destroy and recreate the root. Visibility is controlled with `set_root_visible`.
 
 ```rust
 let (name_state, name_runtime) = Textbox::create(TextboxParameters::new(""));
-let tree = UiNodeBuilder::build(|tree| {
-    tree.row(&[SizePolicy::Fixed(120), SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
-        tree.text("Name");
-        tree.widget(name_runtime);
-    });
-});
+let (_, label_runtime) = TextBlock::create(TextBlockParameters::new("Name"));
+let (_, tree) = Row::create(RowParameters::new(
+    [SizePolicy::Fixed(120), SizePolicy::Remainder(0)],
+    SizePolicy::Auto,
+    [Node::widget(label_runtime), Node::widget(name_runtime)],
+));
 
-ctx.create_window("main", rect(20, 20, 240, 120), tree);
+let root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
 let info = FrameInfo::try_new(Dimensioni::new(800, 600), color(20, 22, 26, 255))?;
 ctx.frame(info).render_ui()?;
 
@@ -266,31 +265,18 @@ Built-in values, events, and commands are accessed through typed weak state hand
 headers and tree rows use `DisclosureParameters::{header, tree}` and no longer have a separate
 widget `Node` or `NodeStateValue` API.
 
-```rust
-let info = FrameInfo::try_new(Dimensioni::new(800, 600), color(20, 22, 26, 255))?;
-ctx.frame(info).render_ui()?;
-
-let results = ctx.committed_results();
-if results.state_of_retained(RetainedId::root_node(root, submit_button_node)).is_submitted() {
-    save_form();
-}
-```
-
 ### Retained node identity
 
 Each owning `Node` receives a private, process-unique runtime identity before mounting. Moving a
 node, applying consuming `with_policy`, wrapping it in an unmounted `GridItem`, and inserting it
 into `Children` or `GridState` preserve that identity; applications cannot read or construct it.
-The older `UiNodeBuilder` result IDs remain only for APIs that have not yet migrated to typed events
-and persistent roots. Builder keys do not reconstruct or reuse runtime identity.
+There is no public node ID or result lookup path. Widgets record consumable events in their typed
+state, and root chrome exposes its rectangle, visibility, active mode, and pending events through
+`RootHandle::state()`.
 
-For the transitional retained-focus API, keep the `NodeId` returned by `UiNodeBuilder` and use `set_focus_node`:
-
-```rust
-my_window.set_focus_node(textbox_node_id);
-```
-
-Registered roots can be configured with `Context::set_root_options(...)` and `WindowOption` to control window chrome. Root overflow does not scroll implicitly; wrap overflowing retained content in `UiNodeBuilder::scroll_area(...)` with `ScrollAreaOption::ENABLE_SCROLL`. Custom widgets can use `WidgetOption::GRAB_SCROLL` and receive consumed scroll through `WidgetUpdateCtx` during their update phase.
+Registered roots can be configured with `Context::set_root_options(...)` and `WindowOption` to
+control window chrome. Root overflow does not scroll implicitly; construct a `ScrollArea` with
+`ScrollAreaOption::ENABLE_SCROLL` and use its typed state handle for offset or membership changes.
 
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
@@ -299,7 +285,7 @@ Registered roots can be configured with `Context::set_root_options(...)` and `Wi
 - Parent containers assign each node a retained parent-local allocation; child offsets and clips remain node-local and are resolved through a stack-only transform during traversal.
 - Resolved outer rectangles and clips remain runtime stack locals. Node behavior works against its local content surface, while outer frame painting, standard hit routing, and conversion from screen input remain runtime-owned.
 - A public widget's Painter geometry and routed pointer positions share the derived content-local origin.
-- `UiNodeBuilder` exposes retained `row`, `grid`, `column`, `stack`, `header`, `tree_node`, `scroll_area`, and `custom_render` structure during the staged migration; owning `Node` values can also enter roots directly.
+- Concrete container constructors consume child `Node` values and return a typed state handle plus one completed owning `Node`; `Node::custom_render` covers backend-typed custom-render leaves.
 - `SizePolicy::Weight(value)` distributes available track space by sibling share ratio (spacing accounted for). Use `SizePolicy::Fraction(value)` for explicit `0.0..=1.0` proportional sizing in single-track flows.
 - Returning `<= 0` for either axis from `Widget::measure` still means "use layout fallback/defaults" for that axis.
 
@@ -395,19 +381,19 @@ Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`,
 
 - [x] Moved retained root lifetime into `Context`.
     - [x] Applications register windows, dialogs, and popups with `create_window`, `create_dialog`, and `create_popup`.
-    - [x] Registered roots are traversed by `ContextFrame::render_ui`; visibility, replacement, and options are controlled with `set_root_visible`, `set_root_tree`, and `set_root_options`.
+    - [x] Registered roots are traversed by `ContextFrame::render_ui`; visibility and options are controlled with `set_root_visible` and `set_root_options`, while destruction is explicit.
     - [x] The old callback-based per-frame root submission path was removed from the supported API.
-- [x] Replaced pointer-derived public interaction lookup with stable retained identity.
-    - [x] `WidgetTreeBuilder` returns stable `NodeId`s for result lookup and focus control.
-    - [x] `FrameResultGeneration::state_of_retained` and `state_of_node` supersede handle/address-based result lookup.
-    - [x] Root windows, scroll areas, and window chrome derive scoped retained IDs so focus, hover, resize, and close interactions survive tree replacement.
+- [x] Replaced public interaction lookup with typed retained state.
+    - [x] The former builder-generated public identity path was removed in favor of private runtime identity and typed state events.
+    - [x] `RootHandle` exposes checked root state while widget/container constructors return typed weak state handles.
+    - [x] Root windows, scroll areas, and window chrome persist without tree reconstruction.
 - [x] Split retained widget execution into explicit `measure`, `update`, and `paint` phases.
-    - [x] Layout records geometry first; update records control state and frame results; paint records commands from updated widget state.
+    - [x] Layout records geometry first; update records control state and typed events; paint records commands from updated widget state.
     - [x] Custom-render nodes receive content and clip geometry through `CustomRenderArgs`, while widget input remains in the update phase.
-    - [x] Built-in widgets, file dialog UI, and examples now follow the same committed-results path.
+    - [x] Built-in widgets and examples consume events directly from their typed state.
 - [x] Reworked retained layout, scroll areas, and root chrome.
     - [x] `SizePolicy::Weight` now uses sibling share ratios, and `SizePolicy::Fraction` covers explicit proportional sizing.
-    - [x] `ScrollAreaHandle` is the retained nested-scroll API; old panel/container compatibility names were removed.
+    - [x] `ScrollAreaState` is the retained nested-scroll and membership API; old synthetic scrollbar nodes were removed.
     - [x] Root auto-size, popup placement/close behavior, dialog z-order, scrollbars, and bottom-right resize handling were aligned with retained traversal.
 - [x] Tightened drawing, texture, atlas, and backend behavior.
     - [x] Renderer display-list execution batches ordinary draw operations while preserving custom render and retained scroll-area boundaries.
@@ -429,7 +415,7 @@ Version `0.6.0` introduced retained `WidgetTree` authoring on top of the older p
 - [x] `Context::window`, `Context::dialog`, and `Context::popup` accepted retained trees instead of UI-building closures.
 - [x] `WidgetTreeBuilder` introduced reusable widget/layout hierarchies with widgets, panels, headers/tree nodes, row/grid/column/stack groups, and custom-render leaves.
 - [x] Widgets reported intrinsic sizes through `measure` and updated persistent state through the retained traversal.
-- [x] `Context::committed_results()` became the public business-logic view of the previous frame's interaction results.
+    - [x] Interaction observation later moved from generic frame results to typed widget-state events.
 - [x] The widget paint context gained widget-local custom painting for rectangles, text/icons/images, line strokes, polygon fills, and scoped clips.
 - [x] Runtime atlas building and offline/prebuilt atlas export gained shared multi-font configuration.
 - [x] Version `0.6.1` switched demos to runtime atlas construction by default and made prebuilt atlas embedding opt-in.

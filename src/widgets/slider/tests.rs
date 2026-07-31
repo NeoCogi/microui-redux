@@ -5,15 +5,7 @@ use crate::test_support::test_atlas as make_test_atlas;
 use crate::ui_node::UiInputEvent;
 use crate::widget_ctx::localize_events;
 
-fn run_slider_once(
-    slider: &mut Slider,
-    rect: Recti,
-    events: Vec<UiInputEvent>,
-    hovered: bool,
-    focused: bool,
-    active: bool,
-    scroll_delta: Option<Vec2i>,
-) -> ResourceState {
+fn run_slider_once(slider: &mut Slider, rect: Recti, events: Vec<UiInputEvent>, hovered: bool, focused: bool, active: bool, scroll_delta: Option<Vec2i>) {
     let atlas = make_test_atlas();
     let style = Style::default();
     let mut ctx = WidgetUpdateCtx::new_with_interaction(rect, rect, &style, &atlas, true, hovered, focused, false, active, scroll_delta);
@@ -24,7 +16,7 @@ fn run_slider_once(
     slider.update(&mut ctx, events)
 }
 
-fn run_number_once(number: &mut Number, events: Vec<UiInputEvent>) -> ResourceState {
+fn run_number_once(number: &mut Number, events: Vec<UiInputEvent>) {
     let atlas = make_test_atlas();
     let style = Style::default();
     let bounds = rect(0, 0, 100, 20);
@@ -50,9 +42,8 @@ fn slider_zero_range_keeps_value() {
     }];
     let mut ctx = WidgetUpdateCtx::new_with_interaction(rect, rect, &style, &atlas, true, true, true, false, true, None);
 
-    let res = slider.update(&mut ctx, localize_events(rect, input));
+    slider.update(&mut ctx, localize_events(rect, input));
 
-    assert!(res.is_active());
     assert_eq!(state.try_read(|state| state.value().is_finite()), Some(true));
     assert_eq!(state.try_read(SliderState::value), Some(5.0));
     assert_eq!(state.try_update(SliderState::take_changed), Some(false));
@@ -61,9 +52,8 @@ fn slider_zero_range_keeps_value() {
 #[test]
 fn slider_wheel_snaps_fractional_step_from_lower_bound() {
     let (state, mut slider) = Slider::create(SliderParameters::with_opt(1.15, 1.0, 2.0, 0.2, 2, WidgetOption::FRAME));
-    let res = run_slider_once(&mut slider, rect(0, 0, 100, 20), Vec::new(), true, false, false, Some(vec2(0, 1)));
+    run_slider_once(&mut slider, rect(0, 0, 100, 20), Vec::new(), true, false, false, Some(vec2(0, 1)));
 
-    assert!(res.is_changed());
     assert_real_close(state.try_read(SliderState::value).unwrap(), 1.4);
     assert_eq!(state.try_update(SliderState::take_changed), Some(true));
     assert_eq!(state.try_update(SliderState::take_changed), Some(false));
@@ -77,9 +67,8 @@ fn slider_drag_snaps_fractional_step_from_lower_bound() {
         delta: Vec2i::default(),
         buttons: MouseButton::LEFT,
     }];
-    let res = run_slider_once(&mut slider, rect(0, 0, 100, 20), input, true, true, true, None);
+    run_slider_once(&mut slider, rect(0, 0, 100, 20), input, true, true, true, None);
 
-    assert!(res.is_changed());
     assert_real_close(state.try_read(SliderState::value).unwrap(), 13.25);
     assert_eq!(state.try_update(SliderState::take_changed), Some(true));
 }
@@ -98,9 +87,8 @@ fn slider_uses_widget_local_mouse_position() {
     }];
     let mut ctx = WidgetUpdateCtx::new_with_interaction(rect, rect, &style, &atlas, true, true, true, false, true, None);
 
-    let res = slider.update(&mut ctx, localize_events(rect, input));
+    slider.update(&mut ctx, localize_events(rect, input));
 
-    assert!(!res.is_none());
     assert_eq!(state.try_read(SliderState::value), Some(50.0));
     assert_eq!(state.try_update(SliderState::take_changed), Some(true));
 }
@@ -111,7 +99,7 @@ fn number_drag_records_a_typed_change_and_programmatic_setter_is_silent() {
     state.try_update(|state| state.set_value(4.0)).unwrap();
     assert_eq!(state.try_update(NumberState::take_changed), Some(false));
 
-    let result = run_number_once(
+    run_number_once(
         &mut number,
         vec![UiInputEvent::MouseDrag {
             pos: vec2(10, 10),
@@ -119,7 +107,6 @@ fn number_drag_records_a_typed_change_and_programmatic_setter_is_silent() {
             buttons: MouseButton::LEFT,
         }],
     );
-    assert!(result.is_changed());
     assert_eq!(state.try_read(NumberState::value), Some(10.0));
     assert_eq!(state.try_update(NumberState::take_changed), Some(true));
     assert_eq!(state.try_update(NumberState::take_changed), Some(false));

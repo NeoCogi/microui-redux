@@ -196,22 +196,16 @@ impl Textbox {
     }
 
     /// Applies input and cursor movement for this textbox.
-    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) {
         let font = ctx.style().resolve_font_choice(self.font);
         runtime_update_state(&self.state, "Textbox::update", |state| {
-            let old_buf = state.buf.clone();
-            let old_cursor = state.cursor;
-            let mut res = textbox_update(ctx, input, &mut state.buf, &mut state.cursor, self.opt, font);
-            if res.is_changed() {
+            let outcome = textbox_update(ctx, input, &mut state.buf, &mut state.cursor, self.opt, font);
+            if outcome.changed {
                 crate::widgets::record_pending_event(&mut state.pending_changes);
             }
-            if res.is_submitted() {
+            if outcome.submitted {
                 crate::widgets::record_pending_event(&mut state.pending_submissions);
             }
-            if ctx.focused() || state.buf != old_buf || state.cursor != old_cursor {
-                res |= ResourceState::ACTIVE;
-            }
-            res
         })
     }
 
@@ -232,8 +226,8 @@ pub(crate) fn textbox_update(
     cursor: &mut usize,
     _opt: WidgetOption,
     font: FontId,
-) -> ResourceState {
-    let mut res = ResourceState::NONE;
+) -> TextboxUpdateOutcome {
+    let mut outcome = TextboxUpdateOutcome::default();
     let r = ctx.local_rect();
     if !ctx.focused() {
         // Reset to end when blurred so refocusing starts from a predictable position.
@@ -272,10 +266,10 @@ pub(crate) fn textbox_update(
     if ctx.focused() {
         cursor_pos = edit.cursor;
         if edit.changed {
-            res |= ResourceState::CHANGE;
+            outcome.changed = true;
         }
         if edit.submit {
-            res |= ResourceState::SUBMIT;
+            outcome.submitted = true;
         }
         if end_pressed {
             cursor_pos = buf.len();
@@ -297,7 +291,14 @@ pub(crate) fn textbox_update(
 
     cursor_pos = clamp_cursor_boundary(buf, cursor_pos);
     *cursor = cursor_pos;
-    res
+    outcome
+}
+
+/// Semantic editing events produced by the shared single-line editor.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct TextboxUpdateOutcome {
+    pub(crate) changed: bool,
+    pub(crate) submitted: bool,
 }
 
 /// Shared single-line textbox painting used by textbox and numeric inline editors.
@@ -344,7 +345,7 @@ impl Widget for Textbox {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
         self.update_widget(ctx, &input)
     }
 
@@ -396,7 +397,7 @@ mod tests {
     use super::*;
     use crate::test_support::test_atlas;
 
-    fn update_textbox(textbox: &mut Textbox, focused: bool, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update_textbox(textbox: &mut Textbox, focused: bool, input: Vec<UiInputEvent>) {
         let atlas = test_atlas();
         let style = Style::default();
         let bounds = rect(0, 0, 120, 20);
@@ -408,7 +409,7 @@ mod tests {
     fn text_events_record_once_per_update_and_accumulate_across_updates() {
         let (state, mut textbox) = Textbox::create(TextboxParameters::new(""));
 
-        let first = update_textbox(
+        update_textbox(
             &mut textbox,
             true,
             vec![
@@ -417,11 +418,7 @@ mod tests {
                 UiInputEvent::KeyDown { key: KeyMode::RETURN },
             ],
         );
-        assert!(first.is_changed());
-        assert!(first.is_submitted());
-
-        let second = update_textbox(&mut textbox, true, vec![UiInputEvent::Text { text: "e".into() }]);
-        assert!(second.is_changed());
+        update_textbox(&mut textbox, true, vec![UiInputEvent::Text { text: "e".into() }]);
 
         assert_eq!(state.try_read(|state| state.text().to_owned()).as_deref(), Some("abcde"));
         assert_eq!(state.try_update(TextboxState::take_changed), Some(true));

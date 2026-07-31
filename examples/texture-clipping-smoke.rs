@@ -155,6 +155,29 @@ struct TextureClippingProbe {
     screen_content: Rc<RefCell<Option<Recti>>>,
 }
 
+struct TextureClippingParameters {
+    texture: TextureId,
+    screen_content: Rc<RefCell<Option<Recti>>>,
+}
+
+impl WidgetParameters for TextureClippingParameters {}
+
+struct TextureClippingBuilder;
+
+impl WidgetBuilder for TextureClippingBuilder {
+    type Parameters = TextureClippingParameters;
+    type W = TextureClippingProbe;
+
+    fn create_widget(parameters: Self::Parameters) -> Self::W {
+        TextureClippingProbe {
+            state: Rc::new(RefCell::new(())),
+            texture: parameters.texture,
+            options: WidgetOption::NO_INTERACT,
+            screen_content: parameters.screen_content,
+        }
+    }
+}
+
 impl WidgetStateOwner for TextureClippingProbe {
     type State = ();
 
@@ -173,9 +196,7 @@ impl Widget for TextureClippingProbe {
         Dimensioni::new(64, 64)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _events: Vec<UiInputEvent>) -> ResourceState {
-        ResourceState::NONE
-    }
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _events: Vec<UiInputEvent>) {}
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         *self.screen_content.borrow_mut() = Some(ctx.screen_content_rect());
@@ -195,17 +216,14 @@ fn main() -> Result<(), String> {
     let mut ctx = Context::new(backend);
     let texture = ctx.try_load_image_rgba(16, 12, &[0xFF; 16 * 12 * 4])?;
     let screen_content = Rc::new(RefCell::new(None));
-    let probe = TextureClippingProbe {
-        state: Rc::new(RefCell::new(())),
+    let probe = TextureClippingBuilder::create_widget(TextureClippingParameters {
         texture,
-        options: WidgetOption::NO_INTERACT,
         screen_content: screen_content.clone(),
-    };
-    let tree = UiNodeBuilder::build(move |tree| {
-        tree.node(NodeOptions::with_policy(Policy::fixed(64, 64))).widget(probe);
     });
+    let tree = Node::widget(probe).with_policy(Policy::fixed(64, 64));
     let root = ctx.create_window("texture clipping smoke", rect(0, 0, 64, 64), tree);
-    ctx.set_root_options(root, WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE);
+    ctx.set_root_options(root.id(), WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE)
+        .expect("root should remain registered");
 
     // Keep the root background out of the recording log so the assertions isolate the widget's
     // atlas/texture ordering while still exercising the retained public rendering path.

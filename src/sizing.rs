@@ -3,7 +3,7 @@
 /// Size policy used by retained nodes, row/grid tracks, and stack items when resolving cells.
 ///
 /// Cell sizing resolves in this order:
-/// 1. A retained node [`crate::retained::Policy`] override wins when it is not `Auto`.
+/// 1. A retained node [`crate::Policy`] override wins when it is not `Auto`.
 /// 2. Otherwise the active row/grid/stack track policy is used.
 /// 3. `Auto` uses the widget's measured preferred size when it is positive.
 /// 4. If a widget reports no preferred size for an axis, the style/default cell fallback is used.
@@ -26,6 +26,47 @@ pub enum SizePolicy {
     Fraction(f32),
     /// Consumes the remaining space with an optional margin.
     Remainder(i32),
+}
+
+/// Placement policy attached to one retained [`crate::Node`].
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Policy {
+    /// Width policy associated with the node.
+    pub width: SizePolicy,
+    /// Height policy associated with the node.
+    pub height: SizePolicy,
+}
+
+impl Policy {
+    /// Creates a policy from explicit width and height rules.
+    pub const fn new(width: SizePolicy, height: SizePolicy) -> Self {
+        Self { width, height }
+    }
+
+    /// Uses automatic sizing on both axes.
+    pub const fn auto() -> Self {
+        Self::new(SizePolicy::Auto, SizePolicy::Auto)
+    }
+
+    /// Uses fixed sizing on both axes.
+    pub const fn fixed(width: i32, height: i32) -> Self {
+        Self::new(SizePolicy::Fixed(width), SizePolicy::Fixed(height))
+    }
+
+    /// Uses a fixed width and automatic height.
+    pub const fn fixed_width(width: i32) -> Self {
+        Self::new(SizePolicy::Fixed(width), SizePolicy::Auto)
+    }
+
+    /// Uses a fixed height and automatic width.
+    pub const fn fixed_height(height: i32) -> Self {
+        Self::new(SizePolicy::Auto, SizePolicy::Fixed(height))
+    }
+
+    /// Uses remainder sizing on both axes.
+    pub const fn fill() -> Self {
+        Self::new(SizePolicy::Remainder(0), SizePolicy::Remainder(0))
+    }
 }
 
 impl Default for SizePolicy {

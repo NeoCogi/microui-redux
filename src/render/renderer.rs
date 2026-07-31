@@ -120,12 +120,6 @@ pub struct Renderer<B: RendererBackend> {
     custom_renderers: CustomRenderRegistry<B>,
     /// Scratch output reused by final rectangular triangle clipping.
     clipped_triangles: Vec<Vertex>,
-    /// Number of display lists executed, used to assert frame-level ownership.
-    #[cfg(test)]
-    render_count: usize,
-    /// Drawable size used by low-level retained-runtime tests.
-    #[cfg(test)]
-    test_dimensions: Dimensioni,
 }
 
 impl<B: RendererBackend> Renderer<B> {
@@ -148,34 +142,11 @@ impl<B: RendererBackend> Renderer<B> {
             textures: HashSet::new(),
             custom_renderers: CustomRenderRegistry::new(),
             clipped_triangles: Vec::new(),
-            #[cfg(test)]
-            render_count: 0,
-            #[cfg(test)]
-            test_dimensions: Dimensioni::new(1, 1),
         }
-    }
-
-    /// Creates a Renderer whose test-only submission helper uses `dimensions`.
-    #[cfg(test)]
-    pub(crate) fn new_test(backend: B, dimensions: Dimensioni) -> Self {
-        let mut renderer = Self::new(backend);
-        renderer.test_dimensions = dimensions;
-        renderer
-    }
-
-    /// Executes one complete low-level frame for retained-runtime tests.
-    #[cfg(test)]
-    pub(crate) fn render_test(&mut self, list: &mut DisplayList) {
-        let info = FrameInfo::try_new(self.test_dimensions, crate::color(0, 0, 0, 0)).expect("test Renderer dimensions must be positive");
-        self.render(info, list).expect("test backend frame should render");
     }
 
     /// Executes one destructive display-list submission and leaves the list empty for reuse.
     pub(crate) fn render(&mut self, info: FrameInfo, list: &mut DisplayList) -> Result<(), RenderError> {
-        #[cfg(test)]
-        {
-            self.render_count += 1;
-        }
         let result = self.render_once(info, list);
         list.clear();
         result
@@ -222,12 +193,6 @@ impl<B: RendererBackend> Renderer<B> {
     /// Returns the atlas associated with the renderer.
     pub fn atlas(&self) -> AtlasHandle {
         self.atlas.clone()
-    }
-
-    /// Returns how many display lists this Renderer has executed.
-    #[cfg(test)]
-    pub(crate) fn debug_render_count(&self) -> usize {
-        self.render_count
     }
 
     /// Registers one persistent custom renderer specialized for this backend.

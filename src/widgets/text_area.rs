@@ -250,7 +250,7 @@ impl TextArea {
     }
 
     /// Applies multiline editing, scrolling, and scrollbar dragging.
-    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) -> ResourceState {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) {
         let font = ctx.style().resolve_font_choice(self.font);
         let old_preferred_x = self.interaction.preferred_x;
         let old_dragging_y = self.interaction.dragging_y;
@@ -263,11 +263,11 @@ impl TextArea {
                 self.interaction.preferred_x = None;
                 state.reset_preferred_x = false;
             }
-            let mut res = textarea_update(ctx, input, state, &mut self.interaction, self.wrap, font);
-            if res.is_changed() {
+            let outcome = textarea_update(ctx, input, state, &mut self.interaction, self.wrap, font);
+            if outcome.changed {
                 crate::widgets::record_pending_event(&mut state.pending_changes);
             }
-            if res.is_submitted() {
+            if outcome.submitted {
                 crate::widgets::record_pending_event(&mut state.pending_submissions);
             }
             let changed = state.buf != old_buf
@@ -277,10 +277,7 @@ impl TextArea {
                 || self.interaction.preferred_x != old_preferred_x
                 || self.interaction.dragging_y != old_dragging_y
                 || self.interaction.dragging_x != old_dragging_x;
-            if ctx.focused() || changed {
-                res |= ResourceState::ACTIVE;
-            }
-            res
+            let _ = (ctx.focused(), changed);
         })
     }
 
@@ -408,8 +405,8 @@ fn textarea_update(
     interaction: &mut TextAreaInteraction,
     wrap: TextWrap,
     font: FontId,
-) -> ResourceState {
-    let mut res = ResourceState::NONE;
+) -> TextAreaUpdateOutcome {
+    let mut outcome = TextAreaUpdateOutcome::default();
     if !ctx.focused() {
         // Blurred text areas park the cursor at the end and forget vertical cursor preference.
         state.cursor = state.buf.len();
@@ -436,7 +433,7 @@ fn textarea_update(
         );
         cursor_pos = edit.cursor;
         if edit.changed {
-            res |= ResourceState::CHANGE;
+            outcome.changed = true;
             ensure_visible = true;
             reset_preferred = true;
         }
@@ -445,7 +442,7 @@ fn textarea_update(
             reset_preferred = true;
         }
         if edit.submit {
-            res |= ResourceState::SUBMIT;
+            outcome.submitted = true;
         }
     }
 
@@ -573,7 +570,13 @@ fn textarea_update(
     state.scroll.y = clamp_scroll(state.scroll.y, layout.maxscroll_y);
     state.cursor = cursor_pos;
     interaction.preferred_x = preferred_x;
-    res
+    outcome
+}
+
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+struct TextAreaUpdateOutcome {
+    changed: bool,
+    submitted: bool,
 }
 
 /// Paints text-area frame, visible text lines, caret, and scrollbars.
@@ -650,7 +653,7 @@ impl Widget for TextArea {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
         self.update_widget(ctx, &input)
     }
 
@@ -706,7 +709,7 @@ mod tests {
     use super::*;
     use crate::test_support::test_atlas;
 
-    fn update_text_area(text_area: &mut TextArea, input: Vec<UiInputEvent>) -> ResourceState {
+    fn update_text_area(text_area: &mut TextArea, input: Vec<UiInputEvent>) {
         let atlas = test_atlas();
         let style = Style::default();
         let bounds = rect(0, 0, 160, 80);
@@ -717,7 +720,7 @@ mod tests {
     #[test]
     fn text_area_records_independent_change_and_submission_events() {
         let (state, mut text_area) = TextArea::create(TextAreaParameters::new(""));
-        let result = update_text_area(
+        update_text_area(
             &mut text_area,
             vec![
                 UiInputEvent::Text { text: "line".into() },
@@ -725,8 +728,6 @@ mod tests {
                 UiInputEvent::KeyDown { key: KeyMode::RETURN },
             ],
         );
-        assert!(result.is_changed());
-        assert!(result.is_submitted());
         assert_eq!(state.try_update(TextAreaState::take_changed), Some(true));
         assert_eq!(state.try_update(TextAreaState::take_changed), Some(false));
         assert_eq!(state.try_update(TextAreaState::take_submitted), Some(true));

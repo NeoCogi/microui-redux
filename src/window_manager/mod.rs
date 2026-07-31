@@ -53,7 +53,7 @@
 //! Top-level retained UI context.
 //!
 //! `Context` owns the high-level renderer, global input, window-manager state, and the published
-//! frame results that application code reads after each retained update.
+//! retained roots driven by each frame.
 use std::{cell::RefCell, rc::Rc};
 
 use bitflags::bitflags;
@@ -63,17 +63,14 @@ use std::io::Cursor;
 #[cfg(any(feature = "builder", feature = "png_source"))]
 use png::{ColorType, Decoder};
 
-use crate::{rect, Dimensioni, FrameResultGeneration, FrameResults, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId, UiRuntime};
+use crate::{rect, Dimensioni, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId, UiRuntime};
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, DisplayList, FrameInfo, RenderError, Renderer, RendererBackend};
-use crate::ui_node::{pointer_events_from_input, UiNode, UiNodeId};
 use window_manager::WindowEntry;
-mod builder;
 mod input_api;
-mod retained;
+mod root_chrome;
 mod window_manager;
 
-pub use builder::{NodeBuilder, NodeId, NodeOptions, Policy, UiNodeSet, UiNodeBuilder};
-pub use retained::{widget_handle, WidgetHandle};
+pub use root_chrome::{RootHandle, RootMutationError, RootState};
 
 bitflags! {
     #[derive(Copy, Clone)]
@@ -102,11 +99,6 @@ impl RootId {
     /// Wraps a raw counter value as a root identifier.
     pub(crate) const fn from_raw(raw: usize) -> Self {
         Self(raw)
-    }
-
-    /// Returns the raw counter value for stable internal hashing.
-    pub(crate) fn raw(self) -> usize {
-        self.0
     }
 }
 
@@ -145,17 +137,11 @@ pub struct Context<B: RendererBackend> {
     roots: Vec<WindowEntry>,
     /// Next root id counter.
     next_root_id: usize,
-    /// Double-buffered retained widget result store.
-    frame_results: FrameResults,
-
     /// Shared input state mutated by public input APIs and consumed during traversal.
     input: Rc<RefCell<Input>>,
     /// Drawable size used by retained behavior tests that drive complete frames tersely.
     #[cfg(test)]
     test_dimensions: Dimensioni,
-    /// Number of successful whole-root projection replacements.
-    #[cfg(test)]
-    root_projection_replacements: u64,
 }
 
 impl<B: RendererBackend> Context<B> {
@@ -172,13 +158,9 @@ impl<B: RendererBackend> Context<B> {
             frame: 0,
             roots: Vec::default(),
             next_root_id: 1,
-            frame_results: FrameResults::default(),
-
             input: Rc::new(RefCell::new(Input::default())),
             #[cfg(test)]
             test_dimensions: Dimensioni::new(1, 1),
-            #[cfg(test)]
-            root_projection_replacements: 0,
         }
     }
 
@@ -195,12 +177,6 @@ impl<B: RendererBackend> Context<B> {
     pub(crate) fn update_ui(&mut self) {
         let info = FrameInfo::try_new(self.test_dimensions, crate::color(0, 0, 0, 0)).expect("test Context dimensions must be positive");
         self.frame(info).render_ui().expect("test backend frame should render");
-    }
-
-    /// Returns how many complete root projections have been replaced.
-    #[cfg(test)]
-    pub(crate) fn debug_root_projection_replacements(&self) -> u64 {
-        self.root_projection_replacements
     }
 }
 
@@ -226,11 +202,7 @@ pub struct ContextFrame<'a, B: RendererBackend> {
 }
 
 #[cfg(test)]
-mod builder_tests;
-#[cfg(test)]
-mod characterization_tests;
-#[cfg(test)]
-mod tests;
+mod root_tests;
 
 impl<B: RendererBackend> Context<B> {
     /// Starts one logical UI frame after application input/resource mutation is complete.
@@ -241,15 +213,13 @@ impl<B: RendererBackend> Context<B> {
     #[inline(never)]
     /// Starts a logical UI frame and clears transient root/render state.
     fn frame_begin(&mut self) {
-        self.frame_results.begin_frame();
         self.input.borrow_mut().prelude();
         self.frame += 1;
     }
 
     #[inline(never)]
-    /// Finishes root traversal, publishes results, and prepares hover/z-order for the next frame.
+    /// Finishes root traversal and clears one-frame input state.
     fn frame_end(&mut self) {
-        self.frame_results.finish_frame();
         self.input.borrow_mut().epilogue();
     }
 
@@ -303,24 +273,6 @@ impl<B: RendererBackend> Context<B> {
     /// Removes a previously registered custom-render callback.
     pub fn unregister_custom_renderer(&mut self, handle: CustomRenderHandle<B>) -> Result<(), CustomRenderRegistryError> {
         self.renderer.unregister_custom_renderer(handle)
-    }
-
-    /// Returns the previous frame's published widget results.
-    ///
-    /// This is the public business-logic view of retained interaction state.
-    /// App code should react to this generation after rendering, accepting the
-    /// one-frame delay as part of the retained pipeline contract.
-    pub fn committed_results(&self) -> FrameResultGeneration<'_> {
-        self.frame_results.committed()
-    }
-
-    /// Returns the in-progress result generation being written by the current frame.
-    ///
-    /// This is mainly useful for framework internals or advanced debugging.
-    /// Normal application/business logic should prefer [`Context::committed_results`].
-    #[cfg(test)]
-    pub(crate) fn current_results(&self) -> FrameResultGeneration<'_> {
-        self.frame_results.current()
     }
 
     /// Replaces the current UI style.

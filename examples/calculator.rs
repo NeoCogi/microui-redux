@@ -306,7 +306,7 @@ impl Calculator {
 }
 
 struct State {
-    _root: RootId,
+    root: RootHandle,
     display: WidgetStateHandle<TextboxState>,
     calculator: Calculator,
     buttons: [CalcButton; 20],
@@ -341,36 +341,28 @@ fn main() {
             CalcButton::new(".", Action::Dot),
             CalcButton::new("=", Action::Equals),
         ];
-        let tree = UiNodeBuilder::build(|tree| {
-            // The node policy sizes the display band; its single row track fills that allocation.
-            tree.node(NodeOptions::with_policy(Policy::new(
-                SizePolicy::Auto,
-                SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION),
-            )))
-            .row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
-                tree.widget(display_runtime);
-            });
-            tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Remainder(0), |tree| {
-                tree.column(|tree| {
-                    let columns = [
-                        SizePolicy::Weight(1.0),
-                        SizePolicy::Weight(1.0),
-                        SizePolicy::Weight(1.0),
-                        SizePolicy::Weight(1.0),
-                    ];
-                    let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
-                    tree.grid(&columns, &rows, |tree| {
-                        for button in &mut buttons {
-                            tree.widget(button.widget.take().expect("calculator tree is built once"));
-                        }
-                    });
-                });
-            });
-        });
+        let (_, display_row) = Row::create(RowParameters::new(
+            [SizePolicy::Remainder(0)],
+            SizePolicy::Remainder(0),
+            [Node::widget(display_runtime)],
+        ));
+        let display_row = display_row.with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION)));
+        let columns = [SizePolicy::Weight(1.0); 4];
+        let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
+        let button_nodes = buttons
+            .iter_mut()
+            .map(|button| Node::widget(button.widget.take().expect("calculator tree is built once")))
+            .collect::<Vec<_>>();
+        let (_, grid) = Grid::create(GridParameters::new(columns, rows, button_nodes));
+        let (_, keypad_column) = Column::create(ColumnParameters::new([grid]));
+        let (_, keypad_row) = Row::create(RowParameters::new([SizePolicy::Remainder(0)], SizePolicy::Remainder(0), [keypad_column]));
+        let keypad_row = keypad_row.with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Remainder(0)));
+        let (_, tree) = Column::create(ColumnParameters::new([display_row, keypad_row]));
         let root = ctx.create_window("Calculator", rect(0, 0, 320, 420), tree);
-        ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_RESIZE | WindowOption::NO_TITLE);
+        ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_RESIZE | WindowOption::NO_TITLE)
+            .expect("calculator root should remain registered");
         State {
-            _root: root,
+            root,
             display: display_state,
             calculator: Calculator::new(),
             buttons,
@@ -379,7 +371,8 @@ fn main() {
     .unwrap();
 
     fw.event_loop(|ctx, state, dim| {
-        ctx.set_root_rect(state._root, rect(0, 0, dim.width, dim.height));
+        ctx.set_root_rect(state.root.id(), rect(0, 0, dim.width, dim.height))
+            .expect("calculator root should remain registered");
         let _ = state
             .display
             .try_update_with(state.calculator.display_text().to_owned(), |display, text| display.set_text(text));

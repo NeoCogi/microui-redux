@@ -2,13 +2,13 @@ use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::render::{CustomRenderHandle, RendererBackend};
-use crate::{Dimensioni, Id, Recti, Vec2i, WidgetStateOwner};
+use crate::{Dimensioni, Recti, Vec2i, WidgetStateOwner};
 
 use super::containers::{with_container_children, with_container_children_mut};
-use super::{Container, LegacyContainer, NodeBehavior, WidgetNode};
+use super::{Container, NodeBehavior, WidgetNode};
 
-/// Stable runtime node identifier.
-pub(crate) type UiNodeId = Id;
+/// Stable runtime-only node identifier.
+pub(crate) type UiNodeId = RuntimeNodeId;
 
 /// Process-wide source of runtime-only node identity.
 ///
@@ -30,15 +30,6 @@ impl RuntimeNodeId {
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, advance_runtime_node_id)
             .expect("RuntimeNodeId space exhausted");
         Self(NonZeroU64::new(raw).expect("RuntimeNodeId allocator returned zero"))
-    }
-
-    /// Converts the private identity to the transitional scalar used by the pre-P3 runtime.
-    ///
-    /// P3 removes the public builder/result identity path. Until then, the runtime continues to
-    /// key its private focus/capture maps with the crate's existing scalar without exposing an ID
-    /// accessor on `Node`.
-    fn transitional_id(self) -> UiNodeId {
-        UiNodeId::new(self.0.get())
     }
 }
 
@@ -270,9 +261,9 @@ pub(crate) struct NodeRuntime {
 }
 
 impl NodeRuntime {
-    /// Returns the transitional internal scalar for this node's private identity.
+    /// Returns this node's private process-unique identity.
     pub(crate) fn id(&self) -> UiNodeId {
-        self.id.transitional_id()
+        self.id
     }
 
     /// Writes layout as the source of truth.
@@ -335,20 +326,6 @@ impl Node {
         self
     }
 
-    /// Creates an internal legacy node during the staged container migration.
-    ///
-    /// Row/Stack and ScrollArea use this bridge until P2.0/P2.2 migrate them to the public
-    /// `Container + WidgetStateOwner` path. Grid already uses the final state-owned path. This
-    /// constructor is never exported as an insertion API.
-    pub(crate) fn legacy_container(container: Box<dyn LegacyContainer>) -> Self {
-        Self::from_kind(NodeKind::LegacyContainer(container))
-    }
-
-    /// Creates an internal non-application widget used only by the pre-P2.2 synthetic scroll path.
-    pub(crate) fn legacy_widget(widget: Box<dyn NodeBehavior>) -> Self {
-        Self::from_kind(NodeKind::LegacyWidget(widget))
-    }
-
     fn from_kind(kind: NodeKind) -> Self {
         Self {
             state: NodeRuntime {
@@ -388,8 +365,6 @@ impl Node {
         let framed = match &self.data {
             NodeKind::Widget(widget) => widget.is_framed(),
             NodeKind::Container(container) => container.effective_widget_opt().intersects(crate::WidgetOption::FRAME),
-            NodeKind::LegacyContainer(container) => container.is_framed(),
-            NodeKind::LegacyWidget(widget) => widget.is_framed(),
         };
         let border_width = if framed { style.frame_border().width } else { 0 };
         let policy = self.state.policy;
@@ -401,18 +376,6 @@ impl Node {
         let preferred_content = match &self.data {
             NodeKind::Widget(widget) => widget.widget.measure(style, atlas, content_available),
             NodeKind::Container(container) => container.measure(style, atlas, content_available),
-            // Legacy container measurement still needs its transitional context. It never enters
-            // this path from a final state-owned parent after P2.0/P2.2 complete; until then a
-            // temporary standalone runtime provides only recursive measurement services.
-            NodeKind::LegacyContainer(_) | NodeKind::LegacyWidget(_) => {
-                let runtime = super::UiRuntime::new();
-                let ctx = super::MeasureCtx { runtime: &runtime, style, atlas };
-                match &self.data {
-                    NodeKind::LegacyContainer(container) => container.measure(&ctx, &self.state, content_available),
-                    NodeKind::LegacyWidget(widget) => widget.measure(&ctx, &self.state, content_available),
-                    _ => unreachable!(),
-                }
-            }
         };
         let preferred_outer = crate::frame::outer_preferred(preferred_content, border_width);
         Dimensioni::new(
@@ -434,24 +397,22 @@ impl Node {
     /// Returns the node's children when it accepts children.
     pub(crate) fn with_children<R>(&self, f: impl FnOnce(&[Node]) -> R) -> R {
         match &self.data {
-            NodeKind::Widget(_) | NodeKind::LegacyWidget(_) => f(&[]),
+            NodeKind::Widget(_) => f(&[]),
             NodeKind::Container(container) => with_container_children(&**container, |children| f(children.as_slice())),
-            NodeKind::LegacyContainer(container) => f(container.children()),
         }
     }
 
     /// Runs `f` with this node's authoritative child collection when it is a container.
     pub(crate) fn with_children_mut<R>(&mut self, f: impl FnOnce(&mut [Node]) -> R) -> Option<R> {
         match &mut self.data {
-            NodeKind::Widget(_) | NodeKind::LegacyWidget(_) => None,
+            NodeKind::Widget(_) => None,
             NodeKind::Container(container) => Some(with_container_children_mut(&mut **container, |children| f(children.as_mut_slice()))),
-            NodeKind::LegacyContainer(container) => Some(f(container.children_mut().as_mut_slice())),
         }
     }
 
     /// Returns whether this node is a container.
     pub(crate) fn is_container(&self) -> bool {
-        matches!(self.data, NodeKind::Container(_) | NodeKind::LegacyContainer(_))
+        matches!(self.data, NodeKind::Container(_))
     }
 
     /// Counts this node and every retained descendant.
@@ -465,9 +426,7 @@ impl Node {
     pub(crate) fn debug_erased_adapter_count(&self) -> usize {
         let here = match &self.data {
             NodeKind::Widget(widget) => usize::from(widget.debug_is_erased_widget_adapter()),
-            NodeKind::LegacyWidget(widget) => usize::from(widget.debug_is_erased_widget_adapter()),
             NodeKind::Container(_) => 0,
-            NodeKind::LegacyContainer(container) => usize::from(container.debug_is_erased_widget_adapter()),
         };
         self.with_children(|children| here + children.iter().map(Self::debug_erased_adapter_count).sum::<usize>())
     }
@@ -521,10 +480,6 @@ pub(crate) enum NodeKind {
     Widget(WidgetNode),
     /// Direct state-owning public container runtime.
     Container(Box<dyn Container>),
-    /// Temporary pre-P2.0/P2.2 container adapter.
-    LegacyContainer(Box<dyn LegacyContainer>),
-    /// Temporary pre-P2.2 internal synthetic widget adapter.
-    LegacyWidget(Box<dyn NodeBehavior>),
 }
 
 /// Opaque ordered owner of unique retained child nodes.

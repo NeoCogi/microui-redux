@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::sizing::SizePolicy;
 use crate::widget::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, Dimensioni, Recti, ResourceState, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
+    AtlasHandle, Dimensioni, Recti, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
     WidgetStateOwner, WidgetUpdateCtx,
 };
 
@@ -333,9 +333,7 @@ impl Widget for GridContainer {
         runtime_read_state(&self.state, "Grid::measure", |state| measure_grid(state, style, atlas, available))
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) -> ResourceState {
-        ResourceState::NONE
-    }
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }

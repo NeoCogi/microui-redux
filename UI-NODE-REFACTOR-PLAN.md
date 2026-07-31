@@ -3514,7 +3514,7 @@ removal, and focused implementation evidence rather than redefining that behavio
   all-example checks for `example-glow`, `example-vulkan`, and `example-wgpu`. `cargo clippy
   --all-targets -- -W clippy::all` completes with the repository's existing warning baseline.
 
-- [ ] **P1.4 — Give each root one persistent `WidgetTree`**
+- [x] **P1.4 — Give each root one persistent `WidgetTree`**
 
   **Problem**
 
@@ -3562,13 +3562,23 @@ removal, and focused implementation evidence rather than redefining that behavio
   - API-surface tests prove a root `Node` cannot be replaced while preserving `RootId`; a dynamic
     container-root test replaces descendants while preserving the root/window and persistent state.
 
+  **Completion evidence (2026-07-31)**
+
+  Window, dialog, and popup creation now consume one application `Node`, install one persistent
+  private `RootChromeContainer` tree, and return a cloneable weak `RootHandle`. `WindowEntry` retains
+  only lifecycle/cross-root data plus a weak root-state capability; `RootState` owns chrome geometry,
+  visibility, interaction, and typed pending events. Hide/show, destruction, never-reused IDs,
+  same-cell mutation conflicts, popup switching/dismissal, drag/close events, body fallthrough,
+  phase counts, dynamic descendant replacement, and post-descendant chrome overlay ordering are
+  covered by focused root tests. Generic/root-only result storage is gone.
+
 ### P2 — Container mechanics and runtime traversal
 
 P2 makes the P0 container, visibility, identity, and event behavior executable on P1 ownership.
 Its acceptance bullets are implementation-specific evidence and edge coverage; any material need to
 change a protected P0 behavior follows the explicit change-control rule.
 
-- [ ] **P2.0 — Convert row, grid, and stack and finish the shared layout-container mechanics**
+- [x] **P2.0 — Convert row, grid, and stack and finish the shared layout-container mechanics**
 
   **Problem**
 
@@ -3606,17 +3616,15 @@ change a protected P0 behavior follows the explicit change-control rule.
     traversal order.
   - Dynamic membership performs no root reconstruction or state transfer.
 
-  **Partial completion evidence (2026-07-30)**
+  **Completion evidence (2026-07-31)**
 
-  Grid now uses public `GridParameters`, `GridItem`, `GridSpan`, `GridState`, `GridContainer`, and
-  `GridBuilder`. `GridState` is the sole retained authority for opaque children, index-matched
-  spans, and both track axes. Its private `GridItems` wrapper centralizes every topology mutation,
-  and focused tests cover normalization, invalid insertion recovery, child/span synchronization,
-  state-handle access failure, drop behavior, stable child identity, track mutation, post-mount span
-  mutation, placement, and downstream public construction. Generic `NodeRuntime` and
-  `ContainerLayoutCtx` contain no Grid-specific state or accessor. The projection builder converts
-  its temporary private child-edge span directly to `GridItem`; non-grid projections discard it as
-  before. Row and Stack remain outstanding, so P2.0 stays open.
+  Row, Grid, and Stack now expose parameter/state/container/builder roles whose constructors return
+  a typed weak state handle plus one completed `Node`. Their concrete states are the sole owners of
+  children and parent-specific configuration; Grid owns spans in `GridItem`, while Row and Stack
+  expose mounted track/direction setters without rebuilding nodes. Focused tests cover topology
+  mutation, failed-access ownership, track changes, span reflow, direction changes, sizing-policy
+  application, and shared weighted/remainder/fractional placement. No projection-only span transport
+  remains.
 
 - [x] **P2.1 — Make disclosure one stateful container**
 
@@ -3708,7 +3716,7 @@ change a protected P0 behavior follows the explicit change-control rule.
   descendant liveness, target sanitization, and immediate expiry after child removal. Production
   searches find no `widgets::Node`, `NodeStateValue`, or `LegacyDisclosureNode`.
 
-- [ ] **P2.2 — Make scroll area one container state with direct children**
+- [x] **P2.2 — Make scroll area one container state with direct children**
 
   **Problem**
 
@@ -3753,6 +3761,15 @@ change a protected P0 behavior follows the explicit change-control rule.
     coordinates, and never lets a scrollbar/body hit leak into the other region.
   - Replacing children preserves scroll state and clamps offset.
   - Removing the area expires all descendant handles and cannot redirect capture to a replacement.
+
+  **Completion evidence (2026-07-31)**
+
+  ScrollArea is now one public state-owned container with direct `Children`; viewport, tracks,
+  thumbs, and corner are geometry painted and routed by that container rather than synthetic nodes.
+  The state owns offset, scrolling enablement, drag state, derived geometry, and the safe indexed
+  topology family. Layout uses one descendant viewport clip/translation boundary, while container
+  paint/input remain in the parent clip. Focused tests pin direct semantic topology, mounted state
+  mutation, offset/disable behavior, clipping, and child ownership.
 
 - [ ] **P2.3 — Traverse retained boxes and checked container borrows directly**
 
@@ -3940,7 +3957,7 @@ change a protected P0 behavior follows the explicit change-control rule.
 
 ### P3 — Public roots and application migration
 
-- [ ] **P3.0 — Delete projection builders and root replacement**
+- [x] **P3.0 — Delete projection builders and root replacement**
 
   **Problem**
 
@@ -3973,7 +3990,17 @@ change a protected P0 behavior follows the explicit change-control rule.
   - Production searches find no `NodeOptions::grid_span`, `BuilderChild::grid_span`, or equivalent
     projection-only Grid placement transport.
 
-- [ ] **P3.1 — Migrate examples and external custom widgets**
+  **Completion evidence (2026-07-31)**
+
+  The projection/builder/root-replacement surface and its compatibility implementation are deleted:
+  `UiNodeSet`, `UiNodeBuilder`, `NodeBuilder`, `NodeOptions`, `BuilderChild`, builder keys,
+  `set_root_nodes`, and runtime-state transfer no longer exist. Generic resource/frame result stores,
+  retained/generated result IDs, and the public generated `Id` module are also gone. Root owners use
+  `RootHandle` for lifecycle and typed observation; dynamic roots mutate container descendants, and
+  literal root replacement requires destroy/recreate. Downstream API tests construct every built-in
+  and a custom container through the sole owning-`Node` authoring path.
+
+- [x] **P3.1 — Migrate examples and external custom widgets**
 
   **Problem**
 
@@ -4004,6 +4031,15 @@ change a protected P0 behavior follows the explicit change-control rule.
   - Glow, Vulkan, and WGPU examples compile separately.
   - The non-dialog portions of `demo-full` are migrated and green without deleting, moving, or
     prematurely uncommenting the preserved file-dialog integration regions.
+
+  **Completion evidence (2026-07-31)**
+
+  All examples now construct owning nodes directly, create each root once, retain only useful typed
+  weak handles, and mutate dynamic membership/configuration through concrete container states.
+  External custom examples use explicit parameter/builder/runtime roles, and demo-full changes stack
+  direction through `StackState` instead of replacing a root. Separate Glow, Vulkan, and WGPU
+  all-example checks pass. All 13 exact P3.2 restoration markers remain, and `src/file_dialog.rs` is
+  unchanged.
 
 - [ ] **P3.2 — Re-enable the file dialog and prove local mutation**
 
