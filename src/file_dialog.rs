@@ -604,7 +604,7 @@ impl<B: RendererBackend> Context<B> {
 mod tests {
     use super::*;
     use crate::test_support::{AllocationMeasurement, NoopRenderer, test_atlas};
-    use crate::{Dimensioni, MouseButton, Vec2i};
+    use crate::{Button, ButtonParameters, ButtonState, Dimensioni, MouseButton, Node, Vec2i, WindowOption, rect};
     use std::{
         fs,
         time::{SystemTime, UNIX_EPOCH},
@@ -656,6 +656,27 @@ mod tests {
         assert_eq!(session.status(), FileDialogStatus::Pending);
         assert_eq!(session.status(), FileDialogStatus::Pending);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn pending_file_dialog_blocks_pointer_input_to_underlying_windows() {
+        let mut ctx = context();
+        let (behind, button) = Button::create(ButtonParameters::new("behind"));
+        let window = ctx.create_window("window", rect(0, 0, 100, 80), Node::widget(button));
+        ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+            .unwrap();
+        let session = ctx.open_file_dialog(FileDialogRequest::default());
+        let dialog = controller(&ctx, &session).root.id();
+        ctx.update_and_render_ui();
+
+        assert_eq!(ctx.debug_modal_root(), Some(dialog));
+        ctx.mousedown(10, 10, MouseButton::LEFT);
+        ctx.mouseup(10, 10, MouseButton::LEFT);
+        ctx.update_and_render_ui();
+
+        assert_eq!(behind.try_update(ButtonState::take_submitted), Some(false));
+        assert_eq!(session.status(), FileDialogStatus::Pending);
+        assert!(ctx.debug_root_zindex(dialog).unwrap() > ctx.debug_root_zindex(window.id()).unwrap());
     }
 
     #[test]

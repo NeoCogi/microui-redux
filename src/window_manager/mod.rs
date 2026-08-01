@@ -110,6 +110,11 @@ impl RootId {
 /// to ordinary root hit routing is the popup boundary: an outside pointer press dismisses the
 /// active popup before the event may continue to the root underneath.
 ///
+/// A visible dialog is modal. It remains above every other root and is the only root eligible for
+/// pointer, keyboard, text, focus, or capture routing until it is hidden or destroyed. Pointer
+/// input outside its rectangle is consumed at the cross-root boundary; other roots remain visible
+/// and continue to participate in layout and paint.
+///
 /// `Context`, its retained state, and its registered custom-render callbacks stay on the thread
 /// that owns the context. The rendering contracts intentionally do not require `Send` or `Sync`;
 /// applications should deliver any cross-thread results before starting a [`ContextFrame`].
@@ -139,6 +144,8 @@ pub struct Context<B: RendererBackend> {
     last_zindex: i32,
     /// Registered window-manager roots replayed by [`ContextFrame::render_ui`].
     roots: Vec<WindowEntry>,
+    /// Visible dialogs in nesting order; the last entry is the sole input root.
+    modal_stack: Vec<RootId>,
     /// Next root id counter.
     next_root_id: usize,
     /// Context-owned file-dialog controllers advanced after retained input updates.
@@ -166,6 +173,7 @@ impl<B: RendererBackend> Context<B> {
             style: Rc::new(style),
             last_zindex: 0,
             roots: Vec::default(),
+            modal_stack: Vec::new(),
             next_root_id: 1,
             file_dialogs: Vec::new(),
             next_file_dialog_id: 1,

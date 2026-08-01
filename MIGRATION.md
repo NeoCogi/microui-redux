@@ -252,6 +252,12 @@ counted `take_changed`/`take_submitted` events.
 `destroy_root(id)` permanently unregisters the root and drops that tree. `RootMutationError`
 distinguishes an unknown root from an active root-state borrow.
 
+Dialogs are modal whenever visible. Showing a dialog makes it the sole input-eligible root and
+keeps it above windows and popups. Pointer presses outside the dialog do not fall through;
+keyboard, text, focus, and pointer capture are also confined to that dialog. Hiding or destroying
+the active dialog restores the previous dialog in the modal stack, or normal routing when no dialog
+remains. Blocked roots retain their trees and still participate in layout and paint.
+
 Root visibility is not generic node visibility. `DisclosureState::{collapse, expand, toggle}` gates
 only that Disclosure's descendants while retaining them. There is no public generic node visibility
 bit or visibility mutation API.

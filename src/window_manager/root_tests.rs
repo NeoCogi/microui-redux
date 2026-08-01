@@ -435,6 +435,218 @@ fn fronting_changes_only_cross_root_z_order() {
 }
 
 #[test]
+fn visible_dialog_is_the_sole_pointer_root_and_remains_frontmost() {
+    let mut ctx = context();
+    let (behind_button, behind_content) = button_content("behind");
+    let window = ctx.create_window("window", rect(0, 0, 100, 80), behind_content);
+    ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let (dialog_button, dialog_content) = button_content("dialog");
+    let dialog = ctx.create_dialog("dialog", rect(120, 100, 100, 80), dialog_content);
+    ctx.set_root_options(dialog.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    ctx.set_root_visible(dialog.id(), true).unwrap();
+    ctx.update_and_render_ui();
+
+    assert_eq!(ctx.debug_modal_root(), Some(dialog.id()));
+    assert_eq!(ctx.debug_rendered_root_names(), ["window", "dialog"]);
+
+    ctx.mousedown(10, 10, MouseButton::LEFT);
+    ctx.mouseup(10, 10, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(behind_button.try_update(ButtonState::take_submitted), Some(false));
+
+    ctx.mousedown(130, 110, MouseButton::LEFT);
+    ctx.mouseup(130, 110, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(dialog_button.try_update(ButtonState::take_submitted), Some(true));
+
+    assert!(ctx.bring_root_to_front(window.id()));
+    ctx.set_root_visible(window.id(), true).unwrap();
+    assert_eq!(ctx.debug_rendered_root_names(), ["window", "dialog"]);
+    assert!(ctx.debug_root_zindex(dialog.id()).unwrap() > ctx.debug_root_zindex(window.id()).unwrap());
+
+    ctx.set_root_visible(dialog.id(), false).unwrap();
+    assert_eq!(ctx.debug_modal_root(), None);
+    ctx.mousedown(10, 10, MouseButton::LEFT);
+    ctx.mouseup(10, 10, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(behind_button.try_update(ButtonState::take_submitted), Some(true));
+}
+
+#[test]
+fn active_dialog_keeps_a_visible_popup_below_and_input_blocked() {
+    let mut ctx = context();
+    let (popup_button, popup_content) = button_content("popup");
+    let popup = ctx.create_popup("popup", popup_content);
+    ctx.set_root_options(popup.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let dialog = ctx.create_dialog("dialog", rect(120, 100, 100, 80), empty_content());
+    ctx.set_root_options(dialog.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    ctx.set_root_visible(dialog.id(), true).unwrap();
+    ctx.mousemove(10, 10);
+    ctx.update_and_render_ui();
+
+    ctx.set_root_visible(popup.id(), true).unwrap();
+    ctx.set_root_rect(popup.id(), rect(0, 0, 100, 80)).unwrap();
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_rendered_root_names(), ["popup", "dialog"]);
+
+    ctx.mousedown(10, 10, MouseButton::LEFT);
+    ctx.mouseup(10, 10, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(popup_button.try_update(ButtonState::take_submitted), Some(false));
+
+    ctx.set_root_visible(dialog.id(), false).unwrap();
+    ctx.mousedown(10, 10, MouseButton::LEFT);
+    ctx.mouseup(10, 10, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(popup_button.try_update(ButtonState::take_submitted), Some(true));
+}
+
+#[test]
+fn modal_activation_clears_underlying_focus_and_blocks_keyboard_input() {
+    let state = Rc::new(RefCell::new(OrderedProbeState::default()));
+    let probe = OrderedProbe {
+        state: state.clone(),
+        opt: WidgetOption::HOLD_FOCUS,
+    };
+    let mut ctx = context();
+    let window = ctx.create_window("window", rect(0, 0, 100, 80), Node::widget(probe));
+    ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let dialog = ctx.create_dialog("dialog", rect(120, 100, 100, 80), empty_content());
+    ctx.set_root_options(dialog.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+
+    ctx.mousedown(10, 10, MouseButton::LEFT);
+    ctx.mouseup(10, 10, MouseButton::LEFT);
+    ctx.update_ui(Dimensioni::new(320, 240));
+    assert_eq!(state.borrow().events, ["down", "up"]);
+
+    ctx.set_root_visible(dialog.id(), true).unwrap();
+    let updates_before_modal_input = state.borrow().updates;
+    ctx.keydown(KeyMode::SHIFT);
+    ctx.text("blocked");
+    ctx.keyup(KeyMode::SHIFT);
+    ctx.update_ui(Dimensioni::new(320, 240));
+    assert_eq!(state.borrow().updates, updates_before_modal_input);
+    assert_eq!(state.borrow().events, ["down", "up"]);
+
+    ctx.set_root_visible(dialog.id(), false).unwrap();
+    ctx.text("still unfocused");
+    ctx.update_ui(Dimensioni::new(320, 240));
+    assert_eq!(state.borrow().events, ["down", "up"]);
+
+    ctx.mousedown(10, 10, MouseButton::LEFT);
+    ctx.text("accepted");
+    ctx.update_ui(Dimensioni::new(320, 240));
+    assert_eq!(state.borrow().events, ["down", "up", "down", "text"]);
+}
+
+#[test]
+fn showing_a_dialog_revokes_underlying_chrome_capture() {
+    let mut ctx = context();
+    let window = ctx.create_window("window", rect(30, 30, 140, 100), empty_content());
+    let dialog = ctx.create_dialog("dialog", rect(170, 120, 100, 80), empty_content());
+    ctx.update_and_render_ui();
+    let title = ctx.debug_root_chrome(window.id()).unwrap().0.unwrap();
+
+    ctx.mousedown(title.x + 2, title.y + 2, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_root_has_pointer_capture(window.id()), Some(true));
+    assert_eq!(window.state().try_read(RootState::is_moving), Some(true));
+    let before = window.state().try_read(RootState::rect).unwrap();
+
+    ctx.set_root_visible(dialog.id(), true).unwrap();
+    assert_eq!(ctx.debug_root_has_pointer_capture(window.id()), Some(false));
+    assert_eq!(window.state().try_read(RootState::is_active), Some(false));
+    ctx.mousemove(title.x + 20, title.y + 20);
+    ctx.mouseup(title.x + 20, title.y + 20, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(
+        window.state().try_read(|state| {
+            let rect = state.rect();
+            (rect.x, rect.y, rect.width, rect.height)
+        }),
+        Some((before.x, before.y, before.width, before.height))
+    );
+}
+
+#[test]
+fn hiding_or_destroying_the_active_dialog_restores_the_previous_modal_dialog() {
+    let mut ctx = context();
+    let first = ctx.create_dialog("first", rect(20, 20, 120, 90), empty_content());
+    let second = ctx.create_dialog("second", rect(40, 40, 120, 90), empty_content());
+
+    ctx.set_root_visible(first.id(), true).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
+    ctx.set_root_visible(second.id(), true).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(second.id()));
+
+    ctx.set_root_visible(second.id(), false).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
+    ctx.set_root_visible(second.id(), true).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(second.id()));
+
+    ctx.update_and_render_ui();
+    let close = ctx.debug_root_chrome(second.id()).unwrap().1.unwrap();
+    ctx.mousedown(close.x + close.width / 2, close.y + close.height / 2, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(second.state().try_read(RootState::is_visible), Some(false));
+    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
+
+    ctx.set_root_visible(second.id(), true).unwrap();
+    assert!(ctx.destroy_root(second.id()));
+    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
+    assert!(ctx.destroy_root(first.id()));
+    assert_eq!(ctx.debug_modal_root(), None);
+}
+
+#[test]
+fn fronting_remains_state_borrow_independent_and_does_not_replace_the_active_modal() {
+    let mut ctx = context();
+    let first = ctx.create_dialog("first", rect(20, 20, 120, 90), empty_content());
+    let middle = ctx.create_dialog("middle", rect(30, 30, 120, 90), empty_content());
+    let second = ctx.create_dialog("second", rect(40, 40, 120, 90), empty_content());
+    ctx.set_root_visible(first.id(), true).unwrap();
+    ctx.set_root_visible(middle.id(), true).unwrap();
+    ctx.set_root_visible(second.id(), true).unwrap();
+
+    first.state().try_update(|_| assert!(ctx.bring_root_to_front(first.id()))).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(second.id()));
+    assert!(ctx.debug_root_zindex(second.id()).unwrap() > ctx.debug_root_zindex(first.id()).unwrap());
+
+    ctx.set_root_visible(second.id(), false).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(middle.id()));
+    ctx.set_root_visible(second.id(), true).unwrap();
+
+    second.state().try_update(|_| assert!(ctx.bring_root_to_front(second.id()))).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(second.id()));
+}
+
+#[test]
+fn modal_restoration_keeps_hiding_and_destruction_independent_of_other_root_borrows() {
+    let mut ctx = context();
+    let window = ctx.create_window("window", rect(0, 0, 100, 80), empty_content());
+    let first = ctx.create_dialog("first", rect(20, 20, 120, 90), empty_content());
+    let second = ctx.create_dialog("second", rect(40, 40, 120, 90), empty_content());
+    ctx.set_root_visible(first.id(), true).unwrap();
+    ctx.set_root_visible(second.id(), true).unwrap();
+
+    first.state().try_update(|_| ctx.set_root_visible(second.id(), false).unwrap()).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
+
+    ctx.set_root_visible(second.id(), true).unwrap();
+    first.state().try_update(|_| assert!(ctx.destroy_root(second.id()))).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
+
+    first.state().try_update(|_| assert!(ctx.destroy_root(window.id()))).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
+}
+
+#[test]
 fn title_drag_and_close_record_typed_root_events() {
     let mut ctx = context();
     let root = ctx.create_window("window", rect(30, 30, 140, 100), empty_content());

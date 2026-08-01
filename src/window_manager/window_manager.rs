@@ -10,7 +10,7 @@ use super::root_chrome::root_chrome_geometry;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(super) enum WindowKind {
     Window,
-    Dialog,
+    Modal,
     Popup,
 }
 
@@ -77,15 +77,18 @@ impl<B: RendererBackend> Context<B> {
 
     /// Creates a hidden retained dialog around one uniquely owned application node.
     ///
-    /// Show it with [`Context::set_root_visible`]; hiding preserves all descendant state.
+    /// Show it with [`Context::set_root_visible`]. A visible dialog becomes the active modal root:
+    /// it stays frontmost and is the only root eligible for input until hidden or destroyed.
+    /// Hiding preserves all descendant state.
     pub fn create_dialog(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
-        self.register_root(WindowKind::Dialog, name, rect, content, WindowOption::FRAME, false)
+        self.register_root(WindowKind::Modal, name, rect, content, WindowOption::FRAME, false)
     }
 
     /// Creates a hidden auto-sized popup around one uniquely owned application node.
     ///
     /// Showing places it at the current pointer position. An outside press hides it and records a
-    /// submission before ordinary routing may continue beneath the popup boundary.
+    /// submission before ordinary routing may continue beneath the popup boundary. While a dialog
+    /// is active, a shown popup remains visible but is kept below the dialog and receives no input.
     pub fn create_popup(&mut self, name: &str, content: Node) -> RootHandle {
         self.register_root(WindowKind::Popup, name, Recti::default(), content, Self::default_popup_options(), false)
     }
@@ -116,6 +119,9 @@ impl<B: RendererBackend> Context<B> {
     }
 
     /// Shows or hides a retained root, preserving its tree and typed state.
+    ///
+    /// Showing a dialog pushes it onto the modal stack. Hiding the active dialog restores the
+    /// previous visible dialog, if any; otherwise ordinary cross-root routing resumes.
     ///
     /// This is distinct from [`Context::destroy_root`], which drops the complete retained owner.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
@@ -161,27 +167,41 @@ impl<B: RendererBackend> Context<B> {
         }
 
         if visible {
-            self.last_zindex = self.last_zindex.saturating_add(1);
-            self.roots[target].z_index = self.last_zindex;
+            if kind == WindowKind::Modal {
+                self.push_modal(root);
+            } else {
+                self.raise_root_index(target);
+                self.raise_active_modal();
+            }
         } else {
             self.roots[target].tree.clear_transient_targets();
+            if kind == WindowKind::Modal {
+                self.remove_modal(root);
+            }
         }
         self.invalidate_ui_commit();
         Ok(())
     }
 
     /// Raises a registered root and reports whether it exists.
+    ///
+    /// The active modal dialog remains above every other root raised through this operation.
     pub fn bring_root_to_front(&mut self, root: RootId) -> bool {
-        let Some(entry) = self.roots.iter_mut().find(|entry| entry.id == root) else {
+        let Some(index) = self.roots.iter().position(|entry| entry.id == root) else {
             return false;
         };
-        self.last_zindex = self.last_zindex.saturating_add(1);
-        entry.z_index = self.last_zindex;
+        self.raise_root_index(index);
+        if self.modal_stack.last().copied() != Some(root) {
+            self.raise_active_modal();
+        }
         self.invalidate_ui_commit();
         true
     }
 
     /// Permanently unregisters a root and releases its complete retained tree.
+    ///
+    /// Destroying the active dialog restores the previous visible dialog, if any;
+    /// otherwise ordinary cross-root routing resumes.
     ///
     /// There is intentionally no root-content replacement operation. Destroy and recreate a root
     /// to install a different root owner, or mutate descendants through their container state.
@@ -189,7 +209,11 @@ impl<B: RendererBackend> Context<B> {
         let Some(index) = self.roots.iter().position(|entry| entry.id == root) else {
             return false;
         };
+        let kind = self.roots[index].kind;
         self.roots.remove(index);
+        if kind == WindowKind::Modal {
+            self.remove_modal(root);
+        }
         self.invalidate_ui_commit();
         true
     }
@@ -217,6 +241,60 @@ impl<B: RendererBackend> Context<B> {
         panic!("registered root lost its persistent RootState owner")
     }
 
+    /// Assigns a fresh z-index without applying modal policy.
+    fn raise_root_index(&mut self, index: usize) {
+        self.last_zindex = self.last_zindex.saturating_add(1);
+        self.roots[index].z_index = self.last_zindex;
+    }
+
+    /// Makes one visible dialog the sole input root and clears every other tree's targets.
+    fn push_modal(&mut self, root: RootId) {
+        let index = self.root_index(root).expect("modal root must remain registered");
+        assert!(self.roots[index].kind == WindowKind::Modal, "modal root must have modal kind");
+
+        let changed = self.modal_stack.last().copied() != Some(root);
+        self.modal_stack.retain(|candidate| *candidate != root);
+        self.modal_stack.push(root);
+        if changed {
+            for entry in &mut self.roots {
+                if entry.id != root {
+                    entry.tree.clear_transient_targets();
+                }
+            }
+        }
+        let index = self.root_index(root).expect("modal root must remain registered");
+        self.raise_root_index(index);
+    }
+
+    /// Removes a dialog from modal policy and restores the most recently activated survivor.
+    fn remove_modal(&mut self, root: RootId) {
+        let was_active = self.modal_stack.last().copied() == Some(root);
+        self.modal_stack.retain(|candidate| *candidate != root);
+        if was_active && !self.modal_stack.is_empty() {
+            self.raise_active_modal();
+        }
+    }
+
+    /// Restores the active modal root above a root that was just shown or fronted.
+    fn raise_active_modal(&mut self) {
+        let Some(root) = self.modal_stack.last().copied() else { return };
+        let index = self.root_index(root).expect("modal root must remain registered");
+        self.raise_root_index(index);
+    }
+
+    /// Reconciles modal ownership after a state-local title close.
+    fn reconcile_closed_modal(&mut self) {
+        let Some(root) = self.modal_stack.last().copied() else { return };
+        let index = self.root_index(root).expect("modal root must remain registered");
+        let visible = self.roots[index]
+            .root_state
+            .try_read(RootState::is_visible)
+            .unwrap_or_else(|| self.root_access_failure(index));
+        if !visible {
+            self.remove_modal(root);
+        }
+    }
+
     /// Performs one synchronization layout, then one full update/layout pair per queued event.
     pub(super) fn update_window_manager(&mut self, dimensions: Dimensioni) {
         let atlas = self.renderer.atlas();
@@ -237,6 +315,7 @@ impl<B: RendererBackend> Context<B> {
             // Dialog controls are ordinary retained widgets. Consume their committed actions only
             // after the complete cross-root update and before the matching layout commit.
             self.process_file_dialogs();
+            self.reconcile_closed_modal();
             self.layout_window_manager(viewport, &atlas);
         }
     }
@@ -282,30 +361,34 @@ impl<B: RendererBackend> Context<B> {
 
     /// Routes and applies one normalized event, visiting every eligible tree exactly once.
     fn update_window_manager_for_event(&mut self, atlas: &crate::AtlasHandle, event: &crate::UiInputEvent, input: crate::input::InputSnapshot) {
-        if matches!(event, crate::UiInputEvent::MouseDown { .. }) {
+        if self.modal_stack.is_empty() && matches!(event, crate::UiInputEvent::MouseDown { .. }) {
             self.dismiss_outside_popup(input.mouse_pos);
         }
 
-        let hover_root = event.is_pointer().then(|| self.front_root_at(input.mouse_pos)).flatten();
+        let hover_root = event.is_pointer().then(|| self.input_root_at(input.mouse_pos)).flatten();
         if matches!(event, crate::UiInputEvent::MouseDown { .. })
             && let Some(root) = hover_root
         {
             let _ = self.bring_root_to_front(root);
         }
 
-        let keyboard_root = self.front_visible_root();
+        let keyboard_root = self.front_input_root();
+        let modal_root = self.modal_stack.last().copied();
         for entry in &mut self.roots {
             let visible = entry
                 .root_state
                 .try_read(RootState::is_visible)
                 .expect("registered root state unavailable before input update");
-            if visible {
+            if visible && modal_root.is_none_or(|modal| modal == entry.id) {
                 entry.tree.runtime.begin_input_event(hover_root == Some(entry.id), event);
             }
         }
 
         if event.is_pointer() {
-            let capture_index = self.roots.iter().position(|entry| entry.tree.runtime.capture.is_some());
+            let capture_index = self
+                .roots
+                .iter()
+                .position(|entry| self.modal_stack.last().is_none_or(|modal| *modal == entry.id) && entry.tree.runtime.capture.is_some());
             let mut capture_handled = false;
             if let Some(index) = capture_index {
                 let entry = &mut self.roots[index];
@@ -343,12 +426,13 @@ impl<B: RendererBackend> Context<B> {
         }
 
         self.roots.sort_by_key(|entry| entry.z_index);
+        let modal_root = self.modal_stack.last().copied();
         for entry in &mut self.roots {
             let visible = entry
                 .root_state
                 .try_read(RootState::is_visible)
                 .expect("registered root state unavailable during input update");
-            if !visible {
+            if !visible || modal_root.is_some_and(|modal| modal != entry.id) {
                 entry.tree.clear_transient_targets();
                 continue;
             }
@@ -440,6 +524,23 @@ impl<B: RendererBackend> Context<B> {
             .map(|(_, entry)| entry.id)
     }
 
+    /// Returns the sole pointer-eligible root at `point` under the active modal policy.
+    fn input_root_at(&self, point: Vec2i) -> Option<RootId> {
+        let Some(modal) = self.modal_stack.last().copied() else {
+            return self.front_root_at(point);
+        };
+        let index = self.root_index(modal).expect("modal root must remain registered");
+        self.roots[index]
+            .root_state
+            .try_read(|state| (state.is_visible() && state.rect().contains(&point)).then_some(modal))
+            .unwrap_or_else(|| self.root_access_failure(index))
+    }
+
+    /// Returns the sole keyboard-eligible modal root or the ordinary front visible root.
+    fn front_input_root(&self) -> Option<RootId> {
+        self.modal_stack.last().copied().or_else(|| self.front_visible_root())
+    }
+
     const fn default_popup_options() -> WindowOption {
         WindowOption::FRAME
             .union(WindowOption::AUTO_SIZE)
@@ -467,6 +568,11 @@ impl<B: RendererBackend> Context<B> {
     #[cfg(test)]
     pub(crate) fn debug_root_zindex(&self, root: RootId) -> Option<i32> {
         self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.z_index)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_modal_root(&self) -> Option<RootId> {
+        self.modal_stack.last().copied()
     }
 
     #[cfg(test)]

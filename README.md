@@ -240,6 +240,9 @@ The current supported authoring path is retained widget trees registered as cont
 Root creation consumes one persistent application `Node` and returns a non-owning `RootHandle`.
 Roots cannot be replaced while retaining their identity: mutate descendants through a state-owned
 container, or destroy and recreate the root. Visibility is controlled with `set_root_visible`.
+A visible dialog is modal: it stays above every window and popup, receives all eligible pointer,
+keyboard, text, focus, and capture routing, and blocks interaction with other roots until hidden or
+destroyed. Other roots remain visible and continue to be laid out and painted.
 
 ```rust
 let (name_state, name_runtime) = Textbox::create(TextboxParameters::new(""));

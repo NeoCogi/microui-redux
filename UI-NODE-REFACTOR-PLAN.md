@@ -74,7 +74,21 @@ This is the sole authoritative UI-node migration plan. It supersedes the obsolet
     complete layout commit before the next event. An empty queue runs layout synchronization but
     zero widget updates. `ContextFrame::render_ui` performs paint/display-list submission only and
     never drains input, updates widgets, or lays out the tree. There is no timer, tick, or idle
-    widget-update path.
+    widget-update path;
+18. a visible `WindowKind::Modal` root is modal. Context stores visible dialogs in one private
+    `modal_stack: Vec<RootId>`; `modal_stack.last()` is the active dialog and an empty stack means
+    ordinary routing. It does not store a `RootHandle`: Context already owns each matching
+    `WindowEntry`, while `RootHandle` is an application-facing weak capability and would duplicate
+    state access at this internal policy boundary. The ID stack also keeps `bring_root_to_front`
+    and `destroy_root` borrow-independent; it is cross-root policy metadata, not another owner or a
+    duplicate state cell. The active dialog remains frontmost and is the sole root eligible
+    for pointer, keyboard, text, focus, capture, and per-event update routing. Outside pointer input
+    is swallowed rather than falling through. Other roots remain visible and continue through
+    layout and paint. Showing another dialog activates it and clears transient targets in every
+    other root; hiding, closing, or destroying it restores the previous dialog in the stack,
+    or ordinary routing if none remains. A popup has no implicit modal ownership relationship and
+    is therefore blocked while a dialog is active; modal-owned popup behavior requires a future
+    explicit root relationship rather than a cross-root exception.
 
 All common runtime phases belong to `Widget`, including for containers. Public `Container: Widget`
 adds only opaque child visitation, layout, descendant-visibility, container-specific routed-input,
@@ -1774,9 +1788,10 @@ The internal ownership shape is:
 
 ```text
 Context
+  -> modal_stack: Vec<RootId>            // last() is the private cross-root routing gate
   -> WindowEntry {
        id: RootId,
-       kind / z-order / just-opened / backend viewport data,
+       kind / z-order,
        root_state: WidgetStateHandle<RootState>, // framework-only weak clone
        tree: WidgetTree,
      }
@@ -1850,7 +1865,9 @@ coordinates z-order, front-root selection, backend viewport state, and transient
   `NO_TITLE` clears a current move; enabling `NO_RESIZE` or `AUTO_SIZE` clears a current resize; the
   matching tree capture is released before another pointer event routes;
 - `set_root_visible(root, false)` keeps the tree alive, silently clears moving/resizing state plus
-  invalid focus/hover/capture/routed targets, and emits no submission;
+  invalid focus/hover/capture/routed targets, and emits no submission. Hiding the active dialog
+  removes it from the stack, exposing the previous dialog or disabling the modal gate if none
+  remains;
 - `set_root_visible(root, true)` raises the root. A window/dialog keeps its rectangle. Before a
   hidden popup is shown, any other visible popup in that Context is silently hidden and sanitized
   without recording a submission. The new popup is repositioned at the current pointer with a
@@ -1859,13 +1876,27 @@ coordinates z-order, front-root selection, backend viewport state, and transient
   not restore cleared transient
   targets. Switching popups is atomic: Context resolves both entries and obtains the required
   checked state borrows before changing either; if either state is borrowed, the operation returns
-  `RootMutationError::Borrowed` and leaves both visibility states unchanged;
-- `bring_root_to_front(root)` changes only z-order and emits no typed event;
+  `RootMutationError::Borrowed` and leaves both visibility states unchanged. Showing a dialog also
+  makes it the active modal root, clears transient input targets in every other root, and keeps it
+  above windows and popups;
+- `bring_root_to_front(root)` changes only z-order and emits no typed event. It does not change
+  modal ownership; raising any inactive root cannot place it above the active dialog;
 - mutation by an unknown/destroyed ID returns `RootMutationError::UnknownRoot`. Trying a Context
   mutation while a state-handle closure currently borrows that same `RootState` returns
   `RootMutationError::Borrowed`; callers finish the closure and retry. A weak-upgrade failure for an
   extant `WindowEntry` is an internal ownership invariant panic. `bring_root_to_front` and
-  `destroy_root` need no state borrow and return `false` for an unknown/destroyed ID.
+  `destroy_root` need no state borrow and return `false` for an unknown/destroyed ID. Destroying the
+  active dialog removes it from the stack, exposing the previous dialog or disabling the modal
+  gate.
+
+Modal routing is a strict cross-root gate, not a second input queue or a tree-local option. While
+`modal_stack.last()` returns a root, hit testing, pointer capture lookup, keyboard/text selection,
+and full input-driven update traversal admit only that root. A pointer event outside its rectangle
+selects no recipient and cannot dismiss or activate an underlying popup/window. Activation immediately
+sanitizes focus, hover, capture, and routed targets in every other tree, preventing a pre-modal
+capture from bypassing the gate. Layout and paint still visit every visible root. The modal root is
+re-raised after any attempted fronting/showing of another root so visual and input ordering cannot
+diverge.
 
 Chrome events use the same private saturating `u32` counters and one-occurrence `take_*` contract as
 built-in widget events:
@@ -3331,12 +3362,13 @@ explicit decision before changing the criterion.
   | `create_window(name, rect, node)` | create a visible `FRAME` root at `rect`, raise it, and return a live `RootHandle` before any frame | no pending event; no interaction targets |
   | `create_dialog(name, rect, node)` | create a hidden `FRAME` root at `rect` with a live handle | no pending event; no interaction targets |
   | `create_popup(name, node)` | create a hidden root at `Recti::default()` with `FRAME | AUTO_SIZE | NO_RESIZE | NO_TITLE` and a live handle | no pending event or frame-based input suppression |
-  | `set_root_visible(id, false)` | retain the complete tree/state and current pending events | silently clear chrome mode plus focus/hover/capture/routed targets |
-  | title close / eligible popup outside press | retain the complete tree/state but make the root hidden | clear chrome/transient targets and record one typed submission |
-  | show a window/dialog | retain its rectangle, make it visible, and raise it | preserve pending events; restore no transient target |
-  | show a hidden popup | atomically hide any visible popup, position the new popup at the current committed pointer with a `1 x 1` seed, and raise it; the next `update_ui` synchronizes auto-size before draining input | old popup records nothing; both trees are sanitized; new pending events survive |
-  | show an already-visible popup | raise it without repositioning it or adding input suppression | record nothing and preserve current state |
-  | `destroy_root(id)` | immediately remove the entry and unmount/release its complete tree without returning any owned value | record nothing; all targets disappear and weak handles expire after active access upgrades |
+  | `set_root_visible(id, false)` | retain the complete tree/state and current pending events; remove a dialog from `modal_stack`, exposing the previous entry when the active dialog is removed | silently clear chrome mode plus focus/hover/capture/routed targets |
+  | title close / eligible popup outside press | retain the complete tree/state but make the root hidden; remove a closed dialog from `modal_stack` | clear chrome/transient targets and record one typed submission |
+  | show a window | retain its rectangle, make it visible, and raise it below any active dialog | preserve pending events; restore no transient target |
+  | show a dialog | retain its rectangle, make it visible, move it to the end of `modal_stack`, and raise it above every other root | preserve its pending events and clear every other tree's focus/hover/capture/routed targets |
+  | show a hidden popup | atomically hide any visible popup, position the new popup at the current committed pointer with a `1 x 1` seed, and raise it; the next `update_ui` synchronizes auto-size before draining input; an active dialog is immediately re-raised above it | old popup records nothing; both popup trees are sanitized; new pending events survive, but the popup is input-blocked while the dialog remains active |
+  | show an already-visible popup | raise it below any active dialog without repositioning it | record nothing and preserve current state; it remains input-blocked while the dialog is active |
+  | `destroy_root(id)` | immediately remove the entry and unmount/release its complete tree without returning any owned value; remove a dialog from `modal_stack`, exposing the previous entry when the active dialog is removed | record nothing; all targets disappear and weak handles expire after active access upgrades |
 
   Root IDs remain independent from private runtime-node IDs and are never reused after creation or
   destruction. Counter exhaustion is an invariant panic before a new root is registered. Dropping
@@ -3348,7 +3380,8 @@ explicit decision before changing the criterion.
   exists and `RootMutationError::Borrowed` when the required live state cell is unavailable, without
   partial mutation. An extant entry whose weak state cannot upgrade is an invariant panic.
   `bring_root_to_front` and `destroy_root` need no state borrow and return `false` only when the ID is
-  unknown; successful fronting changes z-order only.
+  unknown; successful fronting changes z-order only, does not inspect `RootState`, and cannot move
+  any inactive root above the active dialog. Showing a dialog is the operation that activates it.
 
   Programmatic rectangle and size setters write the requested geometry silently and preserve an
   active move/resize baseline. The next `update_ui` synchronization layout silently enforces the
@@ -3908,6 +3941,15 @@ removal, and focused implementation evidence rather than redefining that behavio
   state upgrades. Delete all generic and root-only result storage. Remove public root
   replacement after P3 migration and add no replacement of the one application child.
 
+  Context owns one private `modal_stack: Vec<RootId>` as cross-root policy, not an application
+  `RootHandle`. Its last entry is the active modal root, and the stack permits restoration without
+  borrowing `RootState` from `bring_root_to_front` or `destroy_root`. Any shown dialog moves to the
+  end of that stack and remains frontmost. Only its tree may
+  receive pointer, keyboard, text, focus, capture, or input-driven update traversal; outside
+  pointer input is swallowed. Activating it clears every other tree's transient targets. Hiding,
+  closing, or destroying it exposes the previous dialog in the stack, if any. Other roots continue to
+  lay out and paint, and popups have no implicit exception to the modal gate.
+
   **Acceptance tests**
 
   - Window, dialog, and popup behavior works from one persistent private chrome-container root and
@@ -3923,6 +3965,10 @@ removal, and focused implementation evidence rather than redefining that behavio
     record typed change/current active state; programmatic changes are silent.
   - At most one popup is visible per Context; showing another silently hides and sanitizes the
     previous popup without recording a submission. Nested popup behavior is out of scope.
+  - The last visible dialog in `modal_stack` is the sole input/update root and remains visually
+    frontmost; underlying windows and popups cannot route pointer, keyboard, focus, or capture
+    input. Activating a dialog clears their transient targets, and hiding/destroying the active
+    dialog restores the previous visible dialog or ordinary routing.
   - Phase-count and hit-region tests prove chrome dispatches through the tree once, body input falls
     through to the application child, the post-tree overlay paints above descendants, and no
     parallel window-manager chrome capture/update exists.
@@ -3939,6 +3985,14 @@ removal, and focused implementation evidence rather than redefining that behavio
   same-cell mutation conflicts, popup switching/dismissal, drag/close events, body fallthrough,
   phase counts, dynamic descendant replacement, and post-descendant chrome overlay ordering are
   covered by focused root tests. Generic/root-only result storage is gone.
+
+  **Modal correction evidence (2026-08-01)**
+
+  Context now stores one ID-only `modal_stack`; its last entry is the active modal root. Dialog
+  lifecycle updates that stack without adding root-state borrows to destruction/fronting.
+  Focused tests prove exclusive pointer and keyboard routing, immediate revocation of underlying
+  focus/chrome capture, dialog-front z-order enforcement, restoration across hide/destruction, and
+  file-dialog isolation from an underlying window. Layout and paint remain cross-root.
 
 ### P2 — Container mechanics and runtime traversal
 
@@ -4849,7 +4903,9 @@ change a protected P0 behavior follows the explicit change-control rule.
     paint.
   - Docs distinguish initialization Parameters from mutable State with concrete examples.
   - Root docs distinguish hide from destroy, document `RootHandle` weak ownership, and define
-    `RootState` current chrome queries plus pending `take_changed`/`take_submitted` semantics.
+    `RootState` current chrome queries plus pending `take_changed`/`take_submitted` semantics. They
+    define visible dialogs as modal, including exclusive routing, outside-click swallowing,
+    frontmost ordering, and restoration when the active dialog closes.
   - Crate-root/prelude exports include `RootHandle`, `RootState`, and `RootMutationError`, but not
     `RootChromeContainer`, `RootInteraction`, or framework-private state-transition helpers.
   - Visibility docs distinguish root visibility from Disclosure descendant gating and expose no
@@ -4882,6 +4938,11 @@ change a protected P0 behavior follows the explicit change-control rule.
   exact mutable container configuration, owned-input recovery, and removed compatibility names.
   Two new compiling doctests cover the canonical update/render loop and downstream
   `ContainerBuilder` finalization.
+
+  A 2026-08-01 modal-correction audit added the visible-dialog routing contract to Context and root
+  rustdoc, README, migration notes, and the normative architecture section. The private Context
+  modal stack contains only `RootId`s; no public modal handle, dialog option, or second ownership
+  channel was introduced.
 
   `cargo test --all-targets` passes with 162 unit tests, 2 intentionally ignored manual
   baselines, and 4 downstream integration tests. `cargo test --doc` passes 12 positive and 7
