@@ -18,6 +18,9 @@ enum DisclosureVariant {
 }
 
 /// One-shot construction input for a stateful disclosure container.
+///
+/// Label, header/tree presentation, and base options are initialization-only. Initial expansion
+/// and children move into [`DisclosureState`] for mounted mutation.
 pub struct DisclosureParameters {
     label: String,
     expanded: bool,
@@ -59,6 +62,9 @@ impl DisclosureParameters {
 }
 
 /// Application-facing state for a disclosure container.
+///
+/// Expansion gates descendant traversal while retaining every owned runtime and its state. It does
+/// not expose or mutate generic node visibility.
 pub struct DisclosureState {
     children: Children,
     expanded: bool,
@@ -307,7 +313,7 @@ impl Container for DisclosureContainer {
         if let Some(pos) = super::event_position(event) {
             self.header_hovered = self.header_rect.contains(&pos);
         }
-        ctx.route_widget_in_rect(event, self.header_rect, self.opt, self.focus_policy())
+        ctx.route_widget_in_rect(event, self.header_rect, self.opt)
     }
 }
 

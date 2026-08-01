@@ -26,7 +26,8 @@ impl ColumnParameters {
 /// Application-facing state for a vertical column.
 ///
 /// Child ownership is private. The inherent methods commit unique nodes or drop existing owners;
-/// none can detach an attached node or lend the complete collection.
+/// none can detach an attached node or lend the complete collection. Ordered membership is the
+/// Column's complete mounted configuration; spacing remains Style-owned.
 pub struct ColumnState {
     pub(super) children: Children,
 }

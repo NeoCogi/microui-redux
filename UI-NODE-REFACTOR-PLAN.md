@@ -2,6 +2,8 @@
 
 ## Status and scope
 
+Target release: `0.8.0-pre-alpha` (the `0.8` pre-alpha development line).
+
 This is the sole authoritative UI-node migration plan. It supersedes the obsolete, now-removed
 `UI-NODE-PLAN.md`. The following corrections and decisions are authoritative:
 
@@ -668,7 +670,6 @@ pub trait Container: Widget {
         ctx.route_widget(
             event,
             self.effective_widget_opt(),
-            self.focus_policy(),
         )
     }
 }
@@ -708,7 +709,6 @@ impl ContainerInputCtx<'_> {
         &mut self,
         event: &UiInputEvent,
         opt: WidgetOption,
-        focus: FocusPolicy,
     ) -> ContainerInputResult;
 
     pub fn route_widget_in_rect(
@@ -716,10 +716,14 @@ impl ContainerInputCtx<'_> {
         event: &UiInputEvent,
         rect: Recti,
         opt: WidgetOption,
-        focus: FocusPolicy,
     ) -> ContainerInputResult;
 }
 ```
+
+`ContainerInputCtx` does not accept a separate `FocusPolicy`. The retained runtime reads the
+authoritative policy from the current node's inherited `Widget::focus_policy` during the same input
+transaction. Passing another copy through routing would either be ignored or create two sources of
+truth that could disagree.
 
 ### Keep pointer-capture ownership in `WidgetTree` and its local lifecycle in the captured container
 
@@ -4774,14 +4778,14 @@ change a protected P0 behavior follows the explicit change-control rule.
   warning. Source audits find zero restoration markers or legacy file-dialog integration APIs in
   `src`, `examples`, and `tests`.
 
-- [ ] **P3.3 — Align public modules, README, rustdoc, and migration notes**
+- [x] **P3.3 — Align the final public API, modules, README, rustdoc, and migration notes**
 
   **Problem**
 
   Public documentation currently mixes strong retained state, generated identity, and builder
   projection terminology.
 
-  **Decision needed: No**
+  **Decision needed: No — explicit plan-owner approval of the final documentation/API audit**
 
   **Target contract or migration**
 
@@ -4809,6 +4813,27 @@ change a protected P0 behavior follows the explicit change-control rule.
   of that one event, and `WidgetUpdateCtx::{mouse_buttons,key_modes,key_codes}` in place of
   `WidgetInputEvents` batch helpers.
 
+  The final documentation audit also removes three misleading compatibility remnants rather than
+  documenting them as supported architecture:
+
+  - remove the unused `FocusPolicy` argument from
+    `ContainerInputCtx::{route_widget, route_widget_in_rect}`. Focus policy remains authoritative
+    through the current runtime's inherited `Widget::focus_policy` query; containers that had
+    supplied `DragCapture` through the ignored argument move that intent to their `Widget`
+    implementation;
+  - make the ordered `Input` queue crate-private and remove its crate-root/prelude exports.
+    Applications enqueue only through `Context::{mousemove,mousedown,mouseup,scroll,keydown,keyup,
+    keydown_code,keyup_code,text}`; there is no second public queue owner;
+  - delete the temporary public `WidgetConfig` helper and its exports. Built-in Parameters already
+    own initialization-only font/options, while a downstream custom runtime keeps any immutable
+    `FontChoice`/`WidgetOption` fields directly.
+
+  Keep `WidgetStateHandle::new(&Rc<RefCell<T>>)` as the explicitly selected downstream
+  `WidgetStateOwner` conformance boundary. It accepts a borrowed owner but returns no `Rc`, raw
+  `Weak`, or escaping borrow. Hiding that input representation would require a fifth public state
+  cell abstraction and a second ownership migration, so P3.3 documents the advanced implementor
+  contract rather than introducing one.
+
   **Acceptance tests**
 
   - Crate docs/README examples compile where practical.
@@ -4829,6 +4854,43 @@ change a protected P0 behavior follows the explicit change-control rule.
     `RootChromeContainer`, `RootInteraction`, or framework-private state-transition helpers.
   - Visibility docs distinguish root visibility from Disclosure descendant gating and expose no
     generic node visibility API.
+  - `ContainerInputCtx` exposes no ignored or duplicate focus-policy argument; custom-container
+    examples obtain focus behavior only from their inherited `Widget::focus_policy`.
+  - Crate-root/prelude exports contain no public `Input` queue or `WidgetConfig`; Context input
+    forwarding and concrete Parameters/runtime fields are the only documented paths.
+
+  **Completion evidence (2026-07-31)**
+
+  The public audit removed the ignored focus-policy parameter from both `ContainerInputCtx`
+  routing helpers and moved non-default capture intent into the authoritative `Widget` overrides
+  on `ScrollAreaContainer`, root chrome, and the downstream custom-container fixture. The
+  transitional `InputResult` alias was deleted. A focused runtime regression proves that a
+  `Widget::focus_policy` override retains focus without a routing-helper policy channel.
+
+  The ordered `Input` queue and all of its mutation methods are crate-private, with crate-root and
+  prelude exports removed. Applications enqueue only through Context forwarding. The temporary
+  `WidgetConfig` type and its exports are deleted; custom-render examples now keep immutable
+  `WidgetOption` fields directly. `WidgetStateHandle::new(&Rc<RefCell<T>>)` remains the selected
+  downstream conformance boundary and now documents the same-allocation, sole-persistent-owner,
+  reentrancy, and commit-order requirements.
+
+  Crate rustdoc, public container/node/root/state docs, and README now describe one Parameters /
+  State / runtime ownership model, fixed constructor shapes, opaque topology, capture ownership,
+  root hide-versus-destroy behavior, one-event update and FIFO commit ordering, the paint-only
+  frame boundary, popup routing, visibility separation, and state access without a Context token.
+  `MIGRATION.md` records the complete final mapping, including custom widget/container examples,
+  exact mutable container configuration, owned-input recovery, and removed compatibility names.
+  Two new compiling doctests cover the canonical update/render loop and downstream
+  `ContainerBuilder` finalization.
+
+  `cargo test --all-targets` passes with 162 unit tests, 2 intentionally ignored manual
+  baselines, and 4 downstream integration tests. `cargo test --doc` passes 12 positive and 7
+  compile-fail doctests. Formatting, no-default-features, warning-free rustdoc, and separate
+  Glow/Vulkan/WGPU example checks pass. `cargo clippy --all-targets -- -W clippy::all` exits
+  successfully with the repository's pre-existing warnings and no P3.3-specific warning. Source,
+  export, and generated-rustdoc audits find no production `WidgetConfig`, public `Input`, ignored
+  focus-policy routing parameter, `NodeBehavior`, result-store family, private runtime node ID, or
+  private root-chrome type. `git diff --check` passes.
 
 ### P4 — Correctness after simplification
 

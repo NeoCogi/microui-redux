@@ -235,7 +235,8 @@ impl GridParameters {
 /// Application-facing mutable Grid state.
 ///
 /// This is the single retained authority for child ownership, child spans, and both track axes.
-/// Span and track changes preserve the identity and widget state of every existing child.
+/// Span and track changes preserve the identity and widget state of every existing child. Spans
+/// are Grid-owned parent-child placement metadata, not generic [`Node`] policy.
 pub struct GridState {
     items: GridItems,
     column_tracks: Vec<SizePolicy>,

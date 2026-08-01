@@ -1,5 +1,5 @@
 use crate::render::CustomRenderKey;
-use crate::{Dimensioni, FocusPolicy, KeyCode, KeyMode, MouseButton, Recti, Style, Vec2i};
+use crate::{Dimensioni, KeyCode, KeyMode, MouseButton, Recti, Style, Vec2i};
 use crate::{Widget, WidgetOption, WidgetParameters, WidgetState, WidgetStateOwner};
 
 #[cfg(test)]
@@ -24,10 +24,29 @@ pub use stack::{Stack, StackBuilder, StackContainer, StackParameters, StackState
 /// Marker for application-facing state owned by a concrete container runtime.
 ///
 /// The marker deliberately grants no generic child access. Built-in state types expose only their
-/// topology-safe inherent operations.
+/// topology-safe inherent operations. It adds no parallel measurement, update, paint, layout, or
+/// input contract; those belong to the runtime's [`Widget`] and [`Container`] implementations.
 pub trait ContainerState: WidgetState {}
 
 /// Associates one-shot parameters with one concrete state-owning container runtime.
+///
+/// Downstream convenience constructors use `create_container`, obtain the runtime's typed weak
+/// state handle through [`WidgetStateOwner::state_handle`], and finish ownership with
+/// [`Node::container`]. Parameters do not choose whether a handle is returned: built-in concrete
+/// constructors always return `(WidgetStateHandle<State>, Node)`.
+///
+/// ```
+/// use microui_redux::{ContainerBuilder, Node, WidgetStateHandle, WidgetStateOwner};
+///
+/// fn finish<B>(parameters: B::Parameters) -> (WidgetStateHandle<<B::W as WidgetStateOwner>::State>, Node)
+/// where
+///     B: ContainerBuilder,
+/// {
+///     let runtime = B::create_container(parameters);
+///     let state = runtime.state_handle();
+///     (state, Node::container(runtime))
+/// }
+/// ```
 pub trait ContainerBuilder: Sized + 'static {
     /// One-shot construction input shared with the widget builder model.
     type Parameters: WidgetParameters;
@@ -41,7 +60,10 @@ pub trait ContainerBuilder: Sized + 'static {
 /// Scoped immutable child visitor constructed only by retained traversal.
 ///
 /// A container must submit exactly one authoritative collection. Ordinary callers cannot create a
-/// visitor, install an extraction callback, or retain a child borrow after `visit` returns.
+/// visitor, install an extraction callback, or retain a child borrow after `visit` returns. The
+/// framework may recurse into submitted descendants while the parent state is borrowed; this
+/// controlled recursion is the exception to the application rule against keeping state-access
+/// closures active across traversal.
 pub struct ChildrenVisitor<'a> {
     callback: &'a mut dyn FnMut(&Children),
     submissions: usize,
@@ -65,6 +87,9 @@ impl ChildrenVisitor<'_> {
 }
 
 /// Scoped mutable child visitor constructed only by retained traversal.
+///
+/// The collection must be the same authoritative collection submitted by [`ChildrenVisitor`]. A
+/// borrow cannot escape `visit`, and attached nodes remain opaque while the framework recurses.
 pub struct ChildrenVisitorMut<'a> {
     callback: &'a mut dyn FnMut(&mut Children),
     submissions: usize,
@@ -123,25 +148,39 @@ pub(crate) fn with_container_children_mut<R>(container: &mut dyn Container, f: i
 ///
 /// Common measurement, update, paint, options, and focus behavior remain inherited from
 /// [`Widget`]. Implementations must submit the same authoritative [`Children`] collection exactly
-/// once from both visitor methods.
+/// once from both visitor methods. `layout` and `route_input` are the only container-specific
+/// phases.
+///
+/// Capture responsibilities are deliberately split. The tree runtime owns the private captured
+/// node identity. The captured container owns only its local retention predicate and cleanup hook.
+/// Ancestors own descendant eligibility through [`Container::children_visible`]; collapsing or
+/// removing an ancestor can therefore revoke descendant capture without giving that ancestor the
+/// captured identity. Containers with no local capture state use the defaults. A container that
+/// can keep capture after routing must override both capture methods consistently.
 pub trait Container: Widget {
-    /// Supplies the authoritative collection for immutable traversal.
+    /// Supplies the authoritative collection for immutable traversal exactly once.
     fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>);
-    /// Supplies the same authoritative collection for mutable traversal.
+    /// Supplies the same authoritative collection for mutable traversal exactly once.
     fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>);
 
     /// Assigns child rectangles within this container's local content coordinates.
     fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti);
 
     /// Reports whether descendants participate in traversal while remaining owned.
+    ///
+    /// This is an ancestor-owned descendant gate, not generic node visibility. Built-in
+    /// [`Disclosure`] uses it for collapsed content; root visibility remains a separate
+    /// [`crate::Context::set_root_visible`] operation.
     fn children_visible(&self) -> bool {
         true
     }
 
     /// Reports whether this container's current local pointer-capture interaction remains active.
     ///
-    /// The retained runtime owns the captured node identity. This query can only revoke capture
-    /// already owned by this container; it receives no identity or tree capability.
+    /// The retained runtime owns the captured node identity. This query can only retain or revoke
+    /// capture already owned by this container; it receives no identity or tree capability. The
+    /// default keeps an otherwise valid capture and is correct for containers without revocable
+    /// local drag state.
     fn retains_pointer_capture(&self) -> bool {
         true
     }
@@ -149,12 +188,18 @@ pub trait Container: Widget {
     /// Clears container-local interaction state after the runtime ends this container's capture.
     ///
     /// The default is appropriate for containers without capture-specific local state. The runtime
-    /// invokes this only for the captured container itself, never through an ancestor.
+    /// invokes this only for the captured container itself, never through an ancestor. Override
+    /// this together with [`Container::retains_pointer_capture`] when capture owns local state.
     fn on_pointer_capture_lost(&mut self) {}
 
-    /// Routes one event to this container's own interactive surface.
+    /// Routes one event to this container's own interactive surface before that event's update.
+    ///
+    /// Descendant routing is framework-owned. An override may restrict this container's local hit
+    /// surface and then call [`ContainerInputCtx::route_widget`] or
+    /// [`ContainerInputCtx::route_widget_in_rect`]. Focus behavior comes only from the inherited
+    /// [`Widget::focus_policy`] query.
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
-        ctx.route_widget(event, self.effective_widget_opt(), self.focus_policy())
+        ctx.route_widget(event, self.effective_widget_opt())
     }
 }
 
@@ -286,9 +331,6 @@ impl ContainerInputResult {
     }
 }
 
-/// Transitional internal name used by the pre-P2.5 routing implementation.
-pub(crate) type InputResult = ContainerInputResult;
-
 fn event_position(event: &UiInputEvent) -> Option<Vec2i> {
     match event {
         UiInputEvent::MouseMove { pos, .. }
@@ -311,19 +353,19 @@ pub(super) fn route_public_widget_input(
     clip: Recti,
     opt: WidgetOption,
     event: &UiInputEvent,
-) -> InputResult {
+) -> ContainerInputResult {
     if opt.intersects(WidgetOption::NO_INTERACT) {
-        return InputResult::Ignored;
+        return ContainerInputResult::Ignored;
     }
 
     let id = state.id();
     if event.is_focus_input() {
         // Enforce the router invariant at the final delivery boundary as well as at target lookup.
         if runtime.focus != Some(id) {
-            return InputResult::Ignored;
+            return ContainerInputResult::Ignored;
         }
         runtime.push_routed_event(id, event.clone());
-        return InputResult::Consumed;
+        return ContainerInputResult::Consumed;
     }
 
     let captured = runtime.capture == Some(id);
@@ -333,36 +375,43 @@ pub(super) fn route_public_widget_input(
         UiInputEvent::MouseDown { button, .. } if hovered => {
             runtime.claim_pointer_focus(id, *button);
             runtime.push_routed_event(id, event.clone());
-            InputResult::Captured
+            ContainerInputResult::Captured
         }
         UiInputEvent::MouseDrag { .. } if captured || state.focused || hovered => {
             runtime.push_routed_event(id, event.clone());
-            if captured { InputResult::Captured } else { InputResult::Consumed }
+            if captured {
+                ContainerInputResult::Captured
+            } else {
+                ContainerInputResult::Consumed
+            }
         }
         UiInputEvent::MouseUp { .. } if captured || state.focused || hovered => {
             runtime.push_routed_event(id, event.clone());
-            InputResult::Consumed
+            ContainerInputResult::Consumed
         }
         UiInputEvent::MouseMove { .. } if hovered => {
             runtime.push_routed_event(id, event.clone());
-            InputResult::Consumed
+            ContainerInputResult::Consumed
         }
         UiInputEvent::Scroll { delta, .. } if hovered => {
             runtime.push_routed_event(id, event.clone());
             if opt.intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0) {
-                InputResult::Consumed
+                ContainerInputResult::Consumed
             } else {
-                InputResult::Ignored
+                ContainerInputResult::Ignored
             }
         }
-        _ => InputResult::Ignored,
+        _ => ContainerInputResult::Ignored,
     }
 }
 
 /// Framework-scoped geometry services available to a public [`Container`] implementation.
 ///
 /// The fields and constructor are private so application code cannot use this context to traverse
-/// arbitrary trees or mutate attached topology outside the active container call.
+/// arbitrary trees or mutate attached topology outside the active container call. Its public
+/// operations measure or lay out indexed children from the container's authoritative collection,
+/// configure descendant viewport/overflow, and expose the active style and atlas; it does not lend
+/// nodes or permit topology mutation.
 pub struct ContainerLayoutCtx<'a> {
     runtime: &'a mut UiRuntime,
     style: &'a Style,
@@ -428,6 +477,10 @@ impl ContainerLayoutCtx<'_> {
 }
 
 /// Framework-scoped routed-input services for one public [`Container`] call.
+///
+/// The context belongs to one normalized event and one current container. It exposes only the
+/// current container's capture predicate and scoped routing of that container's own surface. It
+/// does not expose captured identity, descendant routing, or a focus-policy override.
 pub struct ContainerInputCtx<'a> {
     runtime: &'a mut UiRuntime,
     content_rect: Recti,
@@ -453,12 +506,18 @@ impl ContainerInputCtx<'_> {
     }
 
     /// Routes through the container's complete local content rectangle.
-    pub fn route_widget(&mut self, event: &UiInputEvent, opt: WidgetOption, _focus: FocusPolicy) -> ContainerInputResult {
+    ///
+    /// `opt` is the surface's effective interaction option set. The runtime obtains focus behavior
+    /// authoritatively from the current container's [`Widget::focus_policy`] implementation.
+    pub fn route_widget(&mut self, event: &UiInputEvent, opt: WidgetOption) -> ContainerInputResult {
         route_public_widget_input(self.runtime, self.current, self.content_rect, self.content_clip, opt, event)
     }
 
     /// Routes through one container-local sub-rectangle intersected with the active clip.
-    pub fn route_widget_in_rect(&mut self, event: &UiInputEvent, rect: Recti, opt: WidgetOption, _focus: FocusPolicy) -> ContainerInputResult {
+    ///
+    /// Use this for chrome such as a disclosure header or scrollbar. `rect` uses the same local
+    /// content coordinate system as the event delivered to [`Container::route_input`].
+    pub fn route_widget_in_rect(&mut self, event: &UiInputEvent, rect: Recti, opt: WidgetOption) -> ContainerInputResult {
         route_public_widget_input(self.runtime, self.current, rect, self.content_clip, opt, event)
     }
 }

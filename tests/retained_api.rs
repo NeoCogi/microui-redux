@@ -143,6 +143,10 @@ impl Widget for ExternalContainer {
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+
+    fn focus_policy(&self) -> FocusPolicy {
+        FocusPolicy::DragCapture
+    }
 }
 
 impl Container for ExternalContainer {
@@ -175,6 +179,10 @@ impl Container for ExternalContainer {
         let state = self.state.try_borrow().expect("external state must not be reentered");
         state.retain_capture.set(false);
         state.capture_losses.set(state.capture_losses.get() + 1);
+    }
+
+    fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
+        ctx.route_widget(event, self.options)
     }
 }
 

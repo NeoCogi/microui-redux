@@ -69,16 +69,23 @@ impl<B: RendererBackend> Context<B> {
     }
 
     /// Creates an open retained window around one uniquely owned application node.
+    ///
+    /// The returned handle is weak; `Context` owns the root until explicit destruction.
     pub fn create_window(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
         self.register_root(WindowKind::Window, name, rect, content, WindowOption::FRAME, true)
     }
 
     /// Creates a hidden retained dialog around one uniquely owned application node.
+    ///
+    /// Show it with [`Context::set_root_visible`]; hiding preserves all descendant state.
     pub fn create_dialog(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
         self.register_root(WindowKind::Dialog, name, rect, content, WindowOption::FRAME, false)
     }
 
     /// Creates a hidden auto-sized popup around one uniquely owned application node.
+    ///
+    /// Showing places it at the current pointer position. An outside press hides it and records a
+    /// submission before ordinary routing may continue beneath the popup boundary.
     pub fn create_popup(&mut self, name: &str, content: Node) -> RootHandle {
         self.register_root(WindowKind::Popup, name, Recti::default(), content, Self::default_popup_options(), false)
     }
@@ -109,6 +116,8 @@ impl<B: RendererBackend> Context<B> {
     }
 
     /// Shows or hides a retained root, preserving its tree and typed state.
+    ///
+    /// This is distinct from [`Context::destroy_root`], which drops the complete retained owner.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
         let target = self.root_index(root)?;
         let mouse = self.input.borrow().mouse_pos;
@@ -173,6 +182,9 @@ impl<B: RendererBackend> Context<B> {
     }
 
     /// Permanently unregisters a root and releases its complete retained tree.
+    ///
+    /// There is intentionally no root-content replacement operation. Destroy and recreate a root
+    /// to install a different root owner, or mutate descendants through their container state.
     pub fn destroy_root(&mut self, root: RootId) -> bool {
         let Some(index) = self.roots.iter().position(|entry| entry.id == root) else {
             return false;

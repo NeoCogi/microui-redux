@@ -63,7 +63,8 @@ use std::io::Cursor;
 #[cfg(any(feature = "builder", feature = "png_source"))]
 use png::{ColorType, Decoder};
 
-use crate::{rect, Dimensioni, ImageSource, Input, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId, UiRuntime};
+use crate::input::Input;
+use crate::{rect, Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId, UiRuntime};
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, DisplayList, FrameInfo, RenderError, Renderer, RendererBackend};
 use window_manager::WindowEntry;
 mod input_api;
@@ -103,6 +104,11 @@ impl RootId {
 }
 
 /// Primary entry point used to drive the UI over a rendering backend.
+///
+/// `Context` is the only public ordered input-queue boundary. Input forwarding calls append raw
+/// transitions without coalescing; [`Context::update_ui`] drains them in call order. The exception
+/// to ordinary root hit routing is the popup boundary: an outside pointer press dismisses the
+/// active popup before the event may continue to the root underneath.
 ///
 /// `Context`, its retained state, and its registered custom-render callbacks stay on the thread
 /// that owns the context. The rendering contracts intentionally do not require `Send` or `Sync`;
@@ -189,6 +195,11 @@ impl<B: RendererBackend> Context<B> {
 
 /// Exclusively owned logical UI frame.
 ///
+/// This value borrows `Context` to serialize paint/submission, but it does not lock independent
+/// [`crate::WidgetStateHandle`] or [`RootHandle::state`] access. Mutating layout-affecting state after the
+/// last update commit makes that commit semantically stale; drop the unsubmitted frame and call
+/// [`Context::update_ui`] again before painting. No separate Context token exists.
+///
 /// Submission consumes the frame, making a second submission unrepresentable:
 ///
 /// ```compile_fail
@@ -220,8 +231,10 @@ impl<B: RendererBackend> Context<B> {
     /// Drains ordered input and commits retained state plus layout for `dimensions`.
     ///
     /// One synchronization layout always runs first. Each queued input event then causes exactly
-    /// one full eligible-tree update followed by another layout commit. This method never paints
-    /// or submits backend work.
+    /// one route followed by one full eligible-tree update and another layout commit. Geometry
+    /// produced for one event is therefore authoritative when routing the next. With an empty
+    /// queue, the initial layout is the complete synchronization commit. This method performs no
+    /// timer synthesis, painting, or backend submission.
     ///
     /// Context-owned input, style, and root mutations invalidate a prior commit automatically.
     /// Mutations made through weak widget/container state handles cannot notify Context; callers
@@ -393,7 +406,9 @@ impl<B: RendererBackend> ContextFrame<'_, B> {
     /// Consumes this logical frame, paints the last committed UI once, and submits it once.
     ///
     /// Returns [`RenderError::UiUpdateRequired`] before paint or backend acquisition when no commit
-    /// exists for these dimensions or when raw input is pending.
+    /// exists for these dimensions or when raw input is pending. This operation is paint-only: it
+    /// does not route input, update semantic state, run layout, synthesize timers, or produce a
+    /// generic frame-result/resource-state object.
     pub fn render_ui(mut self) -> Result<(), RenderError> {
         let dimensions = self.info.dimensions();
         let commit_matches = self

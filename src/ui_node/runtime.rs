@@ -628,10 +628,10 @@ impl UiRuntime {
     }
 
     /// Applies runtime pointer-capture ownership from one routed event result.
-    pub(crate) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: InputResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
+    pub(crate) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: ContainerInputResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
         if event.is_pointer_release() && mouse_buttons.is_empty() {
             self.defer_current_pointer_capture_loss();
-        } else if result == InputResult::Captured {
+        } else if result == ContainerInputResult::Captured {
             self.acquire_pointer_capture(owner);
         } else if self.capture == Some(owner) && mouse_buttons.is_empty() {
             self.defer_current_pointer_capture_loss();
@@ -645,7 +645,7 @@ impl UiRuntime {
         parent_transform: Transform,
         style: &Style,
         event: &UiInputEvent,
-    ) -> Option<(RuntimeNodeId, InputResult)> {
+    ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
         let id = node.id();
         let child_transform = parent_transform.push(node.state.layout);
         let child_result = if node_children_visible(node) {
@@ -675,12 +675,18 @@ impl UiRuntime {
         parent_transform: Transform,
         style: &Style,
         event: &UiInputEvent,
-    ) -> InputResult {
-        with_node_mut(roots, id, |node| self.route_input_event_to_node_only_ref(node, parent_transform, style, event)).unwrap_or(InputResult::Ignored)
+    ) -> ContainerInputResult {
+        with_node_mut(roots, id, |node| self.route_input_event_to_node_only_ref(node, parent_transform, style, event)).unwrap_or(ContainerInputResult::Ignored)
     }
 
     /// Routes an event to exactly one borrowed node without traversing descendants.
-    fn route_input_event_to_node_only_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Style, event: &UiInputEvent) -> InputResult {
+    fn route_input_event_to_node_only_ref(
+        &mut self,
+        node: &mut Node,
+        parent_transform: Transform,
+        style: &Style,
+        event: &UiInputEvent,
+    ) -> ContainerInputResult {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.routed_input_dispatches += 1);
         let framed = node_is_framed(node);
@@ -869,9 +875,10 @@ mod tests {
     use super::*;
     use crate::test_support::test_atlas;
     use crate::{
-        Children, ChildrenVisitor, ChildrenVisitorMut, ContainerState, Input, Widget, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner,
+        Children, ChildrenVisitor, ChildrenVisitorMut, ContainerState, Widget, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner,
         WidgetUpdateCtx,
     };
+    use crate::input::Input;
 
     #[derive(Default)]
     struct ProbeCounts {
@@ -932,6 +939,37 @@ mod tests {
         fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {
             self.counts.paints.set(self.counts.paints.get() + 1);
             self.log.borrow_mut().push(format!("{}:paint", self.name));
+        }
+    }
+
+    struct HoldFocusProbe {
+        state: Rc<RefCell<()>>,
+        opt: WidgetOption,
+    }
+
+    impl WidgetStateOwner for HoldFocusProbe {
+        type State = ();
+
+        fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+            WidgetStateHandle::new(&self.state)
+        }
+    }
+
+    impl Widget for HoldFocusProbe {
+        fn widget_opt(&self) -> &WidgetOption {
+            &self.opt
+        }
+
+        fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+            Dimensioni::new(20, 20)
+        }
+
+        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
+
+        fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+
+        fn focus_policy(&self) -> FocusPolicy {
+            FocusPolicy::HoldUntilBlur
         }
     }
 
@@ -1094,6 +1132,10 @@ mod tests {
         }
 
         fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+
+        fn focus_policy(&self) -> FocusPolicy {
+            FocusPolicy::DragCapture
+        }
     }
 
     impl Container for CaptureContainer {
@@ -1128,7 +1170,7 @@ mod tests {
                     .expect("capture state must be available during routing")
                     .saw_capture_during_drag = true;
             }
-            ctx.route_widget(event, self.opt, FocusPolicy::DragCapture)
+            ctx.route_widget(event, self.opt)
         }
     }
 
@@ -1269,11 +1311,49 @@ mod tests {
         };
         runtime.begin_input_event(true, &event);
         let routed = runtime.route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event);
-        assert_eq!(routed.map(|(_, result)| result), Some(InputResult::Captured));
+        assert_eq!(routed.map(|(_, result)| result), Some(ContainerInputResult::Captured));
         runtime.update_tree_root(&mut root, &style, atlas, empty_input());
 
         assert_eq!(first_counts.routed_events.get(), 0);
         assert_eq!(second_counts.routed_events.get(), 1);
+    }
+
+    #[test]
+    fn widget_focus_policy_is_authoritative_after_container_routing_cleanup() {
+        let mut root = Node::widget(HoldFocusProbe {
+            state: Rc::new(RefCell::new(())),
+            opt: WidgetOption::NONE,
+        });
+        let id = root.id();
+        let mut runtime = UiRuntime::new();
+        let style = Style::default();
+        let atlas = test_atlas();
+
+        runtime.begin_update();
+        layout_root(&mut runtime, &mut root, &style, atlas.clone());
+
+        let mut input = Input::default();
+        input.mousedown(20, 30, MouseButton::LEFT);
+        let (down, down_state) = next_input(&mut input);
+        runtime.begin_input_event(true, &down);
+        let (owner, result) = runtime
+            .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &down)
+            .expect("pointer-down must route to the focus probe");
+        runtime.update_pointer_capture(owner, result, &down, down_state.mouse_buttons);
+        runtime.update_tree_root(&mut root, &style, atlas.clone(), down_state);
+        assert_eq!(runtime.focus, Some(id));
+
+        input.mouseup(20, 30, MouseButton::LEFT);
+        let (release, release_state) = next_input(&mut input);
+        runtime.begin_input_event(true, &release);
+        assert_eq!(
+            runtime.route_captured_pointer_input_event(std::slice::from_mut(&mut root), &style, release_state.mouse_buttons, &release),
+            Some(true)
+        );
+        runtime.update_tree_root(&mut root, &style, atlas, release_state);
+
+        assert_eq!(runtime.capture, None);
+        assert_eq!(runtime.focus, Some(id), "the Widget override, not a routing helper argument, must retain focus");
     }
 
     #[test]

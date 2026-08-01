@@ -1,8 +1,7 @@
-//! Common runtime node model used by the next retained traversal path.
+//! Internal retained node model and traversal runtime.
 //!
-//! Internal retained UI node runtime.
-//! It gives the crate one node representation that can own either a widget or a framework
-//! container.
+//! One node representation owns either a widget or a container; no parallel legacy tree or
+//! generated public identity path remains.
 //!
 //! Topology is assembled from unique owning nodes and concrete state-owned containers. Update and
 //! paint visit a node before its eligible children in forward sibling order; pointer input visits
@@ -34,7 +33,7 @@ pub(crate) use runtime::UiRuntime;
 #[cfg(test)]
 pub(crate) use runtime::RuntimeMetrics;
 mod containers;
-pub(crate) use containers::{InputResult, WidgetNode};
+pub(crate) use containers::WidgetNode;
 pub use containers::{
     ChildrenVisitor, ChildrenVisitorMut, Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState, Container, ContainerBuilder, ContainerInputCtx,
     ContainerInputResult, ContainerLayoutCtx, ContainerState, Disclosure, DisclosureBuilder, DisclosureContainer, DisclosureParameters, DisclosureState, Grid,

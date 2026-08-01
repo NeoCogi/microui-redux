@@ -90,7 +90,7 @@ bitflags! {
 pub enum FocusPolicy {
     /// Focus is only needed for the click interaction and clears when the button is released.
     Momentary,
-    /// Focus remains after release until the widget explicitly clears it or another click moves it.
+    /// Focus remains after release until routing moves it to another widget or the node is hidden or removed.
     HoldUntilBlur,
     /// Focus captures a pointer drag and clears when the drag button is released.
     DragCapture,
@@ -129,7 +129,15 @@ pub trait WidgetParameters: 'static {}
 /// A cloneable, non-owning capability for checked access to concrete widget state.
 ///
 /// The concrete [`WidgetStateOwner`] runtime is the persistent owner. Consequently, cloning this
-/// handle never keeps removed state alive and does not require `T: Clone`.
+/// handle never keeps removed state alive and does not require `T: Clone`. Dropping every handle
+/// likewise has no effect on the mounted runtime.
+///
+/// Access closures must finish before an update, layout, or paint traversal can reach the same
+/// state. Same-cell reentrancy fails without invoking the inner closure; access to an independent
+/// state cell may be nested. A [`crate::ContextFrame`] does not lock these handles and there is no
+/// Context access token. If state that can affect layout changes after the last
+/// [`crate::Context::update_ui`] commit, cancel any unsubmitted frame and commit again before
+/// painting.
 pub struct WidgetStateHandle<T: WidgetState> {
     /// Weak access to the state allocation retained by the concrete runtime.
     cell: Weak<RefCell<T>>,
@@ -145,7 +153,11 @@ impl<T: WidgetState> WidgetStateHandle<T> {
     /// Creates a weak state capability for a concrete runtime's private state allocation.
     ///
     /// This borrows the strong owner only long enough to downgrade it and never exposes that owner
-    /// through the resulting handle.
+    /// through the resulting handle. This constructor is the advanced downstream
+    /// [`WidgetStateOwner`] conformance boundary: the supplied `Rc<RefCell<T>>` must be the same
+    /// private allocation used by every runtime phase, and the runtime must remain its only
+    /// persistent strong owner. Applications ordinarily receive handles from built-in `create`
+    /// constructors instead of calling this method.
     pub fn new(owner: &Rc<RefCell<T>>) -> Self {
         Self { cell: Rc::downgrade(owner) }
     }
@@ -177,6 +189,10 @@ impl<T: WidgetState> WidgetStateHandle<T> {
     }
 
     /// Runs an exclusive update while preserving `input` if access fails before `f` starts.
+    ///
+    /// Use this operation when `input` transfers ownership, such as a still-unmounted
+    /// [`crate::Node`]. Both an expired state owner and a same-cell borrow conflict return the exact
+    /// input value unchanged.
     pub fn try_update_with<I, R>(&self, input: I, f: impl FnOnce(&mut T, I) -> R) -> Result<R, I> {
         let owner = match self.cell.upgrade() {
             Some(owner) => owner,
@@ -219,7 +235,7 @@ pub trait WidgetBuilder: Sized + 'static {
 pub(crate) fn runtime_read_state<T: WidgetState, R>(state: &Rc<RefCell<T>>, phase: &'static str, f: impl FnOnce(&T) -> R) -> R {
     let state = state.try_borrow().unwrap_or_else(|_| {
         panic!(
-            "retained widget state invariant violated during {phase}: associated state is already borrowed; application state-access closures must finish before rendering"
+            "retained widget state invariant violated during {phase}: associated state is already borrowed; application state-access closures must finish before retained update, layout, or paint traversal"
         )
     });
     f(&state)
@@ -229,7 +245,7 @@ pub(crate) fn runtime_read_state<T: WidgetState, R>(state: &Rc<RefCell<T>>, phas
 pub(crate) fn runtime_update_state<T: WidgetState, R>(state: &Rc<RefCell<T>>, phase: &'static str, f: impl FnOnce(&mut T) -> R) -> R {
     let mut state = state.try_borrow_mut().unwrap_or_else(|_| {
         panic!(
-            "retained widget state invariant violated during {phase}: associated state is already borrowed; application state-access closures must finish before rendering"
+            "retained widget state invariant violated during {phase}: associated state is already borrowed; application state-access closures must finish before retained update, layout, or paint traversal"
         )
     });
     f(&mut state)
@@ -241,6 +257,10 @@ pub(crate) fn runtime_update_state<T: WidgetState, R>(state: &Rc<RefCell<T>>, ph
 /// 1. `measure`, which reports intrinsic size for an explicit layout commit.
 /// 2. `update`, which applies exactly one routed event (or `None`) and mutates widget-local state.
 /// 3. `paint`, which records paint commands for already committed widget state.
+///
+/// The runtime routes an event before running that event's complete update traversal, then commits
+/// layout before considering the next queued event. [`Widget::focus_policy`] is the sole focus
+/// policy query; container input helpers do not accept a parallel policy value.
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
@@ -270,6 +290,10 @@ pub trait Widget {
         *self.widget_opt()
     }
     /// Returns the focus behavior used by generic dispatch.
+    ///
+    /// Override this when options alone do not describe the runtime's focus lifecycle. The
+    /// retained tree owns focused-node identity; widgets can request policy but cannot read,
+    /// replace, or transfer that identity.
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::from_widget_options(self.effective_widget_opt())
     }

@@ -10,6 +10,9 @@ use crate::{
 use super::{Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerLayoutCtx, ContainerState, Node};
 
 /// One-shot construction input for a horizontal row.
+///
+/// The initial children, index-matched width tracks, and shared item height are copied into
+/// [`RowState`] and remain mutable there after mounting.
 pub struct RowParameters {
     children: Children,
     widths: Vec<SizePolicy>,
@@ -30,6 +33,9 @@ impl RowParameters {
 }
 
 /// Application-facing state for a horizontal row.
+///
+/// This is the sole mounted authority for ordered membership, index-matched width tracks, and the
+/// shared item-height policy. Missing width entries use [`SizePolicy::Auto`].
 pub struct RowState {
     children: Children,
     widths: Vec<SizePolicy>,

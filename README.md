@@ -1,9 +1,11 @@
 # Rxi's Microui Port to Idiomatic Rust
 [![Crate](https://img.shields.io/crates/v/microui-redux.svg)](https://crates.io/crates/microui-redux)
 
-This project started as a C2Rust conversion of Rxi's MicroUI and has since grown into a Rust-first UI toolkit. It keeps Microui's compact rendering model while moving UI authoring onto retained `WidgetTree` values, stateful widget structs, stable retained node IDs, and backend-agnostic rendering hooks.
+This project started as a C2Rust conversion of Rxi's MicroUI and has since grown into a Rust-first UI toolkit. It keeps Microui's compact rendering model while moving UI authoring onto unique owning `Node` trees, typed weak state handles, context-owned roots, and backend-agnostic rendering hooks. Runtime node identity is private.
 
 Compared to [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces std types, reusable retained trees, and richer widgets such as custom rendering callbacks, dialogs, and a file dialog.
+
+The current API model and upgrade mapping are summarized below; the detailed breaking-change guide is in [MIGRATION.md](MIGRATION.md).
 
 ## Demo
 Clone and build the demo (enable exactly one backend feature):
@@ -63,13 +65,13 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 ![random](res/microui-0.6.png)
 
 ## Key Concepts
-- **Context**: owns the high-level `Renderer`, an ordered input queue, and retained root windows. Applications deliver input and mutate typed state, call `update_ui(dimensions)` to drain input and commit layout, then call `frame(FrameInfo).render_ui()?` to paint and submit that commit once.
+- **Context**: owns the high-level `Renderer`, the only ordered input queue, and retained root windows. Applications enqueue through Context methods, call `update_ui(dimensions)` to drain input and commit layout, observe or mutate typed state, synchronize again if that mutation can affect layout, then call `frame(FrameInfo).render_ui()?` to paint and submit once.
 - **Container**: a public `Widget` subtrait for runtimes that own one authoritative opaque `Children` collection. Application-facing container state uses typed weak `WidgetStateHandle` values and safe indexed membership operations.
 - **Layout engine + flows**: parent containers assign child rectangles through scoped `ContainerLayoutCtx` services. Row, Grid, Column, Stack, Disclosure, and ScrollArea all own persistent children behind typed container state.
-- **Widget**: a runtime UI element implementing `Widget` (for example `Button`, `Textbox`, or `Slider`) and owning its associated state cell.
-- **Node**: the non-cloneable owner of one concrete widget or container runtime. A `Node` receives private process-unique identity when constructed and moves exactly once into a root or `Children` collection.
+- **Widget**: a runtime UI element implementing `Widget` (for example `Button`, `Textbox`, or `Slider`) and uniquely owning its associated state allocation. `*Parameters` are one-shot initialization; `*State` holds mounted mutable values and events.
+- **Node**: the non-cloneable owner of one concrete widget or container runtime. A `Node` receives private process-unique identity when constructed and transfers exactly once into a root or opaque `Children` collection; attached nodes cannot be detached or reparented.
 - **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and `Renderer` executes it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](src/render/RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
-- **Typography**: atlases can now bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while individual text-bearing widgets can override `config.font`.
+- **Typography**: atlases can bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while text-bearing `*Parameters` select a per-widget font with `.font(...)`.
 
 The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained concepts such as `Node`, `Children`, `Container`, `Column`, `Disclosure`, typed state handles, and `Context`. Low-level rendering lives under `microui_redux::render`, and atlas construction lives under `microui_redux::atlas::builder`.
 
@@ -191,7 +193,7 @@ let cube_renderer = ctx.register_custom_renderer({
     }
 })?;
 
-let cube = CubeWidget::new();
+let cube = CubeBuilder::create_widget(CubeParameters);
 let tree = Node::custom_render(cube, cube_renderer).with_policy(Policy::fill());
 let _root = ctx.create_window("Cube", rect(40, 40, 360, 360), tree);
 ```
@@ -231,7 +233,7 @@ cargo run --example backend-frame-cube --features example-vulkan
 cargo run --example backend-frame-cube --features example-wgpu
 ```
 
-### Retained-mode migration status
+### Current retained authoring model
 
 The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate built-in state through typed `WidgetStateHandle` values, commit updates with `Context::update_ui(...)`, and paint with `Context::frame(FrameInfo).render_ui()?`.
 
@@ -248,15 +250,18 @@ let (_, tree) = Row::create(RowParameters::new(
     [Node::widget(label_runtime), Node::widget(name_runtime)],
 ));
 
-let root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
+let _root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
 let dimensions = Dimensioni::new(800, 600);
 let info = FrameInfo::try_new(dimensions, color(20, 22, 26, 255))?;
 ctx.update_ui(dimensions);
-ctx.frame(info).render_ui()?;
 
 if name_state.try_update(TextboxState::take_submitted).unwrap_or(false) {
     // react to the textbox submission here
 }
+
+// If the reaction changed layout-affecting widget/container state, synchronize once more.
+// ctx.update_ui(dimensions);
+ctx.frame(info).render_ui()?;
 ```
 
 Retained trees are the supported public authoring path. Each non-cloneable `Node` owns one concrete
@@ -296,10 +301,12 @@ control window chrome. Root overflow does not scroll implicitly; construct a `Sc
 
 Built-in state is mutated through typed handles between commits. After programmatic state/topology changes, call `update_ui` even when no input is pending so layout is synchronized before paint. Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `keydown_code`, and `text`; calls are queued without coalescing. A widget receives the current event as `Option<&UiInputEvent>`, while `WidgetUpdateCtx::{mouse_buttons,key_modes,key_codes}` exposes held state after that event was applied.
 
+`ContextFrame` holds the Context borrow needed to serialize paint/submission, but it does not lock independent widget or root state handles and there is no Context access token. Do not keep a state-access closure active while retained update/layout/paint can reach that same state. Framework recursion through a container's scoped child visitor is the intentional exception. If layout-affecting state changes after the last commit, drop any unsubmitted frame and call `update_ui` again before paint.
+
 ## Fonts and typography
 - Atlas building supports multiple baked fonts and sizes through `atlas::builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.
 - `Context::new(...)` binds the conventional atlas keys `body`, `small`, `title`, `heading`, and `mono` onto the default `Style`. `Context::set_style(...)` also rebinds any font fields that are still left at their default/unset values, so tweaking colors or spacing on top of `Style::default()` keeps the intended body/title sizes.
-- Text-bearing widgets expose `config.font: FontChoice`, so you can either select a semantic role (`FontRole::Heading.into()`) or a concrete baked font ID (`atlas.font_id("caption").unwrap().into()`).
+- Text-bearing widget Parameters expose `.font(FontChoice)`, so you can either select a semantic role (`FontRole::Heading.into()`) or a concrete baked font ID (`atlas.font_id("caption").unwrap().into()`).
 - Font sizes are selected by choosing another baked font variant, not by scaling one bitmap font at runtime.
 - `examples/demo-full` uses this directly: `NORMAL.ttf` for control/body text, `BOLD.ttf` for window titles, and `CONSOLE.ttf` for the log window’s input/output text.
 
@@ -380,6 +387,17 @@ To embed the generated atlas instead, add `prebuilt-atlas` explicitly:
 
 To export an atlas as Rust, enable `save-to-rust` (and `png_source` when serializing PNG-backed atlas data) and call `AtlasHandle::to_rust_files`. The helper binary requires `builder`, `save-to-rust`, and `png_source`:
 `cargo run --bin atlas_export --features "builder save-to-rust png_source" -- --output path/to/atlas.rs`
+
+### Version 0.8.0-pre-alpha
+
+`0.8.0-pre-alpha` is the current in-development UI-node/runtime refactor. It establishes the final
+direction for unique owning nodes, concrete runtime-owned state, typed weak application handles,
+public custom containers, one-event update commits, and paint-only rendering. The public API,
+README, rustdoc, and [migration guide](MIGRATION.md) are being aligned as each remaining
+correctness and cleanup phase in [UI-NODE-REFACTOR-PLAN.md](UI-NODE-REFACTOR-PLAN.md) lands.
+
+This is intentionally a pre-alpha version: downstream users should expect further breaking changes
+before `0.8.0` and should consult the plan's completed-item evidence when evaluating a snapshot.
 
 ### Version 0.7.0
 Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`, it completes the retained migration by moving root lifetime, interaction identity, and frame traversal into the context instead of requiring applications to resubmit each root every frame.

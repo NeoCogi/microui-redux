@@ -213,7 +213,7 @@ pub(crate) struct InputSnapshot {
 
 #[derive(Clone, Debug)]
 /// Ordered raw input queue plus the state committed by events already consumed by the UI.
-pub struct Input {
+pub(crate) struct Input {
     /// Pointer position after the most recently consumed input event.
     pub(crate) mouse_pos: Vec2i,
     /// Mouse buttons held after the most recently consumed input event.
@@ -239,63 +239,48 @@ impl Default for Input {
 }
 
 impl Input {
-    /// Returns the state of all modifier keys.
-    pub fn key_state(&self) -> KeyMode {
-        self.key_down
-    }
-
-    /// Returns the state of all navigation keys.
-    pub fn key_codes(&self) -> KeyCode {
-        self.key_code_down
-    }
-
     /// Queues a mouse-pointer position update.
-    pub fn mousemove(&mut self, x: i32, y: i32) {
+    pub(crate) fn mousemove(&mut self, x: i32, y: i32) {
         self.pending.push_back(RawInputEvent::MouseMove { pos: Vec2i::new(x, y) });
     }
 
-    /// Returns the currently held mouse buttons.
-    pub fn get_mouse_buttons(&self) -> MouseButton {
-        self.mouse_down
-    }
-
     /// Queues a mouse-button press at the supplied pointer position.
-    pub fn mousedown(&mut self, x: i32, y: i32, btn: MouseButton) {
+    pub(crate) fn mousedown(&mut self, x: i32, y: i32, btn: MouseButton) {
         self.pending.push_back(RawInputEvent::MouseDown { pos: Vec2i::new(x, y), button: btn });
     }
 
     /// Queues a mouse-button release at the supplied pointer position.
-    pub fn mouseup(&mut self, x: i32, y: i32, btn: MouseButton) {
+    pub(crate) fn mouseup(&mut self, x: i32, y: i32, btn: MouseButton) {
         self.pending.push_back(RawInputEvent::MouseUp { pos: Vec2i::new(x, y), button: btn });
     }
 
     /// Queues one scroll-wheel or trackpad transition.
-    pub fn scroll(&mut self, x: i32, y: i32) {
+    pub(crate) fn scroll(&mut self, x: i32, y: i32) {
         self.pending.push_back(RawInputEvent::Scroll { delta: Vec2i::new(x, y) });
     }
 
     /// Queues a modifier/control-key press.
-    pub fn keydown(&mut self, key: KeyMode) {
+    pub(crate) fn keydown(&mut self, key: KeyMode) {
         self.pending.push_back(RawInputEvent::KeyDown { key });
     }
 
     /// Queues a modifier/control-key release.
-    pub fn keyup(&mut self, key: KeyMode) {
+    pub(crate) fn keyup(&mut self, key: KeyMode) {
         self.pending.push_back(RawInputEvent::KeyUp { key });
     }
 
     /// Queues a navigation-key press.
-    pub fn keydown_code(&mut self, code: KeyCode) {
+    pub(crate) fn keydown_code(&mut self, code: KeyCode) {
         self.pending.push_back(RawInputEvent::KeyCodeDown { code });
     }
 
     /// Queues a navigation-key release.
-    pub fn keyup_code(&mut self, code: KeyCode) {
+    pub(crate) fn keyup_code(&mut self, code: KeyCode) {
         self.pending.push_back(RawInputEvent::KeyCodeUp { code });
     }
 
     /// Queues one UTF-8 text input transition.
-    pub fn text(&mut self, text: &str) {
+    pub(crate) fn text(&mut self, text: &str) {
         self.pending.push_back(RawInputEvent::Text { text: text.to_owned() });
     }
 

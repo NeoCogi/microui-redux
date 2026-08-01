@@ -28,6 +28,9 @@ bitflags! {
 }
 
 /// One-shot construction input for a retained scroll area.
+///
+/// Framing is fixed here. Initial scrolling enablement moves into [`ScrollAreaState`] and remains
+/// mutable after mounting.
 pub struct ScrollAreaParameters {
     children: Children,
     opt: ScrollAreaOption,
@@ -52,6 +55,9 @@ enum DragAxis {
 }
 
 /// Application-facing state and direct child owner for a scroll area.
+///
+/// This is the sole mounted authority for ordered membership, content offset, and whether
+/// scrolling is enabled. Derived geometry and local drag state remain runtime-managed.
 pub struct ScrollAreaState {
     children: Children,
     offset: Vec2i,
@@ -177,6 +183,10 @@ impl Widget for ScrollAreaContainer {
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         runtime_read_state(&self.state, "ScrollArea::paint", |state| paint_scroll_area(state, ctx));
     }
+
+    fn focus_policy(&self) -> FocusPolicy {
+        FocusPolicy::DragCapture
+    }
 }
 
 impl WidgetStateOwner for ScrollAreaContainer {
@@ -215,7 +225,7 @@ impl Container for ScrollAreaContainer {
         let has_pointer_capture = ctx.has_pointer_capture();
         let surface = runtime_read_state(&self.state, "ScrollArea::route_input", |state| route_surface(state, event, has_pointer_capture));
         let Some(surface) = surface else { return ContainerInputResult::Ignored };
-        ctx.route_widget_in_rect(event, surface, self.effective_widget_opt(), FocusPolicy::DragCapture)
+        ctx.route_widget_in_rect(event, surface, self.effective_widget_opt())
     }
 }
 

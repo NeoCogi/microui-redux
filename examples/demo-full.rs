@@ -735,7 +735,7 @@ struct SuzanneData {
 struct SuzanneWidget {
     state: Rc<RefCell<()>>,
     data: Rc<RefCell<SuzanneData>>,
-    config: WidgetConfig,
+    opt: WidgetOption,
 }
 
 struct SuzanneWidgetParameters {
@@ -754,7 +754,7 @@ impl WidgetBuilder for SuzanneWidgetBuilder {
         SuzanneWidget {
             state: Rc::new(RefCell::new(())),
             data: parameters.data,
-            config: WidgetConfig::new(WidgetOption::HOLD_FOCUS | WidgetOption::GRAB_SCROLL),
+            opt: WidgetOption::HOLD_FOCUS | WidgetOption::GRAB_SCROLL,
         }
     }
 }
@@ -769,7 +769,7 @@ impl WidgetStateOwner for SuzanneWidget {
 
 impl Widget for SuzanneWidget {
     fn widget_opt(&self) -> &WidgetOption {
-        &self.config.opt
+        &self.opt
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {

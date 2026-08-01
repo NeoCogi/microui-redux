@@ -13,6 +13,11 @@ use crate::{
 use super::RootId;
 
 /// Cloneable non-owning capability for one retained root.
+///
+/// The [`crate::Context`] remains the sole owner of the root and its complete tree. Cloning or
+/// dropping this handle cannot extend or shorten that lifetime. Hiding the root preserves its
+/// runtime and state; [`crate::Context::destroy_root`] permanently unregisters it, drops the tree,
+/// and causes the weak state capability to expire once active access closures finish.
 #[derive(Clone)]
 pub struct RootHandle {
     id: RootId,
@@ -25,7 +30,7 @@ impl RootHandle {
         self.id
     }
 
-    /// Returns the weak checked capability for the root's persistent state.
+    /// Returns the weak checked capability for current chrome state and pending root events.
     pub fn state(&self) -> &WidgetStateHandle<RootState> {
         &self.state
     }
@@ -48,6 +53,12 @@ pub(super) enum RootInteraction {
 }
 
 /// Application-facing state retained by a window, dialog, or popup root.
+///
+/// Queries report current chrome values, including programmatic changes made through
+/// [`crate::Context`]. `take_changed` and `take_submitted` are counted, state-local events: each
+/// successful call consumes exactly one pending occurrence. Hiding is persistent state and does
+/// not destroy the owned application node. Root content itself cannot be replaced; mutate typed
+/// descendant/container state or destroy and recreate the root instead.
 pub struct RootState {
     name: String,
     options: WindowOption,
@@ -114,12 +125,12 @@ impl RootState {
         self.interaction == RootInteraction::Resizing
     }
 
-    /// Consumes one pending user-driven geometry change.
+    /// Consumes one pending user-driven move or resize occurrence.
     pub fn take_changed(&mut self) -> bool {
         take_pending(&mut self.pending_changes)
     }
 
-    /// Consumes one pending close or outside-popup submission.
+    /// Consumes one pending close or outside-popup submission occurrence.
     pub fn take_submitted(&mut self) -> bool {
         take_pending(&mut self.pending_submissions)
     }
@@ -340,7 +351,7 @@ impl Container for RootChromeContainer {
             }
         });
         let Some(surface) = surface else { return ContainerInputResult::Ignored };
-        let result = ctx.route_widget_in_rect(event, surface, WidgetOption::NONE, FocusPolicy::DragCapture);
+        let result = ctx.route_widget_in_rect(event, surface, WidgetOption::NONE);
         if matches!(part, Some(RootChromePart::Close)) && result == ContainerInputResult::Captured {
             ContainerInputResult::Consumed
         } else {

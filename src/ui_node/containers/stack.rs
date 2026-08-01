@@ -32,6 +32,9 @@ impl StackParameters {
 }
 
 /// Application-facing state for a directional stack.
+///
+/// This is the sole mounted authority for ordered membership, shared item width/height policies,
+/// and traversal direction.
 pub struct StackState {
     children: Children,
     item_width: SizePolicy,

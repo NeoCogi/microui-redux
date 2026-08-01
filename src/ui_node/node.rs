@@ -251,7 +251,6 @@ pub(crate) struct NodeRuntime {
     pub(crate) clicked: bool,
     /// Mouse is held down while this node owns focus.
     pub(crate) active: bool,
-    /// Scroll delta consumed by this node during the current frame.
     /// Placement policy used by runtime layout passes.
     pub(crate) policy: crate::Policy,
 }
@@ -278,7 +277,9 @@ impl NodeRuntime {
 /// A `Node` owns exactly one concrete widget or container runtime. It is intentionally not
 /// cloneable: successful insertion transfers ownership into one [`Children`] collection. Its
 /// process-unique identity is runtime-private, unrelated to public [`crate::RootId`] values, and is
-/// never stored in or exposed through a [`crate::WidgetStateHandle`].
+/// never stored in or exposed through a [`crate::WidgetStateHandle`]. Attached nodes cannot be
+/// detached or reparented: topology APIs either keep ownership in place or drop the removed
+/// runtime. Build a replacement node when content must move to another parent.
 pub struct Node {
     /// Common state for layout, identity, and interaction.
     pub(crate) state: NodeRuntime,
@@ -316,7 +317,10 @@ impl Node {
         Self::from_kind(NodeKind::Container(Box::new(container)))
     }
 
-    /// Replaces this still-unmounted node's parent placement policy.
+    /// Replaces this still-unmounted node's generic parent placement policy.
+    ///
+    /// Grid spans are separate parent-owned metadata supplied by [`crate::GridItem`] and take
+    /// precedence for cell occupancy; this policy still controls sizing within the assigned area.
     pub fn with_policy(mut self, policy: crate::Policy) -> Self {
         self.state.policy = policy;
         self
@@ -501,6 +505,11 @@ pub(crate) struct NodeMeasurement {
 }
 
 /// Opaque ordered owner of unique retained child nodes.
+///
+/// Public code can transfer new nodes in or drop existing owners but cannot borrow attached nodes,
+/// recover a removed owner, inspect runtime identity, or reparent a child. Framework-created
+/// [`crate::ChildrenVisitor`] values provide scoped traversal to custom containers without
+/// weakening those ownership rules.
 pub struct Children {
     nodes: Vec<Node>,
 }

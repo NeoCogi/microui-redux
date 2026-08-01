@@ -56,39 +56,6 @@
 //! state, and its concrete retained runtime. Applications keep weak [`crate::WidgetStateHandle`]
 //! capabilities while the runtime remains the sole strong owner of state.
 
-use crate::{FontChoice, FontRole, WidgetOption};
-
-#[derive(Copy, Clone)]
-/// Shared configuration carried by built-in retained widgets.
-pub struct WidgetConfig {
-    /// Font selection used by text-bearing widgets.
-    pub font: FontChoice,
-    /// Widget options applied during interaction and painting.
-    pub opt: WidgetOption,
-}
-
-impl Default for WidgetConfig {
-    fn default() -> Self {
-        Self::new(WidgetOption::NONE)
-    }
-}
-
-impl WidgetConfig {
-    /// Creates a config with the body font and explicit widget options.
-    pub const fn new(opt: WidgetOption) -> Self {
-        Self {
-            font: FontChoice::Role(FontRole::Body),
-            opt,
-        }
-    }
-
-    /// Sets the font selection.
-    pub const fn font(mut self, font: FontChoice) -> Self {
-        self.font = font;
-        self
-    }
-}
-
 /// Records one pending semantic event without wrapping at the counter boundary.
 pub(crate) fn record_pending_event(pending: &mut u32) {
     *pending = pending.saturating_add(1);

@@ -78,7 +78,7 @@ type SelectedFrame<'a> = <SelectedBackend as RendererBackend>::Frame<'a>;
 /// process mouse input in `update` and share camera state with that callback.
 struct CubeWidget {
     state: Rc<RefCell<()>>,
-    config: WidgetConfig,
+    opt: WidgetOption,
 }
 
 struct CubeParameters;
@@ -94,7 +94,7 @@ impl WidgetBuilder for CubeBuilder {
     fn create_widget(_parameters: Self::Parameters) -> Self::W {
         CubeWidget {
             state: Rc::new(RefCell::new(())),
-            config: WidgetConfig::new(WidgetOption::NO_INTERACT),
+            opt: WidgetOption::NO_INTERACT,
         }
     }
 }
@@ -109,7 +109,7 @@ impl WidgetStateOwner for CubeWidget {
 
 impl Widget for CubeWidget {
     fn widget_opt(&self) -> &WidgetOption {
-        &self.config.opt
+        &self.opt
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {

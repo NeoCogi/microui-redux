@@ -71,16 +71,67 @@
     clippy::wildcard_imports
 )]
 //! `microui-redux` provides a GUI toolkit inspired by [rxi/microui](https://github.com/rxi/microui).
-//! The crate uses unique owning [`Node`] values as its public UI authoring input; each root consumes
-//! one persistent node while keeping Microui's compact frame-driven execution and renderer
-//! integration. It exposes the core context, state-owned containers, widget state types, rendering types,
-//! styles, and image APIs needed to embed a UI inside custom render backends while remaining
-//! allocator- and platform-agnostic.
+//! The crate uses unique owning [`Node`] values as its public UI authoring input. Each
+//! [`Context`] root consumes one persistent node and remains its sole owner until explicit
+//! destruction. Applications retain typed weak [`WidgetStateHandle`] and [`RootHandle`]
+//! capabilities, not node identities or strong mounted-state owners.
+//!
+//! Construction is split deliberately: a concrete `*Parameters` value is one-shot initialization,
+//! a concrete `*State` value contains mounted mutable values and counted events, and the concrete
+//! runtime implements [`Widget`] plus [`WidgetStateOwner`]. Ordinary leaf constructors return
+//! `(WidgetStateHandle<State>, Runtime)`; ordinary container constructors return
+//! `(WidgetStateHandle<State>, Node)`. [`widgets::Custom::create`] is the fixed exception because
+//! its state is `()` and it exposes no application handle. Discarding a returned weak handle never
+//! changes runtime ownership.
+//!
+//! # Update and paint boundary
+//!
+//! Input is appended through [`Context`] forwarding methods. [`Context::update_ui`] first
+//! synchronizes layout, then drains that one ordered queue. Each raw event is normalized, routed,
+//! applied by one full eligible-tree update traversal, and followed by layout before the next
+//! event. Calling it with an empty queue is the synchronization path after programmatic state or
+//! topology mutation. [`ContextFrame::render_ui`] is paint-only and returns
+//! [`render::RenderError::UiUpdateRequired`] before backend acquisition when the commit is missing,
+//! stale by Context-owned input/mutation, or for different dimensions. The runtime synthesizes no
+//! timer events and produces no generic frame-result or resource-state object.
+//!
+//! A `ContextFrame` serializes Context operations but does not lock independent typed state
+//! handles, and there is no Context token. State-access closures must finish before retained
+//! traversal reaches the same state. Framework-controlled recursion through a container's opaque
+//! child visitor is the intentional exception. If a layout-affecting handle mutation occurs after
+//! the last commit, cancel any unsubmitted frame and call `update_ui` again before paint.
+//!
+//! ```
+//! use microui_redux::prelude::*;
+//! use microui_redux::render::{RenderError, RendererBackend};
+//!
+//! fn install_and_draw<B: RendererBackend>(
+//!     context: &mut Context<B>,
+//!     dimensions: Dimensioni,
+//!     info: FrameInfo,
+//! ) -> Result<RootHandle, RenderError> {
+//!     let (_button_state, button) = Button::create(ButtonParameters::new("Save"));
+//!     let root = context.create_window(
+//!         "main",
+//!         rect(20, 20, 180, 80),
+//!         Node::widget(button),
+//!     );
+//!
+//!     context.update_ui(dimensions);
+//!     context.frame(info).render_ui()?;
+//!     Ok(root)
+//! }
+//! ```
+//!
+//! The crate exposes the context, state-owning containers, widgets, rendering types, styles, and
+//! image APIs needed to embed a UI inside custom render backends while remaining allocator- and
+//! platform-agnostic.
 //! Built-in widget placement is driven by each widget's `measure` result, so auto-sized rows can use
 //! per-widget intrinsic text/icon metrics instead of a single shared control size.
 //! Retained layout is resolved from context-owned UI nodes, container sizing policies, and widget
 //! measurement results.
 //! Retained application logic observes typed widget state handles returned by constructors.
+//! See the repository `MIGRATION.md` for the `0.8.0-pre-alpha` retained-authoring migration mapping.
 //!
 //! # Rendering pipeline
 //!
@@ -151,7 +202,7 @@ pub mod prelude {
         IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON, load_image_bytes,
     };
     pub use crate::file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
-    pub use crate::input::{ControlColor, Input, KeyCode, KeyMode, MouseButton, WidgetFillOption};
+    pub use crate::input::{ControlColor, KeyCode, KeyMode, MouseButton, WidgetFillOption};
     pub use crate::sizing::{Policy, SizePolicy, StackDirection};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame};
     pub use crate::retained::{
@@ -169,7 +220,7 @@ pub mod prelude {
         ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom, CustomBuilder, CustomParameters,
         ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters, ListItemState, Number, NumberBuilder,
         NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaParameters, TextAreaState,
-        TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxParameters, TextboxState, WidgetConfig,
+        TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxParameters, TextboxState,
     };
     pub use rs_math3d::{
         Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3,
@@ -183,7 +234,7 @@ pub use atlas::{
 };
 pub use window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
 pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
-pub use input::{ControlColor, Input, KeyCode, KeyMode, MouseButton, WidgetFillOption};
+pub use input::{ControlColor, KeyCode, KeyMode, MouseButton, WidgetFillOption};
 pub use text_layout::TextWrap;
 pub use sizing::{Policy, SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
@@ -202,7 +253,7 @@ pub use widgets::{
     ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom, CustomBuilder, CustomParameters,
     ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters, ListItemState, Number, NumberBuilder,
     NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaParameters, TextAreaState,
-    TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxParameters, TextboxState, WidgetConfig,
+    TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxParameters, TextboxState,
 };
 
 #[allow(unused_imports)]
