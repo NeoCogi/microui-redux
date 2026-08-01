@@ -5,7 +5,7 @@ use std::{
 
 use microui_redux::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
 use microui_redux::retained::*;
-use microui_redux::prelude::{Dimensioni, Recti};
+use microui_redux::prelude::{Dimensioni, FileDialogRequest, FileDialogStatus, Recti};
 use microui_redux::{
     color, rect, AtlasHandle, AtlasSource, Column, ColumnParameters, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters, Policy,
     RootMutationError, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy, SourceFormat, Stack, StackDirection,
@@ -62,6 +62,18 @@ fn context() -> Context<TestBackend> {
         format: SourceFormat::Raw,
     };
     Context::new(TestBackend { atlas: AtlasHandle::from(&source) })
+}
+
+#[test]
+fn downstream_file_dialog_session_is_polled_and_cancelled_without_widget_access() {
+    let mut context = context();
+    let request: microui_redux::FileDialogRequest = FileDialogRequest::default();
+    let session = context.open_file_dialog(request);
+
+    assert_eq!(session.status(), FileDialogStatus::Pending);
+    assert!(context.cancel_file_dialog(&session));
+    assert_eq!(session.status(), FileDialogStatus::Cancelled);
+    assert!(!context.cancel_file_dialog(&session));
 }
 
 #[test]

@@ -102,8 +102,7 @@
 //! [`render`].
 
 pub mod atlas;
-// P1.2 TEMPORARY: restore in P3.2
-// mod file_dialog;
+mod file_dialog;
 mod frame;
 mod input;
 mod rect_packer;
@@ -125,6 +124,7 @@ mod window_manager;
 /// This module groups the stable retained concepts used by application code without exposing
 /// low-level renderer details or manual container drawing helpers through default imports.
 pub mod retained {
+    pub use crate::file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
     pub use crate::sizing::{Policy, SizePolicy, StackDirection};
     pub use crate::text_layout::TextWrap;
@@ -150,8 +150,7 @@ pub mod prelude {
         AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry, FontId,
         IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON, load_image_bytes,
     };
-    // P1.2 TEMPORARY: restore in P3.2
-    // pub use crate::file_dialog::FileDialogState;
+    pub use crate::file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
     pub use crate::input::{ControlColor, Input, KeyCode, KeyMode, MouseButton, WidgetFillOption};
     pub use crate::sizing::{Policy, SizePolicy, StackDirection};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame};
@@ -183,8 +182,7 @@ pub use atlas::{
     FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON, load_image_bytes,
 };
 pub use window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
-// P1.2 TEMPORARY: restore in P3.2
-// pub use file_dialog::FileDialogState;
+pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
 pub use input::{ControlColor, Input, KeyCode, KeyMode, MouseButton, WidgetFillOption};
 pub use text_layout::TextWrap;
 pub use sizing::{Policy, SizePolicy, StackDirection};

@@ -54,8 +54,10 @@ This is the sole authoritative UI-node migration plan. It supersedes the obsolet
     dependency order. The implementation and tests in `src/file_dialog.rs` stay in place, and the
     `src/lib.rs` module/export edges plus `demo-full` integration are commented out with uniform
     `P1.2 TEMPORARY: restore in P3.2` markers rather than deleted. P3.2 restores and refactors that
-    preserved code after P1.3/P2.0/P2.2 provide its owning-node/container prerequisites. This is an
-    internal migration state only: no merge/tag/release may expose a build without the restored
+    preserved code after P1.3/P2.0/P2.2 provide its owning-node/container prerequisites. The
+    restored public boundary is a polling `FileDialogSession`: Context owns and advances the
+    dialog, while application code only observes stable pending/accepted/cancelled status. This is
+    an internal migration state only: no merge/tag/release may expose a build without the restored
     public file dialog;
 16. container pointer capture remains owned by `WidgetTree`, while the captured concrete container
     reports whether its own local captured interaction is still active through the defaulted
@@ -136,7 +138,8 @@ not hide deletion behind an empty compatibility type.
 P1.3 supplies the owning `Node`/`Children` foundation but does not prematurely re-enable a reduced
 or reconstruction-based dialog. P2.0 supplies Row/Stack and P2.2 supplies ScrollArea. P3.2 uses the
 preserved source and comment markers as its migration inventory, refactors the implementation in
-place to persistent controls plus local child replacement, restores the crate-root/prelude exports
+place to persistent controls plus local child replacement, replaces application-driven
+`FileDialogState::eval` with Context-owned polling sessions, restores the crate-root/prelude exports
 and `demo-full` integration, re-enables/adapts all file-dialog tests, and removes every temporary
 marker. The ordinary validation matrix may exclude file-dialog code only from the completed P1.2
 commit through the prerequisites before P3.2. No externally visible release is permitted during
@@ -2052,6 +2055,8 @@ capture removal, and replacement behavior.
 | Root geometry/visibility/chrome interaction/events | `RootState`, strongly owned by the private `RootChromeContainer` and exposed weakly through `RootHandle` |
 | Root lifecycle identity | never-reused `RootId` inside `RootHandle`; `Context`/`WindowEntry` changes lifetime only by creation and `destroy_root` |
 | Root cross-window policy/z-order/backend viewport | `WindowEntry`/window manager, using its framework-internal weak `RootState` handle |
+| File-dialog UI, navigation, and terminal transition | Context-owned private controller and retained root; application code receives a `FileDialogSession` that can only poll a stable status snapshot |
+| File-dialog cancellation | explicit `Context::cancel_file_dialog(&session)`, Cancel action, title-bar close, or abandonment of the last session handle; every terminal transition destroys the retained root automatically |
 | State/topology access eligibility | checked borrow of the target cell only |
 
 ## What remains complicated
@@ -2258,7 +2263,7 @@ explicit decision before changing the criterion.
   Add deterministic characterization for widget phase order, current built-in typed mutations,
   custom widgets, committed button/text submission, focus, container layouts, dynamic lists,
   disclosure, scrolling, custom rendering, and root lifecycle. Record allocations and phase counts
-  for one widget, a 100-node tree, a scroll area, and idle/refresh file-dialog evaluation.
+  for one widget, a 100-node tree, a scroll area, and idle/refresh file-dialog processing.
 
   **Acceptance tests**
 
@@ -3749,7 +3754,7 @@ removal, and focused implementation evidence rather than redefining that behavio
     report explicitly lists file-dialog tests and demo behavior as temporarily excluded rather than
     treating their absence as passing evidence.
   - Release checks fail or remain administratively blocked while any P1.2 restoration marker exists
-    or `FileDialogState` is absent from its final crate-root/prelude exports.
+    or the final polling-session types are absent from the crate-root/prelude exports.
 
   **Completion evidence (2026-07-30)**
 
@@ -4652,25 +4657,62 @@ change a protected P0 behavior follows the explicit change-control rule.
   all-example checks pass. All 13 exact P3.2 restoration markers remain, and `src/file_dialog.rs` is
   unchanged.
 
-- [ ] **P3.2 — Re-enable the file dialog and prove local mutation**
+- [x] **P3.2 — Re-enable the file dialog with polling sessions and prove local mutation**
 
   **Problem**
 
-  `FileDialogState::eval` rebuilds its complete UI on ordinary evaluation, so P1.2 could not remove
-  the last strong-handle leaf adapter while preserving control state. The module/export/demo edges
-  have therefore been commented out since P1.2, while `src/file_dialog.rs` and its tests remain in
-  place as the authoritative migration input. The public capability and its executable evidence
-  must now be restored before release.
+  The preserved `FileDialogState::eval` rebuilds its complete UI on ordinary application-driven
+  evaluation, so P1.2 could not remove the last strong-handle leaf adapter while preserving control
+  state. Requiring the application to call that evaluator also leaks the dialog's internal state
+  machine across the Context boundary. The module/export/demo edges have therefore been commented
+  out since P1.2, while `src/file_dialog.rs` and its tests remain in place as the authoritative
+  migration input. The capability and its executable evidence must now be restored behind a
+  Context-owned lifecycle before release.
 
-  **Decision needed: No**
+  **Decision needed: No — explicit plan-owner decision on 2026-07-31**
+
+  **Options considered**
+
+  1. **Selected: polling session.** `Context::open_file_dialog(request)` returns a
+     `FileDialogSession`; Context owns and advances the retained UI/controller, and application code
+     peeks at `session.status()` after `Context::update_ui`. This keeps the state machine and widget
+     topology inside the window manager without callbacks or application evaluation.
+  2. **Rejected: completion callback.** A one-shot callback avoids application polling but adds
+     callback storage/removal, reentrancy, and application mutation during Context processing.
+  3. **Deferred: blocking/nested event loop.** A synchronous result-returning API needs a host event
+     pump and nested-loop policy. Revisit it separately after the retained refactor; P3.2 does not
+     emulate blocking with a second public state machine.
 
   **Target contract or migration**
 
   Start from the preserved `src/file_dialog.rs` implementation and every searchable
   `P1.2 TEMPORARY: restore in P3.2` marker. Refactor the module in place; do not replace it with a
-  newly authored parallel file or discard its history. Restore the `src/lib.rs` module declaration,
-  crate-root/prelude `FileDialogState` exports, and the complete `demo-full` fields,
-  initialization, controls, evaluation, and result handling represented by those markers.
+  newly authored parallel file or discard its history. Restore the `src/lib.rs` module declaration
+  and export `FileDialogRequest`, `FileDialogResult`, `FileDialogSession`, and `FileDialogStatus`
+  from the crate root and prelude. Restore the complete `demo-full` open/result flow represented by
+  the markers, replacing its old dialog-owned field and explicit `eval` call with an optional
+  session and post-`update_ui` polling.
+
+  The public lifecycle is:
+
+  ```rust
+  let dialog = ctx.open_file_dialog(request);
+
+  // After Context::update_ui:
+  match dialog.status() {
+      FileDialogStatus::Pending => {}
+      FileDialogStatus::Accepted(result) => open_file(result.file_path),
+      FileDialogStatus::Cancelled => {}
+  }
+  ```
+
+  `status()` returns a repeatable owned snapshot. Accepted and cancelled states remain observable
+  after the root is gone. `Context::cancel_file_dialog(&session)` explicitly cancels a pending
+  dialog and destroys its root. Accept, the Cancel button, and title-bar close do the same. Dropping
+  the last session handle abandons a pending dialog; Context observes that weak-session expiry and
+  removes the root during the next `update_ui`. Dropping Context marks any still-observed pending
+  session cancelled. OK without a valid non-empty filename remains pending. Sessions expose no
+  callback, evaluator, widget handle, root handle, or topology access.
 
   Construct the shell once. Inputs/buttons and folder/file list containers return state handles
   directly, so retain those typed handles at initialization. On refresh, construct row
@@ -4683,7 +4725,7 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   **Acceptance tests**
 
-  - Idle visible/hidden evaluation allocates no nodes/state and changes no topology.
+  - Idle pending processing allocates no nodes/state and changes no topology.
   - Refresh changes only row nodes and explicitly updated state.
   - Refresh uses `try_update_with(new_rows, ...)`; unavailable access returns the complete unmounted
     replacement vector as `Err(new_rows)` rather than dropping it through an uninvoked closure.
@@ -4691,17 +4733,46 @@ change a protected P0 behavior follows the explicit change-control rule.
     content clamps it to the nearest valid offset, including zero when no scrolling remains.
   - Removed row handles expire; persistent controls and scroll handles remain live.
   - No root replacement, generated ID, Context editor, or Context token remains.
-  - `FileDialogState` is again exported from the same crate-root and prelude surfaces, appears in
-    rustdoc, and is usable by downstream code without an opt-in migration feature.
-  - `demo-full` again exposes and evaluates the dialog flow, including open, navigation, selection,
-    accept, and cancel behavior, using the restored code regions as migration inventory.
+  - The four polling API types are exported from the crate root and prelude, appear in rustdoc, and
+    are usable by downstream code without an opt-in migration feature. `FileDialogState`, public
+    `eval`, and completion callbacks are absent.
+  - `demo-full` again exposes the dialog flow, including open, navigation, selection, accept, and
+    cancel behavior. It polls only after `Context::update_ui` and retains no duplicate dialog state
+    machine.
+  - A terminal UI outcome is visible on the session in the same completed update, automatically
+    destroys the retained root, and is stable across repeated `status()` calls. Explicit Context
+    cancellation and last-session abandonment also remove the root deterministically.
   - Every preserved file-dialog test is re-enabled and adapted rather than deleted; focused tests
-    cover construction geometry, click-without-hover, navigation, selection, hide/show, idle
-    allocation, refresh allocation/topology, and weak-handle lifetime under the final API.
+    cover construction geometry, click-without-hover, navigation, selection, empty accept, button
+    and title-bar cancellation, explicit cancellation, abandonment, idle allocation, refresh
+    topology, scroll clamping, and weak-handle lifetime under the final API.
   - Repository searches find no `P1.2 TEMPORARY: restore in P3.2` marker, commented-out
     file-dialog compilation/integration edge, legacy strong handle, or dormant duplicate source.
   - Release validation treats restored file-dialog API/docs/tests/demo behavior as mandatory rather
     than accepting the temporarily reduced P1.2 surface.
+
+  **Completion evidence (2026-07-31)**
+
+  `src/file_dialog.rs` now constructs one persistent retained shell behind a private
+  `FileDialogController`. Context processes controller actions after each complete retained input
+  update and before its matching layout, replaces only the two dynamic Stack child collections,
+  and destroys roots on terminal outcomes. The public surface is the four polling types plus
+  `Context::open_file_dialog`/`cancel_file_dialog`; no evaluator, callback, dialog widget/root
+  handle, generated ID, or legacy strong handle is exported. `demo-full` opens a session and polls
+  it only after the example runner's first `update_ui`, and the runner performs the required second
+  synchronization update before paint.
+
+  Focused tests exercise UI selection/accept, batched click routing, folder navigation, empty OK,
+  Cancel, title close, foreign/terminal cancellation rejection, session abandonment, Context drop,
+  row-owner expiry, persistent control/scroll handles, scroll preservation/clamping, exact
+  `try_update_with` failure recovery, geometry, and downstream public use. The ignored allocation
+  baseline passes when run serially and records zero allocations for idle controller processing.
+  `cargo test --all-targets` passes with 161 unit tests and 4 downstream integration tests; the two
+  intentionally manual baselines remain ignored. Formatting, doctests, no-default-features,
+  rustdoc, and separate Glow/Vulkan/WGPU example checks pass. `cargo clippy --all-targets -- -W
+  clippy::all` exits successfully with the repository's pre-existing warnings and no file-dialog
+  warning. Source audits find zero restoration markers or legacy file-dialog integration APIs in
+  `src`, `examples`, and `tests`.
 
 - [ ] **P3.3 — Align public modules, README, rustdoc, and migration notes**
 
@@ -5138,7 +5209,7 @@ file-dialog module/export/demo edges are commented out. Each validation report i
 state that `src/file_dialog.rs` and its tests remain preserved but uncompiled, list the exact
 restoration marker count, and must not claim file-dialog coverage. P3.2 restores those edges and
 their tests before rerunning the same matrix. Any release-oriented validation additionally requires
-zero `P1.2 TEMPORARY: restore in P3.2` markers and the final `FileDialogState` exports to be present.
+zero `P1.2 TEMPORARY: restore in P3.2` markers and the final polling-session exports to be present.
 
 Prefer deterministic assertions for state, consumed events, geometry, event order, focus/capture,
 operation counts, weak liveness, and allocation counts. Screenshots may supplement but not replace
@@ -5360,8 +5431,8 @@ The migration is complete when:
   clears descendant transient targets without restoring them on expansion;
 - the file dialog changes only row children on directory refresh, preserves then clamps its scroll
   offset to the new content range, and performs no idle reconstruction or widget update;
-  `src/file_dialog.rs` was
-  refactored in place, `FileDialogState` is restored at crate root/prelude and in `demo-full`, all
+  `src/file_dialog.rs` was refactored in place, the polling request/result/session/status API is
+  exported at crate root/prelude and used in `demo-full`, Context owns the dialog lifecycle, all
   preserved tests are active, and no P1.2 restoration marker or commented-out integration edge
   remains;
 - focus, capture, input, layout, paint, clipping, scrolling, and custom rendering retain the

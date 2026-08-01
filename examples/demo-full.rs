@@ -1027,7 +1027,7 @@ struct DemoRuntimes {
     typography_heading: TextBlock,
     typography_body: TextBlock,
     typography_button: Button,
-    test_buttons: [Button; 5],
+    test_buttons: [Button; 6],
     tree_buttons: [Button; 6],
     popup_buttons: [Button; 2],
     texture_buttons: [Button; 4],
@@ -1061,21 +1061,18 @@ struct State {
     combo_popup_root: RootHandle,
     popup_root: RootHandle,
 
-    // P1.2 TEMPORARY: restore in P3.2
-    // dialog_window: FileDialogState,
+    dialog_session: Option<FileDialogSession>,
     fps: f32,
     last_frame: Instant,
 
     submit_button_state: WidgetStateHandle<ButtonState>,
     log_text_state: WidgetStateHandle<TextBlockState>,
-    test_button_states: [WidgetStateHandle<ButtonState>; 5],
+    test_button_states: [WidgetStateHandle<ButtonState>; 6],
     tree_button_states: [WidgetStateHandle<ButtonState>; 6],
     popup_button_states: [WidgetStateHandle<ButtonState>; 2],
     stack_direction_button_states: [WidgetStateHandle<ButtonState>; 6],
     weight_button_states: [WidgetStateHandle<ButtonState>; 9],
     open_popup: bool,
-    // P1.2 TEMPORARY: restore in P3.2
-    // open_dialog: bool,
     triangle_data: Rc<RefCell<TriangleState>>,
     background_swatch_state: WidgetStateHandle<ColorSwatchState>,
 }
@@ -1339,8 +1336,7 @@ impl State {
             centered_button("Button 3"),
             centered_button("Popup"),
             centered_button("Button 4"),
-            // P1.2 TEMPORARY: restore in P3.2
-            // centered_button("Dialog"),
+            centered_button("Dialog"),
         ];
         let test_button_states = test_button_pairs.each_ref().map(|(state, _)| state.clone());
         let test_buttons = test_button_pairs.map(|(_, runtime)| runtime);
@@ -1464,8 +1460,7 @@ impl State {
             demo_root,
             combo_popup_root,
             popup_root,
-            // P1.2 TEMPORARY: restore in P3.2
-            // dialog_window: FileDialogState::new(ctx),
+            dialog_session: None,
             fps: 0.0,
             last_frame: Instant::now(),
             submit_button_state,
@@ -1476,8 +1471,6 @@ impl State {
             stack_direction_button_states,
             weight_button_states,
             open_popup: false,
-            // P1.2 TEMPORARY: restore in P3.2
-            // open_dialog: false,
             triangle_data,
             background_swatch_state,
         };
@@ -1816,7 +1809,7 @@ impl State {
                 let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
                 let [label_pos, label_size, label_fps] = window_info_labels;
                 let [value_pos, value_size, value_fps] = window_info_values;
-                let [button0, button1, button2, button3, button4] = test_buttons;
+                let [button0, button1, button2, button3, button4, dialog_button] = test_buttons;
                 let [test_label0, test_label1, test_label2] = test_button_labels;
                 let [tree_button0, tree_button1, tree_button2, tree_button3, tree_button4, tree_button5] = tree_buttons;
                 let [checkbox0, checkbox1, checkbox2] = checkboxes;
@@ -1856,8 +1849,7 @@ impl State {
                     tree.row(&button_widths, SizePolicy::Auto, |tree| {
                         tree.widget(test_label2);
                         tree.widget(button4);
-                        // P1.2 TEMPORARY: restore in P3.2
-                        // tree.widget(dialog_button);
+                        tree.widget(dialog_button);
                     });
                 });
 
@@ -2083,15 +2075,18 @@ impl State {
             Some("Pressed button 3"),
             None,
             Some("Pressed button 4"),
-            // P1.2 TEMPORARY: restore in P3.2
-            // None,
+            None,
         ];
         for (index, (button, message)) in self.test_button_states.iter().zip(button_messages).enumerate() {
             if take_button_submission(button) {
                 match index {
                     3 => self.open_popup = true,
-                    // P1.2 TEMPORARY: restore in P3.2
-                    // 5 => self.open_dialog = true,
+                    5 => {
+                        if self.dialog_session.is_none() {
+                            self.dialog_session = Some(ctx.open_file_dialog(FileDialogRequest::default()));
+                            button_logs.push("Open dialog!");
+                        }
+                    }
                     _ => {
                         if let Some(message) = message {
                             button_logs.push(message);
@@ -2163,41 +2158,24 @@ impl State {
         for msg in popup_logs {
             self.write_log(msg);
         }
-
-        // P1.2 TEMPORARY: restore in P3.2
-        // self.dialog(ctx);
     }
 
-    // P1.2 TEMPORARY: restore in P3.2
-    // fn dialog(&mut self, ctx: &mut Context<SelectedBackend>) {
-    //     if self.open_dialog {
-    //         self.dialog_window.open(ctx);
-    //         self.open_dialog = false;
-    //         self.write_log("Open dialog!");
-    //     }
-    //
-    //     let dialog_result = {
-    //         let dialog = &mut self.dialog_window;
-    //         let was_open = dialog.is_open();
-    //         dialog.eval(ctx);
-    //         if was_open && !dialog.is_open() {
-    //             Some(dialog.file_name().clone())
-    //         } else {
-    //             None
-    //         }
-    //     };
-    //     if let Some(result) = dialog_result {
-    //         match result {
-    //             Some(name) => {
-    //                 let mut msg = String::new();
-    //                 msg.push_str("Selected file: ");
-    //                 msg.push_str(name.as_str());
-    //                 self.write_log(msg.as_str());
-    //             }
-    //             None => self.write_log("File dialog canceled"),
-    //         }
-    //     }
-    // }
+    fn poll_file_dialog(&mut self) {
+        let Some(status) = self.dialog_session.as_ref().map(FileDialogSession::status) else {
+            return;
+        };
+        match status {
+            FileDialogStatus::Pending => {}
+            FileDialogStatus::Accepted(result) => {
+                self.write_log(format!("Selected file: {}", result.file_name).as_str());
+                self.dialog_session = None;
+            }
+            FileDialogStatus::Cancelled => {
+                self.write_log("File dialog canceled");
+                self.dialog_session = None;
+            }
+        }
+    }
 
     fn process_frame(&mut self, ctx: &mut Context<SelectedBackend>) {
         let now = Instant::now();
@@ -2221,6 +2199,7 @@ impl State {
         self.suzanne_window(ctx);
         self.stack_direction_window(ctx);
         self.weight_window(ctx);
+        self.poll_file_dialog();
     }
 }
 

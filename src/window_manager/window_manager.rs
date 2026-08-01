@@ -205,17 +205,13 @@ impl<B: RendererBackend> Context<B> {
         panic!("registered root lost its persistent RootState owner")
     }
 
-    // Used by the preserved file-dialog implementation while that module is temporarily uncompiled.
-    #[allow(dead_code)]
-    pub(crate) fn root_spacing(&self) -> i32 {
-        self.style.spacing.max(0)
-    }
-
     /// Performs one synchronization layout, then one full update/layout pair per queued event.
     pub(super) fn update_window_manager(&mut self, dimensions: Dimensioni) {
         let atlas = self.renderer.atlas();
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
 
+        // This pre-layout pass removes abandoned sessions even when no input was queued.
+        self.process_file_dialogs();
         for entry in &mut self.roots {
             entry.tree.runtime.begin_update();
         }
@@ -226,6 +222,9 @@ impl<B: RendererBackend> Context<B> {
             let Some(event) = event else { break };
             let input = self.input.borrow().snapshot();
             self.update_window_manager_for_event(&atlas, &event, input);
+            // Dialog controls are ordinary retained widgets. Consume their committed actions only
+            // after the complete cross-root update and before the matching layout commit.
+            self.process_file_dialogs();
             self.layout_window_manager(viewport, &atlas);
         }
     }
@@ -499,6 +498,12 @@ impl<B: RendererBackend> Context<B> {
     pub(crate) fn debug_root_structure(&self, root: RootId) -> Option<(usize, usize)> {
         let entry = self.roots.iter().find(|entry| entry.id == root)?;
         Some((entry.tree.root.debug_node_count(), entry.tree.root.debug_erased_adapter_count()))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_node_rect(&self, root: RootId, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
+        let entry = self.roots.iter().find(|entry| entry.id == root)?;
+        entry.tree.runtime.debug_node_rect(std::slice::from_ref(&entry.tree.root), node)
     }
 
     #[cfg(test)]

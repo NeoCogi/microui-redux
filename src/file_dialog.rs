@@ -27,566 +27,576 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
-//! Retained file picker dialog state and UI node set construction.
+//! Context-owned retained file picker with an application-polled session result.
 //!
-//! The dialog owns reusable widget handles for folder/file lists, navigation buttons, path entry,
-//! and selection state so applications can open it repeatedly without rebuilding runtime state.
-use std::path::Path;
+//! Opening a dialog constructs its retained shell once. Context advances navigation, selection,
+//! and completion after each queued input event; applications only retain a [`FileDialogSession`]
+//! and inspect [`FileDialogSession::status`] after [`crate::Context::update_ui`].
 
-use crate::{render::RendererBackend, *};
+use std::{
+    cell::RefCell,
+    path::Path,
+    rc::{Rc, Weak},
+};
 
-/// Simple modal dialog that lets the user browse and pick files.
-pub struct FileDialogState {
-    /// Directory currently shown by the dialog.
-    current_working_directory: String,
-    /// Selected basename after the user accepts the dialog.
-    file_name: Option<String>,
-    /// Selected resolved path after the user accepts the dialog.
-    file_path: Option<String>,
-    /// Editable path textbox.
-    path_box: WidgetHandle<Textbox>,
-    /// Typed application state for the path textbox.
-    path_box_state: WidgetStateHandle<TextboxState>,
-    /// Editable filename textbox.
-    tmp_file_name: WidgetHandle<Textbox>,
-    /// Typed application state for the filename textbox.
-    tmp_file_name_state: WidgetStateHandle<TextboxState>,
-    /// Folder selected from the folder list, if any.
-    selected_folder: Option<String>,
-    /// Registered root id for the dialog window.
-    root: RootId,
-    /// Cached open state mirrored from the registered root.
-    open: bool,
-    /// Folder names currently displayed.
-    folders: Vec<String>,
-    /// File names currently displayed.
-    files: Vec<String>,
-    /// Retained list-item handles for folder rows.
-    folder_items: Vec<WidgetHandle<ListItem>>,
-    /// Typed application state for folder rows.
-    folder_item_states: Vec<WidgetStateHandle<ListItemState>>,
-    /// Retained list-item handles for file rows.
-    file_items: Vec<WidgetHandle<ListItem>>,
-    /// Typed application state for file rows.
-    file_item_states: Vec<WidgetStateHandle<ListItemState>>,
-    /// Node ids corresponding to folder rows.
-    folder_item_ids: Vec<NodeId>,
-    /// Node ids corresponding to file rows.
-    file_item_ids: Vec<NodeId>,
-    /// Button that navigates to the parent directory.
-    up_button: WidgetHandle<Button>,
-    /// Typed application state for the parent-directory button.
-    up_button_state: WidgetStateHandle<ButtonState>,
-    /// Button that navigates to the home directory.
-    home_button: WidgetHandle<Button>,
-    /// Typed application state for the home-directory button.
-    home_button_state: WidgetStateHandle<ButtonState>,
-    /// Button that applies the path textbox.
-    go_button: WidgetHandle<Button>,
-    /// Typed application state for the path-apply button.
-    go_button_state: WidgetStateHandle<ButtonState>,
-    /// Button that accepts the current selection.
-    ok_button: WidgetHandle<Button>,
-    /// Typed application state for the accept button.
-    ok_button_state: WidgetStateHandle<ButtonState>,
-    /// Button that closes without selecting.
-    cancel_button: WidgetHandle<Button>,
-    /// Typed application state for the cancel button.
-    cancel_button_state: WidgetStateHandle<ButtonState>,
-    /// Node id for the parent-directory button.
-    up_button_id: NodeId,
-    /// Node id for the home-directory button.
-    home_button_id: NodeId,
-    /// Node id for the path textbox.
-    path_box_id: NodeId,
-    /// Node id for the path-apply button.
-    go_button_id: NodeId,
-    /// Node id for the accept button.
-    ok_button_id: NodeId,
-    /// Node id for the cancel button.
-    cancel_button_id: NodeId,
-    /// Static label above the folder list.
-    folders_label: WidgetHandle<ListItem>,
-    /// Placeholder shown when no folders exist.
-    no_folders_label: WidgetHandle<ListItem>,
-    /// Static label above the file list.
-    files_label: WidgetHandle<ListItem>,
-    /// Placeholder shown when no files exist.
-    no_files_label: WidgetHandle<ListItem>,
-    /// Static label for the filename textbox.
-    file_name_label: WidgetHandle<ListItem>,
-    /// Spacer row used by the layout tree.
-    spacer_label: WidgetHandle<ListItem>,
-    /// Retained UI node set submitted for the dialog.
-    tree: UiNodeSet,
+use crate::render::RendererBackend;
+use crate::{
+    Button, ButtonParameters, ButtonState, CLOSED_FOLDER_16_ICON, Column, ColumnParameters, Context, FILE_16_ICON, ListItem, ListItemParameters, ListItemState,
+    Node, Policy, Recti, RootHandle, ScrollArea, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters,
+    StackState, Textbox, TextboxParameters, TextboxState, WidgetOption, WidgetStateHandle, WindowOption,
+};
+use crate::ui_node::RuntimeNodeId;
+
+/// One-shot configuration used to open a file dialog.
+#[derive(Clone, Debug)]
+pub struct FileDialogRequest {
+    title: String,
+    initial_directory: String,
+    rect: Recti,
 }
 
-impl FileDialogState {
-    /// Builds the temporary projection handle used until owning nodes land in P1.3.
-    fn projected_textbox(parameters: TextboxParameters) -> (WidgetStateHandle<TextboxState>, WidgetHandle<Textbox>) {
-        let (state, runtime) = Textbox::create(parameters);
-        (state, widget_handle(runtime))
+impl FileDialogRequest {
+    /// Creates a request with the default title, current process directory, and dialog rectangle.
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Builds a button state/runtime pair across the temporary projection boundary.
-    fn projected_button(parameters: ButtonParameters) -> (WidgetStateHandle<ButtonState>, WidgetHandle<Button>) {
-        let (state, runtime) = Button::create(parameters);
-        (state, widget_handle(runtime))
+    /// Replaces the title displayed by the retained dialog root.
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = title.into();
+        self
     }
 
-    /// Builds a list-item state/runtime pair across the temporary projection boundary.
-    fn projected_list_item(parameters: ListItemParameters) -> (WidgetStateHandle<ListItemState>, WidgetHandle<ListItem>) {
-        let (state, runtime) = ListItem::create(parameters);
-        (state, widget_handle(runtime))
+    /// Replaces the directory displayed when the dialog opens.
+    ///
+    /// A missing or unreadable directory remains visible in the path box and produces no filesystem
+    /// entries; an available lexical parent can still be shown for navigation. Opening the dialog
+    /// itself does not fail.
+    pub fn with_initial_directory(mut self, directory: impl Into<String>) -> Self {
+        self.initial_directory = directory.into();
+        self
     }
 
-    /// Builds a projection-only list item whose mounted state is intentionally unused.
-    fn projected_static_list_item(parameters: ListItemParameters) -> WidgetHandle<ListItem> {
-        let (_, runtime) = ListItem::create(parameters);
-        widget_handle(runtime)
+    /// Replaces the initial outer rectangle in screen coordinates.
+    pub const fn with_rect(mut self, rect: Recti) -> Self {
+        self.rect = rect;
+        self
     }
 
-    /// Returns the selected file name (basename only) if the dialog completed successfully.
-    pub fn file_name(&self) -> &Option<String> {
-        &self.file_name
+    /// Returns the configured dialog title.
+    pub fn title(&self) -> &str {
+        &self.title
     }
 
-    /// Returns the selected file path (absolute when possible) if the dialog completed successfully.
-    pub fn file_path(&self) -> &Option<String> {
-        &self.file_path
+    /// Returns the configured initial directory.
+    pub fn initial_directory(&self) -> &str {
+        &self.initial_directory
     }
 
-    /// Returns `true` if the dialog window is currently open.
-    pub fn is_open(&self) -> bool {
-        self.open
+    /// Returns the configured initial outer rectangle.
+    pub const fn rect(&self) -> Recti {
+        self.rect
     }
+}
 
-    /// Resolves a typed file name into a path relative to the current directory when needed.
-    fn resolve_selected_path(cwd: &str, file_name: &str) -> String {
-        let path = Path::new(file_name);
-        if path.is_absolute() {
-            path.to_string_lossy().to_string()
-        } else {
-            Path::new(cwd).join(path).to_string_lossy().to_string()
+impl Default for FileDialogRequest {
+    fn default() -> Self {
+        let initial_directory = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .to_string_lossy()
+            .into_owned();
+        Self {
+            title: "Open File".to_owned(),
+            initial_directory,
+            rect: Recti::new(50, 50, 720, 520),
+        }
+    }
+}
+
+/// File selected by an accepted dialog.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileDialogResult {
+    /// Selected basename suitable for display.
+    pub file_name: String,
+    /// Selected path, resolved against the dialog's current directory when entered relatively.
+    pub file_path: String,
+}
+
+/// Observable lifecycle state of a file-dialog session.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FileDialogStatus {
+    /// The retained dialog is still accepting input.
+    Pending,
+    /// The user accepted a non-empty file selection.
+    Accepted(FileDialogResult),
+    /// The user cancelled, closed, explicitly cancelled, or otherwise ended the dialog.
+    Cancelled,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct FileDialogSessionId(usize);
+
+/// Read-only application capability for one Context-owned file dialog.
+///
+/// The session is deliberately not cloneable. Dropping it while pending abandons the dialog;
+/// Context removes the retained root during its next UI update.
+pub struct FileDialogSession {
+    id: FileDialogSessionId,
+    status: Rc<RefCell<FileDialogStatus>>,
+}
+
+impl FileDialogSession {
+    /// Returns a repeatable owned snapshot of the current status.
+    ///
+    /// Terminal snapshots remain available after Context has removed the dialog root.
+    pub fn status(&self) -> FileDialogStatus {
+        self.status.borrow().clone()
+    }
+}
+
+struct DialogRows {
+    nodes: Vec<Node>,
+    states: Vec<WidgetStateHandle<ListItemState>>,
+    ids: Vec<RuntimeNodeId>,
+}
+
+enum ControllerDisposition {
+    Pending,
+    Remove,
+}
+
+pub(crate) struct FileDialogController {
+    id: FileDialogSessionId,
+    status: Weak<RefCell<FileDialogStatus>>,
+    root: RootHandle,
+    current_working_directory: String,
+    folders: Vec<String>,
+    files: Vec<String>,
+    folder_items: Vec<WidgetStateHandle<ListItemState>>,
+    file_items: Vec<WidgetStateHandle<ListItemState>>,
+    folder_item_ids: Vec<RuntimeNodeId>,
+    file_item_ids: Vec<RuntimeNodeId>,
+    folder_rows: WidgetStateHandle<StackState>,
+    file_rows: WidgetStateHandle<StackState>,
+    #[cfg_attr(not(test), allow(dead_code))]
+    folder_scroll: WidgetStateHandle<ScrollAreaState>,
+    #[cfg_attr(not(test), allow(dead_code))]
+    file_scroll: WidgetStateHandle<ScrollAreaState>,
+    path_box: WidgetStateHandle<TextboxState>,
+    file_name_box: WidgetStateHandle<TextboxState>,
+    up_button: WidgetStateHandle<ButtonState>,
+    home_button: WidgetStateHandle<ButtonState>,
+    go_button: WidgetStateHandle<ButtonState>,
+    ok_button: WidgetStateHandle<ButtonState>,
+    cancel_button: WidgetStateHandle<ButtonState>,
+    #[cfg_attr(not(test), allow(dead_code))]
+    up_button_id: RuntimeNodeId,
+    #[cfg_attr(not(test), allow(dead_code))]
+    ok_button_id: RuntimeNodeId,
+    #[cfg_attr(not(test), allow(dead_code))]
+    cancel_button_id: RuntimeNodeId,
+}
+
+impl Drop for FileDialogController {
+    fn drop(&mut self) {
+        let Some(status) = self.status.upgrade() else {
+            return;
+        };
+        let mut status = status.borrow_mut();
+        if matches!(*status, FileDialogStatus::Pending) {
+            *status = FileDialogStatus::Cancelled;
+        }
+    }
+}
+
+impl FileDialogController {
+    fn new<B: RendererBackend>(ctx: &mut Context<B>, id: FileDialogSessionId, status: Weak<RefCell<FileDialogStatus>>, request: FileDialogRequest) -> Self {
+        let current_working_directory = request.initial_directory;
+        let (folders, files) = Self::read_directory(Path::new(&current_working_directory));
+        let folder_rows = Self::make_folder_rows(&current_working_directory, &folders);
+        let file_rows = Self::make_file_rows(&files);
+
+        let (up_button, up_runtime) = Button::create(ButtonParameters::new("Up"));
+        let up_node = Node::widget(up_runtime);
+        let up_button_id = up_node.id();
+        let (home_button, home_runtime) = Button::create(ButtonParameters::new("Home"));
+        let home_node = Node::widget(home_runtime);
+        let (path_box, path_runtime) = Textbox::create(TextboxParameters::new(current_working_directory.clone()));
+        let path_node = Node::widget(path_runtime);
+        let (go_button, go_runtime) = Button::create(ButtonParameters::new("Go"));
+        let go_node = Node::widget(go_runtime);
+
+        let (folder_rows_state, folder_rows_node) = Stack::create(StackParameters::new(
+            SizePolicy::Remainder(0),
+            SizePolicy::Auto,
+            StackDirection::TopToBottom,
+            folder_rows.nodes,
+        ));
+        let (folder_scroll, folder_scroll_node) = ScrollArea::create(ScrollAreaParameters::new(
+            ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
+            [
+                Self::static_item("Folders"),
+                folder_rows_node.with_policy(Policy::new(SizePolicy::Remainder(0), SizePolicy::Auto)),
+            ],
+        ));
+
+        let (file_rows_state, file_rows_node) = Stack::create(StackParameters::new(
+            SizePolicy::Remainder(0),
+            SizePolicy::Auto,
+            StackDirection::TopToBottom,
+            file_rows.nodes,
+        ));
+        let (file_scroll, file_scroll_node) = ScrollArea::create(ScrollAreaParameters::new(
+            ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
+            [
+                Self::static_item("Files"),
+                file_rows_node.with_policy(Policy::new(SizePolicy::Remainder(0), SizePolicy::Auto)),
+            ],
+        ));
+
+        let (file_name_box, file_name_runtime) = Textbox::create(TextboxParameters::new(""));
+        let file_name_node = Node::widget(file_name_runtime);
+        let (cancel_button, cancel_runtime) = Button::create(ButtonParameters::new("Cancel"));
+        let cancel_node = Node::widget(cancel_runtime);
+        let cancel_button_id = cancel_node.id();
+        let (ok_button, ok_runtime) = Button::create(ButtonParameters::new("Open"));
+        let ok_node = Node::widget(ok_runtime);
+        let ok_button_id = ok_node.id();
+
+        let (_, toolbar) = crate::Row::create(crate::RowParameters::new(
+            [SizePolicy::Fixed(56), SizePolicy::Fixed(56), SizePolicy::Weight(1.0), SizePolicy::Fixed(56)],
+            SizePolicy::Auto,
+            [up_node, home_node, path_node, go_node],
+        ));
+        let (_, browser) = crate::Row::create(crate::RowParameters::new(
+            [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)],
+            SizePolicy::Weight(1.0),
+            [folder_scroll_node, file_scroll_node],
+        ));
+        let browser = browser.with_policy(Policy::new(SizePolicy::Remainder(0), SizePolicy::Weight(1.0)));
+        let (_, filename) = crate::Row::create(crate::RowParameters::new(
+            [SizePolicy::Fixed(86), SizePolicy::Weight(1.0)],
+            SizePolicy::Auto,
+            [Self::static_item("File name:"), file_name_node],
+        ));
+        let (_, actions) = crate::Row::create(crate::RowParameters::new(
+            [SizePolicy::Weight(1.0), SizePolicy::Fixed(96), SizePolicy::Fixed(96)],
+            SizePolicy::Auto,
+            [Self::static_item(""), cancel_node, ok_node],
+        ));
+        let (_, shell) = Column::create(ColumnParameters::new([toolbar, browser, filename, actions]));
+
+        let root = ctx.create_dialog(&request.title, request.rect, shell.with_policy(Policy::fill()));
+        ctx.set_root_options(root.id(), WindowOption::FRAME)
+            .expect("new file-dialog root must accept options");
+        ctx.set_root_visible(root.id(), true).expect("new file-dialog root must become visible");
+
+        Self {
+            id,
+            status,
+            root,
+            current_working_directory,
+            folders,
+            files,
+            folder_items: folder_rows.states,
+            file_items: file_rows.states,
+            folder_item_ids: folder_rows.ids,
+            file_item_ids: file_rows.ids,
+            folder_rows: folder_rows_state,
+            file_rows: file_rows_state,
+            folder_scroll,
+            file_scroll,
+            path_box,
+            file_name_box,
+            up_button,
+            home_button,
+            go_button,
+            ok_button,
+            cancel_button,
+            up_button_id,
+            ok_button_id,
+            cancel_button_id,
         }
     }
 
-    /// Resolves a typed directory path and accepts it only when it exists.
-    fn resolve_directory_path(cwd: &str, input: &str) -> Option<String> {
-        if input.trim().is_empty() {
-            return None;
-        }
-        let raw = Path::new(input.trim());
-        let candidate = if raw.is_absolute() { raw.to_path_buf() } else { Path::new(cwd).join(raw) };
-        if candidate.is_dir() {
-            Some(candidate.to_string_lossy().to_string())
-        } else {
-            None
-        }
+    fn static_item(label: &str) -> Node {
+        let (_, runtime) = ListItem::create(ListItemParameters::with_opt(label, WidgetOption::NO_INTERACT));
+        Node::widget(runtime)
     }
 
-    /// Returns the best available user home directory from common environment variables.
-    fn home_dir() -> Option<String> {
-        if let Ok(home) = std::env::var("HOME") {
-            if !home.is_empty() {
-                return Some(home);
-            }
-        }
-        if let Ok(home) = std::env::var("USERPROFILE") {
-            if !home.is_empty() {
-                return Some(home);
-            }
-        }
-        None
-    }
-
-    /// Reads one directory into separate folder and file lists.
-    fn list_folders_files(p: &Path, folders: &mut Vec<String>, files: &mut Vec<String>) {
-        folders.clear();
-        files.clear();
-        if let Some(parent) = p.parent() {
-            // Inject parent as the first folder entry so the dialog can always navigate upward.
-            folders.push(parent.to_string_lossy().to_string());
-        }
-        if let Ok(read_dir) = std::fs::read_dir(p) {
-            for entry in read_dir {
-                if let Ok(e) = entry {
-                    let path = e.path();
-                    if path.is_dir() {
-                        folders.push(path.to_string_lossy().to_string());
-                    } else {
-                        files.push(e.file_name().to_string_lossy().to_string())
-                    }
+    fn read_directory(path: &Path) -> (Vec<String>, Vec<String>) {
+        let mut folders = Vec::new();
+        let mut files = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(path) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if entry_path.is_dir() {
+                    folders.push(entry_path.to_string_lossy().into_owned());
+                } else {
+                    files.push(entry.file_name().to_string_lossy().into_owned());
                 }
             }
         }
+        folders.sort();
+        files.sort();
+        if let Some(parent) = path.parent() {
+            folders.insert(0, parent.to_string_lossy().into_owned());
+        }
+        (folders, files)
     }
 
-    /// Refreshes filesystem entries and rebuilt list item widget handles.
-    fn refresh_entries(&mut self) {
-        // Re-snapshot the filesystem, then rebuild both the retained widget
-        // handles so list length changes stay in sync.
-        Self::list_folders_files(Path::new(&self.current_working_directory), &mut self.folders, &mut self.files);
-        self.rebuild_item_states();
-    }
-
-    /// Rebuilds retained list item state from the latest folder/file names.
-    fn rebuild_item_states(&mut self) {
-        let parent_path = Path::new(&self.current_working_directory).parent().map(|p| p.to_string_lossy().to_string());
-
-        self.folder_items.clear();
-        self.folder_item_states.clear();
-        self.folder_items.reserve(self.folders.len());
-        self.folder_item_states.reserve(self.folders.len());
-        for f in &self.folders {
-            // Show the injected parent entry using the conventional ".." label
-            // while preserving the full path internally for navigation.
-            let label = if parent_path.as_deref() == Some(f.as_str()) {
+    fn make_folder_rows(cwd: &str, folders: &[String]) -> DialogRows {
+        if folders.is_empty() {
+            return DialogRows {
+                nodes: vec![Self::static_item("No folders")],
+                states: Vec::new(),
+                ids: Vec::new(),
+            };
+        }
+        let parent = Path::new(cwd).parent().map(|path| path.to_string_lossy().into_owned());
+        let mut nodes = Vec::with_capacity(folders.len());
+        let mut states = Vec::with_capacity(folders.len());
+        let mut ids = Vec::with_capacity(folders.len());
+        for folder in folders {
+            let label = if parent.as_deref() == Some(folder.as_str()) {
                 ".."
             } else {
-                Path::new(f).file_name().and_then(|name| name.to_str()).unwrap_or(f.as_str())
+                Path::new(folder).file_name().and_then(|name| name.to_str()).unwrap_or(folder)
             };
-            // Mirror the currently selected directory in the icon so the list
-            // provides a visual cue before the next refresh swaps contents.
-            let icon = if self.selected_folder.as_deref() == Some(f.as_str()) {
-                OPEN_FOLDER_16_ICON
-            } else {
-                CLOSED_FOLDER_16_ICON
+            let (state, runtime) = ListItem::create(ListItemParameters::with_icon(label, CLOSED_FOLDER_16_ICON));
+            let node = Node::widget(runtime);
+            ids.push(node.id());
+            states.push(state);
+            nodes.push(node);
+        }
+        DialogRows { nodes, states, ids }
+    }
+
+    fn make_file_rows(files: &[String]) -> DialogRows {
+        if files.is_empty() {
+            return DialogRows {
+                nodes: vec![Self::static_item("No files")],
+                states: Vec::new(),
+                ids: Vec::new(),
             };
-            let (state, runtime) = Self::projected_list_item(ListItemParameters::with_icon(label, icon));
-            self.folder_item_states.push(state);
-            self.folder_items.push(runtime);
         }
-
-        self.file_items.clear();
-        self.file_item_states.clear();
-        self.file_items.reserve(self.files.len());
-        self.file_item_states.reserve(self.files.len());
-        for f in &self.files {
-            let (state, runtime) = Self::projected_list_item(ListItemParameters::with_icon(f.as_str(), FILE_16_ICON));
-            self.file_item_states.push(state);
-            self.file_items.push(runtime);
+        let mut nodes = Vec::with_capacity(files.len());
+        let mut states = Vec::with_capacity(files.len());
+        let mut ids = Vec::with_capacity(files.len());
+        for file in files {
+            let (state, runtime) = ListItem::create(ListItemParameters::with_icon(file, FILE_16_ICON));
+            let node = Node::widget(runtime);
+            ids.push(node.id());
+            states.push(state);
+            nodes.push(node);
         }
+        DialogRows { nodes, states, ids }
     }
 
-    /// Rebuilds the retained UI node set and records the node ids used for result lookup.
-    fn rebuild_tree(&mut self, spacing: i32) {
-        let mut folder_item_ids = Vec::with_capacity(self.folder_items.len());
-        let mut file_item_ids = Vec::with_capacity(self.file_items.len());
-        let mut up_button_id = NodeId::default();
-        let mut home_button_id = NodeId::default();
-        let mut path_box_id = NodeId::default();
-        let mut go_button_id = NodeId::default();
-        let mut cancel_button_id = NodeId::default();
-        let mut ok_button_id = NodeId::default();
-        let tree = {
-            let up_button = &self.up_button;
-            let home_button = &self.home_button;
-            let path_box = &self.path_box;
-            let go_button = &self.go_button;
-            let folders_label = &self.folders_label;
-            let no_folders_label = &self.no_folders_label;
-            let files_label = &self.files_label;
-            let no_files_label = &self.no_files_label;
-            let file_name_label = &self.file_name_label;
-            let tmp_file_name = &self.tmp_file_name;
-            let spacer_label = &self.spacer_label;
-            let cancel_button = &self.cancel_button;
-            let ok_button = &self.ok_button;
-            let folder_items = &self.folder_items;
-            let file_items = &self.file_items;
-            let no_folder_items = folder_items.is_empty();
-            let no_file_items = file_items.is_empty();
+    fn refresh_entries(&mut self) {
+        let (folders, files) = Self::read_directory(Path::new(&self.current_working_directory));
+        let folder_rows = Self::make_folder_rows(&self.current_working_directory, &folders);
+        let file_rows = Self::make_file_rows(&files);
 
-            UiNodeBuilder::build(|tree| {
-                let toolbar_widths = [
-                    SizePolicy::Fixed(56),
-                    SizePolicy::Fixed(56),
-                    SizePolicy::Remainder(56 + spacing),
-                    SizePolicy::Fixed(56),
-                ];
-                let pane_widths = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
-                let filename_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(0)];
-                let action_widths = [SizePolicy::Remainder(96 * 2 + spacing * 2), SizePolicy::Fixed(96), SizePolicy::Fixed(96)];
-                // The column owns the complete dialog body. Natural-height controls reserve only
-                // what they measure, and the weighted browser row receives every remaining pixel.
-                tree.node(NodeOptions::with_policy(Policy::fill())).column(|tree| {
-                    // Toolbar: up/home/path/go.
-                    tree.row(&toolbar_widths, SizePolicy::Auto, |tree| {
-                        up_button_id = tree.widget(up_button);
-                        home_button_id = tree.widget(home_button);
-                        path_box_id = tree.widget(path_box);
-                        go_button_id = tree.widget(go_button);
-                    });
-
-                    // Main pane: folders on the left, files on the right, both scrollable through scroll areas.
-                    tree.row(&pane_widths, SizePolicy::Weight(1.0), |tree| {
-                        tree.scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
-                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                                tree.widget(folders_label);
-                                for item in folder_items {
-                                    folder_item_ids.push(tree.widget(item));
-                                }
-                                if no_folder_items {
-                                    tree.widget(no_folders_label);
-                                }
-                            });
-                        });
-
-                        tree.scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
-                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                                tree.widget(files_label);
-                                for item in file_items {
-                                    file_item_ids.push(tree.widget(item));
-                                }
-                                if no_file_items {
-                                    tree.widget(no_files_label);
-                                }
-                            });
-                        });
-                    });
-
-                    // Filename row and action buttons remain at their natural control height.
-                    tree.row(&filename_widths, SizePolicy::Auto, |tree| {
-                        tree.widget(file_name_label);
-                        tree.widget(tmp_file_name);
-                    });
-
-                    tree.row(&action_widths, SizePolicy::Auto, |tree| {
-                        tree.widget(spacer_label);
-                        cancel_button_id = tree.widget(cancel_button);
-                        ok_button_id = tree.widget(ok_button);
-                    });
-                });
-            })
-        };
-        self.tree = tree;
-        self.folder_item_ids = folder_item_ids;
-        self.file_item_ids = file_item_ids;
-        self.up_button_id = up_button_id;
-        self.home_button_id = home_button_id;
-        self.path_box_id = path_box_id;
-        self.go_button_id = go_button_id;
-        self.cancel_button_id = cancel_button_id;
-        self.ok_button_id = ok_button_id;
-    }
-
-    /// Synchronizes text boxes and tree structure with the current dialog state.
-    fn sync_retained_view(&mut self, spacing: i32) {
-        if self.path_box_state.try_read(|path_box| path_box.text() != self.current_working_directory) == Some(true) {
-            let _ = self
-                .path_box_state
-                .try_update_with(self.current_working_directory.clone(), |path_box, path| path_box.set_text(path));
+        if let Err(rejected) = replace_stack_rows(&self.folder_rows, folder_rows.nodes) {
+            panic!("file-dialog folder row container unavailable with {} replacement nodes", rejected.len());
         }
-        self.rebuild_tree(spacing);
+        if let Err(rejected) = replace_stack_rows(&self.file_rows, file_rows.nodes) {
+            panic!("file-dialog file row container unavailable with {} replacement nodes", rejected.len());
+        }
+
+        self.folders = folders;
+        self.files = files;
+        self.folder_items = folder_rows.states;
+        self.file_items = file_rows.states;
+        self.folder_item_ids = folder_rows.ids;
+        self.file_item_ids = file_rows.ids;
     }
 
-    /// Changes the working directory and resets folder selection.
-    fn navigate_to(&mut self, path: String) -> bool {
-        if path.is_empty() || path == self.current_working_directory {
+    fn navigate_to(&mut self, directory: String) -> bool {
+        if directory.is_empty() || directory == self.current_working_directory {
             return false;
         }
-        self.current_working_directory = path;
-        self.selected_folder = None;
-        let _ = self
-            .path_box_state
-            .try_update_with(self.current_working_directory.clone(), |path_box, path| path_box.set_text(path));
-        let _ = self.tmp_file_name_state.try_update(|tmp_file_name| tmp_file_name.set_text(""));
+        self.current_working_directory = directory;
+        self.path_box
+            .try_update_with(self.current_working_directory.clone(), |state, path| state.set_text(path))
+            .expect("file-dialog path box must remain mounted");
+        self.file_name_box
+            .try_update(TextboxState::clear)
+            .expect("file-dialog filename box must remain mounted");
         true
     }
 
-    /// Pushes the current retained nodes/options into the registered context root.
-    fn sync_retained_root<B: RendererBackend>(&mut self, ctx: &mut Context<B>) {
-        self.sync_retained_view(ctx.root_spacing());
-        ctx.set_root_nodes(self.root, std::mem::take(&mut self.tree));
-        self.open = ctx.root_visible(self.root).unwrap_or(false);
+    fn resolve_directory_path(&self, input: &str) -> Option<String> {
+        let input = input.trim();
+        if input.is_empty() {
+            return None;
+        }
+        let raw = Path::new(input);
+        let candidate = if raw.is_absolute() {
+            raw.to_path_buf()
+        } else {
+            Path::new(&self.current_working_directory).join(raw)
+        };
+        candidate.is_dir().then(|| candidate.to_string_lossy().into_owned())
     }
 
-    /// Applies toolbar/path navigation actions from committed frame results.
-    fn apply_navigation_actions(&mut self) -> bool {
-        if self.up_button_state.try_update(ButtonState::take_submitted).unwrap_or(false)
-            && let Some(parent) = Path::new(self.current_working_directory.as_str()).parent()
-        {
-            return self.navigate_to(parent.to_string_lossy().to_string());
-        }
+    fn home_dir() -> Option<String> {
+        std::env::var("HOME")
+            .ok()
+            .filter(|home| !home.is_empty())
+            .or_else(|| std::env::var("USERPROFILE").ok().filter(|home| !home.is_empty()))
+    }
 
-        if self.home_button_state.try_update(ButtonState::take_submitted).unwrap_or(false)
+    fn apply_navigation_actions(&mut self) -> bool {
+        if self.up_button.try_update(ButtonState::take_submitted).unwrap_or(false)
+            && let Some(parent) = Path::new(&self.current_working_directory).parent()
+        {
+            return self.navigate_to(parent.to_string_lossy().into_owned());
+        }
+        if self.home_button.try_update(ButtonState::take_submitted).unwrap_or(false)
             && let Some(home) = Self::home_dir()
-            && Path::new(home.as_str()).is_dir()
+            && Path::new(&home).is_dir()
         {
             return self.navigate_to(home);
         }
-
-        let path_submitted = self.path_box_state.try_update(TextboxState::take_submitted).unwrap_or(false);
-        let go_submitted = self.go_button_state.try_update(ButtonState::take_submitted).unwrap_or(false);
+        let path_submitted = self.path_box.try_update(TextboxState::take_submitted).unwrap_or(false);
+        let go_submitted = self.go_button.try_update(ButtonState::take_submitted).unwrap_or(false);
         if path_submitted || go_submitted {
-            let path_input = self.path_box_state.try_read(|path_box| path_box.text().to_owned()).unwrap_or_default();
-            if let Some(path) = Self::resolve_directory_path(self.current_working_directory.as_str(), path_input.as_str()) {
+            let input = self.path_box.try_read(|state| state.text().to_owned()).unwrap_or_default();
+            if let Some(path) = self.resolve_directory_path(&input) {
                 return self.navigate_to(path);
             }
         }
-
         false
     }
 
-    /// Applies folder-list selection and navigates when a folder is submitted.
     fn apply_folder_actions(&mut self) -> bool {
-        let next_directory = self.folder_item_states.iter().enumerate().find_map(|(index, state)| {
-            if state.try_update(ListItemState::take_submitted).unwrap_or(false) {
-                self.folders.get(index).cloned()
-            } else {
-                None
-            }
+        let directory = self.folder_items.iter().enumerate().find_map(|(index, state)| {
+            state
+                .try_update(ListItemState::take_submitted)
+                .unwrap_or(false)
+                .then(|| self.folders.get(index).cloned())
+                .flatten()
         });
-
-        if let Some(path) = next_directory {
-            self.selected_folder = Some(path.clone());
-            return self.navigate_to(path);
-        }
-
-        false
+        directory.is_some_and(|directory| self.navigate_to(directory))
     }
 
-    /// Applies file-list selection into the temporary filename textbox.
     fn apply_file_actions(&mut self) {
-        let selected_file = self.file_item_states.iter().enumerate().find_map(|(index, state)| {
-            if state.try_update(ListItemState::take_submitted).unwrap_or(false) {
-                self.files.get(index).cloned()
-            } else {
-                None
-            }
+        let selected = self.file_items.iter().enumerate().find_map(|(index, state)| {
+            state
+                .try_update(ListItemState::take_submitted)
+                .unwrap_or(false)
+                .then(|| self.files.get(index).cloned())
+                .flatten()
         });
-
-        if let Some(name) = selected_file {
-            let _ = self
-                .tmp_file_name_state
-                .try_update_with(name, |tmp_file_name, name| tmp_file_name.set_text(name));
+        if let Some(selected) = selected {
+            self.file_name_box
+                .try_update_with(selected, |state, name| state.set_text(name))
+                .expect("file-dialog filename box must remain mounted");
         }
     }
 
-    /// Applies OK/Cancel actions and stores the selected file result.
-    fn apply_completion_actions(&mut self) -> bool {
-        let mut close = false;
-        if self.cancel_button_state.try_update(ButtonState::take_submitted).unwrap_or(false) {
-            self.file_name = None;
-            self.file_path = None;
-            self.open = false;
-            close = true;
+    fn completion_action(&mut self) -> Option<FileDialogStatus> {
+        if self.cancel_button.try_update(ButtonState::take_submitted).unwrap_or(false) {
+            return Some(FileDialogStatus::Cancelled);
         }
-
-        if self.ok_button_state.try_update(ButtonState::take_submitted).unwrap_or(false) {
-            let typed_name = self
-                .tmp_file_name_state
-                .try_read(|tmp_file_name| tmp_file_name.text().to_owned())
-                .unwrap_or_default();
-            if typed_name.is_empty() {
-                self.file_name = None;
-                self.file_path = None;
-            } else {
-                // Store both the display basename and resolved path so callers can choose either.
-                let selected_path = Self::resolve_selected_path(self.current_working_directory.as_str(), typed_name.as_str());
-                let selected_name = Path::new(selected_path.as_str())
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .map(|name| name.to_string())
-                    .unwrap_or(typed_name);
-                self.file_name = Some(selected_name);
-                self.file_path = Some(selected_path);
-            }
-            self.open = false;
-            close = true;
+        if !self.ok_button.try_update(ButtonState::take_submitted).unwrap_or(false) {
+            return None;
         }
-        close
-    }
-
-    /// Creates a new dialog window and associated scroll areas.
-    pub fn new<B: RendererBackend>(ctx: &mut Context<B>) -> Self {
-        let current_working_directory = std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-            .to_string_lossy()
-            .to_string();
-        let root = ctx.create_dialog("Open File", Recti::new(50, 50, 720, 520), UiNodeSet::default());
-        ctx.set_root_options(root, WindowOption::FRAME);
-        let (path_box_state, path_box) = Self::projected_textbox(TextboxParameters::new(""));
-        let (tmp_file_name_state, tmp_file_name) = Self::projected_textbox(TextboxParameters::new(""));
-        let (up_button_state, up_button) = Self::projected_button(ButtonParameters::new("Up"));
-        let (home_button_state, home_button) = Self::projected_button(ButtonParameters::new("Home"));
-        let (go_button_state, go_button) = Self::projected_button(ButtonParameters::new("Go"));
-        let (ok_button_state, ok_button) = Self::projected_button(ButtonParameters::new("Open"));
-        let (cancel_button_state, cancel_button) = Self::projected_button(ButtonParameters::new("Cancel"));
-        let mut dialog = Self {
-            current_working_directory,
-            file_name: None,
-            file_path: None,
-            path_box,
-            path_box_state,
-            tmp_file_name,
-            tmp_file_name_state,
-            selected_folder: None,
-            root,
-            open: ctx.root_visible(root).unwrap_or(false),
-            folders: Vec::new(),
-            files: Vec::new(),
-            folder_items: Vec::new(),
-            folder_item_states: Vec::new(),
-            file_items: Vec::new(),
-            file_item_states: Vec::new(),
-            folder_item_ids: Vec::new(),
-            file_item_ids: Vec::new(),
-            up_button,
-            up_button_state,
-            home_button,
-            home_button_state,
-            go_button,
-            go_button_state,
-            ok_button,
-            ok_button_state,
-            cancel_button,
-            cancel_button_state,
-            up_button_id: NodeId::default(),
-            home_button_id: NodeId::default(),
-            path_box_id: NodeId::default(),
-            go_button_id: NodeId::default(),
-            ok_button_id: NodeId::default(),
-            cancel_button_id: NodeId::default(),
-            folders_label: Self::projected_static_list_item(ListItemParameters::with_opt("Folders", WidgetOption::NO_INTERACT)),
-            no_folders_label: Self::projected_static_list_item(ListItemParameters::with_opt("No folders", WidgetOption::NO_INTERACT)),
-            files_label: Self::projected_static_list_item(ListItemParameters::with_opt("Files", WidgetOption::NO_INTERACT)),
-            no_files_label: Self::projected_static_list_item(ListItemParameters::with_opt("No Files", WidgetOption::NO_INTERACT)),
-            file_name_label: Self::projected_static_list_item(ListItemParameters::with_opt("File name:", WidgetOption::NO_INTERACT)),
-            spacer_label: Self::projected_static_list_item(ListItemParameters::with_opt("", WidgetOption::NO_INTERACT)),
-            tree: UiNodeSet::default(),
+        let typed_name = self.file_name_box.try_read(|state| state.text().trim().to_owned()).unwrap_or_default();
+        if typed_name.is_empty() {
+            return None;
+        }
+        let typed_path = Path::new(&typed_name);
+        let file_path = if typed_path.is_absolute() {
+            typed_path.to_string_lossy().into_owned()
+        } else {
+            Path::new(&self.current_working_directory).join(typed_path).to_string_lossy().into_owned()
         };
-        let _ = dialog
-            .path_box_state
-            .try_update_with(dialog.current_working_directory.clone(), |path_box, path| path_box.set_text(path));
-        dialog.refresh_entries();
-        dialog.sync_retained_root(ctx);
-        dialog
+        let file_name = Path::new(&file_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned)
+            .unwrap_or(typed_name);
+        Some(FileDialogStatus::Accepted(FileDialogResult { file_name, file_path }))
     }
 
-    /// Marks the dialog as open for the next frame.
-    pub fn open<B: RendererBackend>(&mut self, ctx: &mut Context<B>) {
-        ctx.set_root_visible(self.root, true);
-        self.open = true;
-    }
-
-    /// Renders the dialog and updates the selected file when confirmed.
-    pub fn eval<B: RendererBackend>(&mut self, ctx: &mut Context<B>) {
-        let needs_refresh = self.apply_navigation_actions() || self.apply_folder_actions();
-        self.apply_file_actions();
-        let close = self.apply_completion_actions();
-        if close {
-            ctx.set_root_visible(self.root, false);
+    fn process(&mut self) -> ControllerDisposition {
+        let Some(status) = self.status.upgrade() else {
+            return ControllerDisposition::Remove;
+        };
+        if !matches!(*status.borrow(), FileDialogStatus::Pending) {
+            return ControllerDisposition::Remove;
         }
 
-        if needs_refresh {
-            // Defer the rebuild until the dialog callback is done so all borrows
-            // against the current tree and item handles have been released.
+        let root_closed = self.root.state().try_update(crate::RootState::take_submitted).unwrap_or(true);
+        if root_closed {
+            *status.borrow_mut() = FileDialogStatus::Cancelled;
+            return ControllerDisposition::Remove;
+        }
+
+        let refresh = self.apply_navigation_actions() || self.apply_folder_actions();
+        self.apply_file_actions();
+        if let Some(completion) = self.completion_action() {
+            *status.borrow_mut() = completion;
+            return ControllerDisposition::Remove;
+        }
+        if refresh {
             self.refresh_entries();
         }
-        self.sync_retained_root(ctx);
-        self.open = ctx.root_visible(self.root).unwrap_or(false);
+        ControllerDisposition::Pending
+    }
+
+    fn belongs_to(&self, session: &FileDialogSession) -> bool {
+        self.id == session.id && self.status.upgrade().is_some_and(|status| Rc::ptr_eq(&status, &session.status))
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn replace_stack_rows(handle: &WidgetStateHandle<StackState>, nodes: Vec<Node>) -> Result<(), Vec<Node>> {
+    handle.try_update_with(nodes, |state, nodes| state.replace(nodes))
+}
+
+impl<B: RendererBackend> Context<B> {
+    /// Opens a retained file dialog and returns its read-only polling session.
+    pub fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
+        let id = FileDialogSessionId(self.next_file_dialog_id);
+        self.next_file_dialog_id = self.next_file_dialog_id.checked_add(1).expect("file-dialog session id counter overflowed");
+        let status = Rc::new(RefCell::new(FileDialogStatus::Pending));
+        let controller = FileDialogController::new(self, id, Rc::downgrade(&status), request);
+        self.file_dialogs.push(controller);
+        FileDialogSession { id, status }
+    }
+
+    /// Cancels a pending session owned by this Context.
+    ///
+    /// Returns `false` when the session is terminal or belongs to another Context.
+    pub fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
+        let Some(index) = self.file_dialogs.iter().position(|dialog| dialog.belongs_to(session)) else {
+            return false;
+        };
+        if !matches!(*session.status.borrow(), FileDialogStatus::Pending) {
+            return false;
+        }
+        *session.status.borrow_mut() = FileDialogStatus::Cancelled;
+        let dialog = self.file_dialogs.remove(index);
+        let removed = self.destroy_root(dialog.root.id());
+        debug_assert!(removed, "pending file-dialog controller must own a registered root");
+        true
+    }
+
+    pub(crate) fn process_file_dialogs(&mut self) {
+        let mut index = 0;
+        while index < self.file_dialogs.len() {
+            match self.file_dialogs[index].process() {
+                ControllerDisposition::Pending => index += 1,
+                ControllerDisposition::Remove => {
+                    let dialog = self.file_dialogs.remove(index);
+                    let _ = self.destroy_root(dialog.root.id());
+                }
+            }
+        }
     }
 }
 
@@ -594,9 +604,10 @@ impl FileDialogState {
 mod tests {
     use super::*;
     use crate::test_support::{AllocationMeasurement, NoopRenderer, test_atlas};
+    use crate::{Dimensioni, MouseButton, Vec2i};
     use std::{
         fs,
-        time::{Instant, SystemTime, UNIX_EPOCH},
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     fn unique_temp_dir(name: &str) -> std::path::PathBuf {
@@ -604,252 +615,307 @@ mod tests {
         std::env::temp_dir().join(format!("microui-redux-{name}-{}-{nanos}", std::process::id()))
     }
 
-    fn click_node(ctx: &mut Context<NoopRenderer>, root: RootId, node: NodeId) {
-        let rect = ctx.debug_root_node_rect(root, node).expect("node rect should be laid out");
-        let x = rect.x + rect.width / 2;
-        let y = rect.y + rect.height / 2;
-        ctx.mousemove(x, y);
-        ctx.update_and_render_ui();
-        ctx.mousedown(x, y, MouseButton::LEFT);
-        ctx.update_and_render_ui();
+    fn context() -> Context<NoopRenderer> {
+        Context::new_test(NoopRenderer { atlas: test_atlas() }, Dimensioni::new(900, 700))
     }
 
-    fn click_node_without_hover_frame(ctx: &mut Context<NoopRenderer>, root: RootId, node: NodeId) {
+    fn controller<'a>(ctx: &'a Context<NoopRenderer>, session: &FileDialogSession) -> &'a FileDialogController {
+        ctx.file_dialogs
+            .iter()
+            .find(|dialog| dialog.belongs_to(session))
+            .expect("pending session must have a controller")
+    }
+
+    fn click_node(ctx: &mut Context<NoopRenderer>, root: crate::RootId, node: RuntimeNodeId, batched: bool) {
         let rect = ctx.debug_root_node_rect(root, node).expect("node rect should be laid out");
         let x = rect.x + rect.width / 2;
         let y = rect.y + rect.height / 2;
         ctx.mousemove(x, y);
+        if !batched {
+            ctx.update_and_render_ui();
+        }
         ctx.mousedown(x, y, MouseButton::LEFT);
         ctx.update_and_render_ui();
     }
 
     #[test]
-    fn action_buttons_keep_the_standard_control_height() {
-        let atlas = test_atlas();
-        let backend = NoopRenderer { atlas };
-        let mut ctx = Context::new_test(backend, Dimensioni::new(800, 600));
-        let mut dialog = FileDialogState::new(&mut ctx);
-        dialog.open(&mut ctx);
-        dialog.eval(&mut ctx);
-        ctx.update_and_render_ui();
+    fn request_builders_and_pending_snapshot_are_public_contract() {
+        let dir = unique_temp_dir("request");
+        fs::create_dir_all(&dir).unwrap();
+        let request = FileDialogRequest::new()
+            .with_title("Choose")
+            .with_initial_directory(dir.to_string_lossy())
+            .with_rect(Recti::new(10, 20, 400, 300));
+        assert_eq!(request.title(), "Choose");
+        assert_eq!(request.initial_directory(), dir.to_string_lossy());
+        let request_rect = request.rect();
+        assert_eq!((request_rect.x, request_rect.y, request_rect.width, request_rect.height), (10, 20, 400, 300));
 
-        let toolbar = ctx
-            .debug_root_node_rect(dialog.root, dialog.up_button_id)
-            .expect("toolbar button should be laid out");
-        let cancel = ctx
-            .debug_root_node_rect(dialog.root, dialog.cancel_button_id)
-            .expect("cancel button should be laid out");
-        let open = ctx
-            .debug_root_node_rect(dialog.root, dialog.ok_button_id)
-            .expect("open button should be laid out");
-
-        assert_eq!(cancel.height, toolbar.height);
-        assert_eq!(open.height, toolbar.height);
+        let mut ctx = context();
+        let session = ctx.open_file_dialog(request);
+        assert_eq!(session.status(), FileDialogStatus::Pending);
+        assert_eq!(session.status(), FileDialogStatus::Pending);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
-    fn browser_pane_absorbs_dialog_height_while_footer_stays_compact() {
-        let atlas = test_atlas();
-        let backend = NoopRenderer { atlas };
-        let mut ctx = Context::new_test(backend, Dimensioni::new(900, 800));
-        let mut dialog = FileDialogState::new(&mut ctx);
-        dialog.open(&mut ctx);
-        dialog.eval(&mut ctx);
+    fn action_buttons_keep_standard_height_and_browser_absorbs_resize() {
+        let mut ctx = context();
+        let session = ctx.open_file_dialog(FileDialogRequest::default());
         ctx.update_and_render_ui();
+        let (root, up, cancel, open) = {
+            let dialog = controller(&ctx, &session);
+            (dialog.root.id(), dialog.up_button_id, dialog.cancel_button_id, dialog.ok_button_id)
+        };
+        let toolbar_before = ctx.debug_root_node_rect(root, up).unwrap();
+        let cancel_before = ctx.debug_root_node_rect(root, cancel).unwrap();
+        let open_before = ctx.debug_root_node_rect(root, open).unwrap();
+        assert_eq!(cancel_before.height, toolbar_before.height);
+        assert_eq!(open_before.height, toolbar_before.height);
 
-        let toolbar_before = ctx
-            .debug_root_node_rect(dialog.root, dialog.up_button_id)
-            .expect("toolbar button should be laid out");
-        let open_before = ctx
-            .debug_root_node_rect(dialog.root, dialog.ok_button_id)
-            .expect("open button should be laid out");
-        let body_before = ctx.debug_root_body(dialog.root).expect("dialog body should exist");
+        let body_before = ctx.debug_root_body(root).unwrap();
         let trailing_gap = body_before.y + body_before.height - (open_before.y + open_before.height);
         assert!(trailing_gap >= 0 && trailing_gap < toolbar_before.height);
-
-        let mut resized = ctx.root_rect(dialog.root).expect("dialog root should exist");
+        let mut resized = controller(&ctx, &session).root.state().try_read(crate::RootState::rect).unwrap();
         resized.height += 80;
-        ctx.set_root_rect(dialog.root, resized);
-        dialog.eval(&mut ctx);
+        ctx.set_root_rect(root, resized).unwrap();
         ctx.update_and_render_ui();
-
-        let toolbar_after = ctx
-            .debug_root_node_rect(dialog.root, dialog.up_button_id)
-            .expect("toolbar button should remain laid out");
-        let open_after = ctx
-            .debug_root_node_rect(dialog.root, dialog.ok_button_id)
-            .expect("open button should remain laid out");
-
+        let toolbar_after = ctx.debug_root_node_rect(root, up).unwrap();
+        let open_after = ctx.debug_root_node_rect(root, open).unwrap();
         assert_eq!(
             (toolbar_after.x, toolbar_after.y, toolbar_after.width, toolbar_after.height),
-            (toolbar_before.x, toolbar_before.y, toolbar_before.width, toolbar_before.height),
+            (toolbar_before.x, toolbar_before.y, toolbar_before.width, toolbar_before.height)
         );
         assert_eq!(open_after.height, open_before.height);
         assert_eq!(open_after.y - open_before.y, 80);
     }
 
-    #[test]
-    fn selecting_file_row_then_open_returns_selected_path() {
-        let dir = unique_temp_dir("file-dialog-select");
+    fn selection_flow(batched: bool) {
+        let dir = unique_temp_dir(if batched { "batched" } else { "select" });
         fs::create_dir_all(&dir).unwrap();
         let file_path = dir.join("picked.txt");
         fs::write(&file_path, b"picked").unwrap();
-
-        let atlas = test_atlas();
-        let backend = NoopRenderer { atlas };
-        let mut ctx = Context::new_test(backend, Dimensioni::new(800, 600));
-        let mut dialog = FileDialogState::new(&mut ctx);
-        dialog.current_working_directory = dir.to_string_lossy().to_string();
-        dialog.refresh_entries();
-        dialog.open(&mut ctx);
-        dialog.eval(&mut ctx);
+        let mut ctx = context();
+        let session = ctx.open_file_dialog(FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
         ctx.update_and_render_ui();
-
-        let file_node = dialog.file_item_ids[0];
-        click_node(&mut ctx, dialog.root, file_node);
-        dialog.eval(&mut ctx);
-
-        assert_eq!(dialog.tmp_file_name_state.try_read(|tmp| tmp.text().to_string()).as_deref(), Some("picked.txt"));
-
-        ctx.mouseup(0, 0, MouseButton::LEFT);
-        ctx.update_and_render_ui();
-        let ok_node = dialog.ok_button_id;
-        click_node(&mut ctx, dialog.root, ok_node);
-        dialog.eval(&mut ctx);
-
-        assert_eq!(dialog.file_name().as_deref(), Some("picked.txt"));
-        assert_eq!(dialog.file_path().as_deref(), Some(file_path.to_string_lossy().as_ref()));
-
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir(dir);
-    }
-
-    #[test]
-    fn file_dialog_clicks_work_without_prior_hover_frame() {
-        let dir = unique_temp_dir("file-dialog-batched-click");
-        fs::create_dir_all(&dir).unwrap();
-        let file_path = dir.join("batched.txt");
-        fs::write(&file_path, b"picked").unwrap();
-
-        let atlas = test_atlas();
-        let backend = NoopRenderer { atlas };
-        let mut ctx = Context::new_test(backend, Dimensioni::new(800, 600));
-        let mut dialog = FileDialogState::new(&mut ctx);
-        dialog.current_working_directory = dir.to_string_lossy().to_string();
-        dialog.refresh_entries();
-        dialog.open(&mut ctx);
-        dialog.eval(&mut ctx);
-        ctx.update_and_render_ui();
-
-        let file_node = dialog.file_item_ids[0];
-        click_node_without_hover_frame(&mut ctx, dialog.root, file_node);
-        dialog.eval(&mut ctx);
-
+        let (root, file_node) = {
+            let dialog = controller(&ctx, &session);
+            (dialog.root.id(), dialog.file_item_ids[0])
+        };
+        click_node(&mut ctx, root, file_node, batched);
         assert_eq!(
-            dialog.tmp_file_name_state.try_read(|tmp| tmp.text().to_string()).as_deref(),
-            Some("batched.txt")
+            controller(&ctx, &session).file_name_box.try_read(|state| state.text().to_owned()).as_deref(),
+            Some("picked.txt")
         );
-
         ctx.mouseup(0, 0, MouseButton::LEFT);
         ctx.update_and_render_ui();
-        let ok_node = dialog.ok_button_id;
-        click_node_without_hover_frame(&mut ctx, dialog.root, ok_node);
-        dialog.eval(&mut ctx);
-
-        assert_eq!(dialog.file_name().as_deref(), Some("batched.txt"));
-        assert_eq!(dialog.file_path().as_deref(), Some(file_path.to_string_lossy().as_ref()));
-
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir(dir);
+        let open = controller(&ctx, &session).ok_button_id;
+        let open_rect = ctx.debug_root_node_rect(root, open).unwrap();
+        click_node(&mut ctx, root, open, batched);
+        let expected = FileDialogStatus::Accepted(FileDialogResult {
+            file_name: "picked.txt".to_owned(),
+            file_path: file_path.to_string_lossy().into_owned(),
+        });
+        assert_eq!(
+            session.status(),
+            expected,
+            "open rect=({}, {}, {}, {}), filename={:?}",
+            open_rect.x,
+            open_rect.y,
+            open_rect.width,
+            open_rect.height,
+            ctx.file_dialogs
+                .first()
+                .and_then(|dialog| dialog.file_name_box.try_read(|state| state.text().to_owned()))
+        );
+        assert_eq!(session.status(), expected);
+        assert!(ctx.file_dialogs.is_empty());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
-    #[ignore = "manual serial release-mode P0/P5 UI-node baseline"]
-    fn ui_node_p0_baseline_file_dialog() {
-        let dir = unique_temp_dir("file-dialog-baseline");
-        fs::create_dir_all(&dir).unwrap();
-        for index in 0..8 {
-            fs::write(dir.join(format!("file-{index}.txt")), b"baseline").unwrap();
-        }
-        for index in 0..4 {
-            fs::create_dir(dir.join(format!("folder-{index}"))).unwrap();
-        }
+    fn selecting_file_then_open_accepts_and_removes_root() {
+        selection_flow(false);
+    }
 
-        let backend = NoopRenderer { atlas: test_atlas() };
-        let mut ctx = Context::new_test(backend, Dimensioni::new(800, 600));
-        let mut dialog = FileDialogState::new(&mut ctx);
-        dialog.current_working_directory = dir.to_string_lossy().to_string();
-        dialog.refresh_entries();
-        dialog.open(&mut ctx);
-        dialog.eval(&mut ctx);
+    #[test]
+    fn clicks_work_when_move_and_press_are_queued_together() {
+        selection_flow(true);
+    }
+
+    #[test]
+    fn empty_accept_stays_pending_and_cancel_button_terminates() {
+        let mut ctx = context();
+        let session = ctx.open_file_dialog(FileDialogRequest::default());
         ctx.update_and_render_ui();
-        dialog.eval(&mut ctx);
+        let (root, open, cancel, root_state) = {
+            let dialog = controller(&ctx, &session);
+            (dialog.root.id(), dialog.ok_button_id, dialog.cancel_button_id, dialog.root.state().clone())
+        };
+        click_node(&mut ctx, root, open, false);
+        assert_eq!(session.status(), FileDialogStatus::Pending);
+        assert!(root_state.is_alive());
+
+        ctx.mouseup(0, 0, MouseButton::LEFT);
         ctx.update_and_render_ui();
+        click_node(&mut ctx, root, cancel, false);
+        assert_eq!(session.status(), FileDialogStatus::Cancelled);
+        assert!(!root_state.is_alive());
+    }
 
-        let replacements_before_idle = ctx.debug_root_projection_replacements();
-        let idle_started = Instant::now();
-        let idle_measurement = AllocationMeasurement::begin();
-        dialog.eval(&mut ctx);
+    #[test]
+    fn title_close_cancels_and_removes_the_dialog_root() {
+        let mut ctx = context();
+        let session = ctx.open_file_dialog(FileDialogRequest::default());
         ctx.update_and_render_ui();
-        let idle_allocations = idle_measurement.finish();
-        let idle_elapsed = idle_started.elapsed();
-        let idle_replacements = ctx.debug_root_projection_replacements() - replacements_before_idle;
-        let idle_metrics = ctx.debug_root_runtime_metrics(dialog.root).unwrap();
-        let idle_structure = ctx.debug_root_structure(dialog.root).unwrap();
-
-        fs::write(dir.join("new-file.txt"), b"refresh").unwrap();
-        let replacements_before_refresh = ctx.debug_root_projection_replacements();
-        let refresh_started = Instant::now();
-        let refresh_measurement = AllocationMeasurement::begin();
-        dialog.refresh_entries();
-        dialog.eval(&mut ctx);
+        let (root, root_state) = {
+            let dialog = controller(&ctx, &session);
+            (dialog.root.id(), dialog.root.state().clone())
+        };
+        let close = ctx.debug_root_chrome(root).unwrap().1.expect("dialog should have a close button");
+        let x = close.x + close.width / 2;
+        let y = close.y + close.height / 2;
+        ctx.mousemove(x, y);
+        ctx.mousedown(x, y, MouseButton::LEFT);
         ctx.update_and_render_ui();
-        let refresh_allocations = refresh_measurement.finish();
-        let refresh_elapsed = refresh_started.elapsed();
-        let refresh_replacements = ctx.debug_root_projection_replacements() - replacements_before_refresh;
-        let refresh_metrics = ctx.debug_root_runtime_metrics(dialog.root).unwrap();
-        let refresh_structure = ctx.debug_root_structure(dialog.root).unwrap();
+        assert_eq!(session.status(), FileDialogStatus::Cancelled);
+        assert!(!root_state.is_alive());
+    }
 
-        println!(
-            "| scenario | nodes | erased adapters | allocs | bytes | root rebuilds | tree layouts | measures | layouts | updates | paints | ns/eval+frame |"
-        );
-        println!("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
-        println!(
-            "| file dialog idle | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
-            idle_structure.0,
-            idle_structure.1,
-            idle_allocations.events,
-            idle_allocations.bytes,
-            idle_replacements,
-            idle_metrics.tree_layouts,
-            idle_metrics.measures,
-            idle_metrics.layouts,
-            idle_metrics.updates,
-            idle_metrics.paints,
-            idle_elapsed.as_nanos(),
-        );
-        println!(
-            "| file dialog refresh | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
-            refresh_structure.0,
-            refresh_structure.1,
-            refresh_allocations.events,
-            refresh_allocations.bytes,
-            refresh_replacements,
-            refresh_metrics.tree_layouts,
-            refresh_metrics.measures,
-            refresh_metrics.layouts,
-            refresh_metrics.updates,
-            refresh_metrics.paints,
-            refresh_elapsed.as_nanos(),
-        );
-
-        assert_eq!(idle_replacements, 1);
-        assert_eq!(refresh_replacements, 1);
-        assert_eq!(idle_metrics.tree_layouts, 3);
-        assert_eq!(refresh_metrics.tree_layouts, 3);
-        assert!(idle_allocations.events > 0);
-        assert!(refresh_allocations.events > idle_allocations.events);
-
+    #[test]
+    fn folder_submission_navigates_and_replaces_only_dynamic_rows() {
+        let dir = unique_temp_dir("navigate");
+        let child = dir.join("child");
+        fs::create_dir_all(&child).unwrap();
+        fs::write(child.join("inside.txt"), b"inside").unwrap();
+        let mut ctx = context();
+        let session = ctx.open_file_dialog(FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
+        ctx.update_and_render_ui();
+        let (root, child_node, old_row, path_box) = {
+            let dialog = controller(&ctx, &session);
+            let index = dialog
+                .folders
+                .iter()
+                .position(|folder| Path::new(folder) == child)
+                .expect("child directory should be listed");
+            (
+                dialog.root.id(),
+                dialog.folder_item_ids[index],
+                dialog.folder_items[index].clone(),
+                dialog.path_box.clone(),
+            )
+        };
+        click_node(&mut ctx, root, child_node, false);
+        let dialog = controller(&ctx, &session);
+        assert_eq!(Path::new(&dialog.current_working_directory), child);
+        assert_eq!(dialog.files, ["inside.txt"]);
+        assert!(!old_row.is_alive());
+        assert!(path_box.is_alive());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn explicit_cancel_is_context_checked_and_terminal_status_is_stable() {
+        let mut owner = context();
+        let mut foreign = context();
+        let session = owner.open_file_dialog(FileDialogRequest::default());
+        let root_state = controller(&owner, &session).root.state().clone();
+        assert!(!foreign.cancel_file_dialog(&session));
+        assert!(owner.cancel_file_dialog(&session));
+        assert!(!owner.cancel_file_dialog(&session));
+        assert_eq!(session.status(), FileDialogStatus::Cancelled);
+        assert_eq!(session.status(), FileDialogStatus::Cancelled);
+        assert!(!root_state.is_alive());
+    }
+
+    #[test]
+    fn dropping_pending_session_removes_root_on_next_update() {
+        let mut ctx = context();
+        let session = ctx.open_file_dialog(FileDialogRequest::default());
+        let root_state = controller(&ctx, &session).root.state().clone();
+        drop(session);
+        assert!(root_state.is_alive());
+        ctx.update_ui(Dimensioni::new(900, 700));
+        assert!(!root_state.is_alive());
+        assert!(ctx.file_dialogs.is_empty());
+    }
+
+    #[test]
+    fn dropping_context_cancels_a_still_observed_session() {
+        let session = {
+            let mut ctx = context();
+            ctx.open_file_dialog(FileDialogRequest::default())
+        };
+        assert_eq!(session.status(), FileDialogStatus::Cancelled);
+    }
+
+    #[test]
+    fn refresh_replaces_only_rows_and_preserves_then_clamps_scroll() {
+        let dir = unique_temp_dir("refresh");
+        fs::create_dir_all(&dir).unwrap();
+        for index in 0..60 {
+            fs::write(dir.join(format!("file-{index:02}.txt")), b"row").unwrap();
+        }
+        let mut ctx = context();
+        let session = ctx.open_file_dialog(FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
+        ctx.update_ui(Dimensioni::new(900, 700));
+        let (old_row, path, folder_scroll, scroll, root, shell_count) = {
+            let dialog = controller(&ctx, &session);
+            (
+                dialog.file_items[0].clone(),
+                dialog.path_box.clone(),
+                dialog.folder_scroll.clone(),
+                dialog.file_scroll.clone(),
+                dialog.root.id(),
+                ctx.debug_root_structure(dialog.root.id()).unwrap().0,
+            )
+        };
+        scroll.try_update(|state| state.set_offset(Vec2i::new(0, 40))).unwrap();
+        fs::write(dir.join("new-file.txt"), b"row").unwrap();
+        ctx.file_dialogs[0].refresh_entries();
+        assert!(!old_row.is_alive());
+        assert!(path.is_alive());
+        assert!(folder_scroll.is_alive());
+        assert!(scroll.is_alive());
+        ctx.update_ui(Dimensioni::new(900, 700));
+        assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((0, 40)));
+        assert_eq!(ctx.debug_root_structure(root).unwrap().0, shell_count + 1);
+
+        for entry in fs::read_dir(&dir).unwrap() {
+            fs::remove_file(entry.unwrap().path()).unwrap();
+        }
+        ctx.file_dialogs[0].refresh_entries();
+        ctx.update_ui(Dimensioni::new(900, 700));
+        assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((0, 0)));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unavailable_row_replacement_returns_every_unmounted_node() {
+        let (stack, owner) = Stack::create(StackParameters::new(SizePolicy::Auto, SizePolicy::Auto, StackDirection::TopToBottom, []));
+        let rejected = stack
+            .try_read(|_| {
+                let replacements = vec![FileDialogController::static_item("one"), FileDialogController::static_item("two")];
+                replace_stack_rows(&stack, replacements).expect_err("active read must reject mutation")
+            })
+            .unwrap();
+        assert_eq!(rejected.len(), 2);
+        drop(owner);
+    }
+
+    #[test]
+    #[ignore = "manual serial allocation baseline; global allocation counters include parallel test threads"]
+    fn idle_processing_allocates_no_nodes_or_state_and_changes_no_topology() {
+        let mut ctx = context();
+        let session = ctx.open_file_dialog(FileDialogRequest::default());
+        ctx.update_ui(Dimensioni::new(900, 700));
+        let root = controller(&ctx, &session).root.id();
+        let structure = ctx.debug_root_structure(root).unwrap();
+        let measurement = AllocationMeasurement::begin();
+        ctx.process_file_dialogs();
+        let allocations = measurement.finish();
+        assert_eq!(allocations.events, 0);
+        assert_eq!(ctx.debug_root_structure(root), Some(structure));
+        assert_eq!(session.status(), FileDialogStatus::Pending);
     }
 }

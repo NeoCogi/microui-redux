@@ -199,10 +199,14 @@ impl<S> Application<S> {
                 }
             }
 
-            // User state mutates retained/application state after this frame's input is ready.
             let dimensions = Dimensioni::new(width as i32, height as i32);
-            f(&mut self.ctx, &mut self.state, dimensions);
             if let Ok(info) = FrameInfo::try_new(dimensions, color(0x7F, 0x7F, 0x7F, 255)) {
+                // First commit queued host input so application polling observes this frame's
+                // completed widget and Context-owned dialog actions.
+                self.ctx.update_ui(dimensions);
+                f(&mut self.ctx, &mut self.state, dimensions);
+                // Application mutations can affect retained state and layout, so synchronize once
+                // more before the paint-only frame is submitted.
                 self.ctx.update_ui(dimensions);
                 if let Err(error) = self.ctx.frame(info).render_ui() {
                     eprintln!("[microui-redux][example] frame failed: {error}");

@@ -135,6 +135,10 @@ pub struct Context<B: RendererBackend> {
     roots: Vec<WindowEntry>,
     /// Next root id counter.
     next_root_id: usize,
+    /// Context-owned file-dialog controllers advanced after retained input updates.
+    pub(crate) file_dialogs: Vec<crate::file_dialog::FileDialogController>,
+    /// Next file-dialog session id counter.
+    pub(crate) next_file_dialog_id: usize,
     /// Shared input state mutated by public input APIs and consumed during traversal.
     input: Rc<RefCell<Input>>,
     /// Dimensions of the most recent complete update/layout commit.
@@ -157,6 +161,8 @@ impl<B: RendererBackend> Context<B> {
             last_zindex: 0,
             roots: Vec::default(),
             next_root_id: 1,
+            file_dialogs: Vec::new(),
+            next_file_dialog_id: 1,
             input: Rc::new(RefCell::new(Input::default())),
             ui_commit: None,
             #[cfg(test)]
