@@ -233,7 +233,7 @@ impl Slider {
     }
 
     /// Updates slider value from shift-click text entry, scroll, or pointer drag.
-    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let base = ctx.local_rect();
         let font = ctx.style().resolve_font_choice(self.font);
         runtime_update_state(&self.state, "Slider::update", |state| {
@@ -242,7 +242,7 @@ impl Slider {
             if number_textbox_update(ctx, input, &mut state.edit, self.precision, font, &mut v) {
                 return;
             }
-            if let Some(delta) = input.scroll_delta() {
+            if let Some(UiInputEvent::Scroll { delta, .. }) = input {
                 let range = state.high - state.low;
                 if range != 0.0 {
                     let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
@@ -256,8 +256,22 @@ impl Slider {
                 }
             }
             let range = state.high - state.low;
-            if ctx.focused() && (!input.mouse_down().is_empty() || input.mouse_pressed().intersects(MouseButton::LEFT)) && base.width > 0 && range != 0.0 {
-                let content_x = input.mouse_pos().x;
+            let pointer_pos = match input {
+                Some(
+                    UiInputEvent::MouseMove { pos, .. }
+                    | UiInputEvent::MouseDrag { pos, .. }
+                    | UiInputEvent::MouseDown { pos, .. }
+                    | UiInputEvent::MouseUp { pos, .. },
+                ) => Some(*pos),
+                _ => None,
+            };
+            if ctx.focused()
+                && ctx.mouse_buttons().intersects(MouseButton::LEFT)
+                && let Some(pointer_pos) = pointer_pos
+                && base.width > 0
+                && range != 0.0
+            {
+                let content_x = pointer_pos.x;
                 v = state.low + content_x as Real * range / base.width as Real;
                 if self.step != 0. {
                     v = snap_slider_value(v, state.low, self.step);
@@ -323,13 +337,15 @@ fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
 /// Runs the shared textbox editor for shift-click numeric input.
 fn number_textbox_update(
     ctx: &mut WidgetUpdateCtx<'_>,
-    input: &[UiInputEvent],
+    input: Option<&UiInputEvent>,
     edit: &mut NumberEditState,
     precision: usize,
     font: FontId,
     value: &mut Real,
 ) -> bool {
-    let shift_click = { input.mouse_pressed().intersects(MouseButton::LEFT) && input.key_mods().intersects(KeyMode::SHIFT) && ctx.hovered() };
+    let shift_click = matches!(input, Some(UiInputEvent::MouseDown { button, .. }) if button.intersects(MouseButton::LEFT))
+        && ctx.key_modes().intersects(KeyMode::SHIFT)
+        && ctx.hovered();
 
     if shift_click {
         // Enter edit mode by seeding the textbox with the current formatted value.
@@ -369,8 +385,8 @@ impl Widget for Slider {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
-        self.update_widget(ctx, &input)
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        self.update_widget(ctx, input)
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -531,13 +547,16 @@ impl Number {
     }
 
     /// Updates number value from shift-click text entry or horizontal drag.
-    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let font = ctx.style().resolve_font_choice(self.font);
         runtime_update_state(&self.state, "Number::update", |state| {
             let last = state.value;
             if !number_textbox_update(ctx, input, &mut state.edit, self.precision, font, &mut state.value) {
-                if ctx.focused() && input.mouse_down().intersects(MouseButton::LEFT) {
-                    state.set_value(state.value + input.mouse_delta().x as Real * self.step);
+                if ctx.focused()
+                    && ctx.mouse_buttons().intersects(MouseButton::LEFT)
+                    && let Some(UiInputEvent::MouseDrag { delta, .. }) = input
+                {
+                    state.set_value(state.value + delta.x as Real * self.step);
                 } else {
                     state.set_value(state.value);
                 }
@@ -577,8 +596,8 @@ impl Widget for Number {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
-        self.update_widget(ctx, &input)
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        self.update_widget(ctx, input)
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {

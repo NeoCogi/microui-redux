@@ -185,14 +185,14 @@ pub enum UiInputEvent {
     MouseMove {
         /// Current pointer position in the receiver's routed local coordinate space.
         pos: Vec2i,
-        /// Pointer movement since the previous frame.
+        /// Pointer movement since the previous queued pointer-position event.
         delta: Vec2i,
     },
     /// Pointer moved while one or more mouse buttons are held.
     MouseDrag {
         /// Current pointer position in the receiver's routed local coordinate space.
         pos: Vec2i,
-        /// Pointer movement since the previous frame.
+        /// Pointer movement since the previous queued pointer-position event.
         delta: Vec2i,
         /// Mouse buttons held during the drag.
         buttons: MouseButton,
@@ -201,14 +201,14 @@ pub enum UiInputEvent {
     MouseDown {
         /// Current pointer position in the receiver's routed local coordinate space.
         pos: Vec2i,
-        /// Buttons pressed during this frame.
+        /// Buttons carried by this queued press transition.
         button: MouseButton,
     },
     /// One or more mouse buttons were released.
     MouseUp {
         /// Current pointer position in the receiver's routed local coordinate space.
         pos: Vec2i,
-        /// Buttons released during this frame.
+        /// Buttons carried by this queued release transition.
         button: MouseButton,
     },
     /// Scroll wheel or equivalent high-level scroll input.
@@ -220,35 +220,25 @@ pub enum UiInputEvent {
     },
     /// Modifier/control key state was pressed.
     KeyDown {
-        /// Modifier/control key bits pressed during this frame.
+        /// Modifier/control key bits carried by this queued press transition.
         key: KeyMode,
-    },
-    /// Current modifier/control key state for this frame.
-    KeyState {
-        /// Modifier/control keys currently held.
-        keys: KeyMode,
     },
     /// Modifier/control key state was released.
     KeyUp {
-        /// Modifier/control key bits released during this frame.
+        /// Modifier/control key bits carried by this queued release transition.
         key: KeyMode,
     },
     /// Navigation key state was pressed.
     KeyCodeDown {
-        /// Navigation key bits pressed during this frame.
+        /// Navigation key bits carried by this queued press transition.
         code: KeyCode,
-    },
-    /// Current navigation key state for this frame.
-    KeyCodeState {
-        /// Navigation keys currently held.
-        codes: KeyCode,
     },
     /// Navigation key state was released.
     KeyCodeUp {
-        /// Navigation key bits released during this frame.
+        /// Navigation key bits carried by this queued release transition.
         code: KeyCode,
     },
-    /// UTF-8 text input collected during this frame.
+    /// One queued UTF-8 text input transition.
     Text {
         /// Entered text.
         text: String,
@@ -268,13 +258,7 @@ impl UiInputEvent {
     pub(crate) fn is_focus_input(&self) -> bool {
         matches!(
             self,
-            Self::KeyDown { .. }
-                | Self::KeyState { .. }
-                | Self::KeyUp { .. }
-                | Self::KeyCodeDown { .. }
-                | Self::KeyCodeState { .. }
-                | Self::KeyCodeUp { .. }
-                | Self::Text { .. }
+            Self::KeyDown { .. } | Self::KeyUp { .. } | Self::KeyCodeDown { .. } | Self::KeyCodeUp { .. } | Self::Text { .. }
         )
     }
 
@@ -313,10 +297,8 @@ fn event_position(event: &UiInputEvent) -> Option<Vec2i> {
         | UiInputEvent::MouseUp { pos, .. }
         | UiInputEvent::Scroll { pos, .. } => Some(*pos),
         UiInputEvent::KeyDown { .. }
-        | UiInputEvent::KeyState { .. }
         | UiInputEvent::KeyUp { .. }
         | UiInputEvent::KeyCodeDown { .. }
-        | UiInputEvent::KeyCodeState { .. }
         | UiInputEvent::KeyCodeUp { .. }
         | UiInputEvent::Text { .. } => None,
     }
@@ -348,7 +330,8 @@ pub(super) fn route_public_widget_input(
     let hovered = event_position(event).map(|pos| rect.contains(&pos) && clip.contains(&pos)).unwrap_or(false);
 
     match event {
-        UiInputEvent::MouseDown { .. } if hovered => {
+        UiInputEvent::MouseDown { button, .. } if hovered => {
+            runtime.claim_pointer_focus(id, *button);
             runtime.push_routed_event(id, event.clone());
             InputResult::Captured
         }
@@ -500,7 +483,7 @@ mod visitor_tests {
             Dimensioni::default()
         }
 
-        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
+        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
 
         fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
     }

@@ -110,7 +110,7 @@ impl Widget for RetainedPaint {
         Dimensioni::new(96, 48)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let hovered = ctx.hovered();
@@ -178,7 +178,9 @@ fn main() -> Result<(), String> {
     let tree = Node::widget(paint);
     ctx.create_window("retained custom drawing", rect(12, 12, 132, 84), tree);
 
-    let info = FrameInfo::try_new(Dimensioni::new(160, 100), color(18, 20, 22, 255)).map_err(|error| error.to_string())?;
+    let dimensions = Dimensioni::new(160, 100);
+    let info = FrameInfo::try_new(dimensions, color(18, 20, 22, 255)).map_err(|error| error.to_string())?;
+    ctx.update_ui(dimensions);
     ctx.frame(info).render_ui().map_err(|error| error.to_string())?;
     Ok(())
 }

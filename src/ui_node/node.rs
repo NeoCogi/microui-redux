@@ -252,7 +252,6 @@ pub(crate) struct NodeRuntime {
     /// Mouse is held down while this node owns focus.
     pub(crate) active: bool,
     /// Scroll delta consumed by this node during the current frame.
-    pub(crate) scroll_delta: Option<Vec2i>,
     /// Placement policy used by runtime layout passes.
     pub(crate) policy: crate::Policy,
 }
@@ -332,7 +331,6 @@ impl Node {
                 focused: false,
                 clicked: false,
                 active: false,
-                scroll_delta: None,
                 policy: crate::Policy::auto(),
             },
             data: kind,

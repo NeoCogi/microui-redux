@@ -137,8 +137,7 @@ pub mod retained {
     };
     pub use crate::window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
     pub use crate::widget::{
-        FocusPolicy, Widget, WidgetBuilder, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
-        WidgetStateOwner, WidgetUpdateCtx,
+        FocusPolicy, Widget, WidgetBuilder, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
     };
 }
 
@@ -162,8 +161,8 @@ pub mod prelude {
         DisclosureBuilder, DisclosureContainer, DisclosureParameters, DisclosureState, FocusPolicy, Grid, GridBuilder, GridContainer, GridItem, GridParameters,
         GridSpan, GridState, Node, RootHandle, RootId, RootMutationError, RootState, Row, RowBuilder, RowContainer, RowParameters, RowState, ScrollArea,
         ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, Stack, StackBuilder, StackContainer, StackParameters,
-        StackState, TextWrap, UiInputEvent, Widget, WidgetBuilder, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState,
-        WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, WindowOption,
+        StackState, TextWrap, UiInputEvent, Widget, WidgetBuilder, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
+        WidgetStateOwner, WidgetUpdateCtx, WindowOption,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
@@ -191,8 +190,7 @@ pub use text_layout::TextWrap;
 pub use sizing::{Policy, SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
 pub use widget::{
-    FocusPolicy, Widget, WidgetBuilder, WidgetInputEvents, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner,
-    WidgetUpdateCtx,
+    FocusPolicy, Widget, WidgetBuilder, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 pub use ui_node::{
     Children, ChildrenVisitor, ChildrenVisitorMut, Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState, Container, ContainerBuilder,

@@ -609,9 +609,9 @@ mod tests {
         let x = rect.x + rect.width / 2;
         let y = rect.y + rect.height / 2;
         ctx.mousemove(x, y);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
         ctx.mousedown(x, y, MouseButton::LEFT);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
     }
 
     fn click_node_without_hover_frame(ctx: &mut Context<NoopRenderer>, root: RootId, node: NodeId) {
@@ -620,7 +620,7 @@ mod tests {
         let y = rect.y + rect.height / 2;
         ctx.mousemove(x, y);
         ctx.mousedown(x, y, MouseButton::LEFT);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
     }
 
     #[test]
@@ -631,7 +631,7 @@ mod tests {
         let mut dialog = FileDialogState::new(&mut ctx);
         dialog.open(&mut ctx);
         dialog.eval(&mut ctx);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
 
         let toolbar = ctx
             .debug_root_node_rect(dialog.root, dialog.up_button_id)
@@ -655,7 +655,7 @@ mod tests {
         let mut dialog = FileDialogState::new(&mut ctx);
         dialog.open(&mut ctx);
         dialog.eval(&mut ctx);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
 
         let toolbar_before = ctx
             .debug_root_node_rect(dialog.root, dialog.up_button_id)
@@ -671,7 +671,7 @@ mod tests {
         resized.height += 80;
         ctx.set_root_rect(dialog.root, resized);
         dialog.eval(&mut ctx);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
 
         let toolbar_after = ctx
             .debug_root_node_rect(dialog.root, dialog.up_button_id)
@@ -703,7 +703,7 @@ mod tests {
         dialog.refresh_entries();
         dialog.open(&mut ctx);
         dialog.eval(&mut ctx);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
 
         let file_node = dialog.file_item_ids[0];
         click_node(&mut ctx, dialog.root, file_node);
@@ -712,7 +712,7 @@ mod tests {
         assert_eq!(dialog.tmp_file_name_state.try_read(|tmp| tmp.text().to_string()).as_deref(), Some("picked.txt"));
 
         ctx.mouseup(0, 0, MouseButton::LEFT);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
         let ok_node = dialog.ok_button_id;
         click_node(&mut ctx, dialog.root, ok_node);
         dialog.eval(&mut ctx);
@@ -739,7 +739,7 @@ mod tests {
         dialog.refresh_entries();
         dialog.open(&mut ctx);
         dialog.eval(&mut ctx);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
 
         let file_node = dialog.file_item_ids[0];
         click_node_without_hover_frame(&mut ctx, dialog.root, file_node);
@@ -751,7 +751,7 @@ mod tests {
         );
 
         ctx.mouseup(0, 0, MouseButton::LEFT);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
         let ok_node = dialog.ok_button_id;
         click_node_without_hover_frame(&mut ctx, dialog.root, ok_node);
         dialog.eval(&mut ctx);
@@ -782,15 +782,15 @@ mod tests {
         dialog.refresh_entries();
         dialog.open(&mut ctx);
         dialog.eval(&mut ctx);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
         dialog.eval(&mut ctx);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
 
         let replacements_before_idle = ctx.debug_root_projection_replacements();
         let idle_started = Instant::now();
         let idle_measurement = AllocationMeasurement::begin();
         dialog.eval(&mut ctx);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
         let idle_allocations = idle_measurement.finish();
         let idle_elapsed = idle_started.elapsed();
         let idle_replacements = ctx.debug_root_projection_replacements() - replacements_before_idle;
@@ -803,7 +803,7 @@ mod tests {
         let refresh_measurement = AllocationMeasurement::begin();
         dialog.refresh_entries();
         dialog.eval(&mut ctx);
-        ctx.update_ui();
+        ctx.update_and_render_ui();
         let refresh_allocations = refresh_measurement.finish();
         let refresh_elapsed = refresh_started.elapsed();
         let refresh_replacements = ctx.debug_root_projection_replacements() - replacements_before_refresh;

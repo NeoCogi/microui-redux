@@ -196,7 +196,7 @@ impl Widget for TextureClippingProbe {
         Dimensioni::new(64, 64)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _events: Vec<UiInputEvent>) {}
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _events: Option<&UiInputEvent>) {}
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         *self.screen_content.borrow_mut() = Some(ctx.screen_content_rect());
@@ -231,7 +231,9 @@ fn main() -> Result<(), String> {
     style.colors[ControlColor::WindowBG as usize] = color(0, 0, 0, 0);
     ctx.set_style(&style);
 
-    let info = FrameInfo::try_new(Dimensioni::new(64, 64), color(0, 0, 0, 255)).map_err(|error| error.to_string())?;
+    let dimensions = Dimensioni::new(64, 64);
+    let info = FrameInfo::try_new(dimensions, color(0, 0, 0, 255)).map_err(|error| error.to_string())?;
+    ctx.update_ui(dimensions);
     ctx.frame(info).render_ui().map_err(|error| error.to_string())?;
 
     {

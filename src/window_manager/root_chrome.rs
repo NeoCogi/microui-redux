@@ -240,10 +240,10 @@ impl Widget for RootChromeContainer {
         })
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         runtime_update_state(&self.state, "RootChrome::update", |state| {
             let initial = state.rect;
-            for event in &input {
+            if let Some(event) = input {
                 match event {
                     UiInputEvent::MouseDown { pos, button } if button.intersects(MouseButton::LEFT) => match state.geometry.hit_test(*pos) {
                         Some(RootChromePart::Close) => {

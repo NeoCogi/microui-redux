@@ -63,7 +63,7 @@ Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
 ![random](res/microui-0.6.png)
 
 ## Key Concepts
-- **Context**: owns the high-level `Renderer`, user input, and retained root windows. Applications deliver input and mutate typed state first, then `frame(FrameInfo)?.render_ui()?` traverses registered roots and submits one owned frame.
+- **Context**: owns the high-level `Renderer`, an ordered input queue, and retained root windows. Applications deliver input and mutate typed state, call `update_ui(dimensions)` to drain input and commit layout, then call `frame(FrameInfo).render_ui()?` to paint and submit that commit once.
 - **Container**: a public `Widget` subtrait for runtimes that own one authoritative opaque `Children` collection. Application-facing container state uses typed weak `WidgetStateHandle` values and safe indexed membership operations.
 - **Layout engine + flows**: parent containers assign child rectangles through scoped `ContainerLayoutCtx` services. Row, Grid, Column, Stack, Disclosure, and ScrollArea all own persistent children behind typed container state.
 - **Widget**: a runtime UI element implementing `Widget` (for example `Button`, `Textbox`, or `Slider`) and owning its associated state cell.
@@ -126,7 +126,7 @@ There are two frame values and one shared frame trait in the public lifecycle:
 
 | Type | What it represents | What ending it does |
 | --- | --- | --- |
-| `ContextFrame<'ctx, B>` | The application-level logical UI frame. It exclusively borrows `Context<B>` while retained UI is traversed and recorded. | `render_ui(self)` records and submits once. Dropping without submission cancels. |
+| `ContextFrame<'ctx, B>` | The application-level paint/submission frame. It exclusively borrows `Context<B>` while committed retained UI is painted and recorded. | `render_ui(self)` paints and submits once. Dropping without submission cancels. |
 | `B::Frame<'backend>` | The backend-level RAII frame. It exclusively borrows the concrete backend only while the recorded display list is executing. | Its `Drop` implementation performs backend-specific, best-effort finalization. WGPU/Vulkan submit and present there; GL flushes before the outer window runner swaps buffers. |
 | `RendererFrame` | The common trait implemented by every `B::Frame<'_>`. | Defines the standard UI operations: atlas quads/triangles, flush boundaries, and external textures. |
 
@@ -144,11 +144,13 @@ synchronously during display-list execution.
 The complete sequence is:
 
 ```text
-application/resource updates
+application/resource updates + ordered input calls
+        |
+Context::update_ui(dimensions)        drain FIFO; full update + layout after each event
         |
 Context::frame(FrameInfo)             logical ContextFrame
         |
-ContextFrame::render_ui(self)         retained update, paint, internal display-list recording
+ContextFrame::render_ui(self)         paint-only internal display-list recording
         |
 Renderer preflight                    validate texture/custom-render keys
         |
@@ -231,7 +233,7 @@ cargo run --example backend-frame-cube --features example-wgpu
 
 ### Retained-mode migration status
 
-The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate built-in state through typed `WidgetStateHandle` values, and drive frames with `Context::frame(FrameInfo).render_ui()?`.
+The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate built-in state through typed `WidgetStateHandle` values, commit updates with `Context::update_ui(...)`, and paint with `Context::frame(FrameInfo).render_ui()?`.
 
 Root creation consumes one persistent application `Node` and returns a non-owning `RootHandle`.
 Roots cannot be replaced while retaining their identity: mutate descendants through a state-owned
@@ -247,7 +249,9 @@ let (_, tree) = Row::create(RowParameters::new(
 ));
 
 let root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
-let info = FrameInfo::try_new(Dimensioni::new(800, 600), color(20, 22, 26, 255))?;
+let dimensions = Dimensioni::new(800, 600);
+let info = FrameInfo::try_new(dimensions, color(20, 22, 26, 255))?;
+ctx.update_ui(dimensions);
 ctx.frame(info).render_ui()?;
 
 if name_state.try_update(TextboxState::take_submitted).unwrap_or(false) {
@@ -280,7 +284,8 @@ control window chrome. Root overflow does not scroll implicitly; construct a `Sc
 
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
-- Retained traversal measures committed widget state, allocates widget rectangles, updates the whole retained tree with `Widget::update`, then paints the whole retained tree with `Widget::paint`.
+- `Context::update_ui` first synchronizes layout, then drains input in API-call order. Every event runs one complete eligible-tree `Widget::update` traversal and one follow-up layout, so geometry changed by one event is authoritative for routing the next.
+- `ContextFrame::render_ui` performs no input, update, or layout work. It paints the committed tree with `Widget::paint` and submits one display list; missing, stale, pending-input, or dimension-mismatched commits return `RenderError::UiUpdateRequired` before backend acquisition.
 - Widgets and containers share the public `Widget` phase contract. Containers additionally expose only opaque child visitors, indexed layout services, descendant visibility, and scoped input routing.
 - Parent containers assign each node a retained parent-local allocation; child offsets and clips remain node-local and are resolved through a stack-only transform during traversal.
 - Resolved outer rectangles and clips remain runtime stack locals. Node behavior works against its local content surface, while outer frame painting, standard hit routing, and conversion from screen input remain runtime-owned.
@@ -289,7 +294,7 @@ control window chrome. Root overflow does not scroll implicitly; construct a `Sc
 - `SizePolicy::Weight(value)` distributes available track space by sibling share ratio (spacing accounted for). Use `SizePolicy::Fraction(value)` for explicit `0.0..=1.0` proportional sizing in single-track flows.
 - Returning `<= 0` for either axis from `Widget::measure` still means "use layout fallback/defaults" for that axis.
 
-Built-in widget structs keep their fields public as retained state so application code can update labels, values, fonts, and options between frames. Raw input is not exposed through `Context`; feed events through methods such as `mousemove`, `mousedown`, `scroll`, `keydown_code`, and `text`. Widgets clamp their own transient invariants, such as UTF-8 cursor positions, scroll offsets, selected indices, and slider bounds, during `Widget::update`.
+Built-in state is mutated through typed handles between commits. After programmatic state/topology changes, call `update_ui` even when no input is pending so layout is synchronized before paint. Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `keydown_code`, and `text`; calls are queued without coalescing. A widget receives the current event as `Option<&UiInputEvent>`, while `WidgetUpdateCtx::{mouse_buttons,key_modes,key_codes}` exposes held state after that event was applied.
 
 ## Fonts and typography
 - Atlas building supports multiple baked fonts and sizes through `atlas::builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.

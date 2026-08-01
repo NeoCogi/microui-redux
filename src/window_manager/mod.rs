@@ -131,14 +131,14 @@ pub struct Context<B: RendererBackend> {
 
     /// Highest z-index allocated to an open window-manager root.
     last_zindex: i32,
-    /// Monotonic frame counter used for root freshness bookkeeping.
-    frame: usize,
     /// Registered window-manager roots replayed by [`ContextFrame::render_ui`].
     roots: Vec<WindowEntry>,
     /// Next root id counter.
     next_root_id: usize,
     /// Shared input state mutated by public input APIs and consumed during traversal.
     input: Rc<RefCell<Input>>,
+    /// Dimensions of the most recent complete update/layout commit.
+    ui_commit: Option<Dimensioni>,
     /// Drawable size used by retained behavior tests that drive complete frames tersely.
     #[cfg(test)]
     test_dimensions: Dimensioni,
@@ -155,10 +155,10 @@ impl<B: RendererBackend> Context<B> {
             display_list: DisplayList::new(),
             style: Rc::new(style),
             last_zindex: 0,
-            frame: 0,
             roots: Vec::default(),
             next_root_id: 1,
             input: Rc::new(RefCell::new(Input::default())),
+            ui_commit: None,
             #[cfg(test)]
             test_dimensions: Dimensioni::new(1, 1),
         }
@@ -172,10 +172,11 @@ impl<B: RendererBackend> Context<B> {
         context
     }
 
-    /// Drives one complete owned frame for retained behavior tests.
+    /// Updates and renders once for retained behavior tests.
     #[cfg(test)]
-    pub(crate) fn update_ui(&mut self) {
+    pub(crate) fn update_and_render_ui(&mut self) {
         let info = FrameInfo::try_new(self.test_dimensions, crate::color(0, 0, 0, 0)).expect("test Context dimensions must be positive");
+        self.update_ui(self.test_dimensions);
         self.frame(info).render_ui().expect("test backend frame should render");
     }
 }
@@ -205,29 +206,31 @@ pub struct ContextFrame<'a, B: RendererBackend> {
 mod root_tests;
 
 impl<B: RendererBackend> Context<B> {
-    /// Starts one logical UI frame after application input/resource mutation is complete.
+    /// Starts one paint/submission frame for state previously committed by [`Context::update_ui`].
     pub fn frame(&mut self, info: FrameInfo) -> ContextFrame<'_, B> {
         ContextFrame { context: self, info, completed: false }
     }
 
-    #[inline(never)]
-    /// Starts a logical UI frame and clears transient root/render state.
-    fn frame_begin(&mut self) {
-        self.input.borrow_mut().prelude();
-        self.frame += 1;
+    /// Drains ordered input and commits retained state plus layout for `dimensions`.
+    ///
+    /// One synchronization layout always runs first. Each queued input event then causes exactly
+    /// one full eligible-tree update followed by another layout commit. This method never paints
+    /// or submits backend work.
+    ///
+    /// Context-owned input, style, and root mutations invalidate a prior commit automatically.
+    /// Mutations made through weak widget/container state handles cannot notify Context; callers
+    /// must invoke this method after those mutations, including when the input queue is empty.
+    #[track_caller]
+    pub fn update_ui(&mut self, dimensions: Dimensioni) {
+        assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui dimensions must be positive");
+        self.ui_commit = None;
+        self.update_window_manager(dimensions);
+        self.ui_commit = Some(dimensions);
     }
 
-    #[inline(never)]
-    /// Finishes root traversal and clears one-frame input state.
-    fn frame_end(&mut self) {
-        self.input.borrow_mut().epilogue();
-    }
-
-    /// Updates retained roots and records exactly one display list.
-    fn update_and_record_ui(&mut self, dimensions: Dimensioni) {
-        self.frame_begin();
-        self.render_window_manager(dimensions);
-        self.frame_end();
+    /// Invalidates any layout commit known to have been affected through a Context API.
+    pub(super) fn invalidate_ui_commit(&mut self) {
+        self.ui_commit = None;
     }
 
     /// Registers one backend-specific callback for retained custom-render nodes.
@@ -284,7 +287,8 @@ impl<B: RendererBackend> Context<B> {
     pub fn set_style(&mut self, style: &Style) {
         let mut resolved = style.clone();
         resolved.bind_default_named_fonts(&self.renderer.atlas());
-        self.style = Rc::new(resolved)
+        self.style = Rc::new(resolved);
+        self.invalidate_ui_commit();
     }
 
     /// Returns the high-level renderer used for frame execution and resource management.
@@ -380,9 +384,21 @@ impl<B: RendererBackend> Context<B> {
 }
 
 impl<B: RendererBackend> ContextFrame<'_, B> {
-    /// Consumes this logical frame, records the UI once, and submits it once.
+    /// Consumes this logical frame, paints the last committed UI once, and submits it once.
+    ///
+    /// Returns [`RenderError::UiUpdateRequired`] before paint or backend acquisition when no commit
+    /// exists for these dimensions or when raw input is pending.
     pub fn render_ui(mut self) -> Result<(), RenderError> {
-        self.context.update_and_record_ui(self.info.dimensions());
+        let dimensions = self.info.dimensions();
+        let commit_matches = self
+            .context
+            .ui_commit
+            .is_some_and(|committed| (committed.width, committed.height) == (dimensions.width, dimensions.height));
+        if !commit_matches || self.context.input.borrow().has_pending() {
+            self.completed = true;
+            return Err(RenderError::UiUpdateRequired);
+        }
+        self.context.paint_window_manager(self.info.dimensions());
         let Context { renderer, display_list, .. } = &mut *self.context;
         let result = renderer.render(self.info, display_list);
         self.completed = true;

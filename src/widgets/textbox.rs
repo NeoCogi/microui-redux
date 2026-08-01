@@ -196,7 +196,7 @@ impl Textbox {
     }
 
     /// Applies input and cursor movement for this textbox.
-    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let font = ctx.style().resolve_font_choice(self.font);
         runtime_update_state(&self.state, "Textbox::update", |state| {
             let outcome = textbox_update(ctx, input, &mut state.buf, &mut state.cursor, self.opt, font);
@@ -221,7 +221,7 @@ impl Textbox {
 /// Shared single-line text editing update used by textbox and numeric inline editors.
 pub(crate) fn textbox_update(
     ctx: &mut WidgetUpdateCtx<'_>,
-    input: &[UiInputEvent],
+    input: Option<&UiInputEvent>,
     buf: &mut String,
     cursor: &mut usize,
     _opt: WidgetOption,
@@ -235,33 +235,52 @@ pub(crate) fn textbox_update(
     }
     let mut cursor_pos = clamp_cursor_boundary(buf, *cursor);
 
-    let (mouse_pressed, mouse_pos, end_pressed, edit) = {
-        let edit = if ctx.focused() {
-            apply_text_input(
-                buf,
-                cursor_pos,
-                input.text_input().as_str(),
-                input.key_mods(),
-                input.key_pressed(),
-                input.key_code_pressed(),
-                false,
-                ReturnBehavior::Submit,
-            )
-        } else {
-            // Without focus, the textbox ignores key/text input but keeps a consistent outcome.
-            super::text_edit::TextEditOutcome {
-                cursor: cursor_pos,
-                changed: false,
-                moved: false,
-                submit: false,
-            }
-        };
-        (
-            input.mouse_pressed(),
-            input.mouse_pos(),
-            input.key_code_pressed().intersects(KeyCode::END),
-            edit,
+    let mouse_pressed = match input {
+        Some(UiInputEvent::MouseDown { button, .. }) => *button,
+        _ => MouseButton::NONE,
+    };
+    let mouse_pos = match input {
+        Some(
+            UiInputEvent::MouseMove { pos, .. }
+            | UiInputEvent::MouseDrag { pos, .. }
+            | UiInputEvent::MouseDown { pos, .. }
+            | UiInputEvent::MouseUp { pos, .. }
+            | UiInputEvent::Scroll { pos, .. },
+        ) => *pos,
+        _ => Vec2i::default(),
+    };
+    let key_pressed = match input {
+        Some(UiInputEvent::KeyDown { key }) => *key,
+        _ => KeyMode::NONE,
+    };
+    let key_code_pressed = match input {
+        Some(UiInputEvent::KeyCodeDown { code }) => *code,
+        _ => KeyCode::NONE,
+    };
+    let text_input = match input {
+        Some(UiInputEvent::Text { text }) => text.as_str(),
+        _ => "",
+    };
+    let end_pressed = key_code_pressed.intersects(KeyCode::END);
+    let edit = if ctx.focused() {
+        apply_text_input(
+            buf,
+            cursor_pos,
+            text_input,
+            ctx.key_modes(),
+            key_pressed,
+            key_code_pressed,
+            false,
+            ReturnBehavior::Submit,
         )
+    } else {
+        // Without focus, the textbox ignores key/text input but keeps a consistent outcome.
+        super::text_edit::TextEditOutcome {
+            cursor: cursor_pos,
+            changed: false,
+            moved: false,
+            submit: false,
+        }
     };
     if ctx.focused() {
         cursor_pos = edit.cursor;
@@ -345,8 +364,8 @@ impl Widget for Textbox {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
-        self.update_widget(ctx, &input)
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        self.update_widget(ctx, input)
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -401,8 +420,32 @@ mod tests {
         let atlas = test_atlas();
         let style = Style::default();
         let bounds = rect(0, 0, 120, 20);
-        let mut ctx = WidgetUpdateCtx::new_with_interaction(bounds, bounds, &style, &atlas, true, false, focused, false, false, None);
-        textbox.update(&mut ctx, input)
+        let mut keys = KeyMode::NONE;
+        let mut codes = KeyCode::NONE;
+        for event in &input {
+            match event {
+                UiInputEvent::KeyDown { key } => keys |= *key,
+                UiInputEvent::KeyUp { key } => keys &= !*key,
+                UiInputEvent::KeyCodeDown { code } => codes |= *code,
+                UiInputEvent::KeyCodeUp { code } => codes &= !*code,
+                _ => {}
+            }
+            let mut ctx = WidgetUpdateCtx::new_with_interaction(
+                bounds,
+                bounds,
+                &style,
+                &atlas,
+                true,
+                false,
+                focused,
+                false,
+                false,
+                MouseButton::NONE,
+                keys,
+                codes,
+            );
+            textbox.update(&mut ctx, Some(event));
+        }
     }
 
     #[test]
@@ -421,6 +464,7 @@ mod tests {
         update_textbox(&mut textbox, true, vec![UiInputEvent::Text { text: "e".into() }]);
 
         assert_eq!(state.try_read(|state| state.text().to_owned()).as_deref(), Some("abcde"));
+        assert_eq!(state.try_update(TextboxState::take_changed), Some(true));
         assert_eq!(state.try_update(TextboxState::take_changed), Some(true));
         assert_eq!(state.try_update(TextboxState::take_changed), Some(true));
         assert_eq!(state.try_update(TextboxState::take_changed), Some(false));

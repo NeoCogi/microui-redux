@@ -3,25 +3,59 @@
 use super::*;
 use crate::test_support::test_atlas as make_test_atlas;
 use crate::ui_node::UiInputEvent;
-use crate::widget_ctx::localize_events;
+use crate::widget_ctx::localize_event;
 
 fn run_slider_once(slider: &mut Slider, rect: Recti, events: Vec<UiInputEvent>, hovered: bool, focused: bool, active: bool, scroll_delta: Option<Vec2i>) {
     let atlas = make_test_atlas();
     let style = Style::default();
-    let mut ctx = WidgetUpdateCtx::new_with_interaction(rect, rect, &style, &atlas, true, hovered, focused, false, active, scroll_delta);
-    let mut events = localize_events(rect, events);
+    let held = if active { MouseButton::LEFT } else { MouseButton::NONE };
+    let mut events = events
+        .into_iter()
+        .map(|event| localize_event(Vec2i::new(rect.x, rect.y), event))
+        .collect::<Vec<_>>();
     if let Some(delta) = scroll_delta {
         events.push(UiInputEvent::Scroll { pos: Vec2i::default(), delta });
     }
-    slider.update(&mut ctx, events)
+    for event in &events {
+        let mut ctx = WidgetUpdateCtx::new_with_interaction(
+            rect,
+            rect,
+            &style,
+            &atlas,
+            true,
+            hovered,
+            focused,
+            false,
+            active,
+            held,
+            KeyMode::NONE,
+            KeyCode::NONE,
+        );
+        slider.update(&mut ctx, Some(event));
+    }
 }
 
 fn run_number_once(number: &mut Number, events: Vec<UiInputEvent>) {
     let atlas = make_test_atlas();
     let style = Style::default();
     let bounds = rect(0, 0, 100, 20);
-    let mut ctx = WidgetUpdateCtx::new_with_interaction(bounds, bounds, &style, &atlas, true, true, true, false, true, None);
-    number.update(&mut ctx, events)
+    for event in &events {
+        let mut ctx = WidgetUpdateCtx::new_with_interaction(
+            bounds,
+            bounds,
+            &style,
+            &atlas,
+            true,
+            true,
+            true,
+            false,
+            true,
+            MouseButton::LEFT,
+            KeyMode::NONE,
+            KeyCode::NONE,
+        );
+        number.update(&mut ctx, Some(event));
+    }
 }
 
 fn assert_real_close(actual: Real, expected: Real) {
@@ -40,9 +74,23 @@ fn slider_zero_range_keeps_value() {
         delta: vec2(5, 0),
         buttons: MouseButton::LEFT,
     }];
-    let mut ctx = WidgetUpdateCtx::new_with_interaction(rect, rect, &style, &atlas, true, true, true, false, true, None);
+    let mut ctx = WidgetUpdateCtx::new_with_interaction(
+        rect,
+        rect,
+        &style,
+        &atlas,
+        true,
+        true,
+        true,
+        false,
+        true,
+        MouseButton::LEFT,
+        KeyMode::NONE,
+        KeyCode::NONE,
+    );
 
-    slider.update(&mut ctx, localize_events(rect, input));
+    let event = localize_event(Vec2i::new(rect.x, rect.y), input.into_iter().next().unwrap());
+    slider.update(&mut ctx, Some(&event));
 
     assert_eq!(state.try_read(|state| state.value().is_finite()), Some(true));
     assert_eq!(state.try_read(SliderState::value), Some(5.0));
@@ -85,9 +133,23 @@ fn slider_uses_widget_local_mouse_position() {
         delta: Vec2i::default(),
         buttons: MouseButton::LEFT,
     }];
-    let mut ctx = WidgetUpdateCtx::new_with_interaction(rect, rect, &style, &atlas, true, true, true, false, true, None);
+    let mut ctx = WidgetUpdateCtx::new_with_interaction(
+        rect,
+        rect,
+        &style,
+        &atlas,
+        true,
+        true,
+        true,
+        false,
+        true,
+        MouseButton::LEFT,
+        KeyMode::NONE,
+        KeyCode::NONE,
+    );
 
-    slider.update(&mut ctx, localize_events(rect, input));
+    let event = localize_event(Vec2i::new(rect.x, rect.y), input.into_iter().next().unwrap());
+    slider.update(&mut ctx, Some(&event));
 
     assert_eq!(state.try_read(SliderState::value), Some(50.0));
     assert_eq!(state.try_update(SliderState::take_changed), Some(true));

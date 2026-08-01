@@ -203,6 +203,7 @@ impl<S> Application<S> {
             let dimensions = Dimensioni::new(width as i32, height as i32);
             f(&mut self.ctx, &mut self.state, dimensions);
             if let Ok(info) = FrameInfo::try_new(dimensions, color(0x7F, 0x7F, 0x7F, 255)) {
+                self.ctx.update_ui(dimensions);
                 if let Err(error) = self.ctx.frame(info).render_ui() {
                     eprintln!("[microui-redux][example] frame failed: {error}");
                 }

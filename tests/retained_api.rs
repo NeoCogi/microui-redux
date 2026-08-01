@@ -129,7 +129,7 @@ impl Widget for ExternalContainer {
             .unwrap_or_else(|| Dimensioni::new(20, 20))
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
@@ -220,7 +220,7 @@ impl Widget for ExternalLeaf {
         Dimensioni::new(12, 9)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
@@ -247,6 +247,7 @@ fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis(
         .unwrap();
     let frame = FrameInfo::try_new(Dimensioni::new(320, 240), color(0, 0, 0, 255)).unwrap();
 
+    ctx.update_ui(Dimensioni::new(320, 240));
     ctx.frame(frame).render_ui().unwrap();
 
     assert!(state.try_read(|state| state.measure_calls.get()).unwrap() > 0);

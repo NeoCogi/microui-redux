@@ -21,7 +21,7 @@
 #![allow(dead_code)]
 
 use crate::render::DisplayList;
-use crate::{expand_rect, Dimensioni, Input, MouseButton, Recti, Style, Vec2i, UNCLIPPED_RECT};
+use crate::{Dimensioni, Recti, Style, UNCLIPPED_RECT};
 use crate::{WidgetOption, WindowOption};
 use crate::sizing::SizePolicy;
 use crate::widget::FocusPolicy;
@@ -283,77 +283,6 @@ fn child_content_rect(node: &Node) -> Recti {
         allocation.width.max(content_size.width),
         allocation.height.max(content_size.height),
     )
-}
-
-/// Builds pointer events from raw frame input.
-pub(crate) fn pointer_events_from_input(input: &Input) -> Vec<UiInputEvent> {
-    let mut events = Vec::new();
-    if !input.mouse_pressed.is_empty() {
-        events.push(UiInputEvent::MouseDown {
-            pos: input.mouse_pos,
-            button: input.mouse_pressed,
-        });
-    }
-    if !input.mouse_released.is_empty() {
-        events.push(UiInputEvent::MouseUp {
-            pos: input.mouse_pos,
-            button: input.mouse_released,
-        });
-    }
-    if input.mouse_delta.x != 0 || input.mouse_delta.y != 0 {
-        if input.mouse_down.is_empty() {
-            events.push(UiInputEvent::MouseMove {
-                pos: input.mouse_pos,
-                delta: input.mouse_delta,
-            });
-        } else {
-            events.push(UiInputEvent::MouseDrag {
-                pos: input.mouse_pos,
-                delta: input.mouse_delta,
-                buttons: input.mouse_down,
-            });
-        }
-    }
-    if input.scroll_delta.x != 0 || input.scroll_delta.y != 0 {
-        events.push(UiInputEvent::Scroll {
-            pos: input.mouse_pos,
-            delta: input.scroll_delta,
-        });
-    }
-    events
-}
-
-/// Builds focus transition events from raw frame input.
-pub(crate) fn focus_events_from_input(input: &Input) -> Vec<UiInputEvent> {
-    let mut events = Vec::new();
-    if !input.key_pressed.is_empty() {
-        events.push(UiInputEvent::KeyDown { key: input.key_pressed });
-    }
-    if !input.key_released.is_empty() {
-        events.push(UiInputEvent::KeyUp { key: input.key_released });
-    }
-    if !input.key_code_pressed.is_empty() {
-        events.push(UiInputEvent::KeyCodeDown { code: input.key_code_pressed });
-    }
-    if !input.key_code_released.is_empty() {
-        events.push(UiInputEvent::KeyCodeUp { code: input.key_code_released });
-    }
-    if !input.input_text.is_empty() {
-        events.push(UiInputEvent::Text { text: input.input_text.clone() });
-    }
-    events
-}
-
-/// Builds held input state events for the current frame.
-pub(super) fn held_events_from_input(input: &Input) -> Vec<UiInputEvent> {
-    let mut events = Vec::new();
-    if !input.key_down.is_empty() {
-        events.push(UiInputEvent::KeyState { keys: input.key_down });
-    }
-    if !input.key_code_down.is_empty() {
-        events.push(UiInputEvent::KeyCodeState { codes: input.key_code_down });
-    }
-    events
 }
 
 #[cfg(test)]

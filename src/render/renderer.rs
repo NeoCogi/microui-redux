@@ -53,6 +53,8 @@ use std::{error::Error, fmt};
 /// Failure to validate, acquire, or execute one destructive display-list submission.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RenderError {
+    /// Retained input/state/layout has not been committed for the requested frame dimensions.
+    UiUpdateRequired,
     /// The backend could not acquire per-frame resources.
     Frame(FrameError),
     /// An external texture operation references a texture not owned by this Renderer.
@@ -72,6 +74,7 @@ pub enum RenderError {
 impl fmt::Display for RenderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UiUpdateRequired => write!(f, "UI update is required before rendering"),
             Self::Frame(error) => write!(f, "backend frame acquisition failed: {error}"),
             Self::UnknownTexture { id, operation_index } => {
                 write!(f, "unknown texture {:?} in display-list operation {operation_index}", id)

@@ -9,8 +9,21 @@ fn run_click<W: Widget>(widget: &mut W) {
     let atlas = make_test_atlas();
     let style = Style::default();
     let bounds = rect(0, 0, 100, 20);
-    let mut ctx = WidgetUpdateCtx::new_with_interaction(bounds, bounds, &style, &atlas, true, true, true, true, true, None);
-    widget.update(&mut ctx, Vec::new())
+    let mut ctx = WidgetUpdateCtx::new_with_interaction(
+        bounds,
+        bounds,
+        &style,
+        &atlas,
+        true,
+        true,
+        true,
+        true,
+        true,
+        MouseButton::LEFT,
+        KeyMode::NONE,
+        KeyCode::NONE,
+    );
+    widget.update(&mut ctx, None)
 }
 
 #[test]
@@ -50,14 +63,40 @@ fn combo_run_toggles_open_state() {
     let style = Rc::new(Style::default());
     let (combo_state, mut combo) = Combo::create(ComboParameters::new());
     let rect = rect(0, 0, 100, 20);
-    let mut ctx = WidgetUpdateCtx::new_with_interaction(rect, rect, style.as_ref(), &atlas, true, true, true, true, true, None);
+    let mut ctx = WidgetUpdateCtx::new_with_interaction(
+        rect,
+        rect,
+        style.as_ref(),
+        &atlas,
+        true,
+        true,
+        true,
+        true,
+        true,
+        MouseButton::LEFT,
+        KeyMode::NONE,
+        KeyCode::NONE,
+    );
 
-    combo.update(&mut ctx, Vec::new());
+    combo.update(&mut ctx, None);
     assert_eq!(combo_state.try_read(ComboState::is_open), Some(true));
 
     assert_eq!(combo_state.try_update(ComboState::open_popup), Some(()));
-    let mut ctx = WidgetUpdateCtx::new_with_interaction(rect, rect, style.as_ref(), &atlas, true, true, true, true, true, None);
-    combo.update(&mut ctx, Vec::new());
+    let mut ctx = WidgetUpdateCtx::new_with_interaction(
+        rect,
+        rect,
+        style.as_ref(),
+        &atlas,
+        true,
+        true,
+        true,
+        true,
+        true,
+        MouseButton::LEFT,
+        KeyMode::NONE,
+        KeyCode::NONE,
+    );
+    combo.update(&mut ctx, None);
     assert_eq!(combo_state.try_read(ComboState::is_open), Some(false));
 }
 

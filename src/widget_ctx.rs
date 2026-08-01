@@ -62,109 +62,6 @@ use crate::ui_node::UiInputEvent;
 use crate::style::{Color, Style, TextureId};
 use crate::text_layout::control_text_position_with_font;
 
-/// Convenience methods for a widget-local routed input batch.
-pub trait WidgetInputEvents {
-    /// Returns the currently held mouse buttons.
-    fn mouse_down(&self) -> MouseButton;
-    /// Returns mouse buttons pressed by routed events.
-    fn mouse_pressed(&self) -> MouseButton;
-    /// Returns the last routed mouse position, or `(0, 0)` if this frame has no routed pointer event.
-    fn mouse_pos(&self) -> Vec2i;
-    /// Returns accumulated routed mouse movement.
-    fn mouse_delta(&self) -> Vec2i;
-    /// Returns currently held modifier keys.
-    fn key_mods(&self) -> KeyMode;
-    /// Returns modifier keys pressed by routed events.
-    fn key_pressed(&self) -> KeyMode;
-    /// Returns navigation keys pressed by routed events.
-    fn key_code_pressed(&self) -> KeyCode;
-    /// Returns text input from routed events.
-    fn text_input(&self) -> String;
-    /// Returns scroll delta from routed events.
-    fn scroll_delta(&self) -> Option<Vec2i>;
-}
-
-impl WidgetInputEvents for [UiInputEvent] {
-    fn mouse_down(&self) -> MouseButton {
-        self.iter().fold(MouseButton::NONE, |buttons, event| match event {
-            UiInputEvent::MouseDrag { buttons: held, .. } => buttons | *held,
-            _ => buttons,
-        })
-    }
-
-    fn mouse_pressed(&self) -> MouseButton {
-        self.iter().fold(MouseButton::NONE, |buttons, event| match event {
-            UiInputEvent::MouseDown { button, .. } => buttons | *button,
-            _ => buttons,
-        })
-    }
-
-    fn mouse_pos(&self) -> Vec2i {
-        self.iter()
-            .rev()
-            .find_map(|event| match event {
-                UiInputEvent::MouseMove { pos, .. }
-                | UiInputEvent::MouseDrag { pos, .. }
-                | UiInputEvent::MouseDown { pos, .. }
-                | UiInputEvent::MouseUp { pos, .. }
-                | UiInputEvent::Scroll { pos, .. } => Some(*pos),
-                _ => None,
-            })
-            .unwrap_or_default()
-    }
-
-    fn mouse_delta(&self) -> Vec2i {
-        self.iter().fold(Vec2i::default(), |delta, event| match event {
-            UiInputEvent::MouseMove { delta: event_delta, .. } | UiInputEvent::MouseDrag { delta: event_delta, .. } => delta + *event_delta,
-            _ => delta,
-        })
-    }
-
-    fn key_mods(&self) -> KeyMode {
-        self.iter().fold(KeyMode::NONE, |keys, event| match event {
-            UiInputEvent::KeyState { keys: state } => keys | *state,
-            _ => keys,
-        })
-    }
-
-    fn key_pressed(&self) -> KeyMode {
-        self.iter().fold(KeyMode::NONE, |keys, event| match event {
-            UiInputEvent::KeyDown { key } => keys | *key,
-            _ => keys,
-        })
-    }
-
-    fn key_code_pressed(&self) -> KeyCode {
-        self.iter().fold(KeyCode::NONE, |keys, event| match event {
-            UiInputEvent::KeyCodeDown { code } => keys | *code,
-            _ => keys,
-        })
-    }
-
-    fn text_input(&self) -> String {
-        let mut text = String::new();
-        for event in self {
-            if let UiInputEvent::Text { text: event_text } = event {
-                text.push_str(event_text);
-            }
-        }
-        text
-    }
-
-    fn scroll_delta(&self) -> Option<Vec2i> {
-        self.iter().fold(None, |acc, event| match event {
-            UiInputEvent::Scroll { delta, .. } if delta.x != 0 || delta.y != 0 => Some(*delta),
-            _ => acc,
-        })
-    }
-}
-
-/// Converts routed events from the enclosing local surface into widget content-local coordinates.
-pub(crate) fn localize_events(rect: Recti, events: Vec<UiInputEvent>) -> Vec<UiInputEvent> {
-    let origin = Vec2i::new(rect.x, rect.y);
-    events.into_iter().map(|event| localize_event(origin, event)).collect()
-}
-
 /// Converts one routed event into coordinates relative to `origin`.
 pub(crate) fn localize_event(origin: Vec2i, event: UiInputEvent) -> UiInputEvent {
     match event {
@@ -199,8 +96,6 @@ struct WidgetContextData<'a> {
     clicked: bool,
     /// Whether this widget is in an active pointer interaction.
     active: bool,
-    /// Scroll delta committed by update for this frame.
-    scroll_delta: Option<Vec2i>,
 }
 
 impl<'a> WidgetContextData<'a> {
@@ -214,7 +109,6 @@ impl<'a> WidgetContextData<'a> {
         focused: bool,
         clicked: bool,
         active: bool,
-        scroll_delta: Option<Vec2i>,
     ) -> Self {
         Self {
             content_rect,
@@ -225,7 +119,6 @@ impl<'a> WidgetContextData<'a> {
             focused,
             clicked,
             active,
-            scroll_delta,
         }
     }
 
@@ -262,6 +155,12 @@ pub struct WidgetUpdateCtx<'a> {
     common: WidgetContextData<'a>,
     /// Whether this widget is inside the current hover root.
     in_hover_root: bool,
+    /// Mouse buttons held after applying the current raw input event.
+    mouse_buttons: MouseButton,
+    /// Modifier/control keys held after applying the current raw input event.
+    key_modes: KeyMode,
+    /// Navigation keys held after applying the current raw input event.
+    key_codes: KeyCode,
 }
 
 impl<'a> WidgetUpdateCtx<'a> {
@@ -278,9 +177,24 @@ impl<'a> WidgetUpdateCtx<'a> {
         focused: bool,
         clicked: bool,
         active: bool,
-        scroll_delta: Option<Vec2i>,
+        mouse_buttons: MouseButton,
+        key_modes: KeyMode,
+        key_codes: KeyCode,
     ) -> Self {
-        Self::new_with_content_geometry(rect, screen_clip, style, atlas, in_hover_root, hovered, focused, clicked, active, scroll_delta)
+        Self::new_with_content_geometry(
+            rect,
+            screen_clip,
+            style,
+            atlas,
+            in_hover_root,
+            hovered,
+            focused,
+            clicked,
+            active,
+            mouse_buttons,
+            key_modes,
+            key_codes,
+        )
     }
 
     /// Creates update services for one traversal-derived content surface.
@@ -295,11 +209,16 @@ impl<'a> WidgetUpdateCtx<'a> {
         focused: bool,
         clicked: bool,
         active: bool,
-        scroll_delta: Option<Vec2i>,
+        mouse_buttons: MouseButton,
+        key_modes: KeyMode,
+        key_codes: KeyCode,
     ) -> Self {
         Self {
-            common: WidgetContextData::new(content_rect, screen_clip, style, atlas, hovered, focused, clicked, active, scroll_delta),
+            common: WidgetContextData::new(content_rect, screen_clip, style, atlas, hovered, focused, clicked, active),
             in_hover_root,
+            mouse_buttons,
+            key_modes,
+            key_codes,
         }
     }
 
@@ -336,9 +255,19 @@ impl<'a> WidgetUpdateCtx<'a> {
         self.common.active
     }
 
-    /// Returns scroll delta routed to this widget for this frame.
-    pub fn scroll_delta(&self) -> Option<Vec2i> {
-        self.common.scroll_delta
+    /// Returns mouse buttons held after applying the current input event.
+    pub fn mouse_buttons(&self) -> MouseButton {
+        self.mouse_buttons
+    }
+
+    /// Returns modifier/control keys held after applying the current input event.
+    pub fn key_modes(&self) -> KeyMode {
+        self.key_modes
+    }
+
+    /// Returns navigation keys held after applying the current input event.
+    pub fn key_codes(&self) -> KeyCode {
+        self.key_codes
     }
 
     /// Returns the active style for built-in update logic.
@@ -384,10 +313,9 @@ impl<'a> WidgetPaintCtx<'a> {
         focused: bool,
         clicked: bool,
         active: bool,
-        scroll_delta: Option<Vec2i>,
     ) -> Self {
         Self {
-            common: WidgetContextData::new(content_rect, screen_clip, style, atlas, hovered, focused, clicked, active, scroll_delta),
+            common: WidgetContextData::new(content_rect, screen_clip, style, atlas, hovered, focused, clicked, active),
             display_list,
         }
     }
@@ -422,11 +350,6 @@ impl<'a> WidgetPaintCtx<'a> {
     /// Returns whether this widget is in an active pointer interaction.
     pub fn active(&self) -> bool {
         self.common.active
-    }
-
-    /// Returns scroll delta routed to this widget for this frame.
-    pub fn scroll_delta(&self) -> Option<Vec2i> {
-        self.common.scroll_delta
     }
 
     /// Returns a widget-local painter that records directly into the current frame display list.

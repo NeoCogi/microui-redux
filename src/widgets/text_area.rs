@@ -250,7 +250,7 @@ impl TextArea {
     }
 
     /// Applies multiline editing, scrolling, and scrollbar dragging.
-    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: &[UiInputEvent]) {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let font = ctx.style().resolve_font_choice(self.font);
         let old_preferred_x = self.interaction.preferred_x;
         let old_dragging_y = self.interaction.dragging_y;
@@ -400,7 +400,7 @@ fn textarea_layout(content_rect: Recti, style: &Style, atlas: &AtlasHandle, stat
 /// Updates text-area buffer, cursor, scroll position, and scrollbar drag state.
 fn textarea_update(
     ctx: &mut WidgetUpdateCtx<'_>,
-    input: &[UiInputEvent],
+    input: Option<&UiInputEvent>,
     state: &mut TextAreaState,
     interaction: &mut TextAreaInteraction,
     wrap: TextWrap,
@@ -418,16 +418,45 @@ fn textarea_update(
     let mut reset_preferred = false;
     let mut vertical_moved = false;
     let mut preferred_x = interaction.preferred_x;
+    let text_input = match input {
+        Some(UiInputEvent::Text { text }) => text.as_str(),
+        _ => "",
+    };
+    let key_pressed = match input {
+        Some(UiInputEvent::KeyDown { key }) => *key,
+        _ => KeyMode::NONE,
+    };
+    let key_code_pressed = match input {
+        Some(UiInputEvent::KeyCodeDown { code }) => *code,
+        _ => KeyCode::NONE,
+    };
+    let mouse_pressed = match input {
+        Some(UiInputEvent::MouseDown { button, .. }) => *button,
+        _ => MouseButton::NONE,
+    };
+    let content_mouse_pos = match input {
+        Some(
+            UiInputEvent::MouseMove { pos, .. }
+            | UiInputEvent::MouseDrag { pos, .. }
+            | UiInputEvent::MouseDown { pos, .. }
+            | UiInputEvent::MouseUp { pos, .. }
+            | UiInputEvent::Scroll { pos, .. },
+        ) => *pos,
+        _ => Vec2i::default(),
+    };
+    let mouse_delta = match input {
+        Some(UiInputEvent::MouseMove { delta, .. } | UiInputEvent::MouseDrag { delta, .. }) => *delta,
+        _ => Vec2i::default(),
+    };
 
     if ctx.focused() {
-        let text_input = input.text_input();
         let edit = apply_text_input(
             &mut state.buf,
             cursor_pos,
-            text_input.as_str(),
-            input.key_mods(),
-            input.key_pressed(),
-            input.key_code_pressed(),
+            text_input,
+            ctx.key_modes(),
+            key_pressed,
+            key_code_pressed,
             true,
             ReturnBehavior::Newline { submit_on_ctrl: true },
         );
@@ -447,9 +476,7 @@ fn textarea_update(
     }
 
     let layout = textarea_layout(ctx.local_rect(), ctx.style(), ctx.atlas(), state, wrap, font);
-    let content_mouse_pos = input.mouse_pos();
-
-    if let Some(delta) = input.scroll_delta() {
+    if let Some(UiInputEvent::Scroll { delta, .. }) = input {
         // Wheel/trackpad scrolling only affects axes that actually overflow.
         if layout.maxscroll_y > 0 {
             state.scroll.y += delta.y;
@@ -459,7 +486,7 @@ fn textarea_update(
         }
     }
 
-    if !input.mouse_down().intersects(MouseButton::LEFT) {
+    if !ctx.mouse_buttons().intersects(MouseButton::LEFT) {
         interaction.dragging_y = false;
         interaction.dragging_x = false;
     }
@@ -467,23 +494,23 @@ fn textarea_update(
     let mut clicked_scrollbar = false;
 
     if layout.needs_v && layout.maxscroll_y > 0 && layout.body.height > 0 {
-        if input.mouse_pressed().intersects(MouseButton::LEFT) && layout.vscroll_base.contains(&content_mouse_pos) {
+        if mouse_pressed.intersects(MouseButton::LEFT) && layout.vscroll_base.contains(&content_mouse_pos) {
             // Track scrollbar drag separately so text clicks do not also move the caret.
             interaction.dragging_y = true;
             clicked_scrollbar = true;
         }
         if interaction.dragging_y {
-            state.scroll.y += scrollbar_drag_delta(ScrollAxis::Vertical, input.mouse_delta(), layout.content_size.y, layout.vscroll_base);
+            state.scroll.y += scrollbar_drag_delta(ScrollAxis::Vertical, mouse_delta, layout.content_size.y, layout.vscroll_base);
         }
     }
 
     if layout.needs_h && layout.maxscroll_x > 0 && layout.body.width > 0 {
-        if input.mouse_pressed().intersects(MouseButton::LEFT) && layout.hscroll_base.contains(&content_mouse_pos) {
+        if mouse_pressed.intersects(MouseButton::LEFT) && layout.hscroll_base.contains(&content_mouse_pos) {
             interaction.dragging_x = true;
             clicked_scrollbar = true;
         }
         if interaction.dragging_x {
-            state.scroll.x += scrollbar_drag_delta(ScrollAxis::Horizontal, input.mouse_delta(), layout.content_size.x, layout.hscroll_base);
+            state.scroll.x += scrollbar_drag_delta(ScrollAxis::Horizontal, mouse_delta, layout.content_size.x, layout.hscroll_base);
         }
     }
 
@@ -491,14 +518,14 @@ fn textarea_update(
     let mut caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
     if ctx.focused() {
-        if input.key_code_pressed().intersects(KeyCode::END) {
+        if key_code_pressed.intersects(KeyCode::END) {
             cursor_pos = layout.lines[cursor_line].end;
             caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
             ensure_visible = true;
             reset_preferred = true;
         }
 
-        if input.key_code_pressed().intersects(KeyCode::UP) {
+        if key_code_pressed.intersects(KeyCode::UP) {
             // Vertical movement preserves preferred x so repeated Up/Down follows a visual column.
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line > 0 {
@@ -510,7 +537,7 @@ fn textarea_update(
             vertical_moved = true;
         }
 
-        if input.key_code_pressed().intersects(KeyCode::DOWN) {
+        if key_code_pressed.intersects(KeyCode::DOWN) {
             // Vertical movement preserves preferred x so repeated Up/Down follows a visual column.
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line + 1 < layout.lines.len() {
@@ -523,7 +550,7 @@ fn textarea_update(
         }
     }
 
-    if ctx.focused() && input.mouse_pressed().intersects(MouseButton::LEFT) && ctx.mouse_over(layout.bounds, input.mouse_pos()) && !clicked_scrollbar {
+    if ctx.focused() && mouse_pressed.intersects(MouseButton::LEFT) && ctx.mouse_over(layout.bounds, content_mouse_pos) && !clicked_scrollbar {
         // Convert a widget-local click to content-local coordinates before resolving cursor.
         let mouse_pos = content_mouse_pos;
         let local_x = mouse_pos.x - (layout.body.x + layout.padding) + state.scroll.x;
@@ -653,8 +680,8 @@ impl Widget for TextArea {
         self.preferred_size_widget(style, atlas, avail)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
-        self.update_widget(ctx, &input)
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        self.update_widget(ctx, input)
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -713,8 +740,19 @@ mod tests {
         let atlas = test_atlas();
         let style = Style::default();
         let bounds = rect(0, 0, 160, 80);
-        let mut ctx = WidgetUpdateCtx::new_with_interaction(bounds, bounds, &style, &atlas, true, true, true, false, false, None);
-        text_area.update(&mut ctx, input)
+        let mut keys = KeyMode::NONE;
+        let mut codes = KeyCode::NONE;
+        for event in &input {
+            match event {
+                UiInputEvent::KeyDown { key } => keys |= *key,
+                UiInputEvent::KeyUp { key } => keys &= !*key,
+                UiInputEvent::KeyCodeDown { code } => codes |= *code,
+                UiInputEvent::KeyCodeUp { code } => codes &= !*code,
+                _ => {}
+            }
+            let mut ctx = WidgetUpdateCtx::new_with_interaction(bounds, bounds, &style, &atlas, true, true, true, false, false, MouseButton::NONE, keys, codes);
+            text_area.update(&mut ctx, Some(event));
+        }
     }
 
     #[test]
@@ -724,7 +762,7 @@ mod tests {
             &mut text_area,
             vec![
                 UiInputEvent::Text { text: "line".into() },
-                UiInputEvent::KeyState { keys: KeyMode::CTRL },
+                UiInputEvent::KeyDown { key: KeyMode::CTRL },
                 UiInputEvent::KeyDown { key: KeyMode::RETURN },
             ],
         );

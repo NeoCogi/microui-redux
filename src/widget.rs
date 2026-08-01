@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Widget runtime contracts and per-frame result tracking.
+//! Widget runtime contracts and retained event tracking.
 
 use std::cell::RefCell;
 use std::cmp::max;
@@ -62,7 +62,7 @@ use rs_math3d::Dimensioni;
 use crate::atlas::{AtlasHandle, EXPAND_DOWN_ICON};
 use crate::style::Style;
 use crate::ui_node::UiInputEvent;
-pub use crate::widget_ctx::{WidgetInputEvents, WidgetPaintCtx, WidgetUpdateCtx};
+pub use crate::widget_ctx::{WidgetPaintCtx, WidgetUpdateCtx};
 
 bitflags! {
     #[derive(Copy, Clone)]
@@ -238,25 +238,30 @@ pub(crate) fn runtime_update_state<T: WidgetState, R>(state: &Rc<RefCell<T>>, ph
 /// Common retained runtime phase contract implemented by concrete widgets.
 ///
 /// Widgets participate in three retained execution phases:
-/// 1. `measure`, which reports intrinsic size for the current frame's layout pass.
-/// 2. `update`, which samples interaction and mutates widget-local state.
-/// 3. `paint`, which records paint commands for the updated widget state.
+/// 1. `measure`, which reports intrinsic size for an explicit layout commit.
+/// 2. `update`, which applies exactly one routed event (or `None`) and mutates widget-local state.
+/// 3. `paint`, which records paint commands for already committed widget state.
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
-    /// Returns the intrinsic widget size for the current frame's layout pass.
+    /// Returns the intrinsic widget size for the current explicit layout pass.
     ///
     /// `avail` reports the current container body size visible to the widget.
     /// Values less than or equal to zero are treated as "use layout defaults" for that axis.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
-    /// Updates retained widget state for the current frame.
+    /// Updates retained widget state for exactly one normalized input event.
     ///
     /// Pointer positions in `input` are relative to the widget's derived content rectangle, using
     /// the same origin as [`WidgetUpdateCtx::local_rect`]. Outer frame pixels remain part of the
     /// runtime hit target, so a pointer event on the border may lie just outside the local content
-    /// bounds. The update context intentionally cannot record drawing commands.
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>);
-    /// Records paint commands for the current frame through paint-only capabilities.
+    /// bounds. At most one eligible widget receives `Some(input)` during a traversal; every other
+    /// eligible widget receives `None`. Held state is available from [`WidgetUpdateCtx`]. The
+    /// update context intentionally cannot record drawing commands.
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>);
+    /// Records paint commands through paint-only capabilities.
+    ///
+    /// Paint is observational with respect to semantic widget state. Implementations may maintain
+    /// rendering caches, but must not make behavior or future layout depend on paint having run.
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>);
     /// Returns the effective widget options used by generic dispatch.
     ///
@@ -287,7 +292,7 @@ impl Widget for WidgetOption {
         Dimensioni::new(width, height)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
@@ -328,7 +333,7 @@ mod state_ownership_tests {
             Dimensioni::new(1, 1)
         }
 
-        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {
+        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
             runtime_update_state(&self.state, "TestWidget::update", |state| state.value += 1);
         }
 
@@ -385,7 +390,7 @@ mod state_ownership_tests {
             runtime_read_state(&self.state, "UnitWidget::measure", |_| Dimensioni::new(1, 1))
         }
 
-        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {
+        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
             runtime_update_state(&self.state, "UnitWidget::update", |_| ());
         }
 

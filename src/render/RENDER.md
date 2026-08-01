@@ -60,16 +60,21 @@ use microui_redux::render::DisplayList;
 
 ## Frame execution
 
-Applications deliver input and mutate frame resources before opening a frame.
+Applications deliver input and mutate retained state before committing an update. Rendering then
+paints only that commit.
 The normal `Context` path is:
 
 ```text
+Context::update_ui(positive dimensions)
+    -> run one synchronization layout
+    -> drain raw input in FIFO order
+    -> for each event: route once, update every eligible widget, commit layout
+
 Context::frame(validated FrameInfo)
     -> returns an exclusively borrowed ContextFrame
 
 ContextFrame::render_ui(self)
-    -> measure widgets
-    -> route input and update widget state
+    -> require a matching commit and no pending input
     -> Widget::paint records one ordered DisplayList
     -> preflight resource keys
     -> RendererBackend::frame acquires native frame resources
@@ -77,8 +82,10 @@ ContextFrame::render_ui(self)
     -> backend frame Drop flushes, submits, and presents
 ```
 
-Input belongs to widget update and never enters the rendering subsystem. By the
-time painting starts, widgets record only visual state.
+`render_ui` never drains input, updates widgets, or computes layout. A missing or stale commit,
+pending input, or different frame dimensions returns `RenderError::UiUpdateRequired` before paint,
+display-list execution, or backend acquisition. Input belongs to `update_ui`; by the time painting
+starts, widgets record only committed visual state.
 
 The crate-owned submission path consumes every operation in painter order and leaves its internal
 list empty for reuse, including validation or frame-acquisition failures.
@@ -118,7 +125,7 @@ impl Widget for PaintedSwatch {
     fn update(
         &mut self,
         _ctx: &mut WidgetUpdateCtx<'_>,
-        _events: Vec<UiInputEvent>,
+        _event: Option<&UiInputEvent>,
     ) {}
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {

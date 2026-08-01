@@ -52,8 +52,12 @@
 //
 //! Raw input state, key/button identifiers, and input-related state flags.
 
+use std::collections::VecDeque;
+
 use bitflags::bitflags;
 use rs_math3d::Vec2i;
+
+use crate::ui_node::UiInputEvent;
 
 #[derive(PartialEq, Copy, Clone)]
 #[repr(u32)]
@@ -186,55 +190,50 @@ bitflags! {
 }
 
 #[derive(Clone, Debug)]
-/// Aggregates raw input collected during the current frame.
-pub struct Input {
-    /// Current mouse position in screen coordinates.
+enum RawInputEvent {
+    MouseMove { pos: Vec2i },
+    MouseDown { pos: Vec2i, button: MouseButton },
+    MouseUp { pos: Vec2i, button: MouseButton },
+    Scroll { delta: Vec2i },
+    KeyDown { key: KeyMode },
+    KeyUp { key: KeyMode },
+    KeyCodeDown { code: KeyCode },
+    KeyCodeUp { code: KeyCode },
+    Text { text: String },
+}
+
+/// Held and pointer state after one queued raw event has been applied.
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct InputSnapshot {
     pub(crate) mouse_pos: Vec2i,
-    /// Mouse position recorded at the end of the previous frame.
-    pub(crate) last_mouse_pos: Vec2i,
-    /// Mouse movement delta computed at frame start.
-    pub(crate) mouse_delta: Vec2i,
-    /// Accumulated scroll wheel/trackpad delta for the frame.
-    pub(crate) scroll_delta: Vec2i,
-    /// Mouse buttons currently held.
+    pub(crate) mouse_buttons: MouseButton,
+    pub(crate) key_modes: KeyMode,
+    pub(crate) key_codes: KeyCode,
+}
+
+#[derive(Clone, Debug)]
+/// Ordered raw input queue plus the state committed by events already consumed by the UI.
+pub struct Input {
+    /// Pointer position after the most recently consumed input event.
+    pub(crate) mouse_pos: Vec2i,
+    /// Mouse buttons held after the most recently consumed input event.
     pub(crate) mouse_down: MouseButton,
-    /// Mouse buttons pressed during the current frame.
-    pub(crate) mouse_pressed: MouseButton,
-    /// Mouse buttons released during the current frame.
-    pub(crate) mouse_released: MouseButton,
-    /// Modifier keys currently held.
+    /// Modifier keys held after the most recently consumed input event.
     pub(crate) key_down: KeyMode,
-    /// Modifier keys pressed during the current frame.
-    pub(crate) key_pressed: KeyMode,
-    /// Modifier keys released during the current frame.
-    pub(crate) key_released: KeyMode,
-    /// Navigation keys currently held.
+    /// Navigation keys held after the most recently consumed input event.
     pub(crate) key_code_down: KeyCode,
-    /// Navigation keys pressed during the current frame.
-    pub(crate) key_code_pressed: KeyCode,
-    /// Navigation keys released during the current frame.
-    pub(crate) key_code_released: KeyCode,
-    /// UTF-8 text accumulated during the current frame.
-    pub(crate) input_text: String,
+    /// Raw events waiting to be applied, in API call order.
+    pending: VecDeque<RawInputEvent>,
 }
 
 impl Default for Input {
     fn default() -> Self {
         Self {
             mouse_pos: Vec2i::default(),
-            last_mouse_pos: Vec2i::default(),
-            mouse_delta: Vec2i::default(),
-            scroll_delta: Vec2i::default(),
             mouse_down: MouseButton::NONE,
-            mouse_pressed: MouseButton::NONE,
-            mouse_released: MouseButton::NONE,
             key_down: KeyMode::NONE,
-            key_pressed: KeyMode::NONE,
-            key_released: KeyMode::NONE,
             key_code_down: KeyCode::NONE,
-            key_code_pressed: KeyCode::NONE,
-            key_code_released: KeyCode::NONE,
-            input_text: String::default(),
+            pending: VecDeque::new(),
         }
     }
 }
@@ -250,14 +249,9 @@ impl Input {
         self.key_code_down
     }
 
-    /// Returns the accumulated UTF-8 text entered this frame.
-    pub fn text_input(&self) -> &str {
-        &self.input_text
-    }
-
-    /// Updates the current mouse pointer position.
+    /// Queues a mouse-pointer position update.
     pub fn mousemove(&mut self, x: i32, y: i32) {
-        self.mouse_pos = Vec2i::new(x, y);
+        self.pending.push_back(RawInputEvent::MouseMove { pos: Vec2i::new(x, y) });
     }
 
     /// Returns the currently held mouse buttons.
@@ -265,70 +259,159 @@ impl Input {
         self.mouse_down
     }
 
-    /// Records that the specified mouse button was pressed.
+    /// Queues a mouse-button press at the supplied pointer position.
     pub fn mousedown(&mut self, x: i32, y: i32, btn: MouseButton) {
-        self.mousemove(x, y);
-        self.mouse_down |= btn;
-        self.mouse_pressed |= btn;
+        self.pending.push_back(RawInputEvent::MouseDown { pos: Vec2i::new(x, y), button: btn });
     }
 
-    /// Records that the specified mouse button was released.
+    /// Queues a mouse-button release at the supplied pointer position.
     pub fn mouseup(&mut self, x: i32, y: i32, btn: MouseButton) {
-        self.mousemove(x, y);
-        self.mouse_down &= !btn;
-        self.mouse_released |= btn;
+        self.pending.push_back(RawInputEvent::MouseUp { pos: Vec2i::new(x, y), button: btn });
     }
 
-    /// Accumulates scroll wheel movement.
+    /// Queues one scroll-wheel or trackpad transition.
     pub fn scroll(&mut self, x: i32, y: i32) {
-        self.scroll_delta.x += x;
-        self.scroll_delta.y += y;
+        self.pending.push_back(RawInputEvent::Scroll { delta: Vec2i::new(x, y) });
     }
 
-    /// Records that a modifier key was pressed.
+    /// Queues a modifier/control-key press.
     pub fn keydown(&mut self, key: KeyMode) {
-        self.key_pressed |= key;
-        self.key_down |= key;
+        self.pending.push_back(RawInputEvent::KeyDown { key });
     }
 
-    /// Records that a modifier key was released.
+    /// Queues a modifier/control-key release.
     pub fn keyup(&mut self, key: KeyMode) {
-        self.key_down &= !key;
-        self.key_released |= key;
+        self.pending.push_back(RawInputEvent::KeyUp { key });
     }
 
-    /// Records that a navigation key was pressed.
+    /// Queues a navigation-key press.
     pub fn keydown_code(&mut self, code: KeyCode) {
-        self.key_code_pressed |= code;
-        self.key_code_down |= code;
+        self.pending.push_back(RawInputEvent::KeyCodeDown { code });
     }
 
-    /// Records that a navigation key was released.
+    /// Queues a navigation-key release.
     pub fn keyup_code(&mut self, code: KeyCode) {
-        self.key_code_down &= !code;
-        self.key_code_released |= code;
+        self.pending.push_back(RawInputEvent::KeyCodeUp { code });
     }
 
-    /// Appends UTF-8 text to the input buffer.
+    /// Queues one UTF-8 text input transition.
     pub fn text(&mut self, text: &str) {
-        self.input_text.push_str(text);
+        self.pending.push_back(RawInputEvent::Text { text: text.to_owned() });
     }
 
-    /// Computes per-frame derived input before UI traversal starts.
-    pub(crate) fn prelude(&mut self) {
-        self.mouse_delta = self.mouse_pos - self.last_mouse_pos;
+    /// Returns whether at least one raw event is waiting for UI update.
+    pub(crate) fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
     }
 
-    /// Clears one-frame input fields after UI traversal finishes.
-    pub(crate) fn epilogue(&mut self) {
-        self.key_pressed = KeyMode::NONE;
-        self.key_released = KeyMode::NONE;
-        self.key_code_pressed = KeyCode::NONE;
-        self.key_code_released = KeyCode::NONE;
-        self.input_text.clear();
-        self.mouse_pressed = MouseButton::NONE;
-        self.mouse_released = MouseButton::NONE;
-        self.scroll_delta = Vec2i::new(0, 0);
-        self.last_mouse_pos = self.mouse_pos;
+    /// Returns state committed by events already popped from the queue.
+    pub(crate) fn snapshot(&self) -> InputSnapshot {
+        InputSnapshot {
+            mouse_pos: self.mouse_pos,
+            mouse_buttons: self.mouse_down,
+            key_modes: self.key_down,
+            key_codes: self.key_code_down,
+        }
+    }
+
+    /// Applies and normalizes exactly one queued raw event.
+    pub(crate) fn pop_event(&mut self) -> Option<UiInputEvent> {
+        let event = self.pending.pop_front()?;
+        Some(match event {
+            RawInputEvent::MouseMove { pos } => {
+                let delta = pos - self.mouse_pos;
+                self.mouse_pos = pos;
+                if self.mouse_down.is_empty() {
+                    UiInputEvent::MouseMove { pos, delta }
+                } else {
+                    UiInputEvent::MouseDrag { pos, delta, buttons: self.mouse_down }
+                }
+            }
+            RawInputEvent::MouseDown { pos, button } => {
+                self.mouse_pos = pos;
+                self.mouse_down |= button;
+                UiInputEvent::MouseDown { pos, button }
+            }
+            RawInputEvent::MouseUp { pos, button } => {
+                self.mouse_pos = pos;
+                self.mouse_down &= !button;
+                UiInputEvent::MouseUp { pos, button }
+            }
+            RawInputEvent::Scroll { delta } => UiInputEvent::Scroll { pos: self.mouse_pos, delta },
+            RawInputEvent::KeyDown { key } => {
+                self.key_down |= key;
+                UiInputEvent::KeyDown { key }
+            }
+            RawInputEvent::KeyUp { key } => {
+                self.key_down &= !key;
+                UiInputEvent::KeyUp { key }
+            }
+            RawInputEvent::KeyCodeDown { code } => {
+                self.key_code_down |= code;
+                UiInputEvent::KeyCodeDown { code }
+            }
+            RawInputEvent::KeyCodeUp { code } => {
+                self.key_code_down &= !code;
+                UiInputEvent::KeyCodeUp { code }
+            }
+            RawInputEvent::Text { text } => UiInputEvent::Text { text },
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_calls_are_normalized_in_fifo_order_with_per_event_held_state() {
+        let mut input = Input::default();
+        input.mousemove(4, 5);
+        input.mousedown(4, 5, MouseButton::LEFT);
+        input.mousemove(9, 12);
+        input.keydown(KeyMode::SHIFT);
+        input.text("x");
+        input.mouseup(9, 12, MouseButton::LEFT);
+
+        assert!(matches!(
+            input.pop_event(),
+            Some(UiInputEvent::MouseMove { pos, delta })
+                if (pos.x, pos.y, delta.x, delta.y) == (4, 5, 4, 5)
+        ));
+        assert!(matches!(
+            input.pop_event(),
+            Some(UiInputEvent::MouseDown { button, .. }) if button.bits() == MouseButton::LEFT.bits()
+        ));
+        assert_eq!(input.snapshot().mouse_buttons.bits(), MouseButton::LEFT.bits());
+        assert!(matches!(
+            input.pop_event(),
+            Some(UiInputEvent::MouseDrag { pos, delta, buttons })
+                if (pos.x, pos.y, delta.x, delta.y) == (9, 12, 5, 7) && buttons.bits() == MouseButton::LEFT.bits()
+        ));
+        assert!(matches!(
+            input.pop_event(),
+            Some(UiInputEvent::KeyDown { key }) if key.bits() == KeyMode::SHIFT.bits()
+        ));
+        assert_eq!(input.snapshot().key_modes.bits(), KeyMode::SHIFT.bits());
+        assert!(matches!(input.pop_event(), Some(UiInputEvent::Text { text }) if text == "x"));
+        assert!(matches!(
+            input.pop_event(),
+            Some(UiInputEvent::MouseUp { button, .. }) if button.bits() == MouseButton::LEFT.bits()
+        ));
+        assert_eq!(input.snapshot().mouse_buttons.bits(), MouseButton::NONE.bits());
+        assert!(!input.has_pending());
+    }
+
+    #[test]
+    fn repeated_and_zero_valued_calls_are_not_coalesced() {
+        let mut input = Input::default();
+        input.scroll(0, 0);
+        input.scroll(0, 0);
+        input.text("");
+
+        assert!(matches!(input.pop_event(), Some(UiInputEvent::Scroll { .. })));
+        assert!(matches!(input.pop_event(), Some(UiInputEvent::Scroll { .. })));
+        assert!(matches!(input.pop_event(), Some(UiInputEvent::Text { text }) if text.is_empty()));
+        assert!(input.pop_event().is_none());
     }
 }

@@ -6,7 +6,8 @@ This is the sole authoritative UI-node migration plan. It supersedes the obsolet
 `UI-NODE-PLAN.md`. The following corrections and decisions are authoritative:
 
 1. `crate::Widget` remains the sole common widget execution contract, but this breaking migration
-   simplifies `Widget::update` to return `()`; typed widget state is the only leaf-event surface;
+   changes `Widget::update` to accept `Option<&UiInputEvent>` and return `()`; typed widget state is
+   the only application event surface;
 2. `WidgetState` is application-facing data owned and consumed by a concrete widget implementation.
    It is not a renamed widget execution trait;
 3. `Container` is a public subtrait of `Widget` for built-in and downstream custom containers,
@@ -44,7 +45,8 @@ This is the sole authoritative UI-node migration plan. It supersedes the obsolet
     recreating the root yields a new `RootHandle` with a fresh, never-reused `RootId`;
 14. this document is the only UI-node migration plan. It owns every still-applicable correctness
     defect from the removed `UI-NODE-PLAN.md`, including explicit constraints, one authoritative
-    input-dispatch stream, a two-layout frame pipeline, shared axis allocation, scrolling,
+    ordered input queue, one complete retained-tree update plus layout per dequeued input,
+    paint-only rendering, shared axis allocation, scrolling,
     disclosure, and
     window/transform boundary work;
 15. P1.2 temporarily compiles the file-dialog feature out so the legacy strong-handle leaf adapter
@@ -61,7 +63,14 @@ This is the sole authoritative UI-node migration plan. It supersedes the obsolet
     defaulted `Container::on_pointer_capture_lost` notification when the tree ends the lease.
     Ancestors control descendant eligibility only through `children_visible`; there is no
     `ContainerOption::RETAIN_POINTER_CAPTURE`, parent override, concrete-container downcast, or
-    state-to-tree callback.
+    state-to-tree callback;
+17. input forwarding APIs only enqueue ordered raw events. `Context::update_ui(dimensions)` first
+    synchronizes current layout, then drains those events without coalescing; every dequeued event
+    runs cross-root dispatch, one full eligible-tree `Widget::update`, target sanitation, and a
+    complete layout commit before the next event. An empty queue runs layout synchronization but
+    zero widget updates. `ContextFrame::render_ui` performs paint/display-list submission only and
+    never drains input, updates widgets, or lays out the tree. There is no timer, tick, or idle
+    widget-update path.
 
 All common runtime phases belong to `Widget`, including for containers. Public `Container: Widget`
 adds only opaque child visitation, layout, descendant-visibility, container-specific routed-input,
@@ -80,8 +89,10 @@ before the bulk migration so later items implement one ownership model.
 Breaking public API changes are expected. The migration does not preserve `widget_handle`, strong
 `WidgetHandle<T>`, generated builder identity, `UiNodeBuilder`, `UiNodeSet`, public widget `NodeId`,
 `ResourceState`, any frame-result lookup API, the `Widget::update -> ResourceState` return, or
-context-level `scroll_delta` accessors. Root reads move from Context to `RootState`, and root setters
-become fallible through `RootMutationError`.
+context-level `scroll_delta` accessors. It also does not preserve `WidgetInputEvents`, aggregate
+per-render input semantics, implicit widget update/layout inside `render_ui`, or idle per-frame
+`Widget::update` calls. Root reads move from Context to `RootState`, and root setters become fallible
+through `RootMutationError`.
 
 ## Document authority and behavior change control
 
@@ -183,7 +194,7 @@ Replace projection rebuilding with a persistent retained tree whose application-
 typed state:
 
 - `Widget` remains the object-safe runtime phase trait for both leaves and containers, with
-  `update` simplified to return `()`;
+  `update` simplified to accept one optional current event and return `()`;
 - public `Container: Widget` adds only the object-safe opaque-child-visitation, layout,
   descendant-visibility, routed-input, and local pointer-capture-lifecycle contract needed by
   container nodes;
@@ -206,7 +217,10 @@ typed state:
 - public container-state APIs never return a child or lend the complete mutable child collection;
 - same-cell conflicts between checked state-handle access operations return `None` rather than
   panicking;
-- unrelated state cells may be read or mutated at any time, including while a `ContextFrame` exists;
+- outside paint/custom-render callbacks, unrelated state cells may be read or mutated whenever
+  their checked borrow is available, including while a `ContextFrame` exists; after a
+  layout-affecting mutation the application drops any unsubmitted frame and calls
+  `Context::update_ui` again before paint;
 - node identity, focus, capture, routing, layout, and painting remain internal runtime concerns;
 - removing a node drops its concrete runtime and owned state cell and makes any exposed weak handle
   expire after active access closures release their temporary upgrades;
@@ -234,13 +248,13 @@ Preserve these capabilities:
 - explicit dynamic child insertion, removal, clearing, and replacement;
 - fixed, automatic, weighted, fractional, and remainder sizing;
 - framing, clipping, transforms, and backend-specific custom rendering;
-- same-frame update-to-layout-to-paint behavior;
+- input-transaction update-to-layout consistency followed by paint of the latest committed state;
 - focus, hover, pointer capture, and routed input;
 - two-axis and nested scrolling;
 - correct intrinsic auto-size without a numeric pseudo-unbounded probe;
-- one authoritative input-dispatch stream—ordinary interaction through routed events plus the
-  explicit cross-root popup-dismissal boundary—and exactly the required pre-input/post-update tree
-  layouts;
+- one authoritative ordered input-dispatch stream—ordinary interaction through routed events plus
+  the explicit cross-root popup-dismissal boundary—and a full retained-tree update/layout commit
+  after every dequeued event before the next event is hit-tested;
 - deterministic destruction and stale weak-handle behavior.
 
 ## Non-goals
@@ -267,6 +281,11 @@ This migration does not initially attempt to:
   owning `GridState`;
 - add generic per-node hide/show state or public node-visibility mutation;
 - add dirty propagation, retained paint fragments, a node registry, or an arena without measurement;
+- synthesize `Widget::update` calls from a timer, animation tick, idle frame, paint, or an empty
+  input queue;
+- perform input dispatch, widget update, layout, topology mutation, or application-state mutation
+  from `ContextFrame::render_ui`; paint/custom-render code may update rendering-only caches but must
+  otherwise be observational;
 - redesign keyboard focus, pointer activity, or cross-root focus ownership before the final retained
   tree and routed-input architecture exists; that work is deferred by the dedicated section above.
 
@@ -282,9 +301,10 @@ whether persistent ownership or an active upgrade remains when an application ge
 liveness fact; the ordinary access result stays `Option`, and `try_update_with` uses its error slot
 only to return ownership. Widget phase signatures have no borrow-failure channel, so application
 closures passed to `try_read`/`try_update`/`try_update_with` must not invoke
-`ContextFrame::render_ui` or another top-level retained traversal entry point. This is an explicit
-application-reentrancy precondition, not a frame lock: state access while a `ContextFrame` merely
-exists remains valid when the closure returns before rendering begins. Framework-authorized recursion through
+`Context::update_ui`, `ContextFrame::render_ui`, or another top-level retained traversal entry
+point. This is an explicit application-reentrancy precondition, not a frame lock: state access while
+a `ContextFrame` merely exists remains memory-safe, but a mutation after the last UI commit requires
+dropping that unsubmitted frame and committing again before render. Framework-authorized recursion through
 `Children::measure_child`, `ContainerLayoutCtx::layout_child`, and the opaque visitors is ordinary
 retained traversal and is explicitly exempt.
 
@@ -354,8 +374,9 @@ Repository facts that constrain the migration:
 - routed `UiInputEvent` values and raw `Input` are both interpreted: routing queues events, while
   `UiRuntime::interaction_for` separately derives hover/click/active/scroll state during update.
 - the window manager performs a pre-input layout, while `UiRuntime::update_paint_frame` performs an
-  unconditional pre-update repeat and then a post-update layout. The target requires only the
-  pre-input and post-update tree layouts.
+  unconditional pre-update repeat and then a post-update layout. The target replaces all three
+  frame-coupled passes with an explicit synchronization layout plus one full update/layout
+  transaction per queued input; rendering performs neither.
 - row/grid/stack/column intrinsic measurement and allocation currently use independent policy logic;
   row/grid measurement can disagree with the eventual track allocation.
 - `ContextFrame` already excludes direct Context method calls through Rust borrowing. It does not
@@ -456,7 +477,7 @@ pub trait Widget {
     fn update(
         &mut self,
         ctx: &mut WidgetUpdateCtx<'_>,
-        input: Vec<UiInputEvent>,
+        input: Option<&UiInputEvent>,
     );
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>);
 
@@ -467,7 +488,10 @@ pub trait Widget {
 
 Use the actual current default implementations for `effective_widget_opt` and `focus_policy`; the
 sketch omits their bodies only for brevity. `Widget::update` records any application-observable
-event directly in its typed associated state and returns no generic summary. Do not rename this
+event directly in its typed associated state and returns no generic summary. The option contains
+the one localized routed event assigned to this node for the current input transaction; every other
+eligible node receives `None`. There is no routed batch or `WidgetInputEvents` aggregation helper.
+Do not rename this
 trait, add state/mount identity methods to it, or create a second internal trait with the same
 responsibility.
 
@@ -477,6 +501,115 @@ invokes the concrete runtime directly. The current
 `Node::widget` constructs the `None` metadata path; public backend-typed
 `Node::custom_render(widget, CustomRenderHandle<B>)` supplies the `Some` path while keeping
 `CustomRenderKey` private.
+
+### Drain ordered input through complete update transactions and keep rendering paint-only
+
+**Decision needed: No — explicit plan-owner decision for P2.5 on 2026-07-31**
+
+The input/render coupling is removed at the Context boundary. Public `mousemove`, `mousedown`,
+`mouseup`, `scroll`, `keydown`, `keyup`, `keydown_code`, `keyup_code`, and `text` calls append one
+raw event to a private `VecDeque` in call order. They do not hit-test, mutate a tree, update a
+widget, lay out, paint, or collapse repeated events into one aggregate state. The queue retains the
+payload needed to apply pointer position, button/key held state, modifiers, text, and scroll in that
+exact order. Normalization occurs once when an event is popped; later phases never inspect the raw
+queue or reconstruct an order from final pressed/released bitsets.
+
+The event-loop-facing boundary is explicit:
+
+```rust
+while let Some(event) = event_pump.poll_event() {
+    forward_to_context(&mut context, event); // enqueue only
+}
+
+context.update_ui(window_dimensions);       // drain/update/layout; never paint
+observe_events_and_mutate_typed_state();
+context.update_ui(window_dimensions);       // optional layout-only sync; zero widget updates
+context.frame(frame_info).render_ui()?;      // paint/submit only
+```
+
+`Context::update_ui(dimensions)` requires strictly positive dimensions and validates them before
+touching the queue; invalid dimensions panic with an `update_ui dimensions must be positive`
+diagnostic, matching the existing invariant that renderable `FrameInfo` has positive dimensions.
+It performs one initial layout synchronization so root creation,
+viewport changes, auto-size, and application mutations made through weak state handles are reflected
+before the first pending input is hit-tested. It then drains the queue. For each dequeued event it
+runs this indivisible transaction:
+
+```text
+dequeue and normalize exactly one raw input event
+    -> sanitize targets against the currently committed tree
+    -> apply cross-root/modal/popup policy and choose at most one routed recipient
+    -> localize that event using the currently committed geometry
+    -> traverse every eligible retained node through Widget::update exactly once
+       (recipient: Some(event), all other eligible nodes: None)
+    -> finalize focus/capture transitions and sanitize targets/topology
+    -> measure and lay out every visible root, including auto-size/chrome normalization
+    -> publish that state and geometry as the committed basis for the next queued event
+```
+
+The full update is intentionally not target-only. A resize, scroll, disclosure toggle, option
+change, or topology change made while applying event N is laid out before event N+1 performs root
+selection or hit testing. Thus a later event lands against the UI produced by every earlier input,
+matching an SDL-style ordered event pump. A queue containing N events produces N full eligible-tree
+widget updates and N post-event layout commits, plus the one initial layout synchronization. An
+empty queue produces one layout synchronization and zero `Widget::update` calls. Events are not
+coalesced, reordered, or reconstructed; repeated motion, wheel, key, and text events remain distinct
+transactions.
+
+The initial layout is necessary because application state handles deliberately have no Context or
+dirty callback. That is the remaining explicit precondition rather than a hidden invalidation
+channel: after any layout-affecting state/topology/root/style/viewport mutation, the application
+must call `update_ui` before painting or forwarding another event that depends on the new geometry.
+Calling it with no pending input is layout synchronization, not an idle widget update. Setters and
+topology operations must leave their state internally valid immediately; they cannot rely on a
+future timer-driven `Widget::update` for reconciliation.
+
+`WidgetUpdateCtx` contains the router-owned interaction snapshot and event-time held state for the
+current transaction. Add the exact read-only methods `mouse_buttons() -> MouseButton`,
+`key_modes() -> KeyMode`, and `key_codes() -> KeyCode`; remove the synthetic
+`UiInputEvent::KeyState`/`KeyCodeState` variants because held state is not a second input event. The
+current localized event itself supplies pointer position/delta, pressed/released bits, text, and
+scroll. The context exposes no raw `Input`, queue, Context, focus mutation, or duplicate scroll
+field. Scroll exists only as the routed `UiInputEvent::Scroll` payload.
+Routing may decide consumption/capture and recipient selection but must not apply widget state; the
+single full update traversal applies it. Hover, click/active, focus, capture, and wheel behavior are
+therefore derived once from the same popped event.
+
+`ContextFrame::render_ui` requires a completed `update_ui` for the same dimensions and no newly
+queued input. Add the public unit variant `RenderError::UiUpdateRequired`; return it when no UI
+commit exists, the frame dimensions differ from the committed dimensions, or input was enqueued
+after that commit. Context/root/style operations known to Context also invalidate the commit;
+independent typed-state mutation follows the explicit caller precondition above because it cannot
+set that flag. On a valid commit, rendering clears/records the display list by traversing paint
+once, appends rendering-only chrome/custom operations, and submits that list once. It never calls
+`Widget::update`, layout,
+input dispatch, popup policy, or state reconciliation. Pending input or mismatched committed/frame
+dimensions is this documented update-before-render error, not a reason for rendering to update
+implicitly. Paint remains `&mut self` only for rendering caches and existing backend callback
+ergonomics; mutating application state, topology, interaction, or layout during paint/custom render
+is outside the contract because the type system cannot prevent mutation through independently held
+`Rc<RefCell<_>>` handles.
+
+Options considered and rejected:
+
+1. **One aggregate update and two layouts per rendered frame.** It loses input order and lets event
+   N+1 hit-test geometry that event N has already changed logically but not laid out.
+2. **Target-only event application between layouts.** It makes routing responsible for part of the
+   update semantics and skips cross-widget/container work the full update contract permits.
+3. **Timer/idle `Widget::update`.** It makes behavior depend on render cadence or an unrelated clock
+   and recreates input/render coupling. Empty-queue work is layout synchronization only.
+4. **Layout from `render_ui`.** It hides stale application mutations inside painting and makes the
+   render call an update boundary again.
+5. **Change `Widget::paint` to `&self` as mutation enforcement.** It would block legitimate
+   rendering-cache mutation but still could not prevent application-state mutation through an
+   independently held `Rc<RefCell<_>>` or `FnMut` custom renderer. Keep `&mut self` and make
+   observational paint a documented conformance rule.
+6. **Give weak state handles a dirty callback into Context.** It would couple application state to
+   mount/Context identity and recreate the callback/registry boundary this plan removes. The
+   explicit initial layout synchronization is the selected cost.
+7. **Pass `FrameInfo` into `update_ui`.** It would avoid repeating the dimensions value but couple
+   update/layout to render-only clear/backend information. Keep `Dimensioni` as the update input and
+   validate equality when the later `FrameInfo` is rendered.
 
 ### Keep `Container: Widget` public and `ContainerState` marker-only
 
@@ -657,14 +790,13 @@ new node at the same index.
 Every centralized transition away from an existing captured container schedules
 `on_pointer_capture_lost` if that runtime still belongs to the tree, including pointer release,
 local-retention rejection, ancestor gating, root hiding, explicit transient-target clear, or
-replacement by a new capture. Sanitation outside an active routing batch invokes it immediately.
-A routing-time transition clears tree ownership immediately but defers the notification until that
-target's queued `Widget::update` has consumed earlier drag/release events; otherwise the callback
-could erase the mode needed to apply the final queued drag. If the same runtime reacquires capture
-before its update, the obsolete pending notification is coalesced away and the ordered release/new
-pointer-down events establish its final local mode. The private pending-loss list stores only runtime
-IDs and is drained in update order; it is not an application event, result generation, public lease,
-or second capture owner.
+replacement by a new capture. Sanitation outside an input transaction invokes it immediately. A
+routing-time release clears tree ownership immediately, delivers that one release event to the old
+target during the transaction's full update, and invokes the loss hook immediately after that
+target's update. No second raw event can enter before this ordering completes, so the final drag or
+release cannot be erased prematurely. The transaction may retain at most one private
+`capture_loss_after_update` target; there is no routed-event batch, pending-loss list, loss
+coalescing, or same-transaction reacquisition sequence.
 
 If the node was removed, dropping its runtime is the cleanup and no callback is possible or
 required. The hook receives no ID, reason enum, parent, tree, or Context; it only lets the captured
@@ -673,10 +805,11 @@ captured target, never through an ancestor.
 
 Routing and `Widget::update` remain deliberately separated. `ContainerInputCtx::has_pointer_capture`
 is a read-only answer about the current container, not a handle or ID. It lets a special container
-route later drag/release events in the same ordered input batch after returning `Captured`, before
-its queued pointer-down is applied by `Widget::update`. Sanitation queries established capture
-before the batch and again after update; it does not call `retains_pointer_capture` in the gap
-between acquisition and the update that establishes the container's local mode.
+distinguish direct delivery to its already-captured surface from ordinary hit routing. A pointer-down
+that returns `Captured` is delivered during the same one-event full update; sanitation does not call
+`retains_pointer_capture` between acquisition and that update establishing the local mode. The
+transaction completes its update, sanitation, and layout before the next drag/release event can be
+popped.
 
 `ScrollAreaContainer` returns `scrolling_enabled && drag_axis.is_some()` and clears `drag_axis` from
 `on_pointer_capture_lost`. Disabling scrolling clears both fields needed for retention, so disabling
@@ -735,18 +868,19 @@ translation for descendants; the runtime intersects the viewport with the curren
 `set_content_size` and `set_child_overflow_propagation` update only the current node's derived layout
 state. None of these methods changes topology or returns a child.
 
-`ContainerInputCtx` exists because routing precedes the one per-frame `Widget::update` call and must
-immediately decide deepest-first propagation and pointer capture. Its default `route_widget` path
+`ContainerInputCtx` exists because routing precedes the current input transaction's full
+`Widget::update` traversal and must immediately decide deepest-first propagation and pointer
+capture. Its default `route_widget` path
 performs the same generic geometry/options/focus routing as
-a leaf over the current node's complete content rectangle and queues the accepted event for the
-inherited `Widget::update` batch. `route_widget_in_rect` applies the same rules to a supplied
+a leaf over the current node's complete content rectangle and assigns the accepted event to that
+node for this transaction's inherited `Widget::update`. `route_widget_in_rect` applies the same rules to a supplied
 container-local sub-rectangle, intersected with the active clip; pointer coordinates remain in the
 container's local content coordinate space. `has_pointer_capture` reports only whether the current
-container is the tree's captured target so special routing can continue an acquired gesture before
-queued input updates local state. Disclosure uses sub-rectangle routing for the header, and scroll
+container is the tree's captured target so special routing can continue an established gesture.
+Disclosure uses sub-rectangle routing for the header, and scroll
 area uses it for viewport/scrollbar hit regions. A special container may instead return `Ignored` at
 a scroll boundary. Routing never applies the widget/container state change itself. The later
-`Container::<Widget>::update` consumes the queued event and performs the mutation.
+`Container::<Widget>::update` consumes its optional current event and performs the mutation.
 
 Removing this hook would leave nowhere to return `Ignored`/`Consumed`/`Captured` before update:
 `Widget::update` is deliberately one-way and routing has already selected the recipient. Doing so
@@ -771,8 +905,9 @@ than exported.
 Private retained-tree traversal obtains `&dyn Widget`/`&mut dyn Widget` from either `NodeKind`
 variant's private runtime box and uses exactly one common Widget
 dispatch path per requested measurement, update, or paint invocation. This is not a promise of one
-`Widget::measure` call per frame: the required pre-input and post-update layouts, plus an explicitly
-bounded scroll-constraint convergence, may issue multiple legitimate measurement requests. The
+`Widget::measure` call per application loop: the initial synchronization layout and each required
+post-input layout, plus an explicitly bounded scroll-constraint convergence, may issue multiple
+legitimate measurement requests. The
 invariant forbids parallel leaf/container phase paths and duplicate remeasurement inside one
 request. Traversal branches to `Container` only for layout, scoped child recursion,
 container-owned descendant visibility, special input routing/current-owner inspection, and the
@@ -1047,39 +1182,38 @@ briefly keeping the cell allocation alive would require another global or per-no
 The observable contract is instead that no new successful access begins after both the node owner
 and all already-active access operations are gone.
 
-### Application state-access closures are not top-level rendering callbacks
+### Application state-access closures are not top-level traversal callbacks
 
 Retained traversal is Context-local and never crosses Context boundaries. Entering a top-level
-retained render for the same Context that owns a borrowed state cell from inside application
+retained update, layout, or paint for the same Context that owns a borrowed state cell from inside application
 `WidgetStateHandle::try_read`/`try_update`/`try_update_with` is explicitly unsupported. The runtime
 cannot return the public handle's `None`/`Err(input)` outcome through `Widget::measure`, `update`, or
 `paint`. Skipping a borrowed widget or painting stale data is also not an acceptable fallback.
 
-This sequence is supported because the state borrow ends before traversal starts:
+This sequence is supported because mutation and its borrow end before the explicit UI commit:
 
 ```rust
-let frame = ctx.frame(frame_info);
-
 checkbox_state
     .try_update(CheckboxState::check)
     .expect("checkbox state unavailable");
 
-frame.render_ui()?;
+ctx.update_ui(frame_info.dimensions());
+ctx.frame(frame_info).render_ui()?;
 ```
 
-This sequence violates the API precondition because `render_ui` runs while the mutable state borrow
-is still held by the closure:
+This sequence violates the API precondition because retained traversal begins while the mutable
+state borrow is still held by the closure:
 
 ```rust
 checkbox_state.try_update(|checkbox| {
     checkbox.check();
-    ctx.frame(frame_info).render_ui() // unsupported reentrant rendering
+    ctx.update_ui(frame_info.dimensions()) // unsupported reentrant traversal
 });
 ```
 
 Do not add a FrameGate, Context token, state-access depth counter, or global “currently borrowed”
 flag to detect this condition. Built-in runtimes should use a small internal state-borrow helper that
-panics with a precise diagnostic if an unsupported reentrant render reaches a borrowed state cell;
+panics with a precise diagnostic if unsupported reentrant traversal reaches a borrowed state cell;
 external custom widgets and containers are bound by the same documented precondition. Ordinary
 handle-to-handle borrow conflicts continue to return `None` without invoking the nested closure.
 
@@ -1088,18 +1222,19 @@ may retain its current checked state borrow while calling `Children::measure_chi
 `ContainerLayoutCtx::layout_child`, or supplying that same state's collection through an active
 opaque visitor. Those capabilities are constructed only by the framework, recurse into distinct
 owned child state cells, and are required by the public custom-container contract. Reentering
-`ContextFrame::render_ui` or another root traversal from those methods remains unsupported.
+`Context::update_ui`, `ContextFrame::render_ui`, or another root traversal from those methods remains
+unsupported.
 
 ```rust
 fn runtime_read<T>(cell: &RefCell<T>) -> Ref<'_, T> {
     cell.try_borrow().expect(
-        "widget state is already mutably borrowed; rendering from a state-access closure is unsupported",
+        "widget state is already mutably borrowed; retained traversal from a state-access closure is unsupported",
     )
 }
 
 fn runtime_update<T>(cell: &RefCell<T>) -> RefMut<'_, T> {
     cell.try_borrow_mut().expect(
-        "widget state is already borrowed; rendering from a state-access closure is unsupported",
+        "widget state is already borrowed; retained traversal from a state-access closure is unsupported",
     )
 }
 ```
@@ -1180,11 +1315,12 @@ The public `Container: Widget` runtime supplies its private field only to framew
 visitors or install an extraction closure, so the generic runtime boundary also cannot be used to
 swap whole attached collections. A traversal borrow of a container prevents that same container's
 topology from changing until the visitor returns. Another available container may change, and
-phase/traversal order determines whether its old or new children participate in the current frame.
+phase/traversal order determines whether its old or new children participate in the current input
+transaction.
 There is no snapshot or rollback: each phase renders or processes the state it observes when it
-reaches that node. Work already completed in the frame is not repeated except for the scheduled
-post-update layout. Regardless of same-frame observation order, the next ordinary frame must be
-fully stable against the successful mutation.
+reaches that node. Work already completed in the update traversal is not repeated; the mandatory
+post-event layout observes the resulting topology. Before paint or the next geometry-dependent
+input, the next explicit UI commit must be fully stable against every successful mutation.
 
 Public constructors for row, column, grid, stack, disclosure, and scroll area return
 `(WidgetStateHandle<SpecificContainerState>, Node)`. Each concrete container runtime owns its state
@@ -1319,8 +1455,11 @@ Containers may inspect `child_policy` for measurement and slot planning, but mus
 then let generic traversal apply it a second time. There is no mounted child-policy setter; changing
 policy requires constructing and inserting a replacement node. Grid span is different because it
 belongs to the parent-child edge: `GridState::set_span` updates it without replacing the child.
-State mutations made before pre-input layout affect that frame; mutations during update affect
-post-update layout; mutations after paint become fully visible on the next frame.
+State mutations made before `Context::update_ui` affect its initial synchronization layout and the
+first queued input. Mutations during an input transaction affect that transaction's post-event
+layout and therefore the next queued input. Mutations made after `update_ui` require another
+layout-only `update_ui` call before paint or geometry-dependent input; rendering never reconciles
+them implicitly.
 
 ### Owning node and internal identity
 
@@ -1492,10 +1631,10 @@ values and observations live in the widget-specific state:
 Each consumable event kind is a private saturating `u32` pending count. Public
 `take_changed() -> bool` or `take_submitted() -> bool` consumes exactly one occurrence and returns
 `false` only when none is pending. Events therefore persist across frames and hidden periods until
-consumed. A built-in records at most one occurrence of each semantic event kind per `Widget::update`
-invocation: multiple low-level edits in one routed batch are one `changed` occurrence, while
-occurrences from separate updates accumulate instead of collapsing. The fixed event API and
-recording points are:
+consumed. A built-in records at most one occurrence of each semantic event kind per input-driven
+`Widget::update` invocation. Because one real input produces one update traversal, distinct raw
+events are never collapsed into one semantic occurrence; occurrences from separate input
+transactions accumulate. The fixed event API and recording points are:
 
 | State | Public event API | Recording point |
 |---|---|---|
@@ -1698,7 +1837,8 @@ coordinates z-order, front-root selection, backend viewport state, and transient
 - `set_root_rect(root, rect)` and `set_root_size(root, size)` mutate `RootState` through
   `WindowEntry.root_state` and emit no typed event. They preserve an in-progress move/resize, with
   the next captured delta applied from the new programmatic rectangle. If `AUTO_SIZE` is enabled,
-  the next pre-input measure replaces width/height but preserves the programmatic origin;
+  the next `update_ui` synchronization measure replaces width/height but preserves the
+  programmatic origin;
 - `set_root_options(root, options)` mutates the same authoritative state silently. Enabling
   `NO_TITLE` clears a current move; enabling `NO_RESIZE` or `AUTO_SIZE` clears a current resize; the
   matching tree capture is released before another pointer event routes;
@@ -1707,8 +1847,9 @@ coordinates z-order, front-root selection, backend viewport state, and transient
 - `set_root_visible(root, true)` raises the root. A window/dialog keeps its rectangle. Before a
   hidden popup is shown, any other visible popup in that Context is silently hidden and sanitized
   without recording a submission. The new popup is repositioned at the current pointer with a
-  `1 x 1` seed rectangle, is marked `just_opened`, and receives its content-derived auto-size before
-  input. Showing keeps application state and pending events but does not restore cleared transient
+  `1 x 1` seed rectangle and receives its content-derived auto-size during the next `update_ui`
+  synchronization before input drains. Showing keeps application state and pending events but does
+  not restore cleared transient
   targets. Switching popups is atomic: Context resolves both entries and obtains the required
   checked state borrows before changing either; if either state is borrowed, the operation returns
   `RootMutationError::Borrowed` and leaves both visibility states unchanged;
@@ -1722,8 +1863,8 @@ coordinates z-order, front-root selection, backend viewport state, and transient
 Chrome events use the same private saturating `u32` counters and one-occurrence `take_*` contract as
 built-in widget events:
 
-- `take_submitted` records a left-button press in the title-close rectangle or the first pointer-
-  button press outside an eligible popup after its `just_opened` suppression. Either action first
+- `take_submitted` records a left-button press in the title-close rectangle or a pointer-button
+  press outside an eligible visible popup. Either action first
   clears active chrome interaction/capture, hides the retained root, and then leaves one pending
   submission for the application to consume;
 - `take_changed` records at most one occurrence per `RootChromeContainer::update` invocation when a
@@ -1735,8 +1876,8 @@ built-in widget events:
   destruction clear them;
 - a left press starts move/resize even if no delta follows. Movement applies the routed pointer
   delta with saturating coordinate arithmetic; resize applies it with the shared outer minimum-size
-  clamp. One update increments `pending_changes` only if its final rectangle differs from its entry
-  rectangle, regardless of how many low-level move events were batched;
+  clamp. Each input-driven update increments `pending_changes` only if that one event changes the
+  rectangle; distinct move events run distinct updates and accumulate distinct occurrences;
 - programmatic geometry, visibility, z-order, options, creation, and destruction never increment a
   pending event count;
 - events persist across frames and hidden periods until consumed, and occurrences from separate
@@ -1749,12 +1890,12 @@ interaction path. Its phase contract is exact:
 |---|---|
 | `Widget::measure` | measure the one application child through `Children::measure_child`, add title/frame/body extents, and enforce the outer minimum size with explicit constraints |
 | `Container::layout` | use the shared pure chrome-geometry helper to derive title, close, body, and resize rectangles, then lay out the application child in the body rectangle |
-| `Container::route_input` | on left press, give close/title/resize regions precedence, queue the chrome event and return `Consumed` for close or `Captured` for title/resize; consume other pointer presses over chrome without starting an action; return `Ignored` for body events so ordinary child routing descends into the application node |
+| `Container::route_input` | on left press, give close/title/resize regions precedence, assign the chrome event to this transaction and return `Consumed` for close or `Captured` for title/resize; consume other pointer presses over chrome without starting an action; return `Ignored` for body events so ordinary child routing descends into the application node |
 | `Container::retains_pointer_capture` | report whether `RootInteraction` is currently `Moving` or `Resizing`; the tree clears its capture if this local mode was invalidated by options, hiding, release, dismissal, or sanitization |
 | `Container::on_pointer_capture_lost` | clear `RootInteraction` when the tree ends capture because of release, hiding, gating, transient-target sanitation, or replacement; receive no target ID or loss reason |
-| `Widget::update` | consume the routed chrome events, hide/submit on close, enter or leave moving/resizing state, mutate the rectangle during captured drag, and record a change only for an actual user-driven rectangle change |
+| `Widget::update` | consume the optional routed chrome event for this transaction, hide/submit on close, enter or leave moving/resizing state, mutate the rectangle during captured drag, and record a change only for an actual user-driven rectangle change |
 | `Widget::paint` | paint the window/frame background underlay before descendants from the shared geometry; ordinary traversal paints the application child in the body clip |
-| `Container::children_visible` | return the current `RootState::is_visible` value, allowing a close handled by the parent update to suppress application-child traversal in that same frame |
+| `Container::children_visible` | return the current `RootState::is_visible` value, allowing a close handled by the parent update to suppress application-child traversal in that same input transaction |
 
 One pure `root_chrome_geometry` helper is the source of truth for measure/layout, chrome hit-testing,
 underlay/overlay paint, outer/body conversion, min-size enforcement, and backend viewport bounds.
@@ -1801,12 +1942,13 @@ After descendant paint, the window compositor reads `RootState` once and appends
 close icon, and resize affordance as a post-tree overlay using that same helper. This preserves the
 required z-order without synthetic chrome nodes or a second chrome interaction/update path.
 
-Before pre-input layout, a visible `AUTO_SIZE` root is measured through the internal chrome node with explicit
-constraints and its width/height are silently normalized in `RootState`; this is not a user change
-event. The frame then lays out with that authoritative rectangle, routes and updates chrome through
-the tree, and uses post-update layout for any user-mutated rectangle. If the container's own update
-hides the root on close, traversal rechecks root visibility before descending, so application-child
-update/paint and unnecessary post-layout are skipped for that root.
+During the initial `update_ui` synchronization and every post-event layout commit, a visible
+`AUTO_SIZE` root is measured through the internal chrome node with explicit constraints and its
+width/height are silently normalized in `RootState`; this is not a user change event. Each event
+routes and updates chrome through the tree, then the mandatory post-event layout commits any
+user-mutated rectangle before another event. If the container's own update hides the root on close,
+traversal rechecks root visibility before descending, so application-child update and layout are
+skipped for that root; the later paint-only render also skips it.
 
 Generic `WidgetTree` capture owns title drag and resizing just as it owns container capture. The
 captured private root runtime ID receives matching left-button drag/release events outside its
@@ -1820,19 +1962,23 @@ pointer input. Chrome hit regions outrank the body only within the front eligibl
 cross-root/modal gating by the window manager.
 
 Popup outside-click is necessarily detected at that cross-root boundary rather than by ordinary
-inside-tree hit routing. The pointer press that opens/shows a popup is ignored for dismissal through
-`WindowEntry.just_opened`; that flag clears after the popup's first eligible frame. On a later press
-outside it, before routing that press elsewhere, the window manager upgrades its private weak
-`RootState` handle and invokes a framework-private dismissal operation that clears active chrome
-state/capture, hides the popup, increments the same pending-submission counter, and sanitizes that
-tree's transient targets. This is the sole special boundary hook; it does not create a second result
-or event mechanism. Failure to upgrade means the entry is internally inconsistent and is an
-invariant panic, not a silently missing application event.
+inside-tree hit routing. There is no `just_opened` frame heuristic: the input transaction that
+caused application code to show a popup has already completed before the application observes its
+typed event, and therefore cannot be delivered again. On any later dequeued press outside the
+visible popup, before routing that same press elsewhere, the window manager upgrades its private
+weak `RootState` handle and invokes a framework-private dismissal operation that clears active
+chrome state/capture, hides the popup, increments the same pending-submission counter, and sanitizes
+that tree's transient targets. If application code shows a popup while older input is still queued,
+those queued events are intentionally subsequent UI input and receive normal dismissal/routing;
+callers that are reacting to a UI event show it only after that event has drained. This is the sole
+special boundary hook; it does not create a second result or event mechanism. Failure to upgrade
+means the entry is internally inconsistent and is an invariant panic, not a silently missing
+application event.
 
 At most one popup is visible in a Context. Showing popup B while popup A is visible silently hides A,
 clears A's transient targets and capture, preserves A's state and pending events, and records no
 submission because the transition is programmatic. B then receives the ordinary pointer placement,
-z-order, and `just_opened` behavior. Nested popup ownership and dismissal form a separate future
+z-order, and next `update_ui` layout synchronization. Nested popup ownership and dismissal form a separate future
 feature and are not inferred from multiple independent popup roots. A later press outside the sole
 visible popup dismisses it once, then routes that same press once to the highest eligible remaining
 root; the popup cannot receive both a boundary dismissal and an inside-tree chrome event for that
@@ -1857,21 +2003,21 @@ through Context/`WindowEntry` policy.
 `Container::children_visible` is a narrower traversal gate used by containers such as Disclosure:
 when it returns `false`, descendants remain owned and their weak handles remain live, but they make
 no measurement/layout contribution and receive no input, update, paint, or custom-render call.
-Focus, hover, capture, and queued routed events targeting the hidden descendant subtree are cleared
+Focus, hover, capture, and any current transaction recipient targeting the hidden descendant subtree are cleared
 at the next safe sanitization point and are not automatically restored when traversal resumes. The
 container itself still measures, updates, and paints. Its own `Widget::measure`/`layout`
 implementation is responsible for omitting hidden descendants consistently with the traversal gate.
 
 ### Runtime lifecycle after direct topology mutation
 
-Focus, hover, pointer capture, and routed events remain private `RuntimeNodeId` values in the owning
+Focus, hover, pointer capture, and the current routed recipient remain private `RuntimeNodeId` values in the owning
 `WidgetTree`. Direct state mutation means removal does not call Context cleanup synchronously.
 Instead, every target use is liveness-checked against the retained tree, and the normal frame
 boundary sanitizes targets that no longer exist before routing new input.
 
 Required rules:
 
-- a missing focus/capture/routed target is cleared and never redirected;
+- a missing focus/capture/current-event target is cleared and never redirected;
 - IDs are never reused, so stale state cannot target a replacement node;
 - there are no public per-node or per-root result entries to preserve or transfer; all application
   observation lives in typed state;
@@ -1882,7 +2028,7 @@ Required rules:
 - cross-subtree topology mutation is observed according to deterministic traversal order.
 
 This is safe without a registry or Context callback because runtime targets are scalar IDs, not
-pointers. Focused tests must pin removal-before-frame, removal-during-update in another subtree,
+pointers. Focused tests must pin removal-before-`update_ui`, removal-during-update in another subtree,
 capture removal, and replacement behavior.
 
 ### Authoritative ownership
@@ -1975,7 +2121,8 @@ This is a compact audit index of the normative Target architecture, not an indep
 change behavior. Amend the defining contract and its P0 criterion first, then update this index.
 
 1. `Widget` is the only common runtime phase contract for leaves and containers, and its final
-   `update` method returns `()` rather than a generic leaf result.
+   `update` method accepts `Option<&UiInputEvent>` and returns `()` rather than a routed batch or
+   generic leaf result.
 2. Public `Container: Widget` adds only opaque child visitation, layout, descendant visibility,
    special routed-input behavior/current-owner inspection, and the defaulted local
    `retains_pointer_capture`/`on_pointer_capture_lost` hooks and is implementable downstream; it
@@ -1993,9 +2140,10 @@ change behavior. Amend the defining contract and its P0 criterion first, then up
    no Context or node identity.
 7. State access uses non-escaping closures and checked per-cell borrows; `try_update_with` preserves
    and returns owned input if upgrade/borrow fails before closure invocation.
-8. `ContextFrame` existence has no effect on state or container-state access, but a state-access
-   closure must finish before retained rendering/traversal begins in the same Context; retained
-   traversal never crosses Context boundaries.
+8. `ContextFrame` existence has no effect on state or container-state borrow eligibility, but a
+   state-access closure must finish before retained update/layout/paint traversal begins in the same
+   Context. Layout-affecting mutation after the last UI commit requires dropping an unsubmitted
+   frame and calling `Context::update_ui` again; retained traversal never crosses Context boundaries.
 9. A same-cell conflict between checked handle accesses returns `None`; runtime phase access
    encountered through unsupported top-level render reentrancy may panic with the documented
    diagnostic. Framework-authorized child measurement/layout/visitor recursion is exempt.
@@ -2038,11 +2186,13 @@ change behavior. Amend the defining contract and its P0 criterion first, then up
 24. Container layout state may change after mounting only through the fixed Row/Grid/Stack/Scroll
     APIs; attached `Policy` never changes, while Grid-owned `GridSpan` may change through
     `GridState::set_span` without changing child identity.
-25. Raw input is normalized once. Ordinary retained interaction derives only from routed events;
-    cross-root popup outside dismissal is the sole boundary exception and consumes that same ordered
-    pointer stream before routing it onward. Each normal frame performs pre-input and post-update
-    tree layouts only, and intrinsic layout uses explicit bounded/unbounded constraints plus shared
-    axis allocation.
+25. Raw input is queued and normalized once in call order. Ordinary retained interaction derives
+    only from the one current routed event; cross-root popup outside dismissal is the sole boundary
+    exception and consumes that same event before routing it onward. `Context::update_ui` performs
+    one synchronization layout and, for every dequeued input, one full eligible-tree update followed
+    by one complete layout before the next event. An empty queue performs zero widget updates.
+    `ContextFrame::render_ui` paints/submits only. Intrinsic layout uses explicit bounded/unbounded
+    constraints plus shared axis allocation.
 26. Root chrome uses the same routed-input, update, capture, typed-state, and pending-event machinery
     as other containers. Cross-root popup dismissal is the only private boundary injection and
     records into that same `RootState`.
@@ -2190,11 +2340,12 @@ explicit decision before changing the criterion.
 
   **Decision needed: No — protected wanted-behavior baseline**
 
-  **Implementation owner: P1.0, P1.1, P1.3, P2.3, and the P2.4 capture-lifecycle amendment**
+  **Implementation owner: P1.0, P1.1, P1.3, P2.3, P2.4, and the P2.5 input-transaction amendment**
 
   **Wanted behavior and contract**
 
-  Keep `Widget` as the sole common runtime phase trait but change `Widget::update` to return `()`.
+  Keep `Widget` as the sole common runtime phase trait but change `Widget::update` to accept
+  `Option<&UiInputEvent>` and return `()`.
   Add marker `WidgetState` and `WidgetParameters`, `WidgetStateOwner: Widget`, and associated-type
   `WidgetBuilder`. A builder associates `Parameters` with one concrete `W: WidgetStateOwner` and
   `WidgetBuilder::create_widget` returns that runtime directly. The concrete runtime privately owns
@@ -2227,8 +2378,8 @@ explicit decision before changing the criterion.
 
   **Acceptance tests**
 
-  - Compile-time signature tests pin the public `Widget` methods/defaults and prove `update` returns
-    `()` with no generic result summary.
+  - Compile-time signature tests pin the public `Widget` methods/defaults and prove `update` takes
+    `Option<&UiInputEvent>` and returns `()` with no routed batch or generic result summary.
   - `CheckboxState` can be mutated without exposing measure/update/paint.
   - Concrete `Checkbox` owns its state `Rc` and dispatches after direct generic boxing with no erased
     state-handle trait or parallel owner wrapper.
@@ -2256,8 +2407,8 @@ explicit decision before changing the criterion.
     ordinary capture valid and make loss notification a no-op, and neither hook can acquire,
     transfer, inspect, or clear the tree-owned capture ID.
   - `ContainerInputCtx::has_pointer_capture` reports only whether the current container owns tree
-    capture, allowing same-batch drag/release routing before queued pointer-down update; it exposes
-    no ID and cannot mutate capture.
+    capture, allowing an established captured gesture to distinguish direct delivery from ordinary
+    hit routing; it exposes no ID and cannot mutate capture.
   - Public API/source checks find no `ContainerOption::RETAIN_POINTER_CAPTURE`, parent capture
     override, concrete-container downcast, or state-to-tree/Context capture callback.
 
@@ -2284,13 +2435,22 @@ explicit decision before changing the criterion.
   The plan owner explicitly selected the defaulted public
   `Container::retains_pointer_capture` and `Container::on_pointer_capture_lost` hooks as the missing
   lifecycle half of `ContainerInputResult::Captured`, plus the current-owner-only
-  `ContainerInputCtx::has_pointer_capture` query needed by route-before-update batching. P2.4 adds
+  `ContainerInputCtx::has_pointer_capture` query then needed by route-before-update batching. P2.4 added
   that narrow surface after the initial public container contract: `WidgetTree` keeps sole ownership
   of the capture ID, the captured container reports and clears only its private local interaction,
   and ancestors retain only their existing `children_visible` subtree-gating authority. A dynamic
   `ContainerOption`, parent-controlled retention, routing-as-validity-probe, synthetic input event,
   and concrete downcast are rejected by the normative decision above. This amendment changes no
   common `Widget` phase and adds no second container phase.
+
+  **P2.5 input-transaction amendment (2026-07-31)**
+
+  The plan owner replaced per-render routed batching with one complete update/layout transaction per
+  queued input. `Widget::update` therefore takes `Option<&UiInputEvent>`: exactly the routed
+  recipient gets the one localized event and all other eligible nodes get `None`. P2.5 removes the
+  batch helper and batching-specific capture deferral/coalescing machinery. The scoped capture bool
+  remains useful only to distinguish an already-captured direct delivery; it is no longer a bridge
+  across multiple events before update.
 
 - [x] **P0.2 — Freeze the runtime-owned weak-state contract**
 
@@ -2342,7 +2502,7 @@ explicit decision before changing the criterion.
   `Ok(closure_result)` on success or the exact uncommitted `Err(input)` on either unavailable path.
   `is_alive` separately reports the allocation-liveness fact; remove `replace` and expose no public
   access-error or failure-wrapper type. Document that access closures may not invoke retained
-  traversal/rendering, and use the shared internal runtime-borrow diagnostic for built-ins instead
+  update/layout/paint traversal, and use the shared internal runtime-borrow diagnostic for built-ins instead
   of adding a frame/state-access gate. The application top-level-render prohibition explicitly
   exempts framework-created child measurement/layout/visitor recursion.
 
@@ -2374,11 +2534,13 @@ explicit decision before changing the criterion.
   - `try_update_with(node, ...)` returns that exact unmounted node as `Err(node)` for either expired
     ownership or a live borrow conflict without invoking the closure; successful access moves it
     once, and an invalid `insert` returns it from the inner operation.
-  - State access behaves identically before, during, and after a `ContextFrame` when borrow state is
-    identical and the access closure completes before `render_ui` begins.
-  - Rendering any retained root of the same Context from inside `try_read`/`try_update` is documented
-    as unsupported, and a built-in runtime reports a precise invariant panic rather than skipping
-    the widget or producing stale output. Retained traversal never crosses Context boundaries.
+  - Checked borrow outcomes are identical before, during, and after a `ContextFrame` when borrow
+    state is identical. A layout-affecting mutation after the last UI commit requires dropping an
+    unsubmitted frame and calling `update_ui` again before paint.
+  - Updating, laying out, or rendering any retained root of the same Context from inside
+    `try_read`/`try_update` is documented as unsupported, and a built-in runtime reports a precise
+    invariant panic rather than skipping the widget or producing stale output. Retained traversal
+    never crosses Context boundaries.
   - A downstream container performs authorized nested `Children::measure_child`,
     `ContainerLayoutCtx::layout_child`, and visitor traversal while its parent state borrow is active
     without triggering the top-level-reentrancy diagnostic.
@@ -2476,10 +2638,11 @@ explicit decision before changing the criterion.
 
   Successful direct removal or replacement drops the affected `Node` owner immediately. Its weak
   widget/container state handles expire after any already-active access upgrades finish. Private
-  focus, hover, capture, and queued routed targets are checked against the retained tree before use
+  focus, hover, capture, and the current routed recipient are checked against the retained tree before use
   and sanitized at the next safe boundary; a stale target is cleared, never redirected, and a
   replacement at the same index does not inherit it. Regardless of which cross-container mutation
-  a current traversal has already observed, the next ordinary frame is fully stable.
+  a current traversal has already observed, its post-event layout and the next explicit UI commit
+  are fully stable.
 
   The following target code is illustrative of the concrete construction and mutation contract:
 
@@ -2566,7 +2729,8 @@ explicit decision before changing the criterion.
     non-live and return `None` after any active access upgrade ends.
   - Same-container mutation during its traversal returns `None` without panic.
   - Mutation of another available container follows traversal order: current phases process the
-    state they observe without rollback, and the next ordinary frame is fully stable.
+    state they observe without rollback, and the transaction's layout/next explicit UI commit is
+    fully stable.
   - Marker `ContainerState` has no methods, and public `Children` has no direct node iterator or API
     yielding an attached `Node`, `&Node`, or `&mut Node`.
   - Compile-fail tests prove `Children` is not `Clone`; built-in state handles cannot obtain
@@ -2580,7 +2744,7 @@ explicit decision before changing the criterion.
     must not expose attached collection/node extraction or reparenting, and that the framework
     cannot type-enforce those obligations across downstream safe APIs and the two object-safe calls.
   - No topology method accepts Context or stores Context identity.
-  - Removing or replacing a focused, hovered, captured, or queued-event target drops its owner,
+  - Removing or replacing a focused, hovered, captured, or current-event target drops its owner,
     clears the stale private target at the next safe boundary, never redirects it, and does not
     transfer interaction state to a replacement at the same index.
   - The atomic-batch downstream compile test constructs Column and Disclosure from their completed
@@ -2655,9 +2819,10 @@ explicit decision before changing the criterion.
   Every pending event counter starts at zero. Recording uses `saturating_add(1)`, so `u32::MAX`
   remains `u32::MAX` rather than wrapping. A `take_*` call at zero returns `false` without changing
   state; otherwise it subtracts exactly one and returns `true`. Change and submission counters are
-  independent: one `Widget::update` may record one occurrence of each kind, but never more than one
-  occurrence of the same semantic kind regardless of how many low-level inputs contributed to that
-  update. Pending occurrences remain in the strongly owned state across frames, hidden roots, and
+  independent: one input-driven `Widget::update` may record one occurrence of each kind, but never
+  more than one occurrence of the same semantic kind. Exactly one raw input drives each update
+  traversal, so separate input events are never collapsed and may record separate occurrences.
+  Pending occurrences remain in the strongly owned state across render calls, hidden roots, and
   gated descendants until consumed or the owner is destroyed.
 
   Built-ins absent from the fixed event table expose no generic interaction event. In particular,
@@ -2737,11 +2902,11 @@ explicit decision before changing the criterion.
   - Every change/submission listed in the fixed event table is observed through its typed state.
     Zero-count reads are stable, each successful `take_*` consumes exactly one occurrence, separate
     event kinds remain independent, and a test-only maximum counter proves saturation without wrap.
-  - Multiple low-level inputs contributing to one update produce one semantic occurrence, while
-    occurrences from separate updates accumulate and require separate `take_*` calls. An update
-    that produces both change and submission records one independently consumable occurrence of
-    each kind.
-  - Unconsumed occurrences survive ordinary frames, root hiding/showing, and descendant gating;
+  - Each real input produces a separate full update traversal. One such invocation records at most
+    one occurrence of each semantic kind, while occurrences from separate queued inputs accumulate
+    and require separate `take_*` calls. An invocation that produces both change and submission
+    records one independently consumable occurrence of each kind.
+  - Unconsumed occurrences survive update/render calls, root hiding/showing, and descendant gating;
     destruction drops them with their owning state rather than publishing a final generic result.
   - Programmatic setters are silent; tests cover every setter plus Combo's documented
     `update_items` clamp exception and silent direct `select`.
@@ -2786,6 +2951,13 @@ explicit decision before changing the criterion.
   P0.4 intentionally changes no production API: its typed-event, API-removal,
   compile-fail, application-migration, and documentation criteria become executable and green in
   P1.1/P2.5/P3.0-P3.2.
+
+  **P2.5 input-transaction amendment (2026-07-31)**
+
+  The plan owner removed routed batching. The “at most one occurrence per update” rule now applies
+  to one real input transaction, and distinct queued inputs always run distinct updates and may
+  accumulate distinct pending occurrences. This changes no counter API, saturation rule,
+  application observation surface, or programmatic-setter silence.
 
 - [x] **P0.5 — Freeze the process-unique private runtime identity contract**
 
@@ -2881,7 +3053,7 @@ explicit decision before changing the criterion.
       id: RootId,
       root_state: WidgetStateHandle<RootState>, // private weak clone
       tree: WidgetTree,
-      // Root kind, z-order, just-opened, and backend viewport policy.
+      // Root kind, z-order, and backend viewport policy.
   }
 
   struct WidgetTree {
@@ -2889,7 +3061,7 @@ explicit decision before changing the criterion.
       focus: Option<RuntimeNodeId>,
       hover: Option<RuntimeNodeId>,
       capture: Option<RuntimeNodeId>,
-      routed_events: HashMap<RuntimeNodeId, Vec<UiInputEvent>>,
+      current_event: Option<(RuntimeNodeId, UiInputEvent)>,
   }
   ```
 
@@ -2907,9 +3079,10 @@ explicit decision before changing the criterion.
   }
   ```
 
-  The same liveness validation applies to `hover` and every key in `routed_events`. A missing hover
-  target is cleared, a missing capture/focus target is cleared before it can direct another event,
-  and queued batches for missing nodes are discarded rather than delivered or transferred. Tree
+  The same liveness validation applies to `hover` and the optional `current_event` recipient. A
+  missing hover target is cleared, a missing capture/focus target is cleared before it can direct
+  another event, and a current event for a missing node is discarded rather than delivered or
+  transferred. Tree
   membership is checked by retained-tree traversal; do not add a node registry merely to validate
   these private scalar targets.
 
@@ -2937,10 +3110,11 @@ explicit decision before changing the criterion.
     scenario and tests must not mutate or reset the process-global allocator; a local allocator
     helper may cover the arithmetic boundary if useful.
   - State handles contain no ID and can mutate state regardless of owning Context.
-  - Each `WindowEntry`'s `WidgetTree` owns its focus, hover, capture, and routed-event targets; no
+  - Each `WindowEntry`'s `WidgetTree` owns its focus, hover, capture, and ephemeral current routed
+    recipient; no
     application state or top-level Context field becomes their authoritative owner.
-  - Missing focus, hover, and capture targets are cleared, and every queued routed-event entry for a
-    missing node is discarded; none is redirected or inherited by a later node.
+  - Missing focus, hover, and capture targets are cleared, and a missing current transaction
+    recipient is discarded; none is redirected or inherited by a later node.
   - Downstream compile-fail checks prove `RuntimeNodeId` cannot be imported, named, constructed,
     compared, formatted, or extracted through `Node`/`WidgetStateHandle`; `Node` exposes no public ID
     accessor.
@@ -2955,7 +3129,8 @@ explicit decision before changing the criterion.
   The normative owning-node and lifecycle sections above now define identity as one private scalar
   allocated exactly once with each unique `Node`. It survives ordinary Rust moves and pre-insertion
   configuration, never enters application state, and is never recycled. Each retained tree remains
-  the authoritative owner of its own focus, hover, capture, and routed-event targets; process-wide
+  the authoritative owner of its own focus, hover, capture, and ephemeral current routed recipient;
+  process-wide
   uniqueness prevents a stale target in any tree from aliasing a replacement or a node in another
   Context without Context tokens, mount metadata, or a registry.
 
@@ -2965,7 +3140,7 @@ explicit decision before changing the criterion.
   `WidgetHandle::id` separately casts its strong `Rc` allocation address; `RetainedId::root_node`
   composes root and builder identities; and scroll-area synthetic descendants hash IDs from their
   parent and semantic part. The useful current per-root `UiRuntime` ownership of focus, hover,
-  capture, and routed-event maps is retained conceptually, while those public, pointer-derived,
+  capture, and routed targeting is retained conceptually, while those public, pointer-derived,
   scoped, and synthetic ID sources are migration cost rather than compatibility behavior. P0.5
   intentionally changes no production API: allocator, privacy, preservation, sanitization, and
   documentation criteria become executable and green in P1.3/P2.4.
@@ -3039,7 +3214,7 @@ explicit decision before changing the criterion.
   Descendant gating remains the narrower `Container::children_visible` mechanism: a false gate keeps
   the container itself active and its descendant nodes/state handles owned and live, but descendants
   contribute no measure/layout and receive no input, update, paint, or custom-render callback.
-  Sanitization clears their focus, hover, capture, and queued routed events without restoring those
+  Sanitization clears their focus, hover, capture, and current transaction recipient without restoring those
   targets when the gate later reopens. These two mechanisms are independent and neither writes a
   generic node visibility field.
 
@@ -3146,12 +3321,12 @@ explicit decision before changing the criterion.
   |---|---|---|
   | `create_window(name, rect, node)` | create a visible `FRAME` root at `rect`, raise it, and return a live `RootHandle` before any frame | no pending event; no interaction targets |
   | `create_dialog(name, rect, node)` | create a hidden `FRAME` root at `rect` with a live handle | no pending event; no interaction targets |
-  | `create_popup(name, node)` | create a hidden root at `Recti::default()` with `FRAME | AUTO_SIZE | NO_RESIZE | NO_TITLE` and a live handle | no pending event; `just_opened` is not armed until show |
+  | `create_popup(name, node)` | create a hidden root at `Recti::default()` with `FRAME | AUTO_SIZE | NO_RESIZE | NO_TITLE` and a live handle | no pending event or frame-based input suppression |
   | `set_root_visible(id, false)` | retain the complete tree/state and current pending events | silently clear chrome mode plus focus/hover/capture/routed targets |
   | title close / eligible popup outside press | retain the complete tree/state but make the root hidden | clear chrome/transient targets and record one typed submission |
   | show a window/dialog | retain its rectangle, make it visible, and raise it | preserve pending events; restore no transient target |
-  | show a hidden popup | atomically hide any visible popup, position the new popup at the pointer with a `1 x 1` seed, raise it, and arm `just_opened` | old popup records nothing; both trees are sanitized; new pending events survive |
-  | show an already-visible popup | raise it without repositioning it or rearming `just_opened` | record nothing and preserve current state |
+  | show a hidden popup | atomically hide any visible popup, position the new popup at the current committed pointer with a `1 x 1` seed, and raise it; the next `update_ui` synchronizes auto-size before draining input | old popup records nothing; both trees are sanitized; new pending events survive |
+  | show an already-visible popup | raise it without repositioning it or adding input suppression | record nothing and preserve current state |
   | `destroy_root(id)` | immediately remove the entry and unmount/release its complete tree without returning any owned value | record nothing; all targets disappear and weak handles expire after active access upgrades |
 
   Root IDs remain independent from private runtime-node IDs and are never reused after creation or
@@ -3167,8 +3342,8 @@ explicit decision before changing the criterion.
   unknown; successful fronting changes z-order only.
 
   Programmatic rectangle and size setters write the requested geometry silently and preserve an
-  active move/resize baseline. Before the next input on a visible root, the shared geometry path
-  silently enforces the outer minimum; `AUTO_SIZE` instead replaces width/height with measured
+  active move/resize baseline. The next `update_ui` synchronization layout silently enforces the
+  outer minimum before input drains; `AUTO_SIZE` instead replaces width/height with measured
   intrinsic size while preserving origin. A hidden root retains its requested rectangle until it is
   shown. Option changes are silent and synchronously clear incompatible chrome mode: `NO_TITLE`
   clears moving, while `NO_RESIZE` or `AUTO_SIZE` clears resizing, with matching tree capture
@@ -3207,8 +3382,9 @@ explicit decision before changing the criterion.
   hiding clear current mode. Programmatic mutations and constraint normalization never record an
   event.
 
-  Popup outside dismissal is the sole cross-root input boundary. `just_opened` suppresses the
-  opening/showing press and clears after the first eligible popup frame. Any later pointer-button
+  Popup outside dismissal is the sole cross-root input boundary. There is no `just_opened`
+  suppression: the input transaction that produced a typed event is already drained before
+  application code observes that event and shows the popup. Any subsequently dequeued pointer-button
   press outside the sole visible popup hides and sanitizes it, records exactly one submission through
   `RootState`, and then routes that same press exactly once to the highest eligible remaining root.
   Showing popup B while popup A is visible first obtains both checked state borrows;
@@ -3219,7 +3395,8 @@ explicit decision before changing the criterion.
 
   - Each window/dialog/popup constructor consumes exactly one non-cloneable application `Node` and
     returns a `RootHandle` whose ID identifies the Context entry and whose weak `RootState` handle
-    observes the same geometry/visibility/options used by chrome. `RootState` is live before a frame.
+    observes the same geometry/visibility/options used by chrome. `RootState` is live before the
+    first UI update or render.
   - Creation tests pin visible/hidden status, initial rectangle, immutable name, exact default
     options, initial inactive mode, zero pending counters, z-order behavior, and exactly one private
     chrome node plus one immutable application child for all three root kinds.
@@ -3238,27 +3415,28 @@ explicit decision before changing the criterion.
     public root reads occur only through the checked `RootState` handle, and no parallel Context
     query remains. An internal weak-upgrade failure for an extant entry is an invariant panic.
   - Rectangle/size setters, minimum normalization, auto-size, options, visibility, fronting,
-    creation, and destruction are event-silent. Tests pin immediate requested geometry, next-visible-
-    frame minimum/auto normalization, preserved drag baseline, and origin preservation under
+    creation, and destruction are event-silent. Tests pin immediate requested geometry, next-
+    `update_ui` minimum/auto normalization, preserved drag baseline, and origin preservation under
     `AUTO_SIZE`.
   - Title close and popup outside-click increment `RootState`'s pending submission count while
     retaining a hidden tree; a subsequent explicit destroy removes it. Zero-count takes are stable,
     separate occurrences accumulate with saturation, and each successful take consumes one.
-  - Only left press activates close/move/resize. A popup ignores its opening/showing press for
-    outside dismissal, then any later pointer-button press outside dismisses before that press routes
-    exactly once to the root behind it. Other buttons over ordinary chrome are consumed without
-    activating it.
+  - Only left press activates close/move/resize. An input transaction completes before application
+    code can observe its typed event and show a popup, so that event is never delivered twice. The
+    next dequeued pointer-button press outside dismisses before routing exactly once to the root
+    behind it. Other buttons over ordinary chrome are consumed without activating it.
   - At most one popup is visible per Context. Showing another silently hides the previous popup,
-    clears its transient targets without recording a submission, and gives the new popup ordinary
-    `just_opened` suppression. The switch is atomic and returns `RootMutationError::Borrowed`
+    clears its transient targets without recording a submission, and gives the new popup no
+    frame-based suppression. The switch is atomic and returns `RootMutationError::Borrowed`
     without changing either popup if one of the required state cells is unavailable. Nested popups
     remain a separate feature.
-  - Re-showing an already-visible popup raises it without changing its rectangle or rearming
-    `just_opened`; reopening a hidden popup applies pointer placement and suppression exactly once.
+  - Re-showing an already-visible popup raises it without changing its rectangle or input policy;
+    reopening a hidden popup applies current-pointer placement exactly once.
   - Drag/resize exposes current active/moving/resizing state and increments `take_changed` only when
     user interaction actually changes the rectangle. A press without movement changes mode but not
-    the counter; a batched update records at most one change, separate updates accumulate, movement
-    uses saturating coordinates, and resize uses the shared minimum clamp.
+    the counter; each input-driven update records at most one change, and separate movement events
+    accumulate because they run separate updates. Movement uses saturating coordinates, and resize
+    uses the shared minimum clamp.
   - Matching release, hiding, lost/sanitized capture, and incompatible options clear active state;
     moving and resizing never overlap, and `is_active()` is exactly their union.
   - Root chrome returns `true` from `retains_pointer_capture` exactly while moving/resizing is
@@ -3276,13 +3454,13 @@ explicit decision before changing the criterion.
     combination, tiny/negative extents, title-text minimums, frame insets, close/resize precedence,
     non-negative outputs, and checked-overflow diagnostics.
   - Phase/order tests prove body input reaches the application child, close suppresses child
-    update/paint in the same frame, captured drag/release works outside bounds, underlay precedes
-    descendants, and the rendering-only overlay follows them.
+    update in the same input transaction and later paint, captured drag/release works outside
+    bounds, underlay precedes descendants, and the rendering-only overlay follows them.
   - Hiding silently clears transient targets and active chrome state but retains typed state and
     pending events; showing does not restore cleared targets. Destruction releases all retained
     ownership subject only to already-active state upgrades.
-  - Programmatic options clear incompatible move/resize capture, popup reopen applies pointer
-    positioning/`just_opened`, and auto-size normalization emits no change event.
+  - Programmatic options clear incompatible move/resize capture, popup reopen applies current-pointer
+    positioning without frame suppression, and auto-size normalization emits no change event.
   - Compile-fail/API-surface tests prove no operation replaces a root `Node` while retaining its
     `RootId`, no `RootState` child getter exists, and `RootChromeContainer`, `RootInteraction`, and
     framework transition helpers remain private. A persistent exposed container root supports
@@ -3330,6 +3508,13 @@ explicit decision before changing the criterion.
   land in P1.4; hidden/destroyed target cleanup in P2.4; ordered popup-boundary input in P2.5;
   projection/result/query removal and application migration in P3.0; and final explicit-constraint,
   shared-geometry, and backend-boundary verification in P4.2.
+
+  **P2.5 popup-order amendment (2026-07-31)**
+
+  The explicit input/update boundary makes `just_opened` both unnecessary and incorrect: the input
+  that produced an application-visible opening event has completed before application code can show
+  the popup. P2.5 removes the flag and its frame suppression. A press still queued when a popup is
+  shown is subsequent input by contract and follows ordinary outside-dismissal/routing.
 
 ### P1 — Final state ownership and persistent topology
 
@@ -3409,7 +3594,7 @@ removal, and focused implementation evidence rather than redefining that behavio
   Focused tests prove the sole persistent strong owner, weak cloning for non-`Clone` state,
   unavailable-access behavior, separate liveness observation, closure-result propagation,
   same-cell conflict, cross-cell access, active read and write lifetime, exact input recovery,
-  discarded-unit-handle ownership, and the top-level rendering precondition. A downstream
+  discarded-unit-handle ownership, and the top-level retained-traversal precondition. A downstream
   integration implements all four roles for meaningful and unit-state widgets, inserts both
   concrete runtimes through the generic staging bridge, exercises them
   before/during/after a live `ContextFrame`, and observes handle expiry when Context releases the
@@ -3542,7 +3727,7 @@ removal, and focused implementation evidence rather than redefining that behavio
   **Acceptance tests**
 
   - Each requested leaf measure/update/paint invocation uses one direct Widget dispatch path; tests
-    do not incorrectly require only one measurement request per frame.
+    do not incorrectly require only one measurement request per update/layout call.
   - Moving a concrete runtime into a node does not change an already-returned weak handle or create a
     new one.
   - Built-in concrete runtimes are non-`Clone`; downstream documentation makes unique
@@ -3779,8 +3964,9 @@ change a protected P0 behavior follows the explicit change-control rule.
   **Acceptance tests**
 
   - Empty/populated/dynamic containers match current layout for every sizing policy.
-  - State setters change Row/Grid/Stack layout on the scheduled post-update or next-frame pass as
-    defined; Stack direction migration replaces `demo-full` root rebuilding.
+  - State setters change Row/Grid/Stack layout during the next explicit `update_ui`
+    synchronization or current input transaction's mandatory post-event layout; Stack direction
+    migration replaces `demo-full` root rebuilding.
   - Missing/excess Row widths, empty/extra Grid tracks, grid reflow, grid span, Style spacing, and
     nested transforms follow the exact target rules.
   - `layout_child` applies `Policy` once after slot/span resolution; a non-`Auto` policy changes only
@@ -3884,7 +4070,7 @@ change a protected P0 behavior follows the explicit change-control rule.
   phases, routes only the header sub-rectangle, and gates descendant traversal from
   `children_visible`. Collapsed descendants retain their boxes and weak-handle liveness but are
   excluded from measure/layout overflow, input, update, paint, and custom rendering. Runtime layout
-  boundaries sanitize hidden/removed hover, focus, capture, and routed-event targets; expansion does
+  boundaries sanitize hidden/removed hover, focus, capture, and the current routed recipient; expansion does
   not restore them. Tests cover header/tree defaults and option overrides, initial predicates and
   explicit expand/collapse/toggle, label painting and click toggling, hidden phase exclusion,
   descendant liveness, target sanitization, and immediate expiry after child removal. Production
@@ -3910,8 +4096,8 @@ change a protected P0 behavior follows the explicit change-control rule.
   `drag_axis`, without giving state tree authority.
   Requested offsets clamp as specified above. The runtime owns clipping, translation,
   panel/bar/thumb/corner paint, wheel fallback, drag capture, and range clamping. Routing reads the
-  current offset/geometry to decide whole-event consumption or capture and queues the localized
-  event; the later inherited `Widget::update` is the only operation that changes offset or drag
+  current offset/geometry to decide whole-event consumption or capture and assigns the localized
+  event to the current transaction; the immediately following inherited `Widget::update` is the only operation that changes offset or drag
   state. It uses
   `ContainerInputCtx::route_widget_in_rect` for viewport and scrollbar hit regions and
   `ContainerLayoutCtx::set_children_viewport` for the clipped/translated content surface. Remove
@@ -3936,8 +4122,8 @@ change a protected P0 behavior follows the explicit change-control rule.
     disabling cleared `drag_axis`; only a later matching pointer-down can acquire new tree capture.
   - Collapsing an ancestor while scrollbar capture is active invokes the captured area's loss hook,
     clears `drag_axis`, and prevents expansion or an unpaired drag from continuing the old gesture.
-  - Routing a wheel/drag event does not mutate `ScrollAreaState`; it queues exactly one localized
-    event, and the subsequent `Widget::update` applies the state change once.
+  - Routing a wheel/drag event does not mutate `ScrollAreaState`; it assigns exactly one localized
+    event, and the same transaction's `Widget::update` applies the state change once before layout.
   - Sub-rectangle routing intersects the active clip, preserves container-local pointer
     coordinates, and never lets a scrollbar/body hit leak into the other region.
   - Replacing children preserves scroll state and clamps offset.
@@ -4002,7 +4188,7 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   Query `children_visible` immediately before each descendant recursion. In particular, update the
   container itself first, then query the gate before updating its children; this gives Disclosure
-  collapse and root close same-frame suppression. Measure/layout/paint/input query the gate before
+  collapse and root close same-input-transaction suppression. Measure/layout/paint/input query the gate before
   entering children for that phase. The private root chrome gate does not create generic node
   visibility; normally the window manager skips the complete tree when `RootState` is hidden.
 
@@ -4011,14 +4197,16 @@ change a protected P0 behavior follows the explicit change-control rule.
   - Every live node whose ancestor container gates permit traversal updates/paints once in the
     established order; there is no generic node visibility check.
   - Phase-count tests prove each explicit measurement request uses one inherited `Widget::measure`
-    dispatch and each eligible node receives one update/paint dispatch, with no parallel
-    container-phase path. The test permits the specified two layout phases and bounded scroll
-    convergence rather than asserting one measure call per frame.
+    dispatch and each eligible node receives one update per dequeued input and one paint per render,
+    with no parallel container-phase path. The test permits the initial synchronization layout,
+    one layout per input, and bounded scroll convergence rather than asserting one measure call per
+    application loop.
   - Runtime layout reuses the authoritative private node-measurement result for leaf content size;
     production source contains no second node-measurement algorithm or layout-time leaf
     remeasurement adapter.
   - Ordinary containers use the generic `route_widget` default; special container routing only
-    queues or declines events, and the single inherited `Widget::update` call performs state changes.
+    assigns or declines the current event, and the current transaction's inherited
+    `Widget::update` call performs state changes.
   - Nested scroll boundary and pointer-capture tests prove the pre-update routing result is available
     without a second Widget update or a container-specific update phase.
   - A downstream custom container measures children through `Children::measure_child`, reads generic
@@ -4061,7 +4249,7 @@ change a protected P0 behavior follows the explicit change-control rule.
   the sole node-measurement algorithm; its `NodeMeasurement` is reused for leaf
   content sizing. The transitional aliases, `NodeBehavior`, all implementations/bounds, and its
   five private phase adapters are deleted. Focused tests pin one-dispatch leaf measurement,
-  parent-first/forward update and paint, reverse-z input, same-frame descendant suppression, and a
+  parent-first/forward update and paint, reverse-z input, same-transaction descendant suppression, and a
   downstream container's public child measurement/policy/layout path including invalid indices.
 
   The cross-cutting matrix passes formatting, all targets (130 unit and three downstream tests;
@@ -4095,25 +4283,25 @@ change a protected P0 behavior follows the explicit change-control rule.
   ancestor container on its path currently returns `children_visible == true`; the container node
   owning a closed gate remains eligible while its descendants do not.
 
-  Focus, hover, and routed-event targets require structural eligibility. Capture requires the same
+  Focus, hover, and the current routed recipient require structural eligibility. Capture requires the same
   structural eligibility and, when the captured node is a container, one
   `retains_pointer_capture` call on that target. The query's `true` default means only “this
   container does not locally revoke its existing capture”; it cannot acquire capture, see its ID,
   transfer it, or override a closed ancestor gate. A `false` result makes `WidgetTree` clear its own
   capture before another pointer event is routed. A replacement node at the same child index has a
-  different never-reused ID and receives none of the removed node's targets or queued events.
+  different never-reused ID and receives none of the removed node's targets or current event.
 
   Centralize every `Some(old_capture) -> None` or different-owner transition in `WidgetTree`. Locate
-  that exact target without treating a closed ancestor gate as removal. Outside an active routing
-  batch, call `on_pointer_capture_lost` immediately if the captured runtime still exists and is a
-  container. During routing, clear the capture ID immediately but add the old target to a private
-  pending-loss list; after that target's queued `Widget::update`, call the hook if it still exists
-  and has not reacquired capture. This preserves final queued drag/release effects and coalesces an
-  obsolete loss when the same runtime releases and reacquires within one batch. A removed runtime
-  receives no notification because dropping it is definitive cleanup. The hook receives no cause or
-  identity and cannot affect parent/tree policy. This closes the local lifecycle when capture ends
-  because of pointer release, local rejection, ancestor gating, root hiding, transient-target
-  clearing, or capture replacement.
+  that exact target without treating a closed ancestor gate as removal. Outside an active input
+  transaction, call `on_pointer_capture_lost` immediately if the captured runtime still exists and
+  is a container. For a routed release, clear the capture ID immediately, retain at most one private
+  `capture_loss_after_update` ID, deliver that release to the old target in the transaction's full
+  update, and then invoke the hook. Because the transaction completes before another raw event is
+  popped, no pending-loss list, multi-event coalescing, or release/reacquire-in-one-batch logic is
+  required. A removed runtime receives no notification because dropping it is definitive cleanup.
+  The hook receives no cause or identity and cannot affect parent/tree policy. This closes the local
+  lifecycle when capture ends because of pointer release, local rejection, ancestor gating, root
+  hiding, transient-target clearing, or capture replacement.
 
   If sanitation invalidates capture before that pointer stream's drag/release is routed, retain one
   private tree-runtime discard marker after clearing the captured ID. A subsequent drag or release
@@ -4133,29 +4321,31 @@ change a protected P0 behavior follows the explicit change-control rule.
   and destruction transitions also clear the local mode; the tree remains the only captured-ID
   owner.
 
-  Run sanitation after the pre-input layout and before any target-directed routing, again after
-  update/direct topology changes before paint, and defensively at focused/captured direct-delivery
-  entry points. Do not query a capture newly acquired during an ordered routing batch before the
-  later `Widget::update` applies its queued pointer-down; subsequent events in that batch use
-  `ContainerInputCtx::has_pointer_capture` to identify the current container without exposing its
-  ID. Hidden roots clear focus/hover/capture/routed targets while retaining their tree; root
-  destruction releases complete retained runtime ownership. There are no result generations to
-  sanitize. Debug builds assert after sanitation that every remaining scalar/map target is
-  structurally eligible and that a captured container still reports local retention.
+  Run sanitation after the initial `update_ui` synchronization layout and before target-directed
+  routing, again after each event's full update/direct topology changes, and defensively at
+  focused/captured direct-delivery entry points. Do not query a capture newly acquired by the
+  current event before the same transaction's `Widget::update` applies its pointer-down. The
+  mandatory sanitation/layout commit completes before the next event is popped;
+  `ContainerInputCtx::has_pointer_capture` only identifies established direct capture delivery
+  without exposing the ID. Hidden roots clear focus/hover/capture and the current recipient while
+  retaining their tree; root destruction releases complete retained runtime ownership. There are no
+  result generations to sanitize. Debug builds assert after sanitation that every remaining
+  persistent or current target is structurally eligible and that a captured container still reports
+  local retention.
 
   **Acceptance tests**
 
-  - Removing a focused/captured target before a frame clears it before new input routing.
-  - Removing a hovered target or a target with queued routed events clears every corresponding
-    scalar/map entry at the same safe boundary.
+  - Removing a focused/captured target before `update_ui` clears it before new input routing.
+  - Removing a hovered target or the current transaction recipient clears the corresponding target
+    at the same safe boundary.
   - Cross-subtree removal during update cannot route later input to the removed or replacement node;
     unaffected persistent targets remain unchanged.
   - Pointer release after target removal is ignored safely and is not redirected to a parent,
     sibling, or replacement.
-  - Hidden roots preserve widget/application state but clear focus/hover/capture/routed targets;
+  - Hidden roots preserve widget/application state but clear focus/hover/capture/current recipient;
     showing does not restore those transient targets. Destroyed roots unmount all tree state and
     release it subject only to already-active state upgrades.
-  - Collapsing Disclosure clears descendant focus/hover/capture/routed events, and expanding does
+  - Collapsing Disclosure clears descendant focus/hover/capture/current recipient, and expanding does
     not restore them automatically. The Disclosure controls only structural subtree eligibility; it
     never answers retention on behalf of the captured descendant. If that descendant still exists,
     `WidgetTree` invokes its loss hook directly so private drag state cannot survive re-expansion.
@@ -4165,16 +4355,15 @@ change a protected P0 behavior follows the explicit change-control rule.
     because its private drag axis was cleared; a new matching pointer-down can acquire a fresh
     capture normally.
   - Ancestor collapse, root hiding, and explicit transient clearing call
-    `on_pointer_capture_lost` immediately on a still-mounted captured container. Routing-time release
-    clears the tree ID immediately but invokes the hook only after that target's queued update has
-    applied all preceding drag/release events; removal drops the runtime without fabricating a
-    callback or input event.
-  - A pointer-down that newly acquires capture followed by drag/release in the same ordered routing
-    batch remains routable through `has_pointer_capture`; retention is checked after update has
-    applied the queued acquisition event, not in the route/update gap.
-  - Drag followed by release in one batch applies the final drag before the loss hook clears local
-    mode. Release followed by a new matching pointer-down on the same container coalesces the stale
-    pending loss, retains the newly acquired capture, and leaves the new local mode active.
+    `on_pointer_capture_lost` immediately on a still-mounted captured container. A routing-time
+    release clears the tree ID immediately, delivers that one release during the transaction's full
+    update, and invokes the hook after the old target's update; removal drops the runtime without
+    fabricating a callback or input event.
+  - A pointer-down that newly acquires capture establishes local mode during its own full update and
+    passes retention sanitation before the next queued drag/release is routed.
+  - Drag, release, and a later matching pointer-down are three distinct transactions. The drag is
+    applied and laid out before release; release cleanup completes before the new press can acquire
+    fresh capture. Production code contains no pending capture-loss list or same-batch coalescing.
   - `RootChromeContainer` retains capture exactly while its private interaction is moving/resizing;
     incompatible options, hiding, matching release, and dismissal clear the local mode and the tree
     capture without a second window-manager capture owner.
@@ -4216,82 +4405,166 @@ change a protected P0 behavior follows the explicit change-control rule.
   dialog remains deliberately excluded until P3.2, with its preserved implementation/tests and all
   13 exact restoration markers unchanged.
 
-- [ ] **P2.5 — Make routed events authoritative and reduce the frame to two tree layouts**
+  **P2.5 supersession note (2026-07-31)**
+
+  The completion evidence above records the batching implementation that landed in P2.4; it is
+  historical evidence, not the final runtime contract. P2.5 must delete
+  `capture_awaiting_update`, the pending capture-loss collection, same-batch reacquisition
+  coalescing, and batching-only tests. Keep the stale pointer-stream discard marker and the public
+  retention/loss hooks. Replace multi-event deferral with the single current-transaction ordering
+  specified above, and replace the focused tests with distinct down/drag/release transaction tests.
+
+- [x] **P2.5 — Drain ordered input through full updates/layouts and make rendering paint-only**
 
   **Problem**
 
-  Current input is interpreted twice: routing queues localized `UiInputEvent` values, then update
-  receives raw `Input` and calls `UiRuntime::interaction_for` to derive hover, click, active,
-  focus, and scroll again. The window manager also performs pre-input layout before
-  `UiRuntime::update_paint_frame` repeats layout both before and after update, producing three tree
-  layouts.
+  Current input is an aggregate coupled to `ContextFrame::render_ui`: routing reconstructs a fixed
+  event order from pressed/released/held state, update reinterprets the same raw `Input`, layout runs
+  around that render-owned update, and only then does paint occur. Multiple OS events cannot observe
+  each other's resulting layout, so a resize, scroll, disclosure, or topology change may leave the
+  next event hit-testing stale geometry.
 
-  **Decision needed: No — carries forward the approved correctness contract**
+  **Decision needed: No — explicit plan-owner decision on 2026-07-31**
 
   **Target contract or migration**
 
-  Convert raw `Input` to ordered routed events once at the window-manager boundary. Routing owns
-  hit testing, focus/capture transitions, the per-node interaction snapshot, event localization, and
-  wheel propagation/consumption. `Widget::update` receives only the queued localized events plus the
-  snapshot in `WidgetUpdateCtx`; remove raw `Input` from update traversal,
-  `UiRuntime::interaction_for`, and the duplicate scroll-delta channel. Delete public
-  `WidgetUpdateCtx::scroll_delta()` and `WidgetPaintCtx::scroll_delta()` plus their common stored
-  field; widgets read scroll only through `WidgetInputEvents::scroll_delta()` on the localized
-  `UiInputEvent` batch. `WidgetUpdateCtx` exposes the router-produced focused snapshot read-only and
-  has no focus mutation method. Document these intentional custom-widget API changes.
+  Implement the normative “Drain ordered input...” architecture above as one atomic API/runtime
+  change:
 
-  Cross-root/modal selection is the first stage of that same dispatcher. It applies the one
-  `just_opened`/outside-popup dismissal rule through the popup's private `RootState` operation, then
-  routes the same press to the newly eligible front root. It must not derive another click/drag/
-  wheel snapshot or let retained widget update inspect raw `Input`.
+  - replace aggregate transition fields with a private `VecDeque<RawInputEvent>` plus the committed
+    pointer/button/key/modifier snapshot. Every public input-forwarding call appends exactly one
+    event; popping applies it to the snapshot in FIFO order and normalizes it once. Do not coalesce
+    pointer motion, wheel, key, or text calls and do not reconstruct an order from end-state flags;
+    update `UiInputEvent` rustdoc from “this/previous frame” to “this transaction/previous queued
+    pointer event” terminology;
+  - add public `Context::update_ui(dimensions: Dimensioni)`. It performs an initial full layout
+    synchronization, sanitizes targets, and then drains the queue. For each popped event, perform
+    cross-root selection/outside-popup policy, route/localize once, traverse every eligible node
+    through `Widget::update` once, finalize/sanitize focus and capture, and measure/layout every
+    visible root before popping the next event;
+  - validate positive dimensions before synchronization or queue mutation and panic with
+    `update_ui dimensions must be positive` on invalid input; keep the queue intact on that panic;
+  - change `Widget::update` to `Option<&UiInputEvent>` and delete `WidgetInputEvents` plus the
+    per-node routed-event map/batch. The one recipient receives `Some(localized_event)`; every other
+    eligible node receives `None`. `WidgetUpdateCtx` supplies only the event-time interaction
+    snapshot plus `mouse_buttons`, `key_modes`, and `key_codes`. Remove synthetic
+    `UiInputEvent::KeyState`/`KeyCodeState`, raw `Input`, `UiRuntime::interaction_for`, context/update/paint
+    `scroll_delta`, and every duplicate interaction derivation;
+  - keep routing non-mutating with respect to widget state. It decides target, propagation,
+    localization, focus, and capture from committed geometry; the immediately following full update
+    applies the event. The mandatory full layout then commits resize, scroll translation,
+    disclosure visibility, intrinsic size, options, and topology before the next input;
+  - split `render_window_manager` into private update/commit and paint/record entry points. Replace
+    render-scoped `UiRuntime::begin_frame` with an update-call metrics reset plus
+    `begin_input_event(pointer_input_enabled)` for each popped event. The latter clears the current
+    recipient, one-event `clicked`, and per-event focus-update marker, then establishes that event's
+    root eligibility. Pointer events recompute hover from committed geometry; non-pointer events
+    preserve hover. Focus, capture, and held/active interaction persist until their ordered
+    transition changes them. Paint performs no transient reset;
+  - simplify P2.4 capture handling to the current one-event transaction. Keep tree ownership,
+    stale-stream discard, retention/loss hooks, and `has_pointer_capture` for established direct
+    delivery. Delete `capture_awaiting_update`, the pending-loss collection, batch coalescing, and
+    same-batch paths. A routed release may retain one `capture_loss_after_update` ID until that
+    target's current update finishes;
+  - remove `WindowEntry.just_opened`. A UI input is fully drained before application code consumes
+    its typed event and shows a popup, so the opening input cannot be delivered twice. Every queued
+    event remaining after a programmatic show is subsequent input and follows normal outside-popup
+    dismissal/routing;
+  - split update from rendering. `ContextFrame::render_ui` no longer calls
+    `update_and_record_ui`, `UiRuntime::update_paint_frame`, input prelude/epilogue, dispatch,
+    update, auto-size, or layout; delete those combined orchestration methods rather than leaving
+    unused alternate entry points. Rendering paints
+    the last committed tree once, records rendering-only chrome/custom operations, and submits once;
+  - track whether Context-owned operations have invalidated the UI commit and the dimensions of the
+    last commit. Add `RenderError::UiUpdateRequired` and return it when rendering has no commit, has
+    pending input, or uses different dimensions. Weak state handles intentionally cannot set this
+    bit, so rustdoc requires a layout-only `update_ui` after external state/topology mutation;
+  - an empty input queue performs the initial synchronization layout and zero `Widget::update`
+    calls. Add no timer, tick, elapsed-time argument, idle callback, synthetic input, or render-time
+    update. Any input-independent invariant belongs in its state setter/topology operation or pure
+    measure/layout logic.
 
-  Within one ordered routing batch, tree capture changes immediately. Special containers use only
-  `ContainerInputCtx::has_pointer_capture` to route drag/release events that follow their acquiring
-  pointer-down before update has established private local mode. A routing-time loss queues the
-  P2.4 private capture-lost notification until the old target's event batch has been applied; a
-  same-target reacquisition coalesces that obsolete notification. No synthetic `UiInputEvent`,
-  public capture token, or extra `Widget::update` invocation is introduced.
-
-  Use this ordinary frame pipeline:
-
-  ```text
-  begin frame
-      -> pre-input tree layout
-      -> cross-root gating / optional popup dismissal / route input once
-      -> update each eligible widget/container once
-      -> post-update tree layout
-      -> paint
-  ```
-
-  The pre-input layout supplies hit geometry. Pointer events retain routing-time local coordinates,
-  so a later layout cannot relocalize them. Scroll routing only chooses consumption/capture and
-  queues the event; the recipient's single `Widget::update` changes offset/derived translation,
-  which post-update layout/paint observes without an unconditional middle layout. The post-update
-  pass remains required because updates can change intrinsic size, disclosure state, dynamic
-  options, or topology. Skipping it requires the separate measured optimization decision in P5.2.
+  Primary production surfaces are `src/input.rs`, `src/window_manager/input_api.rs`,
+  `src/window_manager/mod.rs`, `src/window_manager/window_manager.rs`,
+  `src/window_manager/root_chrome.rs`, `src/ui_node/runtime.rs`,
+  `src/ui_node/containers/mod.rs`, `src/widget.rs`, `src/widget_ctx.rs`, and every built-in/custom
+  `Widget::update` implementation. Update `src/lib.rs`/prelude exports, examples, downstream API
+  tests, runtime phase metrics, and Context/root/input rustdoc in the same item; do not leave an
+  internal compatibility batch adapter. Put ordered transaction/phase tests in the inline
+  `src/ui_node/runtime.rs` tests and `src/window_manager/root_tests.rs`; adapt public signature and
+  event-loop usage coverage in `tests/retained_api.rs`. Replace the current test-only zero-argument
+  `Context::update_ui()` helper, whose name collides with the new public API; test helpers must call
+  the public dimensioned commit and an explicitly separate render helper when paint is required.
 
   **Acceptance tests**
 
-  - Every raw transition enters one ordered dispatcher and has one authoritative interaction
-    outcome; popup outside dismissal is decided there before the same press is routed onward.
-  - Widget update receives exactly the localized events selected by routing; hover/click/active,
-    focus/capture, and wheel state cannot disagree with those events.
-  - Same-batch capture/acquire/drag/release and release/reacquire sequences preserve event order,
-    apply the final drag, and leave tree/local capture state matching the last transition without a
-    synthetic event or second update.
+  - Enqueue interleaved move/down/move/up, wheel, key, and text calls and prove FIFO dispatch with no
+    coalescing or fixed-kind reordering. Event-time button/key/modifier snapshots match each event,
+    not the final aggregate state.
+  - Invalid `update_ui` dimensions panic with the exact diagnostic before layout or dequeue; a later
+    valid call drains the still-intact queue.
+  - With N queued events, every eligible node receives exactly N `Widget::update` calls, each routed
+    recipient sees exactly one `Some` event, all other calls see `None`, and instrumentation records
+    one initial synchronization layout plus N post-event layouts. With N = 0 it records one layout,
+    zero widget updates, and zero paint until rendering is requested.
+  - A root resize event changes committed root/body geometry before the next queued pointer event;
+    that event lands using the resized geometry. Equivalent two-event tests cover scroll offset,
+    Disclosure collapse/expand, intrinsic-size mutation, and direct topology change.
+  - Scroll routing itself leaves state unchanged; the immediately following full update changes
+    offset/thumb state and the mandatory layout commits descendant translation before the next
+    queued event.
+  - Down, drag, release, and a later down execute as separate transactions. Capture/local mode from
+    each is finalized before the next; final drag applies before release cleanup, stale streams are
+    not redirected, and production code has no pending-loss batch/coalescing machinery.
+  - Popup opening from a consumed typed event needs no suppression and the opening event is not
+    delivered twice. The next outside press dismisses and then routes once behind it. Showing a
+    popup while older input remains queued deliberately exposes it to those subsequent events.
+  - `Context::update_ui` never paints or submits. `ContextFrame::render_ui` performs one paint and
+    one backend submission with zero input pops, widget updates, measurements, or layouts.
+    Rendering without a matching commit, after enqueueing input, or with changed dimensions returns
+    `RenderError::UiUpdateRequired` before paint/display-list/backend work and does not update
+    implicitly.
+  - Programmatic state/topology mutation followed by a layout-only `update_ui` affects paint without
+    a widget update. Rustdoc/example code shows the required second commit after application event
+    consumption and before rendering; no timer/tick API or idle update path exists.
   - Production searches find no raw `Input` in retained node update contexts, no
-    `UiRuntime::interaction_for`, no context-level `scroll_delta` accessor/storage, and no duplicate
-    scroll derivation; `WidgetInputEvents::scroll_delta()` reads only the routed batch.
-  - Instrumentation reports exactly one pre-input and one post-update tree-layout phase in an
-    ordinary frame; there is no unconditional pre-update repeat inside update/paint.
-  - Scroll routing itself leaves widget state unchanged; the one update applies translation/thumb
-    state before paint without an intermediate full layout. Size-changing update remains visible to
-    same-frame post-update layout and paint.
+    `UiRuntime::interaction_for`, `WidgetInputEvents`, `UiInputEvent::KeyState`/`KeyCodeState`,
+    context-level `scroll_delta`, routed-event
+    batch/map, `capture_awaiting_update`, pending capture-loss collection, `just_opened`, or
+    `update_and_record_ui`/`UiRuntime::update_paint_frame`/other update-layout call reachable from
+    `ContextFrame::render_ui`.
   - Textbox, slider, number, text-area, disclosure, nested scroll, capture, key/text, and front-root
     pointer gating tests pass with routed events as their only source; popup dismissal is covered as
     the single documented cross-root exception.
   - Keyboard/text routing selects only the front visible root and its focused node; widgets cannot
     cooperatively assign or clear that focus, and textbox submission leaves it intact.
+
+  **Completion evidence (2026-07-31)**
+
+  Input forwarding now appends one private raw event per public call to a FIFO `VecDeque`; popping
+  each event advances the committed pointer/button/key snapshot and produces one normalized
+  `UiInputEvent`. `Context::update_ui` performs the initial synchronization layout and then one full
+  eligible-tree update plus one committed layout per event. `Widget::update` receives
+  `Option<&UiInputEvent>`, while event-time held button/key/modifier state comes only from
+  `WidgetUpdateCtx`. The routed batch/map, synthetic held-state events, duplicate scroll channel,
+  P2.4 capture-loss batching/coalescing, and popup-opening suppression are removed.
+
+  Rendering now requires a matching input-free UI commit and returns
+  `RenderError::UiUpdateRequired` before paint or backend access otherwise. On a valid commit it
+  only paints/records/submits; it performs no input drain, widget update, measurement, or layout.
+  Examples and retained API documentation show the explicit event-pump, `update_ui`, optional
+  application-state observation, second layout-only `update_ui`, and paint-only render sequence.
+
+  Focused tests cover FIFO/no-coalescing and event-time held snapshots, exact N-update/N+1-layout
+  phase counts, empty-queue layout synchronization, invalid-dimension queue preservation, geometry
+  changes affecting later queued input, Disclosure expansion, popup dismissal with one behind-root
+  delivery, per-event capture handling, and render preflight before backend acquisition. Formatting
+  and `git diff --check` pass. All targets pass with 149 unit tests, one existing ignored manual
+  test, and three downstream API tests; all 17 doctests pass. The no-default-features build,
+  generated docs, and separate Glow, Vulkan, and WGPU example configurations pass. Clippy completes
+  with only the repository's existing warning baseline. Forbidden-source searches find none of the
+  removed aggregate/batch/update-from-render mechanisms. The file dialog remains deliberately
+  excluded until P3.2, with its implementation/tests and all 13 restoration markers preserved.
 
 ### P3 — Public roots and application migration
 
@@ -4456,9 +4729,14 @@ change a protected P0 behavior follows the explicit change-control rule.
   Document the fixed leaf/container constructor table, the intentional removal of
   arbitrary mounted public-field mutation, exact mounted Row/Grid/Stack/Scroll configuration,
   input-preserving `try_update_with`, generic policy/Grid-owned span precedence, no root replacement, the one ordered
-  input dispatcher and popup-boundary exception, the two-layout frame, the complete removal of
+  input queue and popup-boundary exception, the explicit `update_ui(dimensions)` drain/commit
+  boundary, one full update/layout per input, layout-only empty-queue synchronization, paint-only
+  `render_ui`, the no-timer rule, the update-before-render error/precondition, and the complete removal of
   `ResourceState`/frame results, and the
   framework-recursion exemption from the application reentrancy prohibition.
+  Custom-widget migration notes show `Widget::update(ctx, Option<&UiInputEvent>)`, direct matching
+  of that one event, and `WidgetUpdateCtx::{mouse_buttons,key_modes,key_codes}` in place of
+  `WidgetInputEvents` batch helpers.
 
   **Acceptance tests**
 
@@ -4468,9 +4746,11 @@ change a protected P0 behavior follows the explicit change-control rule.
     production-source checks confirm that `NodeBehavior` itself was deleted in P2.3.
   - Container docs distinguish tree ownership of the captured ID, captured-container ownership of
     local retention/loss state, and ancestor ownership of descendant eligibility. They document the
-    default/override obligation and route-before-update ordering without introducing
+    default/override obligation and per-event route-before-update ordering without introducing
     `ContainerOption` or parent-controlled capture.
-  - Docs explicitly state that ContextFrame does not lock state and that no Context token exists.
+  - Docs explicitly state that ContextFrame does not lock state and that no Context token exists,
+    while layout-affecting mutation after the last commit still requires another `update_ui` before
+    paint.
   - Docs distinguish initialization Parameters from mutable State with concrete examples.
   - Root docs distinguish hide from destroy, document `RootHandle` weak ownership, and define
     `RootState` current chrome queries plus pending `take_changed`/`take_submitted` semantics.
@@ -4481,7 +4761,7 @@ change a protected P0 behavior follows the explicit change-control rule.
 
 ### P4 — Correctness after simplification
 
-- [ ] **P4.0 — Pin dynamic-mutation and frame-pass semantics**
+- [ ] **P4.0 — Pin dynamic-mutation, update-commit, and paint-only semantics**
 
   **Problem**
 
@@ -4492,22 +4772,36 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   **Target contract or migration**
 
-  Use the settled P2.5 frame sequence: pre-input layout, routed input, update, post-update layout,
-  and paint. Document: later nodes in a phase see earlier successful mutations; completed phases do
-  not rerun except the scheduled post-update layout; paint-time state changes may become fully
-  visible next frame. The current frame presents exactly what its ordered phases observed, with no
-  rollback or snapshot promise, and the next ordinary frame must be fully stable.
+  Use the settled P2.5 boundary: `Context::update_ui` creates a committed state/layout, and
+  `ContextFrame::render_ui` only paints/submits that commit. During each input-driven full update,
+  later nodes see earlier successful mutations; already-updated nodes do not rerun, but the mandatory
+  post-event layout observes the complete resulting tree before the next event. There is no rollback
+  or snapshot promise across nodes.
+
+  A successful programmatic mutation before `update_ui` is observed by its initial synchronization
+  layout. A layout-affecting mutation after a commit requires another layout-only `update_ui` before
+  paint; a newly queued event also invalidates the commit. Paint and custom-render callbacks are
+  observational with respect to application state, topology, interaction, and layout. They may
+  update rendering-only caches, but using an independently held state handle to mutate retained UI
+  during paint is a downstream contract violation, not a deferred-next-frame feature.
 
   **Acceptance tests**
 
-  - Update-time intrinsic-size changes affect same-frame post-update layout and paint.
+  - An event-driven intrinsic-size change affects that transaction's post-event layout, the next
+    queued event's hit testing, and the later paint-only render.
   - Mutation of a later/earlier sibling produces the documented distinct outcome.
   - Same-container topology mutation returns `None`; a not-currently-borrowed subtree mutation is
     safe and deterministic.
-  - Custom-render callback mutation follows the same contract without panic.
-  - A state-access closure that completes before `ContextFrame::render_ui` remains valid; invoking
-    any retained root traversal for the same Context from inside that closure is an explicitly
-    unsupported reentrant call and receives the documented diagnostic without adding a frame gate.
+  - A programmatic layout/topology mutation followed by an empty-queue `update_ui` changes committed
+    geometry with zero widget updates. Painting without that explicit commit is outside the typed-
+    state contract; Context-detectable invalidation returns `RenderError::UiUpdateRequired`.
+  - Paint and custom-render tests use observational callbacks only. Documentation explicitly rejects
+    application-state/topology/layout mutation during either callback while allowing private
+    rendering-cache mutation.
+  - A state-access closure that completes before `Context::update_ui` remains valid; invoking any
+    retained update/layout/paint traversal for the same Context from inside that closure is an
+    explicitly unsupported reentrant call and receives the documented diagnostic without adding a
+    global state-handle gate.
   - Framework-authorized child measurement, layout, and visitor recursion remains valid while a
     parent runtime's state borrow is active and is not diagnosed as application reentrancy.
 
@@ -4615,8 +4909,11 @@ change a protected P0 behavior follows the explicit change-control rule.
   `FrameResultGeneration`, `RetainedId`, every generic/root result store and query, and
   obsolete compatibility aliases. Also remove raw `Input`/`interaction_for` from retained update,
   `WidgetUpdateCtx::scroll_delta`/`WidgetPaintCtx::scroll_delta` and their stored duplicate channel,
-  the unconditional middle layout, pseudo-unbounded numeric probes, independent container axis
-  solvers, all generic result construction, and every result sink.
+  aggregate input transition bitsets/text buffers, `WidgetInputEvents`, synthetic
+  `UiInputEvent::KeyState`/`KeyCodeState`, routed-event batches/maps,
+  `capture_awaiting_update`, pending capture-loss/coalescing machinery, `WindowEntry.just_opened`,
+  render-owned update/layout glue, the unconditional middle layout, pseudo-unbounded numeric probes,
+  independent container axis solvers, all generic result construction, and every result sink.
 
   **Acceptance tests**
 
@@ -4624,9 +4921,11 @@ change a protected P0 behavior follows the explicit change-control rule.
   - No public API keeps removed state persistently alive or requires Context for state access.
   - Examples/tests/docs use the single parameter/state/builder model and contain no old disclosure,
     generic-visibility, frame-result, or mutable-child-borrow surface.
-  - Searches find no `UiRuntime::interaction_for`, raw-input retained update context, third tree
-    layout, context-level scroll-delta accessor/storage, `10_000` measurement probe, or root-node
-    replacement entry point.
+  - Searches find no `UiRuntime::interaction_for`, raw-input retained update context,
+    `WidgetInputEvents`, synthetic held-state events, routed batch/map, batching-only capture
+    deferral, `just_opened`, update/layout
+    reachable from `render_ui`, context-level scroll-delta accessor/storage, `10_000` measurement
+    probe, or root-node replacement entry point.
   - Structural type/line counts demonstrate net removal rather than another compatibility layer.
 
 - [ ] **P5.1 — Repeat allocation, phase, and code-structure baselines**
@@ -4651,8 +4950,11 @@ change a protected P0 behavior follows the explicit change-control rule.
     container around the application tree and no synthetic title/close/resize nodes.
   - Root reconstruction, reconciliation, erased-handle cloning, and Context state validation are
     structurally absent.
-  - An ordinary frame records two tree-layout phases; each explicit runtime method uses at most one
-    associated-state upgrade when it needs state and no identity/topology/dispatch weak upgrade.
+  - Phase baselines separate `update_ui` from rendering. A call draining N events records N full
+    eligible-tree update traversals and N + 1 complete layout commits; an empty-queue call records
+    one layout and zero updates. A subsequent render records one paint traversal, zero updates, and
+    zero layouts. Each explicit runtime method uses at most one associated-state upgrade when it
+    needs state and no identity/topology/dispatch weak upgrade.
     Window-manager boundary operations may likewise upgrade `WindowEntry.root_state` once per
     operation; measure/layout/runtime access then uses the root container's ordinary associated-state
     upgrade rather than a registry lookup.
@@ -4781,7 +5083,7 @@ contract or overstate what Rust can prove about arbitrary custom safe APIs.
 | A container can acquire capture but cannot report later local invalidation | `ContainerInputResult::Captured` has no matching state-derived retention query | Defaulted `Container::retains_pointer_capture`; captured container declares local continuation while `WidgetTree` owns/clears the ID | P0.1/P2.4 |
 | Tree capture can end while a retained container keeps stale local drag state | Ancestor gating/release clears the runtime ID without notifying the captured abstraction | Defaulted `Container::on_pointer_capture_lost`; `WidgetTree` notifies only the old captured target if it still exists | P0.1/P2.4 |
 | Scroll disable cannot synchronously clear tree-owned capture | State setter correctly has no tree capability | State resets local drag/offset; `ScrollAreaContainer::retains_pointer_capture` reports false; target sanitization releases capture before routing | P2.2/P2.4 |
-| Scroll routing is described as both non-mutating and offset-mutating | Routing and update responsibilities were conflated | Routing decides/queues; unit-returning Widget update mutates state | P2.2/P2.5 |
+| Scroll routing is described as both non-mutating and offset-mutating | Routing and update responsibilities were conflated | Routing selects/assigns the current event; unit-returning Widget update mutates state | P2.2/P2.5 |
 | Public header/tree `Node` collides with owning `Node` | Old widget was not classified | Reserve `Node`; absorb behavior into Disclosure | P0.6/P1.1/P2.1 |
 | Disclosure recreates adapters | Strong handle adapted per phase | One state-owning runtime | P2.1 |
 | Whole attached child collections can be swapped | Raw `children_mut`/callback authority | Marker state plus safe inherent ops and opaque visitors | P0.3/P2.3 |
@@ -4791,12 +5093,12 @@ contract or overstate what Rust can prove about arbitrary custom safe APIs.
 | Root/chrome observation would require a parallel result mechanism | Chrome is special-cased outside retained typed state | One private `RootChromeContainer` with public `RootState` and `RootHandle` | P0.7/P1.4/P3.0 |
 | Built-in container callers should not repeat the runtime-to-node wrapping step | Factory returns raw `Box<dyn Container>` | Built-in convenience constructor returns `Node`; custom insertion accepts concrete `Container + WidgetStateOwner` | P0.3/P1.3 |
 | Container rollout previously assigned every built-in to the atomic foundation batch | Foundation and concrete migrations were conflated | Atomic Node/visitor/Column/Disclosure slice; Grid follows as an early state-owned correction, Row/Stack and ScrollArea extend it later | P1.3/P2.0/P2.1/P2.2 |
-| Runtime phases cannot return a handle-unavailable outcome during render reentrancy | Phase signatures have no state-access outcome channel | Forbid rendering inside state-access closures; local diagnostic only | P0.2/P4.0 |
+| Runtime phases cannot return a handle-unavailable outcome during traversal reentrancy | Phase signatures have no state-access outcome channel | Forbid top-level update/layout/paint inside state-access closures; local diagnostic only | P0.2/P4.0 |
 | A failed state access can drop a moved, unmounted node before insertion | Plain closure capture gives the handle no way to return ownership | `try_update_with` validates access first and returns the exact input on failure | P0.2/P1.3 |
 | `Widget::update` generic results have no runtime consumer after result removal | `ResourceState` historically fed `FrameResults` | Change update to return `()` and remove the complete generic result family | P0.1/P0.4/P5.0 |
-| Raw input and routed events can disagree | Retained update derives interaction separately with `interaction_for` | One ordered dispatcher; routed events for ordinary interaction and one explicit popup boundary decision | P2.5/P5.0 |
-| Context scroll accessors duplicate the routed event batch | Scroll delta is copied into phase context state | Remove update/paint context accessors; inspect localized events only | P2.5/P5.0 |
-| A frame lays out the retained tree three times | Pre-route, pre-update, and post-update layout are separate | One pre-input and one post-update tree layout | P2.5/P4.0 |
+| Raw input and routed events can disagree | Aggregate input is reconstructed for routing and independently interpreted by `interaction_for` | FIFO raw-event queue; normalize once and deliver at most one localized event in each full update transaction | P2.5/P5.0 |
+| Context scroll accessors duplicate routed input | Scroll delta is copied into phase context state | Remove update/paint context accessors; inspect the one localized current event only | P2.5/P5.0 |
+| Input, update/layout, and paint are coupled to one render call | Render owns aggregate dispatch plus pre-route/pre-update/post-update layout | Explicit `update_ui`: one sync layout and one full update/layout per event; `render_ui` paints/submits only | P2.5/P4.0 |
 | Auto-size uses a `10_000` pseudo-unbounded probe | Public dimensions encode both bounds and intrinsic requests | Private explicit constraints adapt unbounded axes to the documented public `0` convention | P4.2/P5.0 |
 | Row/Grid measurement can disagree with allocation | Independent policy and track solvers | Shared intrinsic/allocation axis primitives and one Grid placement list | P2.0/P4.2 |
 | Mounted container configuration is underspecified | Old public fields and builder reconstruction blur initialization and state | Exact Row/Grid/Stack/Scroll state setters; immutable node policy and mutable Grid-owned child span | P1.1/P2.0/P2.2 |
@@ -4852,7 +5154,8 @@ Update together:
   exact mounted container configuration, input-preserving access, and unified
   `RootHandle`/`RootState`/`RootMutationError` chrome and lifecycle;
 - README construction, state mutation, event consumption, dynamic list, custom-render construction,
-  render-reentrancy precondition, scrolling, and destruction examples;
+  explicit update/drain before paint, empty-queue layout synchronization, paint-only/custom-render
+  preconditions, render-reentrancy, scrolling, and destruction examples;
 - simple, calculator, demo, custom drawing, texture, and backend examples;
 - file-dialog implementation/tests;
 - migration notes explaining the combined-widget split, old header/tree `Node` to Disclosure,
@@ -4861,15 +5164,16 @@ Update together:
   replacement, typed root chrome and removal of all frame results, unit-returning widget update,
   absence of generic node
   visibility, immutable node placement, tree-owned capture versus captured-container local
-  retention/loss versus parent descendant gating, the ordered input dispatcher/popup-boundary
-  exception, the two-layout frame, explicit
+  retention/loss versus parent descendant gating, the FIFO input queue/popup-boundary exception,
+  one full update/layout transaction per input, layout-only empty-queue synchronization,
+  paint-only rendering and no timer/idle update, explicit
   intrinsic constraints/shared axis allocation, removal of public widget IDs/results, and the one
   externally visible generic state-owning-runtime insertion boundary.
 
 ## Suggested implementation sequence
 
 1. Land characterization and establish the final `Widget` signatures, including
-   `Widget::update -> ()`.
+   `Widget::update(Option<&UiInputEvent>) -> ()`.
 2. Add parameters/state/builder/runtime-owner/weak-handle primitives and migrate one Checkbox plus
    one unit-state widget end to end.
 3. Apply the fixed constructor/mutation table while splitting the remaining built-ins, defining only
@@ -4886,8 +5190,9 @@ Update together:
    no application-child replacement, and no frame-result channel.
 7. Switch traversal, target sanitization, Disclosure, and scroll area to direct ownership; complete
    container capture acquisition with the defaulted local-retention/loss hooks and scoped
-   current-owner query while keeping the ID in `WidgetTree`, remove generic node visibility, make
-   routed events authoritative, and reduce the frame to two tree layouts.
+   current-owner query while keeping the ID in `WidgetTree`, remove generic node visibility, replace
+   aggregate input with a FIFO queue, drain it through one full update/layout transaction per event,
+   and split explicit UI commit from paint-only rendering.
 8. Remove public projection/root replacement and migrate one small example completely.
 9. Replace pseudo-unbounded probes and independent Row/Grid/container solvers with explicit private
    constraints and shared axis primitives; centralize chrome conversion in the retained root-chrome
@@ -4914,7 +5219,7 @@ change process updates both.
 The migration is complete when:
 
 - the public `Widget` trait remains the only common phase contract for leaves and containers, and
-  its final `update` method returns `()`;
+  its final `update` method accepts `Option<&UiInputEvent>` and returns `()`;
 - public `Container: Widget` is implementable by downstream custom containers, adds only
   opaque child visitation/layout/descendant-visibility/special-input behavior plus the defaulted
   local pointer-capture-retention/loss hooks and scoped current-owner query, and redeclares none of
@@ -4922,8 +5227,9 @@ The migration is complete when:
 - `NodeBehavior`, its implementations/bounds, and any equivalent catch-all runtime adapter are
   absent; private traversal dispatches common phases once through `Widget` and branches to
   `Container` only for container-specific work;
-- each requested runtime invocation has one common `Widget` dispatch path; the two required layout
-  phases may each invoke measurement and do not imply only one measure call per frame;
+- each requested runtime invocation has one common `Widget` dispatch path; the initial
+  synchronization layout and each post-input layout may invoke measurement and do not imply only
+  one measure call per application loop;
 - widget/container/chrome update constructs and returns no generic result; typed state events,
   `WidgetUpdateCtx`, and routed-input results are the respective application, focus, and
   capture/consumption mechanisms; `ResourceState` and frame-result APIs are absent;
@@ -4955,8 +5261,9 @@ The migration is complete when:
 - state/topology access never checks Context identity, mount state, frame state, or a global lock;
 - same-cell conflicts between checked handle operations return `None`, while unrelated available
   cells can be accessed regardless of `ContextFrame` lifetime;
-- state-access closures finish before retained traversal/rendering; reentrant rendering from inside
-  a closure is documented as unsupported and is not implemented with a frame/write gate;
+- state-access closures finish before retained update/layout/paint traversal; reentrant traversal
+  from inside a closure is documented as unsupported and is not implemented with a frame/write
+  gate. A layout-affecting mutation after a UI commit requires another explicit commit before paint;
 - framework-owned nested `Children::measure_child`, `ContainerLayoutCtx::layout_child`, and opaque
   visitor traversal are authorized recursion, not application rendering reentrancy;
 - `WidgetStateHandleDyn`, erased handle cloning, and duplicate state dispatch are absent;
@@ -4993,7 +5300,7 @@ The migration is complete when:
   tree-owned capture before another event is routed by observing
   `ScrollAreaContainer::retains_pointer_capture == false`; disable/re-enable cannot resurrect the
   cleared drag/capture, `on_pointer_capture_lost` clears drag after externally caused loss, and
-  routing queues but does not apply scroll state changes;
+  routing assigns the current event but does not apply scroll state changes;
 - `Children::new`/`Default`/`FromIterator<Node>` support downstream construction, but built-in
   states expose no whole collection and no framework-provided API returns an attached node;
 - only framework-created opaque visitors reach container child collections; ordinary callers cannot
@@ -5052,18 +5359,24 @@ The migration is complete when:
 - root visibility and container descendant gating are the only visibility mechanisms; collapsing
   clears descendant transient targets without restoring them on expansion;
 - the file dialog changes only row children on directory refresh, preserves then clamps its scroll
-  offset to the new content range, and performs no idle tree work; `src/file_dialog.rs` was
+  offset to the new content range, and performs no idle reconstruction or widget update;
+  `src/file_dialog.rs` was
   refactored in place, `FileDialogState` is restored at crate root/prelude and in `demo-full`, all
   preserved tests are active, and no P1.2 restoration marker or commented-out integration edge
   remains;
 - focus, capture, input, layout, paint, clipping, scrolling, and custom rendering retain the
   supported behavior required by this migration under deterministic tests, subject to the
   explicitly unresolved post-refactor focus-model defect above;
-- raw input enters one ordered dispatcher; routed events are the only ordinary retained interaction
-  source and popup outside dismissal is the sole cross-root boundary exception. A frame performs
-  exactly one pre-input and one post-update retained-tree layout, with no raw-input
-  `interaction_for` path or unconditional middle layout; context-level scroll-delta
-  storage/accessors are absent and widgets inspect only their localized routed-event batch;
+- every public input call enters one FIFO queue without coalescing; each event is normalized/routed
+  once and popup outside dismissal is the sole cross-root boundary exception. Public
+  `Context::update_ui(dimensions)` performs one synchronization layout plus one full eligible-tree
+  `Widget::update(Option<&UiInputEvent>)` traversal and one complete layout per dequeued event; the
+  next event uses that committed geometry. An empty queue performs zero widget updates. Public
+  `ContextFrame::render_ui` paints/submits only and returns `RenderError::UiUpdateRequired` for
+  detectable missing/stale commits. There is no timer/idle update, raw-input `interaction_for`,
+  `WidgetInputEvents`, synthetic held-state events, routed batch/map, duplicate scroll channel,
+  batching-only capture deferral,
+  `just_opened`, or update/layout reachable from rendering;
 - retained measurement contains no large pseudo-unbounded sentinel, uses explicit private
   bounded/unbounded constraints and shared axis allocation, and keeps chrome/client conversion in
   the shared private root-chrome helper while carrying transforms/clips directly;
@@ -5076,8 +5389,9 @@ The migration is complete when:
   `WidgetStateOwner`; no raw-box or parallel owner-wrapper surface is documented as supported;
 - measurements show zero root reconstruction, zero erased state redispatch, two semantic nodes for a
   one-child scroll area, exactly one internal chrome-container node per root, zero idle file-dialog
-  tree allocation, two retained-tree layouts per
-  ordinary frame, zero associated-state weak upgrades during concrete runtime methods, at most one
+  tree allocation, N full updates and N + 1 layout commits for N queued inputs, one synchronization
+  layout and zero updates for an empty queue, and one paint with zero update/layout work per render;
+  there are zero associated-state weak upgrades during concrete runtime methods and at most one
   direct associated-state borrow per such method, no identity/topology/dispatch weak upgrades, and
   no material regression;
 - no incremental traversal or retained-paint cache is added without a separate evidence-backed

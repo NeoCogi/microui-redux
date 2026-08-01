@@ -168,9 +168,9 @@ impl Widget for ScrollAreaContainer {
         runtime_read_state(&self.state, "ScrollArea::measure", |state| measure_children(state, style, atlas, available))
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         runtime_update_state(&self.state, "ScrollArea::update", |state| {
-            update_scroll_state(state, ctx.style(), &input);
+            update_scroll_state(state, ctx.style(), input);
         });
     }
 
@@ -386,7 +386,7 @@ fn route_surface(state: &ScrollAreaState, event: &UiInputEvent, has_pointer_capt
     None
 }
 
-fn update_scroll_state(state: &mut ScrollAreaState, style: &Style, events: &[UiInputEvent]) {
+fn update_scroll_state(state: &mut ScrollAreaState, style: &Style, event: Option<&UiInputEvent>) {
     if !state.scrolling_enabled {
         state.offset = Vec2i::default();
         state.drag_axis = None;
@@ -394,7 +394,7 @@ fn update_scroll_state(state: &mut ScrollAreaState, style: &Style, events: &[UiI
     }
     let padding = style.padding.max(0);
     let scrollbar_size = style.scrollbar_size.max(0);
-    for event in events {
+    if let Some(event) = event {
         match *event {
             UiInputEvent::Scroll { delta, .. } => {
                 state.offset.x = state.offset.x.saturating_add(delta.x);

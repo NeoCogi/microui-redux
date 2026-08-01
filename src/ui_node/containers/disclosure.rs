@@ -204,10 +204,8 @@ impl Widget for DisclosureContainer {
         })
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Vec<UiInputEvent>) {
-        let submitted = input
-            .iter()
-            .any(|event| matches!(event, UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT)));
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        let submitted = matches!(input, Some(UiInputEvent::MouseDown { button, .. }) if button.intersects(MouseButton::LEFT));
         if !submitted {
             return;
         }

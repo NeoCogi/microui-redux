@@ -1,7 +1,6 @@
 //! Window-manager root registry, cross-root policy, and persistent tree traversal.
 
 use super::*;
-use crate::ui_node::pointer_events_from_input;
 use crate::{Node, RootHandle, RootMutationError, RootState, Vec2i, WidgetStateHandle};
 
 use super::root_chrome::{record_root_overlay, root_handle, RootChromeContainer, RootChromeParameters};
@@ -31,7 +30,6 @@ impl WidgetTree {
 pub(super) struct WindowEntry {
     pub(super) id: RootId,
     pub(super) kind: WindowKind,
-    pub(super) just_opened: bool,
     pub(super) z_index: i32,
     pub(super) root_state: WidgetStateHandle<RootState>,
     pub(super) tree: WidgetTree,
@@ -56,11 +54,11 @@ impl<B: RendererBackend> Context<B> {
         self.roots.push(WindowEntry {
             id,
             kind,
-            just_opened: false,
             z_index,
             root_state: root_state.clone(),
             tree: WidgetTree { root, runtime: UiRuntime::new() },
         });
+        self.invalidate_ui_commit();
         root_handle(id, root_state)
     }
 
@@ -115,11 +113,6 @@ impl<B: RendererBackend> Context<B> {
         let target = self.root_index(root)?;
         let mouse = self.input.borrow().mouse_pos;
         let kind = self.roots[target].kind;
-        let was_visible = self.roots[target]
-            .root_state
-            .try_read(RootState::is_visible)
-            .ok_or(RootMutationError::Borrowed)?;
-
         if visible && kind == WindowKind::Popup {
             let mut other = None;
             for (index, entry) in self.roots.iter().enumerate() {
@@ -154,7 +147,6 @@ impl<B: RendererBackend> Context<B> {
                     state.set_visible_silent(true);
                 })?;
             }
-            self.roots[target].just_opened = !was_visible;
         } else {
             self.update_root_state(root, |state| state.set_visible_silent(visible))?;
         }
@@ -165,6 +157,7 @@ impl<B: RendererBackend> Context<B> {
         } else {
             self.roots[target].tree.clear_transient_targets();
         }
+        self.invalidate_ui_commit();
         Ok(())
     }
 
@@ -175,6 +168,7 @@ impl<B: RendererBackend> Context<B> {
         };
         self.last_zindex = self.last_zindex.saturating_add(1);
         entry.z_index = self.last_zindex;
+        self.invalidate_ui_commit();
         true
     }
 
@@ -184,6 +178,7 @@ impl<B: RendererBackend> Context<B> {
             return false;
         };
         self.roots.remove(index);
+        self.invalidate_ui_commit();
         true
     }
 
@@ -194,6 +189,7 @@ impl<B: RendererBackend> Context<B> {
     fn update_root_state(&mut self, root: RootId, update: impl FnOnce(&mut RootState)) -> Result<(), RootMutationError> {
         let index = self.root_index(root)?;
         if self.roots[index].root_state.try_update(update).is_some() {
+            self.invalidate_ui_commit();
             Ok(())
         } else if self.roots[index].root_state.is_alive() {
             Err(RootMutationError::Borrowed)
@@ -215,9 +211,28 @@ impl<B: RendererBackend> Context<B> {
         self.style.spacing.max(0)
     }
 
-    pub(super) fn render_window_manager(&mut self, dimensions: Dimensioni) {
+    /// Performs one synchronization layout, then one full update/layout pair per queued event.
+    pub(super) fn update_window_manager(&mut self, dimensions: Dimensioni) {
         let atlas = self.renderer.atlas();
-        let viewport = Recti::new(0, 0, dimensions.width.max(0), dimensions.height.max(0));
+        let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
+
+        for entry in &mut self.roots {
+            entry.tree.runtime.begin_update();
+        }
+        self.layout_window_manager(viewport, &atlas);
+
+        loop {
+            let event = { self.input.borrow_mut().pop_event() };
+            let Some(event) = event else { break };
+            let input = self.input.borrow().snapshot();
+            self.update_window_manager_for_event(&atlas, &event, input);
+            self.layout_window_manager(viewport, &atlas);
+        }
+    }
+
+    /// Synchronizes auto-size and layout for every visible root.
+    fn layout_window_manager(&mut self, viewport: Recti, atlas: &crate::AtlasHandle) {
+        self.roots.sort_by_key(|entry| entry.z_index);
 
         for index in 0..self.roots.len() {
             let (visible, options, rect) = self.roots[index]
@@ -229,7 +244,7 @@ impl<B: RendererBackend> Context<B> {
                 let size = self.roots[index]
                     .tree
                     .runtime
-                    .measure_tree_root(&self.roots[index].tree.root, self.style.as_ref(), &atlas, available);
+                    .measure_tree_root(&self.roots[index].tree.root, self.style.as_ref(), atlas, available);
                 self.roots[index]
                     .root_state
                     .try_update(|state| state.set_size_silent(size))
@@ -237,36 +252,7 @@ impl<B: RendererBackend> Context<B> {
             }
         }
 
-        let (mouse_pos, mouse_pressed) = {
-            let input = self.input.borrow();
-            (input.mouse_pos, input.mouse_pressed)
-        };
-        if !mouse_pressed.is_empty() {
-            self.dismiss_outside_popup(mouse_pos);
-        }
-        let hover_root = self.front_root_at(mouse_pos);
-        if !mouse_pressed.is_empty()
-            && let Some(root) = hover_root
-        {
-            let _ = self.bring_root_to_front(root);
-        }
-
-        let keyboard_root = self
-            .roots
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                self.roots[*index]
-                    .root_state
-                    .try_read(RootState::is_visible)
-                    .unwrap_or_else(|| self.root_access_failure(*index))
-            })
-            .max_by_key(|(_, entry)| entry.z_index)
-            .map(|(_, entry)| entry.id);
-
-        let mut roots = std::mem::take(&mut self.roots);
-        roots.sort_by_key(|entry| entry.z_index);
-        for entry in &mut roots {
+        for entry in &mut self.roots {
             let (visible, rect) = entry
                 .root_state
                 .try_read(|state| (state.is_visible(), state.rect()))
@@ -276,25 +262,81 @@ impl<B: RendererBackend> Context<B> {
                 continue;
             }
 
-            let pointer_input = hover_root == Some(entry.id);
-            entry.tree.runtime.begin_frame(pointer_input);
             entry
                 .tree
                 .runtime
                 .layout_tree_root(&mut entry.tree.root, self.style.as_ref(), atlas.clone(), rect, viewport);
-            {
-                let input = self.input.borrow();
-                Self::route_entry_input(entry, self.style.as_ref(), &input, keyboard_root == Some(entry.id));
-                entry
+        }
+    }
+
+    /// Routes and applies one normalized event, visiting every eligible tree exactly once.
+    fn update_window_manager_for_event(&mut self, atlas: &crate::AtlasHandle, event: &crate::UiInputEvent, input: crate::input::InputSnapshot) {
+        if matches!(event, crate::UiInputEvent::MouseDown { .. }) {
+            self.dismiss_outside_popup(input.mouse_pos);
+        }
+
+        let hover_root = event.is_pointer().then(|| self.front_root_at(input.mouse_pos)).flatten();
+        if matches!(event, crate::UiInputEvent::MouseDown { .. })
+            && let Some(root) = hover_root
+        {
+            let _ = self.bring_root_to_front(root);
+        }
+
+        let keyboard_root = self.front_visible_root();
+        for entry in &mut self.roots {
+            let visible = entry
+                .root_state
+                .try_read(RootState::is_visible)
+                .expect("registered root state unavailable before input update");
+            if visible {
+                entry.tree.runtime.begin_input_event(hover_root == Some(entry.id), event);
+            }
+        }
+
+        if event.is_pointer() {
+            let capture_index = self.roots.iter().position(|entry| entry.tree.runtime.capture.is_some());
+            let mut capture_handled = false;
+            if let Some(index) = capture_index {
+                let entry = &mut self.roots[index];
+                let roots = std::slice::from_mut(&mut entry.tree.root);
+                capture_handled = entry
                     .tree
                     .runtime
-                    .update_tree_root(&mut entry.tree.root, self.style.as_ref(), atlas.clone(), &input);
+                    .route_captured_pointer_input_event(roots, self.style.as_ref(), input.mouse_buttons, event)
+                    .is_some();
             }
 
-            let (visible, next_rect) = entry
+            if !capture_handled
+                && let Some(root) = hover_root
+                && let Some(index) = self.roots.iter().position(|entry| entry.id == root)
+            {
+                let entry = &mut self.roots[index];
+                if entry.tree.runtime.accepts_pointer_input() {
+                    let transform = entry.tree.runtime.root_transform();
+                    if let Some((owner, result)) = entry
+                        .tree
+                        .runtime
+                        .route_input_event_to_node_ref(&mut entry.tree.root, transform, self.style.as_ref(), event)
+                    {
+                        entry.tree.runtime.update_pointer_capture(owner, result, event, input.mouse_buttons);
+                    }
+                }
+            }
+        } else if event.is_focus_input()
+            && let Some(root) = keyboard_root
+            && let Some(index) = self.roots.iter().position(|entry| entry.id == root)
+        {
+            let entry = &mut self.roots[index];
+            let roots = std::slice::from_mut(&mut entry.tree.root);
+            entry.tree.runtime.route_focus_input_event(roots, self.style.as_ref(), event);
+        }
+
+        self.roots.sort_by_key(|entry| entry.z_index);
+        for entry in &mut self.roots {
+            let visible = entry
                 .root_state
-                .try_read(|state| (state.is_visible(), state.rect()))
-                .expect("registered root state unavailable after root update");
+                .try_read(RootState::is_visible)
+                .expect("registered root state unavailable during input update");
             if !visible {
                 entry.tree.clear_transient_targets();
                 continue;
@@ -302,7 +344,32 @@ impl<B: RendererBackend> Context<B> {
             entry
                 .tree
                 .runtime
-                .layout_tree_root(&mut entry.tree.root, self.style.as_ref(), atlas.clone(), next_rect, viewport);
+                .update_tree_root(&mut entry.tree.root, self.style.as_ref(), atlas.clone(), input);
+
+            let visible = entry
+                .root_state
+                .try_read(RootState::is_visible)
+                .expect("registered root state unavailable after root update");
+            if !visible {
+                entry.tree.clear_transient_targets();
+            }
+        }
+    }
+
+    /// Paints and records the already committed trees without updating or laying them out.
+    pub(super) fn paint_window_manager(&mut self, dimensions: Dimensioni) {
+        self.display_list.clear();
+        let atlas = self.renderer.atlas();
+        let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
+        self.roots.sort_by_key(|entry| entry.z_index);
+        for entry in &mut self.roots {
+            let visible = entry
+                .root_state
+                .try_read(RootState::is_visible)
+                .expect("registered root state unavailable during paint");
+            if !visible {
+                continue;
+            }
             entry
                 .tree
                 .runtime
@@ -311,14 +378,12 @@ impl<B: RendererBackend> Context<B> {
                 .root_state
                 .try_read(|state| record_root_overlay(&mut self.display_list, viewport, state, self.style.as_ref(), &atlas))
                 .expect("registered root state unavailable during overlay paint");
-            entry.just_opened = false;
         }
-        self.roots = roots;
     }
 
     fn dismiss_outside_popup(&mut self, mouse: Vec2i) {
         let popup = self.roots.iter().enumerate().find_map(|(index, entry)| {
-            if entry.kind != WindowKind::Popup || entry.just_opened {
+            if entry.kind != WindowKind::Popup {
                 return None;
             }
             entry
@@ -350,25 +415,18 @@ impl<B: RendererBackend> Context<B> {
             .map(|(_, entry)| entry.id)
     }
 
-    fn route_entry_input(entry: &mut WindowEntry, style: &Style, input: &Input, route_focus_input: bool) {
-        let roots = std::slice::from_mut(&mut entry.tree.root);
-        if entry.tree.runtime.accepts_pointer_input() || entry.tree.runtime.capture.is_some() {
-            for event in pointer_events_from_input(input) {
-                if entry.tree.runtime.route_captured_pointer_input_event(roots, style, input, &event).is_some() {
-                    continue;
-                }
-                if !entry.tree.runtime.accepts_pointer_input() {
-                    continue;
-                }
-                let transform = entry.tree.runtime.root_transform();
-                if let Some((owner, result)) = entry.tree.runtime.route_input_event_to_node_ref(&mut roots[0], transform, style, &event) {
-                    entry.tree.runtime.update_pointer_capture(owner, result, &event, input);
-                }
-            }
-        }
-        if route_focus_input {
-            entry.tree.runtime.route_focus_input_events(roots, style, input);
-        }
+    fn front_visible_root(&self) -> Option<RootId> {
+        self.roots
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| {
+                self.roots[*index]
+                    .root_state
+                    .try_read(RootState::is_visible)
+                    .unwrap_or_else(|| self.root_access_failure(*index))
+            })
+            .max_by_key(|(_, entry)| entry.z_index)
+            .map(|(_, entry)| entry.id)
     }
 
     const fn default_popup_options() -> WindowOption {

@@ -333,7 +333,7 @@ impl Widget for GridContainer {
         runtime_read_state(&self.state, "Grid::measure", |state| measure_grid(state, style, atlas, available))
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {}
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }

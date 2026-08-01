@@ -145,7 +145,7 @@ impl Widget for Checkbox {
         self.preferred_size(style, atlas)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Vec<UiInputEvent>) {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
         if !ctx.clicked() {
             return;
         }
