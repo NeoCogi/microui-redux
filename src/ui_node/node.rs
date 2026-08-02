@@ -145,6 +145,7 @@ fn translate_rect(rect: Recti, offset: Vec2i) -> Recti {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_atlas;
 
     fn text_node(label: &str) -> (crate::WidgetStateHandle<crate::TextBlockState>, Node) {
         let (state, runtime) = crate::TextBlock::create(crate::TextBlockParameters::new(label));
@@ -182,6 +183,21 @@ mod tests {
 
         children.push(rejected);
         assert_eq!(children.nodes[0].state.id.0.get(), first_id);
+    }
+
+    #[test]
+    fn measurement_reports_content_and_leaves_placement_policy_to_the_parent() {
+        let (_, plain) = text_node("same content");
+        let (_, fixed) = text_node("same content");
+        let fixed = fixed.with_policy(crate::Policy::fixed(300, 200));
+        let style = crate::Style::default();
+        let atlas = test_atlas();
+
+        let plain = plain.measure(&style, &atlas, Dimensioni::default());
+        let fixed_measurement = fixed.measure(&style, &atlas, Dimensioni::default());
+        assert_eq!((plain.width, plain.height), (fixed_measurement.width, fixed_measurement.height));
+        let children: Children = [fixed].into_iter().collect();
+        assert_eq!(children.child_policy(0), Some(crate::Policy::fixed(300, 200)));
     }
 
     #[test]
@@ -346,26 +362,20 @@ impl Node {
         self.state.id()
     }
 
-    /// Measures this node without requiring a Context or runtime registry.
-    ///
-    /// Public `Children::measure_child` uses this path so downstream containers can implement the
-    /// inherited `Widget::measure` contract while holding their own state borrow.
-    pub(crate) fn measure(&self, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> NodeMeasurement {
+    /// Measures this node's preferred outer size. Placement policy is applied later by layout.
+    pub(crate) fn measure(&self, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+        // Frame geometry is intrinsic to the widget, so remove it from the content bound before
+        // dispatch and add it back to the returned content preference afterward.
         let framed = self.data.widget().effective_widget_opt().intersects(crate::WidgetOption::FRAME);
-        let border_width = if framed { style.frame_border().width } else { 0 };
-        let policy = self.state.policy;
-        let outer_available = Dimensioni::new(
-            super::measure_axis_available(policy.width, available.width),
-            super::measure_axis_available(policy.height, available.height),
-        );
-        let content_available = crate::frame::content_available(outer_available, border_width);
-        let preferred_content = self.data.widget().measure(style, atlas, content_available);
-        let preferred_outer = crate::frame::outer_preferred(preferred_content, border_width);
-        let resolved_outer = Dimensioni::new(
-            super::resolve_size(policy.width, preferred_outer.width, available.width, available.width, None),
-            super::resolve_size(policy.height, preferred_outer.height, available.height, available.height, None),
-        );
-        NodeMeasurement { resolved_outer, preferred_outer }
+        let border_width = if framed { style.frame_border().width.max(0) } else { 0 };
+        let measured_content = self
+            .data
+            .widget()
+            .measure(style, atlas, crate::frame::content_available(available, border_width));
+        // Widgets cannot return negative geometry. Node placement policy is intentionally absent:
+        // the parent applies it later when allocating this preferred outer size.
+        let preferred_content = Dimensioni::new(measured_content.width.max(0), measured_content.height.max(0));
+        crate::frame::outer_preferred(preferred_content, border_width)
     }
 
     /// Writes layout as the source of truth.
@@ -496,14 +506,6 @@ impl NodeKind {
     }
 }
 
-/// One authoritative node measurement reused by parent allocation and leaf content sizing.
-pub(crate) struct NodeMeasurement {
-    /// Policy-resolved preferred outer size returned to the parent.
-    pub(crate) resolved_outer: Dimensioni,
-    /// Intrinsic outer size before parent allocation clamps/fills it.
-    pub(crate) preferred_outer: Dimensioni,
-}
-
 /// Opaque ordered owner of unique retained child nodes.
 ///
 /// Public code can transfer new nodes in or drop existing owners but cannot borrow attached nodes,
@@ -530,9 +532,16 @@ impl Children {
         self.nodes.is_empty()
     }
 
-    /// Measures one child by index without exposing the child itself.
+    /// Measures one child's preferred content without applying its placement policy.
+    ///
+    /// Use [`Self::child_policy`] separately when the container's slot calculation needs it.
     pub fn measure_child(&self, index: usize, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Option<Dimensioni> {
-        self.nodes.get(index).map(|node| node.measure(style, atlas, available).resolved_outer)
+        self.nodes.get(index).map(|node| node.measure(style, atlas, available))
+    }
+
+    /// Returns one child's placement policy without exposing the child itself.
+    pub fn child_policy(&self, index: usize) -> Option<crate::Policy> {
+        self.nodes.get(index).map(|node| node.state.policy)
     }
 
     /// Appends one still-unmounted node and commits this collection as its owner.

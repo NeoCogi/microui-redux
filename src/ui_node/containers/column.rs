@@ -6,7 +6,7 @@ use crate::{
     WidgetStateOwner, WidgetUpdateCtx,
 };
 
-use super::{Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerLayoutCtx, ContainerState, Node};
+use super::{Axis, Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerLayoutCtx, ContainerState, Node};
 
 /// One-shot construction input for a vertical [`Column`].
 #[derive(Default)]
@@ -87,19 +87,7 @@ impl Widget for ColumnContainer {
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-        runtime_read_state(&self.state, "Column::measure", |state| {
-            let mut width = 0;
-            let mut height: i32 = 0;
-            for index in 0..state.children.len() {
-                let child = state.children.measure_child(index, style, atlas, available).unwrap_or_default();
-                width = width.max(child.width);
-                height = height.saturating_add(child.height);
-                if index + 1 < state.children.len() {
-                    height = height.saturating_add(style.spacing);
-                }
-            }
-            Dimensioni::new(width.max(0), height.max(0))
-        })
+        runtime_read_state(&self.state, "Column::measure", |state| measure_column(&state.children, style, atlas, available))
     }
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
@@ -162,27 +150,89 @@ impl Column {
     }
 }
 
-fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+/// Resolves and commits a top-to-bottom child layout inside `rect`.
+///
+/// This is shared with Disclosure because an expanded disclosure body has exactly Column flow.
+/// The function uses scalar replay instead of building per-frame policy and height vectors.
+pub(super) fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+    let spacing = ctx.style().spacing.max(0);
     let count = children.len();
-    let spacing = ctx.style().spacing;
-    let available_height = rect.height.saturating_sub(spacing.saturating_mul(count.saturating_sub(1) as i32));
-    let mut preferred = Vec::with_capacity(count);
-    let mut policies = Vec::with_capacity(count);
-    for index in 0..count {
-        let child_size = children
-            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(rect.width, available_height))
-            .unwrap_or_default();
-        preferred.push(child_size.height);
-        policies.push(ctx.child_policy(children, index).map(|policy| policy.height).unwrap_or(crate::SizePolicy::Auto));
-    }
-    let placements = super::super::resolve_axis_placements(&policies, &preferred, available_height);
+    // Spacing is outside track allocation, so children divide only the remaining height.
+    let spacing_total = spacing.saturating_mul(count.saturating_sub(1) as i32);
+    let available_height = rect.height.saturating_sub(spacing_total).max(1);
+
+    // First pass: summarize policies and preferred heights without retaining per-child data.
+    let mut axis = Axis::new(
+        available_height,
+        (0..count).map(|index| {
+            let policy = children.child_policy(index).unwrap_or_else(crate::Policy::auto);
+            let width = policy.width.measurement_bound(rect.width.max(1));
+            let preferred = children
+                .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(width, available_height))
+                .unwrap_or_default()
+                .height;
+            (policy.height, preferred)
+        }),
+    );
+
+    // Second pass: resolve each ordered slot and commit it immediately. `offered` may differ from
+    // `advance` because child layout remains responsible for applying the node policy once.
     let mut y = rect.y;
     for index in 0..count {
-        let placement = placements.get(index).copied().unwrap_or_default();
-        // `offered` is deliberately not always the final allocation. `layout_child` owns the one
-        // application of the child's policy; `advance` only positions the following sibling.
-        let child_rect = Recti::new(rect.x, y, rect.width, placement.offered);
+        let policy = children.child_policy(index).unwrap_or_else(crate::Policy::auto);
+        let width = policy.width.measurement_bound(rect.width.max(1));
+        let preferred = children
+            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(width, available_height))
+            .unwrap_or_default()
+            .height;
+        let slot = axis.next(policy.height, preferred);
+        let child_rect = Recti::new(rect.x, y, rect.width, slot.offered);
         let _ = ctx.layout_child(children, index, child_rect);
-        y = y.saturating_add(placement.advance).saturating_add(spacing);
+        y = y.saturating_add(slot.advance).saturating_add(spacing);
     }
+}
+
+/// Measures the preferred extent of a top-to-bottom child sequence.
+///
+/// Width is the widest policy-adjusted child. Height uses the same ordered axis allocation as
+/// layout, including spacing, but does not retain or mutate any sizing state.
+pub(super) fn measure_column(children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+    let spacing = style.spacing.max(0);
+    let count = children.len();
+    let mut width = 0;
+    // A positive bound is divided among tracks after spacing; zero stays the intrinsic marker.
+    let spacing_total = spacing.saturating_mul(count.saturating_sub(1) as i32);
+    let available_height = if available.height > 0 {
+        available.height.saturating_sub(spacing_total).max(1)
+    } else {
+        0
+    };
+    // The summary pass also computes the widest child while it gathers vertical track inputs.
+    let mut axis = Axis::new(
+        available_height,
+        (0..count).map(|index| {
+            let policy = children.child_policy(index).unwrap_or_else(crate::Policy::auto);
+            let child_width = policy.width.measurement_bound(available.width);
+            let child = children.measure_child(index, style, atlas, Dimensioni::new(child_width, 0)).unwrap_or_default();
+            width = width.max(policy.width.preferred_extent(child.width, available.width));
+            (policy.height, child.height)
+        }),
+    );
+    if available_height == 0 {
+        // Axis::new already accumulated the intrinsic total, so unbounded auto-size needs no replay.
+        return Dimensioni::new(width, axis.intrinsic_extent(count, spacing));
+    }
+
+    // Bounded policies such as Remainder depend on sibling order and are replayed through the
+    // scalar cursor. No child result escapes this query or becomes mutable widget state.
+    for index in 0..count {
+        let policy = children.child_policy(index).unwrap_or_else(crate::Policy::auto);
+        let child_width = policy.width.measurement_bound(available.width);
+        let preferred = children
+            .measure_child(index, style, atlas, Dimensioni::new(child_width, 0))
+            .unwrap_or_default()
+            .height;
+        axis.next(policy.height, preferred);
+    }
+    Dimensioni::new(width, axis.extent(count, spacing))
 }

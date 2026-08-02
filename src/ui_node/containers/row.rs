@@ -7,7 +7,7 @@ use crate::{
     WidgetStateOwner, WidgetUpdateCtx,
 };
 
-use super::{Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerLayoutCtx, ContainerState, Node};
+use super::{Axis, Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerLayoutCtx, ContainerState, Node};
 
 /// One-shot construction input for a horizontal row.
 ///
@@ -106,56 +106,7 @@ impl Widget for RowContainer {
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-        runtime_read_state(&self.state, "Row::measure", |state| {
-            let count = state.children.len();
-            let spacing = style.spacing.saturating_mul(count.saturating_sub(1) as i32);
-            let available_width = available.width.saturating_sub(spacing).max(0);
-            let initial = (0..count)
-                .map(|index| {
-                    state
-                        .children
-                        .measure_child(index, style, atlas, Dimensioni::new(available_width, available.height))
-                        .unwrap_or_default()
-                })
-                .collect::<Vec<_>>();
-
-            // A positive width is a real constraint. Resolve the same tracks used by layout, then
-            // measure height at each child's actual width so wrapped content cannot widen the row
-            // or report a height derived from a different allocation.
-            let (width, preferred_height) = if available.width > 0 {
-                let policies = (0..count)
-                    .map(|index| state.widths.get(index).copied().unwrap_or(SizePolicy::Auto))
-                    .collect::<Vec<_>>();
-                let preferred_widths = initial.iter().map(|size| size.width).collect::<Vec<_>>();
-                let tracks = super::super::resolve_axis_tracks(&policies, &preferred_widths, available_width);
-                let height = tracks
-                    .iter()
-                    .enumerate()
-                    .map(|(index, width)| {
-                        state
-                            .children
-                            .measure_child(index, style, atlas, Dimensioni::new(*width, available.height))
-                            .unwrap_or_default()
-                            .height
-                    })
-                    .max()
-                    .unwrap_or_default();
-                (tracks.into_iter().sum::<i32>().saturating_add(spacing).max(0), height)
-            } else {
-                let width = initial.iter().map(|size| size.width).sum::<i32>().saturating_add(spacing).max(0);
-                let height = initial.iter().map(|size| size.height).max().unwrap_or_default();
-                (width, height)
-            };
-
-            let height = super::super::resolve_size(
-                state.item_height,
-                preferred_height.max(super::super::default_cell_height(style, atlas)),
-                available.height,
-                available.height,
-                None,
-            );
-            Dimensioni::new(width, height)
-        })
+        runtime_read_state(&self.state, "Row::measure", |state| row_size(state, style, atlas, available))
     }
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
@@ -215,33 +166,124 @@ impl Row {
     }
 }
 
+/// Resolves shared row height and commits children from left to right.
+///
+/// Width tracks are replayed because the shared height must be known before any child is placed;
+/// replaying them avoids allocating a temporary width collection on every layout frame.
 fn layout_row(ctx: &mut ContainerLayoutCtx<'_>, state: &mut RowState, rect: Recti) {
     let count = state.children.len();
-    let spacing = ctx.style().spacing.saturating_mul(count.saturating_sub(1) as i32);
-    let available_width = rect.width.saturating_sub(spacing).max(0);
-    let mut preferred = Vec::with_capacity(count);
+    let spacing = ctx.style().spacing.max(0);
+    let spacing_total = spacing.saturating_mul(count.saturating_sub(1) as i32);
+    let available_width = rect.width.saturating_sub(spacing_total).max(1);
+    // First resolve each width and measure content at that actual width. This is what keeps wrapped
+    // child height consistent with the widths that layout will commit.
+    let mut axis = row_axis(state, ctx.style(), ctx.atlas(), available_width);
+    let mut height = 0;
     for index in 0..count {
-        let size = state
+        let policy = state.widths.get(index).copied().unwrap_or(SizePolicy::Auto);
+        let preferred = state
             .children
-            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(available_width, rect.height))
-            .unwrap_or_default();
-        preferred.push(size.width);
+            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::default())
+            .unwrap_or_default()
+            .width;
+        let width = axis.next(policy, preferred).advance;
+        let measured_width = state
+            .children
+            .child_policy(index)
+            .unwrap_or_else(crate::Policy::auto)
+            .width
+            .measurement_bound(width);
+        height = height.max(
+            state
+                .children
+                .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(measured_width, 0))
+                .unwrap_or_default()
+                .height,
+        );
     }
-    let policies = (0..count)
-        .map(|index| state.widths.get(index).copied().unwrap_or(SizePolicy::Auto))
-        .collect::<Vec<_>>();
-    let tracks = super::super::resolve_axis_tracks(&policies, &preferred, available_width);
-    let height = super::super::resolve_size(state.item_height, rect.height, rect.height, rect.height, None);
+    height = state
+        .item_height
+        .preferred_extent(height.max(super::default_cell_height(ctx.style(), ctx.atlas())), rect.height);
+
+    // Replay the allocation now that the single shared row height is known, placing each child as
+    // soon as its width is resolved instead of collecting widths in a temporary Vec.
+    let mut axis = row_axis(state, ctx.style(), ctx.atlas(), available_width);
     let mut x = rect.x;
-    for (index, width) in tracks.into_iter().enumerate() {
+    for index in 0..count {
+        let policy = state.widths.get(index).copied().unwrap_or(SizePolicy::Auto);
+        let preferred = state
+            .children
+            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::default())
+            .unwrap_or_default()
+            .width;
+        let width = axis.next(policy, preferred).advance;
         let _ = ctx.layout_child(&mut state.children, index, Recti::new(x, rect.y, width, height));
-        x = x.saturating_add(width).saturating_add(ctx.style().spacing);
+        x = x.saturating_add(width).saturating_add(spacing);
     }
+}
+
+/// Builds the scalar width cursor from child preferences and index-matched Row track policies.
+fn row_axis(state: &RowState, style: &Style, atlas: &AtlasHandle, available_width: i32) -> Axis {
+    Axis::new(
+        available_width,
+        (0..state.children.len()).map(|index| {
+            let preferred = state
+                .children
+                .measure_child(index, style, atlas, Dimensioni::default())
+                .unwrap_or_default()
+                .width;
+            (state.widths.get(index).copied().unwrap_or(SizePolicy::Auto), preferred)
+        }),
+    )
+}
+
+/// Measures a Row using the same width-track resolution used during layout.
+///
+/// Children are remeasured at their resolved widths to obtain a correct shared height for wrapped
+/// content. Placement policy remains parent-owned and is not folded into child content measurement.
+fn row_size(state: &RowState, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+    let count = state.children.len();
+    let spacing = style.spacing.max(0);
+    let spacing_total = spacing.saturating_mul(count.saturating_sub(1) as i32);
+    let available_width = if available.width > 0 {
+        available.width.saturating_sub(spacing_total).max(1)
+    } else {
+        0
+    };
+    // Resolve width tracks first; each resolved width then becomes the child's wrapping constraint.
+    let mut axis = row_axis(state, style, atlas, available_width);
+    let mut preferred_height = 0;
+    for index in 0..count {
+        let policy = state.widths.get(index).copied().unwrap_or(SizePolicy::Auto);
+        let preferred = state
+            .children
+            .measure_child(index, style, atlas, Dimensioni::default())
+            .unwrap_or_default()
+            .width;
+        let width = state
+            .children
+            .child_policy(index)
+            .unwrap_or_else(crate::Policy::auto)
+            .width
+            .measurement_bound(axis.next(policy, preferred).advance);
+        preferred_height = preferred_height.max(
+            state
+                .children
+                .measure_child(index, style, atlas, Dimensioni::new(width, 0))
+                .unwrap_or_default()
+                .height,
+        );
+    }
+    // An empty or zero-height row retains the standard control-height fallback.
+    preferred_height = preferred_height.max(super::default_cell_height(style, atlas));
+    let height = state.item_height.preferred_extent(preferred_height, available.height);
+    Dimensioni::new(axis.extent(count, spacing), height)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_atlas;
     use crate::{Custom, CustomParameters};
 
     #[test]
@@ -268,5 +310,24 @@ mod tests {
         assert!(!first_state.is_alive());
         drop(node);
         assert!(!row.is_alive());
+    }
+
+    #[test]
+    fn row_measurement_and_bounded_allocation_share_track_sizing() {
+        let style = Style { spacing: 3, ..Style::default() };
+        let state = RowState {
+            children: [
+                Node::widget(Custom::create(CustomParameters::new("left"))),
+                Node::widget(Custom::create(CustomParameters::new("right side"))),
+            ]
+            .into_iter()
+            .collect(),
+            widths: vec![SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)],
+            item_height: SizePolicy::Auto,
+        };
+        let measured = row_size(&state, &style, &test_atlas(), Dimensioni::default());
+        let allocated = row_size(&state, &style, &test_atlas(), measured);
+        assert_eq!(allocated.width, measured.width);
+        assert_eq!(allocated.height, measured.height);
     }
 }

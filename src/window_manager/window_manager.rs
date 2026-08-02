@@ -325,16 +325,17 @@ impl<B: RendererBackend> Context<B> {
         self.roots.sort_by_key(|entry| entry.z_index);
 
         for index in 0..self.roots.len() {
-            let (visible, options, rect) = self.roots[index]
+            let (visible, options) = self.roots[index]
                 .root_state
-                .try_read(|state| (state.is_visible(), state.options(), state.rect()))
+                .try_read(|state| (state.is_visible(), state.options()))
                 .unwrap_or_else(|| self.root_access_failure(index));
             if visible && options.intersects(WindowOption::AUTO_SIZE) {
-                let available = Dimensioni::new(rect.width.max(1), 10_000);
+                // Auto-size is an intrinsic query. The retained RootChrome node owns chrome
+                // conversion, so the window manager supplies neither a probe size nor a formula.
                 let size = self.roots[index]
                     .tree
                     .runtime
-                    .measure_tree_root(&self.roots[index].tree.root, self.style.as_ref(), atlas, available);
+                    .measure_tree_root(&self.roots[index].tree.root, self.style.as_ref(), atlas);
                 self.roots[index]
                     .root_state
                     .try_update(|state| state.set_size_silent(size))

@@ -1,6 +1,6 @@
 use super::*;
 use crate::input::InputSnapshot;
-use crate::{MouseButton, Vec2i};
+use crate::{MouseButton, Style, Vec2i};
 #[cfg(test)]
 use std::cell::Cell;
 
@@ -90,40 +90,6 @@ impl UiRuntime {
         }
     }
 
-    /// Measures the outer root size needed for `AUTO_SIZE` node roots.
-    pub(crate) fn measure_auto_size(&self, roots: &[Node], style: &Style, atlas: &crate::AtlasHandle, opt: WindowOption, min_width: i32) -> Dimensioni {
-        let title_height = if opt.intersects(WindowOption::NO_TITLE) {
-            0
-        } else {
-            root_titlebar_height(style, atlas)
-        };
-        let padding = style.padding.max(0);
-        let border_width = if opt.intersects(WindowOption::FRAME) { style.frame_border().width } else { 0 };
-        let border_extent = border_width.checked_mul(2).expect("root frame extent overflowed i32");
-        let horizontal_padding = padding.saturating_mul(2);
-        let available = Dimensioni::new(min_width.saturating_sub(border_extent).saturating_sub(horizontal_padding).max(1), 10_000);
-        let mut width: i32 = 0;
-        let mut height: i32 = 0;
-        for (index, root) in roots.iter().enumerate() {
-            let preferred = self.measure_node(root, style, atlas, available).resolved_outer;
-            width = width.max(preferred.width);
-            height = height.saturating_add(preferred.height);
-            if index + 1 < roots.len() {
-                height = height.saturating_add(style.spacing);
-            }
-        }
-        let outer_width = width
-            .saturating_add(horizontal_padding)
-            .checked_add(border_extent)
-            .expect("auto-sized root width overflowed i32");
-        let outer_height = height
-            .saturating_add(padding.saturating_mul(2))
-            .saturating_add(title_height)
-            .checked_add(border_extent)
-            .expect("auto-sized root height overflowed i32");
-        Dimensioni::new(outer_width.max(min_width).max(1), outer_height.max(1))
-    }
-
     /// Clears update-cycle metrics before the initial synchronization layout.
     pub(crate) fn begin_update(&mut self) {
         debug_assert!(self.capture_loss_after_update.is_none(), "pointer-capture loss was not delivered after update");
@@ -160,9 +126,12 @@ impl UiRuntime {
         self.clear_all_pointer_capture(roots);
     }
 
-    /// Measures one persistent root node without introducing a parallel root projection.
-    pub(crate) fn measure_tree_root(&self, root: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
-        self.measure_node(root, style, atlas, available).resolved_outer
+    /// Measures one persistent root node for auto-size without introducing a parallel projection.
+    ///
+    /// Both zero components explicitly request unconstrained preferred size. Root chrome owns the
+    /// conversion from application content to the final outer window extent.
+    pub(crate) fn measure_tree_root(&self, root: &Node, style: &Style, atlas: &crate::AtlasHandle) -> Dimensioni {
+        self.measure_node(root, style, atlas, Dimensioni::default())
     }
 
     /// Lays out one persistent root node at its authoritative screen-space rectangle.
@@ -353,18 +322,14 @@ impl UiRuntime {
     /// Returns the current full rectangle for a retained node.
     #[cfg(test)]
     pub(crate) fn debug_node_rect(&self, roots: &[Node], id: RuntimeNodeId) -> Option<Recti> {
-        with_node(roots, id, |node| {
-            self.parent_transform_for_node(roots, id).resolve(node.state.layout.allocation)
-        })
+        roots.iter().find_map(|root| Self::debug_node_rect_from(root, id, self.root_transform))
     }
 
     /// Returns a node-local rectangle in screen coordinates for a retained node.
     #[cfg(test)]
     pub(crate) fn debug_node_local_rect(&self, roots: &[Node], id: RuntimeNodeId, rect: Recti) -> Option<Recti> {
-        with_node(roots, id, |node| {
-            let screen_rect = self.parent_transform_for_node(roots, id).resolve(node.state.layout.allocation);
-            Recti::new(screen_rect.x + rect.x, screen_rect.y + rect.y, rect.width, rect.height)
-        })
+        self.debug_node_rect(roots, id)
+            .map(|screen_rect| Recti::new(screen_rect.x + rect.x, screen_rect.y + rect.y, rect.width, rect.height))
     }
 
     /// Returns whether a node exists in this runtime.
@@ -378,29 +343,12 @@ impl UiRuntime {
         with_node(roots, id, f)
     }
 
-    /// Finds the current parent of `child` by walking root/container child membership.
-    pub(super) fn parent_of(&self, roots: &[Node], child: RuntimeNodeId) -> Option<RuntimeNodeId> {
-        for root in roots {
-            if let Some(parent) = Self::parent_of_from(root, child) {
-                return Some(parent);
-            }
-        }
-        None
-    }
-
-    fn parent_of_from(current: &Node, child: RuntimeNodeId) -> Option<RuntimeNodeId> {
-        current.with_children(|children| {
-            if children.iter().any(|node| node.id() == child) {
-                return Some(current.id());
-            }
-            children.iter().find_map(|descendant| Self::parent_of_from(descendant, child))
-        })
-    }
-
     /// Measures one already-borrowed node through the authoritative private node path.
-    fn measure_node(&self, node: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> NodeMeasurement {
+    fn measure_node(&self, node: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.measures += 1);
+        // Node::measure is the only place that adds frame geometry; containers receive the same
+        // content-only measurement contract whether reached here or through Children.
         node.measure(style, atlas, available)
     }
 
@@ -409,16 +357,17 @@ impl UiRuntime {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.layouts += 1);
         let framed = node_is_framed(node);
-        let measurement = self.measure_node(node, style, atlas, Dimensioni::new(rect.width, rect.height));
-        let preferred = measurement.resolved_outer;
+        // Query content preference at the offered slot before the parent-owned node policy chooses
+        // the actual outer allocation.
+        let preferred = self.measure_node(node, style, atlas, Dimensioni::new(rect.width.max(1), rect.height.max(1)));
         let policy = node.state.policy;
         let outer = Recti::new(
             rect.x,
             rect.y,
-            resolve_allocated_size(policy.width, preferred.width, rect.width, rect.width, None),
-            resolve_allocated_size(policy.height, preferred.height, rect.height, rect.height, None),
+            policy.width.allocated_extent(rect.width),
+            policy.height.allocated_extent(rect.height),
         );
-        self.layout_node_outer_ref(node, style, atlas, framed, outer, measurement)
+        self.layout_node_outer_ref(node, style, atlas, framed, outer, preferred)
     }
 
     /// Lays out a node whose parent/root flow has already resolved its size policy.
@@ -428,9 +377,9 @@ impl UiRuntime {
         let framed = node_is_framed(node);
         // Preserve the established measure/layout phase contract while keeping the resolved root
         // allocation authoritative.
-        let measurement = self.measure_node(node, style, atlas, Dimensioni::new(rect.width, rect.height));
+        let preferred = self.measure_node(node, style, atlas, Dimensioni::new(rect.width.max(1), rect.height.max(1)));
         let outer = Recti::new(rect.x, rect.y, rect.width.max(0), rect.height.max(0));
-        self.layout_node_outer_ref(node, style, atlas, framed, outer, measurement)
+        self.layout_node_outer_ref(node, style, atlas, framed, outer, preferred)
     }
 
     /// Applies frame/content geometry and delegates layout for one resolved outer allocation.
@@ -441,20 +390,21 @@ impl UiRuntime {
         atlas: &crate::AtlasHandle,
         framed: bool,
         outer: Recti,
-        measurement: NodeMeasurement,
+        preferred: Dimensioni,
     ) -> Dimensioni {
+        // Store every rectangle in node-local coordinates except the outer allocation, which stays
+        // parent-local. Transform traversal later composes those two coordinate spaces once.
         let local_outer = Recti::new(0, 0, outer.width, outer.height);
         let frame_geometry = crate::frame::frame_geometry(local_outer, framed, style);
         let content = frame_geometry.content_or_empty();
         let is_branch = node.is_container();
         node.set_layout(NodeLayout::from_parts(outer, content, Dimensioni::new(outer.width.max(0), outer.height.max(0))));
 
+        // Leaves expose overflow when their preference exceeds allocation. Containers instead
+        // author their child viewport and content extent through the scoped layout context.
         match &mut node.data {
             NodeKind::Widget(_) => {
-                let content_size = Dimensioni::new(
-                    outer.width.max(measurement.preferred_outer.width).max(0),
-                    outer.height.max(measurement.preferred_outer.height).max(0),
-                );
+                let content_size = Dimensioni::new(outer.width.max(preferred.width).max(0), outer.height.max(preferred.height).max(0));
                 node.state.set_layout(node.state.layout.with_content_size(content_size));
             }
             NodeKind::Container(container) => {
@@ -463,6 +413,7 @@ impl UiRuntime {
             }
         }
 
+        // A container may narrow its child clip, but it cannot expand beyond framed content.
         node.state.layout.allocation = outer;
         node.state.layout.children.clip = node
             .state
@@ -472,6 +423,8 @@ impl UiRuntime {
             .intersect(&content)
             .unwrap_or_else(|| Recti::new(content.x, content.y, 0, 0));
 
+        // Only visible branches that opt into propagation contribute descendant overflow to their
+        // own content size. Gated children retain stale boxes without affecting active geometry.
         let propagate_child_overflow = node.state.layout.propagate_child_overflow;
         if is_branch && node_children_visible(node) && propagate_child_overflow {
             let content_rect = node.with_children(child_content_bounds_from_children).unwrap_or(content);
@@ -614,8 +567,7 @@ impl UiRuntime {
         }
 
         let capture = self.capture?;
-        let parent_transform = self.parent_transform_for_node(roots, capture);
-        let result = self.route_input_event_to_node_only(roots, capture, parent_transform, style, event);
+        let result = self.route_input_event_to_target(roots, capture, style, event);
         self.update_pointer_capture(capture, result, event, mouse_buttons);
         Some(result.is_consumed())
     }
@@ -625,8 +577,7 @@ impl UiRuntime {
         let Some(focus) = self.focus.filter(|id| contains_active_node_in(roots, *id)) else {
             return false;
         };
-        let parent_transform = self.parent_transform_for_node(roots, focus);
-        self.route_input_event_to_node_only(roots, focus, parent_transform, style, event).is_consumed()
+        self.route_input_event_to_target(roots, focus, style, event).is_consumed()
     }
 
     /// Applies runtime pointer-capture ownership from one routed event result.
@@ -703,16 +654,38 @@ impl UiRuntime {
         None
     }
 
-    /// Routes an event to exactly one node without traversing descendants.
-    fn route_input_event_to_node_only(
+    /// Routes directly to one target during a single transform-carrying tree traversal.
+    fn route_input_event_to_target(&mut self, roots: &mut [Node], target: RuntimeNodeId, style: &Style, event: &UiInputEvent) -> ContainerInputResult {
+        // Roots are independent transform origins; stop as soon as the unique target is found.
+        for root in roots {
+            if let Some(result) = self.route_input_event_to_target_from(root, target, self.root_transform, style, event) {
+                return result;
+            }
+        }
+        ContainerInputResult::Ignored
+    }
+
+    /// Descends toward one target while carrying the exact parent transform for each level.
+    ///
+    /// This replaces recursive parent lookup and transform reconstruction with one forward walk.
+    fn route_input_event_to_target_from(
         &mut self,
-        roots: &mut [Node],
-        id: RuntimeNodeId,
+        current: &mut Node,
+        target: RuntimeNodeId,
         parent_transform: Transform,
         style: &Style,
         event: &UiInputEvent,
-    ) -> ContainerInputResult {
-        with_node_mut(roots, id, |node| self.route_input_event_to_node_only_ref(node, parent_transform, style, event)).unwrap_or(ContainerInputResult::Ignored)
+    ) -> Option<ContainerInputResult> {
+        if current.id() == target {
+            return Some(self.route_input_event_to_node_only_ref(current, parent_transform, style, event));
+        }
+        // Children share the transform produced by their current parent layout.
+        let child_parent = parent_transform.push(current.state.layout);
+        current.with_children_mut(|children| {
+            children
+                .iter_mut()
+                .find_map(|child| self.route_input_event_to_target_from(child, target, child_parent, style, event))
+        })?
     }
 
     /// Routes an event to exactly one borrowed node without traversing descendants.
@@ -809,23 +782,13 @@ impl UiRuntime {
         }
     }
 
-    /// Pushes this node onto a parent transform.
-    pub(super) fn node_transform(&self, roots: &[Node], id: RuntimeNodeId, parent: Transform) -> Transform {
-        with_node(roots, id, |node| parent.push(node.state.layout)).unwrap_or(parent)
-    }
-
-    /// Derives the child transform for one node by walking its parent chain.
-    pub(super) fn transform_for_node(&self, roots: &[Node], id: RuntimeNodeId) -> Transform {
-        let parent = self.parent_transform_for_node(roots, id);
-        self.node_transform(roots, id, parent)
-    }
-
-    pub(super) fn parent_transform_for_node(&self, roots: &[Node], id: RuntimeNodeId) -> Transform {
-        self.contains_node(roots, id)
-            .then(|| self.parent_of(roots, id))
-            .flatten()
-            .map(|parent| self.transform_for_node(roots, parent))
-            .unwrap_or(self.root_transform)
+    #[cfg(test)]
+    fn debug_node_rect_from(current: &Node, target: RuntimeNodeId, parent: Transform) -> Option<Recti> {
+        if current.id() == target {
+            return Some(parent.resolve(current.state.layout.allocation));
+        }
+        let child_parent = parent.push(current.state.layout);
+        current.with_children(|children| children.iter().find_map(|child| Self::debug_node_rect_from(child, target, child_parent)))
     }
 }
 

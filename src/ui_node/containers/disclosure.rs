@@ -187,25 +187,32 @@ impl Widget for DisclosureContainer {
     fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
         let header = self.header_preferred(style, atlas);
         runtime_read_state(&self.state, "Disclosure::measure", |state| {
+            // A collapsed disclosure contributes only its interactive header; the caller's bound
+            // is a measurement constraint, not a minimum preferred width.
             if !state.expanded {
-                return Dimensioni::new(available.width.max(header.width), header.height);
+                return header;
             }
 
+            // Expanded content follows Column sizing inside the width left after tree indentation
+            // and the height left after the header-to-body gap.
             let indent = self.indent(style);
-            let child_available = Dimensioni::new(available.width.saturating_sub(indent), available.height.saturating_sub(header.height));
-            let mut width = 0;
-            let mut height: i32 = 0;
-            for index in 0..state.children.len() {
-                let child = state.children.measure_child(index, style, atlas, child_available).unwrap_or_default();
-                width = width.max(child.width);
-                height = height.saturating_add(child.height);
-                if index + 1 < state.children.len() {
-                    height = height.saturating_add(style.spacing);
-                }
-            }
+            let spacing = style.spacing.max(0);
+            let child_available = Dimensioni::new(
+                if available.width > 0 {
+                    available.width.saturating_sub(indent).max(1)
+                } else {
+                    0
+                },
+                if available.height > 0 {
+                    available.height.saturating_sub(header.height).saturating_sub(spacing).max(1)
+                } else {
+                    0
+                },
+            );
+            let child = super::column::measure_column(&state.children, style, atlas, child_available);
             Dimensioni::new(
-                available.width.max(header.width).max(width.saturating_add(indent)),
-                header.height.saturating_add(style.spacing).saturating_add(height),
+                header.width.max(child.width.saturating_add(indent)),
+                header.height.saturating_add(spacing).saturating_add(child.height),
             )
         })
     }
@@ -292,6 +299,8 @@ impl Container for DisclosureContainer {
             return;
         }
 
+        // Header geometry stays Disclosure-owned; only the remaining indented body uses Column
+        // layout, avoiding a second vertical-flow implementation.
         let indent = self.indent(ctx.style());
         let spacing = ctx.style().spacing;
         let child_rect = Recti::new(
@@ -301,7 +310,7 @@ impl Container for DisclosureContainer {
             rect.height.saturating_sub(header_height).saturating_sub(spacing),
         );
         runtime_update_state(&self.state, "Disclosure::layout", |state| {
-            layout_children(ctx, &mut state.children, child_rect);
+            super::column::layout_column(ctx, &mut state.children, child_rect);
         });
     }
 
@@ -348,28 +357,6 @@ impl Disclosure {
         let container = DisclosureBuilder::create_container(parameters);
         let state = container.state_handle();
         (state, Node::container(container))
-    }
-}
-
-fn layout_children(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-    let count = children.len();
-    let spacing = ctx.style().spacing;
-    let available_height = rect.height.saturating_sub(spacing.saturating_mul(count.saturating_sub(1) as i32));
-    let mut preferred = Vec::with_capacity(count);
-    let mut policies = Vec::with_capacity(count);
-    for index in 0..count {
-        let child = children
-            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(rect.width, available_height))
-            .unwrap_or_default();
-        preferred.push(child.height);
-        policies.push(ctx.child_policy(children, index).map(|policy| policy.height).unwrap_or(crate::SizePolicy::Auto));
-    }
-    let heights = super::super::resolve_axis_tracks(&policies, &preferred, available_height);
-    let mut y = rect.y;
-    for index in 0..count {
-        let height = heights.get(index).copied().unwrap_or_default();
-        let _ = ctx.layout_child(children, index, Recti::new(rect.x, y, rect.width, height));
-        y = y.saturating_add(height).saturating_add(spacing);
     }
 }
 

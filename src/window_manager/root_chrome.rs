@@ -237,16 +237,27 @@ impl Widget for RootChromeContainer {
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
         runtime_read_state(&self.state, "RootChrome::measure", |state| {
-            let shell = root_chrome_geometry(
-                Recti::new(0, 0, available.width.max(1), available.height.max(1)),
-                Dimensioni::default(),
-                &state.name,
-                state.options,
-                style,
-                atlas,
+            // Resolve chrome once against the supplied bound to learn how much of each axis remains
+            // available to application content. This keeps title/frame policy inside root chrome.
+            let outer = Recti::new(0, 0, available.width.max(1), available.height.max(1));
+            let shell = root_chrome_geometry(outer, Dimensioni::default(), &state.name, state.options, style, atlas);
+            let child_available = Dimensioni::new(
+                inset_available(available.width, outer.width.saturating_sub(shell.body.width)),
+                inset_available(available.height, outer.height.saturating_sub(shell.body.height)),
             );
-            let child_available = Dimensioni::new(shell.body.width.max(1), shell.body.height.max(1));
-            let child = state.children.measure_child(0, style, atlas, child_available).unwrap_or_default();
+            // Child placement policy belongs to this parent and determines its measurement bound;
+            // the child's own measure call still reports content only.
+            let policy = state.children.child_policy(0).unwrap_or_else(crate::Policy::auto);
+            let measured_available = Dimensioni::new(
+                policy.width.measurement_bound(child_available.width),
+                policy.height.measurement_bound(child_available.height),
+            );
+            let child = state.children.measure_child(0, style, atlas, measured_available).unwrap_or_default();
+            let child = Dimensioni::new(
+                policy.width.preferred_extent(child.width, child_available.width),
+                policy.height.preferred_extent(child.height, child_available.height),
+            );
+            // Re-run the single chrome formula with measured content to obtain intrinsic outer size.
             root_chrome_geometry(Recti::default(), child, &state.name, state.options, style, atlas).intrinsic_outer
         })
     }
@@ -313,10 +324,22 @@ impl Container for RootChromeContainer {
 
     fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
         runtime_update_state(&self.state, "RootChrome::layout", |state| {
+            // The shell determines the actual body slot before content is measured for wrapping.
+            let shell = root_chrome_geometry(rect, Dimensioni::default(), &state.name, state.options, ctx.style(), ctx.atlas());
+            let policy = state.children.child_policy(0).unwrap_or_else(crate::Policy::auto);
             let child = state
                 .children
-                .measure_child(0, ctx.style(), ctx.atlas(), Dimensioni::new(rect.width.max(1), rect.height.max(1)))
+                .measure_child(
+                    0,
+                    ctx.style(),
+                    ctx.atlas(),
+                    Dimensioni::new(
+                        policy.width.measurement_bound(shell.body.width.max(1)),
+                        policy.height.measurement_bound(shell.body.height.max(1)),
+                    ),
+                )
                 .unwrap_or_default();
+            // Commit one geometry value used by layout, hit testing, interaction, and overlay paint.
             state.geometry = root_chrome_geometry(rect, child, &state.name, state.options, ctx.style(), ctx.atlas());
             let body = state.geometry.body;
             let _ = ctx.layout_child(&mut state.children, 0, body);
@@ -531,6 +554,12 @@ pub(super) fn root_chrome_geometry(
         minimum_outer,
         intrinsic_outer,
     }
+}
+
+/// Removes root-chrome occupancy from a positive measurement bound while preserving intrinsic zero.
+fn inset_available(value: i32, inset: i32) -> i32 {
+    // A positive remainder stays positive because zero requests unconstrained child measurement.
+    if value > 0 { value.saturating_sub(inset.max(0)).max(1) } else { 0 }
 }
 
 fn root_titlebar_height(style: &Style, atlas: &AtlasHandle) -> i32 {

@@ -293,30 +293,27 @@ impl ScrollArea {
     }
 }
 
+/// Measures scroll content intrinsically while accounting for panel padding.
+///
+/// Height remains unbounded because scrolling exists specifically to contain vertical overflow;
+/// a positive outer width still constrains wrapping inside the padded viewport.
 fn measure_scroll_area(state: &ScrollAreaState, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
     let padding = style.padding.max(0);
-    let inner = Dimensioni::new(
-        available.width.saturating_sub(padding.saturating_mul(2)).max(0),
-        available.height.saturating_sub(padding.saturating_mul(2)).max(0),
-    );
-    super::super::add_padding(measure_children(state, style, atlas, inner), padding)
+    // Preserve zero as the unbounded-width marker while removing both horizontal padding edges.
+    let width = if available.width > 0 {
+        available.width.saturating_sub(padding.saturating_mul(2)).max(1)
+    } else {
+        0
+    };
+    let content = super::column::measure_column(&state.children, style, atlas, Dimensioni::new(width, 0));
+    let inset = padding.saturating_mul(2);
+    Dimensioni::new(content.width.saturating_add(inset), content.height.saturating_add(inset))
 }
 
-fn measure_children(state: &ScrollAreaState, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-    let mut width = 0;
-    let mut height: i32 = 0;
-    for index in 0..state.children.len() {
-        let child = state.children.measure_child(index, style, atlas, available).unwrap_or_default();
-        width = width.max(child.width);
-        height = height.saturating_add(child.height);
-        if index + 1 < state.children.len() {
-            height = height.saturating_add(style.spacing);
-        }
-    }
-    Dimensioni::new(width.max(0), height.max(0))
-}
-
+/// Commits child, viewport, and scrollbar geometry for one ScrollArea allocation.
 fn layout_scroll_area(state: &mut ScrollAreaState, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
+    // Layout may shrink content or the viewport, so clamp the previously requested offset against
+    // geometry derived from this exact allocation.
     let requested_offset = state.geometry.offset;
     state.geometry = resolve_scroll_area_geometry(state, ctx, rect, requested_offset);
 
@@ -411,22 +408,40 @@ fn resolve_scroll_area_geometry(state: &mut ScrollAreaState, ctx: &mut Container
     unreachable!("scroll-area scrollbar presence must converge within four states")
 }
 
+/// Lays out vertical scroll content and returns its complete overflow extent.
+///
+/// Each child is measured once for intrinsic width and again at its policy-adjusted offered width;
+/// the second height is necessary for wrapped content. Cursor movement uses actual committed child
+/// size, not the pre-layout preference, so fixed node policies cannot desynchronize later children.
 fn layout_children(state: &mut ScrollAreaState, ctx: &mut ContainerLayoutCtx<'_>, view: Dimensioni) -> Dimensioni {
     let child_width = view.width.max(0);
-    let child_height = view.height.max(0);
     let mut y: i32 = 0;
     let mut width = 0;
     for index in 0..state.children.len() {
+        // Allow content wider than the viewport so horizontal overflow remains observable.
         let preferred = state
             .children
-            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(child_width, child_height))
+            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(child_width.max(1), 0))
             .unwrap_or_default();
         let offered_width = child_width.max(preferred.width);
+        let measured_width = state
+            .children
+            .child_policy(index)
+            .unwrap_or_else(crate::Policy::auto)
+            .width
+            .measurement_bound(offered_width);
+        // Height must correspond to the width that generic node layout will actually apply.
+        let preferred_height = state
+            .children
+            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(measured_width, 0))
+            .unwrap_or_default()
+            .height;
         let size = ctx
-            .layout_child(&mut state.children, index, Recti::new(0, y, offered_width, preferred.height))
+            .layout_child(&mut state.children, index, Recti::new(0, y, offered_width, preferred_height))
             .unwrap_or_default();
+        // Advance by committed geometry because the node policy may override the measured height.
         width = width.max(offered_width.max(size.width));
-        y = y.saturating_add(preferred.height);
+        y = y.saturating_add(size.height);
         if index + 1 < state.children.len() {
             y = y.saturating_add(ctx.style().spacing);
         }

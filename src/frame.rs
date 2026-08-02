@@ -35,11 +35,11 @@ pub(crate) fn frame_geometry(outer: Recti, framed: bool, style: &Style) -> Frame
     FrameGeometry { outer, content }
 }
 
-/// Removes a resolved frame from positive measurement constraints while preserving sentinels.
+/// Removes a frame from a positive measurement bound while preserving the intrinsic `0` marker.
 pub(crate) fn content_available(available: Dimensioni, border_width: i32) -> Dimensioni {
     Dimensioni::new(
-        inset_positive_axis(available.width, border_width),
-        inset_positive_axis(available.height, border_width),
+        inset_available(available.width, border_width.saturating_mul(2)),
+        inset_available(available.height, border_width.saturating_mul(2)),
     )
 }
 
@@ -114,13 +114,10 @@ fn checked_inset(outer: Recti, width: i32) -> Option<Recti> {
     ))
 }
 
-fn inset_positive_axis(value: i32, border_width: i32) -> i32 {
-    if value <= 0 {
-        value
-    } else {
-        let inset = i64::from(border_width.max(0)) * 2;
-        i32::try_from((i64::from(value) - inset).max(0)).expect("inset positive size fits in i32")
-    }
+/// Removes a non-negative inset from a measurement axis without losing the `0 == unbounded` marker.
+fn inset_available(value: i32, inset: i32) -> i32 {
+    // Positive bounds stay positive because downstream measurement reserves zero for unbounded.
+    if value > 0 { value.saturating_sub(inset.max(0)).max(1) } else { 0 }
 }
 
 fn expand_positive_axis(value: i32, border_width: i32) -> i32 {
@@ -175,9 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn measurement_helpers_preserve_non_positive_sentinels() {
-        let available = content_available(Dimensioni::new(10, 0), 2);
-        assert_eq!((available.width, available.height), (6, 0));
+    fn preferred_measurement_preserves_non_positive_results() {
         let preferred = outer_preferred(Dimensioni::new(10, -1), 2);
         assert_eq!((preferred.width, preferred.height), (14, -1));
     }

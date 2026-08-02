@@ -1,10 +1,11 @@
 use super::*;
 
-use crate::test_support::{recording_backend, test_atlas, NoopRenderer, RenderEvent};
+use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonState, Column, ColumnParameters, ColumnState, Custom, CustomParameters, Dimensioni, Disclosure,
-    DisclosureParameters, DisclosureState, KeyMode, MouseButton, Node, Policy, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Style, UiInputEvent, Widget,
-    WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    DisclosureParameters, DisclosureState, Grid, GridParameters, KeyMode, MouseButton, Node, Policy, Row, RowParameters, ScrollArea, ScrollAreaOption,
+    ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetState,
+    WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use crate::widget::{runtime_read_state, runtime_update_state};
@@ -941,6 +942,33 @@ fn layout_only_update_and_paint_have_separate_phase_counts() {
 }
 
 #[test]
+fn warmed_container_measurement_and_layout_allocate_nothing() {
+    let child = |name| Node::widget(Custom::create(CustomParameters::new(name)));
+    let (_, row) = Row::create(RowParameters::new([SizePolicy::Weight(1.0)], SizePolicy::Auto, [child("row")]));
+    let (_, grid) = Grid::create(GridParameters::new([SizePolicy::Weight(1.0)], [SizePolicy::Auto], [child("grid")]));
+    let (_, stack) = Stack::create(StackParameters::new(
+        SizePolicy::Remainder(0),
+        SizePolicy::Fixed(20),
+        StackDirection::TopToBottom,
+        [child("stack")],
+    ));
+    let (_, disclosure) = Disclosure::create(DisclosureParameters::header("expanded", true, [child("disclosure")]));
+    let (_, scroll) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [child("scroll")]));
+    let (_, content) = Column::create(ColumnParameters::new([row, grid, stack, disclosure, scroll]));
+    let mut ctx = context();
+    ctx.create_window("allocation probe", rect(10, 10, 300, 220), content);
+    let dimensions = Dimensioni::new(640, 480);
+
+    ctx.update_ui(dimensions);
+    ctx.update_ui(dimensions);
+    let measurement = AllocationMeasurement::begin();
+    ctx.update_ui(dimensions);
+    let allocations = measurement.finish();
+
+    assert_eq!(allocations.events, 0, "steady measurement/layout allocated {} bytes", allocations.bytes);
+}
+
+#[test]
 fn fronting_changes_only_cross_root_z_order() {
     let mut ctx = context();
     let first = ctx.create_window("first", rect(0, 0, 100, 80), empty_content());
@@ -1266,6 +1294,60 @@ fn chrome_geometry_exposes_one_body_and_auto_size_tracks_content() {
     assert!(body.width > 0 && body.height > 0);
     assert!(content.width > 0 && content.height > 0);
     assert!(outer.width >= body.width && outer.height >= body.height);
+}
+
+#[test]
+fn auto_size_ignores_the_previous_rect_for_flexible_row_grid_and_stack_tracks() {
+    let row_children = (0..5)
+        .map(|index| Node::widget(Custom::create(CustomParameters::new(format!("row {index}")))))
+        .collect::<Vec<_>>();
+    let (_, row) = Row::create(RowParameters::new(
+        [
+            SizePolicy::Fixed(18),
+            SizePolicy::Auto,
+            SizePolicy::Fraction(0.5),
+            SizePolicy::Weight(1.0),
+            SizePolicy::Remainder(4),
+        ],
+        SizePolicy::Weight(1.0),
+        row_children,
+    ));
+    let grid_items = (0..5)
+        .map(|index| Node::widget(Custom::create(CustomParameters::new(format!("grid {index}")))))
+        .collect::<Vec<_>>();
+    let (_, grid) = Grid::create(GridParameters::new(
+        [
+            SizePolicy::Fixed(18),
+            SizePolicy::Auto,
+            SizePolicy::Fraction(0.5),
+            SizePolicy::Weight(1.0),
+            SizePolicy::Remainder(4),
+        ],
+        [SizePolicy::Weight(1.0)],
+        grid_items,
+    ));
+    let (_, stack) = Stack::create(StackParameters::new(
+        SizePolicy::Fraction(0.5),
+        SizePolicy::Weight(1.0),
+        StackDirection::TopToBottom,
+        [
+            Node::widget(Custom::create(CustomParameters::new("stack first"))),
+            Node::widget(Custom::create(CustomParameters::new("stack second"))),
+        ],
+    ));
+    let (_, content) = Column::create(ColumnParameters::new([row, grid, stack]));
+    let mut ctx = context();
+    let root = ctx.create_popup("intrinsic", content);
+    ctx.set_root_rect(root.id(), rect(20, 30, 2_000, 3_000)).unwrap();
+    ctx.set_root_visible(root.id(), true).unwrap();
+
+    ctx.update_and_render_ui();
+
+    let outer = root.state().try_read(RootState::rect).unwrap();
+    assert!(
+        outer.width < 1_000 && outer.height < 1_000,
+        "AUTO_SIZE must derive both axes from content: {outer:?}"
+    );
 }
 
 #[test]

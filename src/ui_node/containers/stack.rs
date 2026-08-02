@@ -7,7 +7,7 @@ use crate::{
     WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 
-use super::{Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerLayoutCtx, ContainerState, Node};
+use super::{Axis, Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerLayoutCtx, ContainerState, Node};
 
 /// One-shot construction input for a directional stack.
 pub struct StackParameters {
@@ -114,25 +114,7 @@ impl Widget for StackContainer {
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-        runtime_read_state(&self.state, "Stack::measure", |state| {
-            let mut width = 0;
-            let mut height: i32 = 0;
-            for index in 0..state.children.len() {
-                let size = state.children.measure_child(index, style, atlas, available).unwrap_or_default();
-                width = width.max(super::super::resolve_size(state.item_width, size.width, available.width, available.width, None));
-                height = height.saturating_add(super::super::resolve_size(
-                    state.item_height,
-                    size.height,
-                    available.height,
-                    available.height,
-                    None,
-                ));
-                if index + 1 < state.children.len() {
-                    height = height.saturating_add(style.spacing);
-                }
-            }
-            Dimensioni::new(width.max(0), height.max(0))
-        })
+        runtime_read_state(&self.state, "Stack::measure", |state| stack_size(state, style, atlas, available))
     }
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
@@ -189,35 +171,114 @@ impl Stack {
     }
 }
 
+/// Commits a vertical Stack in its configured traversal direction.
+///
+/// Stack differs from Column by applying one shared width policy and one shared height policy to
+/// every child. Direction changes placement order only; sizing remains index-stable.
 fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut StackState, rect: Recti) {
     let count = state.children.len();
-    let mut heights = Vec::with_capacity(count);
-    for index in 0..count {
-        let size = state
-            .children
-            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(rect.width, rect.height))
-            .unwrap_or_default();
-        heights.push(super::super::resolve_size(state.item_height, size.height, rect.height, rect.height, None));
-    }
-    let width = super::super::resolve_size(state.item_width, rect.width, rect.width, rect.width, None);
+    let spacing = ctx.style().spacing.max(0);
+    // Establish one item width from the widest intrinsic child before measuring wrapped heights.
+    let preferred_width = (0..count)
+        .map(|index| {
+            state
+                .children
+                .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::default())
+                .unwrap_or_default()
+                .width
+        })
+        .max()
+        .unwrap_or_default();
+    let width = state.item_width.preferred_extent(preferred_width, rect.width);
+    let spacing_total = spacing.saturating_mul(count.saturating_sub(1) as i32);
+    let available_height = rect.height.saturating_sub(spacing_total).max(1);
+    // The scalar axis holds only shared allocation totals; individual heights are replayed below.
+    let mut axis = stack_axis(state, ctx.style(), ctx.atlas(), width, available_height);
     match state.direction {
         StackDirection::TopToBottom => {
             let mut y = rect.y;
-            for (index, height) in heights.into_iter().enumerate() {
+            for index in 0..count {
+                let preferred = stack_child_height(state, index, ctx.style(), ctx.atlas(), width);
+                let height = axis.next(state.item_height, preferred).advance;
                 let _ = ctx.layout_child(&mut state.children, index, Recti::new(rect.x, y, width, height));
-                y = y.saturating_add(height).saturating_add(ctx.style().spacing);
+                y = y.saturating_add(height).saturating_add(spacing);
             }
         }
         StackDirection::BottomToTop => {
+            // Child zero is anchored at the bottom, followed by later children above it.
             let mut y = rect.y.saturating_add(rect.height);
-            for index in (0..count).rev() {
-                let height = heights.get(index).copied().unwrap_or_default();
+            for index in 0..count {
+                let preferred = stack_child_height(state, index, ctx.style(), ctx.atlas(), width);
+                let height = axis.next(state.item_height, preferred).advance;
                 y = y.saturating_sub(height);
                 let _ = ctx.layout_child(&mut state.children, index, Recti::new(rect.x, y, width, height));
-                y = y.saturating_sub(ctx.style().spacing);
+                y = y.saturating_sub(spacing);
             }
         }
     }
+}
+
+/// Measures one Stack child height at the shared item width.
+///
+/// The child's own width policy determines the content-measurement bound but is applied to final
+/// geometry later by the generic node layout path.
+fn stack_child_height(state: &StackState, index: usize, style: &Style, atlas: &AtlasHandle, width: i32) -> i32 {
+    let child_width = state
+        .children
+        .child_policy(index)
+        .unwrap_or_else(crate::Policy::auto)
+        .width
+        .measurement_bound(width);
+    state
+        .children
+        .measure_child(index, style, atlas, Dimensioni::new(child_width, 0))
+        .unwrap_or_default()
+        .height
+}
+
+/// Builds the scalar vertical cursor for all Stack children at one resolved item width.
+fn stack_axis(state: &StackState, style: &Style, atlas: &AtlasHandle, width: i32, available_height: i32) -> Axis {
+    Axis::new(
+        available_height,
+        (0..state.children.len()).map(|index| (state.item_height, stack_child_height(state, index, style, atlas, width))),
+    )
+}
+
+/// Measures the preferred Stack extent without mutating or retaining sizing results.
+fn stack_size(state: &StackState, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+    let count = state.children.len();
+    if count == 0 {
+        return Dimensioni::default();
+    }
+    let spacing = style.spacing.max(0);
+    // Width must be resolved before height because child text may wrap at the shared width.
+    let preferred_width = (0..count)
+        .map(|index| {
+            state
+                .children
+                .measure_child(index, style, atlas, Dimensioni::default())
+                .unwrap_or_default()
+                .width
+        })
+        .max()
+        .unwrap_or_default();
+    let width = state.item_width.preferred_extent(preferred_width, available.width);
+    let spacing_total = spacing.saturating_mul(count.saturating_sub(1) as i32);
+    let available_height = if available.height > 0 {
+        available.height.saturating_sub(spacing_total).max(1)
+    } else {
+        0
+    };
+    let mut axis = stack_axis(state, style, atlas, width, available_height);
+    if available_height == 0 {
+        // The construction pass already contains every intrinsic child height.
+        return Dimensioni::new(width, axis.intrinsic_extent(count, spacing));
+    }
+    // Bounded policies require ordered replay so Remainder observes earlier siblings.
+    for index in 0..count {
+        axis.next(state.item_height, stack_child_height(state, index, style, atlas, width));
+    }
+    Dimensioni::new(width, axis.extent(count, spacing))
 }
 
 #[cfg(test)]

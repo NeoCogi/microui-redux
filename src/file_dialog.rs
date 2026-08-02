@@ -925,7 +925,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "manual serial allocation baseline; global allocation counters include parallel test threads"]
     fn idle_processing_allocates_no_nodes_or_state_and_changes_no_topology() {
         let mut ctx = context();
         let session = ctx.open_file_dialog(FileDialogRequest::default());

@@ -281,10 +281,11 @@ pub(crate) fn runtime_update_state<T: WidgetState, R>(state: &Rc<RefCell<T>>, ph
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
-    /// Returns the intrinsic widget size for the current explicit layout pass.
+    /// Returns this widget's preferred content size; node placement policy is applied later.
     ///
-    /// `avail` reports the current container body size visible to the widget.
-    /// Values less than or equal to zero are treated as "use layout defaults" for that axis.
+    /// A positive `avail` component is available for wrapping or other responsive content. A
+    /// non-positive component requests the unconstrained preferred size on that axis. Returned
+    /// components are clamped to zero; an empty container may therefore prefer zero space.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     /// Updates retained widget state for exactly one normalized input event.
     ///

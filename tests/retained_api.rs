@@ -135,6 +135,7 @@ impl Widget for ExternalContainer {
     fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
         let state = self.state.try_borrow().expect("external state must not be reentered");
         state.measure_calls.set(state.measure_calls.get() + 1);
+        state.observed_policy.set(state.children.child_policy(0));
         state
             .children
             .measure_child(0, style, atlas, available)

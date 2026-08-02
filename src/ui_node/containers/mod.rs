@@ -7,6 +7,7 @@ use crate::widget_ctx::{WidgetPaintCtx, WidgetUpdateCtx};
 
 use super::{Children, Node, NodeLayout, NodeRuntime, UiRuntime};
 
+mod axis;
 mod column;
 mod disclosure;
 mod grid;
@@ -14,12 +15,25 @@ mod row;
 mod scroll_area;
 mod stack;
 
+use axis::Axis;
+
 pub use column::{Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState};
 pub use disclosure::{Disclosure, DisclosureBuilder, DisclosureContainer, DisclosureParameters, DisclosureState};
 pub use grid::{Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState};
 pub use row::{Row, RowBuilder, RowContainer, RowParameters, RowState};
 pub use scroll_area::{ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState};
 pub use stack::{Stack, StackBuilder, StackContainer, StackParameters, StackState};
+
+/// Returns the content-independent fallback width used by explicit empty Grid tracks.
+fn default_cell_width(style: &Style) -> i32 {
+    style.default_cell_width.saturating_add(style.padding.max(0) * 2).max(0)
+}
+
+/// Returns the font-derived fallback height used by empty Row and Grid tracks.
+fn default_cell_height(style: &Style, atlas: &crate::AtlasHandle) -> i32 {
+    let padding = style.padding.max(0);
+    (atlas.get_font_height(style.font) as i32).saturating_add(padding * 2).max(padding * 2)
+}
 
 /// Marker for application-facing state owned by a concrete container runtime.
 ///
@@ -442,7 +456,7 @@ impl ContainerLayoutCtx<'_> {
 
     /// Returns one child's pre-insertion placement policy.
     pub fn child_policy(&self, children: &Children, index: usize) -> Option<crate::Policy> {
-        children.as_slice().get(index).map(|node| node.state.policy)
+        children.child_policy(index)
     }
 
     /// Assigns one indexed child rectangle and returns its resulting content size.

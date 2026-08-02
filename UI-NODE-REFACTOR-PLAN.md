@@ -1287,6 +1287,7 @@ impl Children {
         atlas: &AtlasHandle,
         available: Dimensioni,
     ) -> Option<Dimensioni>;
+    pub fn child_policy(&self, index: usize) -> Option<Policy>;
     pub fn push(&mut self, node: Node);
     pub fn insert(&mut self, index: usize, node: Node) -> Result<(), Node>;
     pub fn remove_drop(&mut self, index: usize) -> bool;
@@ -1321,8 +1322,9 @@ impl ColumnState {
 `Children` is public but opaque. `new`, `Default`, and `FromIterator<Node>` let downstream custom
 containers build a collection before mounting it. `measure_child` lets a custom
 `Container: Widget` implement the unchanged `Widget::measure` signature without a second container
-measurement trait; it delegates to the child's private `Node` measurement path and exposes no node
-ID or storage. Direct node iteration is crate-private and double-ended, so update/layout/paint can
+measurement trait; it delegates to the child's private content measurement path. `child_policy`
+separately exposes indexed placement policy so measurement never has to apply it implicitly. Neither
+method exposes node identity or storage. Direct node iteration is crate-private and double-ended, so update/layout/paint can
 traverse forward and input routing can traverse in reverse without making attached node references
 public.
 
@@ -4316,8 +4318,8 @@ change a protected P0 behavior follows the explicit change-control rule.
   branches to `Container` only for layout, special input, descendant visibility, and scoped child
   visitation. P2.4 adds only the subsequently approved current-capture lifecycle hooks and scoped
   current-owner query; it does not reintroduce a common-phase adapter. Private `Node::measure` is
-  the sole node-measurement algorithm; its `NodeMeasurement` is reused for leaf
-  content sizing. The transitional aliases, `NodeBehavior`, all implementations/bounds, and its
+  the sole node-measurement algorithm and returns preferred `Dimensioni` directly for leaf content
+  sizing. The transitional aliases, `NodeBehavior`, all implementations/bounds, and its
   five private phase adapters are deleted. Focused tests pin one-dispatch leaf measurement,
   parent-first/forward update and paint, reverse-z input, same-transaction descendant suppression, and a
   downstream container's public child measurement/policy/layout path including invalid indices.
@@ -5107,7 +5109,7 @@ change a protected P0 behavior follows the explicit change-control rule.
   with the repository's pre-existing warning baseline and no P4.1-specific warning;
   `git diff --check` passes. P4.1 changes no public API.
 
-- [ ] **P4.2 — Replace pseudo-unbounded measurement and unify axis allocation**
+- [x] **P4.2 — Replace pseudo-unbounded measurement and unify axis allocation**
 
   **Problem**
 
@@ -5116,23 +5118,20 @@ change a protected P0 behavior follows the explicit change-control rule.
   measurement/allocation logic, so preferred size, track allocation, spans, and overflow can
   disagree. Window chrome calculations currently leak into `ui_node` measurement.
 
-  **Decision needed: No — the approved correctness scope selects explicit constraints and shared
-  axis primitives**
+  **Decision needed: No — use the existing public preferred-size contract directly**
 
   **Target contract or migration**
 
-  Introduce private `AxisConstraint::{Bounded(i32), Unbounded}` and `MeasureConstraints`. Under an
-  unbounded axis, `Auto`, `Fraction`, `Weight`, and `Remainder` contribute their content-derived
-  intrinsic minimum; only `Fixed` forces its fixed extent. At the unchanged public
-  `Widget::measure(Dimensioni)` boundary, adapt `Unbounded` to the already documented non-positive
-  “use intrinsic/defaults” input (`0`) rather than a large numeric sentinel. Built-in containers and
-  `Children::measure_child` preserve the explicit internal constraint mode while recursing.
+  Keep measurement limited to preferred content size: positive `Dimensioni` components may bound
+  wrapping, while non-positive components request unconstrained preferred size. Do not introduce a
+  second constraint type or apply `Node` placement policy inside node measurement. Expose the same
+  indexed child-policy query to measurement and layout so downstream containers have the same
+  capability as built-ins.
 
-  Implement shared internal `intrinsic_tracks` and `allocate_tracks` primitives for linear and grid
-  axes. Row/Grid measurement and layout use the same track list. Grid computes row-major placements
-  once, derives per-track intrinsic minima including spans and spacing, keeps fixed tracks fixed,
-  and reports overflow when a fixed span cannot satisfy a child rather than silently growing it.
-  Apply the mounted configuration and child-policy precedence defined above exactly once.
+  Use one private scalar axis cursor with no per-child storage. With no bound, flexible track
+  policies use child preferred size and `Fixed` remains exact. Grid rebuilds row-major placements
+  only when its topology or column count changes and reads them immutably during measurement; fixed
+  spans expose overflow rather than silently growing.
 
   The private `RootChromeContainer` measures retained application content and owns title/frame/body
   padding, outer minimum size, and conversion between intrinsic client size and outer root geometry
@@ -5148,13 +5147,42 @@ change a protected P0 behavior follows the explicit change-control rule.
     content intrinsic minima instead of the probe size.
   - Row measured width and height agree with the same policies used during allocation.
   - Grid intrinsic size reflects children, explicit/empty tracks, spacing, row/column spans, and the
-    fixed-track overflow rule; measurement and layout share one placement list.
-  - Column/Row/Grid/Stack use the common axis primitives without a general constraint-solver layer.
+    fixed-track overflow rule; one Grid-owned placement list feeds both axes until Grid mutation
+    rebuilds it.
+  - Column/Row/Grid/Stack share one allocation rule without a measurement solver or sizing cache.
   - Generic `src/ui_node` traversal contains no title/close/resize/window-option formula; the one
     private root-chrome module and `root_chrome_geometry` helper determine title height, all hit and
     paint rectangles, minimum size, and client/outer conversion for window/dialog/popup variants.
   - Deep nonzero-origin transform/clip tests pass without `parent_of` or recursive parent-transform
     reconstruction.
+
+  **Completion evidence (2026-08-02)**
+
+  `Widget::measure` now has one purpose: return preferred content, optionally using positive bounds
+  for wrapping. It does not apply `Node` placement policy. `Children::measure_child` preserves that
+  meaning, and `Children::child_policy` gives every container the separate indexed placement query
+  needed for slot planning. No private constraint model, measurement plan object, or numeric probe
+  remains. `AUTO_SIZE` requests unconstrained preferred size with `Dimensioni::default()`.
+
+  Built-in measurement remains an immutable query. A small private scalar `Axis` cursor resolves
+  sibling policy, advance, and offered-slot arithmetic without a `Vec`, cache, `RefCell`, or renderer
+  dependency. Grid owns row-major placements as derived Grid metadata and uses ordinary mutable
+  vectors only inside its mutable layout phase. Warmed measurement/layout across every built-in
+  container performs zero allocations. ScrollArea advances by the child's actual laid-out size, so
+  fixed child policy no longer relies on policy-resolved measurement.
+
+  `RootChromeContainer` owns the outer/body conversion through `root_chrome_geometry`.
+  Focus/capture routing and debug geometry use one transform-carrying root-to-target traversal, so
+  parent lookup and recursive transform reconstruction are gone. Focused tests cover preferred-size
+  and placement-policy separation, track policies, Grid spans and overflow, Row sizing, and an
+  auto-sized Row/Grid/Stack root seeded with a `2000 x 3000` rectangle.
+
+  `cargo fmt --all -- --check`, `cargo test --all-targets`, `cargo test --doc`,
+  `cargo check --no-default-features`, `cargo doc --no-deps`, and separate Glow/Vulkan/WGPU example
+  checks pass. The suite has 189 passing unit tests, one existing ignored manual baseline, four
+  passing downstream integration tests, and 19 passing doctest/compile-fail cases. Clippy completes
+  with the repository's existing warning baseline and no P4.2-specific warning; `git diff --check`
+  passes. P4.2 adds only the indexed `Children::child_policy` query.
 
 ### P5 — Cleanup and measured optimization
 
@@ -5367,8 +5395,8 @@ contract or overstate what Rust can prove about arbitrary custom safe APIs.
 | Raw input and routed events can disagree | Aggregate input is reconstructed for routing and independently interpreted by `interaction_for` | FIFO raw-event queue; normalize once and deliver at most one localized event in each full update transaction | P2.5/P5.0 |
 | Context scroll accessors duplicate routed input | Scroll delta is copied into phase context state | Remove update/paint context accessors; inspect the one localized current event only | P2.5/P5.0 |
 | Input, update/layout, and paint are coupled to one render call | Render owns aggregate dispatch plus pre-route/pre-update/post-update layout | Explicit `update_ui`: one sync layout and one full update/layout per event; `render_ui` paints/submits only | P2.5/P4.0 |
-| Auto-size uses a `10_000` pseudo-unbounded probe | Public dimensions encode both bounds and intrinsic requests | Private explicit constraints adapt unbounded axes to the documented public `0` convention | P4.2/P5.0 |
-| Row/Grid measurement can disagree with allocation | Independent policy and track solvers | Shared intrinsic/allocation axis primitives and one Grid placement list | P2.0/P4.2 |
+| Auto-size uses a `10_000` pseudo-unbounded probe | Public dimensions already define non-positive axes as unconstrained preferred-size requests | Pass `Dimensioni::default()` directly; do not add a parallel constraint model | P4.2/P5.0 |
+| Row/Grid measurement can disagree with allocation | Measurement applied placement policy and containers used independent track rules | Keep measurement content-only; use one bounded track allocator and one Grid placement list per call | P2.0/P4.2 |
 | Mounted container configuration is underspecified | Old public fields and builder reconstruction blur initialization and state | Exact Row/Grid/Stack/Scroll state setters; immutable node policy and mutable Grid-owned child span | P1.1/P2.0/P2.2 |
 | Grid span leaks through every generic node and container context | Parent-child edge data was modeled as intrinsic node data | `GridItem` construction plus one `GridState` authority for children, spans, and tracks; private builder-edge bridge only until P3.0 | P1.3/P2.0/P3.0 |
 | A custom container can visit different child collections by phase | Safe Rust cannot relate two opaque visitor calls across methods | Document one-authoritative-`Children` conformance obligation and test examples | P0.1/P2.3 |
@@ -5462,9 +5490,9 @@ Update together:
    aggregate input with a FIFO queue, drain it through one full update/layout transaction per event,
    and split explicit UI commit from paint-only rendering.
 8. Remove public projection/root replacement and migrate one small example completely.
-9. Replace pseudo-unbounded probes and independent Row/Grid/container solvers with explicit private
-   constraints and shared axis primitives; centralize chrome conversion in the retained root-chrome
-   helper shared with the window boundary.
+9. Replace pseudo-unbounded probes with the existing unconstrained preferred-size convention, use
+   one bounded track allocator, and centralize chrome conversion in the retained root-chrome helper
+   shared with the window boundary.
 10. After Row/Stack/ScrollArea prerequisites exist, use the preserved source and markers to re-enable
     and migrate the file dialog as the dynamic-topology proof; restore its exports/demo/tests and
     remove every temporary marker before remaining examples/docs and release validation.

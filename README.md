@@ -292,6 +292,8 @@ control window chrome. Root overflow does not scroll implicitly; construct a `Sc
 
 ### Preferred sizing and retained layout
 - Every built-in widget reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout).
+- `Widget::measure` reports preferred content, not an allocation. A positive input axis may be used for wrapping; a non-positive axis requests the unconstrained preferred size. `Node` placement policy is applied later by its parent layout.
+- Auto-sized roots measure both axes intrinsically. Flexible `Fraction`, `Weight`, and `Remainder` tracks contribute content minima until a bounded allocation exists; `Fixed` tracks remain exact and may expose child overflow.
 - `Context::update_ui` first synchronizes layout, then drains input in API-call order. Every event runs one complete eligible-tree `Widget::update` traversal and one follow-up layout, so geometry changed by one event is authoritative for routing the next.
 - `ContextFrame::render_ui` performs no input, update, or layout work. It paints the committed tree with `Widget::paint` and submits one display list; missing, stale, pending-input, or dimension-mismatched commits return `RenderError::UiUpdateRequired` before backend acquisition.
 - Widgets and containers share the public `Widget` phase contract. Containers additionally expose only opaque child visitors, indexed layout services, descendant visibility, and scoped input routing.

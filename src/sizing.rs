@@ -5,11 +5,14 @@
 /// Cell sizing resolves in this order:
 /// 1. A retained node [`crate::Policy`] override wins when it is not `Auto`.
 /// 2. Otherwise the active row/grid/stack track policy is used.
-/// 3. `Auto` uses the widget's measured preferred size when it is positive.
-/// 4. If a widget reports no preferred size for an axis, the style/default cell fallback is used.
+/// 3. `Auto` uses the widget's measured preferred size.
+/// 4. Containers may define a style fallback for explicit empty tracks.
+///
+/// Widget measurement itself reports content only. When a container turns those preferences into
+/// intrinsic tracks, flexible policies keep the content size and only `Fixed` forces an extent.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SizePolicy {
-    /// Uses the default cell size defined by the style.
+    /// Uses measured content.
     Auto,
     /// Reserves a fixed number of pixels.
     Fixed(i32),
@@ -72,6 +75,79 @@ impl Policy {
 impl Default for SizePolicy {
     fn default() -> Self {
         SizePolicy::Auto
+    }
+}
+
+impl SizePolicy {
+    /// Returns this policy's contribution when no finite parent extent exists.
+    ///
+    /// Only `Fixed` can force a size without a reference axis. Every flexible policy falls back to
+    /// the widget's measured content so auto-size cannot manufacture space from an arbitrary probe.
+    pub(crate) fn intrinsic_extent(self, content: i32) -> i32 {
+        match self {
+            Self::Fixed(value) => value,
+            _ => content,
+        }
+        .max(0)
+    }
+
+    /// Converts a parent allocation into the width or height offered during child measurement.
+    ///
+    /// Zero retains the public "unbounded" convention. A fixed policy remains meaningful without
+    /// a parent bound; other flexible policies need content measurement to establish a preference.
+    pub(crate) fn measurement_bound(self, available: i32) -> i32 {
+        if available <= 0 {
+            return match self {
+                Self::Fixed(value) => value.max(0),
+                _ => 0,
+            };
+        }
+        // A positive measurement offer must remain positive even when a policy resolves to zero;
+        // zero is reserved for the distinct unbounded-measurement request.
+        self.allocated_extent(available).max(1)
+    }
+
+    /// Combines measured content with this policy for a container's preferred extent.
+    ///
+    /// `Auto` preserves content under a positive bound. Other policies resolve against that bound,
+    /// while an unbounded query uses the intrinsic rule above.
+    pub(crate) fn preferred_extent(self, content: i32, available: i32) -> i32 {
+        if available <= 0 {
+            self.intrinsic_extent(content)
+        } else {
+            match self {
+                Self::Auto => content.max(0),
+                _ => self.allocated_extent(available),
+            }
+        }
+    }
+
+    /// Resolves one policy inside an already allocated parent slot.
+    ///
+    /// Sibling-aware weight sharing is handled by the private container-axis cursor. At this final
+    /// node boundary, a valid positive `Weight` consumes the slot the parent already assigned it.
+    pub(crate) fn allocated_extent(self, available: i32) -> i32 {
+        match self {
+            Self::Auto => available,
+            Self::Fixed(value) => value,
+            Self::Fraction(value) => scaled(available, value.clamp(0.0, 1.0)),
+            Self::Weight(value) if value.is_finite() && value > 0.0 => available,
+            Self::Weight(_) => 0,
+            Self::Remainder(margin) => available.saturating_sub(margin.max(0)),
+        }
+        .max(0)
+    }
+}
+
+/// Multiplies a non-negative pixel extent by a finite positive ratio.
+///
+/// Invalid and non-positive ratios deliberately resolve to zero rather than propagating NaN or
+/// producing a negative layout extent. Flooring keeps allocation deterministic in integer pixels.
+pub(crate) fn scaled(total: i32, ratio: f32) -> i32 {
+    if ratio.is_finite() && ratio > 0.0 {
+        ((total.max(0) as f32) * ratio).floor() as i32
+    } else {
+        0
     }
 }
 
