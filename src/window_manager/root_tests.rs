@@ -4,8 +4,8 @@ use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, reco
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonState, Column, ColumnParameters, ColumnState, Custom, CustomParameters, Dimensioni, Disclosure,
     DisclosureParameters, DisclosureState, Grid, GridParameters, KeyMode, MouseButton, Node, Policy, Row, RowParameters, ScrollArea, ScrollAreaOption,
-    ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetState,
-    WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    ListItem, ListItemParameters, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style, UiInputEvent, Widget, WidgetOption,
+    WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use crate::widget::{runtime_read_state, runtime_update_state};
@@ -1297,6 +1297,70 @@ fn chrome_geometry_exposes_one_body_and_auto_size_tracks_content() {
 }
 
 #[test]
+fn auto_height_preserves_popup_width_and_stretches_stack_items() {
+    let mut item_ids = Vec::new();
+    let items = ["Apple", "Banana", "Cherry", "Date"]
+        .into_iter()
+        .map(|label| {
+            let (_, item) = ListItem::create(ListItemParameters::new(label));
+            let node = Node::widget(item);
+            item_ids.push(node.id());
+            node
+        })
+        .collect::<Vec<_>>();
+    let (_, content) = Stack::create(StackParameters::new(
+        SizePolicy::Remainder(0),
+        SizePolicy::Auto,
+        StackDirection::TopToBottom,
+        items,
+    ));
+    let mut ctx = context();
+    let root = ctx.create_popup("combo", content);
+    let anchor = rect(20, 30, 180, 1);
+    ctx.set_root_options(
+        root.id(),
+        WindowOption::FRAME | WindowOption::AUTO_HEIGHT | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
+    )
+    .unwrap();
+    ctx.set_root_visible(root.id(), true).unwrap();
+    ctx.set_root_rect(root.id(), anchor).unwrap();
+
+    ctx.update_and_render_ui();
+
+    let outer = root.state().try_read(RootState::rect).unwrap();
+    let body = ctx.debug_root_body(root.id()).unwrap();
+    assert_eq!(outer.x, anchor.x);
+    assert_eq!(outer.y, anchor.y);
+    assert_eq!(outer.width, anchor.width, "AUTO_HEIGHT must retain the programmed width");
+    assert!(outer.height > anchor.height, "popup height must still follow its items");
+    for item in item_ids {
+        let item = ctx.debug_root_node_rect(root.id(), item).unwrap();
+        assert_eq!((item.x, item.width), (body.x, body.width));
+    }
+}
+
+#[test]
+fn auto_width_preserves_programmed_height() {
+    let (_, item) = ListItem::create(ListItemParameters::new("intrinsic width"));
+    let mut ctx = context();
+    let root = ctx.create_popup("horizontal", Node::widget(item));
+    let programmed = rect(20, 30, 1, 120);
+    ctx.set_root_options(
+        root.id(),
+        WindowOption::FRAME | WindowOption::AUTO_WIDTH | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
+    )
+    .unwrap();
+    ctx.set_root_visible(root.id(), true).unwrap();
+    ctx.set_root_rect(root.id(), programmed).unwrap();
+
+    ctx.update_and_render_ui();
+
+    let outer = root.state().try_read(RootState::rect).unwrap();
+    assert!(outer.width > programmed.width, "AUTO_WIDTH must derive width from content");
+    assert_eq!(outer.height, programmed.height, "AUTO_WIDTH must retain the programmed height");
+}
+
+#[test]
 fn auto_size_ignores_the_previous_rect_for_flexible_row_grid_and_stack_tracks() {
     let row_children = (0..5)
         .map(|index| Node::widget(Custom::create(CustomParameters::new(format!("row {index}")))))
@@ -1338,8 +1402,8 @@ fn auto_size_ignores_the_previous_rect_for_flexible_row_grid_and_stack_tracks() 
     let (_, content) = Column::create(ColumnParameters::new([row, grid, stack]));
     let mut ctx = context();
     let root = ctx.create_popup("intrinsic", content);
-    ctx.set_root_rect(root.id(), rect(20, 30, 2_000, 3_000)).unwrap();
     ctx.set_root_visible(root.id(), true).unwrap();
+    ctx.set_root_rect(root.id(), rect(20, 30, 2_000, 3_000)).unwrap();
 
     ctx.update_and_render_ui();
 

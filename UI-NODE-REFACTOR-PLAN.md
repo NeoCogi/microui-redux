@@ -5162,7 +5162,8 @@ change a protected P0 behavior follows the explicit change-control rule.
   for wrapping. It does not apply `Node` placement policy. `Children::measure_child` preserves that
   meaning, and `Children::child_policy` gives every container the separate indexed placement query
   needed for slot planning. No private constraint model, measurement plan object, or numeric probe
-  remains. `AUTO_SIZE` requests unconstrained preferred size with `Dimensioni::default()`.
+  remains. `AUTO_WIDTH` and `AUTO_HEIGHT` independently request unconstrained preferred size on one
+  axis, and their `AUTO_SIZE` composite requests it on both with `Dimensioni::default()`.
 
   Built-in measurement remains an immutable query. A small private scalar `Axis` cursor resolves
   sibling policy, advance, and offered-slot arithmetic without a `Vec`, cache, `RefCell`, or renderer
@@ -5416,7 +5417,7 @@ contract or overstate what Rust can prove about arbitrary custom safe APIs.
 | Raw input and routed events can disagree | Aggregate input is reconstructed for routing and independently interpreted by `interaction_for` | FIFO raw-event queue; normalize once and deliver at most one localized event in each full update transaction | P2.5/P5.0 |
 | Context scroll accessors duplicate routed input | Scroll delta is copied into phase context state | Remove update/paint context accessors; inspect the one localized current event only | P2.5/P5.0 |
 | Input, update/layout, and paint are coupled to one render call | Render owns aggregate dispatch plus pre-route/pre-update/post-update layout | Explicit `update_ui`: one sync layout and one full update/layout per event; `render_ui` paints/submits only | P2.5/P4.0 |
-| Auto-size uses a `10_000` pseudo-unbounded probe | Public dimensions already define non-positive axes as unconstrained preferred-size requests | Pass `Dimensioni::default()` directly; do not add a parallel constraint model | P4.2/P5.0 |
+| Auto-size uses a `10_000` pseudo-unbounded probe | Public dimensions already define non-positive axes as unconstrained preferred-size requests | Pass zero only for each auto-sized axis; do not add a parallel constraint model | P4.2/P5.0 |
 | Row/Grid measurement can disagree with allocation | Measurement applied placement policy and containers used independent track rules | Keep measurement content-only; use one bounded track allocator and one Grid placement list per call | P2.0/P4.2 |
 | Mounted container configuration is underspecified | Old public fields and builder reconstruction blur initialization and state | Exact Row/Grid/Stack/Scroll state setters; immutable node policy and mutable Grid-owned child span | P1.1/P2.0/P2.2 |
 | Grid span leaks through every generic node and container context | Parent-child edge data was modeled as intrinsic node data | `GridItem` construction plus one `GridState` authority for children, spans, and tracks; private builder-edge bridge only until P3.0 | P1.3/P2.0/P3.0 |

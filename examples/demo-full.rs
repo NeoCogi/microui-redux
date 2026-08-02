@@ -1300,7 +1300,7 @@ impl State {
         let combo_popup_root = ctx.create_popup("Combo Box Popup", combo_node);
         ctx.set_root_options(
             combo_popup_root.id(),
-            WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
+            WindowOption::FRAME | WindowOption::AUTO_HEIGHT | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
         )
         .expect("combo popup root must exist");
         let popup_root = ctx.create_popup("Test Popup", popup_node);

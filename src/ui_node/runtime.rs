@@ -111,10 +111,11 @@ impl UiRuntime {
 
     /// Measures one persistent root node for auto-size without introducing a parallel projection.
     ///
-    /// Both zero components explicitly request unconstrained preferred size. Root chrome owns the
-    /// conversion from application content to the final outer window extent.
-    pub(crate) fn measure_tree_root(&self, root: &Node, style: &Style, atlas: &crate::AtlasHandle) -> Dimensioni {
-        self.measure_node(root, style, atlas, Dimensioni::default())
+    /// A zero component requests unconstrained preferred size; a positive component supplies the
+    /// programmed measurement bound. Root chrome owns the conversion from application content to
+    /// the final outer window extent.
+    pub(crate) fn measure_tree_root(&self, root: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+        self.measure_node(root, style, atlas, available)
     }
 
     /// Lays out one persistent root node at its authoritative screen-space rectangle.

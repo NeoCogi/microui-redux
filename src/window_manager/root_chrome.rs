@@ -238,8 +238,10 @@ impl Widget for RootChromeContainer {
     fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
         runtime_read_state(&self.state, "RootChrome::measure", |state| {
             // Resolve chrome once against the supplied bound to learn how much of each axis remains
-            // available to application content. This keeps title/frame policy inside root chrome.
-            let outer = Recti::new(0, 0, available.width.max(1), available.height.max(1));
+            // available to application content. Seed an unconstrained axis with the root's real
+            // minimum so a one-pixel placeholder cannot collapse the other axis's frame geometry.
+            let minimum = root_chrome_geometry(Recti::default(), Dimensioni::default(), &state.name, state.options, style, atlas).minimum_outer;
+            let outer = Recti::new(0, 0, available.width.max(minimum.width), available.height.max(minimum.height));
             let shell = root_chrome_geometry(outer, Dimensioni::default(), &state.name, state.options, style, atlas);
             let child_available = Dimensioni::new(
                 inset_available(available.width, outer.width.saturating_sub(shell.body.width)),
@@ -479,9 +481,10 @@ pub(super) fn root_chrome_geometry(
         0
     };
     let border_extent = border.checked_mul(2).expect("root chrome frame extent overflowed i32");
-    let auto_size = options.intersects(WindowOption::AUTO_SIZE);
-    let mut minimum_width: i32 = if auto_size { 1 } else { 96 };
-    let mut minimum_height: i32 = if auto_size { 1 } else { 64 };
+    let auto_width = options.intersects(WindowOption::AUTO_WIDTH);
+    let auto_height = options.intersects(WindowOption::AUTO_HEIGHT);
+    let mut minimum_width: i32 = if auto_width { 1 } else { 96 };
+    let mut minimum_height: i32 = if auto_height { 1 } else { 64 };
     if !options.intersects(WindowOption::NO_TITLE) {
         let close_width = if options.intersects(WindowOption::NO_CLOSE) { 0 } else { title_height };
         minimum_width = minimum_width.max(
@@ -491,7 +494,7 @@ pub(super) fn root_chrome_geometry(
                 .saturating_add(close_width)
                 .saturating_add(padding.saturating_mul(2)),
         );
-        minimum_height = minimum_height.max(if auto_size {
+        minimum_height = minimum_height.max(if auto_height {
             title_height
         } else {
             title_height.saturating_add(padding.saturating_mul(2))

@@ -77,8 +77,12 @@ bitflags! {
     pub struct WindowOption : u32 {
         /// Gives the root a Style-owned outer border and inset content area.
         const FRAME = 1024;
-        /// Automatically adapts the root size to its content.
-        const AUTO_SIZE = 512;
+        /// Adapts the root width to its content while retaining its programmed height.
+        const AUTO_WIDTH = 256;
+        /// Adapts the root height to its content while retaining its programmed width.
+        const AUTO_HEIGHT = 512;
+        /// Adapts both root axes to intrinsic content size.
+        const AUTO_SIZE = Self::AUTO_WIDTH.bits() | Self::AUTO_HEIGHT.bits();
         /// Hides the title bar.
         const NO_TITLE = 128;
         /// Hides the close button.

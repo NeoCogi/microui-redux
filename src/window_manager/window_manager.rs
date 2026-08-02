@@ -325,17 +325,25 @@ impl<B: RendererBackend> Context<B> {
         self.roots.sort_by_key(|entry| entry.z_index);
 
         for index in 0..self.roots.len() {
-            let (visible, options) = self.roots[index]
+            let (visible, options, rect) = self.roots[index]
                 .root_state
-                .try_read(|state| (state.is_visible(), state.options()))
+                .try_read(|state| (state.is_visible(), state.options(), state.rect()))
                 .unwrap_or_else(|| self.root_access_failure(index));
+            let auto_width = options.intersects(WindowOption::AUTO_WIDTH);
+            let auto_height = options.intersects(WindowOption::AUTO_HEIGHT);
             if visible && options.intersects(WindowOption::AUTO_SIZE) {
-                // Auto-size is an intrinsic query. The retained RootChrome node owns chrome
-                // conversion, so the window manager supplies neither a probe size nor a formula.
+                // Zero requests intrinsic size on an automatic axis. A retained axis supplies its
+                // programmed outer bound so root chrome can offer the exact remaining body extent
+                // without exposing frame or padding arithmetic to the application.
+                let available = Dimensioni::new(if auto_width { 0 } else { rect.width.max(1) }, if auto_height { 0 } else { rect.height.max(1) });
                 let size = self.roots[index]
                     .tree
                     .runtime
-                    .measure_tree_root(&self.roots[index].tree.root, &self.style, atlas);
+                    .measure_tree_root(&self.roots[index].tree.root, &self.style, atlas, available);
+                let size = Dimensioni::new(
+                    if auto_width { size.width } else { rect.width },
+                    if auto_height { size.height } else { rect.height },
+                );
                 self.roots[index]
                     .root_state
                     .try_update(|state| state.set_size_silent(size))
