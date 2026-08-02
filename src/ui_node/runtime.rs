@@ -669,6 +669,40 @@ impl UiRuntime {
         })
     }
 
+    /// Routes a root's post-tree chrome before its application descendants.
+    ///
+    /// Ordinary retained containers remain child-first. A root is different because its title,
+    /// close button, and resize grip are painted after the complete application tree and therefore
+    /// occupy the top input layer where their rectangles overlap application content.
+    pub(crate) fn route_root_input_event_to_node_ref(
+        &mut self,
+        node: &mut Node,
+        parent_transform: Transform,
+        style: &Style,
+        event: &UiInputEvent,
+    ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
+        let id = node.id();
+        let root_result = self.route_input_event_to_node_only_ref(node, parent_transform, style, event);
+        if root_result.is_consumed() {
+            return Some((id, root_result));
+        }
+
+        let child_transform = parent_transform.push(node.state.layout);
+        if node_children_visible(node) {
+            return node
+                .with_children_mut(|children| {
+                    for child in children.iter_mut().rev() {
+                        if let Some(result) = self.route_input_event_to_node_ref(child, child_transform, style, event) {
+                            return Some(result);
+                        }
+                    }
+                    None
+                })
+                .flatten();
+        }
+        None
+    }
+
     /// Routes an event to exactly one node without traversing descendants.
     fn route_input_event_to_node_only(
         &mut self,

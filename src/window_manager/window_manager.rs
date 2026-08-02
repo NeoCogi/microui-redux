@@ -407,10 +407,11 @@ impl<B: RendererBackend> Context<B> {
                 let entry = &mut self.roots[index];
                 if entry.tree.runtime.accepts_pointer_input() {
                     let transform = entry.tree.runtime.root_transform();
-                    if let Some((owner, result)) = entry
-                        .tree
-                        .runtime
-                        .route_input_event_to_node_ref(&mut entry.tree.root, transform, self.style.as_ref(), event)
+                    if let Some((owner, result)) =
+                        entry
+                            .tree
+                            .runtime
+                            .route_root_input_event_to_node_ref(&mut entry.tree.root, transform, self.style.as_ref(), event)
                     {
                         entry.tree.runtime.update_pointer_capture(owner, result, event, input.mouse_buttons);
                     }

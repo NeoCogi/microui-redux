@@ -1197,6 +1197,40 @@ fn title_drag_and_close_record_typed_root_events() {
 }
 
 #[test]
+fn resize_overlay_preempts_content_where_the_grip_overlaps_the_root_body() {
+    let probe = OrderedProbe {
+        state: Rc::new(RefCell::new(OrderedProbeState::default())),
+        opt: WidgetOption::NONE,
+    };
+    let probe_state = probe.state_handle();
+    let mut ctx = context();
+    let root = ctx.create_window("window", rect(30, 30, 140, 100), Node::widget(probe).with_policy(Policy::fill()));
+    ctx.update_and_render_ui();
+
+    let resize = ctx.debug_root_chrome(root.id()).unwrap().2.unwrap();
+    let body = ctx.debug_root_body(root.id()).unwrap();
+    let press = crate::vec2(resize.x + 1, resize.y + 1);
+    assert!(
+        resize.contains(&press) && body.contains(&press),
+        "the regression requires the painted grip to overlap content"
+    );
+
+    let before = root.state().try_read(RootState::rect).unwrap();
+    ctx.mousedown(press.x, press.y, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(root.state().try_read(RootState::is_resizing), Some(true));
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(Vec::new()));
+
+    ctx.mousemove(press.x + 12, press.y + 8);
+    ctx.mouseup(press.x + 12, press.y + 8, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(
+        root.state().try_read(|state| (state.rect().width, state.rect().height)),
+        Some((before.width + 12, before.height + 8))
+    );
+}
+
+#[test]
 fn hiding_and_showing_root_does_not_restore_chrome_capture() {
     let mut ctx = context();
     let root = ctx.create_window("window", rect(30, 30, 140, 100), empty_content());
