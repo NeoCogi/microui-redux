@@ -126,6 +126,9 @@ impl View3D {
     }
 
     pub fn set_dimension(&mut self, dimension: Dimensioni) {
+        if (self.dimension.width, self.dimension.height) == (dimension.width, dimension.height) {
+            return;
+        }
         self.dimension = dimension;
         let aspect = (self.dimension.width as f32) / (self.dimension.height as f32);
         self.camera = self.camera.with_aspect(aspect);

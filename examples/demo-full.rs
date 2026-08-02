@@ -1128,8 +1128,11 @@ impl State {
         let suzanne_renderer = {
             let suzanne_data = suzanne_data.clone();
             ctx.register_custom_renderer(move |frame: &mut SelectedFrame<'_>, args: CustomRenderArgs| {
-                let suzanne = suzanne_data.borrow();
                 let area = area_from_args(&args);
+                let mut suzanne = suzanne_data.borrow_mut();
+                // Projection is a rendering cache derived from the authoritative committed area.
+                // This also initializes the aspect ratio on an inputless first frame.
+                suzanne.view_3d.set_dimension(Dimensioni::new(area.rect.width, area.rect.height));
                 frame.enqueue_mesh_draw(
                     area,
                     MeshSubmission {
