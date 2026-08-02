@@ -161,7 +161,7 @@ pub struct Style {
     pub title_height: i32,
     /// Width of scrollbars.
     pub scrollbar_size: i32,
-    /// Size of slider thumbs.
+    /// Minimum length of scrollbar thumbs and width of slider thumbs.
     pub thumb_size: i32,
     /// Width of inside-aligned widget and container borders.
     pub frame_border_width: i32,

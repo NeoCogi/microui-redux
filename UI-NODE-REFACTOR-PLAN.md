@@ -5043,7 +5043,7 @@ change a protected P0 behavior follows the explicit change-control rule.
   with the repository's pre-existing warning baseline and no P4.0-specific warning;
   `git diff --check` passes.
 
-- [ ] **P4.1 — Correct scroll/disclosure edge cases on the single-owner representation**
+- [x] **P4.1 — Correct scroll/disclosure edge cases on the single-owner representation**
 
   **Problem**
 
@@ -5076,6 +5076,36 @@ change a protected P0 behavior follows the explicit change-control rule.
   - Resize/content replacement clamps offsets without rebuilding state.
   - Collapse retains descendant ownership/handles but clears transient targets and skips every
     descendant phase; removal drops descendants and expires their handles.
+
+  **Completion evidence (2026-08-01)**
+
+  One private `ScrollbarGeometry` now owns the proportional/minimum thumb, thumb travel, maximum
+  offset, exact drag inverse, and centered track-click mapping used by ScrollArea paint and input;
+  TextArea uses the same paint/drag mapping. ScrollArea commits one documented geometry value for
+  its surface, body, padded content view, child extent, range, offset, tracks, thumbs, and corner.
+  Its monotonic no-bars-to-required-bars layout loop has a strict four-state bound, lays children in
+  stable virtual content coordinates, and applies the content origin exactly once through the child
+  viewport transform. Resize and dynamic content replacement clamp the existing offset in place.
+
+  Wheel routing now consumes an entire diagonal event only if its clamped two-axis offset changes;
+  otherwise the unchanged event bubbles from either content or track, including at nested-scroll
+  boundaries. The generic public-widget router no longer queues a scroll event that it reports as
+  ignored. Scrollbar drag/release requires a matching left-button track/thumb press, uses the same
+  range as the painted thumb, and track presses outside the thumb center it on the pointer.
+
+  Disclosure remains the sole owner of its descendants and its existing expansion bit remains the
+  sole traversal gate. Integration coverage proves collapse retains weak-handle liveness while
+  skipping measure, update, paint, custom render, and stale focus delivery; clearing the owned
+  children expires their handles. Scroll integration covers nested boundary bubbling, diagonal
+  atomicity, padding fit, mutually induced bars, exact thumb inversion, press ownership, stable
+  offset-only allocation, resize clamping, and the existing file-dialog replacement/clamp path.
+
+  `cargo fmt --all -- --check`, `cargo test --all-targets`, `cargo test --doc`,
+  `cargo check --no-default-features`, `cargo doc --no-deps`, and separate Glow/Vulkan/WGPU example
+  checks pass. The suite has 183 passing unit tests, two existing ignored manual baselines, four
+  passing downstream integration tests, and 19 passing doctest/compile-fail cases. Clippy completes
+  with the repository's pre-existing warning baseline and no P4.1-specific warning;
+  `git diff --check` passes. P4.1 changes no public API.
 
 - [ ] **P4.2 — Replace pseudo-unbounded measurement and unify axis allocation**
 

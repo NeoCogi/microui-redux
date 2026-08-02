@@ -57,7 +57,7 @@
 use crate::*;
 use crate::widget::{runtime_read_state, runtime_update_state};
 use std::{cell::RefCell, rc::Rc};
-use crate::scrollbar::{scrollbar_base, scrollbar_drag_delta, scrollbar_max_scroll, scrollbar_thumb, ScrollAxis};
+use crate::scrollbar::{scrollbar_base, scrollbar_max_scroll, ScrollAxis, ScrollbarGeometry};
 use crate::text_layout::{build_text_lines, TextLine};
 
 use super::text_edit::{
@@ -500,7 +500,15 @@ fn textarea_update(
             clicked_scrollbar = true;
         }
         if interaction.dragging_y {
-            state.scroll.y += scrollbar_drag_delta(ScrollAxis::Vertical, mouse_delta, layout.content_size.y, layout.vscroll_base);
+            let scrollbar = ScrollbarGeometry::new(
+                ScrollAxis::Vertical,
+                layout.vscroll_base,
+                layout.body.height,
+                layout.content_size.y,
+                state.scroll.y,
+                layout.thumb_size,
+            );
+            state.scroll.y += scrollbar.drag_delta(mouse_delta);
         }
     }
 
@@ -510,7 +518,15 @@ fn textarea_update(
             clicked_scrollbar = true;
         }
         if interaction.dragging_x {
-            state.scroll.x += scrollbar_drag_delta(ScrollAxis::Horizontal, mouse_delta, layout.content_size.x, layout.hscroll_base);
+            let scrollbar = ScrollbarGeometry::new(
+                ScrollAxis::Horizontal,
+                layout.hscroll_base,
+                layout.body.width,
+                layout.content_size.x,
+                state.scroll.x,
+                layout.thumb_size,
+            );
+            state.scroll.x += scrollbar.drag_delta(mouse_delta);
         }
     }
 
@@ -646,27 +662,29 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &TextAreaState, wrap: Tex
 
     if layout.needs_v && layout.maxscroll_y > 0 && layout.body.height > 0 {
         ctx.draw_rect(layout.vscroll_base, ctx.style().colors[ControlColor::ScrollBase as usize]);
-        let thumb = scrollbar_thumb(
+        let thumb = ScrollbarGeometry::new(
             ScrollAxis::Vertical,
             layout.vscroll_base,
             layout.body.height,
             layout.content_size.y,
             state.scroll.y,
             layout.thumb_size,
-        );
+        )
+        .thumb();
         ctx.draw_rect(thumb, ctx.style().colors[ControlColor::ScrollThumb as usize]);
     }
 
     if layout.needs_h && layout.maxscroll_x > 0 && layout.body.width > 0 {
         ctx.draw_rect(layout.hscroll_base, ctx.style().colors[ControlColor::ScrollBase as usize]);
-        let thumb = scrollbar_thumb(
+        let thumb = ScrollbarGeometry::new(
             ScrollAxis::Horizontal,
             layout.hscroll_base,
             layout.body.width,
             layout.content_size.x,
             state.scroll.x,
             layout.thumb_size,
-        );
+        )
+        .thumb();
         ctx.draw_rect(thumb, ctx.style().colors[ControlColor::ScrollThumb as usize]);
     }
 }

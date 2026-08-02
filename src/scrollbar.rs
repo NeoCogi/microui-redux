@@ -50,10 +50,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Geometry helpers for retained container scrollbars.
+//! Pure one-axis scrollbar geometry.
 //!
-//! Containers own scrollbar state and input routing; this file keeps the pure calculations for
-//! base tracks, thumb rectangles, and drag-to-scroll conversion independent of that state.
+//! Widgets and containers still own their layout, state, and input policy. This module only keeps
+//! the track/thumb mapping in one place so paint, dragging, and track clicks cannot disagree.
 use crate::{Recti, Vec2i};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -65,109 +65,168 @@ pub(crate) enum ScrollAxis {
     Horizontal,
 }
 
+impl ScrollAxis {
+    fn rect_len(self, rect: Recti) -> i32 {
+        match self {
+            Self::Vertical => rect.height,
+            Self::Horizontal => rect.width,
+        }
+    }
+
+    fn point(self, point: Vec2i) -> i32 {
+        match self {
+            Self::Vertical => point.y,
+            Self::Horizontal => point.x,
+        }
+    }
+
+    fn origin(self, rect: Recti) -> i32 {
+        match self {
+            Self::Vertical => rect.y,
+            Self::Horizontal => rect.x,
+        }
+    }
+
+    fn with_len(self, mut rect: Recti, len: i32) -> Recti {
+        match self {
+            Self::Vertical => rect.height = len,
+            Self::Horizontal => rect.width = len,
+        }
+        rect
+    }
+
+    fn translate(self, mut rect: Recti, amount: i32) -> Recti {
+        match self {
+            Self::Vertical => rect.y = rect.y.saturating_add(amount),
+            Self::Horizontal => rect.x = rect.x.saturating_add(amount),
+        }
+        rect
+    }
+}
+
+/// Complete mapping between one scrollbar track and one content axis.
+///
+/// `thumb`, [`Self::drag_delta`], and [`Self::centered_offset`] all use the same scroll range and
+/// thumb travel. Keeping those values together is important when the minimum thumb length is
+/// larger than the proportional thumb.
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct ScrollbarGeometry {
+    axis: ScrollAxis,
+    track: Recti,
+    thumb: Recti,
+    max_offset: i32,
+    thumb_travel: i32,
+}
+
+impl ScrollbarGeometry {
+    /// Resolves one track and thumb for the supplied visible/content lengths and offset.
+    pub(crate) fn new(axis: ScrollAxis, track: Recti, view_len: i32, content_len: i32, offset: i32, min_thumb_len: i32) -> Self {
+        let track_len = axis.rect_len(track).max(0);
+        let view_len = view_len.max(0);
+        let content_len = content_len.max(0);
+        let max_offset = scrollbar_max_scroll(content_len, view_len);
+
+        let proportional = if content_len > 0 {
+            track_len.saturating_mul(view_len) / content_len
+        } else {
+            track_len
+        };
+        let thumb_len = proportional.max(min_thumb_len.max(0)).min(track_len);
+        let thumb_travel = track_len.saturating_sub(thumb_len).max(0);
+        let thumb_offset = if max_offset > 0 && thumb_travel > 0 {
+            offset.clamp(0, max_offset).saturating_mul(thumb_travel) / max_offset
+        } else {
+            0
+        };
+        let thumb = axis.translate(axis.with_len(track, thumb_len), thumb_offset);
+
+        Self {
+            axis,
+            track,
+            thumb,
+            max_offset,
+            thumb_travel,
+        }
+    }
+
+    /// Returns the full scrollbar track.
+    pub(crate) fn track(self) -> Recti {
+        self.track
+    }
+
+    /// Returns the painted and hit-tested thumb rectangle.
+    pub(crate) fn thumb(self) -> Recti {
+        self.thumb
+    }
+
+    /// Converts pointer movement into the exactly inverse content-offset movement.
+    pub(crate) fn drag_delta(self, delta: Vec2i) -> i32 {
+        if self.thumb_travel <= 0 || self.max_offset <= 0 {
+            return 0;
+        }
+        self.axis.point(delta).saturating_mul(self.max_offset) / self.thumb_travel
+    }
+
+    /// Returns the offset that centers the thumb on `pointer`, clamped to the track.
+    pub(crate) fn centered_offset(self, pointer: Vec2i) -> i32 {
+        if self.thumb_travel <= 0 || self.max_offset <= 0 {
+            return 0;
+        }
+        let thumb_len = self.axis.rect_len(self.thumb);
+        let centered = self
+            .axis
+            .point(pointer)
+            .saturating_sub(self.axis.origin(self.track))
+            .saturating_sub(thumb_len / 2)
+            .clamp(0, self.thumb_travel);
+        centered.saturating_mul(self.max_offset) / self.thumb_travel
+    }
+}
+
 /// Returns the scrollbar track rectangle just outside the container body on the selected axis.
 pub(crate) fn scrollbar_base(axis: ScrollAxis, body: Recti, scrollbar_size: i32) -> Recti {
     let mut base = body;
     match axis {
         ScrollAxis::Vertical => {
-            base.x = body.x + body.width;
+            base.x = body.x.saturating_add(body.width);
             base.width = scrollbar_size;
         }
         ScrollAxis::Horizontal => {
-            base.y = body.y + body.height;
+            base.y = body.y.saturating_add(body.height);
             base.height = scrollbar_size;
         }
     }
     base
 }
 
-/// Returns the viewport body left after scrollbar track occupancy is reserved.
-pub(crate) fn scrollbar_viewport_body(rect: Recti, content_size: crate::Dimensioni, padding: i32, scrollbar_size: i32) -> Recti {
-    if scrollbar_size <= 0 {
-        return rect;
-    }
-    let padding = padding.max(0);
-    let content = crate::Dimensioni::new(
-        content_size.width.saturating_add(padding.saturating_mul(2)),
-        content_size.height.saturating_add(padding.saturating_mul(2)),
-    );
-    let mut body = rect;
-    for _ in 0..3 {
-        let needs_vertical = content.height > body.height && body.height > 0;
-        let needs_horizontal = content.width > body.width && body.width > 0;
-        let mut next = rect;
-        if needs_vertical {
-            next.width = next.width.saturating_sub(scrollbar_size);
-        }
-        if needs_horizontal {
-            next.height = next.height.saturating_sub(scrollbar_size);
-        }
-        if next.x == body.x && next.y == body.y && next.width == body.width && next.height == body.height {
-            break;
-        }
-        body = next;
-    }
-    body
-}
-
 /// Returns the largest scroll offset needed to reveal all content.
 pub(crate) fn scrollbar_max_scroll(content_len: i32, view_len: i32) -> i32 {
-    (content_len - view_len).max(0)
+    content_len.saturating_sub(view_len).max(0)
 }
 
-/// Converts pointer drag distance on the scrollbar track into content scroll distance.
-pub(crate) fn scrollbar_drag_delta(axis: ScrollAxis, delta: Vec2i, content_len: i32, base: Recti) -> i32 {
-    let base_len = match axis {
-        ScrollAxis::Vertical => base.height,
-        ScrollAxis::Horizontal => base.width,
-    };
-    if base_len <= 0 {
-        return 0;
-    }
-    let axis_delta = match axis {
-        ScrollAxis::Vertical => delta.y,
-        ScrollAxis::Horizontal => delta.x,
-    };
-    axis_delta.saturating_mul(content_len) / base_len
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Computes the thumb rectangle for the given view/content ratio and current scroll offset.
-pub(crate) fn scrollbar_thumb(axis: ScrollAxis, base: Recti, view_len: i32, content_len: i32, scroll: i32, thumb_size: i32) -> Recti {
-    let mut thumb = base;
-    let base_len = match axis {
-        ScrollAxis::Vertical => base.height,
-        ScrollAxis::Horizontal => base.width,
-    };
-    if base_len <= 0 || content_len <= 0 || view_len <= 0 {
-        return thumb;
+    #[test]
+    fn minimum_thumb_drag_uses_the_same_inverse_range_as_paint() {
+        let track = Recti::new(10, 20, 8, 100);
+        let geometry = ScrollbarGeometry::new(ScrollAxis::Vertical, track, 20, 200, 90, 40);
+
+        let thumb = geometry.thumb();
+        assert_eq!((thumb.x, thumb.y, thumb.width, thumb.height), (10, 50, 8, 40));
+        assert_eq!(geometry.drag_delta(Vec2i::new(0, 30)), 90);
+
+        let moved = ScrollbarGeometry::new(ScrollAxis::Vertical, track, 20, 200, 180, 40);
+        assert_eq!(moved.thumb().y, geometry.thumb().y + 30);
     }
 
-    // Thumb length represents the visible fraction but is clamped so it remains usable.
-    let mut thumb_len = base_len.saturating_mul(view_len) / content_len;
-    if thumb_len < thumb_size {
-        thumb_len = thumb_size;
-    }
-    if thumb_len > base_len {
-        thumb_len = base_len;
-    }
+    #[test]
+    fn centered_track_click_clamps_to_both_ends() {
+        let track = Recti::new(4, 6, 100, 8);
+        let geometry = ScrollbarGeometry::new(ScrollAxis::Horizontal, track, 25, 100, 0, 20);
 
-    match axis {
-        ScrollAxis::Vertical => thumb.height = thumb_len,
-        ScrollAxis::Horizontal => thumb.width = thumb_len,
+        assert_eq!(geometry.centered_offset(Vec2i::new(-100, 8)), 0);
+        assert_eq!(geometry.centered_offset(Vec2i::new(104, 8)), 75);
     }
-
-    let max_scroll = scrollbar_max_scroll(content_len, view_len);
-    if max_scroll > 0 {
-        let track_len = base_len - thumb_len;
-        if track_len > 0 {
-            // Map scroll position into the remaining track length after reserving the thumb.
-            let offset = scroll.clamp(0, max_scroll) * track_len / max_scroll;
-            match axis {
-                ScrollAxis::Vertical => thumb.y += offset,
-                ScrollAxis::Horizontal => thumb.x += offset,
-            }
-        }
-    }
-
-    thumb
 }

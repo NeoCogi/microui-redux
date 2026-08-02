@@ -3,8 +3,8 @@ use super::*;
 use crate::test_support::{recording_backend, test_atlas, NoopRenderer, RenderEvent};
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonState, Column, ColumnParameters, ColumnState, Custom, CustomParameters, Dimensioni, Disclosure,
-    DisclosureParameters, DisclosureState, KeyMode, MouseButton, Node, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetState,
-    WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    DisclosureParameters, DisclosureState, KeyMode, MouseButton, Node, Policy, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Style, UiInputEvent, Widget,
+    WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use crate::widget::{runtime_read_state, runtime_update_state};
@@ -30,7 +30,9 @@ struct OrderedProbeState {
     events: Vec<&'static str>,
     held_buttons: Vec<u32>,
     held_keys: Vec<u32>,
+    measures: usize,
     updates: usize,
+    paints: usize,
 }
 
 impl WidgetState for OrderedProbeState {}
@@ -54,6 +56,7 @@ impl Widget for OrderedProbe {
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        self.state.borrow_mut().measures += 1;
         Dimensioni::new(80, 60)
     }
 
@@ -78,7 +81,9 @@ impl Widget for OrderedProbe {
         }
     }
 
-    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {
+        self.state.borrow_mut().paints += 1;
+    }
 }
 
 struct CommitProbeState {
@@ -454,6 +459,107 @@ fn disclosure_update_commits_child_geometry_before_the_next_queued_press() {
 
     assert_eq!(disclosure.try_read(DisclosureState::is_expanded), Some(true));
     assert_eq!(button.try_update(ButtonState::take_submitted), Some(true));
+}
+
+#[test]
+fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_removal() {
+    let (backend, log) = recording_backend(test_atlas());
+    let mut ctx = Context::new_test(backend, Dimensioni::new(320, 240));
+
+    let probe = OrderedProbe {
+        state: Rc::new(RefCell::new(OrderedProbeState::default())),
+        opt: WidgetOption::HOLD_FOCUS,
+    };
+    let probe_state = probe.state_handle();
+    let probe_node = Node::widget(probe);
+    let probe_id = probe_node.id();
+
+    let custom = ctx
+        .register_custom_renderer(|frame, _args| frame.record_marker("disclosure custom child"))
+        .unwrap();
+    let custom_runtime = Custom::create(CustomParameters::new("custom"));
+    let custom_state = custom_runtime.state_handle();
+    let custom_node = Node::custom_render(custom_runtime, custom).with_policy(Policy::fixed(20, 10));
+
+    let (disclosure, content) = Disclosure::create(DisclosureParameters::header("section", true, [probe_node, custom_node]));
+    let root = ctx.create_window("window", rect(0, 0, 160, 140), content);
+    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    ctx.update_and_render_ui();
+    let probe_rect = ctx.debug_root_node_rect(root.id(), probe_id).unwrap();
+
+    ctx.mousedown(probe_rect.x + 2, probe_rect.y + 2, MouseButton::LEFT);
+    ctx.mouseup(probe_rect.x + 2, probe_rect.y + 2, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    let visible_counts = probe_state
+        .try_read(|state| (state.measures, state.updates, state.paints, state.events.clone()))
+        .unwrap();
+    assert_eq!(visible_counts.3, ["down", "up"]);
+
+    disclosure.try_update(DisclosureState::collapse).unwrap();
+    log.clear();
+    ctx.mousemove(probe_rect.x + 2, probe_rect.y + 2);
+    ctx.update_and_render_ui();
+
+    assert_eq!(
+        probe_state.try_read(|state| (state.measures, state.updates, state.paints)),
+        Some((visible_counts.0, visible_counts.1, visible_counts.2)),
+        "collapsed descendants must skip measure, update, and paint"
+    );
+    assert!(
+        !log.snapshot()
+            .iter()
+            .any(|event| matches!(event, RenderEvent::Marker(name) if name == "disclosure custom child")),
+        "collapsed descendants must skip custom rendering"
+    );
+    assert!(probe_state.is_alive() && custom_state.is_alive(), "collapse must retain descendant ownership");
+
+    disclosure.try_update(DisclosureState::expand).unwrap();
+    log.clear();
+    ctx.text("focus must not return");
+    ctx.update_and_render_ui();
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
+    assert!(
+        log.snapshot()
+            .iter()
+            .any(|event| matches!(event, RenderEvent::Marker(name) if name == "disclosure custom child"))
+    );
+
+    disclosure.try_update(DisclosureState::clear).unwrap();
+    assert!(!probe_state.is_alive() && !custom_state.is_alive(), "removal must drop descendant runtimes");
+}
+
+#[test]
+fn nested_scroll_bubbles_at_the_inner_boundary_and_moves_only_the_outer_area() {
+    let inner_content = Node::widget(Custom::create(CustomParameters::new("inner content"))).with_policy(Policy::fixed(50, 180));
+    let (inner, inner_node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [inner_content]));
+    let inner_node = inner_node.with_policy(Policy::fixed(60, 60));
+    let inner_id = inner_node.id();
+    let outer_tail = Node::widget(Custom::create(CustomParameters::new("outer tail"))).with_policy(Policy::fixed(60, 120));
+    let (outer, content) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [inner_node, outer_tail]));
+
+    let mut ctx = context();
+    let root = ctx.create_window("window", rect(0, 0, 100, 100), content);
+    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+
+    inner.try_update(|state| state.set_offset(crate::vec2(0, i32::MAX))).unwrap();
+    ctx.update_ui(dimensions);
+    let inner_offset = inner.try_read(|state| state.offset()).unwrap();
+    assert!(inner_offset.y > 0);
+    let inner_rect = ctx.debug_root_node_rect(root.id(), inner_id).unwrap();
+
+    ctx.mousemove(inner_rect.x + 5, inner_rect.y + 5);
+    ctx.scroll(0, 12);
+    ctx.update_ui(dimensions);
+
+    assert_eq!(
+        inner.try_read(|state| (state.offset().x, state.offset().y)),
+        Some((inner_offset.x, inner_offset.y))
+    );
+    assert_eq!(outer.try_read(|state| state.offset().y), Some(12));
 }
 
 #[test]

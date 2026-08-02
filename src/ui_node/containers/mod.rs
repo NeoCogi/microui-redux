@@ -396,13 +396,9 @@ pub(super) fn route_public_widget_input(
             runtime.push_routed_event(id, event.clone());
             ContainerInputResult::Consumed
         }
-        UiInputEvent::Scroll { delta, .. } if hovered => {
+        UiInputEvent::Scroll { delta, .. } if hovered && opt.intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0) => {
             runtime.push_routed_event(id, event.clone());
-            if opt.intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0) {
-                ContainerInputResult::Consumed
-            } else {
-                ContainerInputResult::Ignored
-            }
+            ContainerInputResult::Consumed
         }
         _ => ContainerInputResult::Ignored,
     }
