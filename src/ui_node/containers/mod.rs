@@ -90,6 +90,9 @@ impl ChildrenVisitor<'_> {
 ///
 /// The collection must be the same authoritative collection submitted by [`ChildrenVisitor`]. A
 /// borrow cannot escape `visit`, and attached nodes remain opaque while the framework recurses.
+/// The owning container state remains borrowed across that recursion, so a checked application
+/// mutation of the same container returns `None`; another currently available state cell can still
+/// be changed and is observed according to traversal order.
 pub struct ChildrenVisitorMut<'a> {
     callback: &'a mut dyn FnMut(&mut Children),
     submissions: usize,

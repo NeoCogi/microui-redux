@@ -306,6 +306,42 @@ Built-in state is mutated through typed handles between commits. After programma
 
 `ContextFrame` holds the Context borrow needed to serialize paint/submission, but it does not lock independent widget or root state handles and there is no Context access token. Do not keep a state-access closure active while retained update/layout/paint can reach that same state. Framework recursion through a container's scoped child visitor is the intentional exception. If layout-affecting state changes after the last commit, drop any unsubmitted frame and call `update_ui` again before paint.
 
+The application owns `Context` and its weak state handles as independent Rust values, so the
+compiler permits explicitly capturing the Context inside a state-access closure. Do not initiate
+retained traversal that way:
+
+```rust
+textbox_state.try_update(|state| {
+    state.set_text("hello");
+    context.update_ui(dimensions); // unsupported: the mutable state borrow is still active
+});
+```
+
+`try_update` holds the state's checked `RefCell` borrow until its closure returns. If the nested
+layout, update, or paint traversal reaches that state, the built-in runtime's checked borrow is
+incompatible and panics with a diagnostic naming the runtime phase. This is the reentrancy guard;
+there is no separate Context lock. Finish the state access before committing instead:
+
+```rust
+textbox_state
+    .try_update(|state| state.set_text("hello"))
+    .expect("textbox state unavailable");
+context.update_ui(dimensions);
+```
+
+Update and paint visit a node before its eligible children and visit siblings in forward order. A
+successful mutation of a later, currently available state cell is visible when traversal reaches
+it; mutating an already-updated sibling does not rerun that sibling. A container's active child
+visitor borrow makes mutation of that same container return `None`, while another available subtree
+may change. There is no transaction snapshot or rollback, but every input transaction ends with a
+complete layout before the next event is routed.
+
+`Widget::paint` and registered custom-render callbacks are observational with respect to
+application state, topology, interaction, and layout. They may update private rendering-only
+caches, but mutating retained UI through an independently captured state handle during either
+callback violates the contract; it is not a deferred-next-frame update. Commit those changes before
+creating the frame.
+
 ## Fonts and typography
 - Atlas building supports multiple baked fonts and sizes through `atlas::builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.
 - `Context::new(...)` binds the conventional atlas keys `body`, `small`, `title`, `heading`, and `mono` onto the default `Style`. `Context::set_style(...)` also rebinds any font fields that are still left at their default/unset values, so tweaking colors or spacing on top of `Style::default()` keeps the intended body/title sizes.

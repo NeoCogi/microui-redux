@@ -1232,6 +1232,12 @@ checkbox_state.try_update(|checkbox| {
 });
 ```
 
+This compiles because the application-owned Context and weak state handle are independent Rust
+values with no static lifetime relationship. `try_update` nevertheless retains the cell's mutable
+`RefCell` borrow until its closure returns. If the nested traversal reaches that state, the built-in
+runtime requests an incompatible borrow and reports the phase-specific invariant panic. That local
+state borrow is the reentrancy guard; the architecture deliberately adds no Context-wide gate.
+
 Do not add a FrameGate, Context token, state-access depth counter, or global “currently borrowed”
 flag to detect this condition. Built-in runtimes should use a small internal state-borrow helper that
 panics with a precise diagnostic if unsupported reentrant traversal reaches a borrowed state cell;
@@ -2578,9 +2584,10 @@ explicit decision before changing the criterion.
     state is identical. A layout-affecting mutation after the last UI commit requires dropping an
     unsubmitted frame and calling `update_ui` again before paint.
   - Updating, laying out, or rendering any retained root of the same Context from inside
-    `try_read`/`try_update` is documented as unsupported, and a built-in runtime reports a precise
-    invariant panic rather than skipping the widget or producing stale output. Retained traversal
-    never crosses Context boundaries.
+    `try_read`/`try_update` is documented as unsupported. When that traversal reaches the actively
+    borrowed associated state and requests an incompatible borrow, a built-in runtime reports a
+    precise invariant panic rather than skipping the widget or producing stale output. Retained
+    traversal never crosses Context boundaries.
   - A downstream container performs authorized nested `Children::measure_child`,
     `ContainerLayoutCtx::layout_child`, and visitor traversal while its parent state borrow is active
     without triggering the top-level-reentrancy diagnostic.
@@ -4955,7 +4962,7 @@ change a protected P0 behavior follows the explicit change-control rule.
 
 ### P4 — Correctness after simplification
 
-- [ ] **P4.0 — Pin dynamic-mutation, update-commit, and paint-only semantics**
+- [x] **P4.0 — Pin dynamic-mutation, update-commit, and paint-only semantics**
 
   **Problem**
 
@@ -4994,10 +5001,47 @@ change a protected P0 behavior follows the explicit change-control rule.
     rendering-cache mutation.
   - A state-access closure that completes before `Context::update_ui` remains valid; invoking any
     retained update/layout/paint traversal for the same Context from inside that closure is an
-    explicitly unsupported reentrant call and receives the documented diagnostic without adding a
-    global state-handle gate.
+    explicitly unsupported reentrant call. If traversal reaches the actively borrowed associated
+    state and requests an incompatible borrow, it receives the documented diagnostic without adding
+    a global state-handle gate.
   - Framework-authorized child measurement, layout, and visitor recursion remains valid while a
     parent runtime's state borrow is active and is not diagnosed as application reentrancy.
+
+  **Completion evidence (2026-08-01)**
+
+  Focused window-manager characterization now proves that an input-driven intrinsic-size mutation
+  is included in that event's post-update layout, changes the next queued pointer event's hit target,
+  and supplies the geometry later observed by paint without render-time update/layout work. Separate
+  probes pin parent-first forward-sibling semantics: a later sibling observes an earlier successful
+  cross-cell mutation, while mutation of an already-updated sibling changes its final state without
+  rerunning it.
+
+  Topology characterization proves that the active container visitor borrow makes same-container
+  mutation return `None`, while mutation of a not-yet-borrowed sibling subtree succeeds and its new
+  descendant participates when traversal reaches that subtree in the same transaction. A
+  programmatic child insertion followed by an empty-queue `update_ui` records one tree layout, zero
+  widget updates, and committed nonzero geometry for the inserted node. Render preflight coverage
+  now also proves that a Context-owned root mutation returns `UiUpdateRequired` before backend work.
+
+  Reentrancy tests hold both mutable and shared application access borrows while deliberately
+  entering retained traversal. Incompatible built-in `TextBlock::measure`, `TextBlock::paint`, and
+  `Button::update` borrows report the shared phase-specific invariant diagnostic; after the access
+  closure ends, ordinary commit and paint succeed. Existing downstream custom-container coverage
+  continues to perform framework-authorized nested child measurement, layout, and mutable visitor
+  recursion without that diagnostic or a global state-handle gate.
+
+  README, migration guidance, crate/Widget/Context/custom-render rustdoc, renderer documentation,
+  and traversal/visitor comments now explain the exact compiler-visible example, local `RefCell`
+  borrow guard, no-snapshot mutation ordering, explicit empty-queue synchronization, and
+  observational paint/custom-render rule. P4.0 changes no public API, Context/state ownership, phase
+  signature, or traversal implementation.
+
+  `cargo fmt --all -- --check`, `cargo test --all-targets`, `cargo test --doc`,
+  `cargo check --no-default-features`, `cargo doc --no-deps`, and separate Glow/Vulkan/WGPU example
+  checks pass. The suite has 175 passing unit tests, two existing ignored manual baselines, four
+  passing downstream integration tests, and 19 passing doctest/compile-fail cases. Clippy completes
+  with the repository's pre-existing warning baseline and no P4.0-specific warning;
+  `git diff --check` passes.
 
 - [ ] **P4.1 — Correct scroll/disclosure edge cases on the single-owner representation**
 

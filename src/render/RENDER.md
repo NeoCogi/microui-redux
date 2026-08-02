@@ -87,6 +87,13 @@ pending input, or different frame dimensions returns `RenderError::UiUpdateRequi
 display-list execution, or backend acquisition. Input belongs to `update_ui`; by the time painting
 starts, widgets record only committed visual state.
 
+Widget paint and backend custom-render callbacks are observational with respect to application
+state, topology, interaction, and layout. They may maintain private rendering-only caches. A
+callback that captures a `WidgetStateHandle` and mutates retained UI during rendering violates the
+contract; the mutation is not scheduled as deferred work, and weak handles cannot invalidate the
+already selected commit. Perform semantic mutations before `update_ui` and create the frame only
+after that commit is complete.
+
 The crate-owned submission path consumes every operation in painter order and leaves its internal
 list empty for reuse, including validation or frame-acquisition failures.
 Ordinary adjacent operations execute through one exclusively borrowed backend
@@ -98,7 +105,8 @@ normal atlas work is flushed immediately before each barrier.
 `WidgetPaintCtx::painter()` creates a recorder in widget-local coordinates. A
 custom widget can draw without knowing its screen position or the concrete
 backend. `WidgetUpdateCtx` deliberately has no painter or display-list access,
-so visual ordering cannot depend on work recorded during update:
+so visual ordering cannot depend on work recorded during update. A `Widget::paint` implementation
+may update only private rendering caches; it must not change semantic state or future layout:
 
 ```rust
 use microui_redux::prelude::*;

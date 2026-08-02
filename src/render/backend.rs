@@ -334,7 +334,9 @@ pub trait RendererBackend: 'static {
 /// Backend-specific callback invoked synchronously with the statically typed active frame.
 ///
 /// Callbacks stay on the owning Context/Renderer thread. This trait deliberately has no `Send` or
-/// `Sync` bound.
+/// `Sync` bound. A callback may update private rendering-only caches, but is observational with
+/// respect to retained application state, topology, interaction, and layout. Mutating retained UI
+/// through a captured state handle during the callback violates the update-before-paint contract.
 pub trait CustomRender<B: RendererBackend>: 'static {
     /// Records backend-specific work at the current painter-order position.
     fn render<'frame>(&mut self, frame: &mut B::Frame<'frame>, args: CustomRenderArgs);

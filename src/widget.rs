@@ -138,6 +138,23 @@ pub trait WidgetParameters: 'static {}
 /// Context access token. If state that can affect layout changes after the last
 /// [`crate::Context::update_ui`] commit, cancel any unsubmitted frame and commit again before
 /// painting.
+///
+/// Because a handle and its owning Context are independent Rust values, the compiler permits an
+/// application to capture that Context inside an access closure. Calling `update_ui` or
+/// `render_ui` there is unsupported: the handle retains its `RefCell` borrow until the closure
+/// returns, and a built-in runtime panics with the retained-state invariant diagnostic if nested
+/// traversal reaches that cell and requests an incompatible borrow. The active state borrow is the
+/// guard; no separate Context-wide traversal flag exists.
+///
+/// ```text
+/// state.try_update(|state| {
+///     state.change_layout();
+///     context.update_ui(dimensions); // unsupported nested traversal
+/// });
+///
+/// state.try_update(|state| state.change_layout());
+/// context.update_ui(dimensions);     // supported after the borrow ends
+/// ```
 pub struct WidgetStateHandle<T: WidgetState> {
     /// Weak access to the state allocation retained by the concrete runtime.
     cell: Weak<RefCell<T>>,
@@ -281,7 +298,10 @@ pub trait Widget {
     /// Records paint commands through paint-only capabilities.
     ///
     /// Paint is observational with respect to semantic widget state. Implementations may maintain
-    /// rendering caches, but must not make behavior or future layout depend on paint having run.
+    /// private rendering-only caches, but must not mutate application state, topology, interaction,
+    /// or layout, and must not make behavior or future layout depend on paint having run. Mutating
+    /// retained UI through an independently captured state handle is a contract violation rather
+    /// than a deferred-next-frame operation.
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>);
     /// Returns the effective widget options used by generic dispatch.
     ///

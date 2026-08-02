@@ -7,7 +7,11 @@ use crate::{
     WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
-use std::{cell::RefCell, rc::Rc};
+use crate::widget::{runtime_read_state, runtime_update_state};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 fn context() -> Context<NoopRenderer> {
     Context::new_test(NoopRenderer { atlas: test_atlas() }, Dimensioni::new(320, 240))
@@ -72,6 +76,225 @@ impl Widget for OrderedProbe {
                 UiInputEvent::Text { .. } => "text",
             });
         }
+    }
+
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+struct CommitProbeState {
+    intrinsic_height: i32,
+    grow_to: Option<i32>,
+    presses: usize,
+}
+
+impl WidgetState for CommitProbeState {}
+
+struct CommitProbe {
+    state: Rc<RefCell<CommitProbeState>>,
+    painted_rects: Rc<RefCell<Vec<Recti>>>,
+    opt: WidgetOption,
+}
+
+impl CommitProbe {
+    fn new(intrinsic_height: i32, grow_to: Option<i32>) -> (WidgetStateHandle<CommitProbeState>, Self, Rc<RefCell<Vec<Recti>>>) {
+        let painted_rects = Rc::new(RefCell::new(Vec::new()));
+        let probe = Self {
+            state: Rc::new(RefCell::new(CommitProbeState { intrinsic_height, grow_to, presses: 0 })),
+            painted_rects: painted_rects.clone(),
+            opt: WidgetOption::NONE,
+        };
+        let state = probe.state_handle();
+        (state, probe, painted_rects)
+    }
+}
+
+impl WidgetStateOwner for CommitProbe {
+    type State = CommitProbeState;
+
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
+    }
+}
+
+impl Widget for CommitProbe {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        runtime_read_state(&self.state, "CommitProbe::measure", |state| Dimensioni::new(40, state.intrinsic_height))
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, event: Option<&UiInputEvent>) {
+        runtime_update_state(&self.state, "CommitProbe::update", |state| {
+            if let Some(grow_to) = state.grow_to.take() {
+                state.intrinsic_height = grow_to;
+            }
+            if matches!(event, Some(UiInputEvent::MouseDown { .. })) {
+                state.presses += 1;
+            }
+        });
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        // This is deliberately a rendering-only test cache: semantic state remains observational.
+        self.painted_rects.borrow_mut().push(ctx.screen_content_rect());
+    }
+}
+
+#[derive(Default)]
+struct SiblingMutationState {
+    value: i32,
+    observed_during_update: Vec<i32>,
+}
+
+impl WidgetState for SiblingMutationState {}
+
+struct SiblingMutationProbe {
+    state: Rc<RefCell<SiblingMutationState>>,
+    target: Option<(WidgetStateHandle<SiblingMutationState>, i32)>,
+    opt: WidgetOption,
+}
+
+impl SiblingMutationProbe {
+    fn new(value: i32, target: Option<(WidgetStateHandle<SiblingMutationState>, i32)>) -> (WidgetStateHandle<SiblingMutationState>, Self) {
+        let probe = Self {
+            state: Rc::new(RefCell::new(SiblingMutationState {
+                value,
+                observed_during_update: Vec::new(),
+            })),
+            target,
+            opt: WidgetOption::NONE,
+        };
+        let state = probe.state_handle();
+        (state, probe)
+    }
+}
+
+impl WidgetStateOwner for SiblingMutationProbe {
+    type State = SiblingMutationState;
+
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
+    }
+}
+
+impl Widget for SiblingMutationProbe {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(20, 10)
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _event: Option<&UiInputEvent>) {
+        if let Some((target, value)) = &self.target {
+            target
+                .try_update(|state| state.value = *value)
+                .expect("the sibling target must not be borrowed yet or anymore");
+        }
+        runtime_update_state(&self.state, "SiblingMutationProbe::update", |state| {
+            state.observed_during_update.push(state.value);
+        });
+    }
+
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+struct CountedProbe {
+    state: Rc<RefCell<()>>,
+    updates: Rc<Cell<usize>>,
+    opt: WidgetOption,
+}
+
+impl CountedProbe {
+    fn new(updates: Rc<Cell<usize>>) -> Self {
+        Self {
+            state: Rc::new(RefCell::new(())),
+            updates,
+            opt: WidgetOption::NONE,
+        }
+    }
+}
+
+impl WidgetStateOwner for CountedProbe {
+    type State = ();
+
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
+    }
+}
+
+impl Widget for CountedProbe {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(20, 10)
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _event: Option<&UiInputEvent>) {
+        self.updates.set(self.updates.get() + 1);
+    }
+
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+#[derive(Default)]
+struct TopologyMutationState {
+    same_container_blocked: bool,
+    other_container_changed: bool,
+}
+
+impl WidgetState for TopologyMutationState {}
+
+struct TopologyMutator {
+    state: Rc<RefCell<TopologyMutationState>>,
+    same_container: Rc<RefCell<Option<WidgetStateHandle<ColumnState>>>>,
+    other_container: WidgetStateHandle<ColumnState>,
+    candidate: Option<Node>,
+    opt: WidgetOption,
+}
+
+impl WidgetStateOwner for TopologyMutator {
+    type State = TopologyMutationState;
+
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
+    }
+}
+
+impl Widget for TopologyMutator {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(20, 10)
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _event: Option<&UiInputEvent>) {
+        let Some(candidate) = self.candidate.take() else { return };
+        let same_container = self
+            .same_container
+            .borrow()
+            .as_ref()
+            .expect("outer container handle must be installed before traversal")
+            .clone();
+        let same_container_blocked = same_container.try_update(|state| state.remove_drop(usize::MAX)).is_none();
+        let other_container_changed = match self.other_container.try_update_with(candidate, |state, node| state.push(node)) {
+            Ok(()) => true,
+            Err(candidate) => {
+                self.candidate = Some(candidate);
+                false
+            }
+        };
+        runtime_update_state(&self.state, "TopologyMutator::update", |state| {
+            state.same_container_blocked = same_container_blocked;
+            state.other_container_changed = other_container_changed;
+        });
     }
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
@@ -153,7 +376,7 @@ fn update_drains_each_input_into_one_full_update_and_one_followup_layout() {
 fn render_preflight_requires_a_matching_commit_and_never_acquires_backend_on_error() {
     let (backend, log) = recording_backend(test_atlas());
     let mut ctx = Context::new(backend);
-    ctx.create_window("window", rect(10, 10, 120, 90), empty_content());
+    let root = ctx.create_window("window", rect(10, 10, 120, 90), empty_content());
     let dimensions = Dimensioni::new(320, 240);
 
     assert_eq!(ctx.frame(frame_info(dimensions)).render_ui(), Err(RenderError::UiUpdateRequired));
@@ -167,6 +390,10 @@ fn render_preflight_requires_a_matching_commit_and_never_acquires_backend_on_err
     ctx.update_ui(dimensions);
     let other = Dimensioni::new(640, 480);
     assert_eq!(ctx.frame(frame_info(other)).render_ui(), Err(RenderError::UiUpdateRequired));
+    assert!(log.snapshot().is_empty());
+
+    ctx.set_root_rect(root.id(), rect(20, 20, 120, 90)).unwrap();
+    assert_eq!(ctx.frame(frame_info(dimensions)).render_ui(), Err(RenderError::UiUpdateRequired));
     assert!(log.snapshot().is_empty());
 }
 
@@ -227,6 +454,191 @@ fn disclosure_update_commits_child_geometry_before_the_next_queued_press() {
 
     assert_eq!(disclosure.try_read(DisclosureState::is_expanded), Some(true));
     assert_eq!(button.try_update(ButtonState::take_submitted), Some(true));
+}
+
+#[test]
+fn intrinsic_mutation_is_laid_out_before_the_next_event_and_painted_from_that_commit() {
+    let (growing_state, growing, growing_paints) = CommitProbe::new(10, Some(30));
+    let growing = Node::widget(growing);
+    let growing_id = growing.id();
+    let (target_state, target, _) = CommitProbe::new(10, None);
+    let target = Node::widget(target);
+    let target_id = target.id();
+    let (_, content) = Column::create(ColumnParameters::new([growing, target]));
+    let mut ctx = context();
+    let root = ctx.create_window("window", rect(0, 0, 140, 100), content);
+    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+
+    let growing_before = ctx.debug_root_node_rect(root.id(), growing_id).unwrap();
+    let target_before = ctx.debug_root_node_rect(root.id(), target_id).unwrap();
+    assert_eq!(growing_before.height, 10);
+
+    // The move grows the first sibling. Its post-event layout moves the second sibling before the
+    // queued press is routed, so this point is inside only the new target rectangle.
+    ctx.mousemove(growing_before.x + 1, growing_before.y + 1);
+    ctx.mousedown(target_before.x + 1, target_before.y + 21, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+
+    let target_after = ctx.debug_root_node_rect(root.id(), target_id).unwrap();
+    assert_eq!(growing_state.try_read(|state| state.intrinsic_height), Some(30));
+    assert_eq!(target_after.y, target_before.y + 20);
+    assert_eq!(target_state.try_read(|state| state.presses), Some(1));
+
+    let committed_metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    let rendered_metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
+    assert_eq!(rendered_metrics.tree_layouts, committed_metrics.tree_layouts);
+    assert_eq!(rendered_metrics.updates, committed_metrics.updates);
+    assert_eq!(growing_paints.borrow().last().map(|rect| rect.height), Some(30));
+}
+
+#[test]
+fn sibling_mutation_observes_parent_first_forward_traversal_without_reruns() {
+    let (later_state, later) = SiblingMutationProbe::new(0, None);
+    let (earlier_state, earlier) = SiblingMutationProbe::new(0, Some((later_state.clone(), 11)));
+    let (already_updated_state, already_updated) = SiblingMutationProbe::new(0, None);
+    let (_late_mutator_state, late_mutator) = SiblingMutationProbe::new(0, Some((already_updated_state.clone(), 22)));
+    let (_, content) = Column::create(ColumnParameters::new([
+        Node::widget(earlier),
+        Node::widget(later),
+        Node::widget(already_updated),
+        Node::widget(late_mutator),
+    ]));
+    let mut ctx = context();
+    let root = ctx.create_window("window", rect(0, 0, 140, 100), content);
+    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+
+    ctx.mousemove(5, 5);
+    ctx.update_ui(Dimensioni::new(320, 240));
+
+    assert_eq!(earlier_state.try_read(|state| state.observed_during_update.clone()), Some(vec![0]));
+    assert_eq!(later_state.try_read(|state| state.observed_during_update.clone()), Some(vec![11]));
+    assert_eq!(already_updated_state.try_read(|state| state.value), Some(22));
+    assert_eq!(
+        already_updated_state.try_read(|state| state.observed_during_update.clone()),
+        Some(vec![0]),
+        "the earlier sibling changes but is not rerun after the later sibling mutates it"
+    );
+}
+
+#[test]
+fn topology_mutation_is_blocked_for_the_active_container_and_visible_in_a_later_subtree() {
+    let inserted_updates = Rc::new(Cell::new(0));
+    let candidate = Node::widget(CountedProbe::new(inserted_updates.clone()));
+    let (other_container, other_node) = Column::create(ColumnParameters::default());
+    let same_container = Rc::new(RefCell::new(None));
+    let mutator = TopologyMutator {
+        state: Rc::new(RefCell::new(TopologyMutationState::default())),
+        same_container: same_container.clone(),
+        other_container: other_container.clone(),
+        candidate: Some(candidate),
+        opt: WidgetOption::NONE,
+    };
+    let mutator_state = mutator.state_handle();
+    let (outer_container, content) = Column::create(ColumnParameters::new([Node::widget(mutator), other_node]));
+    *same_container.borrow_mut() = Some(outer_container.clone());
+    let mut ctx = context();
+    let root = ctx.create_window("window", rect(0, 0, 140, 100), content);
+    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+
+    ctx.mousemove(5, 5);
+    ctx.update_ui(Dimensioni::new(320, 240));
+
+    assert_eq!(
+        mutator_state.try_read(|state| (state.same_container_blocked, state.other_container_changed)),
+        Some((true, true))
+    );
+    assert_eq!(outer_container.try_read(ColumnState::len), Some(2));
+    assert_eq!(other_container.try_read(ColumnState::len), Some(1));
+    assert_eq!(inserted_updates.get(), 1, "the newly inserted later descendant participates in the same update");
+}
+
+#[test]
+fn programmatic_topology_mutation_needs_only_an_empty_queue_layout_commit() {
+    let (_, first, _) = CommitProbe::new(10, None);
+    let (column, content) = Column::create(ColumnParameters::new([Node::widget(first)]));
+    let mut ctx = context();
+    let root = ctx.create_window("window", rect(0, 0, 140, 100), content);
+    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+
+    let (_, appended, _) = CommitProbe::new(18, None);
+    let appended = Node::widget(appended);
+    let appended_id = appended.id();
+    assert!(
+        column.try_update_with(appended, |state, node| state.push(node)).is_ok(),
+        "the programmatic topology mutation must commit before traversal"
+    );
+    ctx.update_ui(dimensions);
+
+    let metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
+    let appended_rect = ctx.debug_root_node_rect(root.id(), appended_id).unwrap();
+    assert_eq!(metrics.tree_layouts, 1);
+    assert_eq!(metrics.updates, 0);
+    assert_eq!(appended_rect.height, 18);
+}
+
+#[test]
+fn traversal_reaching_state_borrowed_by_an_access_closure_reports_the_runtime_diagnostic() {
+    let (text, widget) = crate::TextBlock::create(crate::TextBlockParameters::new("borrowed"));
+    let mut ctx = context();
+    let root = ctx.create_window("window", rect(0, 0, 140, 100), Node::widget(widget));
+    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+
+    let update_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        text.try_update(|_| ctx.update_ui(dimensions));
+    }))
+    .expect_err("layout must diagnose the active TextBlockState borrow");
+    let update_message = panic_message(update_panic.as_ref());
+    assert!(update_message.contains("retained widget state invariant violated during TextBlock::measure"));
+    assert!(update_message.contains("state-access closures must finish before retained update, layout, or paint traversal"));
+
+    // Once the access closure has unwound and released its borrow, the same commit is valid.
+    ctx.update_ui(dimensions);
+    let paint_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        text.try_update(|_| ctx.frame(frame_info(dimensions)).render_ui().unwrap());
+    }))
+    .expect_err("paint must diagnose the active TextBlockState borrow");
+    let paint_message = panic_message(paint_panic.as_ref());
+    assert!(paint_message.contains("retained widget state invariant violated during TextBlock::paint"));
+
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+
+    // A shared access closure is likewise incompatible when the routed update needs to mutate the
+    // same cell, even though the synchronization layout's shared reads are allowed by RefCell.
+    let (button, button_node) = button_content("button");
+    let button_id = button_node.id();
+    let mut button_ctx = context();
+    let button_root = button_ctx.create_window("button", rect(0, 0, 140, 100), button_node);
+    button_ctx
+        .set_root_options(button_root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    button_ctx.update_ui(dimensions);
+    let button_rect = button_ctx.debug_root_node_rect(button_root.id(), button_id).unwrap();
+    button_ctx.mousedown(button_rect.x + 1, button_rect.y + 1, MouseButton::LEFT);
+    let read_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        button.try_read(|_| button_ctx.update_ui(dimensions));
+    }))
+    .expect_err("Button::update must diagnose the active shared ButtonState borrow");
+    let read_message = panic_message(read_panic.as_ref());
+    assert!(read_message.contains("retained widget state invariant violated during Button::update"));
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("non-string panic payload")
 }
 
 fn button_content(label: &str) -> (WidgetStateHandle<ButtonState>, Node) {

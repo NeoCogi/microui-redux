@@ -100,6 +100,15 @@
 //! traversal reaches the same state. Framework-controlled recursion through a container's opaque
 //! child visitor is the intentional exception. If a layout-affecting handle mutation occurs after
 //! the last commit, cancel any unsubmitted frame and call `update_ui` again before paint.
+//! Handles and Context are independent Rust values, so explicitly capturing Context inside
+//! `try_update` compiles; it is nevertheless unsupported because the closure retains the mutable
+//! state borrow. If nested traversal reaches that cell, built-in runtime borrowing reports the
+//! phase-specific invariant panic. End the closure before calling `update_ui` or `render_ui`.
+//!
+//! Update and paint traverse parent before children and siblings in forward order. Later work sees
+//! successful earlier cross-cell mutations, work already completed does not rerun, and each input
+//! transaction's final layout observes the resulting state and topology. Paint and custom-render
+//! callbacks are observational except for private rendering-only caches.
 //!
 //! ```
 //! use microui_redux::prelude::*;

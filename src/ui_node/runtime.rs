@@ -535,8 +535,10 @@ impl UiRuntime {
         if traverse_children {
             node.with_children_mut(|children| {
                 for child in children {
-                    // Update recursion carries interaction and layout state only. Rendering enters
-                    // the tree later through the distinct paint traversal below.
+                    // Forward order is observable by deliberate cross-cell mutation: a later child
+                    // sees successful earlier changes, while an already-updated child is not rerun.
+                    // The mandatory post-event layout observes the final state/topology. Rendering
+                    // enters the tree later through the distinct paint traversal below.
                     self.update_node_ref(child, child_transform, style, atlas.clone(), input);
                 }
             });

@@ -247,6 +247,10 @@ impl<B: RendererBackend> Context<B> {
     /// Context-owned input, style, and root mutations invalidate a prior commit automatically.
     /// Mutations made through weak widget/container state handles cannot notify Context; callers
     /// must invoke this method after those mutations, including when the input queue is empty.
+    /// Callers must finish every state-access closure first. A closure retains its state-cell borrow;
+    /// if this traversal reaches that cell and requests an incompatible borrow, built-in runtimes
+    /// panic with the retained-state invariant diagnostic rather than skipping work or committing
+    /// stale state.
     #[track_caller]
     pub fn update_ui(&mut self, dimensions: Dimensioni) {
         assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui dimensions must be positive");
@@ -261,6 +265,11 @@ impl<B: RendererBackend> Context<B> {
     }
 
     /// Registers one backend-specific callback for retained custom-render nodes.
+    ///
+    /// The callback is observational with respect to retained application state, topology,
+    /// interaction, and layout. It may mutate callback-private rendering caches, but using a
+    /// captured [`WidgetStateHandle`](crate::WidgetStateHandle) to mutate retained UI during frame
+    /// execution is a contract violation rather than a deferred-next-frame update.
     ///
     /// A callback written for another backend frame type cannot be registered:
     ///
@@ -416,7 +425,9 @@ impl<B: RendererBackend> ContextFrame<'_, B> {
     /// Returns [`RenderError::UiUpdateRequired`] before paint or backend acquisition when no commit
     /// exists for these dimensions or when raw input is pending. This operation is paint-only: it
     /// does not route input, update semantic state, run layout, synthesize timers, or produce a
-    /// generic frame-result/resource-state object.
+    /// generic frame-result/resource-state object. Widget paint and custom-render callbacks must be
+    /// observational with respect to application state, topology, interaction, and layout; only
+    /// private rendering-cache mutation is permitted.
     pub fn render_ui(mut self) -> Result<(), RenderError> {
         let dimensions = self.info.dimensions();
         let commit_matches = self

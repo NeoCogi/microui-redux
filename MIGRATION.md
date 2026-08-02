@@ -127,6 +127,31 @@ Context-invalidated, dimension-mismatched, or pending-input commit yields
 `RenderError::UiUpdateRequired` before paint and backend acquisition. The old `ResourceState`,
 generic frame results, and implicit per-frame result lookup are removed.
 
+State handles and Context are independent values, so application code can compile an explicit
+Context capture inside a state-access closure. It must not do so:
+
+```rust
+textbox_state.try_update(|state| {
+    state.set_text("hello");
+    context.update_ui(dimensions); // unsupported nested retained traversal
+});
+```
+
+The outer `try_update` retains the mutable `RefCell` borrow. If nested measurement, update, or paint
+reaches the same state, the built-in runtime reports an invariant panic when its incompatible borrow
+fails. End the closure first and call `update_ui` afterward. This local borrow is the guard; state
+handles carry no Context token or traversal lock.
+
+Update and paint are parent-first and forward-sibling ordered. Successful cross-cell mutation is
+observed by work that has not run yet, while work already completed is not repeated. The active
+visitor borrow rejects same-container topology mutation with `None`; another available subtree can
+change and participates according to traversal order. The post-event layout observes the complete
+result before the next queued input.
+
+Paint and custom-render callbacks may mutate private rendering caches only. Application state,
+topology, interaction, and layout must remain observational during those callbacks; handle mutation
+there is a contract violation rather than deferred work.
+
 A popup is the deliberate cross-root routing exception: an outside pointer press first dismisses
 the visible popup and records its submission, then may continue to the root underneath. Ordinary
 events target one eligible root.
