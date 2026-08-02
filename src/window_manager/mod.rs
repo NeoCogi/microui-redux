@@ -230,6 +230,9 @@ pub struct ContextFrame<'a, B: RendererBackend> {
 }
 
 #[cfg(test)]
+mod p5_baseline;
+
+#[cfg(test)]
 mod root_tests;
 
 impl<B: RendererBackend> Context<B> {

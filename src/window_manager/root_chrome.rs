@@ -422,6 +422,27 @@ mod capture_tests {
         container.state.borrow_mut().interaction = RootInteraction::Resizing;
         assert!(container.retains_pointer_capture());
     }
+
+    #[test]
+    fn root_chrome_runtime_is_the_only_persistent_strong_state_owner() {
+        let content = Node::widget(Custom::create(CustomParameters::new("content")));
+        let container = RootChromeBuilder::create_container(RootChromeParameters {
+            name: "root".to_owned(),
+            options: WindowOption::FRAME,
+            rect: Recti::new(10, 20, 100, 80),
+            visible: true,
+            content,
+        });
+        let state = container.state_handle();
+        let consumer = state.clone();
+
+        assert_eq!(Rc::strong_count(&container.state), 1);
+        assert!(consumer.is_alive());
+        drop(state);
+        assert_eq!(Rc::strong_count(&container.state), 1);
+        drop(container);
+        assert!(!consumer.is_alive());
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

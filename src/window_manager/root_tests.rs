@@ -772,6 +772,31 @@ fn creation_returns_typed_persistent_root_state() {
 }
 
 #[test]
+fn every_root_kind_adds_exactly_one_private_chrome_node() {
+    let mut ctx = context();
+    let window = ctx.create_window("window", rect(0, 0, 100, 80), empty_content());
+    let dialog = ctx.create_dialog("dialog", rect(10, 10, 100, 80), empty_content());
+    let popup = ctx.create_popup("popup", empty_content());
+
+    // Each application tree contains one empty Column node. The second retained node is the one
+    // private RootChromeContainer; title, close, and resize regions are geometry, not child nodes.
+    assert_eq!(ctx.debug_root_node_count(window.id()), Some(2));
+    assert_eq!(ctx.debug_root_node_count(dialog.id()), Some(2));
+    assert_eq!(ctx.debug_root_node_count(popup.id()), Some(2));
+}
+
+#[test]
+fn one_child_scroll_area_has_exactly_two_application_semantic_nodes() {
+    let child = Node::widget(Custom::create(CustomParameters::new("content")));
+    let (_, content) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [child]));
+    let mut ctx = context();
+    let root = ctx.create_window("scroll", rect(0, 0, 100, 80), content);
+
+    // ScrollArea and its child are the two application nodes; the only third node is root chrome.
+    assert_eq!(ctx.debug_root_node_count(root.id()), Some(3));
+}
+
+#[test]
 fn hide_and_show_preserve_root_and_descendant_state() {
     let mut ctx = context();
     let (button, content) = button_content("button");

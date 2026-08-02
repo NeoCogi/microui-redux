@@ -607,7 +607,7 @@ mod tests {
     use crate::{Button, ButtonParameters, ButtonState, Dimensioni, MouseButton, Node, Vec2i, WindowOption, rect};
     use std::{
         fs,
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Instant, SystemTime, UNIX_EPOCH},
     };
 
     fn unique_temp_dir(name: &str) -> std::path::PathBuf {
@@ -937,5 +937,102 @@ mod tests {
         assert_eq!(allocations.events, 0);
         assert_eq!(ctx.debug_root_node_count(root), Some(node_count));
         assert_eq!(session.status(), FileDialogStatus::Pending);
+    }
+
+    #[test]
+    #[ignore = "manual serial release-mode P5.1 retained file-dialog baseline"]
+    fn ui_node_p5_baseline_file_dialog() {
+        let dir = unique_temp_dir("p5-baseline");
+        fs::create_dir_all(&dir).unwrap();
+        for index in 0..8 {
+            fs::write(dir.join(format!("file-{index}.txt")), b"baseline").unwrap();
+        }
+        for index in 0..4 {
+            fs::create_dir(dir.join(format!("folder-{index}"))).unwrap();
+        }
+
+        let mut ctx = context();
+        let session = ctx.open_file_dialog(FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
+        ctx.update_and_render_ui();
+        ctx.update_and_render_ui();
+
+        let (root, node_count, old_row, persistent_path) = {
+            let dialog = controller(&ctx, &session);
+            (
+                dialog.root.id(),
+                ctx.debug_root_node_count(dialog.root.id()).unwrap(),
+                dialog.file_items[0].clone(),
+                dialog.path_box.clone(),
+            )
+        };
+
+        // The controller itself must perform no hidden state allocation or topology work while
+        // pending and idle. The full UI row below separately records layout and paint allocations.
+        let controller_measurement = AllocationMeasurement::begin();
+        ctx.process_file_dialogs();
+        let controller_allocations = controller_measurement.finish();
+        assert_eq!(controller_allocations.events, 0);
+        assert_eq!(ctx.debug_root_node_count(root), Some(node_count));
+
+        let idle_measurement = AllocationMeasurement::begin();
+        let idle_started = Instant::now();
+        ctx.update_and_render_ui();
+        let idle_elapsed = idle_started.elapsed();
+        let idle_allocations = idle_measurement.finish();
+        let idle_metrics = ctx.debug_root_runtime_metrics(root).unwrap();
+        assert_eq!(idle_metrics.tree_layouts, 1);
+        assert_eq!(idle_metrics.updates, 0);
+        assert_eq!(idle_metrics.paints, node_count as u64);
+        assert_eq!(ctx.debug_root_node_count(root), Some(node_count));
+
+        fs::write(dir.join("new-file.txt"), b"refresh").unwrap();
+        let refresh_measurement = AllocationMeasurement::begin();
+        let refresh_started = Instant::now();
+        ctx.file_dialogs[0].refresh_entries();
+        ctx.update_and_render_ui();
+        let refresh_elapsed = refresh_started.elapsed();
+        let refresh_allocations = refresh_measurement.finish();
+        let refresh_metrics = ctx.debug_root_runtime_metrics(root).unwrap();
+        let refresh_node_count = ctx.debug_root_node_count(root).unwrap();
+
+        assert_eq!(refresh_node_count, node_count + 1);
+        assert_eq!(refresh_metrics.tree_layouts, 1);
+        assert_eq!(refresh_metrics.updates, 0);
+        assert_eq!(refresh_metrics.paints, refresh_node_count as u64);
+        assert!(!old_row.is_alive());
+        assert!(persistent_path.is_alive());
+        assert_eq!(controller(&ctx, &session).root.id(), root, "refresh must retain the root");
+        assert_eq!(session.status(), FileDialogStatus::Pending);
+
+        println!("| scenario | total retained nodes | allocs | bytes | root rebuilds | tree layouts | measures | layouts | updates | paints | ns/operation |");
+        println!("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+        println!(
+            "| file dialog idle | {} | {} | {} | 0 | {} | {} | {} | {} | {} | {} |",
+            node_count,
+            idle_allocations.events,
+            idle_allocations.bytes,
+            idle_metrics.tree_layouts,
+            idle_metrics.measures,
+            idle_metrics.layouts,
+            idle_metrics.updates,
+            idle_metrics.paints,
+            idle_elapsed.as_nanos(),
+        );
+        println!(
+            "| file dialog refresh | {} | {} | {} | 0 | {} | {} | {} | {} | {} | {} |",
+            refresh_node_count,
+            refresh_allocations.events,
+            refresh_allocations.bytes,
+            refresh_metrics.tree_layouts,
+            refresh_metrics.measures,
+            refresh_metrics.layouts,
+            refresh_metrics.updates,
+            refresh_metrics.paints,
+            refresh_elapsed.as_nanos(),
+        );
+
+        drop(ctx);
+        drop(session);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

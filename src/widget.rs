@@ -347,6 +347,7 @@ mod state_ownership_tests {
     use std::{cell::Cell, rc::Rc};
 
     use super::*;
+    use crate::test_support::AllocationMeasurement;
 
     struct TestParameters {
         value: usize,
@@ -474,6 +475,27 @@ mod state_ownership_tests {
         drop(widget);
         assert!(!state.is_alive());
         assert_eq!(state.try_read(|_| ()), None);
+    }
+
+    #[test]
+    fn checked_state_handle_reads_and_updates_allocate_nothing() {
+        let widget = TestBuilder::create_widget(TestParameters { value: 0 });
+        let state = widget.state_handle();
+
+        // Warm the checked upgrade and borrow paths before isolating their steady-state cost.
+        state.try_read(|state| state.value).unwrap();
+        state.try_update(|state| state.value += 1).unwrap();
+
+        let measurement = AllocationMeasurement::begin();
+        for _ in 0..1_000 {
+            state.try_update(|state| state.value += 1).unwrap();
+            state.try_read(|state| state.value).unwrap();
+        }
+        let allocations = measurement.finish();
+
+        assert_eq!(allocations.events, 0, "checked state access allocated {} bytes", allocations.bytes);
+        assert_eq!(state.try_read(|state| state.value), Some(1_001));
+        assert_eq!(Rc::strong_count(&widget.state), 1);
     }
 
     #[test]

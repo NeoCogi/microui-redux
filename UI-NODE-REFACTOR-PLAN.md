@@ -5246,37 +5246,139 @@ change a protected P0 behavior follows the explicit change-control rule.
   with the repository's existing warning baseline and no P5.0-specific warning; `git diff --check`
   passes.
 
-- [ ] **P5.1 — Repeat allocation, phase, and code-structure baselines**
+- [x] **P5.1 — Repeat allocation, phase, and code-structure baselines**
 
   **Problem**
 
   The design deliberately keeps one state allocation per widget/container and checked dynamic
   borrows. Their cost must be compared with removed rebuilding and adapters.
 
-  **Decision needed: No**
+  **Decision needed: No — plan-owner clarification on 2026-08-02**
 
   **Target contract or migration**
 
-  Repeat P0 measurements for allocations, semantic nodes, idle file dialog, phase counts, state
-  access, direct associated-state borrows, root-boundary weak upgrades, and code/type counts. Full traversal remains the
-  completion baseline.
+  Repeat the P0 scenarios against the completed retained runtime. Verify the claimed structural
+  removals, exact semantic-node topology, idle allocation behavior, and update/layout/paint phase
+  separation. Confirm that concrete runtimes directly borrow their strongly owned state and that
+  consumers, including `WindowEntry`, retain only typed weak capabilities. Record release-mode
+  timing as an informational full-traversal baseline; do not introduce optimizations or a hard
+  timing threshold without a separately approved performance budget. Record code/type counts as
+  descriptive evidence rather than treating the deliberately explicit Parameters/State/Builder
+  roles as a line-count reduction target.
+
+  A weak state handle is an ownership boundary, not a performance target. Each checked handle
+  access performs its ordinary scoped upgrade. A complete window-manager update, layout, or paint
+  operation may use multiple non-overlapping checked accesses around retained traversal; do not
+  expose a raw `Rc`, raw `Weak`, owner lease, duplicated root snapshot, or strong `RootHandle` to
+  reduce that count. Concrete runtime methods instead borrow their directly owned strong state cell
+  and perform no weak upgrade.
 
   **Acceptance tests**
 
-  - Idle file dialog has zero tree/state allocation.
-  - One-child scroll area has two semantic nodes; each Context root adds exactly one private chrome
-    container around the application tree and no synthetic title/close/resize nodes.
-  - Root reconstruction, reconciliation, erased-handle cloning, and Context state validation are
-    structurally absent.
+  - Idle file-dialog controller processing allocates nothing and changes no topology.
+  - A one-child scroll area contains exactly two application semantic nodes. Each Context root adds
+    exactly one private chrome container around the application tree and no synthetic
+    title/close/resize nodes.
+  - Root reconstruction, reconciliation, erased dispatch, synthetic scroll nodes, and Context state
+    validation are structurally absent.
   - Phase baselines separate `update_ui` from rendering. A call draining N events records N full
     eligible-tree update traversals and N + 1 complete layout commits; an empty-queue call records
     one layout and zero updates. A subsequent render records one paint traversal, zero updates, and
-    zero layouts. Each explicit runtime method uses at most one associated-state upgrade when it
-    needs state and no identity/topology/dispatch weak upgrade.
-    Window-manager boundary operations may likewise upgrade `WindowEntry.root_state` once per
-    operation; measure/layout/runtime access then uses the root container's ordinary associated-state
-    upgrade rather than a registry lookup.
-  - No material frame-time regression is accepted without a recorded cause and follow-up decision.
+    zero layouts.
+  - Checked state-handle reads and updates allocate nothing.
+  - Concrete runtime state access directly borrows its strongly owned associated state and performs
+    no weak upgrade for identity, topology, dispatch, or state access.
+  - `WindowEntry` owns no strong `RootState` pointer and accesses root state only through its typed
+    weak `WidgetStateHandle<RootState>` capability. The private `RootChromeContainer` remains the
+    sole persistent strong owner.
+  - Allocation and timing tables are recorded. Allocation/topology/phase invariants are hard
+    assertions; timing is informational because P0 defines no performance budget. A stable
+    concerning slowdown is reported with its observed cause and requires a separate decision before
+    optimization, but raw elapsed time is never a flaky test assertion.
+
+  **Completion evidence (2026-08-02)**
+
+  `src/window_manager/p5_baseline.rs` now repeats the one-widget, 100-application-node, and
+  20-content-widget ScrollArea scenarios in a serial ignored release test. Construction is measured
+  once; warmed empty-queue synchronization and paint-only rendering are each averaged over 100
+  calls. Application semantic nodes are reported separately from total retained nodes so the one
+  private root-chrome node is visible rather than silently changing the P0 node-count definition.
+  The same test records the three-event transaction split and hard-asserts all topology and phase
+  invariants; elapsed time is printed but never asserted.
+
+  A focused non-ignored topology test separately constructs a ScrollArea with one child and observes
+  exactly three retained nodes under a Context root: the two application semantic nodes plus the
+  root's single private chrome node.
+
+  The release baseline used Rust 1.97.1 (`x86_64-unknown-linux-gnu`, LLVM 22.1.6):
+
+  | Scenario | Application nodes | Total nodes | Chrome nodes | Build allocs | Build bytes | Sync allocs/call | Sync bytes/call | Sync ns/call | Render allocs/call | Render bytes/call | Render ns/call |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | One widget | 1 | 2 | 1 | 8 | 1,669 | 3 | 288 | 4,709 | 3 | 109 | 4,570 |
+  | 100-node tree | 100 | 101 | 1 | 305 | 21,651 | 891 | 85,536 | 368,749 | 129 | 9,710 | 51,468 |
+  | Scroll area with 20 content widgets | 21 | 22 | 1 | 68 | 5,835 | 120 | 11,520 | 37,143 | 41 | 2,065 | 19,163 |
+
+  For allocation comparison with P0, combining the now-separate synchronization and render rows
+  reduces steady calls/bytes from `19 / 1,397` to `6 / 397` for one widget, from
+  `1,957 / 172,364` to `1,020 / 95,246` for the 100-node tree, and from `497 / 42,244` to
+  `161 / 13,585` for ScrollArea. Construction likewise falls from `14 / 2,821` to `8 / 1,669`,
+  from `717 / 88,691` to `305 / 21,651`, and from `258 / 32,749` to `68 / 5,835`, respectively.
+  The measured current sync-plus-render times were approximately 9.3 us, 420 us, and 56 us versus
+  P0's informational single samples of 9.5 us, 1.29 ms, and 294 us. These timing figures include
+  test allocation instrumentation and are not a compatibility threshold.
+
+  File-dialog evidence constructs the retained shell once, isolates controller-only idle work, and
+  then records complete layout-plus-render idle and refresh rows:
+
+  | Scenario | Total nodes | Allocs | Bytes | Root rebuilds | Tree layouts | Measures | Layouts | Updates | Paints | Informational elapsed range |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | File dialog idle | 34 | 23 | 220 | 0 | 1 | 34 | 34 | 0 | 34 | 0.86-1.13 ms |
+  | File dialog refresh | 35 | 142 | 7,487 | 0 | 1 | 35 | 35 | 0 | 35 | 0.67-1.15 ms |
+
+  The isolated idle controller window records exactly zero allocations and an unchanged 34-node
+  topology. Refresh retains the same `RootId` and persistent control handles, expires replaced row
+  handles, and adds only the one newly discovered row. Compared with P0, complete idle allocation
+  falls from `612 / 57,782` calls/bytes to `23 / 220`, and refresh falls from `718 / 63,511` to
+  `142 / 7,487`. Repeated elapsed samples overlap the P0 single samples and vary substantially with
+  filesystem/test scheduling, confirming the decision to keep timing informational.
+
+  Hard phase evidence records `tree_layouts = 4`, `updates = 6`, and `paints = 0` when three queued
+  events update a two-node root, followed by the same layout/update counts and exactly two paints
+  after `render_ui`. Empty-queue rows record one layout, zero updates, and zero paint until rendering.
+  Focused tests additionally prove that 1,000 checked `try_read`/`try_update` pairs allocate nothing,
+  a one-child ScrollArea contributes exactly two application nodes, all window/dialog/popup roots
+  add one chrome node, and cloning every root consumer capability leaves `RootChromeContainer` as
+  the sole persistent strong `RootState` owner.
+
+  Structural source audits find none of `WidgetStateHandleDyn`, `NodeBehavior`, `UiNodeBuilder`,
+  `UiNodeSet`, `WidgetHandle`, root replacement/state transfer, `ResourceState`, or the frame-result
+  family in production/tests/examples. The only production `Rc<RefCell<RootState>>` is the field on
+  `RootChromeContainer`; `WindowEntry.root_state` remains exactly
+  `WidgetStateHandle<RootState>`. Built-in runtime phases have 74 direct
+  `runtime_read_state(&self.state, ...)`/`runtime_update_state(&self.state, ...)` call sites and no
+  phase-time `state_handle()` call, weak identity lookup, registry, or dispatch upgrade.
+
+  A deliberately mechanical whole-`src` count moves from 64 Rust files, 21,282 lines, and 202
+  textual type definitions at P0 to 60 files, 23,871 lines, and 359 definitions at P5.1. The type
+  increase is expected evidence of the explicit Parameters/State/runtime/Builder split plus inline
+  conformance tests, not a new compatibility layer; the meaningful structural gate is the complete
+  absence of the old projection, identity, result, adapter, and reconciliation types. P5.0 already
+  records the focused cleanup delta separately.
+
+  Reproduce the measurements with:
+
+  ```text
+  cargo test --release ui_node_p5_baseline -- --ignored --nocapture --test-threads=1
+  ```
+
+  `cargo fmt --all -- --check`, `cargo test --all-targets`, `cargo test --doc`,
+  `cargo clippy --all-targets -- -W clippy::all`, `cargo check --no-default-features`,
+  `cargo doc --no-deps`, and separate Glow/Vulkan/WGPU example checks pass. The ordinary suite has
+  195 passing unit tests, three intentionally ignored manual baselines, four passing downstream
+  integration tests, and 19 passing doctest/compile-fail cases. Clippy reports only the repository's
+  existing warning baseline and no P5.1-touched-file warning; `git diff --check` passes. P5.1 adds no
+  public API, production ownership/runtime path, optimization, cache, index, dirty bit, or timing
+  threshold. Full direct traversal remains the measured completion baseline for P5.2.
 
 - [ ] **P5.2 — Keep full traversal unless a separate measured optimization plan is approved**
 
