@@ -882,14 +882,14 @@ mod tests {
         assert_eq!(items.len(), 1);
 
         assert!(items.insert(1, rejected).is_ok());
-        assert_eq!(items.children.as_slice()[0].id(), first_id);
-        assert_eq!(items.children.as_slice()[1].id(), second_id);
+        assert_eq!(items.children.get(0).map(Node::id), Some(first_id));
+        assert_eq!(items.children.get(1).map(Node::id), Some(second_id));
         assert_eq!(items.spans, [GridSpan::new(2, 1), GridSpan::new(3, 2)]);
 
         assert!(items.remove_drop(0));
         assert!(!first_state.is_alive());
         assert!(second_state.is_alive());
-        assert_eq!(items.children.as_slice()[0].id(), second_id);
+        assert_eq!(items.children.get(0).map(Node::id), Some(second_id));
         assert_eq!(items.span(0), Some(GridSpan::new(3, 2)));
 
         let (third_state, third) = text_node("third");
@@ -897,7 +897,7 @@ mod tests {
         items.replace([GridItem::spanned(third, 4, 1)]);
         assert!(!second_state.is_alive());
         assert!(third_state.is_alive());
-        assert_eq!(items.children.as_slice()[0].id(), third_id);
+        assert_eq!(items.children.get(0).map(Node::id), Some(third_id));
         assert_eq!(items.span(0), Some(GridSpan::new(4, 1)));
         assert!(!items.remove_drop(1));
 
@@ -924,14 +924,14 @@ mod tests {
         let (observed_id, span, columns, rows) = grid_state
             .try_read(|state| {
                 (
-                    state.items.children.as_slice()[0].id(),
+                    state.items.children.get(0).map(Node::id),
                     state.span(0),
                     state.column_tracks().to_vec(),
                     state.row_tracks().to_vec(),
                 )
             })
             .expect("Grid state must remain owned by its runtime");
-        assert_eq!(observed_id, child_id);
+        assert_eq!(observed_id, Some(child_id));
         assert_eq!(span, Some(GridSpan::new(2, 3)));
         assert_eq!(columns, [SizePolicy::Fixed(20), SizePolicy::Remainder(0)]);
         assert_eq!(rows, [SizePolicy::Fixed(10), SizePolicy::Fixed(15)]);

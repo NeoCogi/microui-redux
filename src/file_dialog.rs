@@ -888,7 +888,7 @@ mod tests {
                 dialog.folder_scroll.clone(),
                 dialog.file_scroll.clone(),
                 dialog.root.id(),
-                ctx.debug_root_structure(dialog.root.id()).unwrap().0,
+                ctx.debug_root_node_count(dialog.root.id()).unwrap(),
             )
         };
         scroll.try_update(|state| state.set_offset(Vec2i::new(0, 40))).unwrap();
@@ -900,7 +900,7 @@ mod tests {
         assert!(scroll.is_alive());
         ctx.update_ui(Dimensioni::new(900, 700));
         assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((0, 40)));
-        assert_eq!(ctx.debug_root_structure(root).unwrap().0, shell_count + 1);
+        assert_eq!(ctx.debug_root_node_count(root), Some(shell_count + 1));
 
         for entry in fs::read_dir(&dir).unwrap() {
             fs::remove_file(entry.unwrap().path()).unwrap();
@@ -930,12 +930,12 @@ mod tests {
         let session = ctx.open_file_dialog(FileDialogRequest::default());
         ctx.update_ui(Dimensioni::new(900, 700));
         let root = controller(&ctx, &session).root.id();
-        let structure = ctx.debug_root_structure(root).unwrap();
+        let node_count = ctx.debug_root_node_count(root).unwrap();
         let measurement = AllocationMeasurement::begin();
         ctx.process_file_dialogs();
         let allocations = measurement.finish();
         assert_eq!(allocations.events, 0);
-        assert_eq!(ctx.debug_root_structure(root), Some(structure));
+        assert_eq!(ctx.debug_root_node_count(root), Some(node_count));
         assert_eq!(session.status(), FileDialogStatus::Pending);
     }
 }

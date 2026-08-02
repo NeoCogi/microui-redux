@@ -5,7 +5,7 @@ use crate::test_support::test_atlas as make_test_atlas;
 use crate::ui_node::UiInputEvent;
 use crate::widget_ctx::localize_event;
 
-fn run_slider_once(slider: &mut Slider, rect: Recti, events: Vec<UiInputEvent>, hovered: bool, focused: bool, active: bool, scroll_delta: Option<Vec2i>) {
+fn run_slider_once(slider: &mut Slider, rect: Recti, events: Vec<UiInputEvent>, hovered: bool, focused: bool, active: bool, scroll: Option<Vec2i>) {
     let atlas = make_test_atlas();
     let style = Style::default();
     let held = if active { MouseButton::LEFT } else { MouseButton::NONE };
@@ -13,7 +13,7 @@ fn run_slider_once(slider: &mut Slider, rect: Recti, events: Vec<UiInputEvent>, 
         .into_iter()
         .map(|event| localize_event(Vec2i::new(rect.x, rect.y), event))
         .collect::<Vec<_>>();
-    if let Some(delta) = scroll_delta {
+    if let Some(delta) = scroll {
         events.push(UiInputEvent::Scroll { pos: Vec2i::default(), delta });
     }
     for event in &events {

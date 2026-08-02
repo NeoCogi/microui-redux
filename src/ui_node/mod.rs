@@ -17,8 +17,6 @@
 //! visibility gate is checked. Each concrete container borrows its directly owned state for the
 //! current runtime method, and each child borrow remains scoped to one opaque visitor call before
 //! recursion continues.
-#![allow(dead_code)]
-
 use crate::render::DisplayList;
 use crate::{Dimensioni, Recti, UNCLIPPED_RECT};
 use crate::WidgetOption;
@@ -49,11 +47,6 @@ fn union_rect(a: Recti, b: Recti) -> Recti {
     let max_x = (a.x + a.width).max(b.x + b.width);
     let max_y = (a.y + a.height).max(b.y + b.height);
     Recti::new(min_x, min_y, max_x - min_x, max_y - min_y)
-}
-
-/// Compares rectangle components directly.
-fn same_rect(a: Recti, b: Recti) -> bool {
-    (a.x, a.y, a.width, a.height) == (b.x, b.y, b.width, b.height)
 }
 
 /// Returns the screen-space rectangle occupied by a child and any overflow content it measured.

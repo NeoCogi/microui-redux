@@ -33,12 +33,6 @@ pub(crate) struct UiRuntime {
     discard_invalidated_capture_events: bool,
     /// Whether this runtime accepts pointer routing for the current event.
     pub(super) pointer_input_enabled: bool,
-    /// Snapshot of text operations from the most recently recorded display list.
-    #[cfg(test)]
-    debug_texts: Vec<String>,
-    /// Snapshot of rectangle operations from the most recently recorded display list.
-    #[cfg(test)]
-    debug_rects: Vec<Recti>,
     /// Whether the current update was initiated by a pointer event.
     pointer_event_active: bool,
     /// Whether the current event releases pointer buttons.
@@ -63,10 +57,6 @@ impl Default for UiRuntime {
             capture_loss_after_update: None,
             discard_invalidated_capture_events: false,
             pointer_input_enabled: false,
-            #[cfg(test)]
-            debug_texts: Vec::new(),
-            #[cfg(test)]
-            debug_rects: Vec::new(),
             pointer_event_active: false,
             pointer_release_active: false,
             clicked: None,
@@ -81,13 +71,6 @@ impl UiRuntime {
     /// Creates an empty runtime.
     pub(crate) fn new() -> Self {
         Self::default()
-    }
-
-    /// Moves focus to a node in this runtime.
-    pub(crate) fn set_focus_node(&mut self, roots: &[Node], node: RuntimeNodeId) {
-        if contains_active_node_in(roots, node) {
-            self.focus = Some(node);
-        }
     }
 
     /// Clears update-cycle metrics before the initial synchronization layout.
@@ -155,11 +138,6 @@ impl UiRuntime {
     /// Paints one persistent root node and its eligible descendants.
     pub(crate) fn paint_tree_root(&mut self, root: &mut Node, display_list: &mut DisplayList, style: &Style, atlas: crate::AtlasHandle) {
         self.paint_node_ref(root, self.root_transform, display_list, style, atlas);
-        #[cfg(test)]
-        {
-            self.debug_texts = display_list.debug_texts();
-            self.debug_rects = display_list.debug_rects();
-        }
     }
 
     /// Records one routed event for a node-local widget update.
@@ -278,18 +256,6 @@ impl UiRuntime {
         }
     }
 
-    /// Returns text commands recorded by the most recent frame.
-    #[cfg(test)]
-    pub(crate) fn debug_texts(&self) -> &[String] {
-        &self.debug_texts
-    }
-
-    /// Returns rectangle commands recorded by the most recent frame.
-    #[cfg(test)]
-    pub(crate) fn debug_rects(&self) -> &[Recti] {
-        &self.debug_rects
-    }
-
     /// Returns the aggregate root content size from the most recent layout.
     #[cfg(test)]
     pub(crate) fn debug_root_content_size(&self) -> Dimensioni {
@@ -323,24 +289,6 @@ impl UiRuntime {
     #[cfg(test)]
     pub(crate) fn debug_node_rect(&self, roots: &[Node], id: RuntimeNodeId) -> Option<Recti> {
         roots.iter().find_map(|root| Self::debug_node_rect_from(root, id, self.root_transform))
-    }
-
-    /// Returns a node-local rectangle in screen coordinates for a retained node.
-    #[cfg(test)]
-    pub(crate) fn debug_node_local_rect(&self, roots: &[Node], id: RuntimeNodeId, rect: Recti) -> Option<Recti> {
-        self.debug_node_rect(roots, id)
-            .map(|screen_rect| Recti::new(screen_rect.x + rect.x, screen_rect.y + rect.y, rect.width, rect.height))
-    }
-
-    /// Returns whether a node exists in this runtime.
-    pub(crate) fn contains_node(&self, roots: &[Node], id: RuntimeNodeId) -> bool {
-        contains_node_in(roots, id)
-    }
-
-    /// Runs test/debug work against a matching node without exposing an attached borrow publicly.
-    #[cfg(test)]
-    pub(crate) fn with_node<R>(&self, roots: &[Node], id: RuntimeNodeId, f: impl FnOnce(&Node) -> R) -> Option<R> {
-        with_node(roots, id, f)
     }
 
     /// Measures one already-borrowed node through the authoritative private node path.
@@ -487,7 +435,7 @@ impl UiRuntime {
         let traverse_children = node.data.container().is_some_and(Container::children_visible);
         if traverse_children {
             node.with_children_mut(|children| {
-                for child in children {
+                for child in children.iter_mut() {
                     // Forward order is observable by deliberate cross-cell mutation: a later child
                     // sees successful earlier changes, while an already-updated child is not rerun.
                     // The mandatory post-event layout observes the final state/topology. Rendering
@@ -775,7 +723,7 @@ impl UiRuntime {
         let traverse_children = node.data.container().is_some_and(Container::children_visible);
         if traverse_children {
             node.with_children_mut(|children| {
-                for child in children {
+                for child in children.iter_mut() {
                     self.paint_node_ref(child, child_transform, display_list, style, atlas.clone());
                 }
             });
@@ -814,10 +762,6 @@ fn notify_pointer_capture_lost(roots: &mut [Node], id: RuntimeNodeId) {
     });
 }
 
-fn contains_node_in(roots: &[Node], id: RuntimeNodeId) -> bool {
-    roots.iter().any(|root| root.with_node(id, |_| ()).is_some())
-}
-
 /// Returns whether a node participates in traversal through every ancestor visibility gate.
 fn contains_active_node_in(roots: &[Node], id: RuntimeNodeId) -> bool {
     roots.iter().any(|root| contains_active_node(root, id))
@@ -854,9 +798,9 @@ fn translate_local_rect(rect: Recti, origin: Vec2i) -> Recti {
     Recti::new(rect.x + origin.x, rect.y + origin.y, rect.width, rect.height)
 }
 
-fn child_content_bounds_from_children(children: &[Node]) -> Option<Recti> {
+fn child_content_bounds_from_children(children: &Children) -> Option<Recti> {
     let mut bounds = None;
-    for child in children {
+    for child in children.iter() {
         let child_rect = child_content_rect(child);
         bounds = Some(match bounds {
             Some(rect) => union_rect(rect, child_rect),

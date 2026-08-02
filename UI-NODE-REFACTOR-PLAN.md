@@ -5186,7 +5186,7 @@ change a protected P0 behavior follows the explicit change-control rule.
 
 ### P5 — Cleanup and measured optimization
 
-- [ ] **P5.0 — Remove obsolete ownership, identity, and mutation machinery**
+- [x] **P5.0 — Remove obsolete ownership, identity, and mutation machinery**
 
   **Problem**
 
@@ -5223,6 +5223,27 @@ change a protected P0 behavior follows the explicit change-control rule.
     reachable from `render_ui`, context-level scroll-delta accessor/storage, `10_000` measurement
     probe, or root-node replacement entry point.
   - Structural type/line counts demonstrate net removal rather than another compatibility layer.
+
+  **Completion evidence (2026-08-02)**
+
+  Repository audits across `src`, `examples`, and `tests` find none of the named obsolete symbols,
+  entry points, numeric probes, or duplicate scroll channels. `Context` now owns `Style` and the
+  ordered `Input` queue directly; neither has an unnecessary `Rc`/`RefCell` ownership layer, and
+  the private input queue is no longer cloneable or externally field-mutable.
+
+  The retained runtime no longer carries the broad `dead_code` allowance, unused identity/layout
+  helpers, duplicated display-list snapshots, or the hard-coded erased-adapter debug count. Internal
+  child traversal remains behind `Children` instead of converting the authoritative collection to
+  raw slices. The superseded 644-line Grid state-placement proposal is deleted. Excluding that
+  proposal, this phase removes 201 lines and adds 76 across implementation and tests (net -125),
+  with no new type, trait, alias, compatibility adapter, or state store.
+
+  `cargo fmt --all -- --check`, `cargo test --all-targets`, `cargo test --doc`,
+  `cargo check --no-default-features`, `cargo doc --no-deps`, and separate Glow/Vulkan/WGPU example
+  checks pass. The suite has 189 passing unit tests, one existing ignored manual baseline, four
+  passing downstream integration tests, and 19 passing doctest/compile-fail cases. Clippy completes
+  with the repository's existing warning baseline and no P5.0-specific warning; `git diff --check`
+  passes.
 
 - [ ] **P5.1 — Repeat allocation, phase, and code-structure baselines**
 

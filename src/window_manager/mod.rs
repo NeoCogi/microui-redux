@@ -54,8 +54,6 @@
 //!
 //! `Context` owns the high-level renderer, global input, window-manager state, and the published
 //! retained roots driven by each frame.
-use std::{cell::RefCell, rc::Rc};
-
 use bitflags::bitflags;
 #[cfg(any(feature = "builder", feature = "png_source"))]
 use std::io::Cursor;
@@ -137,8 +135,8 @@ pub struct Context<B: RendererBackend> {
     renderer: Renderer<B>,
     /// Reusable operation storage for window-manager frame and chrome drawing.
     display_list: DisplayList,
-    /// Shared style used by all roots and scroll areas.
-    style: Rc<Style>,
+    /// Context-owned style used by all roots and scroll areas.
+    style: Style,
 
     /// Highest z-index allocated to an open window-manager root.
     last_zindex: i32,
@@ -152,8 +150,8 @@ pub struct Context<B: RendererBackend> {
     pub(crate) file_dialogs: Vec<crate::file_dialog::FileDialogController>,
     /// Next file-dialog session id counter.
     pub(crate) next_file_dialog_id: usize,
-    /// Shared input state mutated by public input APIs and consumed during traversal.
-    input: Rc<RefCell<Input>>,
+    /// Ordered input state owned and consumed directly by this Context.
+    input: Input,
     /// Dimensions of the most recent complete update/layout commit.
     ui_commit: Option<Dimensioni>,
     /// Drawable size used by retained behavior tests that drive complete frames tersely.
@@ -170,14 +168,14 @@ impl<B: RendererBackend> Context<B> {
         Self {
             renderer,
             display_list: DisplayList::new(),
-            style: Rc::new(style),
+            style,
             last_zindex: 0,
             roots: Vec::default(),
             modal_stack: Vec::new(),
             next_root_id: 1,
             file_dialogs: Vec::new(),
             next_file_dialog_id: 1,
-            input: Rc::new(RefCell::new(Input::default())),
+            input: Input::default(),
             ui_commit: None,
             #[cfg(test)]
             test_dimensions: Dimensioni::new(1, 1),
@@ -321,9 +319,9 @@ impl<B: RendererBackend> Context<B> {
     /// [`Style::with_named_fonts`] or [`Style::bind_named_fonts`] when you want to force all
     /// semantic roles to those atlas bindings explicitly.
     pub fn set_style(&mut self, style: &Style) {
-        let mut resolved = style.clone();
+        let mut resolved = *style;
         resolved.bind_default_named_fonts(&self.renderer.atlas());
-        self.style = Rc::new(resolved);
+        self.style = resolved;
         self.invalidate_ui_commit();
     }
 
@@ -434,7 +432,7 @@ impl<B: RendererBackend> ContextFrame<'_, B> {
             .context
             .ui_commit
             .is_some_and(|committed| (committed.width, committed.height) == (dimensions.width, dimensions.height));
-        if !commit_matches || self.context.input.borrow().has_pending() {
+        if !commit_matches || self.context.input.has_pending() {
             self.completed = true;
             return Err(RenderError::UiUpdateRequired);
         }

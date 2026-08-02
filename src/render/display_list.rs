@@ -199,30 +199,6 @@ impl DisplayList {
         self.ops.push(DrawOp { clip, kind });
     }
 
-    /// Returns owned text snapshots for runtime paint assertions.
-    #[cfg(test)]
-    pub(crate) fn debug_texts(&self) -> Vec<String> {
-        self.ops
-            .iter()
-            .filter_map(|operation| match &operation.kind {
-                DrawKind::Text { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Returns rectangle snapshots for runtime paint assertions.
-    #[cfg(test)]
-    pub(crate) fn debug_rects(&self) -> Vec<Recti> {
-        self.ops
-            .iter()
-            .filter_map(|operation| match operation.kind {
-                DrawKind::FillRect { rect, .. } => Some(rect),
-                _ => None,
-            })
-            .collect()
-    }
-
     /// Returns fill rectangle, clip, and color snapshots for retained frame-geometry assertions.
     #[cfg(test)]
     pub(crate) fn debug_fill_rects(&self) -> Vec<(Recti, Recti, Color)> {

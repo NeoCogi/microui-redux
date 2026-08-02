@@ -768,7 +768,7 @@ fn creation_returns_typed_persistent_root_state() {
         Some((20, 30, 120, 90))
     );
     assert_eq!(root.state().try_read(RootState::is_visible), Some(true));
-    assert_eq!(ctx.debug_root_structure(root.id()), Some((2, 0)));
+    assert_eq!(ctx.debug_root_node_count(root.id()), Some(2));
 }
 
 #[test]
@@ -865,7 +865,7 @@ fn dynamic_container_root_changes_descendants_without_replacing_the_root() {
     ctx.update_and_render_ui();
     assert_eq!(root.id(), root_id);
     assert!(button.is_alive());
-    assert_eq!(ctx.debug_root_structure(root_id), Some((3, 0)));
+    assert_eq!(ctx.debug_root_node_count(root_id), Some(3));
 
     assert_eq!(column.try_update(|column: &mut ColumnState| column.remove_drop(0)), Some(true));
     assert!(!button.is_alive());

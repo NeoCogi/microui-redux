@@ -55,11 +55,6 @@ impl Default for NodeLayout {
 }
 
 impl NodeLayout {
-    /// Builds a simple non-scrolled layout.
-    pub(crate) fn from_rect(rect: Recti, content_size: Dimensioni) -> Self {
-        Self::from_parts(rect, Recti::new(0, 0, rect.width.max(0), rect.height.max(0)), content_size)
-    }
-
     /// Builds a layout from an outer allocation and node-local child viewport.
     pub(crate) fn from_parts(allocation: Recti, child_clip: Recti, content_size: Dimensioni) -> Self {
         Self {
@@ -117,11 +112,6 @@ impl Transform {
         }
     }
 
-    /// Creates a root transform with a screen-space origin.
-    pub(crate) fn root_at(origin: Vec2i, screen_clip: Recti) -> Self {
-        Self { offset: origin, clip: screen_clip }
-    }
-
     /// Pushes a node's child coordinate system onto the transform stack.
     pub(crate) fn push(self, layout: NodeLayout) -> Self {
         let node_origin = self.offset + Vec2i::new(layout.allocation.x, layout.allocation.y);
@@ -157,7 +147,10 @@ mod tests {
         let mut layout = NodeLayout::from_parts(Recti::new(10, 20, 30, 40), Recti::new(2, 3, 20, 10), Dimensioni::new(30, 40));
         layout.children.offset = Vec2i::new(4, -5);
 
-        let parent = Transform::root_at(Vec2i::new(100, 200), Recti::new(0, 0, 1000, 1000));
+        let parent = Transform {
+            offset: Vec2i::new(100, 200),
+            clip: Recti::new(0, 0, 1000, 1000),
+        };
         let child = parent.push(layout);
 
         assert_eq!((child.offset.x, child.offset.y), (114, 215));
@@ -281,11 +274,6 @@ impl NodeRuntime {
     pub(crate) fn set_layout(&mut self, layout: NodeLayout) {
         self.layout = layout;
     }
-
-    /// Writes a simple non-scrolled layout.
-    pub(crate) fn set_layout_from_rect(&mut self, rect: Recti, content_size: Dimensioni) {
-        self.set_layout(NodeLayout::from_rect(rect, content_size));
-    }
 }
 
 /// Unique owning retained-tree node.
@@ -383,24 +371,19 @@ impl Node {
         self.state.set_layout(layout);
     }
 
-    /// Writes a simple non-scrolled layout.
-    pub(crate) fn set_layout_from_rect(&mut self, rect: Recti, content_size: Dimensioni) {
-        self.set_layout(NodeLayout::from_rect(rect, content_size));
-    }
-
-    /// Returns the node's children when it accepts children.
-    pub(crate) fn with_children<R>(&self, f: impl FnOnce(&[Node]) -> R) -> R {
+    /// Runs `f` with this node's opaque authoritative child collection.
+    pub(crate) fn with_children<R>(&self, f: impl FnOnce(&Children) -> R) -> R {
         match &self.data {
-            NodeKind::Widget(_) => f(&[]),
-            NodeKind::Container(container) => with_container_children(&**container, |children| f(children.as_slice())),
+            NodeKind::Widget(_) => f(&Children::new()),
+            NodeKind::Container(container) => with_container_children(&**container, f),
         }
     }
 
     /// Runs `f` with this node's authoritative child collection when it is a container.
-    pub(crate) fn with_children_mut<R>(&mut self, f: impl FnOnce(&mut [Node]) -> R) -> Option<R> {
+    pub(crate) fn with_children_mut<R>(&mut self, f: impl FnOnce(&mut Children) -> R) -> Option<R> {
         match &mut self.data {
             NodeKind::Widget(_) => None,
-            NodeKind::Container(container) => Some(with_container_children_mut(&mut **container, |children| f(children.as_mut_slice()))),
+            NodeKind::Container(container) => Some(with_container_children_mut(&mut **container, f)),
         }
     }
 
@@ -413,12 +396,6 @@ impl Node {
     #[cfg(test)]
     pub(crate) fn debug_node_count(&self) -> usize {
         self.with_children(|children| 1 + children.iter().map(Self::debug_node_count).sum::<usize>())
-    }
-
-    /// Counts old erased public-widget adapters in this subtree.
-    #[cfg(test)]
-    pub(crate) fn debug_erased_adapter_count(&self) -> usize {
-        self.with_children(|children| children.iter().map(Self::debug_erased_adapter_count).sum())
     }
 
     /// Runs `f` against one matching node without returning a borrow through the opaque visitor.
@@ -451,16 +428,6 @@ impl Node {
             return Some(f.take().expect("mutable node visitor invoked twice")(self));
         }
         self.with_children_mut(|children| children.iter_mut().find_map(|child| child.with_node_mut_inner(id, f)))?
-    }
-
-    /// Collects this node id and all descendant ids.
-    pub(crate) fn collect_ids(&self, ids: &mut Vec<RuntimeNodeId>) {
-        ids.push(self.id());
-        self.with_children(|children| {
-            for child in children.iter() {
-                child.collect_ids(ids);
-            }
-        });
     }
 }
 
@@ -588,12 +555,15 @@ impl Children {
         self.nodes.iter_mut()
     }
 
-    pub(crate) fn as_slice(&self) -> &[Node] {
-        &self.nodes
+    /// Returns one child for framework-only inspection.
+    #[cfg(test)]
+    pub(crate) fn get(&self, index: usize) -> Option<&Node> {
+        self.nodes.get(index)
     }
 
-    pub(crate) fn as_mut_slice(&mut self) -> &mut [Node] {
-        &mut self.nodes
+    /// Returns one child for framework-only layout/traversal.
+    pub(crate) fn get_mut(&mut self, index: usize) -> Option<&mut Node> {
+        self.nodes.get_mut(index)
     }
 }
 

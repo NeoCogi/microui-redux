@@ -461,7 +461,7 @@ impl ContainerLayoutCtx<'_> {
 
     /// Assigns one indexed child rectangle and returns its resulting content size.
     pub fn layout_child(&mut self, children: &mut Children, index: usize, rect: Recti) -> Option<Dimensioni> {
-        let node = children.as_mut_slice().get_mut(index)?;
+        let node = children.get_mut(index)?;
         Some(self.runtime.layout_node_ref(node, self.style, self.atlas, rect))
     }
 

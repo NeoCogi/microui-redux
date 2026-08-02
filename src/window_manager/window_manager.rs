@@ -126,7 +126,7 @@ impl<B: RendererBackend> Context<B> {
     /// This is distinct from [`Context::destroy_root`], which drops the complete retained owner.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
         let target = self.root_index(root)?;
-        let mouse = self.input.borrow().mouse_pos;
+        let mouse = self.input.snapshot().mouse_pos;
         let kind = self.roots[target].kind;
         if visible && kind == WindowKind::Popup {
             let mut other = None;
@@ -308,9 +308,9 @@ impl<B: RendererBackend> Context<B> {
         self.layout_window_manager(viewport, &atlas);
 
         loop {
-            let event = { self.input.borrow_mut().pop_event() };
+            let event = self.input.pop_event();
             let Some(event) = event else { break };
-            let input = self.input.borrow().snapshot();
+            let input = self.input.snapshot();
             self.update_window_manager_for_event(&atlas, &event, input);
             // Dialog controls are ordinary retained widgets. Consume their committed actions only
             // after the complete cross-root update and before the matching layout commit.
@@ -335,7 +335,7 @@ impl<B: RendererBackend> Context<B> {
                 let size = self.roots[index]
                     .tree
                     .runtime
-                    .measure_tree_root(&self.roots[index].tree.root, self.style.as_ref(), atlas);
+                    .measure_tree_root(&self.roots[index].tree.root, &self.style, atlas);
                 self.roots[index]
                     .root_state
                     .try_update(|state| state.set_size_silent(size))
@@ -356,7 +356,7 @@ impl<B: RendererBackend> Context<B> {
             entry
                 .tree
                 .runtime
-                .layout_tree_root(&mut entry.tree.root, self.style.as_ref(), atlas.clone(), rect, viewport);
+                .layout_tree_root(&mut entry.tree.root, &self.style, atlas.clone(), rect, viewport);
         }
     }
 
@@ -397,7 +397,7 @@ impl<B: RendererBackend> Context<B> {
                 capture_handled = entry
                     .tree
                     .runtime
-                    .route_captured_pointer_input_event(roots, self.style.as_ref(), input.mouse_buttons, event)
+                    .route_captured_pointer_input_event(roots, &self.style, input.mouse_buttons, event)
                     .is_some();
             }
 
@@ -408,11 +408,10 @@ impl<B: RendererBackend> Context<B> {
                 let entry = &mut self.roots[index];
                 if entry.tree.runtime.accepts_pointer_input() {
                     let transform = entry.tree.runtime.root_transform();
-                    if let Some((owner, result)) =
-                        entry
-                            .tree
-                            .runtime
-                            .route_root_input_event_to_node_ref(&mut entry.tree.root, transform, self.style.as_ref(), event)
+                    if let Some((owner, result)) = entry
+                        .tree
+                        .runtime
+                        .route_root_input_event_to_node_ref(&mut entry.tree.root, transform, &self.style, event)
                     {
                         entry.tree.runtime.update_pointer_capture(owner, result, event, input.mouse_buttons);
                     }
@@ -424,7 +423,7 @@ impl<B: RendererBackend> Context<B> {
         {
             let entry = &mut self.roots[index];
             let roots = std::slice::from_mut(&mut entry.tree.root);
-            entry.tree.runtime.route_focus_input_event(roots, self.style.as_ref(), event);
+            entry.tree.runtime.route_focus_input_event(roots, &self.style, event);
         }
 
         self.roots.sort_by_key(|entry| entry.z_index);
@@ -438,10 +437,7 @@ impl<B: RendererBackend> Context<B> {
                 entry.tree.clear_transient_targets();
                 continue;
             }
-            entry
-                .tree
-                .runtime
-                .update_tree_root(&mut entry.tree.root, self.style.as_ref(), atlas.clone(), input);
+            entry.tree.runtime.update_tree_root(&mut entry.tree.root, &self.style, atlas.clone(), input);
 
             let visible = entry
                 .root_state
@@ -470,10 +466,10 @@ impl<B: RendererBackend> Context<B> {
             entry
                 .tree
                 .runtime
-                .paint_tree_root(&mut entry.tree.root, &mut self.display_list, self.style.as_ref(), atlas.clone());
+                .paint_tree_root(&mut entry.tree.root, &mut self.display_list, &self.style, atlas.clone());
             entry
                 .root_state
-                .try_read(|state| record_root_overlay(&mut self.display_list, viewport, state, self.style.as_ref(), &atlas))
+                .try_read(|state| record_root_overlay(&mut self.display_list, viewport, state, &self.style, &atlas))
                 .expect("registered root state unavailable during overlay paint");
         }
     }
@@ -586,7 +582,7 @@ impl<B: RendererBackend> Context<B> {
                 Dimensioni::default(),
                 state.name(),
                 state.options(),
-                self.style.as_ref(),
+                &self.style,
                 &self.renderer.atlas(),
             )
             .body
@@ -615,9 +611,9 @@ impl<B: RendererBackend> Context<B> {
     }
 
     #[cfg(test)]
-    pub(crate) fn debug_root_structure(&self, root: RootId) -> Option<(usize, usize)> {
+    pub(crate) fn debug_root_node_count(&self, root: RootId) -> Option<usize> {
         let entry = self.roots.iter().find(|entry| entry.id == root)?;
-        Some((entry.tree.root.debug_node_count(), entry.tree.root.debug_erased_adapter_count()))
+        Some(entry.tree.root.debug_node_count())
     }
 
     #[cfg(test)]
@@ -635,7 +631,7 @@ impl<B: RendererBackend> Context<B> {
                 Dimensioni::default(),
                 state.name(),
                 state.options(),
-                self.style.as_ref(),
+                &self.style,
                 &self.renderer.atlas(),
             );
             (geometry.title, geometry.close, geometry.resize)

@@ -189,7 +189,6 @@ bitflags! {
     }
 }
 
-#[derive(Clone, Debug)]
 enum RawInputEvent {
     MouseMove { pos: Vec2i },
     MouseDown { pos: Vec2i, button: MouseButton },
@@ -211,17 +210,16 @@ pub(crate) struct InputSnapshot {
     pub(crate) key_codes: KeyCode,
 }
 
-#[derive(Clone, Debug)]
 /// Ordered raw input queue plus the state committed by events already consumed by the UI.
 pub(crate) struct Input {
     /// Pointer position after the most recently consumed input event.
-    pub(crate) mouse_pos: Vec2i,
+    mouse_pos: Vec2i,
     /// Mouse buttons held after the most recently consumed input event.
-    pub(crate) mouse_down: MouseButton,
+    mouse_down: MouseButton,
     /// Modifier keys held after the most recently consumed input event.
-    pub(crate) key_down: KeyMode,
+    key_down: KeyMode,
     /// Navigation keys held after the most recently consumed input event.
-    pub(crate) key_code_down: KeyCode,
+    key_code_down: KeyCode,
     /// Raw events waiting to be applied, in API call order.
     pending: VecDeque<RawInputEvent>,
 }
