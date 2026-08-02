@@ -54,122 +54,11 @@ enum DragAxis {
     Vertical,
 }
 
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-struct ScrollbarPresence {
-    vertical: bool,
-    horizontal: bool,
-}
-
-impl ScrollbarPresence {
-    fn union(self, other: Self) -> Self {
-        Self {
-            vertical: self.vertical || other.vertical,
-            horizontal: self.horizontal || other.horizontal,
-        }
-    }
-}
-
-/// Geometry fixed by the surface, padding, and current scrollbar-presence candidate.
-#[derive(Copy, Clone, Debug, Default)]
-struct ScrollAreaFrame {
-    surface: Recti,
-    body: Recti,
-    content_view: Recti,
-    vertical_track: Option<Recti>,
-    horizontal_track: Option<Recti>,
-    corner: Option<Recti>,
-}
-
-impl ScrollAreaFrame {
-    fn new(surface: Recti, padding: i32, scrollbar_size: i32, presence: ScrollbarPresence) -> Self {
-        let surface = Recti::new(surface.x, surface.y, surface.width.max(0), surface.height.max(0));
-        let scrollbar_size = scrollbar_size.max(0);
-        let vertical_width = if presence.vertical { scrollbar_size.min(surface.width) } else { 0 };
-        let horizontal_height = if presence.horizontal { scrollbar_size.min(surface.height) } else { 0 };
-        let body = Recti::new(
-            surface.x,
-            surface.y,
-            surface.width.saturating_sub(vertical_width).max(0),
-            surface.height.saturating_sub(horizontal_height).max(0),
-        );
-        let content_view = inset_rect(body, padding.max(0));
-        let vertical_track = (vertical_width > 0 && body.height > 0).then(|| scrollbar_base(ScrollAxis::Vertical, body, vertical_width));
-        let horizontal_track = (horizontal_height > 0 && body.width > 0).then(|| scrollbar_base(ScrollAxis::Horizontal, body, horizontal_height));
-        let corner = (vertical_width > 0 && horizontal_height > 0).then(|| {
-            Recti::new(
-                body.x.saturating_add(body.width),
-                body.y.saturating_add(body.height),
-                vertical_width,
-                horizontal_height,
-            )
-        });
-
-        Self {
-            surface,
-            body,
-            content_view,
-            vertical_track,
-            horizontal_track,
-            corner,
-        }
-    }
-
-    fn required_scrollbars(self, child_extent: Dimensioni, scrollbar_size: i32) -> ScrollbarPresence {
-        let usable = scrollbar_size > 0 && self.surface.width > 0 && self.surface.height > 0;
-        ScrollbarPresence {
-            vertical: usable && child_extent.height > self.content_view.height,
-            horizontal: usable && child_extent.width > self.content_view.width,
-        }
-    }
-
-    fn commit(self, child_extent: Dimensioni, requested_offset: Vec2i, min_thumb_len: i32) -> ScrollAreaGeometry {
-        let child_extent = Dimensioni::new(child_extent.width.max(0), child_extent.height.max(0));
-        let max_offset = Vec2i::new(
-            scrollbar_max_scroll(child_extent.width, self.content_view.width),
-            scrollbar_max_scroll(child_extent.height, self.content_view.height),
-        );
-        let offset = Vec2i::new(requested_offset.x.clamp(0, max_offset.x), requested_offset.y.clamp(0, max_offset.y));
-        let vertical = self.vertical_track.map(|track| {
-            ScrollbarGeometry::new(
-                ScrollAxis::Vertical,
-                track,
-                self.content_view.height,
-                child_extent.height,
-                offset.y,
-                min_thumb_len,
-            )
-        });
-        let horizontal = self.horizontal_track.map(|track| {
-            ScrollbarGeometry::new(
-                ScrollAxis::Horizontal,
-                track,
-                self.content_view.width,
-                child_extent.width,
-                offset.x,
-                min_thumb_len,
-            )
-        });
-        ScrollAreaGeometry {
-            surface: self.surface,
-            body: self.body,
-            content_view: self.content_view,
-            child_extent,
-            offset,
-            max_offset,
-            vertical,
-            horizontal,
-            corner: self.corner,
-        }
-    }
-}
-
 /// Committed geometry used unchanged by routing, update, and paint.
 #[derive(Copy, Clone, Debug, Default)]
 struct ScrollAreaGeometry {
     surface: Recti,
-    body: Recti,
     content_view: Recti,
-    child_extent: Dimensioni,
     offset: Vec2i,
     max_offset: Vec2i,
     vertical: Option<ScrollbarGeometry>,
@@ -183,78 +72,11 @@ impl ScrollAreaGeometry {
         self.offset.y = self.offset.y.clamp(0, self.max_offset.y);
     }
 
-    fn disable(&mut self) {
-        self.offset = Vec2i::default();
-        self.max_offset = Vec2i::default();
-        self.vertical = None;
-        self.horizontal = None;
-        self.corner = None;
-    }
-
-    fn child_translation(self) -> Vec2i {
-        Vec2i::new(
-            self.content_view.x.saturating_sub(self.offset.x),
-            self.content_view.y.saturating_sub(self.offset.y),
-        )
-    }
-
     fn track_at(self, pos: Vec2i) -> Option<(DragAxis, ScrollbarGeometry)> {
         if let Some(vertical) = self.vertical.filter(|bar| bar.track().contains(&pos)) {
             return Some((DragAxis::Vertical, vertical));
         }
         self.horizontal.filter(|bar| bar.track().contains(&pos)).map(|bar| (DragAxis::Horizontal, bar))
-    }
-
-    fn wheel_route_rect(self, pos: Vec2i, delta: Vec2i) -> Option<Recti> {
-        let hit_rect = if self.content_view.contains(&pos) {
-            Some(self.content_view)
-        } else if let Some(vertical) = self.vertical.filter(|bar| bar.track().contains(&pos)) {
-            Some(vertical.track())
-        } else {
-            self.horizontal.filter(|bar| bar.track().contains(&pos)).map(ScrollbarGeometry::track)
-        }?;
-        let next = Vec2i::new(
-            self.offset.x.saturating_add(delta.x).clamp(0, self.max_offset.x),
-            self.offset.y.saturating_add(delta.y).clamp(0, self.max_offset.y),
-        );
-        ((next.x, next.y) != (self.offset.x, self.offset.y)).then_some(hit_rect)
-    }
-
-    fn apply_wheel(&mut self, delta: Vec2i) {
-        self.offset.x = self.offset.x.saturating_add(delta.x);
-        self.offset.y = self.offset.y.saturating_add(delta.y);
-        self.clamp_offset();
-    }
-
-    fn apply_drag(&mut self, axis: DragAxis, delta: Vec2i) {
-        match axis {
-            DragAxis::Vertical => {
-                if let Some(bar) = self.vertical {
-                    self.offset.y = self.offset.y.saturating_add(bar.drag_delta(delta));
-                }
-            }
-            DragAxis::Horizontal => {
-                if let Some(bar) = self.horizontal {
-                    self.offset.x = self.offset.x.saturating_add(bar.drag_delta(delta));
-                }
-            }
-        }
-        self.clamp_offset();
-    }
-
-    fn center_on(&mut self, axis: DragAxis, pos: Vec2i) {
-        let bar = match axis {
-            DragAxis::Vertical => self.vertical,
-            DragAxis::Horizontal => self.horizontal,
-        };
-        let Some(bar) = bar else { return };
-        if bar.thumb().contains(&pos) {
-            return;
-        }
-        match axis {
-            DragAxis::Vertical => self.offset.y = bar.centered_offset(pos),
-            DragAxis::Horizontal => self.offset.x = bar.centered_offset(pos),
-        }
     }
 }
 
@@ -336,7 +158,11 @@ impl ScrollAreaState {
         self.scrolling_enabled = enabled;
         if !enabled {
             self.drag_axis = None;
-            self.geometry.disable();
+            self.geometry.offset = Vec2i::default();
+            self.geometry.max_offset = Vec2i::default();
+            self.geometry.vertical = None;
+            self.geometry.horizontal = None;
+            self.geometry.corner = None;
         }
     }
 
@@ -491,40 +317,98 @@ fn measure_children(state: &ScrollAreaState, style: &Style, atlas: &AtlasHandle,
 }
 
 fn layout_scroll_area(state: &mut ScrollAreaState, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
+    let requested_offset = state.geometry.offset;
+    state.geometry = resolve_scroll_area_geometry(state, ctx, rect, requested_offset);
+
+    let view = state.geometry.content_view;
+    let offset = state.geometry.offset;
+    ctx.set_children_viewport(view, Vec2i::new(view.x.saturating_sub(offset.x), view.y.saturating_sub(offset.y)));
+    ctx.set_content_size(Dimensioni::new(rect.width.max(0), rect.height.max(0)));
+    ctx.set_child_overflow_propagation(false);
+}
+
+/// Lays out children and resolves the one geometry value used until the next layout.
+fn resolve_scroll_area_geometry(state: &mut ScrollAreaState, ctx: &mut ContainerLayoutCtx<'_>, surface: Recti, requested_offset: Vec2i) -> ScrollAreaGeometry {
     let padding = ctx.style().padding.max(0);
     let scrollbar_size = ctx.style().scrollbar_size.max(0);
-    let requested_offset = state.geometry.offset;
-    let mut presence = ScrollbarPresence::default();
-    let mut committed = None;
+    let min_thumb_len = ctx.style().thumb_size.max(0);
+    let surface = Recti::new(surface.x, surface.y, surface.width.max(0), surface.height.max(0));
+    let bars_usable = state.scrolling_enabled && scrollbar_size > 0 && surface.width > 0 && surface.height > 0;
+    let mut has_vertical = false;
+    let mut has_horizontal = false;
 
     // There are only four possible presence states. Starting without bars and only adding a bar
     // once overflow requires it makes convergence monotonic and strictly bounded.
     for _ in 0..4 {
-        let frame = ScrollAreaFrame::new(rect, padding, scrollbar_size, presence);
-        let child_extent = layout_children(state, ctx, Dimensioni::new(frame.content_view.width, frame.content_view.height));
-        let required = if state.scrolling_enabled {
-            frame.required_scrollbars(child_extent, scrollbar_size)
-        } else {
-            ScrollbarPresence::default()
-        };
-        let next = presence.union(required);
-        if next == presence {
-            committed = Some(frame.commit(child_extent, requested_offset, ctx.style().thumb_size.max(0)));
-            break;
+        let vertical_width = if has_vertical { scrollbar_size.min(surface.width) } else { 0 };
+        let horizontal_height = if has_horizontal { scrollbar_size.min(surface.height) } else { 0 };
+        let body = Recti::new(
+            surface.x,
+            surface.y,
+            surface.width.saturating_sub(vertical_width).max(0),
+            surface.height.saturating_sub(horizontal_height).max(0),
+        );
+        let content_view = inset_rect(body, padding);
+        let child_extent = layout_children(state, ctx, Dimensioni::new(content_view.width, content_view.height));
+
+        let next_vertical = has_vertical || (bars_usable && child_extent.height > content_view.height);
+        let next_horizontal = has_horizontal || (bars_usable && child_extent.width > content_view.width);
+        if next_vertical != has_vertical || next_horizontal != has_horizontal {
+            has_vertical = next_vertical;
+            has_horizontal = next_horizontal;
+            continue;
         }
-        presence = next;
+
+        let max_offset = if state.scrolling_enabled {
+            Vec2i::new(
+                scrollbar_max_scroll(child_extent.width, content_view.width),
+                scrollbar_max_scroll(child_extent.height, content_view.height),
+            )
+        } else {
+            Vec2i::default()
+        };
+        let offset = Vec2i::new(requested_offset.x.clamp(0, max_offset.x), requested_offset.y.clamp(0, max_offset.y));
+        let vertical = (has_vertical && vertical_width > 0 && body.height > 0).then(|| {
+            ScrollbarGeometry::new(
+                ScrollAxis::Vertical,
+                scrollbar_base(ScrollAxis::Vertical, body, vertical_width),
+                content_view.height,
+                child_extent.height,
+                offset.y,
+                min_thumb_len,
+            )
+        });
+        let horizontal = (has_horizontal && horizontal_height > 0 && body.width > 0).then(|| {
+            ScrollbarGeometry::new(
+                ScrollAxis::Horizontal,
+                scrollbar_base(ScrollAxis::Horizontal, body, horizontal_height),
+                content_view.width,
+                child_extent.width,
+                offset.x,
+                min_thumb_len,
+            )
+        });
+        let corner = (has_vertical && has_horizontal && vertical_width > 0 && horizontal_height > 0).then(|| {
+            Recti::new(
+                body.x.saturating_add(body.width),
+                body.y.saturating_add(body.height),
+                vertical_width,
+                horizontal_height,
+            )
+        });
+
+        return ScrollAreaGeometry {
+            surface,
+            content_view,
+            offset,
+            max_offset,
+            vertical,
+            horizontal,
+            corner,
+        };
     }
 
-    let mut geometry = committed.expect("scroll-area scrollbar presence must converge within four states");
-    if !state.scrolling_enabled {
-        geometry.disable();
-    }
-    state.geometry = geometry;
-    state.clamp_offset();
-
-    ctx.set_children_viewport(state.geometry.content_view, state.geometry.child_translation());
-    ctx.set_content_size(Dimensioni::new(rect.width.max(0), rect.height.max(0)));
-    ctx.set_child_overflow_propagation(false);
+    unreachable!("scroll-area scrollbar presence must converge within four states")
 }
 
 fn layout_children(state: &mut ScrollAreaState, ctx: &mut ContainerLayoutCtx<'_>, view: Dimensioni) -> Dimensioni {
@@ -555,7 +439,20 @@ fn route_surface(state: &ScrollAreaState, event: &UiInputEvent, has_pointer_capt
         return None;
     }
     match *event {
-        UiInputEvent::Scroll { pos, delta } => state.geometry.wheel_route_rect(pos, delta),
+        UiInputEvent::Scroll { pos, delta } => {
+            let hit_rect = if state.geometry.content_view.contains(&pos) {
+                Some(state.geometry.content_view)
+            } else if let Some(vertical) = state.geometry.vertical.filter(|bar| bar.track().contains(&pos)) {
+                Some(vertical.track())
+            } else {
+                state.geometry.horizontal.filter(|bar| bar.track().contains(&pos)).map(ScrollbarGeometry::track)
+            }?;
+            let next = Vec2i::new(
+                state.geometry.offset.x.saturating_add(delta.x).clamp(0, state.geometry.max_offset.x),
+                state.geometry.offset.y.saturating_add(delta.y).clamp(0, state.geometry.max_offset.y),
+            );
+            ((next.x, next.y) != (state.geometry.offset.x, state.geometry.offset.y)).then_some(hit_rect)
+        }
         UiInputEvent::MouseDown { pos, button } if button.intersects(MouseButton::LEFT) => state.geometry.track_at(pos).map(|(_, bar)| bar.track()),
         UiInputEvent::MouseDrag { buttons, .. } if has_pointer_capture && state.drag_axis.is_some() && buttons.intersects(MouseButton::LEFT) => {
             Some(state.geometry.surface)
@@ -576,19 +473,33 @@ fn update_scroll_state(state: &mut ScrollAreaState, event: Option<&UiInputEvent>
     if let Some(event) = event {
         match *event {
             UiInputEvent::Scroll { delta, .. } => {
-                state.geometry.apply_wheel(delta);
+                state.geometry.offset.x = state.geometry.offset.x.saturating_add(delta.x);
+                state.geometry.offset.y = state.geometry.offset.y.saturating_add(delta.y);
             }
             UiInputEvent::MouseDown { pos, button } if button.intersects(MouseButton::LEFT) => {
-                if let Some((axis, _)) = state.geometry.track_at(pos) {
+                if let Some((axis, bar)) = state.geometry.track_at(pos) {
                     state.drag_axis = Some(axis);
-                    state.geometry.center_on(axis, pos);
+                    if !bar.thumb().contains(&pos) {
+                        match axis {
+                            DragAxis::Vertical => state.geometry.offset.y = bar.centered_offset(pos),
+                            DragAxis::Horizontal => state.geometry.offset.x = bar.centered_offset(pos),
+                        }
+                    }
                 }
             }
-            UiInputEvent::MouseDrag { delta, buttons, .. } if buttons.intersects(MouseButton::LEFT) => {
-                if let Some(axis) = state.drag_axis {
-                    state.geometry.apply_drag(axis, delta);
+            UiInputEvent::MouseDrag { delta, buttons, .. } if buttons.intersects(MouseButton::LEFT) => match state.drag_axis {
+                Some(DragAxis::Vertical) => {
+                    if let Some(bar) = state.geometry.vertical {
+                        state.geometry.offset.y = state.geometry.offset.y.saturating_add(bar.drag_delta(delta));
+                    }
                 }
-            }
+                Some(DragAxis::Horizontal) => {
+                    if let Some(bar) = state.geometry.horizontal {
+                        state.geometry.offset.x = state.geometry.offset.x.saturating_add(bar.drag_delta(delta));
+                    }
+                }
+                None => {}
+            },
             UiInputEvent::MouseUp { button, .. } if button.intersects(MouseButton::LEFT) => state.drag_axis = None,
             _ => {}
         }
@@ -616,7 +527,21 @@ mod tests {
     use super::*;
     use crate::test_support::test_atlas;
     use crate::ui_node::UiRuntime;
-    use crate::{Custom, CustomParameters, Policy, UNCLIPPED_RECT};
+    use crate::{
+        Column, ColumnParameters, Custom, CustomParameters, Policy, Row, RowParameters, SizePolicy, Stack, StackDirection, StackParameters, TextBlock,
+        TextBlockParameters, TextWrap, UNCLIPPED_RECT,
+    };
+
+    fn laid_out_geometry(child_size: Dimensioni, surface: Recti, style: Style, requested_offset: Vec2i) -> ScrollAreaGeometry {
+        let child = Node::widget(Custom::create(CustomParameters::new("child"))).with_policy(Policy::fixed(child_size.width, child_size.height));
+        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [child]));
+        scroll.try_update(|state| state.set_offset(requested_offset)).unwrap();
+
+        let mut runtime = UiRuntime::new();
+        runtime.begin_update();
+        runtime.layout_tree_root(&mut root, &style, test_atlas(), surface, UNCLIPPED_RECT);
+        scroll.try_read(|state| state.geometry).unwrap()
+    }
 
     #[test]
     fn scroll_area_owns_direct_children_without_synthetic_semantic_nodes() {
@@ -668,11 +593,14 @@ mod tests {
     fn drag_and_release_require_a_matching_left_track_press() {
         let container = ScrollAreaBuilder::create_container(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, []));
         let mut state = container.state.borrow_mut();
-        state.geometry = ScrollAreaFrame::new(Recti::new(0, 0, 80, 60), 0, 10, ScrollbarPresence { vertical: true, horizontal: false }).commit(
-            Dimensioni::new(70, 120),
-            Vec2i::default(),
-            8,
-        );
+        let track = Recti::new(70, 0, 10, 60);
+        state.geometry = ScrollAreaGeometry {
+            surface: Recti::new(0, 0, 80, 60),
+            content_view: Recti::new(0, 0, 70, 60),
+            max_offset: Vec2i::new(0, 60),
+            vertical: Some(ScrollbarGeometry::new(ScrollAxis::Vertical, track, 60, 120, 0, 8)),
+            ..ScrollAreaGeometry::default()
+        };
         let drag = UiInputEvent::MouseDrag {
             pos: Vec2i::new(200, 180),
             delta: Vec2i::new(1, 2),
@@ -696,52 +624,128 @@ mod tests {
 
     #[test]
     fn content_view_includes_padding_and_mutually_induced_bars_converge_monotonically() {
-        let fits = ScrollAreaFrame::new(Recti::new(0, 0, 100, 100), 10, 10, ScrollbarPresence::default());
+        let surface = Recti::new(0, 0, 100, 100);
+        let fits = laid_out_geometry(
+            Dimensioni::new(80, 80),
+            surface,
+            Style {
+                padding: 10,
+                scrollbar_size: 10,
+                ..Style::default()
+            },
+            Vec2i::default(),
+        );
         assert_eq!((fits.content_view.width, fits.content_view.height), (80, 80));
-        assert_eq!(fits.required_scrollbars(Dimensioni::new(80, 80), 10), ScrollbarPresence::default());
+        assert!(fits.vertical.is_none() && fits.horizontal.is_none());
 
-        let child_extent = Dimensioni::new(95, 101);
-        let mut presence = ScrollbarPresence::default();
-        let mut visited = 0;
-        let final_frame = loop {
-            visited += 1;
-            let frame = ScrollAreaFrame::new(Recti::new(0, 0, 100, 100), 0, 10, presence);
-            let next = presence.union(frame.required_scrollbars(child_extent, 10));
-            if next == presence {
-                break frame;
-            }
-            presence = next;
+        let induced = laid_out_geometry(
+            Dimensioni::new(95, 101),
+            surface,
+            Style {
+                padding: 0,
+                scrollbar_size: 10,
+                ..Style::default()
+            },
+            Vec2i::default(),
+        );
+        assert_eq!((induced.content_view.width, induced.content_view.height), (90, 90));
+        assert!(induced.vertical.is_some() && induced.horizontal.is_some());
+        assert!(induced.corner.is_some());
+    }
+
+    #[test]
+    fn wrapped_remainder_column_does_not_create_horizontal_overflow() {
+        let (_, label) = TextBlock::create(TextBlockParameters::new("label"));
+        let (_, text) = TextBlock::create(TextBlockParameters::with_wrap(
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum.",
+            TextWrap::Word,
+        ));
+        let text = Node::widget(text);
+        let text_id = text.id();
+        let (_, text_stack) = Stack::create(StackParameters::new(
+            SizePolicy::Remainder(0),
+            SizePolicy::Auto,
+            StackDirection::TopToBottom,
+            [text],
+        ));
+        let (_, text_column) = Column::create(ColumnParameters::new([text_stack]));
+        let (_, row) = Row::create(RowParameters::new(
+            [SizePolicy::Fixed(40), SizePolicy::Remainder(0)],
+            SizePolicy::Auto,
+            [Node::widget(label), text_column],
+        ));
+        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [row]));
+        let style = Style {
+            padding: 0,
+            spacing: 4,
+            scrollbar_size: 10,
+            ..Style::default()
         };
 
-        assert!(visited <= 4);
-        assert_eq!(presence, ScrollbarPresence { vertical: true, horizontal: true });
-        assert_eq!((final_frame.body.width, final_frame.body.height), (90, 90));
-        assert!(final_frame.corner.is_some());
+        let mut runtime = UiRuntime::new();
+        runtime.begin_update();
+        runtime.layout_tree_root(&mut root, &style, test_atlas(), Recti::new(0, 0, 100, 300), UNCLIPPED_RECT);
+
+        assert_eq!(scroll.try_read(|state| state.geometry.horizontal.is_none()), Some(true));
+        let text_rect = runtime.debug_node_rect(std::slice::from_ref(&root), text_id).unwrap();
+        assert_eq!(
+            text_rect.width, 56,
+            "the remainder track receives only the width left by the fixed track and spacing"
+        );
+        assert!(
+            text_rect.height > test_atlas().get_font_height(style.font) as i32,
+            "height must reflect wrapping at the remainder width"
+        );
     }
 
     #[test]
     fn diagonal_wheel_is_atomic_and_boundary_wheel_bubbles_over_tracks_too() {
-        let frame = ScrollAreaFrame::new(Recti::new(0, 0, 100, 100), 0, 10, ScrollbarPresence { vertical: true, horizontal: true });
-        let mut geometry = frame.commit(Dimensioni::new(200, 200), Vec2i::new(0, 110), 8);
+        let geometry = laid_out_geometry(
+            Dimensioni::new(200, 200),
+            Recti::new(0, 0, 100, 100),
+            Style {
+                padding: 0,
+                scrollbar_size: 10,
+                thumb_size: 8,
+                ..Style::default()
+            },
+            Vec2i::new(0, 110),
+        );
+        let container = ScrollAreaBuilder::create_container(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, []));
+        let mut state = container.state.borrow_mut();
+        state.geometry = geometry;
         let body_pos = Vec2i::new(20, 20);
-        assert!(geometry.wheel_route_rect(body_pos, Vec2i::new(15, 15)).is_some());
-        geometry.apply_wheel(Vec2i::new(15, 15));
+        let diagonal = UiInputEvent::Scroll { pos: body_pos, delta: Vec2i::new(15, 15) };
+        assert!(route_surface(&state, &diagonal, false).is_some());
+        update_scroll_state(&mut state, Some(&diagonal));
         assert_eq!(
-            (geometry.offset.x, geometry.offset.y),
+            (state.geometry.offset.x, state.geometry.offset.y),
             (15, 110),
             "the consumed event applies both requested axes"
         );
 
-        geometry.offset = geometry.max_offset;
-        let vertical_track_pos = Vec2i::new(95, 20);
-        assert!(geometry.wheel_route_rect(vertical_track_pos, Vec2i::new(0, 10)).is_none());
-        assert!(geometry.wheel_route_rect(body_pos, Vec2i::new(10, 10)).is_none());
+        state.geometry.offset = state.geometry.max_offset;
+        let track_boundary = UiInputEvent::Scroll {
+            pos: Vec2i::new(95, 20),
+            delta: Vec2i::new(0, 10),
+        };
+        let body_boundary = UiInputEvent::Scroll { pos: body_pos, delta: Vec2i::new(10, 10) };
+        assert!(route_surface(&state, &track_boundary, false).is_none());
+        assert!(route_surface(&state, &body_boundary, false).is_none());
     }
 
     #[test]
     fn committed_geometry_clamps_offsets_after_content_shrinks() {
-        let frame = ScrollAreaFrame::new(Recti::new(0, 0, 100, 100), 0, 10, ScrollbarPresence { vertical: true, horizontal: true });
-        let geometry = frame.commit(Dimensioni::new(120, 130), Vec2i::new(500, 500), 8);
+        let geometry = laid_out_geometry(
+            Dimensioni::new(120, 130),
+            Recti::new(0, 0, 100, 100),
+            Style {
+                padding: 0,
+                scrollbar_size: 10,
+                ..Style::default()
+            },
+            Vec2i::new(500, 500),
+        );
         assert_eq!((geometry.offset.x, geometry.offset.y), (30, 40));
     }
 

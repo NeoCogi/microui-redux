@@ -107,15 +107,46 @@ impl Widget for RowContainer {
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
         runtime_read_state(&self.state, "Row::measure", |state| {
-            let mut preferred_widths = Vec::with_capacity(state.children.len());
-            let mut preferred_height = 0;
-            for index in 0..state.children.len() {
-                let size = state.children.measure_child(index, style, atlas, available).unwrap_or_default();
-                preferred_widths.push(size.width);
-                preferred_height = preferred_height.max(size.height);
-            }
-            let spacing = style.spacing.saturating_mul(state.children.len().saturating_sub(1) as i32);
-            let width = preferred_widths.into_iter().sum::<i32>().saturating_add(spacing).max(0);
+            let count = state.children.len();
+            let spacing = style.spacing.saturating_mul(count.saturating_sub(1) as i32);
+            let available_width = available.width.saturating_sub(spacing).max(0);
+            let initial = (0..count)
+                .map(|index| {
+                    state
+                        .children
+                        .measure_child(index, style, atlas, Dimensioni::new(available_width, available.height))
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>();
+
+            // A positive width is a real constraint. Resolve the same tracks used by layout, then
+            // measure height at each child's actual width so wrapped content cannot widen the row
+            // or report a height derived from a different allocation.
+            let (width, preferred_height) = if available.width > 0 {
+                let policies = (0..count)
+                    .map(|index| state.widths.get(index).copied().unwrap_or(SizePolicy::Auto))
+                    .collect::<Vec<_>>();
+                let preferred_widths = initial.iter().map(|size| size.width).collect::<Vec<_>>();
+                let tracks = super::super::resolve_axis_tracks(&policies, &preferred_widths, available_width);
+                let height = tracks
+                    .iter()
+                    .enumerate()
+                    .map(|(index, width)| {
+                        state
+                            .children
+                            .measure_child(index, style, atlas, Dimensioni::new(*width, available.height))
+                            .unwrap_or_default()
+                            .height
+                    })
+                    .max()
+                    .unwrap_or_default();
+                (tracks.into_iter().sum::<i32>().saturating_add(spacing).max(0), height)
+            } else {
+                let width = initial.iter().map(|size| size.width).sum::<i32>().saturating_add(spacing).max(0);
+                let height = initial.iter().map(|size| size.height).max().unwrap_or_default();
+                (width, height)
+            };
+
             let height = super::super::resolve_size(
                 state.item_height,
                 preferred_height.max(super::super::default_cell_height(style, atlas)),
