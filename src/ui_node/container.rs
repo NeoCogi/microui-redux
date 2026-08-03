@@ -163,6 +163,16 @@ pub trait Container: Widget {
         true
     }
 
+    /// Tests this container's own event-independent pointer surface.
+    ///
+    /// `content_rect` and `pos` use the same container-local coordinate space as
+    /// [`Container::route_input`]. The runtime applies the active clip and
+    /// [`WidgetOption::NO_INTERACT`] before calling this hook. Descendant hit testing remains
+    /// framework-owned.
+    fn pointer_hit_test(&self, content_rect: Recti, pos: Vec2i) -> bool {
+        content_rect.contains(&pos)
+    }
+
     /// Reports whether this container's current local pointer-capture interaction remains active.
     ///
     /// The retained runtime owns the captured node identity. This query can only retain or revoke

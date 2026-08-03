@@ -241,6 +241,12 @@ impl Container for ScrollAreaContainer {
         })
     }
 
+    fn pointer_hit_test(&self, _content_rect: Recti, pos: Vec2i) -> bool {
+        runtime_read_state(&self.state, "ScrollArea::pointer_hit_test", |state| {
+            state.scrolling_enabled && state.geometry.surface.contains(&pos)
+        })
+    }
+
     fn on_pointer_capture_lost(&mut self) {
         runtime_update_state(&self.state, "ScrollArea::on_pointer_capture_lost", |state| {
             state.drag_axis = None;

@@ -355,6 +355,10 @@ impl Container for RootChromeContainer {
         runtime_read_state(&self.state, "RootChrome::children_visible", RootState::is_visible)
     }
 
+    fn pointer_hit_test(&self, _content_rect: Recti, pos: Vec2i) -> bool {
+        runtime_read_state(&self.state, "RootChrome::pointer_hit_test", |state| state.geometry.hit_test(pos).is_some())
+    }
+
     fn retains_pointer_capture(&self) -> bool {
         runtime_read_state(&self.state, "RootChrome::retains_pointer_capture", RootState::is_active)
     }

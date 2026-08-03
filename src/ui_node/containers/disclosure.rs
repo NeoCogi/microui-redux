@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, COLLAPSE_ICON, ControlColor, Dimensioni, EXPAND_ICON, MouseButton, Recti, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx,
+    AtlasHandle, COLLAPSE_ICON, ControlColor, Dimensioni, EXPAND_ICON, MouseButton, Recti, Style, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx,
     WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 
@@ -316,6 +316,10 @@ impl Container for DisclosureContainer {
 
     fn children_visible(&self) -> bool {
         runtime_read_state(&self.state, "Disclosure::children_visible", DisclosureState::is_expanded)
+    }
+
+    fn pointer_hit_test(&self, _content_rect: Recti, pos: Vec2i) -> bool {
+        self.header_rect.contains(&pos)
     }
 
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
