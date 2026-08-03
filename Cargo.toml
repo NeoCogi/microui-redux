@@ -9,7 +9,7 @@ description = "Retained Rust MicroUI-inspired GUI library"
 repository = "https://github.com/NeoCogi/microui-redux"
 autoexamples = false
 categories = ["gui", "rendering"]
-exclude = ["UNBLOAT-PLAN.md", "FIX-PLAN.md", "atlas.png", ".codex", ".codex/**"]
+exclude = ["atlas.png", ".codex", ".codex/**"]
 
 [lib]
 name = "microui_redux"

@@ -5,7 +5,8 @@ This project started as a C2Rust conversion of Rxi's MicroUI and has since grown
 
 Compared to [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces std types, reusable retained trees, and richer widgets such as custom rendering callbacks, dialogs, and a file dialog.
 
-The current API model and upgrade mapping are summarized below; the detailed breaking-change guide is in [MIGRATION.md](MIGRATION.md).
+The current API model and upgrade notes are summarized below and demonstrated by the retained
+examples in this repository.
 
 ## Demo
 Clone and build the demo (enable exactly one backend feature):
@@ -431,14 +432,13 @@ To export an atlas as Rust, enable `save-to-rust` (and `png_source` when seriali
 
 ### Version 0.8.0-pre-alpha
 
-`0.8.0-pre-alpha` is the current in-development UI-node/runtime refactor. It establishes the final
+`0.8.0-pre-alpha` is the current in-development UI-node/runtime refactor. It establishes the
 direction for unique owning nodes, concrete runtime-owned state, typed weak application handles,
-public custom containers, one-event update commits, and paint-only rendering. The public API,
-README, rustdoc, and [migration guide](MIGRATION.md) are being aligned as each remaining
-correctness and cleanup phase in [UI-NODE-REFACTOR-PLAN.md](UI-NODE-REFACTOR-PLAN.md) lands.
+public custom containers, one-event update commits, and paint-only rendering. The README, crate
+rustdoc, and retained examples document the implemented API.
 
 This is intentionally a pre-alpha version: downstream users should expect further breaking changes
-before `0.8.0` and should consult the plan's completed-item evidence when evaluating a snapshot.
+before `0.8.0` and should evaluate a snapshot against its API documentation and examples.
 
 ### Version 0.7.0
 Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`, it completes the retained migration by moving root lifetime, interaction identity, and frame traversal into the context instead of requiring applications to resubmit each root every frame.

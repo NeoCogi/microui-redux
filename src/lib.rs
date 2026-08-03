@@ -140,7 +140,8 @@
 //! Retained layout is resolved from context-owned UI nodes, container sizing policies, and widget
 //! measurement results.
 //! Retained application logic observes typed widget state handles returned by constructors.
-//! See the repository `MIGRATION.md` for the `0.8.0-pre-alpha` retained-authoring migration mapping.
+//! The [`retained`] module and repository examples document the `0.8.0-pre-alpha` retained-authoring
+//! API.
 //!
 //! # Rendering pipeline
 //!

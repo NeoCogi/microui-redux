@@ -3,4 +3,3 @@
 *target/
 *.lock
 SDL2.*
-*-PLAN.md
