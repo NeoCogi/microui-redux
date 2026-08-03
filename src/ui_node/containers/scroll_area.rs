@@ -461,13 +461,7 @@ fn route_surface(state: &ScrollAreaState, event: &UiInputEvent, has_pointer_capt
     }
     match *event {
         UiInputEvent::Scroll { pos, delta } => {
-            let hit_rect = if state.geometry.content_view.contains(&pos) {
-                Some(state.geometry.content_view)
-            } else if let Some(vertical) = state.geometry.vertical.filter(|bar| bar.track().contains(&pos)) {
-                Some(vertical.track())
-            } else {
-                state.geometry.horizontal.filter(|bar| bar.track().contains(&pos)).map(ScrollbarGeometry::track)
-            }?;
+            let hit_rect = state.geometry.surface.contains(&pos).then_some(state.geometry.surface)?;
             let next = Vec2i::new(
                 state.geometry.offset.x.saturating_add(delta.x).clamp(0, state.geometry.max_offset.x),
                 state.geometry.offset.y.saturating_add(delta.y).clamp(0, state.geometry.max_offset.y),
@@ -753,6 +747,34 @@ mod tests {
         let body_boundary = UiInputEvent::Scroll { pos: body_pos, delta: Vec2i::new(10, 10) };
         assert!(route_surface(&state, &track_boundary, false).is_none());
         assert!(route_surface(&state, &body_boundary, false).is_none());
+    }
+
+    #[test]
+    fn wheel_routes_through_padding_between_content_and_scrollbar() {
+        let geometry = laid_out_geometry(
+            Dimensioni::new(200, 200),
+            Recti::new(0, 0, 100, 100),
+            Style {
+                padding: 5,
+                scrollbar_size: 10,
+                ..Style::default()
+            },
+            Vec2i::default(),
+        );
+        let gutter_pos = Vec2i::new(87, 20);
+        assert!(geometry.surface.contains(&gutter_pos));
+        assert!(!geometry.content_view.contains(&gutter_pos));
+        assert!(geometry.track_at(gutter_pos).is_none());
+
+        let container = ScrollAreaBuilder::create_container(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, []));
+        let mut state = container.state.borrow_mut();
+        state.geometry = geometry;
+        let wheel = UiInputEvent::Scroll {
+            pos: gutter_pos,
+            delta: Vec2i::new(0, 10),
+        };
+        let routed = route_surface(&state, &wheel, false).expect("wheel over the padding gutter must route");
+        assert_eq!((routed.x, routed.y, routed.width, routed.height), (0, 0, 100, 100));
     }
 
     #[test]
