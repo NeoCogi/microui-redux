@@ -449,6 +449,81 @@ fn overlapping_pointer_routing_visits_siblings_in_reverse_z_order() {
 }
 
 #[test]
+fn pointer_hit_selection_uses_reverse_sibling_paint_order() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let (first, _) = Probe::new("first", log.clone());
+    let (second, _) = Probe::new("second", log.clone());
+    let first_id = Node::widget(first);
+    let first_id_value = first_id.id();
+    let second_id = Node::widget(second);
+    let second_id_value = second_id.id();
+    let container = TraversalContainer::new([first_id, second_id], false, log);
+    let mut root = Node::container(container);
+    let mut runtime = UiRuntime::new();
+    let style = Style::default();
+
+    runtime.begin_update();
+    layout_root(&mut runtime, &mut root, &style, test_atlas());
+
+    let hit = runtime.hit_test_pointer_node_ref(&root, runtime.root_transform(), &style, Vec2i::new(20, 30));
+    assert_eq!(hit, Some(second_id_value));
+    assert_ne!(hit, Some(first_id_value));
+}
+
+#[test]
+fn no_interact_node_is_transparent_to_pointer_hit_selection() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let (first, _) = Probe::new("first", log.clone());
+    let (mut second, _) = Probe::new("second", log.clone());
+    second.opt = WidgetOption::NO_INTERACT;
+    let first = Node::widget(first);
+    let first_id = first.id();
+    let container = TraversalContainer::new([first, Node::widget(second)], false, log);
+    let mut root = Node::container(container);
+    let mut runtime = UiRuntime::new();
+    let style = Style::default();
+
+    runtime.begin_update();
+    layout_root(&mut runtime, &mut root, &style, test_atlas());
+
+    assert_eq!(
+        runtime.hit_test_pointer_node_ref(&root, runtime.root_transform(), &style, Vec2i::new(20, 30)),
+        Some(first_id)
+    );
+}
+
+#[test]
+fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let (mut lower, lower_counts) = Probe::new("lower", log.clone());
+    lower.opt = WidgetOption::GRAB_SCROLL;
+    let (upper, upper_counts) = Probe::new("upper", log.clone());
+    let container = TraversalContainer::new([Node::widget(lower), Node::widget(upper)], false, log);
+    let mut root = Node::container(container);
+    let mut runtime = UiRuntime::new();
+    let style = Style::default();
+    let atlas = test_atlas();
+
+    runtime.begin_update();
+    layout_root(&mut runtime, &mut root, &style, atlas.clone());
+    let event = UiInputEvent::Scroll {
+        pos: Vec2i::new(20, 30),
+        delta: Vec2i::new(0, 1),
+    };
+    runtime.begin_input_event(true, &event);
+    let routed = runtime.route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event);
+    assert_eq!(routed.map(|(_, result)| result), Some(ContainerInputResult::Ignored));
+    runtime.update_tree_root(&mut root, &style, atlas, empty_input());
+
+    assert_eq!(upper_counts.routed_events.get(), 0, "unsupported events are not delivered to the target update");
+    assert_eq!(
+        lower_counts.routed_events.get(),
+        0,
+        "the covered sibling must never be considered after the hit"
+    );
+}
+
+#[test]
 fn widget_focus_policy_is_authoritative_after_container_routing_cleanup() {
     let mut root = Node::widget(HoldFocusProbe {
         state: Rc::new(RefCell::new(())),

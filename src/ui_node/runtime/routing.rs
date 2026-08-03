@@ -152,7 +152,70 @@ impl UiRuntime {
         }
     }
 
-    /// Walks borrowed children first so nested owners beat ancestors.
+    /// Selects the topmost hit using ordinary parent-before-children paint stacking.
+    pub(crate) fn hit_test_pointer_node_ref(&self, node: &Node, parent_transform: Transform, style: &Style, pos: Vec2i) -> Option<RuntimeNodeId> {
+        let child_transform = parent_transform.push(node.state.layout);
+        if node_children_visible(node)
+            && let Some(hit) = node.with_children(|children| {
+                children
+                    .iter()
+                    .rev()
+                    .find_map(|child| self.hit_test_pointer_node_ref(child, child_transform, style, pos))
+            })
+        {
+            return Some(hit);
+        }
+        self.pointer_hits_node(node, parent_transform, style, pos).then(|| node.id())
+    }
+
+    /// Selects a root hit with its post-tree chrome above application descendants.
+    fn hit_test_pointer_root_ref(&self, node: &Node, parent_transform: Transform, style: &Style, pos: Vec2i) -> Option<RuntimeNodeId> {
+        if self.pointer_hits_node(node, parent_transform, style, pos) {
+            return Some(node.id());
+        }
+        let child_transform = parent_transform.push(node.state.layout);
+        node_children_visible(node)
+            .then(|| {
+                node.with_children(|children| {
+                    children
+                        .iter()
+                        .rev()
+                        .find_map(|child| self.hit_test_pointer_node_ref(child, child_transform, style, pos))
+                })
+            })
+            .flatten()
+    }
+
+    /// Tests one node's own local surface after runtime-owned option and clip filtering.
+    fn pointer_hits_node(&self, node: &Node, parent_transform: Transform, style: &Style, pos: Vec2i) -> bool {
+        let opt = node.data.widget().effective_widget_opt();
+        if opt.intersects(WidgetOption::NO_INTERACT) {
+            return false;
+        }
+
+        let framed = node_is_framed(node);
+        let screen_rect = parent_transform.resolve(node.state.layout.allocation);
+        let screen_clip = match parent_transform.clip.intersect(&screen_rect) {
+            Some(clip) if clip.contains(&pos) => clip,
+            _ => return false,
+        };
+        let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
+        let local_pos = pos - screen_origin;
+        let local_rect = Recti::new(0, 0, screen_rect.width, screen_rect.height);
+        let Some(container) = node.data.container() else {
+            return local_rect.contains(&local_pos);
+        };
+
+        let content_rect = crate::ui_node::frame::frame_geometry(local_rect, framed, style).content_or_empty();
+        let local_clip = rect_relative_to(screen_clip, screen_origin);
+        let Some(content_clip) = local_clip.intersect(&content_rect) else {
+            return false;
+        };
+        content_clip.contains(&local_pos) && container.pointer_hit_test(content_rect, local_pos)
+    }
+
+    /// Selects one ordinary topmost hit, then dispatches only through its ancestor path.
+    #[cfg(test)]
     pub(crate) fn route_input_event_to_node_ref(
         &mut self,
         node: &mut Node,
@@ -160,25 +223,8 @@ impl UiRuntime {
         style: &Style,
         event: &UiInputEvent,
     ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
-        let id = node.id();
-        let child_transform = parent_transform.push(node.state.layout);
-        let child_result = if node_children_visible(node) {
-            node.with_children_mut(|children| {
-                for child in children.iter_mut().rev() {
-                    if let Some(result) = self.route_input_event_to_node_ref(child, child_transform, style, event) {
-                        return Some(result);
-                    }
-                }
-                None
-            })
-            .flatten()
-        } else {
-            None
-        };
-        child_result.or_else(|| {
-            let result = self.route_input_event_to_node_only_ref(node, parent_transform, style, event);
-            result.is_consumed().then_some((id, result))
-        })
+        let target = self.hit_test_pointer_node_ref(node, parent_transform, style, event.position()?)?;
+        self.route_input_event_to_target_path_from(node, target, parent_transform, style, event)
     }
 
     /// Routes a root's post-tree chrome before its application descendants.
@@ -193,26 +239,36 @@ impl UiRuntime {
         style: &Style,
         event: &UiInputEvent,
     ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
-        let id = node.id();
-        let root_result = self.route_input_event_to_node_only_ref(node, parent_transform, style, event);
-        if root_result.is_consumed() {
-            return Some((id, root_result));
+        let target = self.hit_test_pointer_root_ref(node, parent_transform, style, event.position()?)?;
+        self.route_input_event_to_target_path_from(node, target, parent_transform, style, event)
+    }
+
+    /// Descends to one selected target and bubbles an ignored result only through ancestors.
+    fn route_input_event_to_target_path_from(
+        &mut self,
+        current: &mut Node,
+        target: RuntimeNodeId,
+        parent_transform: Transform,
+        style: &Style,
+        event: &UiInputEvent,
+    ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
+        if current.id() == target {
+            let result = self.route_input_event_to_node_only_ref(current, parent_transform, style, event);
+            return Some((target, result));
         }
 
-        let child_transform = parent_transform.push(node.state.layout);
-        if node_children_visible(node) {
-            return node
-                .with_children_mut(|children| {
-                    for child in children.iter_mut().rev() {
-                        if let Some(result) = self.route_input_event_to_node_ref(child, child_transform, style, event) {
-                            return Some(result);
-                        }
-                    }
-                    None
-                })
-                .flatten();
+        let child_parent = parent_transform.push(current.state.layout);
+        let (owner, result) = current.with_children_mut(|children| {
+            children
+                .iter_mut()
+                .find_map(|child| self.route_input_event_to_target_path_from(child, target, child_parent, style, event))
+        })??;
+        if result.is_consumed() {
+            return Some((owner, result));
         }
-        None
+
+        let result = self.route_input_event_to_node_only_ref(current, parent_transform, style, event);
+        Some(if result.is_consumed() { (current.id(), result) } else { (owner, result) })
     }
 
     /// Routes directly to one target during a single transform-carrying tree traversal.
