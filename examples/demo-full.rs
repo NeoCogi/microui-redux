@@ -2227,10 +2227,10 @@ fn upload_noise_texture(ctx: &mut Context<SelectedBackend>, width: i32, height: 
 
 fn main() {
     let atlas = atlas_assets::load_atlas();
-    #[cfg(feature = "builder")]
-    {
-        builder::Builder::save_png_image(atlas.clone(), "atlas.png").unwrap();
-    }
+    // #[cfg(feature = "builder")]
+    // {
+    //     builder::Builder::save_png_image(atlas.clone(), "atlas.png").unwrap();
+    // }
 
     let mut app = Application::new(atlas, |backend: BackendInitContext, ctx| State::new(backend, ctx)).unwrap();
 
