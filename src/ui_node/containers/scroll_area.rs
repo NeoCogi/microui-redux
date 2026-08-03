@@ -188,10 +188,12 @@ impl Widget for ScrollAreaContainer {
 
     fn effective_widget_opt(&self) -> WidgetOption {
         runtime_read_state(&self.state, "ScrollArea::effective_widget_opt", |state| {
+            // Enabled areas occupy their allocation and accept wheel routing. Disabled areas make
+            // only their own surface transparent while their retained children remain routable.
             if state.scrolling_enabled {
                 self.widget_opt | WidgetOption::GRAB_SCROLL
             } else {
-                self.widget_opt
+                self.widget_opt | WidgetOption::NO_INTERACT
             }
         })
     }
@@ -241,12 +243,6 @@ impl Container for ScrollAreaContainer {
         })
     }
 
-    fn pointer_hit_test(&self, _content_rect: Recti, pos: Vec2i) -> bool {
-        runtime_read_state(&self.state, "ScrollArea::pointer_hit_test", |state| {
-            state.scrolling_enabled && state.geometry.surface.contains(&pos)
-        })
-    }
-
     fn on_pointer_capture_lost(&mut self) {
         runtime_update_state(&self.state, "ScrollArea::on_pointer_capture_lost", |state| {
             state.drag_axis = None;
@@ -255,9 +251,16 @@ impl Container for ScrollAreaContainer {
 
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
         let has_pointer_capture = ctx.has_pointer_capture();
-        let surface = runtime_read_state(&self.state, "ScrollArea::route_input", |state| route_surface(state, event, has_pointer_capture));
-        let Some(surface) = surface else { return ContainerInputResult::Ignored };
-        ctx.route_widget_in_rect(event, surface, self.effective_widget_opt())
+        let opt = self.effective_widget_opt();
+        // The dispatcher has already selected the scroll area from its clipped allocation. This
+        // lookup only decides whether the current event can change scroll or drag state.
+        let event_surface = runtime_read_state(&self.state, "ScrollArea::route_input", |state| route_surface(state, event, has_pointer_capture));
+        let Some(event_surface) = event_surface else {
+            // A boundary wheel event remains owned by this target and may bubble only to ancestors.
+            return ContainerInputResult::Ignored;
+        };
+        // Event-specific controls may be narrower than the allocation selected by the dispatcher.
+        ctx.route_widget_in_rect(event, event_surface, opt)
     }
 }
 
@@ -455,12 +458,17 @@ fn layout_children(state: &mut ScrollAreaState, ctx: &mut ContainerLayoutCtx<'_>
     Dimensioni::new(width.max(0), y.max(0))
 }
 
+/// Returns the local sub-rectangle that can handle this event after dispatcher targeting.
 fn route_surface(state: &ScrollAreaState, event: &UiInputEvent, has_pointer_capture: bool) -> Option<Recti> {
+    // Disabled areas expose no local handler; effective_widget_opt also makes their own allocation
+    // transparent during target selection.
     if !state.scrolling_enabled {
         return None;
     }
     match *event {
         UiInputEvent::Scroll { pos, delta } => {
+            // Wheel handling uses the complete scroll allocation, including padding and tracks,
+            // but rejects motion that clamping would leave unchanged.
             let hit_rect = state.geometry.surface.contains(&pos).then_some(state.geometry.surface)?;
             let next = Vec2i::new(
                 state.geometry.offset.x.saturating_add(delta.x).clamp(0, state.geometry.max_offset.x),
@@ -468,7 +476,9 @@ fn route_surface(state: &ScrollAreaState, event: &UiInputEvent, has_pointer_capt
             );
             ((next.x, next.y) != (state.geometry.offset.x, state.geometry.offset.y)).then_some(hit_rect)
         }
+        // A press can begin scrollbar capture only from an actual track.
         UiInputEvent::MouseDown { pos, button } if button.intersects(MouseButton::LEFT) => state.geometry.track_at(pos).map(|(_, bar)| bar.track()),
+        // Once captured, drag and release remain deliverable outside the original track.
         UiInputEvent::MouseDrag { buttons, .. } if has_pointer_capture && state.drag_axis.is_some() && buttons.intersects(MouseButton::LEFT) => {
             Some(state.geometry.surface)
         }

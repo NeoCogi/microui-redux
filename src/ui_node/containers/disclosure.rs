@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, COLLAPSE_ICON, ControlColor, Dimensioni, EXPAND_ICON, MouseButton, Recti, Style, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx,
+    AtlasHandle, COLLAPSE_ICON, ControlColor, Dimensioni, EXPAND_ICON, MouseButton, Recti, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx,
     WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 
@@ -144,6 +144,8 @@ pub struct DisclosureContainer {
     opt: WidgetOption,
     /// Derived header geometry in this container's local content coordinates.
     header_rect: Recti,
+    /// Visual hover for the header sub-control; dispatcher hover still covers the full allocation.
+    header_hovered: bool,
 }
 
 impl DisclosureContainer {
@@ -215,7 +217,12 @@ impl Widget for DisclosureContainer {
         })
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        // A descendant or sibling may become the dispatcher target without routing through this
+        // container, so clear the narrower visual state when the container itself is not hovered.
+        if !ctx.hovered() {
+            self.header_hovered = false;
+        }
         let submitted = matches!(input, Some(UiInputEvent::MouseDown { button, .. }) if button.intersects(MouseButton::LEFT));
         if !submitted {
             return;
@@ -229,7 +236,7 @@ impl Widget for DisclosureContainer {
         match self.variant {
             DisclosureVariant::Header => {
                 let mut color = ControlColor::Button;
-                if ctx.hovered() {
+                if self.header_hovered {
                     color.hover();
                 }
                 if self.opt.intersects(WidgetOption::FRAME) {
@@ -238,7 +245,7 @@ impl Widget for DisclosureContainer {
                     ctx.draw_rect(row, ctx.style().colors[color as usize]);
                 }
             }
-            DisclosureVariant::Tree if ctx.hovered() => {
+            DisclosureVariant::Tree if self.header_hovered => {
                 ctx.draw_rect(row, ctx.style().colors[ControlColor::ButtonHover as usize]);
             }
             DisclosureVariant::Tree => {}
@@ -316,11 +323,12 @@ impl Container for DisclosureContainer {
         runtime_read_state(&self.state, "Disclosure::children_visible", DisclosureState::is_expanded)
     }
 
-    fn pointer_hit_test(&self, _content_rect: Recti, pos: Vec2i) -> bool {
-        self.header_rect.contains(&pos)
-    }
-
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
+        // Header geometry affects only this sub-control's handling and visuals; the dispatcher has
+        // already selected the container from its complete clipped allocation.
+        if let Some(pos) = event.position() {
+            self.header_hovered = self.header_rect.contains(&pos);
+        }
         ctx.route_widget_in_rect(event, self.header_rect, self.opt)
     }
 }
@@ -342,6 +350,7 @@ impl ContainerBuilder for DisclosureBuilder {
             variant: parameters.variant,
             opt: parameters.opt,
             header_rect: Recti::default(),
+            header_hovered: false,
         }
     }
 }
@@ -379,15 +388,5 @@ mod tests {
         assert!(matches!(tree.variant, DisclosureVariant::Tree));
         assert_eq!(tree.widget_opt().bits(), custom_opt.bits());
         assert_eq!(tree.state_handle().try_read(DisclosureState::is_expanded), Some(true));
-    }
-
-    #[test]
-    fn pointer_surface_contains_only_the_committed_header() {
-        let mut disclosure = DisclosureBuilder::create_container(DisclosureParameters::header("Header", true, std::iter::empty()));
-        disclosure.header_rect = Recti::new(0, 0, 100, 20);
-        let content = Recti::new(0, 0, 100, 80);
-
-        assert!(disclosure.pointer_hit_test(content, Vec2i::new(10, 10)));
-        assert!(!disclosure.pointer_hit_test(content, Vec2i::new(10, 40)));
     }
 }

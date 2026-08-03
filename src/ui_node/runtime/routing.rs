@@ -128,10 +128,8 @@ impl UiRuntime {
         }
 
         let capture = self.capture?;
-        self.hover = event
-            .position()
-            .filter(|pos| self.pointer_hits_target(roots, capture, style, *pos))
-            .map(|_| capture);
+        // Direct delivery will recompute hover from the captured node's clipped allocation.
+        self.hover = None;
         let result = self.route_input_event_to_target(roots, capture, style, event);
         self.update_pointer_capture(capture, result, event, mouse_buttons);
         Some(result.is_consumed())
@@ -142,6 +140,7 @@ impl UiRuntime {
         let Some(focus) = self.focus.filter(|id| contains_active_node_in(roots, *id)) else {
             return false;
         };
+        // Focus input bypasses pointer targeting and goes directly to the retained focus owner.
         self.route_input_event_to_target(roots, focus, style, event).is_consumed()
     }
 
@@ -156,69 +155,7 @@ impl UiRuntime {
         }
     }
 
-    /// Selects the topmost hit using ordinary parent-before-children paint stacking.
-    pub(crate) fn hit_test_pointer_node_ref(&self, node: &Node, parent_transform: Transform, style: &Style, pos: Vec2i) -> Option<RuntimeNodeId> {
-        let child_transform = parent_transform.push(node.state.layout);
-        if node_children_visible(node)
-            && let Some(hit) = node.with_children(|children| {
-                children
-                    .iter()
-                    .rev()
-                    .find_map(|child| self.hit_test_pointer_node_ref(child, child_transform, style, pos))
-            })
-        {
-            return Some(hit);
-        }
-        self.pointer_hits_node(node, parent_transform, style, pos).then(|| node.id())
-    }
-
-    /// Selects a root hit with its post-tree chrome above application descendants.
-    fn hit_test_pointer_root_ref(&self, node: &Node, parent_transform: Transform, style: &Style, pos: Vec2i) -> Option<RuntimeNodeId> {
-        if self.pointer_hits_node(node, parent_transform, style, pos) {
-            return Some(node.id());
-        }
-        let child_transform = parent_transform.push(node.state.layout);
-        node_children_visible(node)
-            .then(|| {
-                node.with_children(|children| {
-                    children
-                        .iter()
-                        .rev()
-                        .find_map(|child| self.hit_test_pointer_node_ref(child, child_transform, style, pos))
-                })
-            })
-            .flatten()
-    }
-
-    /// Tests one node's own local surface after runtime-owned option and clip filtering.
-    fn pointer_hits_node(&self, node: &Node, parent_transform: Transform, style: &Style, pos: Vec2i) -> bool {
-        let opt = node.data.widget().effective_widget_opt();
-        if opt.intersects(WidgetOption::NO_INTERACT) {
-            return false;
-        }
-
-        let framed = node_is_framed(node);
-        let screen_rect = parent_transform.resolve(node.state.layout.allocation);
-        let screen_clip = match parent_transform.clip.intersect(&screen_rect) {
-            Some(clip) if clip.contains(&pos) => clip,
-            _ => return false,
-        };
-        let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
-        let local_pos = pos - screen_origin;
-        let local_rect = Recti::new(0, 0, screen_rect.width, screen_rect.height);
-        let Some(container) = node.data.container() else {
-            return local_rect.contains(&local_pos);
-        };
-
-        let content_rect = crate::ui_node::frame::frame_geometry(local_rect, framed, style).content_or_empty();
-        let local_clip = rect_relative_to(screen_clip, screen_origin);
-        let Some(content_clip) = local_clip.intersect(&content_rect) else {
-            return false;
-        };
-        content_clip.contains(&local_pos) && container.pointer_hit_test(content_rect, local_pos)
-    }
-
-    /// Selects one ordinary topmost hit, then dispatches only through its ancestor path.
+    /// Routes one topmost ordinary hit and bubbles an ignored event only through its ancestors.
     #[cfg(test)]
     pub(crate) fn route_input_event_to_node_ref(
         &mut self,
@@ -227,7 +164,10 @@ impl UiRuntime {
         style: &Style,
         event: &UiInputEvent,
     ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
-        let target = self.hit_test_pointer_node_ref(node, parent_transform, style, event.position()?)?;
+        let pos = event.position()?;
+        // Select exactly one target before any handler runs so ignored events cannot reveal a
+        // covered sibling.
+        let target = self.hit_test_pointer_node_ref(node, parent_transform, pos)?;
         self.hover = Some(target);
         self.route_input_event_to_target_path_from(node, target, parent_transform, style, event)
     }
@@ -243,36 +183,64 @@ impl UiRuntime {
         parent_transform: Transform,
         style: &Style,
         event: &UiInputEvent,
+        root_chrome_hit: bool,
     ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
-        let target = self.hit_test_pointer_root_ref(node, parent_transform, style, event.position()?)?;
+        let pos = event.position()?;
+        // The window manager owns post-tree chrome geometry. When it reports a chrome hit, the
+        // root wins before descendants; otherwise ordinary targeting starts inside the root body.
+        let target = if root_chrome_hit {
+            Some(node.id())
+        } else {
+            let child_transform = parent_transform.push(node.state.layout);
+            node_children_visible(node)
+                .then(|| {
+                    node.with_children(|children| {
+                        children
+                            .iter()
+                            .rev()
+                            .find_map(|child| self.hit_test_pointer_node_ref(child, child_transform, pos))
+                    })
+                })
+                .flatten()
+        }?;
+
         self.hover = Some(target);
         self.route_input_event_to_target_path_from(node, target, parent_transform, style, event)
     }
 
-    /// Tests one retained target's own pointer surface without considering competing nodes.
-    fn pointer_hits_target(&self, roots: &[Node], target: RuntimeNodeId, style: &Style, pos: Vec2i) -> bool {
-        roots
-            .iter()
-            .find_map(|root| self.pointer_hits_target_from(root, target, self.root_transform, style, pos))
-            .unwrap_or(false)
+    /// Selects the deepest topmost node whose clipped allocation contains the pointer.
+    fn hit_test_pointer_node_ref(&self, node: &Node, parent_transform: Transform, pos: Vec2i) -> Option<RuntimeNodeId> {
+        let child_transform = parent_transform.push(node.state.layout);
+        // Children paint after their ordinary parent surface, so inspect them in reverse paint
+        // order before considering the current node.
+        if node_children_visible(node)
+            && let Some(target) = node.with_children(|children| {
+                children
+                    .iter()
+                    .rev()
+                    .find_map(|child| self.hit_test_pointer_node_ref(child, child_transform, pos))
+            })
+        {
+            return Some(target);
+        }
+
+        self.pointer_hits_node(node, parent_transform, pos).then(|| node.id())
     }
 
-    fn pointer_hits_target_from(&self, current: &Node, target: RuntimeNodeId, parent_transform: Transform, style: &Style, pos: Vec2i) -> Option<bool> {
-        if current.id() == target {
-            return Some(self.pointer_hits_node(current, parent_transform, style, pos));
+    /// Tests one node's own allocation using only dispatcher-owned geometry and options.
+    fn pointer_hits_node(&self, node: &Node, parent_transform: Transform, pos: Vec2i) -> bool {
+        // NO_INTERACT makes only this node's own surface transparent; eligible descendants were
+        // already considered by the caller.
+        if node.data.widget().effective_widget_opt().intersects(WidgetOption::NO_INTERACT) {
+            return false;
         }
-        if !node_children_visible(current) {
-            return None;
-        }
-        let child_parent = parent_transform.push(current.state.layout);
-        current.with_children(|children| {
-            children
-                .iter()
-                .find_map(|child| self.pointer_hits_target_from(child, target, child_parent, style, pos))
-        })
+
+        // Allocations are parent-local while the inherited clip is already in screen space.
+        let screen_rect = parent_transform.resolve(node.state.layout.allocation);
+        parent_transform.clip.contains(&pos) && screen_rect.contains(&pos)
     }
 
-    /// Descends to one selected target and bubbles an ignored result only through ancestors.
+    /// Dispatches to one selected target, then bubbles an ignored result through ancestors only.
     fn route_input_event_to_target_path_from(
         &mut self,
         current: &mut Node,
@@ -282,22 +250,29 @@ impl UiRuntime {
         event: &UiInputEvent,
     ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
         if current.id() == target {
+            // The target was already selected geometrically; its result only controls handling.
             let result = self.route_input_event_to_node_only_ref(current, parent_transform, style, event);
             return Some((target, result));
         }
 
-        let child_parent = parent_transform.push(current.state.layout);
+        // Follow the unique target path without revisiting sibling hit testing.
+        let child_transform = parent_transform.push(current.state.layout);
         let (owner, result) = current.with_children_mut(|children| {
             children
                 .iter_mut()
-                .find_map(|child| self.route_input_event_to_target_path_from(child, target, child_parent, style, event))
+                .find_map(|child| self.route_input_event_to_target_path_from(child, target, child_transform, style, event))
         })??;
         if result.is_consumed() {
             return Some((owner, result));
         }
 
-        let result = self.route_input_event_to_node_only_ref(current, parent_transform, style, event);
-        Some(if result.is_consumed() { (current.id(), result) } else { (owner, result) })
+        // Ignored delivery bubbles to the structural parent regardless of the parent's own hit.
+        let parent_result = self.route_input_event_to_node_only_ref(current, parent_transform, style, event);
+        Some(if parent_result.is_consumed() {
+            (current.id(), parent_result)
+        } else {
+            (owner, result)
+        })
     }
 
     /// Routes directly to one target during a single transform-carrying tree traversal.
@@ -323,6 +298,7 @@ impl UiRuntime {
         event: &UiInputEvent,
     ) -> Option<ContainerInputResult> {
         if current.id() == target {
+            // Direct focus/capture delivery stops at the target and never bubbles.
             return Some(self.route_input_event_to_node_only_ref(current, parent_transform, style, event));
         }
         // Children share the transform produced by their current parent layout.
@@ -344,6 +320,8 @@ impl UiRuntime {
     ) -> ContainerInputResult {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.routed_input_dispatches += 1);
+        // Resolve the same frame/content geometry used by update and paint before localizing the
+        // selected event for the concrete widget or container handler.
         let framed = node_is_framed(node);
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);
         let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
@@ -356,12 +334,22 @@ impl UiRuntime {
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
         let local_event = super::widget_context::localize_event(screen_origin, event.clone());
 
+        if self.capture == Some(node.id())
+            && let Some(pos) = event.position()
+        {
+            // Capture changes delivery only. Hover still follows the same allocation predicate as
+            // ordinary target selection and therefore clears when a drag leaves the owner.
+            self.hover = self.pointer_hits_node(node, parent_transform, pos).then(|| node.id());
+        }
+
         match &mut node.data {
             NodeKind::Widget(widget) => {
+                // Leaf widgets handle events through their complete outer allocation.
                 let opt = widget.widget.effective_widget_opt();
                 super::container::route_public_widget_input(self, &node.state, local_rect, local_clip, opt, &local_event)
             }
             NodeKind::Container(container) => {
+                // Containers receive scoped helpers but cannot influence target selection.
                 let mut ctx = ContainerInputCtx::new(self, content_rect, content_clip, &node.state);
                 container.route_input(&mut ctx, &local_event)
             }

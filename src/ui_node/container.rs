@@ -136,8 +136,8 @@ pub(crate) fn with_container_children_mut<R>(container: &mut dyn Container, f: i
 ///
 /// Common measurement, update, paint, options, and focus behavior remain inherited from
 /// [`Widget`]. Implementations must submit the same authoritative [`Children`] collection exactly
-/// once from both visitor methods. Layout, pointer-surface classification, and local event handling
-/// remain container-specific phases.
+/// once from both visitor methods. `layout` and `route_input` are the only container-specific
+/// phases.
 ///
 /// Capture responsibilities are deliberately split. The tree runtime owns the private captured
 /// node identity. The captured container owns only its local retention predicate and cleanup hook.
@@ -163,16 +163,6 @@ pub trait Container: Widget {
         true
     }
 
-    /// Tests this container's own event-independent pointer surface.
-    ///
-    /// `content_rect` and `pos` use the same container-local coordinate space as
-    /// [`Container::route_input`]. The runtime applies the active clip and
-    /// [`WidgetOption::NO_INTERACT`] before calling this hook. Descendant hit testing remains
-    /// framework-owned.
-    fn pointer_hit_test(&self, content_rect: Recti, pos: Vec2i) -> bool {
-        content_rect.contains(&pos)
-    }
-
     /// Reports whether this container's current local pointer-capture interaction remains active.
     ///
     /// The retained runtime owns the captured node identity. This query can only retain or revoke
@@ -190,13 +180,14 @@ pub trait Container: Widget {
     /// this together with [`Container::retains_pointer_capture`] when capture owns local state.
     fn on_pointer_capture_lost(&mut self) {}
 
-    /// Routes one event to this container's own interactive surface before that event's update.
+    /// Classifies and routes one event after the dispatcher selects this container.
     ///
-    /// Descendant routing and initial target selection are framework-owned. An override handles an
-    /// event already targeted at this container or ignored by one of its descendants. Return
-    /// [`ContainerInputResult::Ignored`] to continue only through this container's ancestors. Focus
-    /// behavior comes only from the inherited [`Widget::focus_policy`] query.
+    /// The dispatcher owns clipped-allocation hit testing, stacking, and descendant traversal.
+    /// This method only decides whether the selected container handles the current event. Returning
+    /// [`ContainerInputResult::Ignored`] bubbles through ancestors without restarting sibling
+    /// target search. Focus behavior comes only from the inherited [`Widget::focus_policy`] query.
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
+        // The default container handles events through its complete local content rectangle.
         ctx.route_widget(event, self.effective_widget_opt())
     }
 }
@@ -204,7 +195,7 @@ pub trait Container: Widget {
 /// Result of routing one input event to a container or leaf surface.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ContainerInputResult {
-    /// The node ignored the event, allowing only its ancestors to handle it.
+    /// The selected node ignored the event, allowing only ancestor bubbling.
     Ignored,
     /// The node consumed the event.
     Consumed,
@@ -219,6 +210,7 @@ impl ContainerInputResult {
     }
 }
 
+/// Delivers one already-targeted event through the common widget interaction rules.
 pub(super) fn route_public_widget_input(
     runtime: &mut UiRuntime,
     state: &NodeRuntime,
@@ -227,6 +219,8 @@ pub(super) fn route_public_widget_input(
     opt: WidgetOption,
     event: &UiInputEvent,
 ) -> ContainerInputResult {
+    // NO_INTERACT is enforced at delivery as well as target selection so direct focus or capture
+    // delivery cannot bypass a dynamically disabled widget.
     if opt.intersects(WidgetOption::NO_INTERACT) {
         return ContainerInputResult::Ignored;
     }
@@ -242,15 +236,17 @@ pub(super) fn route_public_widget_input(
     }
 
     let captured = runtime.capture == Some(id);
-    let hovered = event.position().map(|pos| rect.contains(&pos) && clip.contains(&pos)).unwrap_or(false);
+    // Dispatch already selected ordinary pointer targets from their allocations. This narrower
+    // check remains necessary for container sub-controls and for captured delivery outside bounds.
+    let event_hits_rect = event.position().is_some_and(|pos| rect.contains(&pos) && clip.contains(&pos));
 
     match event {
-        UiInputEvent::MouseDown { button, .. } if hovered => {
+        UiInputEvent::MouseDown { button, .. } if event_hits_rect => {
             runtime.claim_pointer_focus(id, *button);
             runtime.push_routed_event(id, event.clone());
             ContainerInputResult::Captured
         }
-        UiInputEvent::MouseDrag { .. } if captured || state.focused || hovered => {
+        UiInputEvent::MouseDrag { .. } if captured || event_hits_rect => {
             runtime.push_routed_event(id, event.clone());
             if captured {
                 ContainerInputResult::Captured
@@ -258,15 +254,15 @@ pub(super) fn route_public_widget_input(
                 ContainerInputResult::Consumed
             }
         }
-        UiInputEvent::MouseUp { .. } if captured || state.focused || hovered => {
+        UiInputEvent::MouseUp { .. } if captured || event_hits_rect => {
             runtime.push_routed_event(id, event.clone());
             ContainerInputResult::Consumed
         }
-        UiInputEvent::MouseMove { .. } if hovered => {
+        UiInputEvent::MouseMove { .. } if event_hits_rect => {
             runtime.push_routed_event(id, event.clone());
             ContainerInputResult::Consumed
         }
-        UiInputEvent::Scroll { delta, .. } if hovered && opt.intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0) => {
+        UiInputEvent::Scroll { delta, .. } if event_hits_rect && opt.intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0) => {
             runtime.push_routed_event(id, event.clone());
             ContainerInputResult::Consumed
         }
@@ -348,8 +344,9 @@ impl ContainerLayoutCtx<'_> {
 /// Framework-scoped routed-input services for one public [`Container`] call.
 ///
 /// The context belongs to one normalized event and one current container. It exposes only the
-/// current container's capture predicate and scoped routing of that container's own surface. It
-/// does not expose captured identity, descendant routing, or a focus-policy override.
+/// current container's capture predicate and scoped event-handling helpers. Pointer target
+/// selection remains entirely dispatcher-owned; this context does not expose captured identity,
+/// descendant routing, or a focus-policy override.
 pub struct ContainerInputCtx<'a> {
     runtime: &'a mut UiRuntime,
     content_rect: Recti,
@@ -358,7 +355,9 @@ pub struct ContainerInputCtx<'a> {
 }
 
 impl ContainerInputCtx<'_> {
+    /// Creates scoped delivery helpers for one dispatcher-selected container.
     pub(crate) fn new<'a>(runtime: &'a mut UiRuntime, content_rect: Recti, content_clip: Recti, current: &'a NodeRuntime) -> ContainerInputCtx<'a> {
+        // The context retains only delivery data for the currently selected container.
         ContainerInputCtx {
             runtime,
             content_rect,
@@ -371,6 +370,7 @@ impl ContainerInputCtx<'_> {
     ///
     /// This exposes no node identity and cannot acquire, release, or transfer capture.
     pub fn has_pointer_capture(&self) -> bool {
+        // Compare privately owned runtime identities without exposing either identity publicly.
         self.runtime.capture == Some(self.current.id())
     }
 
@@ -379,6 +379,7 @@ impl ContainerInputCtx<'_> {
     /// `opt` is the surface's effective interaction option set. The runtime obtains focus behavior
     /// authoritatively from the current container's [`Widget::focus_policy`] implementation.
     pub fn route_widget(&mut self, event: &UiInputEvent, opt: WidgetOption) -> ContainerInputResult {
+        // Handling uses the content rectangle; target selection has already completed.
         route_public_widget_input(self.runtime, self.current, self.content_rect, self.content_clip, opt, event)
     }
 
@@ -387,6 +388,7 @@ impl ContainerInputCtx<'_> {
     /// Use this for chrome such as a disclosure header or scrollbar. `rect` uses the same local
     /// content coordinate system as the event delivered to [`Container::route_input`].
     pub fn route_widget_in_rect(&mut self, event: &UiInputEvent, rect: Recti, opt: WidgetOption) -> ContainerInputResult {
+        // The sub-rectangle limits event handling, never dispatcher-owned pointer occupancy.
         route_public_widget_input(self.runtime, self.current, rect, self.content_clip, opt, event)
     }
 }

@@ -115,6 +115,15 @@ impl RootState {
         self.interaction != RootInteraction::None
     }
 
+    /// Returns whether the pointer occupies post-tree window chrome.
+    pub(super) fn pointer_hits_chrome(&self, pos: Vec2i) -> bool {
+        // Root chrome is private window-manager geometry, so it is resolved before generic tree
+        // allocation targeting rather than exposed through the public Container contract. Stored
+        // chrome is root-local while raw input remains in screen coordinates at this boundary.
+        let local_pos = pos - Vec2i::new(self.rect.x, self.rect.y);
+        self.geometry.hit_test(local_pos).is_some()
+    }
+
     /// Returns whether title movement is active.
     pub fn is_moving(&self) -> bool {
         self.interaction == RootInteraction::Moving
@@ -355,10 +364,6 @@ impl Container for RootChromeContainer {
         runtime_read_state(&self.state, "RootChrome::children_visible", RootState::is_visible)
     }
 
-    fn pointer_hit_test(&self, _content_rect: Recti, pos: Vec2i) -> bool {
-        runtime_read_state(&self.state, "RootChrome::pointer_hit_test", |state| state.geometry.hit_test(pos).is_some())
-    }
-
     fn retains_pointer_capture(&self) -> bool {
         runtime_read_state(&self.state, "RootChrome::retains_pointer_capture", RootState::is_active)
     }
@@ -372,10 +377,13 @@ impl Container for RootChromeContainer {
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
         let has_pointer_capture = ctx.has_pointer_capture();
         let (surface, part) = runtime_read_state(&self.state, "RootChrome::route_input", |state| {
+            let part = event_position(event).and_then(|pos| state.geometry.hit_test(pos));
             if has_pointer_capture && matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. }) {
-                (Some(state.geometry.outer), None)
+                // Captured drag/release delivery does not require the pointer to remain inside the
+                // routed rectangle. Keep the pure chrome hit separate by using the part currently
+                // under the pointer, or an empty rectangle when capture has moved outside chrome.
+                (Some(part.map(|part| state.geometry.rect_for(part)).unwrap_or_default()), part)
             } else {
-                let part = event_position(event).and_then(|pos| state.geometry.hit_test(pos));
                 (part.map(|part| state.geometry.rect_for(part)), part)
             }
         });
@@ -458,7 +466,6 @@ pub(super) enum RootChromePart {
 
 #[derive(Copy, Clone, Debug, Default)]
 pub(super) struct RootChromeGeometry {
-    pub(super) outer: Recti,
     pub(super) client: Recti,
     pub(super) title: Option<Recti>,
     pub(super) close: Option<Recti>,
@@ -469,7 +476,10 @@ pub(super) struct RootChromeGeometry {
 }
 
 impl RootChromeGeometry {
+    /// Classifies one pointer position against chrome parts in interaction priority order.
     fn hit_test(self, point: Vec2i) -> Option<RootChromePart> {
+        // The close button overlays the title, and the resize grip may overlay the body, so test
+        // both specialized controls before the remaining title surface.
         if self.close.is_some_and(|rect| rect.contains(&point)) {
             Some(RootChromePart::Close)
         } else if self.resize.is_some_and(|rect| rect.contains(&point)) {
@@ -481,7 +491,10 @@ impl RootChromeGeometry {
         }
     }
 
+    /// Returns the committed local rectangle for one previously classified chrome part.
     fn rect_for(self, part: RootChromePart) -> Recti {
+        // Missing optional geometry cannot produce its corresponding part and therefore maps only
+        // defensively to an empty rectangle.
         match part {
             RootChromePart::Title => self.title.unwrap_or_default(),
             RootChromePart::Close => self.close.unwrap_or_default(),
@@ -573,7 +586,6 @@ pub(super) fn root_chrome_geometry(
         )
     });
     RootChromeGeometry {
-        outer,
         client,
         title,
         close,

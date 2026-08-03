@@ -453,7 +453,7 @@ fn overlapping_pointer_routing_visits_siblings_in_reverse_z_order() {
 }
 
 #[test]
-fn pointer_hit_selection_uses_reverse_sibling_paint_order() {
+fn pointer_target_selection_uses_reverse_sibling_paint_order() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (first, _) = Probe::new("first", log.clone());
     let (second, _) = Probe::new("second", log.clone());
@@ -469,13 +469,20 @@ fn pointer_hit_selection_uses_reverse_sibling_paint_order() {
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, test_atlas());
 
-    let hit = runtime.hit_test_pointer_node_ref(&root, runtime.root_transform(), &style, Vec2i::new(20, 30));
-    assert_eq!(hit, Some(second_id_value));
-    assert_ne!(hit, Some(first_id_value));
+    let event = UiInputEvent::MouseMove {
+        pos: Vec2i::new(20, 30),
+        delta: Vec2i::default(),
+    };
+    runtime.begin_input_event(true, &event);
+    let target = runtime
+        .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event)
+        .map(|(owner, _)| owner);
+    assert_eq!(target, Some(second_id_value));
+    assert_ne!(target, Some(first_id_value));
 }
 
 #[test]
-fn no_interact_node_is_transparent_to_pointer_hit_selection() {
+fn no_interact_node_is_transparent_to_pointer_target_selection() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (first, _) = Probe::new("first", log.clone());
     let (mut second, _) = Probe::new("second", log.clone());
@@ -490,10 +497,50 @@ fn no_interact_node_is_transparent_to_pointer_hit_selection() {
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, test_atlas());
 
+    let event = UiInputEvent::MouseMove {
+        pos: Vec2i::new(20, 30),
+        delta: Vec2i::default(),
+    };
+    runtime.begin_input_event(true, &event);
     assert_eq!(
-        runtime.hit_test_pointer_node_ref(&root, runtime.root_transform(), &style, Vec2i::new(20, 30)),
+        runtime
+            .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event)
+            .map(|(owner, _)| owner),
         Some(first_id)
     );
+}
+
+#[test]
+fn container_allocation_remains_the_target_outside_an_event_subrect() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let (lower, lower_counts) = Probe::new("lower", log.clone());
+    let lower = Node::widget(lower).with_policy(Policy::fill());
+    let (_, disclosure) = crate::Disclosure::create(crate::DisclosureParameters::header("Header", true, std::iter::empty()));
+    let disclosure = disclosure.with_policy(Policy::fill());
+    let disclosure_id = disclosure.id();
+    let container = TraversalContainer::new([lower, disclosure], false, log);
+    let mut root = Node::container(container);
+    let mut runtime = UiRuntime::new();
+    let style = Style::default();
+    let atlas = test_atlas();
+
+    runtime.begin_update();
+    layout_root(&mut runtime, &mut root, &style, atlas.clone());
+
+    let disclosure_rect = runtime
+        .debug_node_rect(std::slice::from_ref(&root), disclosure_id)
+        .expect("laid-out disclosure must retain a screen allocation");
+    let event = UiInputEvent::MouseMove {
+        // Use the bottom of the filled allocation, below the preferred-height header.
+        pos: Vec2i::new(disclosure_rect.x + 1, disclosure_rect.y + disclosure_rect.height - 1),
+        delta: Vec2i::default(),
+    };
+    runtime.begin_input_event(true, &event);
+    let routed = runtime.route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event);
+    assert!(routed.is_some(), "the selected target may bubble to its parent handler");
+    assert_eq!(runtime.hover, Some(disclosure_id), "the complete allocation must remain the selected target");
+    runtime.update_tree_root(&mut root, &style, atlas, empty_input());
+    assert_eq!(lower_counts.routed_events.get(), 0, "a covered sibling must not receive the bubbled event");
 }
 
 #[test]

@@ -415,12 +415,21 @@ impl<B: RendererBackend> Context<B> {
             {
                 let entry = &mut self.roots[index];
                 if entry.tree.runtime.accepts_pointer_input() {
+                    // Root chrome is a window-manager overlay, not a customizable container hit
+                    // surface. Resolve it here before generic allocation-based tree targeting.
+                    let root_chrome_hit = entry
+                        .root_state
+                        .try_read(|state| event.position().is_some_and(|pos| state.pointer_hits_chrome(pos)))
+                        .expect("registered root state unavailable during pointer targeting");
                     let transform = entry.tree.runtime.root_transform();
-                    if let Some((owner, result)) = entry
-                        .tree
-                        .runtime
-                        .route_root_input_event_to_node_ref(&mut entry.tree.root, transform, &self.style, event)
+                    if let Some((owner, result)) =
+                        entry
+                            .tree
+                            .runtime
+                            .route_root_input_event_to_node_ref(&mut entry.tree.root, transform, &self.style, event, root_chrome_hit)
                     {
+                        // Capture is updated only after the selected target and its ancestors have
+                        // finished classifying the event.
                         entry.tree.runtime.update_pointer_capture(owner, result, event, input.mouse_buttons);
                     }
                 }
