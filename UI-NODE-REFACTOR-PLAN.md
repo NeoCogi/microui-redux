@@ -5380,7 +5380,7 @@ change a protected P0 behavior follows the explicit change-control rule.
   public API, production ownership/runtime path, optimization, cache, index, dirty bit, or timing
   threshold. Full direct traversal remains the measured completion baseline for P5.2.
 
-- [ ] **P5.2 — Keep full traversal unless a separate measured optimization plan is approved**
+- [x] **P5.2 — Keep full traversal unless a separate measured optimization plan is approved**
 
   **Problem**
 
@@ -5391,16 +5391,59 @@ change a protected P0 behavior follows the explicit change-control rule.
 
   **Target contract or migration**
 
-  Complete this migration with full direct traversal. If P5.1 demonstrates a concrete budget miss,
-  do not extend this plan or delay its correctness definition: create and approve a separate plan
-  covering state mutation, topology, style/font/atlas changes, resize, scroll, custom rendering,
-  and removal.
+  Complete this migration with full direct traversal. P5.1 has no approved numeric performance
+  budget and its measurements remain informational. If a future measurement against a separately
+  approved budget demonstrates a concrete miss, do not extend this plan or reopen its correctness
+  definition: create and approve a separate plan covering state mutation, topology,
+  style/font/atlas changes, resize, scroll, custom rendering, and removal.
 
   **Acceptance tests**
 
-  - P5.1 records the full-traversal baseline and any measured budget miss.
+  - P5.1 records the full-traversal baseline; without an approved budget, timing remains
+    informational rather than a release threshold.
   - No cache/index/dirty bit lands without lifecycle and invalidation tests.
   - Completion does not claim incremental rendering when full traversal remains.
+
+  **Completion evidence (2026-08-02)**
+
+  P5.1 records no material regression and no approved budget miss. Its hard allocation, topology,
+  and phase assertions remain the evidence for this item; elapsed time remains informational. The
+  recorded sync-plus-render allocation counts and elapsed samples improve on all three P0 retained
+  runtime scenarios, while the file-dialog controller performs zero idle allocation and no root
+  reconstruction.
+
+  The retained execution paths remain unchanged. `Context::update_ui` performs one complete
+  synchronization layout and one full eligible-tree update/layout transaction per queued event;
+  `UiRuntime` recursively updates and paints every eligible child through direct owned traversal;
+  and `ContextFrame::render_ui` paints/submits the complete committed tree without update or layout.
+  Root visibility, modal eligibility, and `Container::children_visible` remain semantic gates, not
+  dirty-state or incremental-work machinery.
+
+  Production-source audits find no UI traversal dirty bit, retained-paint fragment cache, runtime
+  node index, incremental layout/update/paint path, invalidation graph, generation, or revision
+  mechanism. Existing committed node geometry, transient input targets, display-list capacity
+  reuse, atlas/backend resources, and rendering-only widget caches retain their established owners;
+  none skips retained traversal or claims incremental rendering.
+
+  P5.2 adds no production code, public API, test-only runtime hook, cache, index, dirty flag,
+  invalidation protocol, timing threshold, or optimization. Full direct traversal is the completed
+  P0-P5 migration baseline. Any later incremental traversal or retained-paint work requires a
+  separate repository-grounded plan with explicit lifecycle, invalidation, correctness, and
+  performance-budget tests.
+
+  The serial ignored release baselines pass and reproduce the P5.1 hard allocation, topology, and
+  phase counts: the three-event scenario records four layouts, six node updates, and zero paints
+  before render, then exactly two paints with no additional update or layout. File-dialog idle and
+  refresh retain 34/35 nodes, perform zero root rebuilds, and preserve the recorded allocation and
+  phase counts. Timing samples remain within the previously recorded informational ranges and are
+  not asserted.
+
+  `cargo fmt --all -- --check`, `cargo test --all-targets`, `cargo test --doc`,
+  `cargo clippy --all-targets -- -W clippy::all`, `cargo check --no-default-features`,
+  `cargo doc --no-deps`, and separate Glow/Vulkan/WGPU example checks pass. The ordinary suite has
+  195 passing unit tests, three intentionally ignored manual baselines, four passing downstream
+  integration tests, and 19 passing doctest/compile-fail cases. Clippy reports only the
+  repository's existing warning baseline; `git diff --check` passes.
 
 ## Final release validation gate
 
