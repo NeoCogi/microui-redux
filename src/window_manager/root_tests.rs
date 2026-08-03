@@ -34,6 +34,7 @@ struct OrderedProbeState {
     measures: usize,
     updates: usize,
     paints: usize,
+    hovered: bool,
 }
 
 impl WidgetState for OrderedProbeState {}
@@ -66,6 +67,7 @@ impl Widget for OrderedProbe {
         state.updates += 1;
         state.held_buttons.push(ctx.mouse_buttons().bits());
         state.held_keys.push(ctx.key_modes().bits());
+        state.hovered = ctx.hovered();
         if let Some(event) = event {
             state.events.push(match event {
                 UiInputEvent::MouseMove { .. } => "move",
@@ -1267,6 +1269,14 @@ fn resize_overlay_preempts_content_where_the_grip_overlaps_the_root_body() {
         resize.contains(&press) && body.contains(&press),
         "the regression requires the painted grip to overlap content"
     );
+
+    ctx.mousemove(press.x, press.y);
+    ctx.update_and_render_ui();
+    assert_eq!(probe_state.try_read(|state| state.hovered), Some(false));
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(Vec::new()));
+    ctx.scroll(0, 1);
+    ctx.update_and_render_ui();
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(Vec::new()));
 
     let before = root.state().try_read(RootState::rect).unwrap();
     ctx.mousedown(press.x, press.y, MouseButton::LEFT);

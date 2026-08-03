@@ -144,8 +144,6 @@ pub struct DisclosureContainer {
     opt: WidgetOption,
     /// Derived header geometry in this container's local content coordinates.
     header_rect: Recti,
-    /// Routing-derived hover state for the header sub-rectangle.
-    header_hovered: bool,
 }
 
 impl DisclosureContainer {
@@ -231,7 +229,7 @@ impl Widget for DisclosureContainer {
         match self.variant {
             DisclosureVariant::Header => {
                 let mut color = ControlColor::Button;
-                if self.header_hovered {
+                if ctx.hovered() {
                     color.hover();
                 }
                 if self.opt.intersects(WidgetOption::FRAME) {
@@ -240,7 +238,7 @@ impl Widget for DisclosureContainer {
                     ctx.draw_rect(row, ctx.style().colors[color as usize]);
                 }
             }
-            DisclosureVariant::Tree if self.header_hovered => {
+            DisclosureVariant::Tree if ctx.hovered() => {
                 ctx.draw_rect(row, ctx.style().colors[ControlColor::ButtonHover as usize]);
             }
             DisclosureVariant::Tree => {}
@@ -323,9 +321,6 @@ impl Container for DisclosureContainer {
     }
 
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
-        if let Some(pos) = event.position() {
-            self.header_hovered = self.header_rect.contains(&pos);
-        }
         ctx.route_widget_in_rect(event, self.header_rect, self.opt)
     }
 }
@@ -347,7 +342,6 @@ impl ContainerBuilder for DisclosureBuilder {
             variant: parameters.variant,
             opt: parameters.opt,
             header_rect: Recti::default(),
-            header_hovered: false,
         }
     }
 }

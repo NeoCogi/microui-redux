@@ -16,6 +16,7 @@ struct ProbeCounts {
     updates: Cell<usize>,
     paints: Cell<usize>,
     routed_events: Cell<usize>,
+    hovered: Cell<bool>,
 }
 
 struct Probe {
@@ -60,9 +61,10 @@ impl Widget for Probe {
         Dimensioni::new(17, 13)
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         self.counts.updates.set(self.counts.updates.get() + 1);
         self.counts.routed_events.set(self.counts.routed_events.get() + usize::from(input.is_some()));
+        self.counts.hovered.set(ctx.hovered());
         self.log.borrow_mut().push(format!("{}:update", self.name));
     }
 
@@ -446,6 +448,8 @@ fn overlapping_pointer_routing_visits_siblings_in_reverse_z_order() {
 
     assert_eq!(first_counts.routed_events.get(), 0);
     assert_eq!(second_counts.routed_events.get(), 1);
+    assert!(!first_counts.hovered.get());
+    assert!(second_counts.hovered.get());
 }
 
 #[test]
@@ -521,6 +525,8 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
         0,
         "the covered sibling must never be considered after the hit"
     );
+    assert!(upper_counts.hovered.get(), "the geometric target remains hovered when its event bubbles");
+    assert!(!lower_counts.hovered.get());
 }
 
 #[test]
@@ -582,6 +588,7 @@ fn captured_container_reports_local_retention_and_receives_loss_notification() {
         .expect("container pointer-down must route");
     runtime.update_pointer_capture(owner, result, &down, down_state.mouse_buttons);
     assert_eq!(runtime.capture, Some(id));
+    assert_eq!(runtime.hover, Some(id));
     runtime.update_tree_root(&mut root, &style, atlas.clone(), down_state);
     assert!(state.borrow().active);
 
@@ -593,6 +600,7 @@ fn captured_container_reports_local_retention_and_receives_loss_notification() {
         Some(true)
     );
     assert!(state.borrow().saw_capture_during_drag);
+    assert_eq!(runtime.hover, None, "capture delivery outside the owner's pure surface must not imply hover");
 
     runtime.update_tree_root(&mut root, &style, atlas, drag_state);
     assert_eq!(runtime.capture, Some(id));

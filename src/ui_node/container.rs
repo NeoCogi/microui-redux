@@ -136,8 +136,8 @@ pub(crate) fn with_container_children_mut<R>(container: &mut dyn Container, f: i
 ///
 /// Common measurement, update, paint, options, and focus behavior remain inherited from
 /// [`Widget`]. Implementations must submit the same authoritative [`Children`] collection exactly
-/// once from both visitor methods. `layout` and `route_input` are the only container-specific
-/// phases.
+/// once from both visitor methods. Layout, pointer-surface classification, and local event handling
+/// remain container-specific phases.
 ///
 /// Capture responsibilities are deliberately split. The tree runtime owns the private captured
 /// node identity. The captured container owns only its local retention predicate and cleanup hook.
@@ -192,10 +192,10 @@ pub trait Container: Widget {
 
     /// Routes one event to this container's own interactive surface before that event's update.
     ///
-    /// Descendant routing is framework-owned. An override may restrict this container's local hit
-    /// surface and then call [`ContainerInputCtx::route_widget`] or
-    /// [`ContainerInputCtx::route_widget_in_rect`]. Focus behavior comes only from the inherited
-    /// [`Widget::focus_policy`] query.
+    /// Descendant routing and initial target selection are framework-owned. An override handles an
+    /// event already targeted at this container or ignored by one of its descendants. Return
+    /// [`ContainerInputResult::Ignored`] to continue only through this container's ancestors. Focus
+    /// behavior comes only from the inherited [`Widget::focus_policy`] query.
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
         ctx.route_widget(event, self.effective_widget_opt())
     }
@@ -204,7 +204,7 @@ pub trait Container: Widget {
 /// Result of routing one input event to a container or leaf surface.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ContainerInputResult {
-    /// The node ignored the event.
+    /// The node ignored the event, allowing only its ancestors to handle it.
     Ignored,
     /// The node consumed the event.
     Consumed,

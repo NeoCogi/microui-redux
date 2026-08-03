@@ -22,7 +22,7 @@ impl UiRuntime {
 
         let (opt, focus_policy) = node_interaction_config(node);
         let id = node.id();
-        let (hovered, focused, clicked, active) = self.commit_interaction_snapshot(id, screen_rect, screen_clip, node.state.hovered, input, opt, focus_policy);
+        let (hovered, focused, clicked, active) = self.commit_interaction_snapshot(id, node.state.hovered, input, opt, focus_policy);
         node.state.hovered = hovered;
         node.state.focused = focused;
         node.state.clicked = clicked;
@@ -68,8 +68,6 @@ impl UiRuntime {
     fn commit_interaction_snapshot(
         &mut self,
         id: RuntimeNodeId,
-        rect: Recti,
-        clip: Recti,
         prior_hovered: bool,
         input: InputSnapshot,
         opt: WidgetOption,
@@ -79,14 +77,7 @@ impl UiRuntime {
             return (false, false, false, false);
         }
 
-        let hovered = if self.pointer_event_active {
-            self.pointer_input_enabled && rect.contains(&input.mouse_pos) && clip.contains(&input.mouse_pos)
-        } else {
-            prior_hovered
-        };
-        if hovered {
-            self.hover = Some(id);
-        }
+        let hovered = if self.pointer_event_active { self.hover == Some(id) } else { prior_hovered };
 
         if self.focus == Some(id) {
             let released_without_hold_focus = self.pointer_release_active && input.mouse_buttons.is_empty() && focus_policy.releases_on_mouse_up();

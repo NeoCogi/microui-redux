@@ -128,6 +128,10 @@ impl UiRuntime {
         }
 
         let capture = self.capture?;
+        self.hover = event
+            .position()
+            .filter(|pos| self.pointer_hits_target(roots, capture, style, *pos))
+            .map(|_| capture);
         let result = self.route_input_event_to_target(roots, capture, style, event);
         self.update_pointer_capture(capture, result, event, mouse_buttons);
         Some(result.is_consumed())
@@ -224,6 +228,7 @@ impl UiRuntime {
         event: &UiInputEvent,
     ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
         let target = self.hit_test_pointer_node_ref(node, parent_transform, style, event.position()?)?;
+        self.hover = Some(target);
         self.route_input_event_to_target_path_from(node, target, parent_transform, style, event)
     }
 
@@ -240,7 +245,31 @@ impl UiRuntime {
         event: &UiInputEvent,
     ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
         let target = self.hit_test_pointer_root_ref(node, parent_transform, style, event.position()?)?;
+        self.hover = Some(target);
         self.route_input_event_to_target_path_from(node, target, parent_transform, style, event)
+    }
+
+    /// Tests one retained target's own pointer surface without considering competing nodes.
+    fn pointer_hits_target(&self, roots: &[Node], target: RuntimeNodeId, style: &Style, pos: Vec2i) -> bool {
+        roots
+            .iter()
+            .find_map(|root| self.pointer_hits_target_from(root, target, self.root_transform, style, pos))
+            .unwrap_or(false)
+    }
+
+    fn pointer_hits_target_from(&self, current: &Node, target: RuntimeNodeId, parent_transform: Transform, style: &Style, pos: Vec2i) -> Option<bool> {
+        if current.id() == target {
+            return Some(self.pointer_hits_node(current, parent_transform, style, pos));
+        }
+        if !node_children_visible(current) {
+            return None;
+        }
+        let child_parent = parent_transform.push(current.state.layout);
+        current.with_children(|children| {
+            children
+                .iter()
+                .find_map(|child| self.pointer_hits_target_from(child, target, child_parent, style, pos))
+        })
     }
 
     /// Descends to one selected target and bubbles an ignored result only through ancestors.
