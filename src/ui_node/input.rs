@@ -70,6 +70,16 @@ pub enum UiInputEvent {
 }
 
 impl UiInputEvent {
+    /// Returns the pointer position carried by this event, when it belongs to pointer routing.
+    pub(crate) fn position(&self) -> Option<Vec2i> {
+        match self {
+            Self::MouseMove { pos, .. } | Self::MouseDrag { pos, .. } | Self::MouseDown { pos, .. } | Self::MouseUp { pos, .. } | Self::Scroll { pos, .. } => {
+                Some(*pos)
+            }
+            Self::KeyDown { .. } | Self::KeyUp { .. } | Self::KeyCodeDown { .. } | Self::KeyCodeUp { .. } | Self::Text { .. } => None,
+        }
+    }
+
     /// Returns whether this event belongs to pointer routing.
     pub(crate) fn is_pointer(&self) -> bool {
         matches!(

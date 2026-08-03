@@ -4,35 +4,7 @@ use crate::{Widget, WidgetOption, WidgetParameters, WidgetState, WidgetStateOwne
 #[cfg(test)]
 use crate::{WidgetPaintCtx, WidgetUpdateCtx};
 
-use super::{Children, Node, NodeLayout, NodeRuntime, UiInputEvent, UiRuntime};
-
-mod axis;
-mod column;
-mod disclosure;
-mod grid;
-mod row;
-mod scroll_area;
-mod stack;
-
-use axis::Axis;
-
-pub use column::{Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState};
-pub use disclosure::{Disclosure, DisclosureBuilder, DisclosureContainer, DisclosureParameters, DisclosureState};
-pub use grid::{Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState};
-pub use row::{Row, RowBuilder, RowContainer, RowParameters, RowState};
-pub use scroll_area::{ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState};
-pub use stack::{Stack, StackBuilder, StackContainer, StackDirection, StackParameters, StackState};
-
-/// Returns the content-independent fallback width used by explicit empty Grid tracks.
-fn default_cell_width(style: &Style) -> i32 {
-    style.default_cell_width.saturating_add(style.padding.max(0) * 2).max(0)
-}
-
-/// Returns the font-derived fallback height used by empty Row and Grid tracks.
-fn default_cell_height(style: &Style, atlas: &crate::AtlasHandle) -> i32 {
-    let padding = style.padding.max(0);
-    (atlas.get_font_height(style.font) as i32).saturating_add(padding * 2).max(padding * 2)
-}
+use super::{Children, NodeLayout, NodeRuntime, UiInputEvent, UiRuntime};
 
 /// Marker for application-facing state owned by a concrete container runtime.
 ///
@@ -45,7 +17,7 @@ pub trait ContainerState: WidgetState {}
 ///
 /// Downstream convenience constructors use `create_container`, obtain the runtime's typed weak
 /// state handle through [`WidgetStateOwner::state_handle`], and finish ownership with
-/// [`Node::container`]. Parameters do not choose whether a handle is returned: built-in concrete
+/// [`crate::Node::container`]. Parameters do not choose whether a handle is returned: built-in concrete
 /// constructors always return `(WidgetStateHandle<State>, Node)`.
 ///
 /// ```
@@ -185,7 +157,7 @@ pub trait Container: Widget {
     /// Reports whether descendants participate in traversal while remaining owned.
     ///
     /// This is an ancestor-owned descendant gate, not generic node visibility. Built-in
-    /// [`Disclosure`] uses it for collapsed content; root visibility remains a separate
+    /// [`crate::Disclosure`] uses it for collapsed content; root visibility remains a separate
     /// [`crate::Context::set_root_visible`] operation.
     fn children_visible(&self) -> bool {
         true
@@ -237,21 +209,6 @@ impl ContainerInputResult {
     }
 }
 
-fn event_position(event: &UiInputEvent) -> Option<Vec2i> {
-    match event {
-        UiInputEvent::MouseMove { pos, .. }
-        | UiInputEvent::MouseDrag { pos, .. }
-        | UiInputEvent::MouseDown { pos, .. }
-        | UiInputEvent::MouseUp { pos, .. }
-        | UiInputEvent::Scroll { pos, .. } => Some(*pos),
-        UiInputEvent::KeyDown { .. }
-        | UiInputEvent::KeyUp { .. }
-        | UiInputEvent::KeyCodeDown { .. }
-        | UiInputEvent::KeyCodeUp { .. }
-        | UiInputEvent::Text { .. } => None,
-    }
-}
-
 pub(super) fn route_public_widget_input(
     runtime: &mut UiRuntime,
     state: &NodeRuntime,
@@ -275,7 +232,7 @@ pub(super) fn route_public_widget_input(
     }
 
     let captured = runtime.capture == Some(id);
-    let hovered = event_position(event).map(|pos| rect.contains(&pos) && clip.contains(&pos)).unwrap_or(false);
+    let hovered = event.position().map(|pos| rect.contains(&pos) && clip.contains(&pos)).unwrap_or(false);
 
     match event {
         UiInputEvent::MouseDown { button, .. } if hovered => {

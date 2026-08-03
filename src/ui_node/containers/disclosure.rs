@@ -319,7 +319,7 @@ impl Container for DisclosureContainer {
     }
 
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
-        if let Some(pos) = super::event_position(event) {
+        if let Some(pos) = event.position() {
             self.header_hovered = self.header_rect.contains(&pos);
         }
         ctx.route_widget_in_rect(event, self.header_rect, self.opt)

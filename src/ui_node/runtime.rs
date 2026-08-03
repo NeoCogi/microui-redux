@@ -662,7 +662,7 @@ impl UiRuntime {
         match &mut node.data {
             NodeKind::Widget(widget) => {
                 let opt = widget.widget.effective_widget_opt();
-                super::containers::route_public_widget_input(self, &node.state, local_rect, local_clip, opt, &local_event)
+                super::container::route_public_widget_input(self, &node.state, local_rect, local_clip, opt, &local_event)
             }
             NodeKind::Container(container) => {
                 let mut ctx = ContainerInputCtx::new(self, content_rect, content_clip, &node.state);
