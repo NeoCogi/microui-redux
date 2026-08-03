@@ -50,25 +50,25 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Shared helpers and re-exports for the basic retained widgets.
+//! Shared sizing, coloring, and inline-content helpers for retained controls.
 //!
 //! The split widget modules keep concrete widget state small; this file holds common sizing,
 //! coloring, and submit helpers used by buttons, lists, combos, checkboxes, and custom controls.
 use crate::*;
 /// Measures text with the widget's resolved font choice.
-fn text_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, text: &str) -> Dimensioni {
+pub(super) fn text_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, text: &str) -> Dimensioni {
     atlas.get_text_size(style.resolve_font_choice(font), text)
 }
 
 /// Computes a control height that can fit both text and an optional visual element.
-fn content_height(style: &Style, atlas: &AtlasHandle, font: FontChoice, visual_height: i32) -> i32 {
+pub(super) fn content_height(style: &Style, atlas: &AtlasHandle, font: FontChoice, visual_height: i32) -> i32 {
     let font_height = atlas.get_font_height(style.resolve_font_choice(font)) as i32;
     let vertical_pad = (style.padding / 2).max(1);
     (font_height.max(visual_height) + vertical_pad * 2).max(0)
 }
 
 /// Computes preferred size for a single-line label plus an optional icon or texture.
-fn inline_content_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, label: &str, visual_size: Option<Dimensioni>) -> Dimensioni {
+pub(super) fn inline_content_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, label: &str, visual_size: Option<Dimensioni>) -> Dimensioni {
     let padding = style.padding.max(0);
     let text_size = if label.is_empty() {
         Dimensioni::default()
@@ -93,7 +93,7 @@ fn inline_content_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, lab
 }
 
 /// Computes preferred size for an image-like button that scales its visual to the available width.
-fn scaled_visual_content_size(available: Dimensioni, visual_size: Option<Dimensioni>) -> Dimensioni {
+pub(super) fn scaled_visual_content_size(available: Dimensioni, visual_size: Option<Dimensioni>) -> Dimensioni {
     let visual_size = visual_size.unwrap_or_default();
     if visual_size.width <= 0 || visual_size.height <= 0 {
         return Dimensioni::default();
@@ -106,15 +106,15 @@ fn scaled_visual_content_size(available: Dimensioni, visual_size: Option<Dimensi
 
 #[derive(Copy, Clone)]
 /// Resolved inline placement for an optional visual and text region.
-struct InlineContentLayout {
+pub(super) struct InlineContentLayout {
     /// Optional visual/icon rectangle.
-    visual: Option<Recti>,
+    pub(super) visual: Option<Recti>,
     /// Text rectangle.
-    text: Recti,
+    pub(super) text: Recti,
 }
 
 /// Places an optional visual before text while keeping visual-only content centered.
-fn layout_inline_content(bounds: Recti, style: &Style, label: &str, visual_size: Option<Dimensioni>) -> InlineContentLayout {
+pub(super) fn layout_inline_content(bounds: Recti, style: &Style, label: &str, visual_size: Option<Dimensioni>) -> InlineContentLayout {
     let padding = style.padding.max(0);
     let visual_size = visual_size.unwrap_or_default();
     let has_visual = visual_size.width > 0 && visual_size.height > 0;
@@ -148,7 +148,7 @@ fn layout_inline_content(bounds: Recti, style: &Style, label: &str, visual_size:
 }
 
 /// Places an image-like visual by fitting it to the button bounds while preserving aspect ratio.
-fn layout_scaled_visual_content(bounds: Recti, visual_size: Option<Dimensioni>) -> InlineContentLayout {
+pub(super) fn layout_scaled_visual_content(bounds: Recti, visual_size: Option<Dimensioni>) -> InlineContentLayout {
     let visual_size = visual_size.unwrap_or_default();
     if visual_size.width <= 0 || visual_size.height <= 0 || bounds.width <= 0 || bounds.height <= 0 {
         return InlineContentLayout { visual: None, text: bounds };
@@ -171,7 +171,7 @@ fn layout_scaled_visual_content(bounds: Recti, visual_size: Option<Dimensioni>) 
 }
 
 /// Selects which control color should be painted for a widget's fill policy and state.
-fn widget_fill_color(ctx: &WidgetPaintCtx<'_>, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
+pub(super) fn widget_fill_color(ctx: &WidgetPaintCtx<'_>, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
     if ctx.focused() && fill.intersects(WidgetFillOption::CLICK) {
         let mut color = base;
         color.focus();
@@ -186,18 +186,3 @@ fn widget_fill_color(ctx: &WidgetPaintCtx<'_>, base: ControlColor, fill: WidgetF
         None
     }
 }
-
-mod button;
-mod checkbox;
-mod combo;
-mod custom;
-mod list;
-
-pub use button::{Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState};
-pub use checkbox::{Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState};
-pub use combo::{Combo, ComboBuilder, ComboParameters, ComboState};
-pub use custom::{Custom, CustomBuilder, CustomParameters};
-pub use list::{ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters, ListItemState};
-
-#[cfg(test)]
-mod tests;

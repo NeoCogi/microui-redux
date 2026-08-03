@@ -27,7 +27,7 @@ mod scrollbar;
 mod sizing;
 pub use sizing::{Policy, SizePolicy};
 mod widget;
-mod widget_ctx;
+mod widget_context;
 pub use widget::{
     FocusPolicy, Widget, WidgetBuilder, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };

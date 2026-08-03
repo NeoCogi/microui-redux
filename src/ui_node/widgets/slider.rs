@@ -50,65 +50,14 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Slider and numeric entry widgets.
+//! Retained slider widget.
 //!
-//! Sliders support dragging, wheel increments, snapping, and shift-click text entry; `Number`
-//! shares the same text-editing helpers without a slider thumb.
+//! Sliders support dragging, wheel increments, snapping, and shift-click text entry.
 use crate::*;
 use crate::ui_node::{runtime_read_state, runtime_update_state};
-use std::fmt::Write;
 use std::{cell::RefCell, rc::Rc};
 
-use super::textbox::{textbox_paint, textbox_update};
-
-/// Formats a numeric value using the widget's display precision.
-fn number_label(value: Real, precision: usize) -> String {
-    let mut label = String::new();
-    let _ = write!(label, "{:.*}", precision, value);
-    label
-}
-
-/// Computes preferred size for numeric widgets with optional visual affordance width.
-fn number_preferred_size(
-    style: &Style,
-    atlas: &AtlasHandle,
-    font: FontChoice,
-    value: Real,
-    precision: usize,
-    visual_width: i32,
-    visual_height: i32,
-) -> Dimensioni {
-    let label = number_label(value, precision);
-    let resolved_font = style.resolve_font_choice(font);
-    let text_w = atlas.get_text_size(resolved_font, label.as_str()).width;
-    let padding = style.padding.max(0);
-    let vertical_pad = (padding / 2).max(1);
-    let font_height = atlas.get_font_height(resolved_font) as i32;
-    let width = (text_w + padding * 2 + visual_width.max(0)).max(0);
-    let height = (font_height.max(visual_height.max(0)) + vertical_pad * 2).max(0);
-    Dimensioni::new(width, height)
-}
-
-/// Adds hold-focus while the inline numeric textbox is active.
-fn number_effective_widget_opt(opt: WidgetOption, editing: bool) -> WidgetOption {
-    if editing { opt | WidgetOption::HOLD_FOCUS } else { opt }
-}
-
-/// Chooses drag or text-edit focus behavior for numeric widgets.
-fn number_focus_policy(editing: bool) -> FocusPolicy {
-    if editing { FocusPolicy::HoldUntilBlur } else { FocusPolicy::DragCapture }
-}
-
-#[derive(Clone, Default, PartialEq)]
-/// Editing buffer for number-style widgets.
-struct NumberEditState {
-    /// Whether the widget is currently in edit mode.
-    editing: bool,
-    /// Text buffer for numeric input.
-    buf: String,
-    /// Cursor position within the buffer (byte index).
-    cursor: usize,
-}
+use super::numeric_edit::*;
 
 /// One-shot construction input for a [`Slider`].
 pub struct SliderParameters {
@@ -334,48 +283,6 @@ fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
     }
 }
 
-/// Runs the shared textbox editor for shift-click numeric input.
-fn number_textbox_update(
-    ctx: &mut WidgetUpdateCtx<'_>,
-    input: Option<&UiInputEvent>,
-    edit: &mut NumberEditState,
-    precision: usize,
-    font: FontId,
-    value: &mut Real,
-) -> bool {
-    let shift_click = matches!(input, Some(UiInputEvent::MouseDown { button, .. }) if button.intersects(MouseButton::LEFT))
-        && ctx.key_modes().intersects(KeyMode::SHIFT)
-        && ctx.hovered();
-
-    if shift_click {
-        // Enter edit mode by seeding the textbox with the current formatted value.
-        edit.editing = true;
-        edit.buf.clear();
-        let _ = write!(edit.buf, "{:.*}", precision, value);
-        edit.cursor = edit.buf.len();
-    }
-
-    if edit.editing {
-        let res = textbox_update(ctx, input, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE, font);
-        if res.submitted || !ctx.focused() {
-            if let Ok(v) = edit.buf.parse::<f32>() {
-                *value = v as Real;
-            }
-            // Commit valid parsed values and leave edit mode on submit or blur.
-            edit.editing = false;
-            edit.cursor = 0;
-        } else {
-            return true;
-        }
-    }
-    false
-}
-
-/// Paints the shared textbox editor for a numeric widget.
-fn number_textbox_paint(ctx: &mut WidgetPaintCtx<'_>, edit: &NumberEditState, font: FontId) {
-    textbox_paint(ctx, edit.buf.as_str(), edit.cursor, WidgetOption::NONE, font);
-}
-
 impl Widget for Slider {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
@@ -437,214 +344,189 @@ impl WidgetBuilder for SliderBuilder {
     }
 }
 
-/// One-shot construction input for a [`Number`].
-pub struct NumberParameters {
-    /// Initial number value.
-    pub value: Real,
-    /// Step applied when dragging.
-    pub step: Real,
-    /// Number of digits after the decimal point when rendering.
-    pub precision: usize,
-    /// Font used for the numeric label and editor.
-    pub font: FontChoice,
-    /// Base widget options.
-    pub opt: WidgetOption,
-}
-
-impl WidgetParameters for NumberParameters {}
-
-impl NumberParameters {
-    /// Creates number parameters with default widget options.
-    pub fn new(value: Real, step: Real, precision: usize) -> Self {
-        Self {
-            value,
-            step,
-            precision,
-            font: FontChoice::Role(FontRole::Body),
-            opt: WidgetOption::FRAME,
-        }
-    }
-
-    /// Creates number parameters with explicit widget options.
-    pub fn with_opt(value: Real, step: Real, precision: usize, opt: WidgetOption) -> Self {
-        Self {
-            value,
-            step,
-            precision,
-            font: FontChoice::Role(FontRole::Body),
-            opt,
-        }
-    }
-
-    /// Replaces the font used for the numeric label and editor.
-    pub const fn font(mut self, font: FontChoice) -> Self {
-        self.font = font;
-        self
-    }
-}
-
-/// Application-facing persistent number-input state.
-pub struct NumberState {
-    /// Current number value.
-    value: Real,
-    /// Text editing state for shift-click numeric entry.
-    edit: NumberEditState,
-    /// User value changes waiting to be consumed.
-    pending_changes: u32,
-}
-
-impl WidgetState for NumberState {}
-
-impl NumberState {
-    /// Returns the current number value.
-    pub fn value(&self) -> Real {
-        self.value
-    }
-
-    /// Updates the current number value, replacing non-finite input with zero.
-    pub fn set_value(&mut self, value: Real) {
-        self.value = if value.is_finite() { value } else { 0.0 };
-    }
-
-    /// Returns whether the inline numeric editor is active.
-    pub fn is_editing(&self) -> bool {
-        self.edit.editing
-    }
-
-    /// Consumes one pending user-originated value change.
-    pub fn take_changed(&mut self) -> bool {
-        crate::widgets::take_pending_event(&mut self.pending_changes)
-    }
-}
-
-/// Concrete number-input runtime and sole strong owner of its application state.
-pub struct Number {
-    /// Initialization-only drag step.
-    step: Real,
-    /// Initialization-only display precision.
-    precision: usize,
-    /// Initialization-only font.
-    font: FontChoice,
-    /// Base widget options.
-    opt: WidgetOption,
-    /// Persistent state allocation.
-    state: Rc<RefCell<NumberState>>,
-}
-
-impl Number {
-    /// Constructs a typed state handle and unique number runtime.
-    pub fn create(parameters: NumberParameters) -> (WidgetStateHandle<NumberState>, Self) {
-        let widget = NumberBuilder::create_widget(parameters);
-        let state = widget.state_handle();
-        (state, widget)
-    }
-
-    /// Measures the formatted number label.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        runtime_read_state(&self.state, "Number::measure", |state| {
-            number_preferred_size(style, atlas, self.font, state.value, self.precision, 0, 0)
-        })
-    }
-
-    /// Updates number value from shift-click text entry or horizontal drag.
-    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        let font = ctx.style().resolve_font_choice(self.font);
-        runtime_update_state(&self.state, "Number::update", |state| {
-            let last = state.value;
-            if !number_textbox_update(ctx, input, &mut state.edit, self.precision, font, &mut state.value) {
-                if ctx.focused()
-                    && ctx.mouse_buttons().intersects(MouseButton::LEFT)
-                    && let Some(UiInputEvent::MouseDrag { delta, .. }) = input
-                {
-                    state.set_value(state.value + delta.x as Real * self.step);
-                } else {
-                    state.set_value(state.value);
-                }
-            } else {
-                // Text editing suppresses drag updates while active.
-                state.set_value(state.value);
-            }
-            if state.value != last {
-                crate::widgets::record_pending_event(&mut state.pending_changes);
-            }
-        })
-    }
-
-    /// Paints either the inline numeric editor or the formatted value.
-    fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let font = ctx.style().resolve_font_choice(self.font);
-        runtime_read_state(&self.state, "Number::paint", |state| {
-            if state.edit.editing {
-                number_textbox_paint(ctx, &state.edit, font);
-                return;
-            }
-
-            let base = ctx.local_rect();
-            ctx.draw_widget_fill(base, ControlColor::Base);
-            let label = number_label(state.value, self.precision);
-            ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
-        });
-    }
-}
-
-impl Widget for Number {
-    fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
-    }
-
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        self.update_widget(ctx, input)
-    }
-
-    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        self.paint_widget(ctx);
-    }
-
-    fn effective_widget_opt(&self) -> WidgetOption {
-        runtime_read_state(&self.state, "Number::effective_widget_opt", |state| {
-            number_effective_widget_opt(self.opt, state.edit.editing)
-        })
-    }
-
-    fn focus_policy(&self) -> FocusPolicy {
-        runtime_read_state(&self.state, "Number::focus_policy", |state| number_focus_policy(state.edit.editing))
-    }
-}
-
-impl WidgetStateOwner for Number {
-    type State = NumberState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
-/// Type-level constructor for [`Number`].
-pub struct NumberBuilder;
-
-impl WidgetBuilder for NumberBuilder {
-    type Parameters = NumberParameters;
-    type W = Number;
-
-    fn create_widget(parameters: Self::Parameters) -> Self::W {
-        let state = Rc::new(RefCell::new(NumberState {
-            value: if parameters.value.is_finite() { parameters.value } else { 0.0 },
-            edit: NumberEditState::default(),
-            pending_changes: 0,
-        }));
-        Number {
-            step: parameters.step,
-            precision: parameters.precision,
-            font: parameters.font,
-            opt: parameters.opt,
-            state,
-        }
-    }
-}
-
 #[cfg(test)]
-mod tests;
+mod tests {
+    //! Tests for slider and numeric editing behavior.
+
+    use super::*;
+    use crate::test_support::test_atlas as make_test_atlas;
+    use crate::ui_node::{UiInputEvent, widget_context::localize_event};
+    use crate::{Number, NumberParameters, NumberState};
+
+    fn run_slider_once(slider: &mut Slider, rect: Recti, events: Vec<UiInputEvent>, hovered: bool, focused: bool, active: bool, scroll: Option<Vec2i>) {
+        let atlas = make_test_atlas();
+        let style = Style::default();
+        let held = if active { MouseButton::LEFT } else { MouseButton::NONE };
+        let mut events = events
+            .into_iter()
+            .map(|event| localize_event(Vec2i::new(rect.x, rect.y), event))
+            .collect::<Vec<_>>();
+        if let Some(delta) = scroll {
+            events.push(UiInputEvent::Scroll { pos: Vec2i::default(), delta });
+        }
+        for event in &events {
+            let mut ctx = WidgetUpdateCtx::new_with_interaction(
+                rect,
+                rect,
+                &style,
+                &atlas,
+                true,
+                hovered,
+                focused,
+                false,
+                active,
+                held,
+                KeyMode::NONE,
+                KeyCode::NONE,
+            );
+            slider.update(&mut ctx, Some(event));
+        }
+    }
+
+    fn run_number_once(number: &mut Number, events: Vec<UiInputEvent>) {
+        let atlas = make_test_atlas();
+        let style = Style::default();
+        let bounds = rect(0, 0, 100, 20);
+        for event in &events {
+            let mut ctx = WidgetUpdateCtx::new_with_interaction(
+                bounds,
+                bounds,
+                &style,
+                &atlas,
+                true,
+                true,
+                true,
+                false,
+                true,
+                MouseButton::LEFT,
+                KeyMode::NONE,
+                KeyCode::NONE,
+            );
+            number.update(&mut ctx, Some(event));
+        }
+    }
+
+    fn assert_real_close(actual: Real, expected: Real) {
+        assert!((actual - expected).abs() < 1.0e-5, "expected {expected}, got {actual}");
+    }
+
+    #[test]
+    fn slider_zero_range_keeps_value() {
+        let atlas = make_test_atlas();
+        let style = Style::default();
+
+        let (state, mut slider) = Slider::create(SliderParameters::new(5.0, 5.0, 5.0));
+        let rect = rect(0, 0, 100, 20);
+        let input = vec![UiInputEvent::MouseDrag {
+            pos: vec2(50, 10),
+            delta: vec2(5, 0),
+            buttons: MouseButton::LEFT,
+        }];
+        let mut ctx = WidgetUpdateCtx::new_with_interaction(
+            rect,
+            rect,
+            &style,
+            &atlas,
+            true,
+            true,
+            true,
+            false,
+            true,
+            MouseButton::LEFT,
+            KeyMode::NONE,
+            KeyCode::NONE,
+        );
+
+        let event = localize_event(Vec2i::new(rect.x, rect.y), input.into_iter().next().unwrap());
+        slider.update(&mut ctx, Some(&event));
+
+        assert_eq!(state.try_read(|state| state.value().is_finite()), Some(true));
+        assert_eq!(state.try_read(SliderState::value), Some(5.0));
+        assert_eq!(state.try_update(SliderState::take_changed), Some(false));
+    }
+
+    #[test]
+    fn slider_wheel_snaps_fractional_step_from_lower_bound() {
+        let (state, mut slider) = Slider::create(SliderParameters::with_opt(1.15, 1.0, 2.0, 0.2, 2, WidgetOption::FRAME));
+        run_slider_once(&mut slider, rect(0, 0, 100, 20), Vec::new(), true, false, false, Some(vec2(0, 1)));
+
+        assert_real_close(state.try_read(SliderState::value).unwrap(), 1.4);
+        assert_eq!(state.try_update(SliderState::take_changed), Some(true));
+        assert_eq!(state.try_update(SliderState::take_changed), Some(false));
+    }
+
+    #[test]
+    fn slider_drag_snaps_fractional_step_from_lower_bound() {
+        let (state, mut slider) = Slider::create(SliderParameters::with_opt(10.0, 10.0, 20.0, 0.25, 2, WidgetOption::FRAME));
+        let input = vec![UiInputEvent::MouseDrag {
+            pos: vec2(33, 10),
+            delta: Vec2i::default(),
+            buttons: MouseButton::LEFT,
+        }];
+        run_slider_once(&mut slider, rect(0, 0, 100, 20), input, true, true, true, None);
+
+        assert_real_close(state.try_read(SliderState::value).unwrap(), 13.25);
+        assert_eq!(state.try_update(SliderState::take_changed), Some(true));
+    }
+
+    #[test]
+    fn slider_uses_widget_local_mouse_position() {
+        let atlas = make_test_atlas();
+        let style = Style::default();
+
+        let (state, mut slider) = Slider::create(SliderParameters::new(0.0, 0.0, 100.0));
+        let rect = rect(40, 20, 100, 20);
+        let input = vec![UiInputEvent::MouseDrag {
+            pos: vec2(90, 30),
+            delta: Vec2i::default(),
+            buttons: MouseButton::LEFT,
+        }];
+        let mut ctx = WidgetUpdateCtx::new_with_interaction(
+            rect,
+            rect,
+            &style,
+            &atlas,
+            true,
+            true,
+            true,
+            false,
+            true,
+            MouseButton::LEFT,
+            KeyMode::NONE,
+            KeyCode::NONE,
+        );
+
+        let event = localize_event(Vec2i::new(rect.x, rect.y), input.into_iter().next().unwrap());
+        slider.update(&mut ctx, Some(&event));
+
+        assert_eq!(state.try_read(SliderState::value), Some(50.0));
+        assert_eq!(state.try_update(SliderState::take_changed), Some(true));
+    }
+
+    #[test]
+    fn number_drag_records_a_typed_change_and_programmatic_setter_is_silent() {
+        let (state, mut number) = Number::create(NumberParameters::new(0.0, 2.0, 0));
+        state.try_update(|state| state.set_value(4.0)).unwrap();
+        assert_eq!(state.try_update(NumberState::take_changed), Some(false));
+
+        run_number_once(
+            &mut number,
+            vec![UiInputEvent::MouseDrag {
+                pos: vec2(10, 10),
+                delta: vec2(3, 0),
+                buttons: MouseButton::LEFT,
+            }],
+        );
+        assert_eq!(state.try_read(NumberState::value), Some(10.0));
+        assert_eq!(state.try_update(NumberState::take_changed), Some(true));
+        assert_eq!(state.try_update(NumberState::take_changed), Some(false));
+    }
+
+    #[test]
+    fn slider_programmatic_setter_is_silent() {
+        let (state, _slider) = Slider::create(SliderParameters::new(0.0, -5.0, 5.0));
+        state.try_update(|state| state.set_value(4.0)).unwrap();
+        assert_eq!(state.try_read(SliderState::value), Some(4.0));
+        assert_eq!(state.try_update(SliderState::take_changed), Some(false));
+    }
+}

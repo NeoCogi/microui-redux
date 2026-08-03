@@ -1,4 +1,4 @@
-//! Tests for basic widget sizing and state behavior.
+//! Tests for behavior shared across built-in widgets.
 
 use super::*;
 use crate::ContainerBuilder;

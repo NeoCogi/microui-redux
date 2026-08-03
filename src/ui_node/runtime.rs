@@ -413,7 +413,7 @@ impl UiRuntime {
 
         let event = self
             .take_routed_event(id)
-            .map(|event| super::widget_ctx::localize_event(Vec2i::new(content_rect.x, content_rect.y), event));
+            .map(|event| super::widget_context::localize_event(Vec2i::new(content_rect.x, content_rect.y), event));
         let accepts_pointer_input = self.accepts_pointer_input();
         let screen_content_rect = translate_local_rect(content_rect, screen_origin);
         let screen_content_clip = translate_local_rect(content_clip, screen_origin);
@@ -657,7 +657,7 @@ impl UiRuntime {
         let content_clip = local_clip
             .intersect(&content_rect)
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
-        let local_event = super::widget_ctx::localize_event(screen_origin, event.clone());
+        let local_event = super::widget_context::localize_event(screen_origin, event.clone());
 
         match &mut node.data {
             NodeKind::Widget(widget) => {

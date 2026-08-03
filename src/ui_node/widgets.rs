@@ -56,36 +56,40 @@
 //! state, and its concrete retained runtime. Applications keep weak [`crate::WidgetStateHandle`]
 //! capabilities while the runtime remains the sole strong owner of state.
 
-/// Records one pending semantic event without wrapping at the counter boundary.
-pub(crate) fn record_pending_event(pending: &mut u32) {
-    *pending = pending.saturating_add(1);
-}
+use crate::*;
 
-/// Consumes exactly one pending semantic event.
-pub(crate) fn take_pending_event(pending: &mut u32) -> bool {
-    if *pending == 0 {
-        return false;
-    }
-    *pending -= 1;
-    true
-}
-
-// Widget implementations stay grouped here, while shared contracts and phase contexts live in
-// sibling modules within the retained UI subsystem.
-
-mod core_widgets;
-mod display;
+mod button;
+mod checkbox;
+mod color_swatch;
+mod combo;
+mod control;
+mod custom;
+mod list_box;
+mod list_item;
+mod number;
+mod numeric_edit;
+mod pending_event;
 mod slider;
 mod text_area;
+mod text_block;
 mod text_edit;
 mod textbox;
 
-pub use core_widgets::{
-    Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, Combo, ComboBuilder,
-    ComboParameters, ComboState, Custom, CustomBuilder, CustomParameters, ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder,
-    ListItemParameters, ListItemState,
-};
-pub use display::{ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState};
-pub use slider::{Number, NumberBuilder, NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState};
+use control::{content_height, inline_content_size, layout_inline_content, layout_scaled_visual_content, scaled_visual_content_size, text_size, widget_fill_color};
+pub(crate) use pending_event::{record_pending_event, take_pending_event};
+
+pub use button::{Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState};
+pub use checkbox::{Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState};
+pub use color_swatch::{ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState};
+pub use combo::{Combo, ComboBuilder, ComboParameters, ComboState};
+pub use custom::{Custom, CustomBuilder, CustomParameters};
+pub use list_box::{ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState};
+pub use list_item::{ListItem, ListItemBuilder, ListItemParameters, ListItemState};
+pub use number::{Number, NumberBuilder, NumberParameters, NumberState};
+pub use slider::{Slider, SliderBuilder, SliderParameters, SliderState};
 pub use text_area::{TextArea, TextAreaBuilder, TextAreaParameters, TextAreaState};
+pub use text_block::{TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState};
 pub use textbox::{Textbox, TextboxBuilder, TextboxParameters, TextboxState};
+
+#[cfg(test)]
+mod tests;

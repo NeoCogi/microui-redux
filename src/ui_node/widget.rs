@@ -62,7 +62,7 @@ use rs_math3d::Dimensioni;
 use crate::atlas::{AtlasHandle, EXPAND_DOWN_ICON};
 use crate::style::Style;
 use super::UiInputEvent;
-pub use super::widget_ctx::{WidgetPaintCtx, WidgetUpdateCtx};
+pub use super::widget_context::{WidgetPaintCtx, WidgetUpdateCtx};
 
 bitflags! {
     #[derive(Copy, Clone)]
