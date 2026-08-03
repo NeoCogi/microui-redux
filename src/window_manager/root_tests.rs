@@ -1294,6 +1294,41 @@ fn resize_overlay_preempts_content_where_the_grip_overlaps_the_root_body() {
 }
 
 #[test]
+fn content_capture_remains_exclusive_while_dragging_across_root_chrome() {
+    let probe = OrderedProbe {
+        state: Rc::new(RefCell::new(OrderedProbeState::default())),
+        opt: WidgetOption::NONE,
+    };
+    let probe_state = probe.state_handle();
+    let mut ctx = context();
+    let root = ctx.create_window("window", rect(30, 30, 140, 100), Node::widget(probe).with_policy(Policy::fill()));
+    ctx.update_and_render_ui();
+
+    let body = ctx.debug_root_body(root.id()).unwrap();
+    let resize = ctx.debug_root_chrome(root.id()).unwrap().2.unwrap();
+    let press = crate::vec2(body.x + 1, body.y + 1);
+    let over_chrome = crate::vec2(resize.x + 1, resize.y + 1);
+    assert!(!resize.contains(&press));
+    assert!(body.contains(&over_chrome), "the capture regression requires chrome overlapping content");
+
+    ctx.mousedown(press.x, press.y, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["down"]));
+    assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(true));
+
+    ctx.mousemove(over_chrome.x, over_chrome.y);
+    ctx.update_and_render_ui();
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["down", "drag"]));
+    assert_eq!(probe_state.try_read(|state| state.hovered), Some(true));
+    assert_eq!(root.state().try_read(RootState::is_resizing), Some(false));
+
+    ctx.mouseup(over_chrome.x, over_chrome.y, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["down", "drag", "up"]));
+    assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(false));
+}
+
+#[test]
 fn hiding_and_showing_root_does_not_restore_chrome_capture() {
     let mut ctx = context();
     let root = ctx.create_window("window", rect(30, 30, 140, 100), empty_content());

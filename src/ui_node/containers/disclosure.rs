@@ -380,4 +380,14 @@ mod tests {
         assert_eq!(tree.widget_opt().bits(), custom_opt.bits());
         assert_eq!(tree.state_handle().try_read(DisclosureState::is_expanded), Some(true));
     }
+
+    #[test]
+    fn pointer_surface_contains_only_the_committed_header() {
+        let mut disclosure = DisclosureBuilder::create_container(DisclosureParameters::header("Header", true, std::iter::empty()));
+        disclosure.header_rect = Recti::new(0, 0, 100, 20);
+        let content = Recti::new(0, 0, 100, 80);
+
+        assert!(disclosure.pointer_hit_test(content, Vec2i::new(10, 10)));
+        assert!(!disclosure.pointer_hit_test(content, Vec2i::new(10, 40)));
+    }
 }
