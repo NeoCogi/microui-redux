@@ -8,7 +8,7 @@ use crate::{
     WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
-use crate::widget::{runtime_read_state, runtime_update_state};
+use crate::ui_node::{runtime_read_state, runtime_update_state};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,

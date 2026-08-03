@@ -3,7 +3,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::render::Painter;
-use crate::widget::{runtime_read_state, runtime_update_state};
+use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
     AtlasHandle, Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerInputCtx, ContainerInputResult, ContainerLayoutCtx,
     ContainerState, ControlColor, Dimensioni, FocusPolicy, MouseButton, Node, Recti, Style, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx,
@@ -542,7 +542,7 @@ pub(super) fn root_chrome_geometry(
             .max(minimum_outer.height),
     );
 
-    let client = crate::frame::frame_geometry(outer, options.intersects(WindowOption::FRAME), style).content_or_empty();
+    let client = crate::ui_node::frame::frame_geometry(outer, options.intersects(WindowOption::FRAME), style).content_or_empty();
     let title =
         (!options.intersects(WindowOption::NO_TITLE)).then(|| Recti::new(client.x, client.y, client.width.max(0), title_height.min(client.height.max(0))));
     let close = title.and_then(|title| {
@@ -616,7 +616,7 @@ pub(super) fn record_root_overlay(display_list: &mut crate::render::DisplayList,
         .filter(|resize| resize.width > 0 && resize.height > 0)
         .and_then(|resize| resize.intersect(&geometry.client))
     {
-        crate::frame::paint_internal_frame(&mut painter, visual, Some(style.colors[ControlColor::WindowBG as usize]), style.frame_border());
+        crate::ui_node::frame::paint_internal_frame(&mut painter, visual, Some(style.colors[ControlColor::WindowBG as usize]), style.frame_border());
     }
 }
 

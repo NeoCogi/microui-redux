@@ -70,8 +70,8 @@ pub(crate) fn take_pending_event(pending: &mut u32) -> bool {
     true
 }
 
-// Widget implementations stay grouped here, while the shared execution context now
-// lives in `widget_ctx.rs` beside the widget runtime traits.
+// Widget implementations stay grouped here, while shared contracts and phase contexts live in
+// sibling modules within the retained UI subsystem.
 
 mod core_widgets;
 mod display;

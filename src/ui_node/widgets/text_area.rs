@@ -54,10 +54,10 @@
 //!
 //! Text areas share the UTF-8 editing core with textboxes but track line layout, vertical scroll,
 //! and mouse-driven cursor placement across multiple wrapped lines.
+use crate::ui_node::scrollbar::{ScrollAxis, ScrollbarGeometry, scrollbar_base, scrollbar_max_scroll};
+use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::*;
-use crate::widget::{runtime_read_state, runtime_update_state};
 use std::{cell::RefCell, rc::Rc};
-use crate::scrollbar::{scrollbar_base, scrollbar_max_scroll, ScrollAxis, ScrollbarGeometry};
 use crate::text_layout::{build_text_lines, TextLine};
 
 use super::text_edit::{

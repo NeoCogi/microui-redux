@@ -1,4 +1,4 @@
-//! Internal retained node model and traversal runtime.
+//! Retained UI contracts, built-in components, owning node model, and traversal runtime.
 //!
 //! One node representation owns either a widget or a container; no parallel legacy tree or
 //! generated public identity path remains.
@@ -19,8 +19,20 @@
 //! recursion continues.
 use crate::render::DisplayList;
 use crate::{Dimensioni, Recti, UNCLIPPED_RECT};
-use crate::WidgetOption;
-use crate::widget::FocusPolicy;
+
+pub(crate) mod frame;
+mod input;
+pub use input::UiInputEvent;
+mod scrollbar;
+mod sizing;
+pub use sizing::{Policy, SizePolicy};
+mod widget;
+mod widget_ctx;
+pub use widget::{
+    FocusPolicy, Widget, WidgetBuilder, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+};
+pub(crate) use widget::{runtime_read_state, runtime_update_state};
+pub mod widgets;
 
 mod node;
 pub use node::{Children, Node};
@@ -30,14 +42,12 @@ pub(crate) use runtime::UiRuntime;
 #[cfg(test)]
 pub(crate) use runtime::RuntimeMetrics;
 mod containers;
-pub(crate) use containers::WidgetNode;
 pub use containers::{
     ChildrenVisitor, ChildrenVisitorMut, Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState, Container, ContainerBuilder, ContainerInputCtx,
     ContainerInputResult, ContainerLayoutCtx, ContainerState, Disclosure, DisclosureBuilder, DisclosureContainer, DisclosureParameters, DisclosureState, Grid,
     GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState, Row, RowBuilder, RowContainer, RowParameters, RowState, Stack, StackBuilder,
-    ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaParameters, ScrollAreaState, StackContainer, StackParameters, StackState,
+    ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaParameters, ScrollAreaState, StackContainer, StackDirection, StackParameters, StackState,
 };
-pub use containers::UiInputEvent;
 pub use containers::ScrollAreaOption;
 
 /// Returns the union of two rectangles.

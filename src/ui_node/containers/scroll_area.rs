@@ -2,8 +2,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use bitflags::bitflags;
 
-use crate::scrollbar::{scrollbar_base, scrollbar_max_scroll, ScrollAxis, ScrollbarGeometry};
-use crate::widget::{runtime_read_state, runtime_update_state};
+use crate::ui_node::scrollbar::{ScrollAxis, ScrollbarGeometry, scrollbar_base, scrollbar_max_scroll};
+use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
     AtlasHandle, ControlColor, Dimensioni, FocusPolicy, MouseButton, Recti, Style, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
     WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,

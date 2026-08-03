@@ -58,9 +58,10 @@ use crate::atlas::{AtlasHandle, FontId, IconId};
 use crate::render::{DisplayList, Painter};
 use crate::input::{ControlColor, KeyCode, KeyMode, MouseButton};
 use crate::WidgetOption;
-use crate::ui_node::UiInputEvent;
 use crate::style::{Color, Style, TextureId};
 use crate::text_layout::control_text_position_with_font;
+
+use super::UiInputEvent;
 
 /// Converts one routed event into coordinates relative to `origin`.
 pub(crate) fn localize_event(origin: Vec2i, event: UiInputEvent) -> UiInputEvent {
@@ -393,7 +394,7 @@ impl<'a> WidgetPaintCtx<'a> {
         let color = self.common.style.colors[colorid as usize];
         let border = self.common.style.frame_border();
         let mut painter = self.painter();
-        crate::frame::paint_internal_frame(&mut painter, rect, Some(color), border)
+        crate::ui_node::frame::paint_internal_frame(&mut painter, rect, Some(color), border)
     }
 
     /// Draws an explicit widget-owned internal frame with interaction fill coloring.

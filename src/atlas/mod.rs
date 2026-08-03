@@ -138,6 +138,9 @@ pub(crate) use image::checked_rgba_byte_len;
 pub(crate) use image::validate_rgba_buffer;
 
 #[cfg(feature = "builder")]
+mod rect_packer;
+
+#[cfg(feature = "builder")]
 /// Helpers for constructing atlas textures at build time.
 pub mod builder;
 

@@ -55,7 +55,7 @@
 //! The textbox stores a UTF-8 byte cursor and uses shared text-edit helpers to keep cursor movement
 //! and deletion on valid character boundaries.
 use crate::*;
-use crate::widget::{runtime_read_state, runtime_update_state};
+use crate::ui_node::{runtime_read_state, runtime_update_state};
 use std::{cell::RefCell, rc::Rc};
 
 use super::text_edit::{apply_text_input, caret_rect, centered_line_top, clamp_cursor_boundary, cursor_from_text_x, font_line_metrics, ReturnBehavior};

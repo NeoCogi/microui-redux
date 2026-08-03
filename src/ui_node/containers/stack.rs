@@ -1,13 +1,28 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::sizing::SizePolicy;
-use crate::widget::{runtime_read_state, runtime_update_state};
+use crate::ui_node::sizing::SizePolicy;
+use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, Dimensioni, Recti, StackDirection, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState,
-    WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    AtlasHandle, Dimensioni, Recti, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
+    WidgetStateOwner, WidgetUpdateCtx,
 };
 
 use super::{Axis, Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerLayoutCtx, ContainerState, Node};
+
+/// Direction used by stack flows when emitting vertical cells.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum StackDirection {
+    /// Place cells from the current row start downward.
+    TopToBottom,
+    /// Place cells from the bottom of the current scope upward.
+    BottomToTop,
+}
+
+impl Default for StackDirection {
+    fn default() -> Self {
+        Self::TopToBottom
+    }
+}
 
 /// One-shot construction input for a directional stack.
 pub struct StackParameters {

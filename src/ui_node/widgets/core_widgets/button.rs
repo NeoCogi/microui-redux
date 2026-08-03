@@ -4,7 +4,7 @@
 //! path.
 
 use super::*;
-use crate::widget::runtime_update_state;
+use crate::ui_node::runtime_update_state;
 use crate::widgets::{record_pending_event, take_pending_event};
 use std::{cell::RefCell, rc::Rc};
 

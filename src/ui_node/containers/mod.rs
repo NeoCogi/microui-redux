@@ -1,11 +1,10 @@
-use crate::render::CustomRenderKey;
-use crate::{Dimensioni, KeyCode, KeyMode, MouseButton, Recti, Style, Vec2i};
+use crate::{Dimensioni, Recti, Style, Vec2i};
 use crate::{Widget, WidgetOption, WidgetParameters, WidgetState, WidgetStateOwner};
 
 #[cfg(test)]
-use crate::widget_ctx::{WidgetPaintCtx, WidgetUpdateCtx};
+use crate::{WidgetPaintCtx, WidgetUpdateCtx};
 
-use super::{Children, Node, NodeLayout, NodeRuntime, UiRuntime};
+use super::{Children, Node, NodeLayout, NodeRuntime, UiInputEvent, UiRuntime};
 
 mod axis;
 mod column;
@@ -22,7 +21,7 @@ pub use disclosure::{Disclosure, DisclosureBuilder, DisclosureContainer, Disclos
 pub use grid::{Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState};
 pub use row::{Row, RowBuilder, RowContainer, RowParameters, RowState};
 pub use scroll_area::{ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState};
-pub use stack::{Stack, StackBuilder, StackContainer, StackParameters, StackState};
+pub use stack::{Stack, StackBuilder, StackContainer, StackDirection, StackParameters, StackState};
 
 /// Returns the content-independent fallback width used by explicit empty Grid tracks.
 fn default_cell_width(style: &Style) -> i32 {
@@ -217,116 +216,6 @@ pub trait Container: Widget {
     /// [`Widget::focus_policy`] query.
     fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
         ctx.route_widget(event, self.effective_widget_opt())
-    }
-}
-
-/// Thin retained leaf owner for one erased widget and optional custom-render metadata.
-pub(crate) struct WidgetNode {
-    /// Concrete state-owning runtime erased only after generic insertion validates its owner.
-    pub(crate) widget: Box<dyn Widget>,
-    /// Optional custom backend render callback for custom-render leaves.
-    custom_render: Option<CustomRenderKey>,
-}
-
-impl WidgetNode {
-    /// Erases one concrete state-owning runtime at the retained leaf boundary.
-    pub(crate) fn new<W: WidgetStateOwner>(widget: W, custom_render: Option<CustomRenderKey>) -> Self {
-        Self { widget: Box::new(widget), custom_render }
-    }
-
-    /// Returns the private custom-render callback key, when one was supplied at construction.
-    pub(crate) fn custom_render(&self) -> Option<CustomRenderKey> {
-        self.custom_render
-    }
-}
-
-/// Input event routed to one retained widget or container.
-#[derive(Clone, Debug)]
-pub enum UiInputEvent {
-    /// Pointer moved without any mouse button held.
-    MouseMove {
-        /// Current pointer position in the receiver's routed local coordinate space.
-        pos: Vec2i,
-        /// Pointer movement since the previous queued pointer-position event.
-        delta: Vec2i,
-    },
-    /// Pointer moved while one or more mouse buttons are held.
-    MouseDrag {
-        /// Current pointer position in the receiver's routed local coordinate space.
-        pos: Vec2i,
-        /// Pointer movement since the previous queued pointer-position event.
-        delta: Vec2i,
-        /// Mouse buttons held during the drag.
-        buttons: MouseButton,
-    },
-    /// One or more mouse buttons were pressed.
-    MouseDown {
-        /// Current pointer position in the receiver's routed local coordinate space.
-        pos: Vec2i,
-        /// Buttons carried by this queued press transition.
-        button: MouseButton,
-    },
-    /// One or more mouse buttons were released.
-    MouseUp {
-        /// Current pointer position in the receiver's routed local coordinate space.
-        pos: Vec2i,
-        /// Buttons carried by this queued release transition.
-        button: MouseButton,
-    },
-    /// Scroll wheel or equivalent high-level scroll input.
-    Scroll {
-        /// Pointer position in the receiver's routed local coordinate space.
-        pos: Vec2i,
-        /// Requested scroll delta.
-        delta: Vec2i,
-    },
-    /// Modifier/control key state was pressed.
-    KeyDown {
-        /// Modifier/control key bits carried by this queued press transition.
-        key: KeyMode,
-    },
-    /// Modifier/control key state was released.
-    KeyUp {
-        /// Modifier/control key bits carried by this queued release transition.
-        key: KeyMode,
-    },
-    /// Navigation key state was pressed.
-    KeyCodeDown {
-        /// Navigation key bits carried by this queued press transition.
-        code: KeyCode,
-    },
-    /// Navigation key state was released.
-    KeyCodeUp {
-        /// Navigation key bits carried by this queued release transition.
-        code: KeyCode,
-    },
-    /// One queued UTF-8 text input transition.
-    Text {
-        /// Entered text.
-        text: String,
-    },
-}
-
-impl UiInputEvent {
-    /// Returns whether this event belongs to pointer routing.
-    pub(crate) fn is_pointer(&self) -> bool {
-        matches!(
-            self,
-            Self::MouseMove { .. } | Self::MouseDrag { .. } | Self::MouseDown { .. } | Self::MouseUp { .. } | Self::Scroll { .. }
-        )
-    }
-
-    /// Returns whether this event should be delivered to the focused node.
-    pub(crate) fn is_focus_input(&self) -> bool {
-        matches!(
-            self,
-            Self::KeyDown { .. } | Self::KeyUp { .. } | Self::KeyCodeDown { .. } | Self::KeyCodeUp { .. } | Self::Text { .. }
-        )
-    }
-
-    /// Returns whether this event ends an active pointer capture when no buttons remain held.
-    pub(crate) fn is_pointer_release(&self) -> bool {
-        matches!(self, Self::MouseUp { .. })
     }
 }
 

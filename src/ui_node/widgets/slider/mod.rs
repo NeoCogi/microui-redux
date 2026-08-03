@@ -55,7 +55,7 @@
 //! Sliders support dragging, wheel increments, snapping, and shift-click text entry; `Number`
 //! shares the same text-editing helpers without a slider thumb.
 use crate::*;
-use crate::widget::{runtime_read_state, runtime_update_state};
+use crate::ui_node::{runtime_read_state, runtime_update_state};
 use std::fmt::Write;
 use std::{cell::RefCell, rc::Rc};
 

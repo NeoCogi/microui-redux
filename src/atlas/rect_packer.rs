@@ -55,7 +55,7 @@
 
 #![allow(dead_code)]
 
-use crate::*;
+use crate::{Rect, Recti};
 
 /// Describes size and padding requirements of rectangle packing.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

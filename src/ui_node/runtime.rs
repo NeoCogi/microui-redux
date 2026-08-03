@@ -344,7 +344,7 @@ impl UiRuntime {
         // Store every rectangle in node-local coordinates except the outer allocation, which stays
         // parent-local. Transform traversal later composes those two coordinate spaces once.
         let local_outer = Recti::new(0, 0, outer.width, outer.height);
-        let frame_geometry = crate::frame::frame_geometry(local_outer, framed, style);
+        let frame_geometry = crate::ui_node::frame::frame_geometry(local_outer, framed, style);
         let content = frame_geometry.content_or_empty();
         let is_branch = node.is_container();
         node.set_layout(NodeLayout::from_parts(outer, content, Dimensioni::new(outer.width.max(0), outer.height.max(0))));
@@ -394,7 +394,7 @@ impl UiRuntime {
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);
         let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
         let local_rect = Recti::new(0, 0, screen_rect.width, screen_rect.height);
-        let frame_geometry = crate::frame::frame_geometry(local_rect, framed, style);
+        let frame_geometry = crate::ui_node::frame::frame_geometry(local_rect, framed, style);
         let content_rect = frame_geometry.content_or_empty();
         let screen_clip = parent_transform.clip.intersect(&screen_rect).unwrap_or_default();
         let child_transform = parent_transform.push(node.state.layout);
@@ -413,7 +413,7 @@ impl UiRuntime {
 
         let event = self
             .take_routed_event(id)
-            .map(|event| crate::widget_ctx::localize_event(Vec2i::new(content_rect.x, content_rect.y), event));
+            .map(|event| super::widget_ctx::localize_event(Vec2i::new(content_rect.x, content_rect.y), event));
         let accepts_pointer_input = self.accepts_pointer_input();
         let screen_content_rect = translate_local_rect(content_rect, screen_origin);
         let screen_content_clip = translate_local_rect(content_clip, screen_origin);
@@ -651,13 +651,13 @@ impl UiRuntime {
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);
         let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
         let local_rect = Recti::new(0, 0, screen_rect.width, screen_rect.height);
-        let content_rect = crate::frame::frame_geometry(local_rect, framed, style).content_or_empty();
+        let content_rect = crate::ui_node::frame::frame_geometry(local_rect, framed, style).content_or_empty();
         let screen_clip = parent_transform.clip.intersect(&screen_rect).unwrap_or_default();
         let local_clip = rect_relative_to(screen_clip, screen_origin);
         let content_clip = local_clip
             .intersect(&content_rect)
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
-        let local_event = crate::widget_ctx::localize_event(screen_origin, event.clone());
+        let local_event = super::widget_ctx::localize_event(screen_origin, event.clone());
 
         match &mut node.data {
             NodeKind::Widget(widget) => {
@@ -686,12 +686,12 @@ impl UiRuntime {
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);
         let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
         let local_rect = Recti::new(0, 0, screen_rect.width, screen_rect.height);
-        let frame_geometry = crate::frame::frame_geometry(local_rect, framed, style);
+        let frame_geometry = crate::ui_node::frame::frame_geometry(local_rect, framed, style);
         let content_rect = frame_geometry.content_or_empty();
         let screen_clip = parent_transform.clip.intersect(&screen_rect).unwrap_or_default();
         if framed {
             let mut painter = crate::render::Painter::screen_space(display_list, screen_clip);
-            crate::frame::paint_internal_frame(&mut painter, screen_rect, None, style.frame_border());
+            crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, None, style.frame_border());
         }
         let child_transform = parent_transform.push(node.state.layout);
         let local_clip = rect_relative_to(screen_clip, screen_origin);

@@ -164,20 +164,14 @@
 
 pub mod atlas;
 mod file_dialog;
-mod frame;
 mod input;
-mod rect_packer;
 pub mod render;
-mod scrollbar;
-mod sizing;
 mod style;
 #[cfg(test)]
 mod test_support;
 mod text_layout;
 mod ui_node;
-mod widget;
-mod widget_ctx;
-pub mod widgets;
+pub use ui_node::widgets;
 mod window_manager;
 
 /// Retained UI authoring types.
@@ -187,19 +181,16 @@ mod window_manager;
 pub mod retained {
     pub use crate::file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
-    pub use crate::sizing::{Policy, SizePolicy, StackDirection};
     pub use crate::text_layout::TextWrap;
     pub use crate::ui_node::{
         Children, ChildrenVisitor, ChildrenVisitorMut, Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState, Container, ContainerBuilder,
         ContainerInputCtx, ContainerInputResult, ContainerLayoutCtx, ContainerState, Disclosure, DisclosureBuilder, DisclosureContainer, DisclosureParameters,
-        DisclosureState, Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState, Node, Row, RowBuilder, RowContainer, RowParameters,
-        RowState, ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, Stack, StackBuilder,
-        StackContainer, StackParameters, StackState, UiInputEvent,
+        DisclosureState, FocusPolicy, Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState, Node, Policy, Row, RowBuilder,
+        RowContainer, RowParameters, RowState, ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState,
+        SizePolicy, Stack, StackBuilder, StackContainer, StackDirection, StackParameters, StackState, UiInputEvent, Widget, WidgetBuilder, WidgetOption,
+        WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
     };
     pub use crate::window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
-    pub use crate::widget::{
-        FocusPolicy, Widget, WidgetBuilder, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
-    };
 }
 
 /// Common imports for retained UI applications.
@@ -213,16 +204,15 @@ pub mod prelude {
     };
     pub use crate::file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
     pub use crate::input::{ControlColor, KeyCode, KeyMode, MouseButton, WidgetFillOption};
-    pub use crate::sizing::{Policy, SizePolicy, StackDirection};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame};
     pub use crate::retained::{
         Children, ChildrenVisitor, ChildrenVisitorMut, Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState, Container, ContainerBuilder,
         ContainerInputCtx, ContainerInputResult, ContainerLayoutCtx, ContainerState, Context, ContextFrame, CustomRenderArgs, CustomRenderHandle, Disclosure,
         DisclosureBuilder, DisclosureContainer, DisclosureParameters, DisclosureState, FocusPolicy, Grid, GridBuilder, GridContainer, GridItem, GridParameters,
-        GridSpan, GridState, Node, RootHandle, RootId, RootMutationError, RootState, Row, RowBuilder, RowContainer, RowParameters, RowState, ScrollArea,
-        ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, Stack, StackBuilder, StackContainer, StackParameters,
-        StackState, TextWrap, UiInputEvent, Widget, WidgetBuilder, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
-        WidgetStateOwner, WidgetUpdateCtx, WindowOption,
+        GridSpan, GridState, Node, Policy, RootHandle, RootId, RootMutationError, RootState, Row, RowBuilder, RowContainer, RowParameters, RowState,
+        ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackBuilder,
+        StackContainer, StackDirection, StackParameters, StackState, TextWrap, UiInputEvent, Widget, WidgetBuilder, WidgetOption, WidgetPaintCtx,
+        WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, WindowOption,
     };
     pub use crate::style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
     pub use crate::widgets::{
@@ -246,17 +236,14 @@ pub use window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutation
 pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
 pub use input::{ControlColor, KeyCode, KeyMode, MouseButton, WidgetFillOption};
 pub use text_layout::TextWrap;
-pub use sizing::{Policy, SizePolicy, StackDirection};
 pub use style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
-pub use widget::{
-    FocusPolicy, Widget, WidgetBuilder, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
-};
 pub use ui_node::{
     Children, ChildrenVisitor, ChildrenVisitorMut, Column, ColumnBuilder, ColumnContainer, ColumnParameters, ColumnState, Container, ContainerBuilder,
     ContainerInputCtx, ContainerInputResult, ContainerLayoutCtx, ContainerState, Disclosure, DisclosureBuilder, DisclosureContainer, DisclosureParameters,
-    DisclosureState, Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState, Node, Row, RowBuilder, RowContainer, RowParameters,
-    RowState, ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, Stack, StackBuilder, StackContainer,
-    StackParameters, StackState, UiInputEvent,
+    DisclosureState, FocusPolicy, Grid, GridBuilder, GridContainer, GridItem, GridParameters, GridSpan, GridState, Node, Policy, Row, RowBuilder, RowContainer,
+    RowParameters, RowState, ScrollArea, ScrollAreaBuilder, ScrollAreaContainer, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack,
+    StackBuilder, StackContainer, StackDirection, StackParameters, StackState, UiInputEvent, Widget, WidgetBuilder, WidgetOption, WidgetPaintCtx,
+    WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 pub use widgets::{
     Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch,

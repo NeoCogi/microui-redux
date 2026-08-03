@@ -4,7 +4,7 @@
 //! actual popup traversal.
 
 use super::*;
-use crate::widget::{runtime_read_state, runtime_update_state};
+use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::widgets::{record_pending_event, take_pending_event};
 use std::{cell::RefCell, rc::Rc};
 

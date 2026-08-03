@@ -16,7 +16,7 @@
 //! This type knows nothing about nodes, widgets, rows, columns, or rendering. Containers remain
 //! responsible for measuring their children and for deciding which policy applies to each slot.
 
-use crate::sizing::{scaled, SizePolicy};
+use crate::ui_node::sizing::{SizePolicy, scaled};
 
 /// Per-call scalar state for resolving one ordered sibling axis.
 ///

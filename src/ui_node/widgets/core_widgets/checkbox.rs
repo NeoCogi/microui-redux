@@ -6,7 +6,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use super::*;
-use crate::widget::{WidgetBuilder, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, runtime_read_state, runtime_update_state};
+use crate::ui_node::{runtime_read_state, runtime_update_state};
+use crate::{WidgetBuilder, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner};
 
 /// One-shot construction input for a [`Checkbox`].
 ///

@@ -56,7 +56,7 @@
 //! same measurement and paint pipeline as interactive controls.
 
 use crate::text_layout::{baseline_aligned_top, build_display_text_lines, text_block_size};
-use crate::widget::runtime_read_state;
+use crate::ui_node::runtime_read_state;
 use crate::*;
 use std::{cell::RefCell, rc::Rc};
 

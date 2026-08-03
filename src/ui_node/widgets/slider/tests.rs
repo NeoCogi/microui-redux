@@ -2,8 +2,7 @@
 
 use super::*;
 use crate::test_support::test_atlas as make_test_atlas;
-use crate::ui_node::UiInputEvent;
-use crate::widget_ctx::localize_event;
+use crate::ui_node::{UiInputEvent, widget_ctx::localize_event};
 
 fn run_slider_once(slider: &mut Slider, rect: Recti, events: Vec<UiInputEvent>, hovered: bool, focused: bool, active: bool, scroll: Option<Vec2i>) {
     let atlas = make_test_atlas();

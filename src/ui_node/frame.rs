@@ -1,12 +1,6 @@
 use crate::render::Painter;
+use crate::style::FrameBorder;
 use crate::{Color, Dimensioni, Recti, Style};
-
-/// Style-resolved border appearance for outer and internal frames.
-#[derive(Copy, Clone)]
-pub(crate) struct FrameBorder {
-    pub(crate) width: i32,
-    pub(crate) color: Color,
-}
 
 /// Geometry derived from one authoritative outer allocation.
 #[derive(Copy, Clone, Debug)]

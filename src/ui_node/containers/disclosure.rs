@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::widget::{runtime_read_state, runtime_update_state};
+use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
     AtlasHandle, COLLAPSE_ICON, ControlColor, Dimensioni, EXPAND_ICON, MouseButton, Recti, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx,
     WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
@@ -167,7 +167,7 @@ impl DisclosureContainer {
         } else {
             0
         };
-        crate::frame::outer_preferred(content, border)
+        crate::ui_node::frame::outer_preferred(content, border)
     }
 
     fn indent(&self, style: &Style) -> i32 {

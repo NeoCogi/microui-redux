@@ -1,4 +1,4 @@
-//! Public retained sizing policy types.
+//! Public retained node and container sizing policy types.
 
 /// Size policy used by retained nodes, row/grid tracks, and stack items when resolving cells.
 ///
@@ -148,20 +148,5 @@ pub(crate) fn scaled(total: i32, ratio: f32) -> i32 {
         ((total.max(0) as f32) * ratio).floor() as i32
     } else {
         0
-    }
-}
-
-/// Direction used by stack flows when emitting vertical cells.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum StackDirection {
-    /// Place cells from the current row start downward.
-    TopToBottom,
-    /// Place cells from the bottom of the current scope upward.
-    BottomToTop,
-}
-
-impl Default for StackDirection {
-    fn default() -> Self {
-        Self::TopToBottom
     }
 }

@@ -1,11 +1,11 @@
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::render::{CustomRenderHandle, RendererBackend};
+use crate::render::{CustomRenderHandle, CustomRenderKey, RendererBackend};
 use crate::{Dimensioni, Recti, Vec2i, Widget, WidgetStateOwner};
 
 use super::containers::{with_container_children, with_container_children_mut};
-use super::{Container, WidgetNode};
+use super::Container;
 
 /// Process-wide source of runtime-only node identity.
 ///
@@ -359,11 +359,11 @@ impl Node {
         let measured_content = self
             .data
             .widget()
-            .measure(style, atlas, crate::frame::content_available(available, border_width));
+            .measure(style, atlas, crate::ui_node::frame::content_available(available, border_width));
         // Widgets cannot return negative geometry. Node placement policy is intentionally absent:
         // the parent applies it later when allocating this preferred outer size.
         let preferred_content = Dimensioni::new(measured_content.width.max(0), measured_content.height.max(0));
-        crate::frame::outer_preferred(preferred_content, border_width)
+        crate::ui_node::frame::outer_preferred(preferred_content, border_width)
     }
 
     /// Writes layout as the source of truth.
@@ -428,6 +428,26 @@ impl Node {
             return Some(f.take().expect("mutable node visitor invoked twice")(self));
         }
         self.with_children_mut(|children| children.iter_mut().find_map(|child| child.with_node_mut_inner(id, f)))?
+    }
+}
+
+/// Thin retained leaf owner for one erased widget and optional custom-render metadata.
+pub(crate) struct WidgetNode {
+    /// Concrete state-owning runtime erased only after generic insertion validates its owner.
+    pub(crate) widget: Box<dyn Widget>,
+    /// Optional custom backend render callback for custom-render leaves.
+    custom_render: Option<CustomRenderKey>,
+}
+
+impl WidgetNode {
+    /// Erases one concrete state-owning runtime at the retained leaf boundary.
+    pub(crate) fn new<W: WidgetStateOwner>(widget: W, custom_render: Option<CustomRenderKey>) -> Self {
+        Self { widget: Box::new(widget), custom_render }
+    }
+
+    /// Returns the private custom-render callback key, when one was supplied at construction.
+    pub(crate) fn custom_render(&self) -> Option<CustomRenderKey> {
+        self.custom_render
     }
 }
 
