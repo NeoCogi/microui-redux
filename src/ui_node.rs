@@ -17,9 +17,14 @@
 //! visibility gate is checked. Each concrete container borrows its directly owned state for the
 //! current runtime method, and each child borrow remains scoped to one opaque visitor call before
 //! recursion continues.
-use crate::render::DisplayList;
-use crate::{Dimensioni, Recti, UNCLIPPED_RECT};
-
+//!
+//! # Source layout
+//!
+//! Singular modules such as `widget` and `container` own extension contracts; plural modules such
+//! as `widgets` and `containers` are built-in catalogs. Named module files are used at every depth,
+//! each public built-in component family has one correspondingly named file, and shared helpers are
+//! named for their behavior. Tests follow their owning subject without forcing production code into
+//! a `mod.rs` layout.
 pub(crate) mod frame;
 mod input;
 pub use input::UiInputEvent;
@@ -55,24 +60,3 @@ pub use containers::{
     StackParameters, StackState,
 };
 pub use containers::ScrollAreaOption;
-
-/// Returns the union of two rectangles.
-fn union_rect(a: Recti, b: Recti) -> Recti {
-    let min_x = a.x.min(b.x);
-    let min_y = a.y.min(b.y);
-    let max_x = (a.x + a.width).max(b.x + b.width);
-    let max_y = (a.y + a.height).max(b.y + b.height);
-    Recti::new(min_x, min_y, max_x - min_x, max_y - min_y)
-}
-
-/// Returns the screen-space rectangle occupied by a child and any overflow content it measured.
-fn child_content_rect(node: &Node) -> Recti {
-    let allocation = node.state.layout.allocation;
-    let content_size = node.state.layout.content_size;
-    Recti::new(
-        allocation.x,
-        allocation.y,
-        allocation.width.max(content_size.width),
-        allocation.height.max(content_size.height),
-    )
-}
