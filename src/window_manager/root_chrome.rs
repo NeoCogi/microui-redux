@@ -320,12 +320,6 @@ impl Widget for RootChromeSurface {
         FocusPolicy::DragCapture
     }
 
-    fn keeps_pointer_capture(&self) -> bool {
-        // Capture persists only while move or resize interaction remains active in root state.
-        let Some(state) = self.state.upgrade() else { return false };
-        runtime_read_state(&state, "RootChromeSurface::capture", RootState::is_active)
-    }
-
     fn pointer_capture_lost(&mut self) {
         // External invalidation terminates chrome interaction without recording a submission.
         let Some(state) = self.state.upgrade() else { return };
@@ -419,7 +413,7 @@ mod capture_tests {
     use crate::{Custom, CustomParameters};
 
     #[test]
-    fn root_chrome_retains_capture_only_for_local_move_or_resize_mode() {
+    fn root_chrome_capture_loss_clears_local_move_or_resize_mode() {
         let content = Node::widget(Custom::create(CustomParameters::new("content")));
         let (state, mut container) = create_root_chrome(RootChromeParameters {
             name: "root".to_owned(),
@@ -428,15 +422,13 @@ mod capture_tests {
             visible: true,
             content,
         });
-        assert!(!container.keeps_pointer_capture());
         state.try_update(|state| state.interaction = RootInteraction::Moving).unwrap();
-        assert!(container.keeps_pointer_capture());
         container.pointer_capture_lost();
-        assert!(!container.keeps_pointer_capture());
         assert_eq!(state.try_read(RootState::is_active), Some(false));
 
         state.try_update(|state| state.interaction = RootInteraction::Resizing).unwrap();
-        assert!(container.keeps_pointer_capture());
+        container.pointer_capture_lost();
+        assert_eq!(state.try_read(RootState::is_active), Some(false));
     }
 
     #[test]

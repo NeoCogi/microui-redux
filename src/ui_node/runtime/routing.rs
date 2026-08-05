@@ -15,9 +15,7 @@ impl UiRuntime {
             self.routed_event = None;
         }
 
-        let capture_valid = self
-            .capture
-            .is_none_or(|id| contains_active_node_in(roots, id) && captured_target_retains_pointer_capture(roots, id));
+        let capture_valid = self.capture.is_none_or(|id| contains_active_node_in(roots, id));
         if !capture_valid {
             self.clear_current_pointer_capture(roots);
         }

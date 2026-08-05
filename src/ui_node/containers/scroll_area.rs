@@ -602,11 +602,12 @@ impl ScrollArea {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::Input;
     use crate::test_support::test_atlas;
     use crate::ui_node::UiRuntime;
     use crate::{
-        Column, ColumnParameters, Custom, CustomParameters, Policy, Row, RowParameters, SizePolicy, Stack, StackDirection, StackParameters, TextBlock,
-        TextBlockParameters, TextWrap, UNCLIPPED_RECT,
+        Column, ColumnParameters, Custom, CustomParameters, MouseButton, Policy, Row, RowParameters, SizePolicy, Stack, StackDirection, StackParameters,
+        TextBlock, TextBlockParameters, TextWrap, UNCLIPPED_RECT,
     };
 
     /// Lays out one fixed content node and returns the parent layout's committed summary.
@@ -647,6 +648,42 @@ mod tests {
         assert!(!child_state.is_alive());
         drop(node);
         assert!(!scroll.is_alive());
+    }
+
+    #[test]
+    fn disabling_scrolling_revokes_scrollbar_capture_through_participation() {
+        let child = Node::widget(Custom::create(CustomParameters::new("child"))).with_policy(Policy::fixed(200, 200));
+        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [child]));
+        let style = Style {
+            padding: 0,
+            scrollbar_size: 10,
+            ..Style::default()
+        };
+        let outer = Recti::new(0, 0, 100, 100);
+        let mut runtime = UiRuntime::new();
+
+        runtime.begin_update();
+        runtime.layout_tree_root(&mut root, &style, test_atlas(), outer, UNCLIPPED_RECT);
+        let track = scroll
+            .try_read(|state| state.geometry.vertical)
+            .flatten()
+            .expect("overflowing content must activate the vertical scrollbar");
+
+        let mut input = Input::default();
+        input.mousedown(track.x + track.width / 2, track.y + 1, MouseButton::LEFT);
+        let event = input.pop_event().expect("test input must contain the pointer press");
+        let snapshot = input.snapshot();
+        runtime.begin_input_event(true, &event);
+        let (owner, result) = runtime
+            .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event)
+            .expect("the scrollbar must receive its pointer press");
+        runtime.update_pointer_capture(owner, result, &event, snapshot.mouse_buttons);
+        runtime.update_tree_root(&mut root, &style, test_atlas(), snapshot);
+        assert_eq!(runtime.capture, Some(owner));
+
+        scroll.try_update(|state| state.set_scrolling_enabled(false)).unwrap();
+        runtime.layout_tree_root(&mut root, &style, test_atlas(), outer, UNCLIPPED_RECT);
+        assert_eq!(runtime.capture, None);
     }
 
     #[test]

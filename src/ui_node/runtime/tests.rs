@@ -264,12 +264,6 @@ impl Widget for CaptureSurface {
         FocusPolicy::DragCapture
     }
 
-    fn keeps_pointer_capture(&self) -> bool {
-        self.state
-            .upgrade()
-            .is_some_and(|state| state.try_borrow().expect("capture state must be available for retention").active)
-    }
-
     fn pointer_capture_lost(&mut self) {
         let state = self.state.upgrade().expect("capture state must outlive its surface");
         let mut state = state.try_borrow_mut().expect("capture state must be available for loss notification");
@@ -592,7 +586,7 @@ fn widget_focus_policy_is_authoritative_after_dispatch_cleanup() {
 }
 
 #[test]
-fn captured_container_reports_local_retention_and_receives_loss_notification() {
+fn captured_container_receives_direct_drag_while_capture_is_active() {
     let (container, state) = CaptureContainer::new();
     let mut root = Node::container(container);
     let id = root.id();
@@ -630,12 +624,6 @@ fn captured_container_reports_local_retention_and_receives_loss_notification() {
     assert!(state.borrow().active);
     assert!(state.borrow().saw_capture_during_drag);
     assert_eq!(state.borrow().drags, 1);
-
-    state.borrow_mut().active = false;
-    layout_root(&mut runtime, &mut root, &style, test_atlas());
-    assert_eq!(runtime.capture, None);
-    assert_eq!(state.borrow().losses, 1);
-    assert!(!state.borrow().active);
 }
 
 #[test]

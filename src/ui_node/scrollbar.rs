@@ -377,11 +377,6 @@ impl Widget for RetainedScrollbar {
         FocusPolicy::DragCapture
     }
 
-    fn keeps_pointer_capture(&self) -> bool {
-        // Deactivation cancels capture even if a previous press left the local drag flag set.
-        crate::ui_node::runtime_read_state(&self.state, "Scrollbar::capture", |state| state.dragging && state.configuration.is_some())
-    }
-
     fn pointer_capture_lost(&mut self) {
         // Dispatcher loss ends only the transient drag lease; configured geometry and offset remain.
         crate::ui_node::runtime_update_state(&self.state, "Scrollbar::capture_lost", |state| state.dragging = false);

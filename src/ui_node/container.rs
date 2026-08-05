@@ -171,11 +171,6 @@ impl Widget for Container {
             .map_or_else(|| crate::FocusPolicy::from_widget_options(self.opt), |surface| surface.focus_policy())
     }
 
-    fn keeps_pointer_capture(&self) -> bool {
-        // No surface means there is no local interaction state capable of cancelling capture.
-        self.surface.as_ref().is_none_or(|surface| surface.keeps_pointer_capture())
-    }
-
     fn pointer_capture_lost(&mut self) {
         // Loss notification is local; descendants own and receive their own capture lifecycle.
         if let Some(surface) = &mut self.surface {

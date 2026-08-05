@@ -342,19 +342,10 @@ pub trait Widget {
         }
     }
 
-    /// Reports whether this widget's current local interaction still requires pointer capture.
-    ///
-    /// The dispatcher owns captured node identity. This hook exposes only widget-local validity,
-    /// allowing responsive placement or state changes to revoke a drag without giving widgets any
-    /// routing capability. Widgets without revocable capture state use the default.
-    fn keeps_pointer_capture(&self) -> bool {
-        true
-    }
-
     /// Clears widget-local interaction state after dispatcher-owned capture is revoked.
     ///
-    /// Override this together with [`Widget::keeps_pointer_capture`] when a widget stores a drag
-    /// mode or similar state that must not survive hiding, disabling, or removal.
+    /// Override this when a widget stores a drag mode or similar state that must not survive
+    /// hiding, disabling, or removal.
     fn pointer_capture_lost(&mut self) {}
 }
 

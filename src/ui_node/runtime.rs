@@ -232,24 +232,11 @@ impl UiRuntime {
     }
 }
 
-/// Finds one retained node across independent roots and runs a scoped immutable callback.
-fn with_node<R>(roots: &[Node], id: RuntimeNodeId, f: impl FnOnce(&Node) -> R) -> Option<R> {
-    // Locate the owning root before consuming `f`; the second scoped walk invokes it exactly once.
-    let root = roots.iter().find(|root| root.with_node(id, |_| ()).is_some())?;
-    root.with_node(id, f)
-}
-
 /// Finds one retained node across independent roots and runs a scoped mutable callback.
 fn with_node_mut<R>(roots: &mut [Node], id: RuntimeNodeId, f: impl FnOnce(&mut Node) -> R) -> Option<R> {
     // Determine the root index immutably, then open one mutable path into that root.
     let index = roots.iter().position(|root| root.with_node(id, |_| ()).is_some())?;
     roots[index].with_node_mut(id, f)
-}
-
-/// Asks the current capture target whether its local interaction still requires capture.
-fn captured_target_retains_pointer_capture(roots: &[Node], id: RuntimeNodeId) -> bool {
-    // A missing identity cannot retain capture and is handled as invalid by sanitization.
-    with_node(roots, id, |node| node.data.widget().keeps_pointer_capture()).unwrap_or(false)
 }
 
 /// Notifies a still-retained target that dispatcher-owned pointer capture ended.
