@@ -120,6 +120,8 @@ fn child_content_rect(node: &Node) -> Recti {
 }
 
 fn child_content_bounds_from_children(children: &Children) -> Option<Recti> {
+    // Hidden children keep their last allocation for state continuity but cannot enlarge active
+    // content bounds. Visible child overflow is folded without allocating a temporary collection.
     let mut bounds = None;
     for child in children.iter().filter(|child| node_is_visible(child)) {
         let child_rect = child_content_rect(child);

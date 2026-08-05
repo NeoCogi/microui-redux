@@ -7,6 +7,8 @@ impl UiRuntime {
     pub(super) fn update_node_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Style, atlas: crate::AtlasHandle, input: InputSnapshot) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.updates += 1);
+        // Reconstruct exactly the frame/content coordinate spaces committed during layout. Widgets
+        // see content-local geometry even though allocations and inherited clips use other spaces.
         let framed = node_is_framed(node);
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);
         let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
@@ -20,6 +22,7 @@ impl UiRuntime {
             .intersect(&content_rect)
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
 
+        // Snapshot interaction before invoking user code so all reads during this update are stable.
         let (opt, focus_policy) = node_interaction_config(node);
         let id = node.id();
         let (hovered, focused, clicked, active) = self.commit_interaction_snapshot(id, node.state.hovered, input, opt, focus_policy);
@@ -28,6 +31,8 @@ impl UiRuntime {
         node.state.clicked = clicked;
         node.state.active = active;
 
+        // Only the preselected recipient takes the routed event; all other nodes still receive their
+        // normal eventless update in parent-first order.
         let event = self
             .take_routed_event(id)
             .map(|event| super::widget_context::localize_event(Vec2i::new(content_rect.x, content_rect.y), event));
@@ -49,6 +54,7 @@ impl UiRuntime {
             input.key_codes,
         );
         node.data.widget_mut().update(&mut widget_ctx, event.as_ref());
+        // Run capture cleanup immediately after the owner observes the release/transfer event.
         self.finish_pointer_capture_update(node);
         let traverse_children = node.is_container();
         if traverse_children {
@@ -73,19 +79,23 @@ impl UiRuntime {
         opt: WidgetOption,
         focus_policy: FocusPolicy,
     ) -> (bool, bool, bool, bool) {
+        // Disabled interaction clears every local snapshot without changing geometry or state.
         if opt.intersects(WidgetOption::NO_INTERACT) {
             return (false, false, false, false);
         }
 
+        // Pointer events recompute hover during routing; keyboard-only updates preserve it.
         let hovered = if self.pointer_event_active { self.hover == Some(id) } else { prior_hovered };
 
         if self.focus == Some(id) {
+            // Momentary and drag focus release with the final button; hold-focus widgets retain it.
             let released_without_hold_focus = self.pointer_release_active && input.mouse_buttons.is_empty() && focus_policy.releases_on_mouse_up();
             if released_without_hold_focus {
                 self.focus = None;
             }
         }
 
+        // Derive the remaining flags from dispatcher identities rather than widget-local guesses.
         let focused = self.focus == Some(id);
         let active = focused && input.mouse_buttons.intersects(MouseButton::LEFT);
         let clicked = self.clicked == Some(id);

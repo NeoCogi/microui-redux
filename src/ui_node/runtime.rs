@@ -84,6 +84,7 @@ impl UiRuntime {
 
     /// Clears update-cycle metrics before the initial synchronization layout.
     pub(crate) fn begin_update(&mut self) {
+        // These values describe one event transaction and must never leak into the next update.
         debug_assert!(self.capture_loss_after_update.is_none(), "pointer-capture loss was not delivered after update");
         self.routed_event = None;
         self.clicked = None;
@@ -95,6 +96,8 @@ impl UiRuntime {
 
     /// Starts exactly one full-tree update for one normalized input event.
     pub(crate) fn begin_input_event(&mut self, pointer_input_enabled: bool, event: &UiInputEvent) {
+        // Routing must have consumed the prior event and completed deferred capture cleanup before
+        // a new normalized event can establish its transaction flags.
         debug_assert!(self.routed_event.is_none(), "the previous routed event was not consumed by update");
         debug_assert!(self.capture_loss_after_update.is_none(), "pointer-capture loss was not delivered after update");
         self.pointer_input_enabled = pointer_input_enabled;
@@ -102,15 +105,18 @@ impl UiRuntime {
         self.pointer_release_active = event.is_pointer_release();
         self.clicked = None;
         if self.pointer_event_active {
+            // Pointer routing recomputes hover from current committed geometry for every event.
             self.hover = None;
         }
         if matches!(event, UiInputEvent::MouseDown { .. }) {
+            // A press starts a new focus claim; the selected recipient assigns focus during routing.
             self.focus = None;
         }
     }
 
     /// Clears focus, hover, capture, and queued input while preserving retained node state.
     pub(crate) fn clear_transient_targets(&mut self, roots: &mut [Node]) {
+        // Clear scalar targets first, then notify any capture owner while the tree is still present.
         self.focus = None;
         self.hover = None;
         self.routed_event = None;
@@ -131,16 +137,21 @@ impl UiRuntime {
     pub(crate) fn layout_tree_root(&mut self, root: &mut Node, style: &Style, atlas: crate::AtlasHandle, outer: Recti, viewport: Recti) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.tree_layouts += 1);
+        // Root layout establishes the transform reused by subsequent routing, update, and paint.
         self.root_transform = Transform::root(viewport);
         self.layout_allocated_node_ref(root, style, &atlas, outer);
+        // Cache only derived geometry; the persistent Node remains the authoritative tree.
         self.root_content_size = root.state.layout.content_size;
+        // Layout may hide or remove the current transient target, so validate identities now.
         self.sanitize_transient_targets(std::slice::from_mut(root));
     }
 
     /// Updates one persistent root node and its eligible descendants.
     pub(crate) fn update_tree_root(&mut self, root: &mut Node, style: &Style, atlas: crate::AtlasHandle, input: InputSnapshot) {
+        // Update is parent-first and consumes at most one event previously routed to one identity.
         self.update_node_ref(root, self.root_transform, style, atlas, input);
         let roots = std::slice::from_mut(root);
+        // A gated target may not have been visited to receive deferred loss; finish it explicitly.
         self.flush_capture_loss(roots);
         self.sanitize_transient_targets(roots);
     }
@@ -152,6 +163,8 @@ impl UiRuntime {
 
     /// Records one routed event for a node-local widget update.
     pub(crate) fn push_routed_event(&mut self, node: RuntimeNodeId, event: UiInputEvent) {
+        // The dispatcher preselects one recipient. Multiple queued recipients would reintroduce
+        // handler-dependent hit testing, so enforce the single-recipient invariant here.
         debug_assert!(self.routed_event.is_none(), "one input event was routed to more than one recipient");
         self.routed_event = Some((node, event));
     }
@@ -166,6 +179,7 @@ impl UiRuntime {
 
     /// Takes the current routed event if this node is its sole recipient.
     pub(crate) fn take_routed_event(&mut self, node: RuntimeNodeId) -> Option<UiInputEvent> {
+        // Leave the event intact while unrelated nodes update; only its selected identity may take it.
         if self.routed_event.as_ref().is_some_and(|(recipient, _)| *recipient == node) {
             self.routed_event.take().map(|(_, event)| event)
         } else {
@@ -218,21 +232,29 @@ impl UiRuntime {
     }
 }
 
+/// Finds one retained node across independent roots and runs a scoped immutable callback.
 fn with_node<R>(roots: &[Node], id: RuntimeNodeId, f: impl FnOnce(&Node) -> R) -> Option<R> {
+    // Locate the owning root before consuming `f`; the second scoped walk invokes it exactly once.
     let root = roots.iter().find(|root| root.with_node(id, |_| ()).is_some())?;
     root.with_node(id, f)
 }
 
+/// Finds one retained node across independent roots and runs a scoped mutable callback.
 fn with_node_mut<R>(roots: &mut [Node], id: RuntimeNodeId, f: impl FnOnce(&mut Node) -> R) -> Option<R> {
+    // Determine the root index immutably, then open one mutable path into that root.
     let index = roots.iter().position(|root| root.with_node(id, |_| ()).is_some())?;
     roots[index].with_node_mut(id, f)
 }
 
+/// Asks the current capture target whether its local interaction still requires capture.
 fn captured_target_retains_pointer_capture(roots: &[Node], id: RuntimeNodeId) -> bool {
+    // A missing identity cannot retain capture and is handled as invalid by sanitization.
     with_node(roots, id, |node| node.data.widget().keeps_pointer_capture()).unwrap_or(false)
 }
 
+/// Notifies a still-retained target that dispatcher-owned pointer capture ended.
 fn notify_pointer_capture_lost(roots: &mut [Node], id: RuntimeNodeId) {
+    // Removal is legal before notification; absence simply means the dropped widget needs no hook.
     let _ = with_node_mut(roots, id, |node| {
         node.data.widget_mut().pointer_capture_lost();
     });
@@ -259,6 +281,7 @@ fn contains_active_node(node: &Node, id: RuntimeNodeId) -> bool {
 }
 
 fn node_children_visible(node: &Node) -> bool {
+    // Only Container can own children; participation is checked separately by the caller.
     node.is_container()
 }
 
@@ -273,9 +296,11 @@ fn node_accepts_input(node: &Node) -> bool {
 }
 
 fn node_is_framed(node: &Node) -> bool {
+    // Dynamic widget options are authoritative because surfaces can enable/disable behavior.
     node.data.widget().effective_widget_opt().intersects(WidgetOption::FRAME)
 }
 
+/// Resolves effective event options and focus behavior for the current update pass.
 fn node_interaction_config(node: &Node) -> (WidgetOption, FocusPolicy) {
     let widget = node.data.widget();
     let mut opt = widget.effective_widget_opt();
@@ -286,10 +311,12 @@ fn node_interaction_config(node: &Node) -> (WidgetOption, FocusPolicy) {
     (opt, widget.focus_policy())
 }
 
+/// Converts a screen-space rectangle into coordinates relative to `origin`.
 fn rect_relative_to(rect: Recti, origin: Vec2i) -> Recti {
     Recti::new(rect.x - origin.x, rect.y - origin.y, rect.width, rect.height)
 }
 
+/// Converts a local rectangle into screen coordinates relative to `origin`.
 fn translate_local_rect(rect: Recti, origin: Vec2i) -> Recti {
     Recti::new(rect.x + origin.x, rect.y + origin.y, rect.width, rect.height)
 }

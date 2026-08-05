@@ -194,19 +194,25 @@ pub(super) struct RootChromeParameters {
     pub(super) content: Node,
 }
 
+/// Builds the private root container and returns the weak state capability registered by Context.
 pub(super) fn create_root_chrome(parameters: RootChromeParameters) -> (WidgetStateHandle<RootState>, Container) {
+    // Allocate application-visible root state once. RootChromeLayout retains the strong owner;
+    // RootHandle and all window-manager references remain weak checked capabilities.
     let state = Rc::new(RefCell::new(RootState::new(
         parameters.name,
         parameters.options,
         parameters.rect,
         parameters.visible,
     )));
+    // Capture the public handle before moving state ownership into the private root layout.
     let handle = WidgetStateHandle::new(&state);
     let layout = RootChromeLayout { state: state.clone() };
+    // Chrome interaction and paint use weak access so RootChromeLayout remains the sole state owner.
     let surface = RootChromeSurface {
         state: Rc::downgrade(&state),
         opt: WidgetOption::NONE,
     };
+    // Root chrome is one ordinary Container: one application child, one Layout, one surface Widget.
     let container = Container::new(layout, WidgetOption::NONE, [parameters.content]).with_surface(surface);
     (handle, container)
 }
@@ -224,10 +230,12 @@ struct RootChromeSurface {
 
 impl Widget for RootChromeSurface {
     fn widget_opt(&self) -> &WidgetOption {
+        // Root chrome uses dynamic effective options below; this is its static baseline.
         &self.opt
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
+        // Hidden or destroyed roots cannot become pointer targets even if stale geometry remains.
         let Some(state) = self.state.upgrade() else {
             return self.opt | WidgetOption::NO_INTERACT;
         };
@@ -237,6 +245,8 @@ impl Widget for RootChromeSurface {
     }
 
     fn accepts_event(&self, event: &UiInputEvent) -> bool {
+        // Active move/resize capture continues outside chrome geometry. Otherwise only committed
+        // title/close/resize rectangles accept non-wheel pointer events.
         let Some(state) = self.state.upgrade() else { return false };
         runtime_read_state(&state, "RootChromeSurface::accepts_event", |state| {
             if state.is_active() && matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. }) {
@@ -252,10 +262,13 @@ impl Widget for RootChromeSurface {
     }
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        // The dispatcher already selected this surface and localized pointer coordinates to root.
         let Some(state) = self.state.upgrade() else { return };
         runtime_update_state(&state, "RootChromeSurface::update", |state| {
+            // Compare against the initial rectangle once so any move/resize records one occurrence.
             let initial = state.rect;
             if let Some(event) = input {
+                // Hit classification uses the single geometry snapshot committed by latest layout.
                 match event {
                     UiInputEvent::MouseDown { pos, button } if button.intersects(MouseButton::LEFT) => match state.geometry.hit_test(*pos) {
                         Some(RootChromePart::Close) => {
@@ -268,10 +281,12 @@ impl Widget for RootChromeSurface {
                     },
                     UiInputEvent::MouseDrag { delta, buttons, .. } if buttons.intersects(MouseButton::LEFT) => match state.interaction {
                         RootInteraction::Moving => {
+                            // Movement changes origin only; programmed size remains authoritative.
                             state.rect.x = state.rect.x.saturating_add(delta.x);
                             state.rect.y = state.rect.y.saturating_add(delta.y);
                         }
                         RootInteraction::Resizing => {
+                            // Chrome minimum prevents title/body geometry from becoming invalid.
                             state.rect.width = state.rect.width.saturating_add(delta.x).max(state.geometry.minimum_outer.width);
                             state.rect.height = state.rect.height.saturating_add(delta.y).max(state.geometry.minimum_outer.height);
                         }
@@ -288,6 +303,8 @@ impl Widget for RootChromeSurface {
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        // Paint panel/frame beneath application content. Title text and affordances are submitted as
+        // a post-tree overlay because they occupy the topmost root paint layer.
         let Some(state) = self.state.upgrade() else { return };
         runtime_read_state(&state, "RootChromeSurface::paint", |state| {
             let outer = ctx.local_rect();
@@ -304,11 +321,13 @@ impl Widget for RootChromeSurface {
     }
 
     fn keeps_pointer_capture(&self) -> bool {
+        // Capture persists only while move or resize interaction remains active in root state.
         let Some(state) = self.state.upgrade() else { return false };
         runtime_read_state(&state, "RootChromeSurface::capture", RootState::is_active)
     }
 
     fn pointer_capture_lost(&mut self) {
+        // External invalidation terminates chrome interaction without recording a submission.
         let Some(state) = self.state.upgrade() else { return };
         runtime_update_state(&state, "RootChromeSurface::capture_lost", |state| state.interaction = RootInteraction::None);
     }
@@ -316,6 +335,8 @@ impl Widget for RootChromeSurface {
 
 impl Layout for RootChromeLayout {
     fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        // Resolve chrome-only minimum/insets first, then measure the one application child inside
+        // that body. Auto-size and placement therefore share root_chrome_geometry.
         let (outer, shell) = runtime_read_state(&self.state, "RootChromeLayout::measure_shell", |state| {
             let minimum = root_chrome_geometry(Recti::default(), Dimensioni::default(), &state.name, state.options, style, atlas).minimum_outer;
             let outer = Recti::new(0, 0, available.width.max(minimum.width), available.height.max(minimum.height));
@@ -324,6 +345,7 @@ impl Layout for RootChromeLayout {
                 root_chrome_geometry(outer, Dimensioni::default(), &state.name, state.options, style, atlas),
             )
         });
+        // Convert the outer measurement bound into remaining application-content space.
         let child_available = Dimensioni::new(
             inset_available(available.width, outer.width.saturating_sub(shell.body.width)),
             inset_available(available.height, outer.height.saturating_sub(shell.body.height)),
@@ -344,12 +366,14 @@ impl Layout for RootChromeLayout {
             policy.width.preferred_extent(child.width, child_available.width),
             policy.height.preferred_extent(child.height, child_available.height),
         );
+        // Rebuild geometry with measured content and expose only its intrinsic outer extent.
         runtime_read_state(&self.state, "RootChromeLayout::measure_result", |state| {
             root_chrome_geometry(Recti::default(), child, &state.name, state.options, style, atlas).intrinsic_outer
         })
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        // Provisional shell geometry supplies the exact measurement constraint for the child.
         let shell = runtime_read_state(&self.state, "RootChromeLayout::shell", |state| {
             root_chrome_geometry(rect, Dimensioni::default(), &state.name, state.options, ctx.style(), ctx.atlas())
         });
@@ -365,10 +389,12 @@ impl Layout for RootChromeLayout {
                 ),
             )
             .unwrap_or_default();
+        // Commit one snapshot used by layout, hit testing, surface paint, and overlay paint.
         let body = runtime_update_state(&self.state, "RootChromeLayout::commit", |state| {
             state.geometry = root_chrome_geometry(rect, child, &state.name, state.options, ctx.style(), ctx.atlas());
             state.geometry.body
         });
+        // The single child is application content and is clipped to the committed body.
         let _ = ctx.layout_child(children, 0, body);
         ctx.set_children_viewport(body, Vec2i::default());
         ctx.set_content_size(Dimensioni::new(rect.width.max(0), rect.height.max(0)));

@@ -153,6 +153,7 @@ struct DisclosureHeader {
 impl DisclosureHeader {
     /// Measures the complete custom-painted header, including its optional internal frame.
     fn preferred(&self, style: &Style, atlas: &AtlasHandle) -> Dimensioni {
+        // Resolve icon and text metrics independently, then build the one-row content preference.
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
         let font_height = atlas.get_font_height(style.font) as i32;
@@ -165,6 +166,7 @@ impl DisclosureHeader {
         let content_height = (font_height.max(icon.height) + vertical_pad * 2).max(0);
         let icon_width = (content_height - padding).max(icon.width);
         let content = Dimensioni::new((padding * 2 + icon_width + text_width).max(0), content_height);
+        // A header frame is internal to this child, so preferred size must include its inset here.
         let border = if self.opt.intersects(WidgetOption::FRAME) {
             style.frame_border().width
         } else {
@@ -176,23 +178,28 @@ impl DisclosureHeader {
 
 impl Widget for DisclosureHeader {
     fn widget_opt(&self) -> &WidgetOption {
+        // Static options describe only the header child, never the complete disclosure allocation.
         &self.opt
     }
 
     fn measure(&self, style: &Style, atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        // Header content is intrinsically one line and does not stretch to the offered bound.
         self.preferred(style, atlas)
     }
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        // Routing already selected this real child surface; only a left press submits a toggle.
         let submitted = matches!(input, Some(UiInputEvent::MouseDown { button, .. }) if button.intersects(MouseButton::LEFT));
         if !submitted {
             return;
         }
+        // The weak link prevents this header from extending the enclosing composite's lifetime.
         let Some(state) = self.state.upgrade() else { return };
         runtime_update_state(&state, "DisclosureHeader::update", DisclosureState::toggle);
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        // Expansion determines the icon, while presentation variant determines background/frame.
         let Some(state) = self.state.upgrade() else { return };
         let expanded = runtime_read_state(&state, "DisclosureHeader::paint", DisclosureState::is_expanded);
         let mut row = ctx.local_rect();
@@ -214,6 +221,7 @@ impl Widget for DisclosureHeader {
             DisclosureVariant::Tree => {}
         }
 
+        // Reserve a square icon cell from row height, then paint text in the remaining rectangle.
         let text_color = ctx.style().colors[ControlColor::Text as usize];
         ctx.draw_icon(
             if expanded { COLLAPSE_ICON } else { EXPAND_ICON },
@@ -231,6 +239,7 @@ impl Widget for DisclosureHeader {
     }
 
     fn focus_policy(&self) -> crate::FocusPolicy {
+        // Reuse ordinary option-derived press/release behavior for the addressable header child.
         crate::FocusPolicy::from_widget_options(self.opt)
     }
 }
@@ -257,6 +266,8 @@ impl DisclosureLayout {
 
 impl Layout for DisclosureLayout {
     fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        // The header always contributes. Body measurement is conditional so collapsed content does
+        // not influence root auto-size while its state and nodes remain retained.
         let header = children.measure_child(Self::HEADER, style, atlas, available).unwrap_or_default();
         runtime_read_state(&self.state, "Disclosure::measure", |state| {
             if !state.expanded {
@@ -276,6 +287,7 @@ impl Layout for DisclosureLayout {
                     0
                 },
             );
+            // BODY is itself a Column node, which measures the application-provided descendants.
             let body = children.measure_child(Self::BODY, style, atlas, body_available).unwrap_or_default();
             Dimensioni::new(
                 header.width.max(body.width.saturating_add(indent)),
@@ -285,6 +297,7 @@ impl Layout for DisclosureLayout {
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        // Header is a fixed structural role and always occupies the first visible row.
         let preferred = children
             .measure_child(Self::HEADER, ctx.style(), ctx.atlas(), Dimensioni::new(rect.width, rect.height))
             .unwrap_or_default();
@@ -292,6 +305,8 @@ impl Layout for DisclosureLayout {
         let _ = ctx.set_child_participation(children, Self::HEADER, ChildParticipation::Active);
         let _ = ctx.layout_child(children, Self::HEADER, Recti::new(rect.x, rect.y, rect.width, header_height));
 
+        // Participation is the single gate consumed by update, paint, hit testing, and target
+        // sanitation. No generic visibility bit or topology rewrite is needed for collapse.
         let expanded = runtime_read_state(&self.state, "Disclosure::place", DisclosureState::is_expanded);
         let participation = if expanded { ChildParticipation::Active } else { ChildParticipation::Hidden };
         let _ = ctx.set_child_participation(children, Self::BODY, participation);
@@ -309,16 +324,23 @@ impl Layout for DisclosureLayout {
     }
 }
 
+/// Builds the fixed body/header structure before wrapping it in the public owning node.
 fn create_container(parameters: DisclosureParameters) -> (WidgetStateHandle<DisclosureState>, Container) {
+    // A Column owns mutable application content. DisclosureState delegates topology operations to
+    // its typed weak handle instead of duplicating another child collection.
     let (content, body) = Column::create(ColumnParameters::new(parameters.children.nodes));
+    // This allocation is retained by DisclosureLayout and observed weakly by the header widget.
     let state = Rc::new(RefCell::new(DisclosureState { content, expanded: parameters.expanded }));
     let handle = WidgetStateHandle::new(&state);
+    // The internal widget constructor avoids fabricating meaningless unit state for a surface whose
+    // real state already belongs to the surrounding composite.
     let header = DisclosureHeader {
         state: Rc::downgrade(&state),
         label: parameters.label,
         variant: parameters.variant,
         opt: parameters.opt,
     };
+    // Structural roles are stable: body at index zero, addressable header at index one.
     let layout = DisclosureLayout { state, variant: parameters.variant };
     let container = Container::new(layout, WidgetOption::NONE, [body, Node::widget_internal(header)]);
     (handle, container)
@@ -329,7 +351,11 @@ pub struct Disclosure;
 
 impl Disclosure {
     /// Creates a state-owned disclosure and returns its weak state capability plus completed node.
+    ///
+    /// Construction is complete before the node is returned: callers never observe or manipulate
+    /// the two structural children separately.
     pub fn create(parameters: DisclosureParameters) -> (WidgetStateHandle<DisclosureState>, Node) {
+        // Add the common Node runtime state around the concrete Container ownership boundary.
         let (state, container) = create_container(parameters);
         (state, Node::container(container))
     }

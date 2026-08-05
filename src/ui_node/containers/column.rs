@@ -80,10 +80,12 @@ pub struct ColumnLayout {
 
 impl Layout for ColumnLayout {
     fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        // Column geometry depends only on the authoritative child sequence and shared Style.
         measure_column(children, style, atlas, available)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        // Delegate to the shared flow used by Disclosure bodies so both paths remain identical.
         layout_column(ctx, children, rect);
     }
 }
@@ -93,10 +95,18 @@ pub struct Column;
 
 impl Column {
     /// Creates a state-owned column and returns its weak state capability plus completed node.
+    ///
+    /// The child cell is allocated first because [`ColumnState`] needs a weak mutation capability
+    /// for that exact collection. The layout retains the strong state allocation, while the
+    /// completed [`Container`] becomes the only persistent strong owner of the children.
     pub fn create(parameters: ColumnParameters) -> (WidgetStateHandle<ColumnState>, Node) {
+        // Prepare the single child allocation shared by traversal and weak typed-state mutation.
         let children = Rc::new(RefCell::new(parameters.children));
+        // State owns no nodes; its handle expires as soon as the enclosing layout is dropped.
         let state = Rc::new(RefCell::new(ColumnState { children: ChildrenHandle::new(&children) }));
+        // Capture the public weak handle before moving the strong state owner into the layout.
         let handle = WidgetStateHandle::new(&state);
+        // Move child and state ownership into one concrete Container, then finish the owning Node.
         let container = Container::from_shared(children, ColumnLayout { _state: state }, WidgetOption::NONE);
         (handle, Node::container(container))
     }
@@ -107,6 +117,7 @@ impl Column {
 /// This is shared with Disclosure because an expanded disclosure body has exactly Column flow.
 /// The function uses scalar replay instead of building per-frame policy and height vectors.
 pub(super) fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+    // Spacing consumes room between tracks, never inside a child's allocated rectangle.
     let spacing = ctx.style().spacing.max(0);
     let count = children.len();
     // Spacing is outside track allocation, so children divide only the remaining height.
@@ -149,6 +160,8 @@ pub(super) fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Chi
 /// Width is the widest policy-adjusted child. Height uses the same ordered axis allocation as
 /// layout, including spacing, but does not retain or mutate any sizing state.
 pub(super) fn measure_column(children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+    // Use the same spacing and track policy math as placement so preferred and committed geometry
+    // cannot disagree when the parent supplies a finite height.
     let spacing = style.spacing.max(0);
     let count = children.len();
     let mut width = 0;

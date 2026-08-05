@@ -406,6 +406,7 @@ struct GridLayout {
 
 impl Layout for GridLayoutPolicy {
     fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        // Measurement reads typed track/span state but never mutates reusable layout scratch.
         runtime_read_state(&self.state, "Grid::measure", |state| grid_size(state, children, style, atlas, available))
     }
 
@@ -424,11 +425,16 @@ pub struct Grid;
 
 impl Grid {
     /// Creates a Grid and returns its weak state capability plus completed owning node.
+    ///
+    /// The constructor establishes child/span/placement synchronization before publishing the weak
+    /// state handle. `Container` then owns the nodes, `GridState` owns their parallel metadata, and
+    /// `GridLayoutPolicy` owns reusable per-layout track buffers.
     pub fn create(parameters: GridParameters) -> (WidgetStateHandle<GridState>, Node) {
         let mut items = parameters.items;
         // Placement depends on the final column topology. Normalize it before the state becomes
         // observable through the returned weak handle.
         items.set_columns(parameters.column_tracks.len());
+        // Allocate the final child cell so state can retain only a weak topology capability.
         let children = Rc::new(RefCell::new(parameters.children));
         let state = Rc::new(RefCell::new(GridState {
             children: ChildrenHandle::new(&children),
@@ -436,7 +442,9 @@ impl Grid {
             column_tracks: parameters.column_tracks,
             row_tracks: parameters.row_tracks,
         }));
+        // Capture the application handle before moving strong state ownership into the layout.
         let handle = WidgetStateHandle::new(&state);
+        // Scratch is layout-owned rather than state-owned because applications never observe it.
         let container = Container::from_shared(children, GridLayoutPolicy { state, layout: GridLayout::default() }, WidgetOption::NONE);
         (handle, Node::container(container))
     }

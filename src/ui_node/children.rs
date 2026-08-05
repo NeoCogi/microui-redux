@@ -24,7 +24,13 @@ pub(crate) struct ChildrenHandle {
 }
 
 impl ChildrenHandle {
+    /// Creates a non-owning topology capability for `children`.
+    ///
+    /// The downgraded reference is intentional: application-facing container state may outlive a
+    /// particular access closure, but it must never keep a removed container or its descendants
+    /// alive. Every operation therefore upgrades and borrows the collection afresh.
     pub(crate) fn new(children: &Rc<RefCell<Children>>) -> Self {
+        // Store only a Weak reference so the Container remains the collection's lifetime owner.
         Self { cell: Rc::downgrade(children) }
     }
 
@@ -87,6 +93,7 @@ impl ChildrenHandle {
         // The boolean distinguishes a missing index from capability failure represented by `None`.
         let owner = self.cell.upgrade()?;
         let mut children = owner.try_borrow_mut().ok()?;
+        // Removal is deliberately destructive: attached nodes are never returned for reparenting.
         Some(children.remove_drop(index))
     }
 
@@ -120,6 +127,7 @@ impl ChildrenHandle {
 impl Children {
     /// Creates an empty child collection.
     pub const fn new() -> Self {
+        // No backing allocation is created until the first node is inserted.
         Self { nodes: Vec::new() }
     }
 
@@ -137,22 +145,26 @@ impl Children {
     ///
     /// Use [`Self::child_policy`] separately when the container's slot calculation needs it.
     pub fn measure_child(&self, index: usize, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Option<Dimensioni> {
+        // Resolve the index internally so callers can inspect geometry without borrowing a Node.
         self.nodes.get(index).map(|node| node.measure(style, atlas, available))
     }
 
     /// Returns one child's placement policy without exposing the child itself.
     pub fn child_policy(&self, index: usize) -> Option<crate::Policy> {
+        // Copy only the parent-owned policy; runtime identity and widget state remain opaque.
         self.nodes.get(index).map(|node| node.state.policy)
     }
 
     /// Appends one still-unmounted node and commits this collection as its owner.
     pub(crate) fn push(&mut self, node: Node) {
+        // Moving the unique Node into the vector establishes this collection as its owner.
         self.nodes.push(node);
     }
 
     /// Inserts a node at `index`, returning it unchanged when the index exceeds `len`.
     #[allow(clippy::result_large_err)] // The exact unboxed owner is the failure value by contract.
     pub(crate) fn insert(&mut self, index: usize, node: Node) -> Result<(), Node> {
+        // Validate before consuming `node`, preserving the exact owner when the index is invalid.
         if index > self.nodes.len() {
             return Err(node);
         }
@@ -162,6 +174,7 @@ impl Children {
 
     /// Drops the indexed child owner and reports whether one existed.
     pub(crate) fn remove_drop(&mut self, index: usize) -> bool {
+        // Do not manufacture a detached-node path: a successful removal drops the owner in place.
         if index >= self.nodes.len() {
             return false;
         }
@@ -176,6 +189,7 @@ impl Children {
 
     /// Replaces all children in iterator order, dropping the previous owners.
     pub(crate) fn replace(&mut self, nodes: impl IntoIterator<Item = Node>) {
+        // Collect the replacement sequence once, then drop the previous vector and its subtrees.
         self.nodes = nodes.into_iter().collect();
     }
 

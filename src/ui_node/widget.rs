@@ -250,21 +250,27 @@ pub trait WidgetBuilder: Sized + 'static {
 
 /// Reads associated state during retained runtime dispatch or reports an invariant violation.
 pub(crate) fn runtime_read_state<T: WidgetState, R>(state: &Rc<RefCell<T>>, phase: &'static str, f: impl FnOnce(&T) -> R) -> R {
+    // Runtime traversal treats a conflicting application borrow as a phase-contract violation. It
+    // cannot skip a node without making layout/update/paint state depend on incidental borrowing.
     let state = state.try_borrow().unwrap_or_else(|_| {
         panic!(
             "retained widget state invariant violated during {phase}: associated state is already borrowed; application state-access closures must finish before retained update, layout, or paint traversal"
         )
     });
+    // Keep the checked borrow alive for the complete callback and release it before traversal moves on.
     f(&state)
 }
 
 /// Updates associated state during retained runtime dispatch or reports an invariant violation.
 pub(crate) fn runtime_update_state<T: WidgetState, R>(state: &Rc<RefCell<T>>, phase: &'static str, f: impl FnOnce(&mut T) -> R) -> R {
+    // Mutable runtime access uses the same explicit diagnostic as read access and never queues work
+    // for a later frame, which would make ordering invisible to the caller.
     let mut state = state.try_borrow_mut().unwrap_or_else(|_| {
         panic!(
             "retained widget state invariant violated during {phase}: associated state is already borrowed; application state-access closures must finish before retained update, layout, or paint traversal"
         )
     });
+    // Scope the mutable borrow to this phase callback so independent state cells remain accessible.
     f(&mut state)
 }
 

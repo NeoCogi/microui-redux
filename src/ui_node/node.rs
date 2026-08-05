@@ -63,11 +63,18 @@ pub struct Node {
 impl Node {
     /// Creates a leaf node from one concrete state-owning widget runtime.
     pub fn widget<W: WidgetStateOwner>(widget: W) -> Self {
+        // Public leaves must own typed state so callers can obtain a weak application handle before
+        // the concrete widget is boxed inside WidgetNode.
         Self::widget_with_custom_render(widget, None)
     }
 
     /// Creates a framework-internal leaf whose state is owned by a surrounding composite.
+    ///
+    /// Composite-only surfaces such as a disclosure header already refer to state retained by their
+    /// enclosing layout. Requiring a second unit-state allocation merely to satisfy the public leaf
+    /// constructor would add no ownership or behavior, so this path accepts an ordinary `Widget`.
     pub(crate) fn widget_internal<W: Widget + 'static>(widget: W) -> Self {
+        // No public state handle is produced; lifetime is exactly the lifetime of this Node.
         Self::from_kind(NodeKind::Widget(WidgetNode::new(widget, None)))
     }
 
@@ -84,11 +91,13 @@ impl Node {
     }
 
     fn widget_with_custom_render<W: WidgetStateOwner>(widget: W, custom_render: Option<crate::render::CustomRenderKey>) -> Self {
+        // Erase widget type and renderer metadata together so they cannot become detached owners.
         Self::from_kind(NodeKind::Widget(WidgetNode::new(widget, custom_render)))
     }
 
     /// Creates a branch node from one complete concrete container owner.
     pub fn container(container: Container) -> Self {
+        // Container is already the complete child/layout owner; Node adds only common runtime state.
         Self::from_kind(NodeKind::Container(container))
     }
 
@@ -102,6 +111,8 @@ impl Node {
     }
 
     fn from_kind(kind: NodeKind) -> Self {
+        // Identity is allocated once at the final owning boundary and survives every subsequent move
+        // of the non-Clone Node through unmounted construction and retained insertion.
         Self {
             state: NodeRuntime {
                 id: RuntimeNodeId::allocate(),
@@ -128,6 +139,7 @@ impl Node {
         // dispatch and add it back to the returned content preference afterward.
         let framed = self.data.widget().effective_widget_opt().intersects(crate::WidgetOption::FRAME);
         let border_width = if framed { style.frame_border().width.max(0) } else { 0 };
+        // Both leaves and containers expose one Widget measurement entry point through NodeKind.
         let measured_content = self
             .data
             .widget()
@@ -145,6 +157,8 @@ impl Node {
 
     /// Runs `f` with this node's opaque authoritative child collection.
     pub(crate) fn with_children<R>(&self, f: impl FnOnce(&Children) -> R) -> R {
+        // Treat a leaf as an empty collection for read-only generic traversal. This avoids a second
+        // visitor abstraction while preserving the fact that only Container stores descendants.
         match &self.data {
             NodeKind::Widget(_) => f(&Children::new()),
             NodeKind::Container(container) => container.with_children(f),
@@ -153,6 +167,8 @@ impl Node {
 
     /// Runs `f` with this node's authoritative child collection when it is a container.
     pub(crate) fn with_children_mut<R>(&mut self, f: impl FnOnce(&mut Children) -> R) -> Option<R> {
+        // Mutable traversal distinguishes leaves explicitly because there is no persistent empty
+        // collection that could safely accept topology changes.
         match &mut self.data {
             NodeKind::Widget(_) => None,
             NodeKind::Container(container) => Some(container.with_children_mut(f)),
@@ -172,6 +188,7 @@ impl Node {
 
     /// Runs `f` against one matching node without returning a borrow through the opaque visitor.
     pub(crate) fn with_node<R>(&self, id: RuntimeNodeId, f: impl FnOnce(&Node) -> R) -> Option<R> {
+        // Keep the one-shot visitor in an Option so recursion can move it exactly once at the match.
         let mut f = Some(f);
         self.with_node_inner(id, &mut f)
     }
@@ -183,11 +200,14 @@ impl Node {
         if self.id() == id {
             return Some(f.take().expect("node visitor invoked twice")(self));
         }
+        // Child storage remains borrowed only for this recursive search and cannot escape in `R` as
+        // a Node reference because the callback consumes its argument immediately.
         self.with_children(|children| children.iter().find_map(|child| child.with_node_inner(id, f)))
     }
 
     /// Runs `f` mutably against one matching node without exposing attached storage.
     pub(crate) fn with_node_mut<R>(&mut self, id: RuntimeNodeId, f: impl FnOnce(&mut Node) -> R) -> Option<R> {
+        // Mirror immutable lookup while preserving the single mutable path to an attached node.
         let mut f = Some(f);
         self.with_node_mut_inner(id, &mut f)
     }
@@ -199,6 +219,7 @@ impl Node {
         if self.id() == id {
             return Some(f.take().expect("mutable node visitor invoked twice")(self));
         }
+        // Container's RefCell borrow guards the entire descent, blocking concurrent topology edits.
         self.with_children_mut(|children| children.iter_mut().find_map(|child| child.with_node_mut_inner(id, f)))?
     }
 }
@@ -214,6 +235,8 @@ pub(crate) struct WidgetNode {
 impl WidgetNode {
     /// Erases one concrete runtime at the retained leaf boundary.
     pub(crate) fn new<W: Widget + 'static>(widget: W, custom_render: Option<CustomRenderKey>) -> Self {
+        // Boxing occurs only here, after public constructors have enforced any stronger ownership
+        // contract required for application-addressable widgets.
         Self { widget: Box::new(widget), custom_render }
     }
 
@@ -234,6 +257,7 @@ pub(crate) enum NodeKind {
 impl NodeKind {
     /// Returns the one common runtime phase object for either node variant.
     pub(crate) fn widget(&self) -> &dyn Widget {
+        // Common phases do not need to know whether Widget behavior comes from a leaf or Container.
         match self {
             Self::Widget(node) => &*node.widget,
             Self::Container(container) => container,
@@ -242,6 +266,7 @@ impl NodeKind {
 
     /// Returns the one mutable common runtime phase object for either node variant.
     pub(crate) fn widget_mut(&mut self) -> &mut dyn Widget {
+        // Mutable dispatch follows the same single branch used by read-only phase queries.
         match self {
             Self::Widget(node) => &mut *node.widget,
             Self::Container(container) => container,

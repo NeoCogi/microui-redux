@@ -40,6 +40,7 @@ impl ChildParticipation {
 /// node memory or synchronize traversal.
 static NEXT_RUNTIME_NODE_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Returns the next representable raw identity without wrapping to a reused value.
 pub(super) const fn advance_runtime_node_id(current: u64) -> Option<u64> {
     current.checked_add(1)
 }
@@ -49,7 +50,10 @@ pub(super) const fn advance_runtime_node_id(current: u64) -> Option<u64> {
 pub(crate) struct RuntimeNodeId(pub(super) NonZeroU64);
 
 impl RuntimeNodeId {
+    /// Allocates a process-unique, non-zero identity or panics after exhausting the `u64` space.
     pub(super) fn allocate() -> Self {
+        // `fetch_update` changes the global counter only when checked increment succeeds. This is
+        // important at exhaustion: a failed allocation must not wrap or corrupt later diagnostics.
         let raw = NEXT_RUNTIME_NODE_ID
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, advance_runtime_node_id)
             .expect("RuntimeNodeId space exhausted");
@@ -84,6 +88,7 @@ impl Default for NodeLayout {
 impl NodeLayout {
     /// Builds a layout from an outer allocation and node-local child viewport.
     pub(crate) fn from_parts(allocation: Recti, child_clip: Recti, content_size: Dimensioni) -> Self {
+        // New placements propagate overflow unless a specialized layout explicitly disables it.
         Self {
             allocation,
             children: ChildLayout::new(child_clip),
@@ -141,6 +146,9 @@ impl Transform {
 
     /// Pushes a node's child coordinate system onto the transform stack.
     pub(crate) fn push(self, layout: NodeLayout) -> Self {
+        // Allocation locates the node in its parent's content space. The child offset is applied
+        // only after computing the node-local viewport, so scrolling translates descendants but
+        // never translates the viewport that clips them.
         let node_origin = self.offset + Vec2i::new(layout.allocation.x, layout.allocation.y);
         let screen_clip = translate_rect(layout.children.clip, node_origin);
         Self {
@@ -151,10 +159,12 @@ impl Transform {
 
     /// Resolves a parent-local allocation into screen coordinates.
     pub(crate) fn resolve(self, allocation: Recti) -> Recti {
+        // Allocations are parent-local; the inherited offset is the complete accumulated transform.
         translate_rect(allocation, self.offset)
     }
 }
 
+/// Translates a rectangle without changing its extent.
 fn translate_rect(rect: Recti, offset: Vec2i) -> Recti {
     Recti::new(rect.x + offset.x, rect.y + offset.y, rect.width, rect.height)
 }

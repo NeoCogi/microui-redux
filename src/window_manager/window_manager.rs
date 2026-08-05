@@ -36,8 +36,11 @@ pub(super) struct WindowEntry {
 }
 
 impl<B: RendererBackend> Context<B> {
+    /// Wraps one application node in private root chrome and registers its independent runtime.
     fn register_root(&mut self, kind: WindowKind, name: &str, rect: Recti, content: Node, options: WindowOption, visible: bool) -> RootHandle {
+        // Allocate lifecycle identity before construction; IDs are never derived from node identity.
         let id = self.next_root_id();
+        // Root chrome returns one concrete Container and the weak state handle Context registers.
         let (root_state, root) = create_root_chrome(RootChromeParameters {
             name: name.to_owned(),
             options,
@@ -45,13 +48,16 @@ impl<B: RendererBackend> Context<B> {
             visible,
             content,
         });
+        // Finish the private branch with the same Node::container boundary used by application code.
         let root = Node::container(root);
+        // Hidden roots remain registered but sit outside visible z-order until explicitly shown.
         let z_index = if visible {
             self.last_zindex = self.last_zindex.saturating_add(1);
             self.last_zindex
         } else {
             -1
         };
+        // Context is the sole tree owner; the entry's state handle cannot retain the root.
         self.roots.push(WindowEntry {
             id,
             kind,
@@ -59,11 +65,13 @@ impl<B: RendererBackend> Context<B> {
             root_state: root_state.clone(),
             tree: WidgetTree { root, runtime: UiRuntime::new() },
         });
+        // New topology requires a layout commit before rendering or pointer routing.
         self.invalidate_ui_commit();
         root_handle(id, root_state)
     }
 
     fn next_root_id(&mut self) -> RootId {
+        // Return the current value, then reserve the next without wrapping to a reused identifier.
         let id = RootId::from_raw(self.next_root_id);
         self.next_root_id = self.next_root_id.checked_add(1).expect("retained root id counter overflowed");
         id

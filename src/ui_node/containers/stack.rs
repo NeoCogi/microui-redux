@@ -124,10 +124,12 @@ pub struct StackLayout {
 
 impl Layout for StackLayout {
     fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        // Shared item policies and direction live in typed state; borrow them for this measurement.
         crate::ui_node::runtime_read_state(&self.state, "Stack::measure", |state| stack_size(state, children, style, atlas, available))
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        // One checked state borrow covers policy resolution and every indexed child placement.
         crate::ui_node::runtime_update_state(&self.state, "Stack::place", |state| layout_stack(ctx, state, children, rect));
     }
 }
@@ -137,7 +139,12 @@ pub struct Stack;
 
 impl Stack {
     /// Creates a state-owned stack and its weak application capability.
+    ///
+    /// The container owns the nodes; typed state owns configuration plus a weak topology route.
+    /// Dropping the returned node therefore expires every cloned state handle without requiring a
+    /// separate owner wrapper.
     pub fn create(parameters: StackParameters) -> (WidgetStateHandle<StackState>, Node) {
+        // Establish the final child allocation before creating its weak mutation capability.
         let children = Rc::new(RefCell::new(parameters.children));
         let state = Rc::new(RefCell::new(StackState {
             children: ChildrenHandle::new(&children),
@@ -145,6 +152,7 @@ impl Stack {
             item_height: parameters.item_height,
             direction: parameters.direction,
         }));
+        // Capture a weak application handle, then retain the strong state reference in StackLayout.
         let handle = WidgetStateHandle::new(&state);
         let container = Container::from_shared(children, StackLayout { state }, WidgetOption::NONE);
         (handle, Node::container(container))
@@ -156,6 +164,8 @@ impl Stack {
 /// Stack differs from Column by applying one shared width policy and one shared height policy to
 /// every child. Direction changes placement order only; sizing remains index-stable.
 fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut StackState, children: &mut Children, rect: Recti) {
+    // Direction changes traversal order only. Width and height remain index-stable, so changing
+    // direction never remaps policies to different children.
     let count = children.len();
     let spacing = ctx.style().spacing.max(0);
     // Establish one item width from the widest intrinsic child before measuring wrapped heights.
@@ -202,6 +212,7 @@ fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut StackState, childr
 /// The child's own width policy determines the content-measurement bound but is applied to final
 /// geometry later by the generic node layout path.
 fn stack_child_height(children: &Children, index: usize, style: &Style, atlas: &AtlasHandle, width: i32) -> i32 {
+    // Measure with the resolved shared width so wrapping contributes the height placement will use.
     let child_width = children.child_policy(index).unwrap_or_else(crate::Policy::auto).width.measurement_bound(width);
     children
         .measure_child(index, style, atlas, Dimensioni::new(child_width, 0))
@@ -211,6 +222,7 @@ fn stack_child_height(children: &Children, index: usize, style: &Style, atlas: &
 
 /// Builds the scalar vertical cursor for all Stack children at one resolved item width.
 fn stack_axis(state: &StackState, children: &Children, style: &Style, atlas: &AtlasHandle, width: i32, available_height: i32) -> Axis {
+    // Every child uses the same policy but contributes its own width-constrained preference.
     Axis::new(
         available_height,
         (0..children.len()).map(|index| (state.item_height, stack_child_height(children, index, style, atlas, width))),
@@ -219,6 +231,7 @@ fn stack_axis(state: &StackState, children: &Children, style: &Style, atlas: &At
 
 /// Measures the preferred Stack extent without mutating or retaining sizing results.
 fn stack_size(state: &StackState, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+    // Aggregate the same shared policies used by placement without retaining per-child geometry.
     let count = children.len();
     if count == 0 {
         return Dimensioni::default();
