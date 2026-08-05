@@ -1010,6 +1010,93 @@ fn fronting_changes_only_cross_root_z_order() {
 }
 
 #[test]
+fn blank_root_press_confines_drag_to_the_pressed_root() {
+    let probe = OrderedProbe {
+        state: Rc::new(RefCell::new(OrderedProbeState::default())),
+        opt: WidgetOption::NONE,
+    };
+    let probe_state = probe.state_handle();
+    let mut ctx = context();
+    let first = ctx.create_window("first", rect(0, 0, 100, 80), empty_content());
+    let second = ctx.create_window("second", rect(160, 120, 100, 80), Node::widget(probe).with_policy(Policy::fill()));
+    for root in [first.id(), second.id()] {
+        ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+            .unwrap();
+    }
+    ctx.update_and_render_ui();
+
+    let first_body = ctx.debug_root_body(first.id()).unwrap();
+    let second_body = ctx.debug_root_body(second.id()).unwrap();
+    let first_point = crate::vec2(first_body.x + 1, first_body.y + 1);
+    let second_point = crate::vec2(second_body.x + 1, second_body.y + 1);
+
+    ctx.mousedown(first_point.x, first_point.y, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_root_has_pointer_capture(first.id()), Some(false));
+
+    ctx.mousemove(second_point.x, second_point.y);
+    ctx.update_and_render_ui();
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(Vec::new()));
+}
+
+#[test]
+fn active_root_confines_scroll_while_hover_and_press_remain_hit_routed() {
+    let probe = OrderedProbe {
+        state: Rc::new(RefCell::new(OrderedProbeState::default())),
+        opt: WidgetOption::GRAB_SCROLL,
+    };
+    let probe_state = probe.state_handle();
+    let mut ctx = context();
+    let first = ctx.create_window("first", rect(0, 0, 100, 80), empty_content());
+    let second = ctx.create_window("second", rect(160, 120, 100, 80), Node::widget(probe).with_policy(Policy::fill()));
+    for root in [first.id(), second.id()] {
+        ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+            .unwrap();
+    }
+    ctx.update_and_render_ui();
+
+    let first_body = ctx.debug_root_body(first.id()).unwrap();
+    let second_body = ctx.debug_root_body(second.id()).unwrap();
+    let first_point = crate::vec2(first_body.x + 1, first_body.y + 1);
+    let second_point = crate::vec2(second_body.x + 1, second_body.y + 1);
+
+    ctx.mousedown(first_point.x, first_point.y, MouseButton::LEFT);
+    ctx.mouseup(first_point.x, first_point.y, MouseButton::LEFT);
+    ctx.mousemove(second_point.x, second_point.y);
+    ctx.scroll(0, 1);
+    ctx.update_and_render_ui();
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["move"]));
+
+    ctx.mousedown(second_point.x, second_point.y, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["move", "down"]));
+}
+
+#[test]
+fn pointer_captured_root_remains_the_keyboard_and_text_input_root() {
+    let probe = OrderedProbe {
+        state: Rc::new(RefCell::new(OrderedProbeState::default())),
+        opt: WidgetOption::NONE,
+    };
+    let probe_state = probe.state_handle();
+    let mut ctx = context();
+    let first = ctx.create_window("first", rect(0, 0, 100, 80), Node::widget(probe).with_policy(Policy::fill()));
+    let second = ctx.create_window("second", rect(160, 120, 100, 80), empty_content());
+    ctx.update_and_render_ui();
+
+    let first_body = ctx.debug_root_body(first.id()).unwrap();
+    ctx.mousedown(first_body.x + 1, first_body.y + 1, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_root_has_pointer_capture(first.id()), Some(true));
+
+    assert!(ctx.bring_root_to_front(second.id()));
+    ctx.keydown(KeyMode::SHIFT);
+    ctx.text("captured");
+    ctx.update_and_render_ui();
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["down", "key-down", "text"]));
+}
+
+#[test]
 fn visible_dialog_is_the_sole_pointer_root_and_remains_frontmost() {
     let mut ctx = context();
     let (behind_button, behind_content) = button_content("behind");

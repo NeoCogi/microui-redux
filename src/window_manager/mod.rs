@@ -112,6 +112,11 @@ impl RootId {
 /// to ordinary root hit routing is the popup boundary: an outside pointer press dismisses the
 /// active popup before the event may continue to the root underneath.
 ///
+/// Across ordinary roots, pointer hover and new presses follow topmost hit geometry. Drag, wheel,
+/// keyboard, and text input are confined to the current input root: a root with widget-level
+/// pointer capture remains authoritative, otherwise the front visible root is authoritative.
+/// Captured pointer release still returns to its widget so local drag state is cleaned up.
+///
 /// A visible dialog is modal. It remains above every other root and is the only root eligible for
 /// pointer, keyboard, text, focus, or capture routing until it is hidden or destroyed. Pointer
 /// input outside its rectangle is consumed at the cross-root boundary; other roots remain visible

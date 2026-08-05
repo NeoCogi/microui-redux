@@ -388,9 +388,23 @@ impl<B: RendererBackend> Context<B> {
             && let Some(root) = hover_root
         {
             let _ = self.bring_root_to_front(root);
+            // A new press may target any root. Transfer global pointer ownership before routing so
+            // no previous root can retain a widget-level capture alongside the new press target.
+            for entry in &mut self.roots {
+                if entry.id != root && entry.tree.runtime.capture.is_some() {
+                    entry.tree.clear_transient_targets();
+                }
+            }
         }
 
-        let keyboard_root = self.front_input_root();
+        // Drag, wheel, keyboard, and text input remain confined to the current input root. Hover
+        // and new-press targeting continue to follow pointer geometry across ordinary roots.
+        let captured_root = self.captured_input_root();
+        let pointer_root = match event {
+            crate::UiInputEvent::MouseDrag { .. } | crate::UiInputEvent::Scroll { .. } => captured_root,
+            _ => hover_root,
+        };
+        let keyboard_root = captured_root;
         let modal_root = self.modal_stack.last().copied();
         for entry in &mut self.roots {
             let visible = entry
@@ -398,15 +412,20 @@ impl<B: RendererBackend> Context<B> {
                 .try_read(RootState::is_visible)
                 .expect("registered root state unavailable before input update");
             if visible && modal_root.is_none_or(|modal| modal == entry.id) {
-                entry.tree.runtime.begin_input_event(hover_root == Some(entry.id), event);
+                entry.tree.runtime.begin_input_event(pointer_root == Some(entry.id), event);
             }
         }
 
         if event.is_pointer() {
-            let capture_index = self
-                .roots
-                .iter()
-                .position(|entry| self.modal_stack.last().is_none_or(|modal| *modal == entry.id) && entry.tree.runtime.capture.is_some());
+            // Widget capture owns drag continuation and release cleanup only. Wheel, hover, and new
+            // presses still perform ordinary hit routing, constrained by pointer_root above.
+            let capture_index = matches!(event, crate::UiInputEvent::MouseDrag { .. } | crate::UiInputEvent::MouseUp { .. })
+                .then(|| {
+                    self.roots
+                        .iter()
+                        .position(|entry| self.modal_stack.last().is_none_or(|modal| *modal == entry.id) && entry.tree.runtime.capture.is_some())
+                })
+                .flatten();
             let mut capture_handled = false;
             if let Some(index) = capture_index {
                 let entry = &mut self.roots[index];
@@ -419,7 +438,7 @@ impl<B: RendererBackend> Context<B> {
             }
 
             if !capture_handled
-                && let Some(root) = hover_root
+                && let Some(root) = pointer_root
                 && let Some(index) = self.roots.iter().position(|entry| entry.id == root)
             {
                 let entry = &mut self.roots[index];
@@ -558,6 +577,19 @@ impl<B: RendererBackend> Context<B> {
             .root_state
             .try_read(|state| (state.is_visible() && state.rect().contains(&point)).then_some(modal))
             .unwrap_or_else(|| self.root_access_failure(index))
+    }
+
+    /// Returns the root that exclusively accepts drag, wheel, keyboard, and text input.
+    ///
+    /// An active modal is always authoritative. Otherwise a widget-level pointer capture keeps its
+    /// owning root authoritative even if z-order changes programmatically; without either, the
+    /// ordinary front visible root remains the current input root.
+    fn captured_input_root(&self) -> Option<RootId> {
+        self.modal_stack
+            .last()
+            .copied()
+            .or_else(|| self.roots.iter().find(|entry| entry.tree.runtime.capture.is_some()).map(|entry| entry.id))
+            .or_else(|| self.front_input_root())
     }
 
     /// Returns the sole keyboard-eligible modal root or the ordinary front visible root.
