@@ -50,10 +50,10 @@ impl UiRuntime {
         );
         node.data.widget_mut().update(&mut widget_ctx, event.as_ref());
         self.finish_pointer_capture_update(node);
-        let traverse_children = node.data.container().is_some_and(Container::children_visible);
+        let traverse_children = node.is_container();
         if traverse_children {
             node.with_children_mut(|children| {
-                for child in children.iter_mut() {
+                for child in children.iter_mut().filter(|child| node_is_visible(child)) {
                     // Forward order is observable by deliberate cross-cell mutation: a later child
                     // sees successful earlier changes, while an already-updated child is not rerun.
                     // The mandatory post-event layout observes the final state/topology. Rendering

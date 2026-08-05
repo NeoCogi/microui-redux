@@ -85,127 +85,58 @@ fn every_builtin_container_returns_a_typed_handle_and_completed_node() {
     let (column, column_node) = Column::create(ColumnParameters::new([row_node, grid_node, stack_node, scroll_node]));
     let (disclosure, root_node) = Disclosure::create(DisclosureParameters::header("group", true, [column_node]));
 
-    assert_eq!(row.try_read(|state| state.len()), Some(0));
-    assert_eq!(grid.try_read(|state| state.len()), Some(0));
-    assert_eq!(stack.try_read(|state| state.len()), Some(0));
-    assert_eq!(scroll.try_read(|state| state.len()), Some(0));
-    assert_eq!(column.try_read(|state| state.len()), Some(4));
-    assert_eq!(disclosure.try_read(|state| state.len()), Some(1));
+    assert_eq!(row.try_read(|state| state.len()), Some(Some(0)));
+    assert_eq!(grid.try_read(|state| state.len()), Some(Some(0)));
+    assert_eq!(stack.try_read(|state| state.len()), Some(Some(0)));
+    assert_eq!(scroll.try_read(|state| state.len()), Some(Some(0)));
+    assert_eq!(column.try_read(|state| state.len()), Some(Some(4)));
+    assert_eq!(disclosure.try_read(|state| state.len()), Some(Some(1)));
     drop(root_node);
     assert!(!row.is_alive());
     assert!(!disclosure.is_alive());
 }
 
-struct ExternalParameters {
-    children: Children,
-}
-
-impl WidgetParameters for ExternalParameters {}
-
 struct ExternalState {
-    children: Children,
     measure_calls: Cell<usize>,
     layout_calls: Cell<usize>,
     observed_policy: Cell<Option<Policy>>,
-    retain_capture: Cell<bool>,
-    capture_losses: Cell<usize>,
 }
 
 impl WidgetState for ExternalState {}
-impl ContainerState for ExternalState {}
 
-struct ExternalContainer {
+struct ExternalLayout {
     state: Rc<RefCell<ExternalState>>,
-    options: WidgetOption,
 }
 
-impl WidgetStateOwner for ExternalContainer {
-    type State = ExternalState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
-impl Widget for ExternalContainer {
-    fn widget_opt(&self) -> &WidgetOption {
-        &self.options
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+impl Layout for ExternalLayout {
+    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
         let state = self.state.try_borrow().expect("external state must not be reentered");
         state.measure_calls.set(state.measure_calls.get() + 1);
-        state.observed_policy.set(state.children.child_policy(0));
-        state
-            .children
-            .measure_child(0, style, atlas, available)
-            .unwrap_or_else(|| Dimensioni::new(20, 20))
+        state.observed_policy.set(children.child_policy(0));
+        children.measure_child(0, style, atlas, available).unwrap_or_else(|| Dimensioni::new(20, 20))
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
-    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
-
-    fn focus_policy(&self) -> FocusPolicy {
-        FocusPolicy::DragCapture
-    }
-}
-
-impl Container for ExternalContainer {
-    fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>) {
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
         let state = self.state.try_borrow().expect("external state must not be reentered");
-        visitor.visit(&state.children);
-    }
-
-    fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>) {
-        let mut state = self.state.try_borrow_mut().expect("external state must not be reentered");
-        visitor.visit(&mut state.children);
-    }
-
-    fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
-        let mut state = self.state.try_borrow_mut().expect("external state must not be reentered");
         state.layout_calls.set(state.layout_calls.get() + 1);
-        assert!(ctx.child_policy(&state.children, usize::MAX).is_none());
-        assert!(ctx.layout_child(&mut state.children, usize::MAX, rect).is_none());
-        state.observed_policy.set(ctx.child_policy(&state.children, 0));
-        if !state.children.is_empty() {
-            let _ = ctx.layout_child(&mut state.children, 0, rect);
+        assert!(ctx.child_policy(children, usize::MAX).is_none());
+        assert!(ctx.layout_child(children, usize::MAX, rect).is_none());
+        state.observed_policy.set(ctx.child_policy(children, 0));
+        if !children.is_empty() {
+            let _ = ctx.layout_child(children, 0, rect);
         }
-    }
-
-    fn retains_pointer_capture(&self) -> bool {
-        self.state.try_borrow().expect("external state must not be reentered").retain_capture.get()
-    }
-
-    fn on_pointer_capture_lost(&mut self) {
-        let state = self.state.try_borrow().expect("external state must not be reentered");
-        state.retain_capture.set(false);
-        state.capture_losses.set(state.capture_losses.get() + 1);
-    }
-
-    fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
-        ctx.route_widget(event, self.options)
     }
 }
 
-struct ExternalBuilder;
-
-impl ContainerBuilder for ExternalBuilder {
-    type Parameters = ExternalParameters;
-    type W = ExternalContainer;
-
-    fn create_container(parameters: Self::Parameters) -> Self::W {
-        ExternalContainer {
-            state: Rc::new(RefCell::new(ExternalState {
-                children: parameters.children,
-                measure_calls: Cell::new(0),
-                layout_calls: Cell::new(0),
-                observed_policy: Cell::new(None),
-                retain_capture: Cell::new(true),
-                capture_losses: Cell::new(0),
-            })),
-            options: WidgetOption::NONE,
-        }
-    }
+fn external_container(children: impl IntoIterator<Item = Node>) -> (WidgetStateHandle<ExternalState>, Container) {
+    let state = Rc::new(RefCell::new(ExternalState {
+        measure_calls: Cell::new(0),
+        layout_calls: Cell::new(0),
+        observed_policy: Cell::new(None),
+    }));
+    let handle = WidgetStateHandle::new(&state);
+    let container = Container::new(ExternalLayout { state }, WidgetOption::NONE, children);
+    (handle, container)
 }
 
 struct ExternalLeaf {
@@ -249,18 +180,8 @@ impl Widget for ExternalLeaf {
 fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis() {
     let (child_state, child) = ExternalLeaf::create();
     let policy = Policy::fixed(24, 18);
-    let children = [Node::widget(child).with_policy(policy)].into_iter().collect();
-    let mut runtime = ExternalBuilder::create_container(ExternalParameters { children });
-    let state = runtime.state_handle();
-    assert!(runtime.retains_pointer_capture());
-    state.try_update(|state| state.retain_capture.set(false)).unwrap();
-    assert!(!runtime.retains_pointer_capture());
-    state.try_update(|state| state.retain_capture.set(true)).unwrap();
-    runtime.on_pointer_capture_lost();
-    assert_eq!(
-        state.try_read(|state| (state.retain_capture.get(), state.capture_losses.get())),
-        Some((false, 1))
-    );
+    let children = [Node::widget(child).with_policy(policy)];
+    let (state, runtime) = external_container(children);
     let node = Node::container(runtime);
     let mut ctx = context();
     let root = ctx.create_window("external", rect(10, 20, 100, 80), node);

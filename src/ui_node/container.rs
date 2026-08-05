@@ -1,282 +1,225 @@
-use crate::{Dimensioni, Recti, Style, Vec2i};
-use crate::{Widget, WidgetOption, WidgetParameters, WidgetState, WidgetStateOwner};
+use std::{cell::RefCell, rc::Rc};
 
-#[cfg(test)]
-use crate::{WidgetPaintCtx, WidgetUpdateCtx};
+use crate::{Dimensioni, Recti, Style, UiInputEvent, Vec2i, Widget, WidgetOption};
 
-use super::{Children, NodeLayout, NodeRuntime, UiInputEvent, UiRuntime};
+use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime};
 
-/// Marker for application-facing state owned by a concrete container runtime.
+/// Geometry policy installed in a retained [`Container`].
 ///
-/// The marker deliberately grants no generic child access. Built-in state types expose only their
-/// topology-safe inherent operations. It adds no parallel measurement, update, paint, layout, or
-/// input contract; those belong to the runtime's [`Widget`] and [`Container`] implementations.
-pub trait ContainerState: WidgetState {}
+/// A layout can measure the owner's children and commit their rectangles, viewport, logical
+/// content extent, and participation. It receives no update, paint, focus, capture, event, or
+/// topology-routing capability; those remain widget and dispatcher responsibilities.
+pub trait Layout: 'static {
+    /// Measures the preferred content extent for the current child collection.
+    fn measure(&self, children: &Children, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni;
 
-/// Associates one-shot parameters with one concrete state-owning container runtime.
-///
-/// Downstream convenience constructors use `create_container`, obtain the runtime's typed weak
-/// state handle through [`WidgetStateOwner::state_handle`], and finish ownership with
-/// [`crate::Node::container`]. Parameters do not choose whether a handle is returned: built-in concrete
-/// constructors always return `(WidgetStateHandle<State>, Node)`.
-///
-/// ```
-/// use microui_redux::{ContainerBuilder, Node, WidgetStateHandle, WidgetStateOwner};
-///
-/// fn finish<B>(parameters: B::Parameters) -> (WidgetStateHandle<<B::W as WidgetStateOwner>::State>, Node)
-/// where
-///     B: ContainerBuilder,
-/// {
-///     let runtime = B::create_container(parameters);
-///     let state = runtime.state_handle();
-///     (state, Node::container(runtime))
-/// }
-/// ```
-pub trait ContainerBuilder: Sized + 'static {
-    /// One-shot construction input shared with the widget builder model.
-    type Parameters: WidgetParameters;
-    /// Concrete runtime created before generic insertion erases it.
-    type W: Container + WidgetStateOwner;
-
-    /// Consumes parameters and creates the concrete container runtime.
-    fn create_container(parameters: Self::Parameters) -> Self::W;
+    /// Places retained children inside the container's local content rectangle.
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti);
 }
 
-/// Scoped immutable child visitor constructed only by retained traversal.
+/// Concrete retained owner for one geometry policy and an opaque ordered child collection.
 ///
-/// A container must submit exactly one authoritative collection. Ordinary callers cannot create a
-/// visitor, install an extraction callback, or retain a child borrow after `visit` returns. The
-/// framework may recurse into submitted descendants while the parent state is borrowed; this
-/// controlled recursion is the exception to the application rule against keeping state-access
-/// closures active across traversal.
-pub struct ChildrenVisitor<'a> {
-    callback: &'a mut dyn FnMut(&Children),
-    submissions: usize,
+/// This is the only strong owner of its direct [`Node`](crate::Node) values. Its boxed layout can
+/// borrow children only during measure or placement. An optional ordinary widget supplies behavior
+/// for the container's own surface; it never receives child access.
+pub struct Container {
+    /// One authoritative shared cell for mounted descendants.
+    children: Rc<RefCell<Children>>,
+    /// Dynamic geometry policy for the authoritative collection.
+    layout: Box<dyn Layout>,
+    /// Static options for a container with no installed surface widget.
+    opt: WidgetOption,
+    /// Optional interactive or painted behavior for this container's own surface.
+    surface: Option<Box<dyn Widget>>,
 }
 
-impl ChildrenVisitor<'_> {
-    /// Submits this container's authoritative child collection to the active traversal.
-    pub fn visit(&mut self, children: &Children) {
-        if self.submissions != 0 {
-            panic!("Container::visit_children must submit exactly one Children collection");
-        }
-        self.submissions = 1;
-        (self.callback)(children);
-    }
-
-    fn finish(&self) {
-        if self.submissions != 1 {
-            panic!("Container::visit_children must submit exactly one Children collection");
-        }
-    }
-}
-
-/// Scoped mutable child visitor constructed only by retained traversal.
-///
-/// The collection must be the same authoritative collection submitted by [`ChildrenVisitor`]. A
-/// borrow cannot escape `visit`, and attached nodes remain opaque while the framework recurses.
-/// The owning container state remains borrowed across that recursion, so a checked application
-/// mutation of the same container returns `None`; another currently available state cell can still
-/// be changed and is observed according to traversal order.
-pub struct ChildrenVisitorMut<'a> {
-    callback: &'a mut dyn FnMut(&mut Children),
-    submissions: usize,
-}
-
-impl ChildrenVisitorMut<'_> {
-    /// Submits this container's authoritative child collection to mutable traversal.
-    pub fn visit(&mut self, children: &mut Children) {
-        if self.submissions != 0 {
-            panic!("Container::visit_children_mut must submit exactly one Children collection");
-        }
-        self.submissions = 1;
-        (self.callback)(children);
-    }
-
-    fn finish(&self) {
-        if self.submissions != 1 {
-            panic!("Container::visit_children_mut must submit exactly one Children collection");
-        }
-    }
-}
-
-/// Runs framework work against one immutable collection without returning its borrow.
-pub(crate) fn with_container_children<R>(container: &dyn Container, f: impl FnOnce(&Children) -> R) -> R {
-    let mut f = Some(f);
-    let mut result = None;
+impl Container {
+    /// Creates an unmounted owner from one layout and initial child sequence.
+    pub fn new<L>(layout: L, opt: WidgetOption, children: impl IntoIterator<Item = super::Node>) -> Self
+    where
+        L: Layout,
     {
-        let mut callback = |children: &Children| {
-            let f = f.take().expect("Container::visit_children submitted more than once");
-            result = Some(f(children));
-        };
-        let mut visitor = ChildrenVisitor { callback: &mut callback, submissions: 0 };
-        container.visit_children(&mut visitor);
-        visitor.finish();
+        // Collect once at the ownership boundary; no strong collection handle leaves this value.
+        Self {
+            children: Rc::new(RefCell::new(children.into_iter().collect())),
+            layout: Box::new(layout),
+            opt: opt | WidgetOption::NO_INTERACT,
+            surface: None,
+        }
     }
-    result.expect("Container::visit_children did not submit Children")
-}
 
-/// Runs framework work against one mutable collection without returning its borrow.
-pub(crate) fn with_container_children_mut<R>(container: &mut dyn Container, f: impl FnOnce(&mut Children) -> R) -> R {
-    let mut f = Some(f);
-    let mut result = None;
+    pub(crate) fn from_shared<L>(children: Rc<RefCell<Children>>, layout: L, opt: WidgetOption) -> Self
+    where
+        L: Layout,
     {
-        let mut callback = |children: &mut Children| {
-            let f = f.take().expect("Container::visit_children_mut submitted more than once");
-            result = Some(f(children));
-        };
-        let mut visitor = ChildrenVisitorMut { callback: &mut callback, submissions: 0 };
-        container.visit_children_mut(&mut visitor);
-        visitor.finish();
-    }
-    result.expect("Container::visit_children_mut did not submit Children")
-}
-
-/// Runtime contract for a widget that uniquely owns retained children.
-///
-/// Common measurement, update, paint, options, and focus behavior remain inherited from
-/// [`Widget`]. Implementations must submit the same authoritative [`Children`] collection exactly
-/// once from both visitor methods. `layout` and `route_input` are the only container-specific
-/// phases.
-///
-/// Capture responsibilities are deliberately split. The tree runtime owns the private captured
-/// node identity. The captured container owns only its local retention predicate and cleanup hook.
-/// Ancestors own descendant eligibility through [`Container::children_visible`]; collapsing or
-/// removing an ancestor can therefore revoke descendant capture without giving that ancestor the
-/// captured identity. Containers with no local capture state use the defaults. A container that
-/// can keep capture after routing must override both capture methods consistently.
-pub trait Container: Widget {
-    /// Supplies the authoritative collection for immutable traversal exactly once.
-    fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>);
-    /// Supplies the same authoritative collection for mutable traversal exactly once.
-    fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>);
-
-    /// Assigns child rectangles within this container's local content coordinates.
-    fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti);
-
-    /// Reports whether descendants participate in traversal while remaining owned.
-    ///
-    /// This is an ancestor-owned descendant gate, not generic node visibility. Built-in
-    /// [`crate::Disclosure`] uses it for collapsed content; root visibility remains a separate
-    /// [`crate::Context::set_root_visible`] operation.
-    fn children_visible(&self) -> bool {
-        true
+        Self {
+            children,
+            layout: Box::new(layout),
+            opt: opt | WidgetOption::NO_INTERACT,
+            surface: None,
+        }
     }
 
-    /// Reports whether this container's current local pointer-capture interaction remains active.
-    ///
-    /// The retained runtime owns the captured node identity. This query can only retain or revoke
-    /// capture already owned by this container; it receives no identity or tree capability. The
-    /// default keeps an otherwise valid capture and is correct for containers without revocable
-    /// local drag state.
-    fn retains_pointer_capture(&self) -> bool {
-        true
+    /// Installs ordinary widget behavior on this container's own surface.
+    pub fn with_surface<W: Widget + 'static>(mut self, surface: W) -> Self {
+        // Descendants remain child-first during hit testing. The dispatcher reaches this surface
+        // only after it has selected the container's geometry or bubbled from a selected child.
+        self.surface = Some(Box::new(surface));
+        self
     }
 
-    /// Clears container-local interaction state after the runtime ends this container's capture.
-    ///
-    /// The default is appropriate for containers without capture-specific local state. The runtime
-    /// invokes this only for the captured container itself, never through an ancestor. Override
-    /// this together with [`Container::retains_pointer_capture`] when capture owns local state.
-    fn on_pointer_capture_lost(&mut self) {}
+    /// Runs one immutable framework traversal without exposing child storage publicly.
+    pub(crate) fn with_children<R>(&self, f: impl FnOnce(&Children) -> R) -> R {
+        let children = self
+            .children
+            .try_borrow()
+            .unwrap_or_else(|_| panic!("retained child invariant violated: collection is mutably borrowed during immutable traversal"));
+        f(&children)
+    }
 
-    /// Classifies and routes one event after the dispatcher selects this container.
-    ///
-    /// The dispatcher owns clipped-allocation hit testing, stacking, and descendant traversal.
-    /// This method only decides whether the selected container handles the current event. Returning
-    /// [`ContainerInputResult::Ignored`] bubbles through ancestors without restarting sibling
-    /// target search. Focus behavior comes only from the inherited [`Widget::focus_policy`] query.
-    fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
-        // The default container handles events through its complete local content rectangle.
-        ctx.route_widget(event, self.effective_widget_opt())
+    /// Runs one mutable framework traversal while preventing concurrent topology mutation.
+    pub(crate) fn with_children_mut<R>(&self, f: impl FnOnce(&mut Children) -> R) -> R {
+        let mut children = self
+            .children
+            .try_borrow_mut()
+            .unwrap_or_else(|_| panic!("retained child invariant violated: collection is already borrowed during mutable traversal"));
+        f(&mut children)
+    }
+
+    /// Invokes the geometry policy for one placement pass.
+    pub(crate) fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
+        let mut children = self
+            .children
+            .try_borrow_mut()
+            .unwrap_or_else(|_| panic!("retained child invariant violated: collection is already borrowed during layout"));
+        self.layout.place(ctx, &mut children, rect);
     }
 }
 
-/// Result of routing one input event to a container or leaf surface.
+impl Widget for Container {
+    fn widget_opt(&self) -> &WidgetOption {
+        self.surface.as_ref().map_or(&self.opt, |surface| surface.widget_opt())
+    }
+
+    fn measure(&self, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+        let children = self
+            .children
+            .try_borrow()
+            .unwrap_or_else(|_| panic!("retained child invariant violated: collection is mutably borrowed during measurement"));
+        self.layout.measure(&children, style, atlas, available)
+    }
+
+    fn update(&mut self, ctx: &mut crate::WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        if let Some(surface) = &mut self.surface {
+            // The dispatcher has already selected and localized this one event.
+            surface.update(ctx, input);
+        }
+    }
+
+    fn paint(&mut self, ctx: &mut crate::WidgetPaintCtx<'_>) {
+        if let Some(surface) = &mut self.surface {
+            surface.paint(ctx);
+        }
+    }
+
+    fn effective_widget_opt(&self) -> WidgetOption {
+        self.surface.as_ref().map_or(self.opt, |surface| surface.effective_widget_opt())
+    }
+
+    fn accepts_scroll(&self, delta: Vec2i) -> bool {
+        self.surface.as_ref().is_some_and(|surface| surface.accepts_scroll(delta))
+    }
+
+    fn accepts_event(&self, event: &UiInputEvent) -> bool {
+        self.surface.as_ref().is_some_and(|surface| surface.accepts_event(event))
+    }
+
+    fn focus_policy(&self) -> crate::FocusPolicy {
+        self.surface
+            .as_ref()
+            .map_or_else(|| crate::FocusPolicy::from_widget_options(self.opt), |surface| surface.focus_policy())
+    }
+
+    fn keeps_pointer_capture(&self) -> bool {
+        self.surface.as_ref().is_none_or(|surface| surface.keeps_pointer_capture())
+    }
+
+    fn pointer_capture_lost(&mut self) {
+        if let Some(surface) = &mut self.surface {
+            surface.pointer_capture_lost();
+        }
+    }
+}
+
+/// Dispatcher-internal result of delivering one event to an already-selected node.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum ContainerInputResult {
-    /// The selected node ignored the event, allowing only ancestor bubbling.
+pub(crate) enum DispatchResult {
+    /// The selected widget declined the event, allowing ancestor-only bubbling.
     Ignored,
-    /// The node consumed the event.
+    /// The widget consumed the event without acquiring pointer capture.
     Consumed,
-    /// The node consumed the event and should keep receiving related pointer input.
+    /// The widget consumed the event and requests dispatcher-owned pointer capture.
     Captured,
 }
 
-impl ContainerInputResult {
-    /// Returns whether event traversal should stop.
+impl DispatchResult {
+    /// Returns whether dispatch and ancestor bubbling should stop.
     pub(crate) fn is_consumed(self) -> bool {
         matches!(self, Self::Consumed | Self::Captured)
     }
 }
 
-/// Delivers one already-targeted event through the common widget interaction rules.
-pub(super) fn route_public_widget_input(
+/// Delivers one already-targeted event through common dispatcher interaction rules.
+pub(super) fn dispatch_widget_input(
     runtime: &mut UiRuntime,
     state: &NodeRuntime,
     rect: Recti,
     clip: Recti,
     opt: WidgetOption,
+    accepts_event: bool,
     event: &UiInputEvent,
-) -> ContainerInputResult {
-    // NO_INTERACT is enforced at delivery as well as target selection so direct focus or capture
-    // delivery cannot bypass a dynamically disabled widget.
-    if opt.intersects(WidgetOption::NO_INTERACT) {
-        return ContainerInputResult::Ignored;
+) -> DispatchResult {
+    if opt.intersects(WidgetOption::NO_INTERACT) || !accepts_event {
+        return DispatchResult::Ignored;
     }
 
     let id = state.id();
     if event.is_focus_input() {
-        // Enforce the router invariant at the final delivery boundary as well as at target lookup.
         if runtime.focus != Some(id) {
-            return ContainerInputResult::Ignored;
+            return DispatchResult::Ignored;
         }
         runtime.push_routed_event(id, event.clone());
-        return ContainerInputResult::Consumed;
+        return DispatchResult::Consumed;
     }
 
     let captured = runtime.capture == Some(id);
-    // Dispatch already selected ordinary pointer targets from their allocations. This narrower
-    // check remains necessary for container sub-controls and for captured delivery outside bounds.
     let event_hits_rect = event.position().is_some_and(|pos| rect.contains(&pos) && clip.contains(&pos));
-
     match event {
         UiInputEvent::MouseDown { button, .. } if event_hits_rect => {
             runtime.claim_pointer_focus(id, *button);
             runtime.push_routed_event(id, event.clone());
-            ContainerInputResult::Captured
+            DispatchResult::Captured
         }
         UiInputEvent::MouseDrag { .. } if captured || event_hits_rect => {
             runtime.push_routed_event(id, event.clone());
-            if captured {
-                ContainerInputResult::Captured
-            } else {
-                ContainerInputResult::Consumed
-            }
+            if captured { DispatchResult::Captured } else { DispatchResult::Consumed }
         }
         UiInputEvent::MouseUp { .. } if captured || event_hits_rect => {
             runtime.push_routed_event(id, event.clone());
-            ContainerInputResult::Consumed
+            DispatchResult::Consumed
         }
-        UiInputEvent::MouseMove { .. } if event_hits_rect => {
+        UiInputEvent::MouseMove { .. } | UiInputEvent::Scroll { .. } if event_hits_rect => {
             runtime.push_routed_event(id, event.clone());
-            ContainerInputResult::Consumed
+            DispatchResult::Consumed
         }
-        UiInputEvent::Scroll { delta, .. } if event_hits_rect && opt.intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0) => {
-            runtime.push_routed_event(id, event.clone());
-            ContainerInputResult::Consumed
-        }
-        _ => ContainerInputResult::Ignored,
+        _ => DispatchResult::Ignored,
     }
 }
 
-/// Framework-scoped geometry services available to a public [`Container`] implementation.
+/// Framework-scoped geometry services available to one active [`Layout`] call.
 ///
-/// The fields and constructor are private so application code cannot use this context to traverse
-/// arbitrary trees or mutate attached topology outside the active container call. Its public
-/// operations measure or lay out indexed children from the container's authoritative collection,
-/// configure descendant viewport/overflow, and expose the active style and atlas; it does not lend
-/// nodes or permit topology mutation.
+/// The context measures or places indexed children and commits derived viewport/participation
+/// results. It never lends a node or permits topology mutation.
 pub struct ContainerLayoutCtx<'a> {
     runtime: &'a mut UiRuntime,
     style: &'a Style,
@@ -286,6 +229,7 @@ pub struct ContainerLayoutCtx<'a> {
 }
 
 impl ContainerLayoutCtx<'_> {
+    /// Creates one runtime-scoped placement context.
     pub(crate) fn new<'a>(
         runtime: &'a mut UiRuntime,
         style: &'a Style,
@@ -306,24 +250,35 @@ impl ContainerLayoutCtx<'_> {
         self.atlas
     }
 
-    /// Returns one child's pre-insertion placement policy.
+    /// Returns one child's parent-owned placement policy.
     pub fn child_policy(&self, children: &Children, index: usize) -> Option<crate::Policy> {
         children.child_policy(index)
     }
 
-    /// Assigns one indexed child rectangle and returns its resulting content size.
+    /// Assigns one indexed child rectangle and returns its resulting allocated size.
     pub fn layout_child(&mut self, children: &mut Children, index: usize, rect: Recti) -> Option<Dimensioni> {
         let node = children.get_mut(index)?;
         Some(self.runtime.layout_node_ref(node, self.style, self.atlas, rect))
     }
 
-    /// Replaces the current node's derived content size.
-    pub fn set_content_size(&mut self, size: Dimensioni) {
-        let layout = self.current.layout.with_content_size(size);
-        self.current.set_layout(layout);
+    /// Reads one child's content extent from its most recent placement in this pass.
+    pub fn child_content_size(&self, children: &Children, index: usize) -> Option<Dimensioni> {
+        children.get(index).map(|node| node.state.layout.content_size)
     }
 
-    /// Installs the current node's descendant viewport and translation.
+    /// Commits whether one retained child participates after this layout pass.
+    pub fn set_child_participation(&mut self, children: &mut Children, index: usize, participation: ChildParticipation) -> bool {
+        let Some(node) = children.get_mut(index) else { return false };
+        node.state.participation = participation;
+        true
+    }
+
+    /// Replaces the current container's derived logical content size.
+    pub fn set_content_size(&mut self, size: Dimensioni) {
+        self.current.set_layout(self.current.layout.with_content_size(size));
+    }
+
+    /// Installs the current container's descendant viewport and translation.
     pub fn set_children_viewport(&mut self, viewport: Recti, offset: Vec2i) {
         let viewport = viewport
             .intersect(&self.content)
@@ -334,147 +289,43 @@ impl ContainerLayoutCtx<'_> {
         self.current.set_layout(layout);
     }
 
-    /// Controls whether descendant overflow contributes to the parent-visible content extent.
+    /// Controls whether descendant overflow contributes to the parent-visible extent.
     pub fn set_child_overflow_propagation(&mut self, propagate: bool) {
-        let layout = self.current.layout.with_child_overflow_propagation(propagate);
-        self.current.set_layout(layout);
-    }
-}
-
-/// Framework-scoped routed-input services for one public [`Container`] call.
-///
-/// The context belongs to one normalized event and one current container. It exposes only the
-/// current container's capture predicate and scoped event-handling helpers. Pointer target
-/// selection remains entirely dispatcher-owned; this context does not expose captured identity,
-/// descendant routing, or a focus-policy override.
-pub struct ContainerInputCtx<'a> {
-    runtime: &'a mut UiRuntime,
-    content_rect: Recti,
-    content_clip: Recti,
-    current: &'a NodeRuntime,
-}
-
-impl ContainerInputCtx<'_> {
-    /// Creates scoped delivery helpers for one dispatcher-selected container.
-    pub(crate) fn new<'a>(runtime: &'a mut UiRuntime, content_rect: Recti, content_clip: Recti, current: &'a NodeRuntime) -> ContainerInputCtx<'a> {
-        // The context retains only delivery data for the currently selected container.
-        ContainerInputCtx {
-            runtime,
-            content_rect,
-            content_clip,
-            current,
-        }
-    }
-
-    /// Returns whether the current container owns runtime pointer capture.
-    ///
-    /// This exposes no node identity and cannot acquire, release, or transfer capture.
-    pub fn has_pointer_capture(&self) -> bool {
-        // Compare privately owned runtime identities without exposing either identity publicly.
-        self.runtime.capture == Some(self.current.id())
-    }
-
-    /// Routes through the container's complete local content rectangle.
-    ///
-    /// `opt` is the surface's effective interaction option set. The runtime obtains focus behavior
-    /// authoritatively from the current container's [`Widget::focus_policy`] implementation.
-    pub fn route_widget(&mut self, event: &UiInputEvent, opt: WidgetOption) -> ContainerInputResult {
-        // Handling uses the content rectangle; target selection has already completed.
-        route_public_widget_input(self.runtime, self.current, self.content_rect, self.content_clip, opt, event)
-    }
-
-    /// Routes through one container-local sub-rectangle intersected with the active clip.
-    ///
-    /// Use this for chrome such as a disclosure header or scrollbar. `rect` uses the same local
-    /// content coordinate system as the event delivered to [`Container::route_input`].
-    pub fn route_widget_in_rect(&mut self, event: &UiInputEvent, rect: Recti, opt: WidgetOption) -> ContainerInputResult {
-        // The sub-rectangle limits event handling, never dispatcher-owned pointer occupancy.
-        route_public_widget_input(self.runtime, self.current, rect, self.content_clip, opt, event)
+        self.current.set_layout(self.current.layout.with_child_overflow_propagation(propagate));
     }
 }
 
 #[cfg(test)]
-mod visitor_tests {
+mod tests {
     use super::*;
-    use std::any::Any;
 
-    struct InvalidVisitorContainer {
-        children: Children,
-        submissions: usize,
-        opt: WidgetOption,
+    /// Minimal policy proving that concrete ownership needs geometry only.
+    struct GeometryOnly;
+
+    impl Layout for GeometryOnly {
+        fn measure(&self, children: &Children, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+            Dimensioni::new(children.len() as i32, 1)
+        }
+
+        fn place(&mut self, _ctx: &mut ContainerLayoutCtx<'_>, _children: &mut Children, _rect: Recti) {}
     }
 
-    impl Widget for InvalidVisitorContainer {
-        fn widget_opt(&self) -> &WidgetOption {
-            &self.opt
-        }
-
-        fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
-            Dimensioni::default()
-        }
-
-        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
-
-        fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
-    }
-
-    impl Container for InvalidVisitorContainer {
-        fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>) {
-            for _ in 0..self.submissions {
-                visitor.visit(&self.children);
-            }
-        }
-
-        fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>) {
-            for _ in 0..self.submissions {
-                visitor.visit(&mut self.children);
-            }
-        }
-
-        fn layout(&mut self, _ctx: &mut ContainerLayoutCtx<'_>, _rect: Recti) {}
-    }
-
-    fn invalid(submissions: usize) -> InvalidVisitorContainer {
-        InvalidVisitorContainer {
-            children: Children::new(),
-            submissions,
-            opt: WidgetOption::NONE,
-        }
-    }
-
-    fn panic_message(payload: Box<dyn Any + Send>) -> String {
-        payload
-            .downcast_ref::<&str>()
-            .map(|message| (*message).to_owned())
-            .or_else(|| payload.downcast_ref::<String>().cloned())
-            .unwrap_or_default()
+    /// Creates one real unique node for ownership checks.
+    fn text_node(label: &str) -> super::super::Node {
+        let (_, widget) = crate::TextBlock::create(crate::TextBlockParameters::new(label));
+        super::super::Node::widget(widget)
     }
 
     #[test]
-    fn immutable_visitor_requires_exactly_one_authoritative_collection() {
-        for submissions in [0, 2] {
-            let container = invalid(submissions);
-            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                with_container_children(&container, |_| ());
-            }))
-            .expect_err("invalid immutable visitor submissions must panic");
-            let message = panic_message(panic);
-            assert!(message.contains("visit_children"), "unexpected diagnostic: {message}");
-            assert!(message.contains("exactly one Children collection"), "unexpected diagnostic: {message}");
-        }
-    }
+    fn concrete_container_owns_one_collection_beside_its_layout() {
+        let children = Rc::new(RefCell::new([text_node("first")].into_iter().collect()));
+        let handle = crate::ui_node::children::ChildrenHandle::new(&children);
+        let owner = Container::from_shared(children, GeometryOnly, WidgetOption::NONE);
 
-    #[test]
-    fn mutable_visitor_requires_exactly_one_authoritative_collection() {
-        for submissions in [0, 2] {
-            let mut container = invalid(submissions);
-            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                with_container_children_mut(&mut container, |_| ());
-            }))
-            .expect_err("invalid mutable visitor submissions must panic");
-            let message = panic_message(panic);
-            assert!(message.contains("visit_children_mut"), "unexpected diagnostic: {message}");
-            assert!(message.contains("exactly one Children collection"), "unexpected diagnostic: {message}");
-        }
+        assert_eq!(owner.with_children(Children::len), 1);
+        owner.with_children_mut(|children| children.push(text_node("second")));
+        assert_eq!(handle.len(), Some(2));
+        drop(owner);
+        assert_eq!(handle.len(), None);
     }
 }

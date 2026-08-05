@@ -1,8 +1,7 @@
 use crate::render::{CustomRenderHandle, CustomRenderKey, RendererBackend};
 use crate::{Dimensioni, Widget, WidgetStateOwner};
 
-use super::container::{with_container_children, with_container_children_mut};
-use super::{Children, Container, NodeLayout, RuntimeNodeId};
+use super::{ChildParticipation, Children, Container, NodeLayout, RuntimeNodeId};
 
 #[cfg(test)]
 use super::node_layout::advance_runtime_node_id;
@@ -30,6 +29,8 @@ pub(crate) struct NodeRuntime {
     pub(crate) active: bool,
     /// Placement policy used by runtime layout passes.
     pub(crate) policy: crate::Policy,
+    /// Parent-layout result consumed uniformly by traversal and dispatch.
+    pub(crate) participation: ChildParticipation,
 }
 
 impl NodeRuntime {
@@ -65,6 +66,11 @@ impl Node {
         Self::widget_with_custom_render(widget, None)
     }
 
+    /// Creates a framework-internal leaf whose state is owned by a surrounding composite.
+    pub(crate) fn widget_internal<W: Widget + 'static>(widget: W) -> Self {
+        Self::from_kind(NodeKind::Widget(WidgetNode::new(widget, None)))
+    }
+
     /// Creates a leaf node with a backend-typed custom-render callback.
     ///
     /// The backend-specific handle is erased only after this checked public boundary; the stored
@@ -81,12 +87,9 @@ impl Node {
         Self::from_kind(NodeKind::Widget(WidgetNode::new(widget, custom_render)))
     }
 
-    /// Creates a container node from one concrete state-owning container runtime.
-    pub fn container<C>(container: C) -> Self
-    where
-        C: Container + WidgetStateOwner,
-    {
-        Self::from_kind(NodeKind::Container(Box::new(container)))
+    /// Creates a branch node from one complete concrete container owner.
+    pub fn container(container: Container) -> Self {
+        Self::from_kind(NodeKind::Container(container))
     }
 
     /// Replaces this still-unmounted node's generic parent placement policy.
@@ -108,6 +111,7 @@ impl Node {
                 clicked: false,
                 active: false,
                 policy: crate::Policy::auto(),
+                participation: ChildParticipation::Active,
             },
             data: kind,
         }
@@ -143,7 +147,7 @@ impl Node {
     pub(crate) fn with_children<R>(&self, f: impl FnOnce(&Children) -> R) -> R {
         match &self.data {
             NodeKind::Widget(_) => f(&Children::new()),
-            NodeKind::Container(container) => with_container_children(&**container, f),
+            NodeKind::Container(container) => container.with_children(f),
         }
     }
 
@@ -151,7 +155,7 @@ impl Node {
     pub(crate) fn with_children_mut<R>(&mut self, f: impl FnOnce(&mut Children) -> R) -> Option<R> {
         match &mut self.data {
             NodeKind::Widget(_) => None,
-            NodeKind::Container(container) => Some(with_container_children_mut(&mut **container, f)),
+            NodeKind::Container(container) => Some(container.with_children_mut(f)),
         }
     }
 
@@ -208,8 +212,8 @@ pub(crate) struct WidgetNode {
 }
 
 impl WidgetNode {
-    /// Erases one concrete state-owning runtime at the retained leaf boundary.
-    pub(crate) fn new<W: WidgetStateOwner>(widget: W, custom_render: Option<CustomRenderKey>) -> Self {
+    /// Erases one concrete runtime at the retained leaf boundary.
+    pub(crate) fn new<W: Widget + 'static>(widget: W, custom_render: Option<CustomRenderKey>) -> Self {
         Self { widget: Box::new(widget), custom_render }
     }
 
@@ -223,8 +227,8 @@ impl WidgetNode {
 pub(crate) enum NodeKind {
     /// Direct state-owning leaf runtime.
     Widget(WidgetNode),
-    /// Direct state-owning public container runtime.
-    Container(Box<dyn Container>),
+    /// Direct concrete container owner with one erased geometry policy.
+    Container(Container),
 }
 
 impl NodeKind {
@@ -232,7 +236,7 @@ impl NodeKind {
     pub(crate) fn widget(&self) -> &dyn Widget {
         match self {
             Self::Widget(node) => &*node.widget,
-            Self::Container(container) => &**container,
+            Self::Container(container) => container,
         }
     }
 
@@ -240,23 +244,7 @@ impl NodeKind {
     pub(crate) fn widget_mut(&mut self) -> &mut dyn Widget {
         match self {
             Self::Widget(node) => &mut *node.widget,
-            Self::Container(container) => &mut **container,
-        }
-    }
-
-    /// Returns the container-specific runtime when this node owns children.
-    pub(crate) fn container(&self) -> Option<&dyn Container> {
-        match self {
-            Self::Widget(_) => None,
-            Self::Container(container) => Some(&**container),
-        }
-    }
-
-    /// Returns the mutable container-specific runtime for lifecycle notification.
-    pub(crate) fn container_mut(&mut self) -> Option<&mut dyn Container> {
-        match self {
-            Self::Widget(_) => None,
-            Self::Container(container) => Some(&mut **container),
+            Self::Container(container) => container,
         }
     }
 }
@@ -356,18 +344,18 @@ mod tests {
         let candidate_id = candidate.state.id.0.get();
 
         let rejected = column_state
-            .try_read(|_| {
-                column_state
-                    .try_update_with(candidate, |column, node| column.push(node))
-                    .expect_err("the active read must prevent mutation")
+            .try_read(|_| match column_state.try_update_with(candidate, |column, node| column.push(node)) {
+                Err(candidate) => candidate,
+                Ok(_) => panic!("the active read must prevent mutation"),
             })
             .expect("column read must be available");
         assert_eq!(rejected.state.id.0.get(), candidate_id);
 
         drop(column_node);
-        let rejected = column_state
-            .try_update_with(rejected, |column, node| column.push(node))
-            .expect_err("expired state must return the input owner");
+        let rejected = match column_state.try_update_with(rejected, |column, node| column.push(node)) {
+            Err(rejected) => rejected,
+            Ok(_) => panic!("expired state must return the input owner"),
+        };
         assert_eq!(rejected.state.id.0.get(), candidate_id);
     }
 }

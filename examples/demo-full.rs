@@ -975,7 +975,7 @@ fn root_content() -> (WidgetStateHandle<ColumnState>, Node) {
 }
 
 fn replace_root_content(root: &WidgetStateHandle<ColumnState>, nodes: Vec<Node>, name: &str) {
-    if root.try_update_with(nodes, ColumnState::replace).is_err() {
+    if !matches!(root.try_update_with(nodes, ColumnState::replace), Ok(Ok(()))) {
         panic!("{name} root content state unavailable");
     }
 }
@@ -1531,7 +1531,7 @@ impl State {
     /// Adds one disclosure section using the new state-owned container path.
     ///
     /// The demo does not mutate these top-level sections externally, so their weak handles can be
-    /// discarded while each retained `DisclosureContainer` keeps its state alive.
+    /// discarded while each retained disclosure node keeps its state alive.
     fn section(tree: &mut DemoNodes, label: &str, expanded: bool, f: impl FnOnce(&mut DemoNodes)) {
         let _ = tree.header(label, expanded, f);
     }
@@ -1909,7 +1909,10 @@ impl State {
                 });
 
                 Self::section(tree, "Background Color", true, |tree| {
-                    tree.row(&background_widths, SizePolicy::Fixed(74), |tree| {
+                    // Let the row derive its height from the three slider rows. A fixed pixel
+                    // estimate becomes stale when font metrics, control padding, or spacing
+                    // changes and can place the Blue control underneath the next disclosure.
+                    tree.row(&background_widths, SizePolicy::Auto, |tree| {
                         tree.column(|tree| {
                             tree.row(&slider_row, SizePolicy::Auto, |tree| {
                                 tree.widget(label_red);

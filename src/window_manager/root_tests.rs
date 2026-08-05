@@ -291,10 +291,10 @@ impl Widget for TopologyMutator {
             .as_ref()
             .expect("outer container handle must be installed before traversal")
             .clone();
-        let same_container_blocked = same_container.try_update(|state| state.remove_drop(usize::MAX)).is_none();
+        let same_container_blocked = same_container.try_update(|state| state.remove_drop(usize::MAX)).flatten().is_none();
         let other_container_changed = match self.other_container.try_update_with(candidate, |state, node| state.push(node)) {
-            Ok(()) => true,
-            Err(candidate) => {
+            Ok(Ok(())) => true,
+            Ok(Err(candidate)) | Err(candidate) => {
                 self.candidate = Some(candidate);
                 false
             }
@@ -662,8 +662,8 @@ fn topology_mutation_is_blocked_for_the_active_container_and_visible_in_a_later_
         mutator_state.try_read(|state| (state.same_container_blocked, state.other_container_changed)),
         Some((true, true))
     );
-    assert_eq!(outer_container.try_read(ColumnState::len), Some(2));
-    assert_eq!(other_container.try_read(ColumnState::len), Some(1));
+    assert_eq!(outer_container.try_read(ColumnState::len), Some(Some(2)));
+    assert_eq!(other_container.try_read(ColumnState::len), Some(Some(1)));
     assert_eq!(inserted_updates.get(), 1, "the newly inserted later descendant participates in the same update");
 }
 
@@ -781,21 +781,22 @@ fn every_root_kind_adds_exactly_one_private_chrome_node() {
     let popup = ctx.create_popup("popup", empty_content());
 
     // Each application tree contains one empty Column node. The second retained node is the one
-    // private RootChromeContainer; title, close, and resize regions are geometry, not child nodes.
+    // private root Container; title, close, and resize regions are geometry, not child nodes.
     assert_eq!(ctx.debug_root_node_count(window.id()), Some(2));
     assert_eq!(ctx.debug_root_node_count(dialog.id()), Some(2));
     assert_eq!(ctx.debug_root_node_count(popup.id()), Some(2));
 }
 
 #[test]
-fn one_child_scroll_area_has_exactly_two_application_semantic_nodes() {
+fn one_child_scroll_area_retains_its_three_structural_children() {
     let child = Node::widget(Custom::create(CustomParameters::new("content")));
     let (_, content) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [child]));
     let mut ctx = context();
     let root = ctx.create_window("scroll", rect(0, 0, 100, 80), content);
 
-    // ScrollArea and its child are the two application nodes; the only third node is root chrome.
-    assert_eq!(ctx.debug_root_node_count(root.id()), Some(3));
+    // The application child lives below a virtual surface, beside two real scrollbar widgets.
+    // Root chrome is the sixth retained node and remains separate from the application composite.
+    assert_eq!(ctx.debug_root_node_count(root.id()), Some(6));
 }
 
 #[test]
@@ -834,7 +835,7 @@ fn destroy_expires_handles_and_ids_are_never_reused() {
 }
 
 #[test]
-fn destruction_waits_for_an_active_state_upgrade() {
+fn active_state_upgrade_does_not_keep_destroyed_root_topology_alive() {
     let mut ctx = context();
     let (child, content) = button_content("child");
     let root = ctx.create_window("window", rect(0, 0, 100, 80), content);
@@ -844,7 +845,7 @@ fn destruction_waits_for_an_active_state_upgrade() {
         .try_update(|_| {
             assert!(ctx.destroy_root(root.id()));
             assert!(state.is_alive());
-            assert!(child.is_alive());
+            assert!(!child.is_alive(), "root state access is not a second strong child owner");
         })
         .unwrap();
 
@@ -888,13 +889,14 @@ fn dynamic_container_root_changes_descendants_without_replacing_the_root() {
     let root_id = root.id();
     let (button, widget) = Button::create(ButtonParameters::new("new child"));
 
-    column.try_update(|column| column.push(Node::widget(widget))).unwrap();
+    let inserted = column.try_update(|column| column.push(Node::widget(widget))).unwrap();
+    assert!(inserted.is_ok());
     ctx.update_and_render_ui();
     assert_eq!(root.id(), root_id);
     assert!(button.is_alive());
     assert_eq!(ctx.debug_root_node_count(root_id), Some(3));
 
-    assert_eq!(column.try_update(|column: &mut ColumnState| column.remove_drop(0)), Some(true));
+    assert_eq!(column.try_update(|column: &mut ColumnState| column.remove_drop(0)), Some(Some(true)));
     assert!(!button.is_alive());
     assert!(root.state().is_alive());
 }

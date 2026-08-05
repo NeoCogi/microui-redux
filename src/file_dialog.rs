@@ -555,7 +555,8 @@ impl FileDialogController {
 
 #[allow(clippy::result_large_err)]
 fn replace_stack_rows(handle: &WidgetStateHandle<StackState>, nodes: Vec<Node>) -> Result<(), Vec<Node>> {
-    handle.try_update_with(nodes, |state, nodes| state.replace(nodes))
+    // Flatten state-cell and child-owner availability while preserving every replacement node.
+    handle.try_update_with(nodes, |state, nodes| state.replace(nodes))?
 }
 
 impl<B: RendererBackend> Context<B> {

@@ -1,12 +1,9 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::ui_node::{runtime_read_state, runtime_update_state};
-use crate::{
-    AtlasHandle, Dimensioni, Recti, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
-    WidgetStateOwner, WidgetUpdateCtx,
-};
+use crate::ui_node::children::ChildrenHandle;
+use crate::{AtlasHandle, Container, Dimensioni, Layout, Recti, Style, WidgetOption, WidgetParameters, WidgetState, WidgetStateHandle};
 
-use super::{Axis, Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerLayoutCtx, ContainerState, Node};
+use super::{Axis, Children, ContainerLayoutCtx, Node};
 
 /// One-shot construction input for a vertical [`Column`].
 #[derive(Default)]
@@ -29,112 +26,65 @@ impl ColumnParameters {
 /// none can detach an attached node or lend the complete collection. Ordered membership is the
 /// Column's complete mounted configuration; spacing remains Style-owned.
 pub struct ColumnState {
-    pub(super) children: Children,
+    /// Weak topology capability; the concrete container remains the only strong child owner.
+    children: ChildrenHandle,
 }
 
 impl WidgetState for ColumnState {}
-impl ContainerState for ColumnState {}
 
 impl ColumnState {
     /// Returns the number of owned child nodes.
-    pub fn len(&self) -> usize {
+    pub fn len(&self) -> Option<usize> {
         self.children.len()
     }
 
     /// Returns whether the column owns no children.
-    pub fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> Option<bool> {
         self.children.is_empty()
     }
 
     /// Appends one still-unmounted node.
-    pub fn push(&mut self, node: Node) {
-        self.children.push(node);
+    pub fn push(&mut self, node: Node) -> Result<(), Node> {
+        self.children.try_push(node)
     }
 
     /// Inserts a node, returning it unchanged when `index > len`.
     #[allow(clippy::result_large_err)] // The exact unboxed owner is the failure value by contract.
     pub fn insert(&mut self, index: usize, node: Node) -> Result<(), Node> {
-        self.children.insert(index, node)
+        self.children.try_insert(index, node)
     }
 
     /// Drops one indexed child owner and reports whether it existed.
-    pub fn remove_drop(&mut self, index: usize) -> bool {
-        self.children.remove_drop(index)
+    pub fn remove_drop(&mut self, index: usize) -> Option<bool> {
+        self.children.try_remove_drop(index)
     }
 
     /// Drops every current child owner.
-    pub fn clear(&mut self) {
-        self.children.clear();
+    pub fn clear(&mut self) -> Option<()> {
+        self.children.try_clear()
     }
 
     /// Replaces all children in iterator order and drops the previous owners.
-    pub fn replace(&mut self, nodes: impl IntoIterator<Item = Node>) {
-        self.children.replace(nodes);
+    pub fn replace<I>(&mut self, nodes: I) -> Result<(), I>
+    where
+        I: IntoIterator<Item = Node>,
+    {
+        self.children.try_replace(nodes)
     }
 }
 
-/// Concrete retained runtime for a vertical column.
-///
-/// This runtime is the sole persistent strong owner of `ColumnState`.
-pub struct ColumnContainer {
-    state: Rc<RefCell<ColumnState>>,
-    opt: WidgetOption,
+/// Geometry-only policy for a vertical column.
+pub struct ColumnLayout {
+    _state: Rc<RefCell<ColumnState>>,
 }
 
-impl Widget for ColumnContainer {
-    fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
+impl Layout for ColumnLayout {
+    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        measure_column(children, style, atlas, available)
     }
 
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-        runtime_read_state(&self.state, "Column::measure", |state| measure_column(&state.children, style, atlas, available))
-    }
-
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
-
-    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
-}
-
-impl WidgetStateOwner for ColumnContainer {
-    type State = ColumnState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
-impl Container for ColumnContainer {
-    fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>) {
-        runtime_read_state(&self.state, "Column::visit_children", |state| {
-            visitor.visit(&state.children);
-        });
-    }
-
-    fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>) {
-        runtime_update_state(&self.state, "Column::visit_children_mut", |state| {
-            visitor.visit(&mut state.children);
-        });
-    }
-
-    fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
-        runtime_update_state(&self.state, "Column::layout", |state| {
-            layout_column(ctx, &mut state.children, rect);
-        });
-    }
-}
-
-/// Builder associating [`ColumnParameters`] with [`ColumnContainer`].
-pub struct ColumnBuilder;
-
-impl ContainerBuilder for ColumnBuilder {
-    type Parameters = ColumnParameters;
-    type W = ColumnContainer;
-
-    fn create_container(parameters: Self::Parameters) -> Self::W {
-        ColumnContainer {
-            state: Rc::new(RefCell::new(ColumnState { children: parameters.children })),
-            opt: WidgetOption::NONE,
-        }
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        layout_column(ctx, children, rect);
     }
 }
 
@@ -144,9 +94,11 @@ pub struct Column;
 impl Column {
     /// Creates a state-owned column and returns its weak state capability plus completed node.
     pub fn create(parameters: ColumnParameters) -> (WidgetStateHandle<ColumnState>, Node) {
-        let container = ColumnBuilder::create_container(parameters);
-        let state = container.state_handle();
-        (state, Node::container(container))
+        let children = Rc::new(RefCell::new(parameters.children));
+        let state = Rc::new(RefCell::new(ColumnState { children: ChildrenHandle::new(&children) }));
+        let handle = WidgetStateHandle::new(&state);
+        let container = Container::from_shared(children, ColumnLayout { _state: state }, WidgetOption::NONE);
+        (handle, Node::container(container))
     }
 }
 

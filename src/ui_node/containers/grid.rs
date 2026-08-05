@@ -1,13 +1,11 @@
 use std::{cell::RefCell, rc::Rc};
 
+use crate::ui_node::children::ChildrenHandle;
 use crate::ui_node::sizing::SizePolicy;
 use crate::ui_node::{runtime_read_state, runtime_update_state};
-use crate::{
-    AtlasHandle, Dimensioni, Recti, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
-    WidgetStateOwner, WidgetUpdateCtx,
-};
+use crate::{AtlasHandle, Container, Dimensioni, Layout, Recti, Style, WidgetOption, WidgetParameters, WidgetState, WidgetStateHandle};
 
-use super::{Axis, Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerLayoutCtx, ContainerState, Node};
+use super::{Axis, Children, ContainerLayoutCtx, Node};
 
 /// Validated placement extent for one child owned by a [`Grid`].
 ///
@@ -91,16 +89,14 @@ impl From<Node> for GridItem {
     }
 }
 
-/// Private owner of Grid children and their index-matched placement spans.
+/// Private owner of Grid edge metadata indexed to an adjacent [`Children`] collection.
 ///
-/// Traversal currently requires an opaque [`Children`] collection, while Grid layout also needs
-/// indexed edge metadata. Keeping both vectors behind this type gives them one mutation surface
-/// and prevents public code from desynchronizing them.
+/// Child ownership is deliberately not stored here. Every mutation receives the authoritative
+/// collection explicitly and updates spans before returning, preparing Grid metadata to move into
+/// layout state while the concrete container becomes the sole owner of retained nodes.
 #[derive(Default)]
 struct GridItems {
-    /// Unique child owners in public traversal order.
-    children: Children,
-    /// Grid-owned spans matched one-for-one with `children`.
+    /// Grid-owned spans matched one-for-one with the adjacent child collection.
     spans: Vec<GridSpan>,
     /// Row-major placement derived from `spans` and `columns`.
     placements: Vec<GridPlacement>,
@@ -112,142 +108,146 @@ struct GridItems {
 
 impl GridItems {
     /// Collects unmounted items and establishes the initial placement invariant.
-    fn from_items<T>(items: impl IntoIterator<Item = T>) -> Self
+    fn from_items<T>(items: impl IntoIterator<Item = T>) -> (Children, Self)
     where
         T: Into<GridItem>,
     {
         // Split ownership and edge metadata once, behind the type that keeps them synchronized.
         let items = items.into_iter().map(Into::into);
         let (nodes, spans): (Vec<_>, Vec<_>) = items.map(GridItem::into_parts).unzip();
+        let children = nodes.into_iter().collect::<Children>();
         let mut result = Self {
-            children: nodes.into_iter().collect(),
             spans,
             placements: Vec::new(),
             occupied: Vec::new(),
             columns: 1,
         };
-        result.rebuild_placements();
-        result.debug_assert_synchronized();
-        result
+        result.rebuild_placements(children.len());
+        result.debug_assert_synchronized(children.len());
+        (children, result)
     }
 
     /// Returns the synchronized child/span/placement count.
-    fn len(&self) -> usize {
-        self.debug_assert_synchronized();
-        self.children.len()
+    #[cfg(test)]
+    fn len(&self, children: &Children) -> usize {
+        self.debug_assert_synchronized(children.len());
+        children.len()
     }
 
     /// Returns whether the synchronized collections contain no child.
-    fn is_empty(&self) -> bool {
-        self.debug_assert_synchronized();
-        self.children.is_empty()
+    #[cfg(test)]
+    fn is_empty(&self, children: &Children) -> bool {
+        self.debug_assert_synchronized(children.len());
+        children.is_empty()
     }
 
     /// Appends one child/span pair and refreshes its derived row-major placement.
-    fn push(&mut self, item: GridItem) {
-        self.debug_assert_synchronized();
+    fn push(&mut self, children: &mut Children, item: GridItem) {
+        self.debug_assert_synchronized(children.len());
         let (node, span) = item.into_parts();
-        self.children.push(node);
+        children.push(node);
         self.spans.push(span);
         // Placement is derived from ordered topology, so every successful topology change rebuilds
         // it before the state can be observed again.
-        self.rebuild_placements();
-        self.debug_assert_synchronized();
+        self.rebuild_placements(children.len());
+        self.debug_assert_synchronized(children.len());
     }
 
     /// Inserts ownership and placement metadata as one logical operation.
     #[allow(clippy::result_large_err)] // Failure must preserve the exact unmounted owner and span.
-    fn insert(&mut self, index: usize, item: GridItem) -> Result<(), GridItem> {
-        self.debug_assert_synchronized();
+    fn insert(&mut self, children: &mut Children, index: usize, item: GridItem) -> Result<(), GridItem> {
+        self.debug_assert_synchronized(children.len());
         let (node, span) = item.into_parts();
-        match self.children.insert(index, node) {
+        match children.insert(index, node) {
             Ok(()) => {
                 self.spans.insert(index, span);
-                self.rebuild_placements();
-                self.debug_assert_synchronized();
+                self.rebuild_placements(children.len());
+                self.debug_assert_synchronized(children.len());
                 Ok(())
             }
             Err(node) => {
-                self.debug_assert_synchronized();
+                self.debug_assert_synchronized(children.len());
                 Err(GridItem { node, span })
             }
         }
     }
 
     /// Removes one synchronized child/span pair and reports whether `index` existed.
-    fn remove_drop(&mut self, index: usize) -> bool {
-        self.debug_assert_synchronized();
-        if index >= self.children.len() {
+    fn remove_drop(&mut self, children: &mut Children, index: usize) -> bool {
+        self.debug_assert_synchronized(children.len());
+        if index >= children.len() {
             return false;
         }
-        let removed = self.children.remove_drop(index);
+        let removed = children.remove_drop(index);
         debug_assert!(removed, "GridItems checked the child index before removal");
         self.spans.remove(index);
-        self.rebuild_placements();
-        self.debug_assert_synchronized();
+        self.rebuild_placements(children.len());
+        self.debug_assert_synchronized(children.len());
         true
     }
 
     /// Clears owned and derived state together while retaining reusable allocation.
-    fn clear(&mut self) {
-        self.children.clear();
+    fn clear(&mut self, children: &mut Children) {
+        children.clear();
         self.spans.clear();
-        self.rebuild_placements();
-        self.debug_assert_synchronized();
+        self.rebuild_placements(children.len());
+        self.debug_assert_synchronized(children.len());
     }
 
     /// Replaces topology while retaining the configured column count used for derived placement.
-    fn replace<T>(&mut self, items: impl IntoIterator<Item = T>)
+    fn replace<T>(&mut self, children: &mut Children, items: impl IntoIterator<Item = T>)
     where
         T: Into<GridItem>,
     {
         // Build a complete replacement first. Assignment then swaps both collections as one
         // logical operation instead of exposing an intermediate child/span mismatch.
         let columns = self.columns;
-        *self = Self::from_items(items);
+        let (replacement, metadata) = Self::from_items(items);
+        *children = replacement;
+        *self = metadata;
         self.set_columns(columns);
     }
 
     /// Returns the Grid-owned span associated with one child index.
     fn span(&self, index: usize) -> Option<GridSpan> {
-        self.debug_assert_synchronized();
+        self.debug_assert_synchronized(self.spans.len());
         self.spans.get(index).copied()
     }
 
     /// Updates one span and all placements derived from the ordered span list.
     fn set_span(&mut self, index: usize, span: GridSpan) -> bool {
-        self.debug_assert_synchronized();
+        self.debug_assert_synchronized(self.spans.len());
         let Some(current) = self.spans.get_mut(index) else {
             return false;
         };
         *current = span;
-        self.rebuild_placements();
+        self.rebuild_placements(self.spans.len());
         true
     }
 
     /// Updates the placement column count and immediately restores the derived-data invariant.
     fn set_columns(&mut self, columns: usize) {
         self.columns = columns.max(1);
-        self.rebuild_placements();
+        self.rebuild_placements(self.spans.len());
     }
 
     /// Recomputes row-major placement into retained buffers.
     ///
     /// This runs only when Grid topology, spans, or column count changes. Immutable measurement
     /// reads the resulting placements and therefore never needs interior mutability or allocation.
-    fn rebuild_placements(&mut self) {
-        grid_placements_into(self.children.len(), self.columns, &self.spans, &mut self.placements, &mut self.occupied);
+    fn rebuild_placements(&mut self, child_count: usize) {
+        grid_placements_into(child_count, self.columns, &self.spans, &mut self.placements, &mut self.occupied);
     }
 
     /// Checks the parallel-vector and derived-placement invariants at mutation boundaries.
-    fn debug_assert_synchronized(&self) {
+    fn debug_assert_synchronized(&self, child_count: usize) {
         debug_assert_eq!(
-            self.children.len(),
+            child_count,
             self.spans.len(),
             "Grid child and placement collections must remain index-synchronized"
         );
         debug_assert_eq!(
-            self.children.len(),
+            child_count,
             self.placements.len(),
             "Grid child and derived placement collections must remain index-synchronized"
         );
@@ -257,6 +257,7 @@ impl GridItems {
 /// One-shot construction input for a state-owned [`Grid`].
 #[derive(Default)]
 pub struct GridParameters {
+    children: Children,
     items: GridItems,
     column_tracks: Vec<SizePolicy>,
     row_tracks: Vec<SizePolicy>,
@@ -278,9 +279,10 @@ impl GridParameters {
         T: Into<GridItem>,
     {
         let column_tracks = column_tracks.into_iter().collect::<Vec<_>>();
-        let mut items = GridItems::from_items(items);
+        let (children, mut items) = GridItems::from_items(items);
         items.set_columns(column_tracks.len());
         Self {
+            children,
             items,
             column_tracks,
             row_tracks: row_tracks.into_iter().collect(),
@@ -294,52 +296,61 @@ impl GridParameters {
 /// Span and track changes preserve the identity and widget state of every existing child. Spans
 /// are Grid-owned parent-child placement metadata, not generic [`Node`] policy.
 pub struct GridState {
+    /// Weak topology access coordinated with Grid-owned edge metadata below.
+    children: ChildrenHandle,
     items: GridItems,
     column_tracks: Vec<SizePolicy>,
     row_tracks: Vec<SizePolicy>,
 }
 
 impl WidgetState for GridState {}
-impl ContainerState for GridState {}
 
 impl GridState {
     /// Returns the number of owned Grid children.
-    pub fn len(&self) -> usize {
-        self.items.len()
+    pub fn len(&self) -> Option<usize> {
+        self.children.len()
     }
 
     /// Returns whether the Grid owns no children.
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+    pub fn is_empty(&self) -> Option<bool> {
+        self.children.is_empty()
     }
 
     /// Appends one still-unmounted node and its Grid placement.
-    pub fn push(&mut self, item: impl Into<GridItem>) {
-        self.items.push(item.into());
+    pub fn push(&mut self, item: impl Into<GridItem>) -> Result<(), GridItem> {
+        let children = &self.children;
+        let items = &mut self.items;
+        children.try_update_with(item.into(), |children, item| items.push(children, item))
     }
 
     /// Inserts an item, returning it unchanged when `index > len`.
     #[allow(clippy::result_large_err)] // The exact unboxed owner is the failure value by contract.
     pub fn insert(&mut self, index: usize, item: GridItem) -> Result<(), GridItem> {
-        self.items.insert(index, item)
+        let children = &self.children;
+        let items = &mut self.items;
+        children.try_update_with(item, |children, item| items.insert(children, index, item))?
     }
 
     /// Drops one indexed child owner and its placement, reporting whether it existed.
-    pub fn remove_drop(&mut self, index: usize) -> bool {
-        self.items.remove_drop(index)
+    pub fn remove_drop(&mut self, index: usize) -> Option<bool> {
+        let items = &mut self.items;
+        self.children.try_update_with((), |children, ()| items.remove_drop(children, index)).ok()
     }
 
     /// Drops every current child owner and placement.
-    pub fn clear(&mut self) {
-        self.items.clear();
+    pub fn clear(&mut self) -> Option<()> {
+        let items = &mut self.items;
+        self.children.try_update_with((), |children, ()| items.clear(children)).ok()
     }
 
     /// Replaces all children and placements in iterator order.
-    pub fn replace<T>(&mut self, items: impl IntoIterator<Item = T>)
+    pub fn replace<T, I>(&mut self, items: I) -> Result<(), I>
     where
         T: Into<GridItem>,
+        I: IntoIterator<Item = T>,
     {
-        self.items.replace(items);
+        let metadata = &mut self.items;
+        self.children.try_update_with(items, |children, items| metadata.replace(children, items))
     }
 
     /// Returns one child's Grid-owned placement.
@@ -374,14 +385,11 @@ impl GridState {
     }
 }
 
-/// Concrete retained runtime for a row-major Grid.
-///
-/// The runtime is the sole persistent strong owner of [`GridState`].
-pub struct GridContainer {
+/// Geometry-only policy and reusable placement scratch for a row-major Grid.
+pub struct GridLayoutPolicy {
     state: Rc<RefCell<GridState>>,
     /// Bound-dependent track extents reused only by the mutable layout phase.
     layout: GridLayout,
-    opt: WidgetOption,
 }
 
 /// Reusable output buffers for one committed Grid layout.
@@ -396,72 +404,18 @@ struct GridLayout {
     rows: Vec<i32>,
 }
 
-impl Widget for GridContainer {
-    fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
+impl Layout for GridLayoutPolicy {
+    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        runtime_read_state(&self.state, "Grid::measure", |state| grid_size(state, children, style, atlas, available))
     }
 
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-        runtime_read_state(&self.state, "Grid::measure", |state| grid_size(state, style, atlas, available))
-    }
-
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
-
-    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
-}
-
-impl WidgetStateOwner for GridContainer {
-    type State = GridState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
-impl Container for GridContainer {
-    fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>) {
-        runtime_read_state(&self.state, "Grid::visit_children", |state| {
-            visitor.visit(&state.items.children);
-        });
-    }
-
-    fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>) {
-        runtime_update_state(&self.state, "Grid::visit_children_mut", |state| {
-            visitor.visit(&mut state.items.children);
-        });
-    }
-
-    fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
         // State and layout scratch have disjoint owners, so mutable layout needs neither interior
         // mutability nor a temporary per-frame track collection.
         let layout = &mut self.layout;
         runtime_update_state(&self.state, "Grid::layout", |state| {
-            layout_grid(state, ctx, rect, layout);
+            layout_grid(state, children, ctx, rect, layout);
         });
-    }
-}
-
-/// Builder associating [`GridParameters`] with [`GridContainer`].
-pub struct GridBuilder;
-
-impl ContainerBuilder for GridBuilder {
-    type Parameters = GridParameters;
-    type W = GridContainer;
-
-    fn create_container(parameters: Self::Parameters) -> Self::W {
-        let mut items = parameters.items;
-        // Placement depends on the final column topology. Normalize it before the state becomes
-        // observable through the returned weak handle.
-        items.set_columns(parameters.column_tracks.len());
-        GridContainer {
-            state: Rc::new(RefCell::new(GridState {
-                items,
-                column_tracks: parameters.column_tracks,
-                row_tracks: parameters.row_tracks,
-            })),
-            layout: GridLayout::default(),
-            opt: WidgetOption::NONE,
-        }
     }
 }
 
@@ -471,9 +425,20 @@ pub struct Grid;
 impl Grid {
     /// Creates a Grid and returns its weak state capability plus completed owning node.
     pub fn create(parameters: GridParameters) -> (WidgetStateHandle<GridState>, Node) {
-        let container = GridBuilder::create_container(parameters);
-        let state = container.state_handle();
-        (state, Node::container(container))
+        let mut items = parameters.items;
+        // Placement depends on the final column topology. Normalize it before the state becomes
+        // observable through the returned weak handle.
+        items.set_columns(parameters.column_tracks.len());
+        let children = Rc::new(RefCell::new(parameters.children));
+        let state = Rc::new(RefCell::new(GridState {
+            children: ChildrenHandle::new(&children),
+            items,
+            column_tracks: parameters.column_tracks,
+            row_tracks: parameters.row_tracks,
+        }));
+        let handle = WidgetStateHandle::new(&state);
+        let container = Container::from_shared(children, GridLayoutPolicy { state, layout: GridLayout::default() }, WidgetOption::NONE);
+        (handle, Node::container(container))
     }
 }
 
@@ -481,17 +446,17 @@ impl Grid {
 ///
 /// Columns are resolved before rows because a child's allocated column span is its text-wrapping
 /// bound and therefore affects the preferred height contributed to row tracks.
-fn layout_grid(state: &mut GridState, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti, layout: &mut GridLayout) {
+fn layout_grid(state: &mut GridState, children: &mut Children, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti, layout: &mut GridLayout) {
     let spacing = ctx.style().spacing.max(0);
     let (columns, rows) = grid_dimensions(state);
 
     // Resolve and retain each column width once for both row measurement and final placement.
     let available_width = available_tracks(rect.width, columns, spacing);
-    resolve_columns_into(state, ctx.style(), ctx.atlas(), available_width, &mut layout.columns);
+    resolve_columns_into(state, children, ctx.style(), ctx.atlas(), available_width, &mut layout.columns);
 
     // Row preferences are measured using the resolved column spans, then allocated vertically.
     let available_height = available_tracks(rect.height, rows, spacing);
-    resolve_rows_into(state, ctx.style(), ctx.atlas(), available_height, &layout.columns, &mut layout.rows);
+    resolve_rows_into(state, children, ctx.style(), ctx.atlas(), available_height, &layout.columns, &mut layout.rows);
 
     // Placement and both track vectors are now authoritative for this layout commit.
     for placement in state.items.placements.iter().copied() {
@@ -499,7 +464,7 @@ fn layout_grid(state: &mut GridState, ctx: &mut ContainerLayoutCtx<'_>, rect: Re
         let y = rect.y.saturating_add(track_offset(&layout.rows, placement.row, spacing));
         let width = track_span(&layout.columns, placement.column, placement.column_span, spacing);
         let height = track_span(&layout.rows, placement.row, placement.row_span, spacing);
-        let _ = ctx.layout_child(&mut state.items.children, placement.child_index, Recti::new(x, y, width, height));
+        let _ = ctx.layout_child(children, placement.child_index, Recti::new(x, y, width, height));
     }
 }
 
@@ -507,19 +472,19 @@ fn layout_grid(state: &mut GridState, ctx: &mut ContainerLayoutCtx<'_>, rect: Re
 ///
 /// The pure measurement path resolves scalar column spans on demand when measuring row content.
 /// This costs recomputation but preserves `Widget::measure(&self)` and performs no allocation.
-fn grid_size(state: &GridState, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+fn grid_size(state: &GridState, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
     let spacing = style.spacing.max(0);
     let (columns, rows) = grid_dimensions(state);
     let available_width = available_tracks(available.width, columns, spacing);
     // Column preferences depend only on intrinsic child widths and Grid column spans.
     let width = measured_tracks(&state.column_tracks, columns, available_width, spacing, |index| {
-        preferred_column(state, index, style, atlas, spacing)
+        preferred_column(state, children, index, style, atlas, spacing)
     });
     let available_height = available_tracks(available.height, rows, spacing);
     // Row preferences additionally depend on each child's resolved column-span width.
     let height = measured_tracks(&state.row_tracks, rows, available_height, spacing, |index| {
-        preferred_row(state, index, style, atlas, spacing, |placement| {
-            resolved_column_span(state, style, atlas, spacing, available_width, placement)
+        preferred_row(state, children, index, style, atlas, spacing, |placement| {
+            resolved_column_span(state, children, style, atlas, spacing, available_width, placement)
         })
     });
     Dimensioni::new(width, height)
@@ -554,7 +519,7 @@ fn available_tracks(available: i32, count: usize, spacing: i32) -> i32 {
 }
 
 /// Computes one column's intrinsic minimum from its fallback and spanning children.
-fn preferred_column(state: &GridState, index: usize, style: &Style, atlas: &AtlasHandle, spacing: i32) -> i32 {
+fn preferred_column(state: &GridState, children: &Children, index: usize, style: &Style, atlas: &AtlasHandle, spacing: i32) -> i32 {
     let fallback = super::default_cell_width(style);
     let mut preferred = track_policy(&state.column_tracks, index).intrinsic_extent(fallback);
 
@@ -563,9 +528,7 @@ fn preferred_column(state: &GridState, index: usize, style: &Style, atlas: &Atla
         if index < placement.column || index >= placement.column.saturating_add(placement.column_span) {
             continue;
         }
-        let minimum = state
-            .items
-            .children
+        let minimum = children
             .measure_child(placement.child_index, style, atlas, Dimensioni::default())
             .unwrap_or_default()
             .width;
@@ -587,7 +550,15 @@ fn preferred_column(state: &GridState, index: usize, style: &Style, atlas: &Atla
 /// Layout supplies widths from its resolved column vector. Immutable measurement supplies a pure
 /// scalar resolver. Keeping that choice at the call site prevents this helper from knowing about
 /// caches, phases, or mutable container state.
-fn preferred_row(state: &GridState, index: usize, style: &Style, atlas: &AtlasHandle, spacing: i32, child_width: impl Fn(GridPlacement) -> i32) -> i32 {
+fn preferred_row(
+    state: &GridState,
+    children: &Children,
+    index: usize,
+    style: &Style,
+    atlas: &AtlasHandle,
+    spacing: i32,
+    child_width: impl Fn(GridPlacement) -> i32,
+) -> i32 {
     let fallback = super::default_cell_height(style, atlas);
     let mut preferred = track_policy(&state.row_tracks, index).intrinsic_extent(fallback);
     // Measure only children crossing this row, at the width of their complete column span.
@@ -596,16 +567,12 @@ fn preferred_row(state: &GridState, index: usize, style: &Style, atlas: &AtlasHa
             continue;
         }
         let width = child_width(placement);
-        let width = state
-            .items
-            .children
+        let width = children
             .child_policy(placement.child_index)
             .unwrap_or_else(crate::Policy::auto)
             .width
             .measurement_bound(width);
-        let minimum = state
-            .items
-            .children
+        let minimum = children
             .measure_child(placement.child_index, style, atlas, Dimensioni::new(width.max(1), 0))
             .unwrap_or_default()
             .height;
@@ -666,17 +633,33 @@ fn contribution_for_track(policies: &[SizePolicy], index: usize, start: usize, s
 ///
 /// No resolved-width vector is available in `measure(&self)`, so this function replays the scalar
 /// column allocator and accumulates only the requested span.
-fn resolved_column_span(state: &GridState, style: &Style, atlas: &AtlasHandle, spacing: i32, available_width: i32, placement: GridPlacement) -> i32 {
+fn resolved_column_span(
+    state: &GridState,
+    children: &Children,
+    style: &Style,
+    atlas: &AtlasHandle,
+    spacing: i32,
+    available_width: i32,
+    placement: GridPlacement,
+) -> i32 {
     let columns = state.column_tracks.len().max(1);
     let mut axis = Axis::new(
         available_width,
-        (0..columns).map(|index| (track_policy(&state.column_tracks, index), preferred_column(state, index, style, atlas, spacing))),
+        (0..columns).map(|index| {
+            (
+                track_policy(&state.column_tracks, index),
+                preferred_column(state, children, index, style, atlas, spacing),
+            )
+        }),
     );
     let mut width = 0_i32;
     // All preceding columns must be replayed because Remainder depends on ordered consumption.
     for index in 0..columns {
         let size = axis
-            .next(track_policy(&state.column_tracks, index), preferred_column(state, index, style, atlas, spacing))
+            .next(
+                track_policy(&state.column_tracks, index),
+                preferred_column(state, children, index, style, atlas, spacing),
+            )
             .advance;
         if index >= placement.column && index < placement.column.saturating_add(placement.column_span) {
             width = width.saturating_add(size);
@@ -686,20 +669,20 @@ fn resolved_column_span(state: &GridState, style: &Style, atlas: &AtlasHandle, s
 }
 
 /// Fills the layout-phase column buffer with resolved widths.
-fn resolve_columns_into(state: &GridState, style: &Style, atlas: &AtlasHandle, available_width: i32, columns: &mut Vec<i32>) {
+fn resolve_columns_into(state: &GridState, children: &Children, style: &Style, atlas: &AtlasHandle, available_width: i32, columns: &mut Vec<i32>) {
     let count = state.column_tracks.len().max(1);
     columns.clear();
-    columns.extend((0..count).map(|index| preferred_column(state, index, style, atlas, style.spacing.max(0))));
+    columns.extend((0..count).map(|index| preferred_column(state, children, index, style, atlas, style.spacing.max(0))));
     resolve_tracks(&state.column_tracks, available_width, columns);
 }
 
 /// Fills the layout-phase row buffer using already resolved column widths.
-fn resolve_rows_into(state: &GridState, style: &Style, atlas: &AtlasHandle, available_height: i32, columns: &[i32], rows: &mut Vec<i32>) {
+fn resolve_rows_into(state: &GridState, children: &Children, style: &Style, atlas: &AtlasHandle, available_height: i32, columns: &[i32], rows: &mut Vec<i32>) {
     let (_, count) = grid_dimensions(state);
     let spacing = style.spacing.max(0);
     rows.clear();
     rows.extend((0..count).map(|index| {
-        preferred_row(state, index, style, atlas, spacing, |placement| {
+        preferred_row(state, children, index, style, atlas, spacing, |placement| {
             track_span(columns, placement.column, placement.column_span, spacing)
         })
     }));
@@ -869,47 +852,46 @@ mod tests {
         let first_id = first.id();
         let (second_state, second) = text_node("second");
         let second_id = second.id();
-        let mut items = GridItems::from_items([GridItem::spanned(first, 2, 1)]);
+        let (mut children, mut items) = GridItems::from_items([GridItem::spanned(first, 2, 1)]);
 
-        assert_eq!(items.len(), 1);
+        assert_eq!(items.len(&children), 1);
         assert_eq!(items.span(0), Some(GridSpan::new(2, 1)));
 
         let rejected = items
-            .insert(2, GridItem::spanned(second, 3, 2))
+            .insert(&mut children, 2, GridItem::spanned(second, 3, 2))
             .expect_err("out-of-range insertion must preserve the complete item");
         assert_eq!(rejected.node.id(), second_id);
         assert_eq!(rejected.span(), GridSpan::new(3, 2));
-        assert_eq!(items.len(), 1);
+        assert_eq!(items.len(&children), 1);
 
-        assert!(items.insert(1, rejected).is_ok());
-        assert_eq!(items.children.get(0).map(Node::id), Some(first_id));
-        assert_eq!(items.children.get(1).map(Node::id), Some(second_id));
+        assert!(items.insert(&mut children, 1, rejected).is_ok());
+        assert_eq!(children.get(0).map(Node::id), Some(first_id));
+        assert_eq!(children.get(1).map(Node::id), Some(second_id));
         assert_eq!(items.spans, [GridSpan::new(2, 1), GridSpan::new(3, 2)]);
 
-        assert!(items.remove_drop(0));
+        assert!(items.remove_drop(&mut children, 0));
         assert!(!first_state.is_alive());
         assert!(second_state.is_alive());
-        assert_eq!(items.children.get(0).map(Node::id), Some(second_id));
+        assert_eq!(children.get(0).map(Node::id), Some(second_id));
         assert_eq!(items.span(0), Some(GridSpan::new(3, 2)));
 
         let (third_state, third) = text_node("third");
         let third_id = third.id();
-        items.replace([GridItem::spanned(third, 4, 1)]);
+        items.replace(&mut children, [GridItem::spanned(third, 4, 1)]);
         assert!(!second_state.is_alive());
         assert!(third_state.is_alive());
-        assert_eq!(items.children.get(0).map(Node::id), Some(third_id));
+        assert_eq!(children.get(0).map(Node::id), Some(third_id));
         assert_eq!(items.span(0), Some(GridSpan::new(4, 1)));
-        assert!(!items.remove_drop(1));
+        assert!(!items.remove_drop(&mut children, 1));
 
-        items.clear();
-        assert!(items.is_empty());
+        items.clear(&mut children);
+        assert!(items.is_empty(&children));
         assert!(!third_state.is_alive());
     }
 
     #[test]
     fn grid_state_mutates_placement_and_tracks_without_replacing_children() {
         let (child_state, child) = text_node("stable");
-        let child_id = child.id();
         let (grid_state, grid_node) = Grid::create(GridParameters::new([SizePolicy::Fixed(20)], [SizePolicy::Fixed(10)], [child]));
 
         grid_state
@@ -921,17 +903,9 @@ mod tests {
             })
             .expect("Grid state must be available before runtime traversal");
 
-        let (observed_id, span, columns, rows) = grid_state
-            .try_read(|state| {
-                (
-                    state.items.children.get(0).map(Node::id),
-                    state.span(0),
-                    state.column_tracks().to_vec(),
-                    state.row_tracks().to_vec(),
-                )
-            })
+        let (span, columns, rows) = grid_state
+            .try_read(|state| (state.span(0), state.column_tracks().to_vec(), state.row_tracks().to_vec()))
             .expect("Grid state must remain owned by its runtime");
-        assert_eq!(observed_id, Some(child_id));
         assert_eq!(span, Some(GridSpan::new(2, 3)));
         assert_eq!(columns, [SizePolicy::Fixed(20), SizePolicy::Remainder(0)]);
         assert_eq!(rows, [SizePolicy::Fixed(10), SizePolicy::Fixed(15)]);
@@ -949,17 +923,18 @@ mod tests {
         let (grid_state, grid_node) = Grid::create(GridParameters::default());
 
         let rejected = grid_state
-            .try_read(|_| {
-                grid_state
-                    .try_update_with(GridItem::spanned(child, 2, 3), |state, item| state.push(item))
-                    .expect_err("same-cell read must prevent a nested update")
-            })
+            .try_read(
+                |_| match grid_state.try_update_with(GridItem::spanned(child, 2, 3), |state, item| state.push(item)) {
+                    Err(item) => item,
+                    Ok(_) => panic!("same-cell read must prevent a nested update"),
+                },
+            )
             .expect("outer read must succeed");
 
         assert_eq!(rejected.node.id(), child_id);
         assert_eq!(rejected.span(), GridSpan::new(2, 3));
-        assert!(grid_state.try_update_with(rejected, GridState::push).is_ok());
-        assert_eq!(grid_state.try_read(GridState::len), Some(1));
+        assert!(matches!(grid_state.try_update_with(rejected, GridState::push), Ok(Ok(()))));
+        assert_eq!(grid_state.try_read(GridState::len), Some(Some(1)));
         drop(grid_node);
     }
 
@@ -1019,12 +994,15 @@ mod tests {
         assert_eq!(contribution_for_track(&rows, 0, 0, 2, 0, style.spacing, 40), 8);
         assert_eq!(contribution_for_track(&rows, 1, 0, 2, 0, style.spacing, 40), 30);
 
+        let children = Children::new();
+        let topology = Rc::new(RefCell::new(Children::new()));
         let empty = GridState {
+            children: ChildrenHandle::new(&topology),
             items: GridItems::default(),
             column_tracks: vec![SizePolicy::Fixed(10), SizePolicy::Auto],
             row_tracks: vec![SizePolicy::Fixed(8), SizePolicy::Auto],
         };
-        let measured = grid_size(&empty, &style, &test_atlas(), Dimensioni::default());
+        let measured = grid_size(&empty, &children, &style, &test_atlas(), Dimensioni::default());
         assert_eq!(measured.width, 12);
         assert_eq!(measured.height, 20);
     }

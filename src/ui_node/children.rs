@@ -1,5 +1,8 @@
 //! Opaque ownership of retained child nodes.
 
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+
 use crate::Dimensioni;
 
 use super::Node;
@@ -8,10 +11,110 @@ use super::Node;
 ///
 /// Public code can transfer new nodes in or drop existing owners but cannot borrow attached nodes,
 /// recover a removed owner, inspect runtime identity, or reparent a child. Framework-created
-/// [`crate::ChildrenVisitor`] values provide scoped traversal to custom containers without
-/// weakening those ownership rules.
+/// [`crate::ContainerLayoutCtx`] provides scoped geometry operations without weakening those
+/// ownership rules.
 pub struct Children {
     pub(super) nodes: Vec<Node>,
+}
+
+/// Crate-private weak access used by built-in mutable container state.
+#[derive(Clone)]
+pub(crate) struct ChildrenHandle {
+    cell: Weak<RefCell<Children>>,
+}
+
+impl ChildrenHandle {
+    pub(crate) fn new(children: &Rc<RefCell<Children>>) -> Self {
+        Self { cell: Rc::downgrade(children) }
+    }
+
+    /// Runs a crate-internal atomic metadata/topology update while preserving `input` on failure.
+    pub(crate) fn try_update_with<I, R>(&self, input: I, f: impl FnOnce(&mut Children, I) -> R) -> Result<R, I> {
+        // Grid uses this scoped operation to update child ownership and its index-matched spans
+        // under one state closure. The collection borrow never escapes into public application code.
+        let Some(owner) = self.cell.upgrade() else {
+            return Err(input);
+        };
+        let Ok(mut children) = owner.try_borrow_mut() else {
+            return Err(input);
+        };
+        Ok(f(&mut children, input))
+    }
+
+    /// Reports the current child count, or `None` when storage is unavailable.
+    pub(crate) fn len(&self) -> Option<usize> {
+        // Read access is checked because update and paint traversal may hold a mutable collection
+        // borrow while visiting descendants.
+        let owner = self.cell.upgrade()?;
+        let children = owner.try_borrow().ok()?;
+        Some(children.len())
+    }
+
+    /// Reports whether the collection is empty, or `None` when storage is unavailable.
+    pub(crate) fn is_empty(&self) -> Option<bool> {
+        // Reuse `len` so liveness and borrow-conflict behavior has one implementation.
+        self.len().map(|len| len == 0)
+    }
+
+    /// Appends an unmounted node or returns it unchanged when mutation is unavailable.
+    pub(crate) fn try_push(&self, node: Node) -> Result<(), Node> {
+        // Upgrade and borrow before consuming the node so failure preserves its unique ownership.
+        let Some(owner) = self.cell.upgrade() else {
+            return Err(node);
+        };
+        let Ok(mut children) = owner.try_borrow_mut() else {
+            return Err(node);
+        };
+        children.push(node);
+        Ok(())
+    }
+
+    /// Inserts an unmounted node or returns it unchanged on conflict, expiry, or invalid index.
+    pub(crate) fn try_insert(&self, index: usize, node: Node) -> Result<(), Node> {
+        // Both capability failure and an out-of-range index have the same lossless recovery value,
+        // allowing callers to retry without manufacturing another node.
+        let Some(owner) = self.cell.upgrade() else {
+            return Err(node);
+        };
+        let Ok(mut children) = owner.try_borrow_mut() else {
+            return Err(node);
+        };
+        children.insert(index, node)
+    }
+
+    /// Drops one indexed owner, returning `None` when mutation is unavailable.
+    pub(crate) fn try_remove_drop(&self, index: usize) -> Option<bool> {
+        // The boolean distinguishes a missing index from capability failure represented by `None`.
+        let owner = self.cell.upgrade()?;
+        let mut children = owner.try_borrow_mut().ok()?;
+        Some(children.remove_drop(index))
+    }
+
+    /// Drops every child, returning `None` when mutation is unavailable.
+    pub(crate) fn try_clear(&self) -> Option<()> {
+        // Clearing keeps the collection allocation and weak-handle identity stable.
+        let owner = self.cell.upgrade()?;
+        let mut children = owner.try_borrow_mut().ok()?;
+        children.clear();
+        Some(())
+    }
+
+    /// Replaces every child or returns the unconsumed iterator when mutation is unavailable.
+    pub(crate) fn try_replace<I>(&self, nodes: I) -> Result<(), I>
+    where
+        I: IntoIterator<Item = Node>,
+    {
+        // Acquire the collection before advancing `nodes`; this preserves every unique node on
+        // failure even when the caller supplied a lazy iterator.
+        let Some(owner) = self.cell.upgrade() else {
+            return Err(nodes);
+        };
+        let Ok(mut children) = owner.try_borrow_mut() else {
+            return Err(nodes);
+        };
+        children.replace(nodes);
+        Ok(())
+    }
 }
 
 impl Children {
@@ -43,13 +146,13 @@ impl Children {
     }
 
     /// Appends one still-unmounted node and commits this collection as its owner.
-    pub fn push(&mut self, node: Node) {
+    pub(crate) fn push(&mut self, node: Node) {
         self.nodes.push(node);
     }
 
     /// Inserts a node at `index`, returning it unchanged when the index exceeds `len`.
     #[allow(clippy::result_large_err)] // The exact unboxed owner is the failure value by contract.
-    pub fn insert(&mut self, index: usize, node: Node) -> Result<(), Node> {
+    pub(crate) fn insert(&mut self, index: usize, node: Node) -> Result<(), Node> {
         if index > self.nodes.len() {
             return Err(node);
         }
@@ -58,7 +161,7 @@ impl Children {
     }
 
     /// Drops the indexed child owner and reports whether one existed.
-    pub fn remove_drop(&mut self, index: usize) -> bool {
+    pub(crate) fn remove_drop(&mut self, index: usize) -> bool {
         if index >= self.nodes.len() {
             return false;
         }
@@ -67,12 +170,12 @@ impl Children {
     }
 
     /// Drops every currently owned child.
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.nodes.clear();
     }
 
     /// Replaces all children in iterator order, dropping the previous owners.
-    pub fn replace(&mut self, nodes: impl IntoIterator<Item = Node>) {
+    pub(crate) fn replace(&mut self, nodes: impl IntoIterator<Item = Node>) {
         self.nodes = nodes.into_iter().collect();
     }
 
@@ -86,8 +189,7 @@ impl Children {
         self.nodes.iter_mut()
     }
 
-    /// Returns one child for framework-only inspection.
-    #[cfg(test)]
+    /// Returns one child for framework-only derived-layout inspection.
     pub(crate) fn get(&self, index: usize) -> Option<&Node> {
         self.nodes.get(index)
     }
@@ -107,5 +209,44 @@ impl Default for Children {
 impl FromIterator<Node> for Children {
     fn from_iter<T: IntoIterator<Item = Node>>(iter: T) -> Self {
         Self { nodes: iter.into_iter().collect() }
+    }
+}
+
+#[cfg(test)]
+mod handle_tests {
+    use super::*;
+
+    /// Builds a small node without depending on container construction during owner tests.
+    fn text_node(label: &str) -> Node {
+        // TextBlock construction also gives the test a real state-owning widget runtime, ensuring
+        // these checks exercise the same drop path used by application nodes.
+        let (_, widget) = crate::TextBlock::create(crate::TextBlockParameters::new(label));
+        Node::widget(widget)
+    }
+
+    #[test]
+    fn weak_handle_never_keeps_the_collection_alive() {
+        let children = Rc::new(RefCell::new([text_node("child")].into_iter().collect()));
+        let handle = ChildrenHandle::new(&children);
+
+        assert_eq!(handle.len(), Some(1));
+        drop(children);
+        assert_eq!(handle.len(), None);
+    }
+
+    #[test]
+    fn failed_mutation_preserves_the_exact_node_owner() {
+        let children = Rc::new(RefCell::new(Children::new()));
+        let handle = ChildrenHandle::new(&children);
+        let candidate = text_node("candidate");
+        let candidate_id = candidate.id();
+
+        let rejected = {
+            let _borrow = children.borrow_mut();
+            handle.try_push(candidate).expect_err("an active traversal borrow must reject mounted mutation")
+        };
+
+        assert_eq!(rejected.id(), candidate_id);
+        assert_eq!(handle.len(), Some(0));
     }
 }

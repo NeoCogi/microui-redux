@@ -229,14 +229,12 @@ fn with_node_mut<R>(roots: &mut [Node], id: RuntimeNodeId, f: impl FnOnce(&mut N
 }
 
 fn captured_target_retains_pointer_capture(roots: &[Node], id: RuntimeNodeId) -> bool {
-    with_node(roots, id, |node| node.data.container().is_none_or(Container::retains_pointer_capture)).unwrap_or(false)
+    with_node(roots, id, |node| node.data.widget().keeps_pointer_capture()).unwrap_or(false)
 }
 
 fn notify_pointer_capture_lost(roots: &mut [Node], id: RuntimeNodeId) {
     let _ = with_node_mut(roots, id, |node| {
-        if let Some(container) = node.data.container_mut() {
-            container.on_pointer_capture_lost();
-        }
+        node.data.widget_mut().pointer_capture_lost();
     });
 }
 
@@ -246,6 +244,11 @@ fn contains_active_node_in(roots: &[Node], id: RuntimeNodeId) -> bool {
 }
 
 fn contains_active_node(node: &Node, id: RuntimeNodeId) -> bool {
+    // A disabled or hidden child filters its complete subtree from dispatcher-owned identities.
+    // Roots use the default active value, so the same predicate is valid at every depth.
+    if !node.state.participation.accepts_input() {
+        return false;
+    }
     if node.id() == id {
         return true;
     }
@@ -256,7 +259,17 @@ fn contains_active_node(node: &Node, id: RuntimeNodeId) -> bool {
 }
 
 fn node_children_visible(node: &Node) -> bool {
-    node.data.container().is_none_or(Container::children_visible)
+    node.is_container()
+}
+
+/// Returns whether parent layout allows update and paint traversal through this node.
+fn node_is_visible(node: &Node) -> bool {
+    node.state.participation.is_visible()
+}
+
+/// Returns whether parent layout allows the dispatcher to enter this node's subtree.
+fn node_accepts_input(node: &Node) -> bool {
+    node.state.participation.accepts_input()
 }
 
 fn node_is_framed(node: &Node) -> bool {
@@ -265,7 +278,12 @@ fn node_is_framed(node: &Node) -> bool {
 
 fn node_interaction_config(node: &Node) -> (WidgetOption, FocusPolicy) {
     let widget = node.data.widget();
-    (widget.effective_widget_opt(), widget.focus_policy())
+    let mut opt = widget.effective_widget_opt();
+    if !node_accepts_input(node) {
+        // Keep layout eligibility authoritative without mutating the concrete widget's options.
+        opt |= WidgetOption::NO_INTERACT;
+    }
+    (opt, widget.focus_policy())
 }
 
 fn rect_relative_to(rect: Recti, origin: Vec2i) -> Recti {

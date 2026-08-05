@@ -78,12 +78,9 @@ impl UiRuntime {
     /// Completes capture lifecycle work after one target consumes its routed event.
     pub(super) fn finish_pointer_capture_update(&mut self, node: &mut Node) {
         let id = node.id();
-        if self.capture_loss_after_update == Some(id)
-            && self.capture != Some(id)
-            && let Some(container) = node.data.container_mut()
-        {
+        if self.capture_loss_after_update == Some(id) && self.capture != Some(id) {
             self.capture_loss_after_update = None;
-            container.on_pointer_capture_lost();
+            node.data.widget_mut().pointer_capture_lost();
         }
     }
 
@@ -145,10 +142,10 @@ impl UiRuntime {
     }
 
     /// Applies runtime pointer-capture ownership from one routed event result.
-    pub(crate) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: ContainerInputResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
+    pub(crate) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: DispatchResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
         if event.is_pointer_release() && mouse_buttons.is_empty() {
             self.defer_current_pointer_capture_loss();
-        } else if result == ContainerInputResult::Captured {
+        } else if result == DispatchResult::Captured {
             self.acquire_pointer_capture(owner);
         } else if self.capture == Some(owner) && mouse_buttons.is_empty() {
             self.defer_current_pointer_capture_loss();
@@ -163,7 +160,7 @@ impl UiRuntime {
         parent_transform: Transform,
         style: &Style,
         event: &UiInputEvent,
-    ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
+    ) -> Option<(RuntimeNodeId, DispatchResult)> {
         let pos = event.position()?;
         // Select exactly one target before any handler runs so ignored events cannot reveal a
         // covered sibling.
@@ -184,7 +181,7 @@ impl UiRuntime {
         style: &Style,
         event: &UiInputEvent,
         root_chrome_hit: bool,
-    ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
+    ) -> Option<(RuntimeNodeId, DispatchResult)> {
         let pos = event.position()?;
         // The window manager owns post-tree chrome geometry. When it reports a chrome hit, the
         // root wins before descendants; otherwise ordinary targeting starts inside the root body.
@@ -210,6 +207,11 @@ impl UiRuntime {
 
     /// Selects the deepest topmost node whose clipped allocation contains the pointer.
     fn hit_test_pointer_node_ref(&self, node: &Node, parent_transform: Transform, pos: Vec2i) -> Option<RuntimeNodeId> {
+        // Layout eligibility filters the whole branch before any geometry or widget policy is
+        // considered. The dispatcher, not the layout, remains responsible for target selection.
+        if !node_accepts_input(node) {
+            return None;
+        }
         let child_transform = parent_transform.push(node.state.layout);
         // Children paint after their ordinary parent surface, so inspect them in reverse paint
         // order before considering the current node.
@@ -248,7 +250,7 @@ impl UiRuntime {
         parent_transform: Transform,
         style: &Style,
         event: &UiInputEvent,
-    ) -> Option<(RuntimeNodeId, ContainerInputResult)> {
+    ) -> Option<(RuntimeNodeId, DispatchResult)> {
         if current.id() == target {
             // The target was already selected geometrically; its result only controls handling.
             let result = self.route_input_event_to_node_only_ref(current, parent_transform, style, event);
@@ -276,14 +278,14 @@ impl UiRuntime {
     }
 
     /// Routes directly to one target during a single transform-carrying tree traversal.
-    fn route_input_event_to_target(&mut self, roots: &mut [Node], target: RuntimeNodeId, style: &Style, event: &UiInputEvent) -> ContainerInputResult {
+    fn route_input_event_to_target(&mut self, roots: &mut [Node], target: RuntimeNodeId, style: &Style, event: &UiInputEvent) -> DispatchResult {
         // Roots are independent transform origins; stop as soon as the unique target is found.
         for root in roots {
             if let Some(result) = self.route_input_event_to_target_from(root, target, self.root_transform, style, event) {
                 return result;
             }
         }
-        ContainerInputResult::Ignored
+        DispatchResult::Ignored
     }
 
     /// Descends toward one target while carrying the exact parent transform for each level.
@@ -296,7 +298,7 @@ impl UiRuntime {
         parent_transform: Transform,
         style: &Style,
         event: &UiInputEvent,
-    ) -> Option<ContainerInputResult> {
+    ) -> Option<DispatchResult> {
         if current.id() == target {
             // Direct focus/capture delivery stops at the target and never bubbles.
             return Some(self.route_input_event_to_node_only_ref(current, parent_transform, style, event));
@@ -311,13 +313,7 @@ impl UiRuntime {
     }
 
     /// Routes an event to exactly one borrowed node without traversing descendants.
-    fn route_input_event_to_node_only_ref(
-        &mut self,
-        node: &mut Node,
-        parent_transform: Transform,
-        style: &Style,
-        event: &UiInputEvent,
-    ) -> ContainerInputResult {
+    fn route_input_event_to_node_only_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Style, event: &UiInputEvent) -> DispatchResult {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.routed_input_dispatches += 1);
         // Resolve the same frame/content geometry used by update and paint before localizing the
@@ -333,6 +329,8 @@ impl UiRuntime {
             .intersect(&content_rect)
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
         let local_event = super::widget_context::localize_event(screen_origin, event.clone());
+        // The selected widget may decline this event, but cannot redirect target selection.
+        let accepts_event = node.data.widget().accepts_event(&local_event);
 
         if self.capture == Some(node.id())
             && let Some(pos) = event.position()
@@ -346,12 +344,12 @@ impl UiRuntime {
             NodeKind::Widget(widget) => {
                 // Leaf widgets handle events through their complete outer allocation.
                 let opt = widget.widget.effective_widget_opt();
-                super::container::route_public_widget_input(self, &node.state, local_rect, local_clip, opt, &local_event)
+                super::container::dispatch_widget_input(self, &node.state, local_rect, local_clip, opt, accepts_event, &local_event)
             }
             NodeKind::Container(container) => {
-                // Containers receive scoped helpers but cannot influence target selection.
-                let mut ctx = ContainerInputCtx::new(self, content_rect, content_clip, &node.state);
-                container.route_input(&mut ctx, &local_event)
+                // The dispatcher treats an installed container surface exactly like a widget.
+                let opt = container.effective_widget_opt();
+                super::container::dispatch_widget_input(self, &node.state, content_rect, content_clip, opt, accepts_event, &local_event)
             }
         }
     }

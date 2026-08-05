@@ -141,7 +141,7 @@ impl<'a> WidgetContextData<'a> {
 ///
 /// This context deliberately has no `DisplayList`, [`Painter`], or drawing helpers. Consequently
 /// an update implementation cannot record visual work, and retained traversal does not need to
-/// carry rendering state through the update pass. Interaction and focus are router-produced
+/// carry rendering state through the update pass. Interaction and focus are dispatcher-produced
 /// snapshots; widgets can inspect them but cannot cooperatively assign or clear focus.
 ///
 /// ```compile_fail
@@ -165,7 +165,7 @@ pub struct WidgetUpdateCtx<'a> {
 }
 
 impl<'a> WidgetUpdateCtx<'a> {
-    /// Creates an update context from router-owned interaction state.
+    /// Creates an update context from dispatcher-owned interaction state.
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_interaction(

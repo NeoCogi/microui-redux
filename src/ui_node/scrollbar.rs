@@ -54,7 +54,12 @@
 //!
 //! Widgets and containers still own their layout, state, and input policy. This module only keeps
 //! the track/thumb mapping in one place so paint, dragging, and track clicks cannot disagree.
-use crate::{Recti, Vec2i};
+use std::{cell::RefCell, rc::Rc};
+
+use crate::{
+    ControlColor, Dimensioni, FocusPolicy, MouseButton, Node, Recti, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle,
+    WidgetStateOwner, WidgetUpdateCtx,
+};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 /// Axis selector used by shared scrollbar geometry helpers.
@@ -202,6 +207,171 @@ pub(crate) fn scrollbar_base(axis: ScrollAxis, body: Recti, scrollbar_size: i32)
 /// Returns the largest scroll offset needed to reveal all content.
 pub(crate) fn scrollbar_max_scroll(content_len: i32, view_len: i32) -> i32 {
     content_len.saturating_sub(view_len).max(0)
+}
+
+/// Layout-supplied one-axis scrollbar configuration.
+#[derive(Copy, Clone)]
+struct ScrollbarConfiguration {
+    track: Recti,
+    view_len: i32,
+    content_len: i32,
+    min_thumb_len: i32,
+}
+
+/// State strongly owned by one retained scrollbar widget.
+pub(crate) struct RetainedScrollbarState {
+    axis: ScrollAxis,
+    configuration: Option<ScrollbarConfiguration>,
+    offset: i32,
+    dragging: bool,
+}
+
+impl WidgetState for RetainedScrollbarState {}
+
+impl RetainedScrollbarState {
+    /// Installs geometry from the parent layout and clamps any previous offset.
+    pub(crate) fn configure(&mut self, track: Recti, view_len: i32, content_len: i32, min_thumb_len: i32) {
+        self.configuration = Some(ScrollbarConfiguration {
+            track,
+            view_len,
+            content_len,
+            min_thumb_len,
+        });
+        self.offset = self.offset.clamp(0, self.max_offset());
+    }
+
+    /// Removes the widget from interaction and resets the now-invalid content offset.
+    pub(crate) fn deactivate(&mut self) {
+        self.configuration = None;
+        self.offset = 0;
+        self.dragging = false;
+    }
+
+    /// Returns the current clamped content offset on this axis.
+    pub(crate) const fn offset(&self) -> i32 {
+        self.offset
+    }
+
+    /// Requests a non-negative offset that the next layout configuration will clamp.
+    pub(crate) fn set_offset(&mut self, offset: i32) {
+        // Keeping the request before first placement lets builders seed a scroll position without
+        // inventing a second authoritative offset in their parent layout state.
+        self.offset = offset.max(0);
+    }
+
+    /// Returns the largest offset supported by committed geometry.
+    pub(crate) fn max_offset(&self) -> i32 {
+        self.configuration
+            .map_or(0, |configuration| scrollbar_max_scroll(configuration.content_len, configuration.view_len))
+    }
+
+    /// Resolves paint and pointer geometry from current state without storing duplicate rectangles.
+    fn geometry(&self) -> Option<ScrollbarGeometry> {
+        self.configuration.map(|configuration| {
+            ScrollbarGeometry::new(
+                self.axis,
+                configuration.track,
+                configuration.view_len,
+                configuration.content_len,
+                self.offset,
+                configuration.min_thumb_len,
+            )
+        })
+    }
+}
+
+/// Ordinary widget used as one strong child of a composite scroll area.
+pub(crate) struct RetainedScrollbar {
+    state: Rc<RefCell<RetainedScrollbarState>>,
+    opt: WidgetOption,
+}
+
+impl RetainedScrollbar {
+    /// Creates one independently targetable scrollbar and its weak layout capability.
+    pub(crate) fn create(axis: ScrollAxis) -> (WidgetStateHandle<RetainedScrollbarState>, Node) {
+        let widget = Self {
+            state: Rc::new(RefCell::new(RetainedScrollbarState {
+                axis,
+                configuration: None,
+                offset: 0,
+                dragging: false,
+            })),
+            opt: WidgetOption::NONE,
+        };
+        let state = widget.state_handle();
+        (state, Node::widget(widget))
+    }
+}
+
+impl Widget for RetainedScrollbar {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn effective_widget_opt(&self) -> WidgetOption {
+        crate::ui_node::runtime_read_state(&self.state, "Scrollbar::options", |state| {
+            if state.configuration.is_some() {
+                self.opt
+            } else {
+                self.opt | WidgetOption::NO_INTERACT
+            }
+        })
+    }
+
+    fn measure(&self, style: &crate::Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        let thickness = style.scrollbar_size.max(0);
+        crate::ui_node::runtime_read_state(&self.state, "Scrollbar::measure", |state| match state.axis {
+            ScrollAxis::Horizontal => Dimensioni::new(0, thickness),
+            ScrollAxis::Vertical => Dimensioni::new(thickness, 0),
+        })
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        crate::ui_node::runtime_update_state(&self.state, "Scrollbar::update", |state| {
+            let Some(geometry) = state.geometry() else { return };
+            match input {
+                Some(UiInputEvent::MouseDown { pos, button }) if button.intersects(MouseButton::LEFT) && geometry.track().contains(pos) => {
+                    if !geometry.thumb().contains(pos) {
+                        state.offset = geometry.centered_offset(*pos);
+                    }
+                    state.dragging = true;
+                }
+                Some(UiInputEvent::MouseDrag { delta, .. }) if state.dragging => {
+                    state.offset = state.offset.saturating_add(geometry.drag_delta(*delta)).clamp(0, state.max_offset());
+                }
+                Some(UiInputEvent::MouseUp { .. }) => state.dragging = false,
+                _ => {}
+            }
+        });
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        let geometry = crate::ui_node::runtime_read_state(&self.state, "Scrollbar::paint", RetainedScrollbarState::geometry);
+        if let Some(geometry) = geometry {
+            ctx.draw_rect(geometry.track(), ctx.style().colors[ControlColor::ScrollBase as usize]);
+            ctx.draw_rect(geometry.thumb(), ctx.style().colors[ControlColor::ScrollThumb as usize]);
+        }
+    }
+
+    fn focus_policy(&self) -> FocusPolicy {
+        FocusPolicy::DragCapture
+    }
+
+    fn keeps_pointer_capture(&self) -> bool {
+        crate::ui_node::runtime_read_state(&self.state, "Scrollbar::capture", |state| state.dragging && state.configuration.is_some())
+    }
+
+    fn pointer_capture_lost(&mut self) {
+        crate::ui_node::runtime_update_state(&self.state, "Scrollbar::capture_lost", |state| state.dragging = false);
+    }
+}
+
+impl WidgetStateOwner for RetainedScrollbar {
+    type State = RetainedScrollbarState;
+
+    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
+        WidgetStateHandle::new(&self.state)
+    }
 }
 
 #[cfg(test)]

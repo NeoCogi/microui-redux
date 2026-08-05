@@ -5,6 +5,35 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{Dimensioni, Recti, Vec2i};
 
+/// Layout-authored participation of one retained child and its subtree.
+///
+/// This value deliberately separates responsive placement from application widget options. A
+/// layout may retain a child while removing it from rendering and dispatch, or keep it visible
+/// while preventing activation. The dispatcher remains the sole consumer that turns this data
+/// into event eligibility.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum ChildParticipation {
+    /// The child is updated, painted, and eligible for dispatcher targeting.
+    #[default]
+    Active,
+    /// The child remains visible and updated, but its complete subtree rejects input and focus.
+    Disabled,
+    /// The child remains owned but is excluded from update, paint, input, and focus traversal.
+    Hidden,
+}
+
+impl ChildParticipation {
+    /// Returns whether ordinary update and paint traversal should visit the child.
+    pub(crate) const fn is_visible(self) -> bool {
+        !matches!(self, Self::Hidden)
+    }
+
+    /// Returns whether the dispatcher may target the child or anything below it.
+    pub(crate) const fn accepts_input(self) -> bool {
+        matches!(self, Self::Active)
+    }
+}
+
 /// Process-wide source of runtime-only node identity.
 ///
 /// Relaxed ordering is sufficient: the counter establishes uniqueness and does not publish any

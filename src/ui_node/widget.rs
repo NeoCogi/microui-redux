@@ -57,7 +57,7 @@ use std::cmp::max;
 use std::rc::{Rc, Weak};
 
 use bitflags::bitflags;
-use rs_math3d::Dimensioni;
+use rs_math3d::{Dimensioni, Vec2i};
 
 use crate::atlas::{AtlasHandle, EXPAND_DOWN_ICON};
 use crate::style::Style;
@@ -318,6 +318,42 @@ pub trait Widget {
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::from_widget_options(self.effective_widget_opt())
     }
+
+    /// Returns whether one scroll delta can change this widget's current state.
+    ///
+    /// The dispatcher asks before delivery so a scroll surface at its boundary can ignore the
+    /// event and let ordinary ancestor bubbling continue. Layout is intentionally absent from this
+    /// decision; the interactive widget answers only for its own already-committed state.
+    fn accepts_scroll(&self, delta: Vec2i) -> bool {
+        self.effective_widget_opt().intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0)
+    }
+
+    /// Returns whether this widget supports one dispatcher-selected event.
+    ///
+    /// This is widget behavior, not target selection: returning `false` bubbles only through the
+    /// selected node's ancestors. The default accepts ordinary pointer/focus input and delegates
+    /// wheel boundary checks to [`Widget::accepts_scroll`].
+    fn accepts_event(&self, event: &UiInputEvent) -> bool {
+        match event {
+            UiInputEvent::Scroll { delta, .. } => self.accepts_scroll(*delta),
+            _ => true,
+        }
+    }
+
+    /// Reports whether this widget's current local interaction still requires pointer capture.
+    ///
+    /// The dispatcher owns captured node identity. This hook exposes only widget-local validity,
+    /// allowing responsive placement or state changes to revoke a drag without giving widgets any
+    /// routing capability. Widgets without revocable capture state use the default.
+    fn keeps_pointer_capture(&self) -> bool {
+        true
+    }
+
+    /// Clears widget-local interaction state after dispatcher-owned capture is revoked.
+    ///
+    /// Override this together with [`Widget::keeps_pointer_capture`] when a widget stores a drag
+    /// mode or similar state that must not survive hiding, disabling, or removal.
+    fn pointer_capture_lost(&mut self) {}
 }
 
 impl Widget for WidgetOption {

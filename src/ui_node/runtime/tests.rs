@@ -1,13 +1,12 @@
 //! Cross-phase runtime characterization.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use super::*;
 use crate::test_support::test_atlas;
-use crate::{
-    Children, ChildrenVisitor, ChildrenVisitorMut, ContainerState, Widget, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
-};
+use crate::ui_node::children::ChildrenHandle;
+use crate::{ChildParticipation, Children, Layout, Widget, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx};
 use crate::input::Input;
 
 #[derive(Default)]
@@ -106,60 +105,79 @@ impl Widget for HoldFocusProbe {
 }
 
 struct TraversalState {
-    children: Children,
+    children: ChildrenHandle,
     visible: bool,
 }
 
 impl WidgetState for TraversalState {}
-impl ContainerState for TraversalState {}
 
-struct TraversalContainer {
+struct TraversalLayout {
     state: Rc<RefCell<TraversalState>>,
+}
+
+struct TraversalSurface {
+    state: Weak<RefCell<TraversalState>>,
     hide_during_update: bool,
     log: Rc<RefCell<Vec<String>>>,
     opt: WidgetOption,
 }
 
+struct TraversalContainer;
+
 impl TraversalContainer {
-    fn new(children: impl IntoIterator<Item = Node>, hide_during_update: bool, log: Rc<RefCell<Vec<String>>>) -> Self {
-        Self {
-            state: Rc::new(RefCell::new(TraversalState {
-                children: children.into_iter().collect(),
-                visible: true,
-            })),
+    fn new(children: impl IntoIterator<Item = Node>, hide_during_update: bool, log: Rc<RefCell<Vec<String>>>) -> (Container, Rc<RefCell<TraversalState>>) {
+        let children = Rc::new(RefCell::new(children.into_iter().collect()));
+        let state = Rc::new(RefCell::new(TraversalState {
+            children: ChildrenHandle::new(&children),
+            visible: true,
+        }));
+        let container = Container::from_shared(children, TraversalLayout { state: state.clone() }, WidgetOption::NONE);
+        let surface = TraversalSurface {
+            state: Rc::downgrade(&state),
             hide_during_update,
             log,
             opt: WidgetOption::NONE,
-        }
+        };
+        (container.with_surface(surface), state)
     }
 }
 
-impl WidgetStateOwner for TraversalContainer {
-    type State = TraversalState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
-impl Widget for TraversalContainer {
-    fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
-    }
-
-    fn measure(&self, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
-        let state = self.state.try_borrow().expect("traversal state must be available during measure");
-        (0..state.children.len())
-            .filter_map(|index| state.children.measure_child(index, style, atlas, available))
+impl Layout for TraversalLayout {
+    fn measure(&self, children: &Children, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+        (0..children.len())
+            .filter_map(|index| children.measure_child(index, style, atlas, available))
             .fold(Dimensioni::default(), |size, child| {
                 Dimensioni::new(size.width.max(child.width), size.height.max(child.height))
             })
     }
 
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        let visible = self.state.try_borrow().expect("traversal state must be available during layout").visible;
+        for index in 0..children.len() {
+            let participation = if visible { ChildParticipation::Active } else { ChildParticipation::Hidden };
+            let _ = ctx.set_child_participation(children, index, participation);
+            if visible {
+                let _ = ctx.layout_child(children, index, rect);
+            }
+        }
+    }
+}
+
+impl Widget for TraversalSurface {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::default()
+    }
+
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
         self.log.borrow_mut().push("container:update".to_owned());
-        if self.hide_during_update {
-            self.state.try_borrow_mut().expect("traversal state must be available during update").visible = false;
+        if self.hide_during_update
+            && let Some(state) = self.state.upgrade()
+        {
+            state.try_borrow_mut().expect("traversal state must be available during update").visible = false;
         }
     }
 
@@ -168,39 +186,7 @@ impl Widget for TraversalContainer {
     }
 }
 
-impl Container for TraversalContainer {
-    fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>) {
-        let state = self.state.try_borrow().expect("traversal state must be available during immutable visitation");
-        visitor.visit(&state.children);
-    }
-
-    fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>) {
-        let mut state = self
-            .state
-            .try_borrow_mut()
-            .expect("traversal state must be available during mutable visitation");
-        visitor.visit(&mut state.children);
-    }
-
-    fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
-        let mut state = self.state.try_borrow_mut().expect("traversal state must be available during layout");
-        if state.visible {
-            for index in 0..state.children.len() {
-                let _ = ctx.layout_child(&mut state.children, index, rect);
-            }
-        }
-    }
-
-    fn children_visible(&self) -> bool {
-        self.state
-            .try_borrow()
-            .expect("traversal state must be available for the visibility gate")
-            .visible
-    }
-}
-
 struct CaptureState {
-    children: Children,
     active: bool,
     losses: usize,
     drags: usize,
@@ -208,55 +194,64 @@ struct CaptureState {
 }
 
 impl WidgetState for CaptureState {}
-impl ContainerState for CaptureState {}
 
-struct CaptureContainer {
-    state: Rc<RefCell<CaptureState>>,
+struct CaptureLayout {
+    _state: Rc<RefCell<CaptureState>>,
+}
+
+struct CaptureSurface {
+    state: Weak<RefCell<CaptureState>>,
     opt: WidgetOption,
 }
 
+struct CaptureContainer;
+
 impl CaptureContainer {
-    fn new() -> (Self, Rc<RefCell<CaptureState>>) {
+    fn new() -> (Container, Rc<RefCell<CaptureState>>) {
         let state = Rc::new(RefCell::new(CaptureState {
-            children: Children::new(),
             active: false,
             losses: 0,
             drags: 0,
             saw_capture_during_drag: false,
         }));
-        (
-            Self {
-                state: state.clone(),
-                opt: WidgetOption::NONE,
-            },
-            state,
-        )
+        let layout = CaptureLayout { _state: state.clone() };
+        let surface = CaptureSurface {
+            state: Rc::downgrade(&state),
+            opt: WidgetOption::NONE,
+        };
+        (Container::new(layout, WidgetOption::NONE, []).with_surface(surface), state)
     }
 }
 
-impl WidgetStateOwner for CaptureContainer {
-    type State = CaptureState;
+impl Layout for CaptureLayout {
+    fn measure(&self, _children: &Children, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(20, 20)
+    }
 
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, _children: &mut Children, rect: Recti) {
+        ctx.set_content_size(Dimensioni::new(rect.width.max(0), rect.height.max(0)));
     }
 }
 
-impl Widget for CaptureContainer {
+impl Widget for CaptureSurface {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
     }
 
     fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        Dimensioni::new(20, 20)
+        Dimensioni::default()
     }
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        let mut state = self.state.try_borrow_mut().expect("capture state must be available during update");
+        let state = self.state.upgrade().expect("capture state must outlive its surface");
+        let mut state = state.try_borrow_mut().expect("capture state must be available during update");
         if let Some(event) = input {
             match event {
                 UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT) => state.active = true,
-                UiInputEvent::MouseDrag { buttons, .. } if buttons.intersects(MouseButton::LEFT) && state.active => state.drags += 1,
+                UiInputEvent::MouseDrag { buttons, .. } if buttons.intersects(MouseButton::LEFT) && state.active => {
+                    state.saw_capture_during_drag = _ctx.focused();
+                    state.drags += 1;
+                }
                 UiInputEvent::MouseUp { button, .. } if button.intersects(MouseButton::LEFT) => state.active = false,
                 _ => {}
             }
@@ -268,41 +263,18 @@ impl Widget for CaptureContainer {
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::DragCapture
     }
-}
 
-impl Container for CaptureContainer {
-    fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>) {
-        let state = self.state.try_borrow().expect("capture state must be available during visitation");
-        visitor.visit(&state.children);
+    fn keeps_pointer_capture(&self) -> bool {
+        self.state
+            .upgrade()
+            .is_some_and(|state| state.try_borrow().expect("capture state must be available for retention").active)
     }
 
-    fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>) {
-        let mut state = self.state.try_borrow_mut().expect("capture state must be available during mutable visitation");
-        visitor.visit(&mut state.children);
-    }
-
-    fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
-        ctx.set_content_size(Dimensioni::new(rect.width.max(0), rect.height.max(0)));
-    }
-
-    fn retains_pointer_capture(&self) -> bool {
-        self.state.try_borrow().expect("capture state must be available for retention").active
-    }
-
-    fn on_pointer_capture_lost(&mut self) {
-        let mut state = self.state.try_borrow_mut().expect("capture state must be available for loss notification");
+    fn pointer_capture_lost(&mut self) {
+        let state = self.state.upgrade().expect("capture state must outlive its surface");
+        let mut state = state.try_borrow_mut().expect("capture state must be available for loss notification");
         state.active = false;
         state.losses += 1;
-    }
-
-    fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
-        if matches!(event, UiInputEvent::MouseDrag { .. }) && ctx.has_pointer_capture() {
-            self.state
-                .try_borrow_mut()
-                .expect("capture state must be available during routing")
-                .saw_capture_during_drag = true;
-        }
-        ctx.route_widget(event, self.opt)
     }
 }
 
@@ -336,7 +308,8 @@ impl Widget for CrossSubtreeRemover {
                 .try_borrow_mut()
                 .expect("cross-subtree target state must be independently available")
                 .children
-                .clear();
+                .try_clear()
+                .expect("target topology must be available during sibling update");
             self.removed = true;
         }
     }
@@ -377,7 +350,7 @@ fn common_phases_are_parent_first_and_siblings_are_forward() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (first, first_counts) = Probe::new("first", log.clone());
     let (second, second_counts) = Probe::new("second", log.clone());
-    let container = TraversalContainer::new([Node::widget(first), Node::widget(second)], false, log.clone());
+    let (container, _) = TraversalContainer::new([Node::widget(first), Node::widget(second)], false, log.clone());
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -404,10 +377,10 @@ fn common_phases_are_parent_first_and_siblings_are_forward() {
 }
 
 #[test]
-fn post_update_visibility_gate_suppresses_descendants_in_the_same_frame() {
+fn layout_participation_filters_descendants_after_state_changes() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (child, child_counts) = Probe::new("child", log.clone());
-    let container = TraversalContainer::new([Node::widget(child)], true, log.clone());
+    let (container, _) = TraversalContainer::new([Node::widget(child)], true, log.clone());
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -417,11 +390,13 @@ fn post_update_visibility_gate_suppresses_descendants_in_the_same_frame() {
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
     log.borrow_mut().clear();
     runtime.update_tree_root(&mut root, &style, atlas.clone(), empty_input());
+    // Visibility is a layout result, so commit the state change before paint consumes the flag.
+    layout_root(&mut runtime, &mut root, &style, atlas.clone());
     runtime.paint_tree_root(&mut root, &mut DisplayList::default(), &style, atlas);
 
-    let expected = ["container:update", "container:paint"].map(str::to_owned);
+    let expected = ["container:update", "child:update", "container:paint"].map(str::to_owned);
     assert_eq!(log.borrow().as_slice(), expected.as_slice());
-    assert_eq!((child_counts.updates.get(), child_counts.paints.get()), (0, 0));
+    assert_eq!((child_counts.updates.get(), child_counts.paints.get()), (1, 0));
 }
 
 #[test]
@@ -429,7 +404,7 @@ fn overlapping_pointer_routing_visits_siblings_in_reverse_z_order() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (first, first_counts) = Probe::new("first", log.clone());
     let (second, second_counts) = Probe::new("second", log.clone());
-    let container = TraversalContainer::new([Node::widget(first), Node::widget(second)], false, log);
+    let (container, _) = TraversalContainer::new([Node::widget(first), Node::widget(second)], false, log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -443,7 +418,7 @@ fn overlapping_pointer_routing_visits_siblings_in_reverse_z_order() {
     };
     runtime.begin_input_event(true, &event);
     let routed = runtime.route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event);
-    assert_eq!(routed.map(|(_, result)| result), Some(ContainerInputResult::Captured));
+    assert_eq!(routed.map(|(_, result)| result), Some(DispatchResult::Captured));
     runtime.update_tree_root(&mut root, &style, atlas, empty_input());
 
     assert_eq!(first_counts.routed_events.get(), 0);
@@ -461,7 +436,7 @@ fn pointer_target_selection_uses_reverse_sibling_paint_order() {
     let first_id_value = first_id.id();
     let second_id = Node::widget(second);
     let second_id_value = second_id.id();
-    let container = TraversalContainer::new([first_id, second_id], false, log);
+    let (container, _) = TraversalContainer::new([first_id, second_id], false, log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -489,7 +464,7 @@ fn no_interact_node_is_transparent_to_pointer_target_selection() {
     second.opt = WidgetOption::NO_INTERACT;
     let first = Node::widget(first);
     let first_id = first.id();
-    let container = TraversalContainer::new([first, Node::widget(second)], false, log);
+    let (container, _) = TraversalContainer::new([first, Node::widget(second)], false, log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -511,14 +486,15 @@ fn no_interact_node_is_transparent_to_pointer_target_selection() {
 }
 
 #[test]
-fn container_allocation_remains_the_target_outside_an_event_subrect() {
+fn composite_header_is_targeted_as_a_real_child_surface() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (lower, lower_counts) = Probe::new("lower", log.clone());
     let lower = Node::widget(lower).with_policy(Policy::fill());
+    let lower_id = lower.id();
     let (_, disclosure) = crate::Disclosure::create(crate::DisclosureParameters::header("Header", true, std::iter::empty()));
     let disclosure = disclosure.with_policy(Policy::fill());
     let disclosure_id = disclosure.id();
-    let container = TraversalContainer::new([lower, disclosure], false, log);
+    let (container, _) = TraversalContainer::new([lower, disclosure], false, log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -531,14 +507,15 @@ fn container_allocation_remains_the_target_outside_an_event_subrect() {
         .debug_node_rect(std::slice::from_ref(&root), disclosure_id)
         .expect("laid-out disclosure must retain a screen allocation");
     let event = UiInputEvent::MouseMove {
-        // Use the bottom of the filled allocation, below the preferred-height header.
-        pos: Vec2i::new(disclosure_rect.x + 1, disclosure_rect.y + disclosure_rect.height - 1),
+        // The header is now a concrete child widget placed at the top of the allocation.
+        pos: Vec2i::new(disclosure_rect.x + 1, disclosure_rect.y + 1),
         delta: Vec2i::default(),
     };
     runtime.begin_input_event(true, &event);
     let routed = runtime.route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event);
-    assert!(routed.is_some(), "the selected target may bubble to its parent handler");
-    assert_eq!(runtime.hover, Some(disclosure_id), "the complete allocation must remain the selected target");
+    assert!(routed.is_some(), "the dispatcher must route to the explicit header child");
+    assert_ne!(runtime.hover, Some(disclosure_id), "the structural disclosure must not impersonate its header");
+    assert_ne!(runtime.hover, Some(lower_id), "the covered sibling must remain occluded by the header child");
     runtime.update_tree_root(&mut root, &style, atlas, empty_input());
     assert_eq!(lower_counts.routed_events.get(), 0, "a covered sibling must not receive the bubbled event");
 }
@@ -549,7 +526,7 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
     let (mut lower, lower_counts) = Probe::new("lower", log.clone());
     lower.opt = WidgetOption::GRAB_SCROLL;
     let (upper, upper_counts) = Probe::new("upper", log.clone());
-    let container = TraversalContainer::new([Node::widget(lower), Node::widget(upper)], false, log);
+    let (container, _) = TraversalContainer::new([Node::widget(lower), Node::widget(upper)], false, log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -563,7 +540,7 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
     };
     runtime.begin_input_event(true, &event);
     let routed = runtime.route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event);
-    assert_eq!(routed.map(|(_, result)| result), Some(ContainerInputResult::Ignored));
+    assert_eq!(routed.map(|(_, result)| result), Some(DispatchResult::Ignored));
     runtime.update_tree_root(&mut root, &style, atlas, empty_input());
 
     assert_eq!(upper_counts.routed_events.get(), 0, "unsupported events are not delivered to the target update");
@@ -577,7 +554,7 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
 }
 
 #[test]
-fn widget_focus_policy_is_authoritative_after_container_routing_cleanup() {
+fn widget_focus_policy_is_authoritative_after_dispatch_cleanup() {
     let mut root = Node::widget(HoldFocusProbe {
         state: Rc::new(RefCell::new(())),
         opt: WidgetOption::NONE,
@@ -646,12 +623,12 @@ fn captured_container_reports_local_retention_and_receives_loss_notification() {
         runtime.route_captured_pointer_input_event(std::slice::from_mut(&mut root), &style, drag_state.mouse_buttons, &drag,),
         Some(true)
     );
-    assert!(state.borrow().saw_capture_during_drag);
     assert_eq!(runtime.hover, None, "capture delivery outside the owner's pure surface must not imply hover");
 
     runtime.update_tree_root(&mut root, &style, atlas, drag_state);
     assert_eq!(runtime.capture, Some(id));
     assert!(state.borrow().active);
+    assert!(state.borrow().saw_capture_during_drag);
     assert_eq!(state.borrow().drags, 1);
 
     state.borrow_mut().active = false;
@@ -747,8 +724,7 @@ fn ancestor_gate_clears_all_descendant_targets_and_local_capture_mode() {
     capture_state.borrow_mut().active = true;
     let captured = Node::container(captured);
     let captured_id = captured.id();
-    let gate = TraversalContainer::new([captured], false, log);
-    let gate_state = gate.state.clone();
+    let (gate, gate_state) = TraversalContainer::new([captured], false, log);
     let mut root = Node::container(gate);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -789,8 +765,7 @@ fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() 
     let (replacement, replacement_state) = CaptureContainer::new();
     let replacement = Node::container(replacement);
     let replacement_id = replacement.id();
-    let parent = TraversalContainer::new([removed], false, log);
-    let parent_state = parent.state.clone();
+    let (parent, parent_state) = TraversalContainer::new([removed], false, log);
     let mut root = Node::container(parent);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -808,7 +783,7 @@ fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() 
         },
     );
 
-    parent_state.borrow_mut().children.replace([replacement]);
+    assert!(parent_state.borrow_mut().children.try_replace([replacement]).is_ok());
     layout_root(&mut runtime, &mut root, &style, test_atlas());
 
     assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
@@ -854,15 +829,14 @@ fn cross_subtree_removal_during_update_sanitizes_before_later_delivery() {
     captured_state.borrow_mut().active = true;
     let captured = Node::container(captured);
     let captured_id = captured.id();
-    let target_parent = TraversalContainer::new([captured], false, log.clone());
-    let target_state = target_parent.state.clone();
+    let (target_parent, target_state) = TraversalContainer::new([captured], false, log.clone());
     let remover = CrossSubtreeRemover {
         state: Rc::new(RefCell::new(())),
         target: target_state,
         removed: false,
         opt: WidgetOption::NONE,
     };
-    let root_container = TraversalContainer::new([Node::widget(remover), Node::container(target_parent)], false, log);
+    let (root_container, _) = TraversalContainer::new([Node::widget(remover), Node::container(target_parent)], false, log);
     let mut root = Node::container(root_container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();

@@ -1,15 +1,15 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
 
 use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, COLLAPSE_ICON, ControlColor, Dimensioni, EXPAND_ICON, MouseButton, Recti, Style, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx,
-    WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    AtlasHandle, COLLAPSE_ICON, ChildParticipation, Container, ControlColor, Dimensioni, EXPAND_ICON, Layout, MouseButton, Recti, Style, UiInputEvent, Widget,
+    WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetUpdateCtx,
 };
 
-use super::{
-    Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerInputCtx, ContainerInputResult, ContainerLayoutCtx, ContainerState,
-    Node,
-};
+use super::{Children, Column, ColumnParameters, ColumnState, ContainerLayoutCtx, Node};
 
 #[derive(Copy, Clone)]
 enum DisclosureVariant {
@@ -66,12 +66,12 @@ impl DisclosureParameters {
 /// Expansion gates descendant traversal while retaining every owned runtime and its state. It does
 /// not expose or mutate generic node visibility.
 pub struct DisclosureState {
-    children: Children,
+    /// Weak access to content topology strongly owned by the body Column child.
+    content: WidgetStateHandle<ColumnState>,
     expanded: bool,
 }
 
 impl WidgetState for DisclosureState {}
-impl ContainerState for DisclosureState {}
 
 impl DisclosureState {
     /// Returns whether descendants participate in traversal.
@@ -100,56 +100,59 @@ impl DisclosureState {
     }
 
     /// Returns the number of owned child nodes.
-    pub fn len(&self) -> usize {
-        self.children.len()
+    pub fn len(&self) -> Option<usize> {
+        self.content.try_read(ColumnState::len).flatten()
     }
 
     /// Returns whether the disclosure owns no children.
-    pub fn is_empty(&self) -> bool {
-        self.children.is_empty()
+    pub fn is_empty(&self) -> Option<bool> {
+        self.content.try_read(ColumnState::is_empty).flatten()
     }
 
     /// Appends one still-unmounted child.
-    pub fn push(&mut self, node: Node) {
-        self.children.push(node);
+    pub fn push(&mut self, node: Node) -> Result<(), Node> {
+        self.content.try_update_with(node, |content, node| content.push(node))?
     }
 
     /// Inserts a node, returning it unchanged when `index > len`.
     #[allow(clippy::result_large_err)] // The exact unboxed owner is the failure value by contract.
     pub fn insert(&mut self, index: usize, node: Node) -> Result<(), Node> {
-        self.children.insert(index, node)
+        self.content.try_update_with(node, |content, node| content.insert(index, node))?
     }
 
     /// Drops one indexed child owner and reports whether it existed.
-    pub fn remove_drop(&mut self, index: usize) -> bool {
-        self.children.remove_drop(index)
+    pub fn remove_drop(&mut self, index: usize) -> Option<bool> {
+        self.content.try_update(|content| content.remove_drop(index)).flatten()
     }
 
     /// Drops every child owner.
-    pub fn clear(&mut self) {
-        self.children.clear();
+    pub fn clear(&mut self) -> Option<()> {
+        self.content.try_update(ColumnState::clear).flatten()
     }
 
     /// Replaces all descendants in iterator order.
-    pub fn replace(&mut self, nodes: impl IntoIterator<Item = Node>) {
-        self.children.replace(nodes);
+    pub fn replace<I>(&mut self, nodes: I) -> Result<(), I>
+    where
+        I: IntoIterator<Item = Node>,
+    {
+        self.content.try_update_with(nodes, |content, nodes| content.replace(nodes))?
     }
 }
 
-/// Concrete state-owning disclosure runtime.
-pub struct DisclosureContainer {
-    state: Rc<RefCell<DisclosureState>>,
+/// Dispatcher-addressable disclosure header.
+///
+/// The header owns no descendants and keeps only a weak reference to the state strongly owned by
+/// [`DisclosureLayout`]. It therefore cannot extend the composite container's lifetime.
+struct DisclosureHeader {
+    state: Weak<RefCell<DisclosureState>>,
     label: String,
     variant: DisclosureVariant,
     opt: WidgetOption,
-    /// Derived header geometry in this container's local content coordinates.
-    header_rect: Recti,
-    /// Visual hover for the header sub-control; dispatcher hover still covers the full allocation.
-    header_hovered: bool,
 }
 
-impl DisclosureContainer {
-    fn header_preferred(&self, style: &Style, atlas: &AtlasHandle) -> Dimensioni {
+impl DisclosureHeader {
+    /// Measures the complete custom-painted header, including its optional internal frame.
+    fn preferred(&self, style: &Style, atlas: &AtlasHandle) -> Dimensioni {
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
         let font_height = atlas.get_font_height(style.font) as i32;
@@ -169,74 +172,34 @@ impl DisclosureContainer {
         };
         crate::ui_node::frame::outer_preferred(content, border)
     }
-
-    fn indent(&self, style: &Style) -> i32 {
-        if matches!(self.variant, DisclosureVariant::Tree) {
-            style.indent.max(0)
-        } else {
-            0
-        }
-    }
 }
 
-impl Widget for DisclosureContainer {
+impl Widget for DisclosureHeader {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
     }
 
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-        let header = self.header_preferred(style, atlas);
-        runtime_read_state(&self.state, "Disclosure::measure", |state| {
-            // A collapsed disclosure contributes only its interactive header; the caller's bound
-            // is a measurement constraint, not a minimum preferred width.
-            if !state.expanded {
-                return header;
-            }
-
-            // Expanded content follows Column sizing inside the width left after tree indentation
-            // and the height left after the header-to-body gap.
-            let indent = self.indent(style);
-            let spacing = style.spacing.max(0);
-            let child_available = Dimensioni::new(
-                if available.width > 0 {
-                    available.width.saturating_sub(indent).max(1)
-                } else {
-                    0
-                },
-                if available.height > 0 {
-                    available.height.saturating_sub(header.height).saturating_sub(spacing).max(1)
-                } else {
-                    0
-                },
-            );
-            let child = super::column::measure_column(&state.children, style, atlas, child_available);
-            Dimensioni::new(
-                header.width.max(child.width.saturating_add(indent)),
-                header.height.saturating_add(spacing).saturating_add(child.height),
-            )
-        })
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        self.preferred(style, atlas)
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        // A descendant or sibling may become the dispatcher target without routing through this
-        // container, so clear the narrower visual state when the container itself is not hovered.
-        if !ctx.hovered() {
-            self.header_hovered = false;
-        }
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let submitted = matches!(input, Some(UiInputEvent::MouseDown { button, .. }) if button.intersects(MouseButton::LEFT));
         if !submitted {
             return;
         }
-        runtime_update_state(&self.state, "Disclosure::update", DisclosureState::toggle);
+        let Some(state) = self.state.upgrade() else { return };
+        runtime_update_state(&state, "DisclosureHeader::update", DisclosureState::toggle);
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let expanded = runtime_read_state(&self.state, "Disclosure::paint", DisclosureState::is_expanded);
-        let mut row = self.header_rect;
+        let Some(state) = self.state.upgrade() else { return };
+        let expanded = runtime_read_state(&state, "DisclosureHeader::paint", DisclosureState::is_expanded);
+        let mut row = ctx.local_rect();
         match self.variant {
             DisclosureVariant::Header => {
                 let mut color = ControlColor::Button;
-                if self.header_hovered {
+                if ctx.hovered() {
                     color.hover();
                 }
                 if self.opt.intersects(WidgetOption::FRAME) {
@@ -245,7 +208,7 @@ impl Widget for DisclosureContainer {
                     ctx.draw_rect(row, ctx.style().colors[color as usize]);
                 }
             }
-            DisclosureVariant::Tree if self.header_hovered => {
+            DisclosureVariant::Tree if ctx.hovered() => {
                 ctx.draw_rect(row, ctx.style().colors[ControlColor::ButtonHover as usize]);
             }
             DisclosureVariant::Tree => {}
@@ -272,87 +235,93 @@ impl Widget for DisclosureContainer {
     }
 }
 
-impl WidgetStateOwner for DisclosureContainer {
-    type State = DisclosureState;
+/// Geometry-only policy for the fixed body/header child roles.
+pub struct DisclosureLayout {
+    state: Rc<RefCell<DisclosureState>>,
+    variant: DisclosureVariant,
+}
 
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
+impl DisclosureLayout {
+    const BODY: usize = 0;
+    const HEADER: usize = 1;
+
+    /// Returns the tree-only body indentation in container-local coordinates.
+    fn indent(&self, style: &Style) -> i32 {
+        if matches!(self.variant, DisclosureVariant::Tree) {
+            style.indent.max(0)
+        } else {
+            0
+        }
     }
 }
 
-impl Container for DisclosureContainer {
-    fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>) {
-        runtime_read_state(&self.state, "Disclosure::visit_children", |state| {
-            visitor.visit(&state.children);
-        });
+impl Layout for DisclosureLayout {
+    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        let header = children.measure_child(Self::HEADER, style, atlas, available).unwrap_or_default();
+        runtime_read_state(&self.state, "Disclosure::measure", |state| {
+            if !state.expanded {
+                return header;
+            }
+            let indent = self.indent(style);
+            let spacing = style.spacing.max(0);
+            let body_available = Dimensioni::new(
+                if available.width > 0 {
+                    available.width.saturating_sub(indent).max(1)
+                } else {
+                    0
+                },
+                if available.height > 0 {
+                    available.height.saturating_sub(header.height).saturating_sub(spacing).max(1)
+                } else {
+                    0
+                },
+            );
+            let body = children.measure_child(Self::BODY, style, atlas, body_available).unwrap_or_default();
+            Dimensioni::new(
+                header.width.max(body.width.saturating_add(indent)),
+                header.height.saturating_add(spacing).saturating_add(body.height),
+            )
+        })
     }
 
-    fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>) {
-        runtime_update_state(&self.state, "Disclosure::visit_children_mut", |state| {
-            visitor.visit(&mut state.children);
-        });
-    }
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        let preferred = children
+            .measure_child(Self::HEADER, ctx.style(), ctx.atlas(), Dimensioni::new(rect.width, rect.height))
+            .unwrap_or_default();
+        let header_height = preferred.height.min(rect.height.max(0));
+        let _ = ctx.set_child_participation(children, Self::HEADER, ChildParticipation::Active);
+        let _ = ctx.layout_child(children, Self::HEADER, Recti::new(rect.x, rect.y, rect.width, header_height));
 
-    fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
-        let header_height = self.header_preferred(ctx.style(), ctx.atlas()).height.min(rect.height.max(0));
-        self.header_rect = Recti::new(rect.x, rect.y, rect.width, header_height);
-        let expanded = runtime_read_state(&self.state, "Disclosure::layout gate", DisclosureState::is_expanded);
-        // Retain collapsed descendant boxes for stable ownership, but exclude those stale boxes
-        // from this node's derived overflow/content extent until expansion makes them active again.
-        ctx.set_child_overflow_propagation(expanded);
-        if !expanded {
-            return;
+        let expanded = runtime_read_state(&self.state, "Disclosure::place", DisclosureState::is_expanded);
+        let participation = if expanded { ChildParticipation::Active } else { ChildParticipation::Hidden };
+        let _ = ctx.set_child_participation(children, Self::BODY, participation);
+        if expanded {
+            let indent = self.indent(ctx.style());
+            let spacing = ctx.style().spacing.max(0);
+            let body = Recti::new(
+                rect.x.saturating_add(indent),
+                rect.y.saturating_add(header_height).saturating_add(spacing),
+                rect.width.saturating_sub(indent),
+                rect.height.saturating_sub(header_height).saturating_sub(spacing),
+            );
+            let _ = ctx.layout_child(children, Self::BODY, body);
         }
-
-        // Header geometry stays Disclosure-owned; only the remaining indented body uses Column
-        // layout, avoiding a second vertical-flow implementation.
-        let indent = self.indent(ctx.style());
-        let spacing = ctx.style().spacing;
-        let child_rect = Recti::new(
-            rect.x.saturating_add(indent),
-            rect.y.saturating_add(header_height).saturating_add(spacing),
-            rect.width.saturating_sub(indent),
-            rect.height.saturating_sub(header_height).saturating_sub(spacing),
-        );
-        runtime_update_state(&self.state, "Disclosure::layout", |state| {
-            super::column::layout_column(ctx, &mut state.children, child_rect);
-        });
-    }
-
-    fn children_visible(&self) -> bool {
-        runtime_read_state(&self.state, "Disclosure::children_visible", DisclosureState::is_expanded)
-    }
-
-    fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
-        // Header geometry affects only this sub-control's handling and visuals; the dispatcher has
-        // already selected the container from its complete clipped allocation.
-        if let Some(pos) = event.position() {
-            self.header_hovered = self.header_rect.contains(&pos);
-        }
-        ctx.route_widget_in_rect(event, self.header_rect, self.opt)
     }
 }
 
-/// Builder associating [`DisclosureParameters`] with [`DisclosureContainer`].
-pub struct DisclosureBuilder;
-
-impl ContainerBuilder for DisclosureBuilder {
-    type Parameters = DisclosureParameters;
-    type W = DisclosureContainer;
-
-    fn create_container(parameters: Self::Parameters) -> Self::W {
-        DisclosureContainer {
-            state: Rc::new(RefCell::new(DisclosureState {
-                children: parameters.children,
-                expanded: parameters.expanded,
-            })),
-            label: parameters.label,
-            variant: parameters.variant,
-            opt: parameters.opt,
-            header_rect: Recti::default(),
-            header_hovered: false,
-        }
-    }
+fn create_container(parameters: DisclosureParameters) -> (WidgetStateHandle<DisclosureState>, Container) {
+    let (content, body) = Column::create(ColumnParameters::new(parameters.children.nodes));
+    let state = Rc::new(RefCell::new(DisclosureState { content, expanded: parameters.expanded }));
+    let handle = WidgetStateHandle::new(&state);
+    let header = DisclosureHeader {
+        state: Rc::downgrade(&state),
+        label: parameters.label,
+        variant: parameters.variant,
+        opt: parameters.opt,
+    };
+    let layout = DisclosureLayout { state, variant: parameters.variant };
+    let container = Container::new(layout, WidgetOption::NONE, [body, Node::widget_internal(header)]);
+    (handle, container)
 }
 
 /// Convenience constructor namespace for disclosure containers.
@@ -361,8 +330,7 @@ pub struct Disclosure;
 impl Disclosure {
     /// Creates a state-owned disclosure and returns its weak state capability plus completed node.
     pub fn create(parameters: DisclosureParameters) -> (WidgetStateHandle<DisclosureState>, Node) {
-        let container = DisclosureBuilder::create_container(parameters);
-        let state = container.state_handle();
+        let (state, container) = create_container(parameters);
         (state, Node::container(container))
     }
 }
@@ -372,21 +340,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn header_and_tree_parameters_preserve_the_retired_widget_capabilities() {
-        let header = DisclosureBuilder::create_container(DisclosureParameters::header("Header", false, std::iter::empty()));
-        assert_eq!(header.label, "Header");
-        assert!(matches!(header.variant, DisclosureVariant::Header));
-        assert!(header.widget_opt().intersects(WidgetOption::FRAME));
-        let header_state = header.state_handle();
+    fn header_and_tree_preserve_state_and_fixed_structural_children() {
+        let (header_state, header) = create_container(DisclosureParameters::header("Header", false, std::iter::empty()));
         assert_eq!(header_state.try_read(DisclosureState::is_collapsed), Some(true));
         header_state.try_update(DisclosureState::toggle).unwrap();
         assert_eq!(header_state.try_read(DisclosureState::is_expanded), Some(true));
+        assert_eq!(Node::container(header).debug_node_count(), 3);
 
         let custom_opt = WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT;
-        let tree = DisclosureBuilder::create_container(DisclosureParameters::tree("Tree", true, std::iter::empty()).with_options(custom_opt));
-        assert_eq!(tree.label, "Tree");
-        assert!(matches!(tree.variant, DisclosureVariant::Tree));
-        assert_eq!(tree.widget_opt().bits(), custom_opt.bits());
-        assert_eq!(tree.state_handle().try_read(DisclosureState::is_expanded), Some(true));
+        let (tree_state, tree) = create_container(DisclosureParameters::tree("Tree", true, std::iter::empty()).with_options(custom_opt));
+        assert_eq!(tree_state.try_read(DisclosureState::is_expanded), Some(true));
+        assert_eq!(Node::container(tree).debug_node_count(), 3);
     }
 }

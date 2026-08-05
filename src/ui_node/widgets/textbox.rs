@@ -294,7 +294,7 @@ pub(crate) fn textbox_update(
             cursor_pos = buf.len();
         }
     }
-    // Submission records an event but does not cooperatively mutate focus. The runtime router
+    // Submission records an event but does not cooperatively mutate focus. The runtime dispatcher
     // remains authoritative and continues routing keyboard/text input to its focused node.
 
     let text_metrics = ctx.atlas().get_text_size(font, buf.as_str());

@@ -69,7 +69,7 @@ impl UiRuntime {
             }
             NodeKind::Container(container) => {
                 let mut ctx = ContainerLayoutCtx::new(self, style, atlas, content, &mut node.state);
-                container.layout(&mut ctx, content);
+                container.place(&mut ctx, content);
             }
         }
 
@@ -121,7 +121,7 @@ fn child_content_rect(node: &Node) -> Recti {
 
 fn child_content_bounds_from_children(children: &Children) -> Option<Recti> {
     let mut bounds = None;
-    for child in children.iter() {
+    for child in children.iter().filter(|child| node_is_visible(child)) {
         let child_rect = child_content_rect(child);
         bounds = Some(match bounds {
             Some(rect) => union_rect(rect, child_rect),

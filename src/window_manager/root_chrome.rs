@@ -1,13 +1,15 @@
 //! Persistent retained root state and the private chrome container.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
 
 use crate::render::Painter;
 use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, Children, ChildrenVisitor, ChildrenVisitorMut, Container, ContainerBuilder, ContainerInputCtx, ContainerInputResult, ContainerLayoutCtx,
-    ContainerState, ControlColor, Dimensioni, FocusPolicy, MouseButton, Node, Recti, Style, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx,
-    WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, WindowOption,
+    AtlasHandle, Children, Container, ContainerLayoutCtx, ControlColor, Dimensioni, FocusPolicy, Layout, MouseButton, Node, Recti, Style, UiInputEvent, Vec2i,
+    Widget, WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetUpdateCtx, WindowOption,
 };
 
 use super::RootId;
@@ -62,7 +64,6 @@ pub(super) enum RootInteraction {
 pub struct RootState {
     name: String,
     options: WindowOption,
-    children: Children,
     rect: Recti,
     visible: bool,
     interaction: RootInteraction,
@@ -72,15 +73,12 @@ pub struct RootState {
 }
 
 impl WidgetState for RootState {}
-impl ContainerState for RootState {}
 
 impl RootState {
-    fn new(name: String, options: WindowOption, rect: Recti, visible: bool, children: Children) -> Self {
-        assert_eq!(children.len(), 1, "root chrome must own exactly one application node");
+    fn new(name: String, options: WindowOption, rect: Recti, visible: bool) -> Self {
         Self {
             name,
             options,
-            children,
             rect,
             visible,
             interaction: RootInteraction::None,
@@ -196,85 +194,66 @@ pub(super) struct RootChromeParameters {
     pub(super) content: Node,
 }
 
-impl WidgetParameters for RootChromeParameters {}
-
-pub(super) struct RootChromeBuilder;
-
-impl ContainerBuilder for RootChromeBuilder {
-    type Parameters = RootChromeParameters;
-    type W = RootChromeContainer;
-
-    fn create_container(parameters: Self::Parameters) -> Self::W {
-        RootChromeContainer {
-            state: Rc::new(RefCell::new(RootState::new(
-                parameters.name,
-                parameters.options,
-                parameters.rect,
-                parameters.visible,
-                core::iter::once(parameters.content).collect(),
-            ))),
-            opt: WidgetOption::NONE,
-        }
-    }
+pub(super) fn create_root_chrome(parameters: RootChromeParameters) -> (WidgetStateHandle<RootState>, Container) {
+    let state = Rc::new(RefCell::new(RootState::new(
+        parameters.name,
+        parameters.options,
+        parameters.rect,
+        parameters.visible,
+    )));
+    let handle = WidgetStateHandle::new(&state);
+    let layout = RootChromeLayout { state: state.clone() };
+    let surface = RootChromeSurface {
+        state: Rc::downgrade(&state),
+        opt: WidgetOption::NONE,
+    };
+    let container = Container::new(layout, WidgetOption::NONE, [parameters.content]).with_surface(surface);
+    (handle, container)
 }
 
-pub(super) struct RootChromeContainer {
+/// Geometry-only root policy over the single application child.
+pub(super) struct RootChromeLayout {
     state: Rc<RefCell<RootState>>,
+}
+
+/// Wheel-independent widget behavior installed on the root's own chrome surface.
+struct RootChromeSurface {
+    state: Weak<RefCell<RootState>>,
     opt: WidgetOption,
 }
 
-impl RootChromeContainer {
-    pub(super) fn create(parameters: RootChromeParameters) -> (WidgetStateHandle<RootState>, Node) {
-        let container = RootChromeBuilder::create_container(parameters);
-        let state = container.state_handle();
-        (state, Node::container(container))
-    }
-}
-
-impl WidgetStateOwner for RootChromeContainer {
-    type State = RootState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
-impl Widget for RootChromeContainer {
+impl Widget for RootChromeSurface {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
     }
 
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-        runtime_read_state(&self.state, "RootChrome::measure", |state| {
-            // Resolve chrome once against the supplied bound to learn how much of each axis remains
-            // available to application content. Seed an unconstrained axis with the root's real
-            // minimum so a one-pixel placeholder cannot collapse the other axis's frame geometry.
-            let minimum = root_chrome_geometry(Recti::default(), Dimensioni::default(), &state.name, state.options, style, atlas).minimum_outer;
-            let outer = Recti::new(0, 0, available.width.max(minimum.width), available.height.max(minimum.height));
-            let shell = root_chrome_geometry(outer, Dimensioni::default(), &state.name, state.options, style, atlas);
-            let child_available = Dimensioni::new(
-                inset_available(available.width, outer.width.saturating_sub(shell.body.width)),
-                inset_available(available.height, outer.height.saturating_sub(shell.body.height)),
-            );
-            // Child placement policy belongs to this parent and determines its measurement bound;
-            // the child's own measure call still reports content only.
-            let policy = state.children.child_policy(0).unwrap_or_else(crate::Policy::auto);
-            let measured_available = Dimensioni::new(
-                policy.width.measurement_bound(child_available.width),
-                policy.height.measurement_bound(child_available.height),
-            );
-            let child = state.children.measure_child(0, style, atlas, measured_available).unwrap_or_default();
-            let child = Dimensioni::new(
-                policy.width.preferred_extent(child.width, child_available.width),
-                policy.height.preferred_extent(child.height, child_available.height),
-            );
-            // Re-run the single chrome formula with measured content to obtain intrinsic outer size.
-            root_chrome_geometry(Recti::default(), child, &state.name, state.options, style, atlas).intrinsic_outer
+    fn effective_widget_opt(&self) -> WidgetOption {
+        let Some(state) = self.state.upgrade() else {
+            return self.opt | WidgetOption::NO_INTERACT;
+        };
+        runtime_read_state(&state, "RootChromeSurface::options", |state| {
+            if state.visible { self.opt } else { self.opt | WidgetOption::NO_INTERACT }
         })
     }
 
+    fn accepts_event(&self, event: &UiInputEvent) -> bool {
+        let Some(state) = self.state.upgrade() else { return false };
+        runtime_read_state(&state, "RootChromeSurface::accepts_event", |state| {
+            if state.is_active() && matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. }) {
+                return true;
+            }
+            event_position(event).is_some_and(|position| state.geometry.hit_test(position).is_some()) && !matches!(event, UiInputEvent::Scroll { .. })
+        })
+    }
+
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        // RootChromeLayout owns the preference because it alone can inspect the application child.
+        Dimensioni::default()
+    }
+
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        runtime_update_state(&self.state, "RootChrome::update", |state| {
+        let Some(state) = self.state.upgrade() else { return };
+        runtime_update_state(&state, "RootChromeSurface::update", |state| {
             let initial = state.rect;
             if let Some(event) = input {
                 match event {
@@ -309,7 +288,8 @@ impl Widget for RootChromeContainer {
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        runtime_read_state(&self.state, "RootChrome::paint", |state| {
+        let Some(state) = self.state.upgrade() else { return };
+        runtime_read_state(&state, "RootChromeSurface::paint", |state| {
             let outer = ctx.local_rect();
             if state.options.intersects(WindowOption::FRAME) {
                 let _ = ctx.draw_internal_frame(outer, ControlColor::WindowBG);
@@ -322,78 +302,77 @@ impl Widget for RootChromeContainer {
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::DragCapture
     }
+
+    fn keeps_pointer_capture(&self) -> bool {
+        let Some(state) = self.state.upgrade() else { return false };
+        runtime_read_state(&state, "RootChromeSurface::capture", RootState::is_active)
+    }
+
+    fn pointer_capture_lost(&mut self) {
+        let Some(state) = self.state.upgrade() else { return };
+        runtime_update_state(&state, "RootChromeSurface::capture_lost", |state| state.interaction = RootInteraction::None);
+    }
 }
 
-impl Container for RootChromeContainer {
-    fn visit_children(&self, visitor: &mut ChildrenVisitor<'_>) {
-        runtime_read_state(&self.state, "RootChrome::visit_children", |state| visitor.visit(&state.children));
+impl Layout for RootChromeLayout {
+    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        let (outer, shell) = runtime_read_state(&self.state, "RootChromeLayout::measure_shell", |state| {
+            let minimum = root_chrome_geometry(Recti::default(), Dimensioni::default(), &state.name, state.options, style, atlas).minimum_outer;
+            let outer = Recti::new(0, 0, available.width.max(minimum.width), available.height.max(minimum.height));
+            (
+                outer,
+                root_chrome_geometry(outer, Dimensioni::default(), &state.name, state.options, style, atlas),
+            )
+        });
+        let child_available = Dimensioni::new(
+            inset_available(available.width, outer.width.saturating_sub(shell.body.width)),
+            inset_available(available.height, outer.height.saturating_sub(shell.body.height)),
+        );
+        let policy = children.child_policy(0).unwrap_or_else(crate::Policy::auto);
+        let child = children
+            .measure_child(
+                0,
+                style,
+                atlas,
+                Dimensioni::new(
+                    policy.width.measurement_bound(child_available.width),
+                    policy.height.measurement_bound(child_available.height),
+                ),
+            )
+            .unwrap_or_default();
+        let child = Dimensioni::new(
+            policy.width.preferred_extent(child.width, child_available.width),
+            policy.height.preferred_extent(child.height, child_available.height),
+        );
+        runtime_read_state(&self.state, "RootChromeLayout::measure_result", |state| {
+            root_chrome_geometry(Recti::default(), child, &state.name, state.options, style, atlas).intrinsic_outer
+        })
     }
 
-    fn visit_children_mut(&mut self, visitor: &mut ChildrenVisitorMut<'_>) {
-        runtime_update_state(&self.state, "RootChrome::visit_children_mut", |state| visitor.visit(&mut state.children));
-    }
-
-    fn layout(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
-        runtime_update_state(&self.state, "RootChrome::layout", |state| {
-            // The shell determines the actual body slot before content is measured for wrapping.
-            let shell = root_chrome_geometry(rect, Dimensioni::default(), &state.name, state.options, ctx.style(), ctx.atlas());
-            let policy = state.children.child_policy(0).unwrap_or_else(crate::Policy::auto);
-            let child = state
-                .children
-                .measure_child(
-                    0,
-                    ctx.style(),
-                    ctx.atlas(),
-                    Dimensioni::new(
-                        policy.width.measurement_bound(shell.body.width.max(1)),
-                        policy.height.measurement_bound(shell.body.height.max(1)),
-                    ),
-                )
-                .unwrap_or_default();
-            // Commit one geometry value used by layout, hit testing, interaction, and overlay paint.
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        let shell = runtime_read_state(&self.state, "RootChromeLayout::shell", |state| {
+            root_chrome_geometry(rect, Dimensioni::default(), &state.name, state.options, ctx.style(), ctx.atlas())
+        });
+        let policy = children.child_policy(0).unwrap_or_else(crate::Policy::auto);
+        let child = children
+            .measure_child(
+                0,
+                ctx.style(),
+                ctx.atlas(),
+                Dimensioni::new(
+                    policy.width.measurement_bound(shell.body.width.max(1)),
+                    policy.height.measurement_bound(shell.body.height.max(1)),
+                ),
+            )
+            .unwrap_or_default();
+        let body = runtime_update_state(&self.state, "RootChromeLayout::commit", |state| {
             state.geometry = root_chrome_geometry(rect, child, &state.name, state.options, ctx.style(), ctx.atlas());
-            let body = state.geometry.body;
-            let _ = ctx.layout_child(&mut state.children, 0, body);
-            ctx.set_children_viewport(body, Vec2i::default());
-            ctx.set_content_size(Dimensioni::new(rect.width.max(0), rect.height.max(0)));
-            ctx.set_child_overflow_propagation(false);
+            state.geometry.body
         });
-    }
-
-    fn children_visible(&self) -> bool {
-        runtime_read_state(&self.state, "RootChrome::children_visible", RootState::is_visible)
-    }
-
-    fn retains_pointer_capture(&self) -> bool {
-        runtime_read_state(&self.state, "RootChrome::retains_pointer_capture", RootState::is_active)
-    }
-
-    fn on_pointer_capture_lost(&mut self) {
-        runtime_update_state(&self.state, "RootChrome::on_pointer_capture_lost", |state| {
-            state.interaction = RootInteraction::None;
-        });
-    }
-
-    fn route_input(&mut self, ctx: &mut ContainerInputCtx<'_>, event: &UiInputEvent) -> ContainerInputResult {
-        let has_pointer_capture = ctx.has_pointer_capture();
-        let (surface, part) = runtime_read_state(&self.state, "RootChrome::route_input", |state| {
-            let part = event_position(event).and_then(|pos| state.geometry.hit_test(pos));
-            if has_pointer_capture && matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. }) {
-                // Captured drag/release delivery does not require the pointer to remain inside the
-                // routed rectangle. Keep the pure chrome hit separate by using the part currently
-                // under the pointer, or an empty rectangle when capture has moved outside chrome.
-                (Some(part.map(|part| state.geometry.rect_for(part)).unwrap_or_default()), part)
-            } else {
-                (part.map(|part| state.geometry.rect_for(part)), part)
-            }
-        });
-        let Some(surface) = surface else { return ContainerInputResult::Ignored };
-        let result = ctx.route_widget_in_rect(event, surface, WidgetOption::NONE);
-        if matches!(part, Some(RootChromePart::Close)) && result == ContainerInputResult::Captured {
-            ContainerInputResult::Consumed
-        } else {
-            result
-        }
+        let _ = ctx.layout_child(children, 0, body);
+        ctx.set_children_viewport(body, Vec2i::default());
+        ctx.set_content_size(Dimensioni::new(rect.width.max(0), rect.height.max(0)));
+        ctx.set_child_overflow_propagation(false);
     }
 }
 
@@ -416,42 +395,39 @@ mod capture_tests {
     #[test]
     fn root_chrome_retains_capture_only_for_local_move_or_resize_mode() {
         let content = Node::widget(Custom::create(CustomParameters::new("content")));
-        let mut container = RootChromeBuilder::create_container(RootChromeParameters {
+        let (state, mut container) = create_root_chrome(RootChromeParameters {
             name: "root".to_owned(),
             options: WindowOption::FRAME,
             rect: Recti::new(10, 20, 100, 80),
             visible: true,
             content,
         });
+        assert!(!container.keeps_pointer_capture());
+        state.try_update(|state| state.interaction = RootInteraction::Moving).unwrap();
+        assert!(container.keeps_pointer_capture());
+        container.pointer_capture_lost();
+        assert!(!container.keeps_pointer_capture());
+        assert_eq!(state.try_read(RootState::is_active), Some(false));
 
-        assert!(!container.retains_pointer_capture());
-        container.state.borrow_mut().interaction = RootInteraction::Moving;
-        assert!(container.retains_pointer_capture());
-        container.on_pointer_capture_lost();
-        assert!(!container.retains_pointer_capture());
-        assert!(!container.state.borrow().is_active());
-
-        container.state.borrow_mut().interaction = RootInteraction::Resizing;
-        assert!(container.retains_pointer_capture());
+        state.try_update(|state| state.interaction = RootInteraction::Resizing).unwrap();
+        assert!(container.keeps_pointer_capture());
     }
 
     #[test]
     fn root_chrome_runtime_is_the_only_persistent_strong_state_owner() {
         let content = Node::widget(Custom::create(CustomParameters::new("content")));
-        let container = RootChromeBuilder::create_container(RootChromeParameters {
+        let (state, container) = create_root_chrome(RootChromeParameters {
             name: "root".to_owned(),
             options: WindowOption::FRAME,
             rect: Recti::new(10, 20, 100, 80),
             visible: true,
             content,
         });
-        let state = container.state_handle();
         let consumer = state.clone();
 
-        assert_eq!(Rc::strong_count(&container.state), 1);
         assert!(consumer.is_alive());
         drop(state);
-        assert_eq!(Rc::strong_count(&container.state), 1);
+        assert!(consumer.is_alive(), "weak handle lifetime is independent of other weak clones");
         drop(container);
         assert!(!consumer.is_alive());
     }
@@ -488,17 +464,6 @@ impl RootChromeGeometry {
             Some(RootChromePart::Title)
         } else {
             None
-        }
-    }
-
-    /// Returns the committed local rectangle for one previously classified chrome part.
-    fn rect_for(self, part: RootChromePart) -> Recti {
-        // Missing optional geometry cannot produce its corresponding part and therefore maps only
-        // defensively to an empty rectangle.
-        match part {
-            RootChromePart::Title => self.title.unwrap_or_default(),
-            RootChromePart::Close => self.close.unwrap_or_default(),
-            RootChromePart::Resize => self.resize.unwrap_or_default(),
         }
     }
 }

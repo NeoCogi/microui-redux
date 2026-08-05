@@ -53,10 +53,10 @@ impl UiRuntime {
             display_list.push_custom(screen_content_clip, renderer, screen_content_rect);
         }
 
-        let traverse_children = node.data.container().is_some_and(Container::children_visible);
+        let traverse_children = node.is_container();
         if traverse_children {
             node.with_children_mut(|children| {
-                for child in children.iter_mut() {
+                for child in children.iter_mut().filter(|child| node_is_visible(child)) {
                     self.paint_node_ref(child, child_transform, display_list, style, atlas.clone());
                 }
             });

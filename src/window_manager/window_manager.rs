@@ -3,7 +3,7 @@
 use super::*;
 use crate::{Node, RootHandle, RootMutationError, RootState, Vec2i, WidgetStateHandle};
 
-use super::root_chrome::{record_root_overlay, root_handle, RootChromeContainer, RootChromeParameters};
+use super::root_chrome::{create_root_chrome, record_root_overlay, root_handle, RootChromeParameters};
 #[cfg(test)]
 use super::root_chrome::root_chrome_geometry;
 
@@ -38,13 +38,14 @@ pub(super) struct WindowEntry {
 impl<B: RendererBackend> Context<B> {
     fn register_root(&mut self, kind: WindowKind, name: &str, rect: Recti, content: Node, options: WindowOption, visible: bool) -> RootHandle {
         let id = self.next_root_id();
-        let (root_state, root) = RootChromeContainer::create(RootChromeParameters {
+        let (root_state, root) = create_root_chrome(RootChromeParameters {
             name: name.to_owned(),
             options,
             rect,
             visible,
             content,
         });
+        let root = Node::container(root);
         let z_index = if visible {
             self.last_zindex = self.last_zindex.saturating_add(1);
             self.last_zindex
