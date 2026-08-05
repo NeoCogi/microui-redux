@@ -57,7 +57,7 @@ use std::cmp::max;
 use std::rc::{Rc, Weak};
 
 use bitflags::bitflags;
-use rs_math3d::{Dimensioni, Vec2i};
+use rs_math3d::Dimensioni;
 
 use crate::atlas::{AtlasHandle, EXPAND_DOWN_ICON};
 use crate::style::Style;
@@ -325,23 +325,19 @@ pub trait Widget {
         FocusPolicy::from_widget_options(self.effective_widget_opt())
     }
 
-    /// Returns whether one scroll delta can change this widget's current state.
-    ///
-    /// The dispatcher asks before delivery so a scroll surface at its boundary can ignore the
-    /// event and let ordinary ancestor bubbling continue. Layout is intentionally absent from this
-    /// decision; the interactive widget answers only for its own already-committed state.
-    fn accepts_scroll(&self, delta: Vec2i) -> bool {
-        self.effective_widget_opt().intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0)
-    }
-
     /// Returns whether this widget supports one dispatcher-selected event.
     ///
     /// This is widget behavior, not target selection: returning `false` bubbles only through the
-    /// selected node's ancestors. The default accepts ordinary pointer/focus input and delegates
-    /// wheel boundary checks to [`Widget::accepts_scroll`].
+    /// selected node's ancestors. The default accepts ordinary pointer/focus input. It accepts
+    /// scroll input only when the widget grabs scrolling and the delta can represent movement;
+    /// stateful scroll surfaces can override this method to add boundary checks against their
+    /// already-committed state.
     fn accepts_event(&self, event: &UiInputEvent) -> bool {
         match event {
-            UiInputEvent::Scroll { delta, .. } => self.accepts_scroll(*delta),
+            // Keep the generic scroll policy here so routing has one event-acceptance hook. A zero
+            // delta cannot change any widget and should remain available to ancestor bubbling.
+            UiInputEvent::Scroll { delta, .. } => self.effective_widget_opt().intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0),
+            // Target selection and the remaining widget options govern every non-scroll event.
             _ => true,
         }
     }

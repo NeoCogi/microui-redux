@@ -159,10 +159,6 @@ impl Widget for Container {
         self.surface.as_ref().map_or(self.opt, |surface| surface.effective_widget_opt())
     }
 
-    fn accepts_scroll(&self, delta: Vec2i) -> bool {
-        self.surface.as_ref().is_some_and(|surface| surface.accepts_scroll(delta))
-    }
-
     fn accepts_event(&self, event: &UiInputEvent) -> bool {
         // Event eligibility belongs entirely to the optional surface widget.
         self.surface.as_ref().is_some_and(|surface| surface.accepts_event(event))
