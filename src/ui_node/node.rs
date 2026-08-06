@@ -186,41 +186,26 @@ impl Node {
         self.with_children(|children| 1 + children.iter().map(Self::debug_node_count).sum::<usize>())
     }
 
-    /// Runs `f` against one matching node without returning a borrow through the opaque visitor.
+    /// Runs a test-only immutable visitor against one matching retained node.
+    #[cfg(test)]
     pub(crate) fn with_node<R>(&self, id: RuntimeNodeId, f: impl FnOnce(&Node) -> R) -> Option<R> {
-        // Keep the one-shot visitor in an Option so recursion can move it exactly once at the match.
+        // Keep the one-shot visitor in an Option so recursive descent can move it exactly once when
+        // the requested identity is reached without returning a borrow from opaque child storage.
         let mut f = Some(f);
         self.with_node_inner(id, &mut f)
     }
 
+    #[cfg(test)]
     fn with_node_inner<R, F>(&self, id: RuntimeNodeId, f: &mut Option<F>) -> Option<R>
     where
         F: FnOnce(&Node) -> R,
     {
         if self.id() == id {
+            // Runtime IDs are unique, so taking the callback here proves it cannot run twice.
             return Some(f.take().expect("node visitor invoked twice")(self));
         }
-        // Child storage remains borrowed only for this recursive search and cannot escape in `R` as
-        // a Node reference because the callback consumes its argument immediately.
+        // The child borrow remains scoped to this search and cannot escape through the callback.
         self.with_children(|children| children.iter().find_map(|child| child.with_node_inner(id, f)))
-    }
-
-    /// Runs `f` mutably against one matching node without exposing attached storage.
-    pub(crate) fn with_node_mut<R>(&mut self, id: RuntimeNodeId, f: impl FnOnce(&mut Node) -> R) -> Option<R> {
-        // Mirror immutable lookup while preserving the single mutable path to an attached node.
-        let mut f = Some(f);
-        self.with_node_mut_inner(id, &mut f)
-    }
-
-    fn with_node_mut_inner<R, F>(&mut self, id: RuntimeNodeId, f: &mut Option<F>) -> Option<R>
-    where
-        F: FnOnce(&mut Node) -> R,
-    {
-        if self.id() == id {
-            return Some(f.take().expect("mutable node visitor invoked twice")(self));
-        }
-        // Container's RefCell borrow guards the entire descent, blocking concurrent topology edits.
-        self.with_children_mut(|children| children.iter_mut().find_map(|child| child.with_node_mut_inner(id, f)))?
     }
 }
 

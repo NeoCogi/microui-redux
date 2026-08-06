@@ -251,8 +251,12 @@ impl<'a> WidgetUpdateCtx<'a> {
         self.common.clicked
     }
 
-    /// Returns whether this widget is in an active pointer interaction.
+    /// Returns whether this widget owns pointer capture while the left button is held.
+    ///
+    /// Widgets that retain a local drag mode must reconcile it from this value on every update.
+    /// A `false` value is the complete capture-loss signal; no separate lifecycle callback runs.
     pub fn active(&self) -> bool {
+        // UiRuntime commits this immutable capture snapshot before calling Widget::update.
         self.common.active
     }
 
@@ -348,8 +352,9 @@ impl<'a> WidgetPaintCtx<'a> {
         self.common.clicked
     }
 
-    /// Returns whether this widget is in an active pointer interaction.
+    /// Returns the pointer-capture activity snapshot committed during the latest update.
     pub fn active(&self) -> bool {
+        // Paint observes the retained update result and cannot alter capture ownership.
         self.common.active
     }
 

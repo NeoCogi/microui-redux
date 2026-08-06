@@ -36,8 +36,6 @@ pub(crate) struct UiRuntime {
     pub(crate) hover: Option<RuntimeNodeId>,
     /// Pointer-capturing node.
     pub(crate) capture: Option<RuntimeNodeId>,
-    /// Capture released by routing whose loss hook runs after that event's update traversal.
-    capture_loss_after_update: Option<RuntimeNodeId>,
     /// Whether drag/release events from an externally invalidated capture must be discarded.
     discard_invalidated_capture_events: bool,
     /// Whether this runtime accepts pointer routing for the current event.
@@ -63,7 +61,6 @@ impl Default for UiRuntime {
             focus: None,
             hover: None,
             capture: None,
-            capture_loss_after_update: None,
             discard_invalidated_capture_events: false,
             pointer_input_enabled: false,
             pointer_event_active: false,
@@ -85,7 +82,7 @@ impl UiRuntime {
     /// Clears update-cycle metrics before the initial synchronization layout.
     pub(crate) fn begin_update(&mut self) {
         // These values describe one event transaction and must never leak into the next update.
-        debug_assert!(self.capture_loss_after_update.is_none(), "pointer-capture loss was not delivered after update");
+        // Capture itself intentionally survives because UiRuntime owns it across events.
         self.routed_event = None;
         self.clicked = None;
         self.pointer_event_active = false;
@@ -96,10 +93,9 @@ impl UiRuntime {
 
     /// Starts exactly one full-tree update for one normalized input event.
     pub(crate) fn begin_input_event(&mut self, pointer_input_enabled: bool, event: &UiInputEvent) {
-        // Routing must have consumed the prior event and completed deferred capture cleanup before
-        // a new normalized event can establish its transaction flags.
+        // Routing must have consumed the prior event before a new normalized event can establish
+        // its transaction flags. There is no deferred widget capture-loss callback to flush.
         debug_assert!(self.routed_event.is_none(), "the previous routed event was not consumed by update");
-        debug_assert!(self.capture_loss_after_update.is_none(), "pointer-capture loss was not delivered after update");
         self.pointer_input_enabled = pointer_input_enabled;
         self.pointer_event_active = event.is_pointer();
         self.pointer_release_active = event.is_pointer_release();
@@ -115,13 +111,14 @@ impl UiRuntime {
     }
 
     /// Clears focus, hover, capture, and queued input while preserving retained node state.
-    pub(crate) fn clear_transient_targets(&mut self, roots: &mut [Node]) {
-        // Clear scalar targets first, then notify any capture owner while the tree is still present.
+    pub(crate) fn clear_transient_targets(&mut self) {
+        // Local widget modes reconcile from the next WidgetUpdateCtx::active snapshot, so clearing
+        // runtime identities requires no mutable callback into a retained node.
         self.focus = None;
         self.hover = None;
         self.routed_event = None;
         self.clicked = None;
-        self.clear_all_pointer_capture(roots);
+        self.invalidate_pointer_capture();
     }
 
     /// Measures one persistent root node for auto-size without introducing a parallel projection.
@@ -150,10 +147,9 @@ impl UiRuntime {
     pub(crate) fn update_tree_root(&mut self, root: &mut Node, style: &Style, atlas: crate::AtlasHandle, input: InputSnapshot) {
         // Update is parent-first and consumes at most one event previously routed to one identity.
         self.update_node_ref(root, self.root_transform, style, atlas, input);
-        let roots = std::slice::from_mut(root);
-        // A gated target may not have been visited to receive deferred loss; finish it explicitly.
-        self.flush_capture_loss(roots);
-        self.sanitize_transient_targets(roots);
+        // Topology may change during update; remove identities whose retained path no longer
+        // participates before the next event is routed.
+        self.sanitize_transient_targets(std::slice::from_mut(root));
     }
 
     /// Paints one persistent root node and its eligible descendants.
@@ -230,21 +226,6 @@ impl UiRuntime {
         let child_parent = parent.push(current.state.layout);
         current.with_children(|children| children.iter().find_map(|child| Self::debug_node_rect_from(child, target, child_parent)))
     }
-}
-
-/// Finds one retained node across independent roots and runs a scoped mutable callback.
-fn with_node_mut<R>(roots: &mut [Node], id: RuntimeNodeId, f: impl FnOnce(&mut Node) -> R) -> Option<R> {
-    // Determine the root index immutably, then open one mutable path into that root.
-    let index = roots.iter().position(|root| root.with_node(id, |_| ()).is_some())?;
-    roots[index].with_node_mut(id, f)
-}
-
-/// Notifies a still-retained target that dispatcher-owned pointer capture ended.
-fn notify_pointer_capture_lost(roots: &mut [Node], id: RuntimeNodeId) {
-    // Removal is legal before notification; absence simply means the dropped widget needs no hook.
-    let _ = with_node_mut(roots, id, |node| {
-        node.data.widget_mut().pointer_capture_lost();
-    });
 }
 
 /// Returns whether a node participates in traversal through every ancestor visibility gate.

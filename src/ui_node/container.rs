@@ -4,6 +4,25 @@ use crate::{Dimensioni, Recti, Style, UiInputEvent, Vec2i, Widget, WidgetOption}
 
 use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime};
 
+/// Interactive behavior installed on a [`Container`]'s own surface.
+///
+/// Ordinary leaf widgets need only [`Widget`]. A container surface has the additional ability to
+/// decline a dispatcher-selected event so that it can bubble through structural ancestors. The
+/// dispatcher still owns target selection, generic option checks, focus, and pointer capture.
+pub trait ContainerSurface: Widget {
+    /// Returns whether this surface supports one already-selected event.
+    ///
+    /// Returning `false` does not expose a covered sibling; it permits only ancestor bubbling.
+    /// Captured drag and release delivery bypass this query because capture identity is already an
+    /// authoritative runtime decision. Generic scroll eligibility remains derived from
+    /// [`WidgetOption::GRAB_SCROLL`] before this surface-specific query is considered.
+    fn accepts_event(&self, _event: &UiInputEvent) -> bool {
+        // Most surfaces support every event admitted by generic dispatcher options. Specialized
+        // surfaces override only when committed local state narrows that set further.
+        true
+    }
+}
+
 /// Geometry policy installed in a retained [`Container`].
 ///
 /// A layout can measure the owner's children and commit their rectangles, viewport, logical
@@ -30,7 +49,7 @@ pub struct Container {
     /// Static options for a container with no installed surface widget.
     opt: WidgetOption,
     /// Optional interactive or painted behavior for this container's own surface.
-    surface: Option<Box<dyn Widget>>,
+    surface: Option<Box<dyn ContainerSurface>>,
 }
 
 impl Container {
@@ -78,12 +97,21 @@ impl Container {
     ///
     /// Surface behavior is optional and independent of layout: it can paint or receive routed
     /// input, but it has no access to the child collection. This keeps interaction composition from
-    /// becoming a second container interface.
-    pub fn with_surface<W: Widget + 'static>(mut self, surface: W) -> Self {
+    /// becoming a second container interface. A type with ordinary surface behavior can opt into
+    /// this role with an empty [`ContainerSurface`] implementation; state-dependent event filters
+    /// override [`ContainerSurface::accepts_event`].
+    pub fn with_surface<S: ContainerSurface + 'static>(mut self, surface: S) -> Self {
         // Descendants remain child-first during hit testing. The dispatcher reaches this surface
         // only after it has selected the container's geometry or bubbled from a selected child.
         self.surface = Some(Box::new(surface));
         self
+    }
+
+    /// Returns whether the installed surface supports one dispatcher-selected event.
+    pub(crate) fn accepts_event(&self, event: &UiInputEvent) -> bool {
+        // A geometry-only container has no event-receiving surface. An installed surface owns only
+        // its additional state-dependent filter; generic option policy remains in the dispatcher.
+        self.surface.as_ref().is_some_and(|surface| surface.accepts_event(event))
     }
 
     /// Runs one immutable framework traversal without exposing child storage publicly.
@@ -159,23 +187,11 @@ impl Widget for Container {
         self.surface.as_ref().map_or(self.opt, |surface| surface.effective_widget_opt())
     }
 
-    fn accepts_event(&self, event: &UiInputEvent) -> bool {
-        // Event eligibility belongs entirely to the optional surface widget.
-        self.surface.as_ref().is_some_and(|surface| surface.accepts_event(event))
-    }
-
     fn focus_policy(&self) -> crate::FocusPolicy {
         // Preserve ordinary Widget defaults for inert containers and delegate richer behavior.
         self.surface
             .as_ref()
             .map_or_else(|| crate::FocusPolicy::from_widget_options(self.opt), |surface| surface.focus_policy())
-    }
-
-    fn pointer_capture_lost(&mut self) {
-        // Loss notification is local; descendants own and receive their own capture lifecycle.
-        if let Some(surface) = &mut self.surface {
-            surface.pointer_capture_lost();
-        }
     }
 }
 
@@ -197,6 +213,16 @@ impl DispatchResult {
     }
 }
 
+/// Returns whether generic widget options admit one event kind.
+fn options_accept_event(opt: WidgetOption, event: &UiInputEvent) -> bool {
+    // Wheel input requires an explicit grab and a delta that can represent movement. Every other
+    // event kind is governed by target geometry, focus, capture, and the NO_INTERACT check below.
+    match event {
+        UiInputEvent::Scroll { delta, .. } => opt.intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0),
+        _ => true,
+    }
+}
+
 /// Delivers one already-targeted event through common dispatcher interaction rules.
 pub(super) fn dispatch_widget_input(
     runtime: &mut UiRuntime,
@@ -207,13 +233,14 @@ pub(super) fn dispatch_widget_input(
     accepts_event: bool,
     event: &UiInputEvent,
 ) -> DispatchResult {
-    // Target selection may reach a geometrically matching node whose dynamic options or widget
-    // policy decline this specific event. Such a node remains available for ancestor bubbling.
-    if opt.intersects(WidgetOption::NO_INTERACT) || !accepts_event {
+    let id = state.id();
+    let captured = runtime.capture == Some(id);
+    // Target selection may reach a geometrically matching node whose dynamic options or surface
+    // policy declines this event. Such a node remains available for ancestor-only bubbling.
+    if opt.intersects(WidgetOption::NO_INTERACT) || !options_accept_event(opt, event) || !accepts_event {
         return DispatchResult::Ignored;
     }
 
-    let id = state.id();
     if event.is_focus_input() {
         // Keyboard/text events have no meaningful rectangle. Deliver them only to the dispatcher-
         // owned focus identity selected by an earlier pointer or programmatic transition.
@@ -226,7 +253,6 @@ pub(super) fn dispatch_widget_input(
 
     // Capture lets drag/release escape the original rectangle; all other pointer events still need
     // to hit both the node allocation and its effective clip.
-    let captured = runtime.capture == Some(id);
     let event_hits_rect = event.position().is_some_and(|pos| rect.contains(&pos) && clip.contains(&pos));
     match event {
         UiInputEvent::MouseDown { button, .. } if event_hits_rect => {

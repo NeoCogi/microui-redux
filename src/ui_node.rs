@@ -52,7 +52,7 @@ pub(crate) use runtime::UiRuntime;
 #[cfg(test)]
 pub(crate) use runtime::RuntimeMetrics;
 mod container;
-pub use container::{Container, ContainerLayoutCtx, Layout};
+pub use container::{Container, ContainerLayoutCtx, ContainerSurface, Layout};
 pub(crate) use container::DispatchResult;
 mod containers;
 pub use containers::{

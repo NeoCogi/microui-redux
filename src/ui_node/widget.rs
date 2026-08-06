@@ -283,7 +283,8 @@ pub(crate) fn runtime_update_state<T: WidgetState, R>(state: &Rc<RefCell<T>>, ph
 ///
 /// The runtime routes an event before running that event's complete update traversal, then commits
 /// layout before considering the next queued event. [`Widget::focus_policy`] is the sole focus
-/// policy query; container input helpers do not accept a parallel policy value.
+/// policy query. Event-kind filtering belongs to the dispatcher for ordinary widgets and to
+/// [`crate::ContainerSurface`] for an overloaded container surface.
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
@@ -300,7 +301,9 @@ pub trait Widget {
     /// runtime hit target, so a pointer event on the border may lie just outside the local content
     /// bounds. At most one eligible widget receives `Some(input)` during a traversal; every other
     /// eligible widget receives `None`. Held state is available from [`WidgetUpdateCtx`]. The
-    /// update context intentionally cannot record drawing commands.
+    /// update context intentionally cannot record drawing commands. Implementations that retain a
+    /// local drag mode must reconcile it from [`WidgetUpdateCtx::active`] on every call; pointer
+    /// capture is runtime-owned and has no separate widget lifecycle callback.
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>);
     /// Records paint commands through paint-only capabilities.
     ///
@@ -324,29 +327,6 @@ pub trait Widget {
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::from_widget_options(self.effective_widget_opt())
     }
-
-    /// Returns whether this widget supports one dispatcher-selected event.
-    ///
-    /// This is widget behavior, not target selection: returning `false` bubbles only through the
-    /// selected node's ancestors. The default accepts ordinary pointer/focus input. It accepts
-    /// scroll input only when the widget grabs scrolling and the delta can represent movement;
-    /// stateful scroll surfaces can override this method to add boundary checks against their
-    /// already-committed state.
-    fn accepts_event(&self, event: &UiInputEvent) -> bool {
-        match event {
-            // Keep the generic scroll policy here so routing has one event-acceptance hook. A zero
-            // delta cannot change any widget and should remain available to ancestor bubbling.
-            UiInputEvent::Scroll { delta, .. } => self.effective_widget_opt().intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0),
-            // Target selection and the remaining widget options govern every non-scroll event.
-            _ => true,
-        }
-    }
-
-    /// Clears widget-local interaction state after dispatcher-owned capture is revoked.
-    ///
-    /// Override this when a widget stores a drag mode or similar state that must not survive
-    /// hiding, disabling, or removal.
-    fn pointer_capture_lost(&mut self) {}
 }
 
 impl Widget for WidgetOption {

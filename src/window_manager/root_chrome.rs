@@ -8,8 +8,8 @@ use std::{
 use crate::render::Painter;
 use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, Children, Container, ContainerLayoutCtx, ControlColor, Dimensioni, FocusPolicy, Layout, MouseButton, Node, Recti, Style, UiInputEvent, Vec2i,
-    Widget, WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetUpdateCtx, WindowOption,
+    AtlasHandle, Children, Container, ContainerLayoutCtx, ContainerSurface, ControlColor, Dimensioni, FocusPolicy, Layout, MouseButton, Node, Recti, Style,
+    UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetUpdateCtx, WindowOption,
 };
 
 use super::RootId;
@@ -167,6 +167,13 @@ impl RootState {
         }
     }
 
+    /// Clears private chrome interaction after window-manager policy revokes runtime capture.
+    pub(super) fn clear_interaction_silent(&mut self) {
+        // RootState exposes its active mode publicly, so the window manager updates it atomically
+        // with cross-root capture policy instead of waiting for a later widget traversal.
+        self.interaction = RootInteraction::None;
+    }
+
     pub(super) fn dismiss_popup(&mut self) {
         self.set_visible_silent(false);
         record_pending(&mut self.pending_submissions);
@@ -244,29 +251,22 @@ impl Widget for RootChromeSurface {
         })
     }
 
-    fn accepts_event(&self, event: &UiInputEvent) -> bool {
-        // Active move/resize capture continues outside chrome geometry. Otherwise only committed
-        // title/close/resize rectangles accept non-wheel pointer events.
-        let Some(state) = self.state.upgrade() else { return false };
-        runtime_read_state(&state, "RootChromeSurface::accepts_event", |state| {
-            if state.is_active() && matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. }) {
-                return true;
-            }
-            event_position(event).is_some_and(|position| state.geometry.hit_test(position).is_some()) && !matches!(event, UiInputEvent::Scroll { .. })
-        })
-    }
-
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
         // RootChromeLayout owns the preference because it alone can inspect the application child.
         Dimensioni::default()
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         // The dispatcher already selected this surface and localized pointer coordinates to root.
         let Some(state) = self.state.upgrade() else { return };
         runtime_update_state(&state, "RootChromeSurface::update", |state| {
             // Compare against the initial rectangle once so any move/resize records one occurrence.
             let initial = state.rect;
+            if !ctx.active() {
+                // Runtime capture is authoritative. Reconcile a stale local mode here after normal
+                // release, cross-root transfer, modal exclusion, or a prior visibility gate.
+                state.interaction = RootInteraction::None;
+            }
             if let Some(event) = input {
                 // Hit classification uses the single geometry snapshot committed by latest layout.
                 match event {
@@ -277,9 +277,10 @@ impl Widget for RootChromeSurface {
                         }
                         Some(RootChromePart::Resize) => state.interaction = RootInteraction::Resizing,
                         Some(RootChromePart::Title) => state.interaction = RootInteraction::Moving,
-                        None => {}
+                        // A fresh press always replaces any mode retained from an earlier update.
+                        None => state.interaction = RootInteraction::None,
                     },
-                    UiInputEvent::MouseDrag { delta, buttons, .. } if buttons.intersects(MouseButton::LEFT) => match state.interaction {
+                    UiInputEvent::MouseDrag { delta, .. } if ctx.active() => match state.interaction {
                         RootInteraction::Moving => {
                             // Movement changes origin only; programmed size remains authoritative.
                             state.rect.x = state.rect.x.saturating_add(delta.x);
@@ -292,7 +293,6 @@ impl Widget for RootChromeSurface {
                         }
                         RootInteraction::None => {}
                     },
-                    UiInputEvent::MouseUp { button, .. } if button.intersects(MouseButton::LEFT) => state.interaction = RootInteraction::None,
                     _ => {}
                 }
             }
@@ -319,11 +319,17 @@ impl Widget for RootChromeSurface {
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::DragCapture
     }
+}
 
-    fn pointer_capture_lost(&mut self) {
-        // External invalidation terminates chrome interaction without recording a submission.
-        let Some(state) = self.state.upgrade() else { return };
-        runtime_update_state(&state, "RootChromeSurface::capture_lost", |state| state.interaction = RootInteraction::None);
+impl ContainerSurface for RootChromeSurface {
+    /// Accepts pointer events only over committed post-tree chrome geometry.
+    fn accepts_event(&self, event: &UiInputEvent) -> bool {
+        // Captured drag and release events bypass this geometric query in the dispatcher. Keeping
+        // that rule out of RootState prevents stale widget-local modes from influencing routing.
+        let Some(state) = self.state.upgrade() else { return false };
+        runtime_read_state(&state, "RootChromeSurface::accepts_event", |state| {
+            event_position(event).is_some_and(|position| state.geometry.hit_test(position).is_some()) && !matches!(event, UiInputEvent::Scroll { .. })
+        })
     }
 }
 
@@ -410,25 +416,44 @@ fn event_position(event: &UiInputEvent) -> Option<Vec2i> {
 #[cfg(test)]
 mod capture_tests {
     use super::*;
-    use crate::{Custom, CustomParameters};
+    use crate::test_support::test_atlas;
+    use crate::{Custom, CustomParameters, KeyCode, KeyMode};
 
     #[test]
-    fn root_chrome_capture_loss_clears_local_move_or_resize_mode() {
-        let content = Node::widget(Custom::create(CustomParameters::new("content")));
-        let (state, mut container) = create_root_chrome(RootChromeParameters {
-            name: "root".to_owned(),
-            options: WindowOption::FRAME,
-            rect: Recti::new(10, 20, 100, 80),
-            visible: true,
-            content,
-        });
-        state.try_update(|state| state.interaction = RootInteraction::Moving).unwrap();
-        container.pointer_capture_lost();
-        assert_eq!(state.try_read(RootState::is_active), Some(false));
+    fn root_chrome_inactive_update_clears_a_stale_local_mode() {
+        let state = Rc::new(RefCell::new(RootState::new(
+            "root".to_owned(),
+            WindowOption::FRAME,
+            Recti::new(10, 20, 100, 80),
+            true,
+        )));
+        let mut surface = RootChromeSurface {
+            state: Rc::downgrade(&state),
+            opt: WidgetOption::NONE,
+        };
+        let style = Style::default();
+        let atlas = test_atlas();
+        let bounds = Recti::new(0, 0, 100, 80);
+        let mut ctx = WidgetUpdateCtx::new_with_interaction(
+            bounds,
+            bounds,
+            &style,
+            &atlas,
+            true,
+            false,
+            false,
+            false,
+            false,
+            MouseButton::NONE,
+            KeyMode::NONE,
+            KeyCode::NONE,
+        );
 
-        state.try_update(|state| state.interaction = RootInteraction::Resizing).unwrap();
-        container.pointer_capture_lost();
-        assert_eq!(state.try_read(RootState::is_active), Some(false));
+        // Simulate state left by a surface that was gated while capture was invalidated. Its next
+        // ordered update receives the authoritative inactive snapshot and clears the private mode.
+        state.borrow_mut().interaction = RootInteraction::Moving;
+        surface.update(&mut ctx, None);
+        assert!(!state.borrow().is_active());
     }
 
     #[test]

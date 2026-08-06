@@ -6,7 +6,7 @@ use std::rc::{Rc, Weak};
 use super::*;
 use crate::test_support::test_atlas;
 use crate::ui_node::children::ChildrenHandle;
-use crate::{ChildParticipation, Children, Layout, Widget, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx};
+use crate::{ChildParticipation, Children, ContainerSurface, Layout, Widget, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx};
 use crate::input::Input;
 
 #[derive(Default)]
@@ -186,9 +186,10 @@ impl Widget for TraversalSurface {
     }
 }
 
+impl ContainerSurface for TraversalSurface {}
+
 struct CaptureState {
     active: bool,
-    losses: usize,
     drags: usize,
     saw_capture_during_drag: bool,
 }
@@ -210,7 +211,6 @@ impl CaptureContainer {
     fn new() -> (Container, Rc<RefCell<CaptureState>>) {
         let state = Rc::new(RefCell::new(CaptureState {
             active: false,
-            losses: 0,
             drags: 0,
             saw_capture_during_drag: false,
         }));
@@ -242,17 +242,18 @@ impl Widget for CaptureSurface {
         Dimensioni::default()
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let state = self.state.upgrade().expect("capture state must outlive its surface");
         let mut state = state.try_borrow_mut().expect("capture state must be available during update");
+        // Mirror the public contract: reconcile private drag state from runtime-owned activity on
+        // every update, including an eventless update after capture invalidation.
+        state.active = ctx.active();
         if let Some(event) = input {
             match event {
-                UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT) => state.active = true,
-                UiInputEvent::MouseDrag { buttons, .. } if buttons.intersects(MouseButton::LEFT) && state.active => {
-                    state.saw_capture_during_drag = _ctx.focused();
+                UiInputEvent::MouseDrag { .. } if ctx.active() => {
+                    state.saw_capture_during_drag = ctx.focused();
                     state.drags += 1;
                 }
-                UiInputEvent::MouseUp { button, .. } if button.intersects(MouseButton::LEFT) => state.active = false,
                 _ => {}
             }
         }
@@ -263,14 +264,9 @@ impl Widget for CaptureSurface {
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::DragCapture
     }
-
-    fn pointer_capture_lost(&mut self) {
-        let state = self.state.upgrade().expect("capture state must outlive its surface");
-        let mut state = state.try_borrow_mut().expect("capture state must be available for loss notification");
-        state.active = false;
-        state.losses += 1;
-    }
 }
+
+impl ContainerSurface for CaptureSurface {}
 
 struct CrossSubtreeRemover {
     state: Rc<RefCell<()>>,
@@ -627,7 +623,7 @@ fn captured_container_receives_direct_drag_while_capture_is_active() {
 }
 
 #[test]
-fn routing_time_release_defers_loss_until_that_event_update_finishes() {
+fn routing_time_release_exposes_inactive_state_during_that_event_update() {
     let (container, state) = CaptureContainer::new();
     state.borrow_mut().active = true;
     let mut root = Node::container(container);
@@ -651,14 +647,10 @@ fn routing_time_release_defers_loss_until_that_event_update_finishes() {
         Some(true)
     );
     assert_eq!(runtime.capture, None);
-    assert_eq!(runtime.capture_loss_after_update, Some(id));
-    assert!(state.borrow().active, "loss must wait until the release update");
-    assert_eq!(state.borrow().losses, 0);
+    assert!(state.borrow().active, "local state changes only during the ordered update traversal");
 
     runtime.update_tree_root(&mut root, &style, atlas, release_state);
     assert!(!state.borrow().active);
-    assert_eq!(state.borrow().losses, 1);
-    assert_eq!(runtime.capture_loss_after_update, None);
 }
 
 #[test]
@@ -687,7 +679,7 @@ fn a_new_press_after_release_starts_a_distinct_capture_event() {
     );
     runtime.update_tree_root(&mut root, &style, atlas.clone(), release_state);
     assert_eq!(runtime.capture, None);
-    assert_eq!(state.borrow().losses, 1);
+    assert!(!state.borrow().active);
 
     let mut down_input = Input::default();
     down_input.mousedown(20, 30, MouseButton::LEFT);
@@ -702,11 +694,10 @@ fn a_new_press_after_release_starts_a_distinct_capture_event() {
     runtime.update_tree_root(&mut root, &style, atlas, down_state);
     assert_eq!(runtime.capture, Some(id));
     assert!(state.borrow().active);
-    assert_eq!(state.borrow().losses, 1);
 }
 
 #[test]
-fn ancestor_gate_clears_all_descendant_targets_and_local_capture_mode() {
+fn ancestor_gate_clears_targets_and_next_active_update_reconciles_local_mode() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (captured, capture_state) = CaptureContainer::new();
     capture_state.borrow_mut().active = true;
@@ -734,12 +725,12 @@ fn ancestor_gate_clears_all_descendant_targets_and_local_capture_mode() {
     layout_root(&mut runtime, &mut root, &style, test_atlas());
     assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
     assert!(runtime.take_routed_event(captured_id).is_none());
-    assert!(!capture_state.borrow().active);
-    assert_eq!(capture_state.borrow().losses, 1);
+    assert!(capture_state.borrow().active, "a gated widget is not mutated outside ordered update");
 
     gate_state.borrow_mut().visible = true;
     layout_root(&mut runtime, &mut root, &style, test_atlas());
     assert_eq!(runtime.capture, None, "expansion must not restore old capture");
+    runtime.update_tree_root(&mut root, &style, test_atlas(), empty_input());
     assert!(!capture_state.borrow().active, "expansion must not restore old local mode");
 }
 
@@ -777,9 +768,11 @@ fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() 
     assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
     assert!(runtime.take_routed_event(removed_id).is_none());
     assert!(runtime.take_routed_event(replacement_id).is_none());
-    assert_eq!(removed_state.borrow().losses, 0, "removed runtimes are dropped rather than notified");
+    assert!(
+        removed_state.borrow().active,
+        "removed runtimes are dropped rather than mutated through a callback"
+    );
     assert!(!replacement_state.borrow().active);
-    assert_eq!(replacement_state.borrow().losses, 0);
 
     let mut drag_input = Input::default();
     drag_input.mousedown(20, 30, MouseButton::LEFT);
@@ -847,5 +840,5 @@ fn cross_subtree_removal_during_update_sanitizes_before_later_delivery() {
 
     assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
     assert!(runtime.take_routed_event(captured_id).is_none());
-    assert_eq!(captured_state.borrow().losses, 0, "removed runtime must not receive a loss callback");
+    assert!(captured_state.borrow().active, "removed runtime must not receive out-of-band mutation");
 }

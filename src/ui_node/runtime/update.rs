@@ -54,8 +54,6 @@ impl UiRuntime {
             input.key_codes,
         );
         node.data.widget_mut().update(&mut widget_ctx, event.as_ref());
-        // Run capture cleanup immediately after the owner observes the release/transfer event.
-        self.finish_pointer_capture_update(node);
         let traverse_children = node.is_container();
         if traverse_children {
             node.with_children_mut(|children| {
@@ -95,9 +93,10 @@ impl UiRuntime {
             }
         }
 
-        // Derive the remaining flags from dispatcher identities rather than widget-local guesses.
+        // Derive active interaction directly from dispatcher-owned capture. Widget-local drag
+        // modes reconcile against this snapshot instead of receiving a capture-loss callback.
         let focused = self.focus == Some(id);
-        let active = focused && input.mouse_buttons.intersects(MouseButton::LEFT);
+        let active = self.capture == Some(id) && input.mouse_buttons.intersects(MouseButton::LEFT);
         let clicked = self.clicked == Some(id);
         (hovered, focused, clicked, active)
     }

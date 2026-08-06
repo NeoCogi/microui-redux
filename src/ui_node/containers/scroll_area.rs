@@ -9,8 +9,8 @@ use crate::ui_node::children::ChildrenHandle;
 use crate::ui_node::scrollbar::{RetainedScrollbar, RetainedScrollbarState, ScrollAxis, scrollbar_base};
 use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, ChildParticipation, Container, ControlColor, Dimensioni, FocusPolicy, Layout, Recti, Style, UiInputEvent, Vec2i, Widget, WidgetOption,
-    WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetUpdateCtx,
+    AtlasHandle, ChildParticipation, Container, ContainerSurface, ControlColor, Dimensioni, FocusPolicy, Layout, Recti, Style, UiInputEvent, Vec2i, Widget,
+    WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetUpdateCtx,
 };
 
 use super::{Children, ContainerLayoutCtx, Node};
@@ -222,8 +222,10 @@ impl ScrollAreaState {
         )
     }
 
-    /// Clears one scrollbar's offset, configuration, and drag lease.
+    /// Clears one scrollbar's offset and committed geometry.
     fn reset_axis(handle: &WidgetStateHandle<RetainedScrollbarState>) {
+        // Pointer capture is runtime-owned, so deactivation has no widget-local drag lease to
+        // clear; hidden participation invalidates the corresponding runtime identity during layout.
         handle
             .try_update(|state| {
                 state.set_offset(0);
@@ -262,13 +264,6 @@ impl Widget for ScrollAreaSurface {
         })
     }
 
-    fn accepts_event(&self, event: &UiInputEvent) -> bool {
-        // The parent surface is wheel-only and declines deltas already clamped at both axes.
-        let UiInputEvent::Scroll { delta, .. } = event else { return false };
-        let Some(state) = self.state.upgrade() else { return false };
-        runtime_read_state(&state, "ScrollAreaSurface::accepts_event", |state| state.accepts_scroll_delta(*delta))
-    }
-
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
         // Preferred composite size comes from ScrollAreaLayout and its virtual-surface child.
         Dimensioni::default()
@@ -299,6 +294,17 @@ impl Widget for ScrollAreaSurface {
     fn focus_policy(&self) -> FocusPolicy {
         // The surface accepts only wheel events, so it never creates persistent pointer focus.
         FocusPolicy::Momentary
+    }
+}
+
+impl ContainerSurface for ScrollAreaSurface {
+    /// Accepts only wheel movement that changes the committed scroll offset.
+    fn accepts_event(&self, event: &UiInputEvent) -> bool {
+        // Non-wheel input must continue bubbling because the parent surface exists only to provide
+        // background paint and boundary-aware wheel handling for the composite.
+        let UiInputEvent::Scroll { delta, .. } = event else { return false };
+        let Some(state) = self.state.upgrade() else { return false };
+        runtime_read_state(&state, "ScrollAreaSurface::accepts_event", |state| state.accepts_scroll_delta(*delta))
     }
 }
 

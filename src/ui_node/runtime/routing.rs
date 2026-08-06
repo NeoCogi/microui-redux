@@ -17,7 +17,7 @@ impl UiRuntime {
 
         let capture_valid = self.capture.is_none_or(|id| contains_active_node_in(roots, id));
         if !capture_valid {
-            self.clear_current_pointer_capture(roots);
+            self.invalidate_pointer_capture();
         }
 
         debug_assert!(self.focus.is_none_or(|id| contains_active_node_in(roots, id)));
@@ -26,69 +26,24 @@ impl UiRuntime {
         debug_assert!(self.capture.is_none() || capture_valid);
     }
 
-    /// Ends current capture immediately and notifies the still-retained target directly.
-    fn clear_current_pointer_capture(&mut self, roots: &mut [Node]) {
-        let Some(owner) = self.capture.take() else {
-            return;
-        };
-        if self.capture_loss_after_update == Some(owner) {
-            self.capture_loss_after_update = None;
-        }
-        self.discard_invalidated_capture_events = true;
-        notify_pointer_capture_lost(roots, owner);
-    }
-
-    /// Clears current and deferred capture state for an explicitly ineligible retained tree.
-    pub(super) fn clear_all_pointer_capture(&mut self, roots: &mut [Node]) {
-        let pending_loss = self.capture_loss_after_update.take();
-        if let Some(owner) = self.capture.take() {
+    /// Invalidates current capture after its retained target becomes externally ineligible.
+    pub(super) fn invalidate_pointer_capture(&mut self) {
+        // A subsequent drag/release belongs to the revoked gesture and must not fall through to a
+        // replacement target. Widgets reconcile private modes from a later inactive update.
+        if self.capture.take().is_some() {
             self.discard_invalidated_capture_events = true;
-            notify_pointer_capture_lost(roots, owner);
         }
-        if let Some(owner) = pending_loss {
-            notify_pointer_capture_lost(roots, owner);
-        }
-    }
-
-    /// Clears tree ownership now while deferring local cleanup until this event's update has run.
-    fn defer_current_pointer_capture_loss(&mut self) {
-        let Some(owner) = self.capture.take() else {
-            return;
-        };
-        debug_assert!(self.capture_loss_after_update.is_none() || self.capture_loss_after_update == Some(owner));
-        self.capture_loss_after_update = Some(owner);
     }
 
     /// Acquires capture for one routed owner in the current event transaction.
     fn acquire_pointer_capture(&mut self, owner: RuntimeNodeId) {
+        // Replacing an earlier owner is an atomic runtime identity transition. The previous widget
+        // observes `active() == false` during the already-scheduled full-tree update.
         if self.capture == Some(owner) {
             return;
         }
-        if let Some(previous) = self.capture.take()
-            && previous != owner
-        {
-            self.capture_loss_after_update = Some(previous);
-        }
         self.capture = Some(owner);
         self.discard_invalidated_capture_events = false;
-    }
-
-    /// Completes capture lifecycle work after one target consumes its routed event.
-    pub(super) fn finish_pointer_capture_update(&mut self, node: &mut Node) {
-        let id = node.id();
-        if self.capture_loss_after_update == Some(id) && self.capture != Some(id) {
-            self.capture_loss_after_update = None;
-            node.data.widget_mut().pointer_capture_lost();
-        }
-    }
-
-    /// Delivers losses for targets skipped by update because an ancestor closed its gate.
-    pub(super) fn flush_capture_loss(&mut self, roots: &mut [Node]) {
-        if let Some(owner) = self.capture_loss_after_update.take()
-            && self.capture != Some(owner)
-        {
-            notify_pointer_capture_lost(roots, owner);
-        }
     }
 
     /// Routes one keyboard/text event to the focused node.
@@ -142,11 +97,15 @@ impl UiRuntime {
     /// Applies runtime pointer-capture ownership from one routed event result.
     pub(crate) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: DispatchResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
         if event.is_pointer_release() && mouse_buttons.is_empty() {
-            self.defer_current_pointer_capture_loss();
+            // Normal release is not an invalidation: its event was delivered to the old owner, and
+            // the following update exposes inactive state without swallowing a future gesture.
+            self.capture = None;
         } else if result == DispatchResult::Captured {
             self.acquire_pointer_capture(owner);
         } else if self.capture == Some(owner) && mouse_buttons.is_empty() {
-            self.defer_current_pointer_capture_loss();
+            // Defensive cleanup covers a consumed event that leaves no held buttons even when it
+            // is not represented by the ordinary release branch above.
+            self.capture = None;
         }
     }
 
@@ -327,12 +286,9 @@ impl UiRuntime {
             .intersect(&content_rect)
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
         let local_event = super::widget_context::localize_event(screen_origin, event.clone());
-        // The selected widget may decline this event, but cannot redirect target selection.
-        let accepts_event = node.data.widget().accepts_event(&local_event);
+        let captured = self.capture == Some(node.id());
 
-        if self.capture == Some(node.id())
-            && let Some(pos) = event.position()
-        {
+        if captured && let Some(pos) = event.position() {
             // Capture changes delivery only. Hover still follows the same allocation predicate as
             // ordinary target selection and therefore clears when a drag leaves the owner.
             self.hover = self.pointer_hits_node(node, parent_transform, pos).then(|| node.id());
@@ -340,13 +296,18 @@ impl UiRuntime {
 
         match &mut node.data {
             NodeKind::Widget(widget) => {
-                // Leaf widgets handle events through their complete outer allocation.
+                // Leaf event-kind policy is completely dispatcher-owned; no Widget query widens
+                // the public trait or permits a handler to influence geometric target selection.
                 let opt = widget.widget.effective_widget_opt();
-                super::container::dispatch_widget_input(self, &node.state, local_rect, local_clip, opt, accepts_event, &local_event)
+                super::container::dispatch_widget_input(self, &node.state, local_rect, local_clip, opt, true, &local_event)
             }
             NodeKind::Container(container) => {
-                // The dispatcher treats an installed container surface exactly like a widget.
+                // An overloaded container surface may add a state-dependent filter after target
+                // selection. Captured continuation skips that query because UiRuntime already owns
+                // this target; this also prevents stale surface-local modes from affecting routing.
                 let opt = container.effective_widget_opt();
+                let captured_continuation = captured && matches!(&local_event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. });
+                let accepts_event = captured_continuation || container.accepts_event(&local_event);
                 super::container::dispatch_widget_input(self, &node.state, content_rect, content_clip, opt, accepts_event, &local_event)
             }
         }

@@ -229,7 +229,6 @@ pub(crate) struct RetainedScrollbarState {
     axis: ScrollAxis,
     configuration: Option<ScrollbarConfiguration>,
     offset: i32,
-    dragging: bool,
 }
 
 impl WidgetState for RetainedScrollbarState {}
@@ -249,9 +248,10 @@ impl RetainedScrollbarState {
 
     /// Removes the widget from interaction and resets the now-invalid content offset.
     pub(crate) fn deactivate(&mut self) {
+        // Geometry and offset are the only retained scrollbar state. Drag activity is derived from
+        // UiRuntime capture through WidgetUpdateCtx::active and therefore needs no local reset.
         self.configuration = None;
         self.offset = 0;
-        self.dragging = false;
     }
 
     /// Returns the current clamped content offset on this axis.
@@ -303,12 +303,7 @@ impl RetainedScrollbar {
     pub(crate) fn create(axis: ScrollAxis) -> (WidgetStateHandle<RetainedScrollbarState>, Node) {
         // Start inactive; the parent layout activates the bar only when overflow is committed.
         let widget = Self {
-            state: Rc::new(RefCell::new(RetainedScrollbarState {
-                axis,
-                configuration: None,
-                offset: 0,
-                dragging: false,
-            })),
+            state: Rc::new(RefCell::new(RetainedScrollbarState { axis, configuration: None, offset: 0 })),
             opt: WidgetOption::NONE,
         };
         // Capture the weak configuration handle before moving the widget into its owning Node.
@@ -341,24 +336,24 @@ impl Widget for RetainedScrollbar {
         })
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         // Resolve one geometry snapshot for the complete event so hit testing and delta mapping use
         // identical track/thumb/range values.
         crate::ui_node::runtime_update_state(&self.state, "Scrollbar::update", |state| {
             let Some(geometry) = state.geometry() else { return };
             match input {
                 Some(UiInputEvent::MouseDown { pos, button }) if button.intersects(MouseButton::LEFT) && geometry.track().contains(pos) => {
-                    // Clicking outside the thumb recenters it before starting the drag lease.
+                    // Clicking outside the thumb recenters it. Runtime capture established for this
+                    // press supplies the complete drag lease through `ctx.active()` below.
                     if !geometry.thumb().contains(pos) {
                         state.offset = geometry.centered_offset(*pos);
                     }
-                    state.dragging = true;
                 }
-                Some(UiInputEvent::MouseDrag { delta, .. }) if state.dragging => {
-                    // Convert pointer-space movement back into content-space offset and clamp it.
+                Some(UiInputEvent::MouseDrag { delta, .. }) if ctx.active() => {
+                    // Only the dispatcher-owned capture recipient is active. This continues beyond
+                    // the track rectangle without retaining a second widget-local capture flag.
                     state.offset = state.offset.saturating_add(geometry.drag_delta(*delta)).clamp(0, state.max_offset());
                 }
-                Some(UiInputEvent::MouseUp { .. }) => state.dragging = false,
                 _ => {}
             }
         });
@@ -375,11 +370,6 @@ impl Widget for RetainedScrollbar {
 
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::DragCapture
-    }
-
-    fn pointer_capture_lost(&mut self) {
-        // Dispatcher loss ends only the transient drag lease; configured geometry and offset remain.
-        crate::ui_node::runtime_update_state(&self.state, "Scrollbar::capture_lost", |state| state.dragging = false);
     }
 }
 
