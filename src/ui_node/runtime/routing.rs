@@ -2,6 +2,91 @@
 
 use super::*;
 
+/// Dispatcher-internal result of delivering one event to an already-selected node.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) enum DispatchResult {
+    /// The selected node declined the event, allowing ancestor-only bubbling.
+    Ignored,
+    /// The selected node consumed the event without acquiring pointer capture.
+    Consumed,
+    /// The selected node consumed the event and requests dispatcher-owned pointer capture.
+    Captured,
+}
+
+impl DispatchResult {
+    /// Returns whether dispatch and ancestor bubbling should stop.
+    pub(crate) fn is_consumed(self) -> bool {
+        matches!(self, Self::Consumed | Self::Captured)
+    }
+}
+
+/// Returns whether generic widget options admit one event kind.
+fn options_accept_event(opt: WidgetOption, event: &UiInputEvent) -> bool {
+    // Wheel input requires an explicit grab and a delta that can represent movement. Every other
+    // event kind is governed by target geometry, focus, capture, and the NO_INTERACT check below.
+    match event {
+        UiInputEvent::Scroll { delta, .. } => opt.intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0),
+        _ => true,
+    }
+}
+
+/// Delivers one already-targeted event through common dispatcher interaction rules.
+fn dispatch_widget_input(
+    runtime: &mut UiRuntime,
+    state: &NodeRuntime,
+    rect: Recti,
+    clip: Recti,
+    opt: WidgetOption,
+    accepts_event: bool,
+    event: &UiInputEvent,
+) -> DispatchResult {
+    let id = state.id();
+    let captured = runtime.capture == Some(id);
+    // Target selection may reach a geometrically matching node whose dynamic options or surface
+    // policy declines this event. Such a node remains available for ancestor-only bubbling.
+    if opt.intersects(WidgetOption::NO_INTERACT) || !options_accept_event(opt, event) || !accepts_event {
+        return DispatchResult::Ignored;
+    }
+
+    if event.is_focus_input() {
+        // Keyboard/text events have no meaningful rectangle. Deliver them only to the dispatcher-
+        // owned focus identity selected by an earlier pointer or programmatic transition.
+        if runtime.focus != Some(id) {
+            return DispatchResult::Ignored;
+        }
+        runtime.push_routed_event(id, event.clone());
+        return DispatchResult::Consumed;
+    }
+
+    // Capture lets drag/release escape the original rectangle; all other pointer events still need
+    // to hit both the node allocation and its effective clip.
+    let event_hits_rect = event.position().is_some_and(|pos| rect.contains(&pos) && clip.contains(&pos));
+    match event {
+        UiInputEvent::MouseDown { button, .. } if event_hits_rect => {
+            // Press establishes focus/click state and asks routing to acquire pointer capture.
+            runtime.claim_pointer_focus(id, *button);
+            runtime.push_routed_event(id, event.clone());
+            DispatchResult::Captured
+        }
+        UiInputEvent::MouseDrag { .. } if captured || event_hits_rect => {
+            // An uncaptured drag can be consumed under the pointer but does not create capture.
+            runtime.push_routed_event(id, event.clone());
+            if captured { DispatchResult::Captured } else { DispatchResult::Consumed }
+        }
+        UiInputEvent::MouseUp { .. } if captured || event_hits_rect => {
+            // Routing releases capture after the recipient observes this event during update.
+            runtime.push_routed_event(id, event.clone());
+            DispatchResult::Consumed
+        }
+        UiInputEvent::MouseMove { .. } | UiInputEvent::Scroll { .. } if event_hits_rect => {
+            // Hover and wheel delivery are hit-based and never acquire capture.
+            runtime.push_routed_event(id, event.clone());
+            DispatchResult::Consumed
+        }
+        _ => DispatchResult::Ignored,
+    }
+}
+
 impl UiRuntime {
     /// Clears interaction state that points at a removed or container-gated descendant.
     ///
@@ -299,7 +384,7 @@ impl UiRuntime {
                 // Leaf event-kind policy is completely dispatcher-owned; no Widget query widens
                 // the public trait or permits a handler to influence geometric target selection.
                 let opt = widget.widget.effective_widget_opt();
-                super::container::dispatch_widget_input(self, &node.state, local_rect, local_clip, opt, true, &local_event)
+                dispatch_widget_input(self, &node.state, local_rect, local_clip, opt, true, &local_event)
             }
             NodeKind::Container(container) => {
                 // An overloaded container surface may add a state-dependent filter after target
@@ -308,7 +393,7 @@ impl UiRuntime {
                 let opt = container.effective_widget_opt();
                 let captured_continuation = captured && matches!(&local_event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. });
                 let accepts_event = captured_continuation || container.accepts_event(&local_event);
-                super::container::dispatch_widget_input(self, &node.state, content_rect, content_clip, opt, accepts_event, &local_event)
+                dispatch_widget_input(self, &node.state, content_rect, content_clip, opt, accepts_event, &local_event)
             }
         }
     }

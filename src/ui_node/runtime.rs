@@ -7,6 +7,9 @@ mod paint;
 mod routing;
 mod update;
 
+#[cfg(test)]
+pub(crate) use routing::DispatchResult;
+
 use crate::input::InputSnapshot;
 use crate::render::DisplayList;
 use crate::{Dimensioni, MouseButton, Recti, Style, UNCLIPPED_RECT, Vec2i};
