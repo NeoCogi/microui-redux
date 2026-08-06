@@ -48,20 +48,21 @@ cargo build \
   --features "example-glow external-atlas"
 ```
 
-For an even smaller executable, use nightly + rebuilt `std`:
+For the smallest Linux executable, use the `build-min-size` Cargo alias with nightly. It builds for
+a dedicated `x86_64-unknown-linux-min-size` platform target, rebuilds `std`, uses immediate-abort
+panics, omits Rust unwind tables and panic formatting details, and strips symbols and the linker
+build ID. Normal builds remain on their selected toolchain and platform:
 ```bash
-CARGO_PROFILE_RELEASE_PANIC=immediate-abort \
-CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C strip=symbols -C link-arg=-s -Zlocation-detail=none -Zfmt-debug=none" \
-cargo +nightly build \
-  --release \
-  -Z build-std=std,panic_abort \
-  -Z build-std-features=optimize_for_size \
-  -Z panic-immediate-abort \
+cargo +nightly build-min-size \
   --example demo-full \
   --no-default-features \
-  --features "example-wgpu builder"
+  --features "example-glow builder"
 ```
-Replace `example-wgpu` with `example-glow` or `example-vulkan` if needed.
+The executable is written to
+`target/x86_64-unknown-linux-min-size/min-size/examples/demo-full`. The alias accepts ordinary Cargo
+feature and package-selection arguments; replace `example-glow` with `example-vulkan` or
+`example-wgpu` when needed. It requires the nightly `rust-src` component (`rustup component add
+rust-src --toolchain nightly`).
 
 ![random](res/microui-0.6.png)
 

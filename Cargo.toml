@@ -100,3 +100,9 @@ lto = "fat"
 codegen-units = 1
 debug = "none"
 strip = "symbols"
+
+# Profile used only by the dedicated min-size platform target. The alias overrides panic to the
+# nightly-only immediate-abort strategy while rebuilding std with the same size-oriented profile.
+[profile.min-size]
+inherits = "release"
+incremental = false

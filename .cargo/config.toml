@@ -1,0 +1,25 @@
+[alias]
+# Build against a distinct min-size platform so its codegen flags never affect normal Linux builds.
+# Nightly is selected explicitly by the caller because rustup chooses a toolchain before Cargo runs.
+build-min-size = [
+    "build",
+    "--profile", "min-size",
+    "--target", ".cargo/x86_64-unknown-linux-min-size.json",
+    "-Z", "json-target-spec",
+    "-Z", "panic-immediate-abort",
+    "-Z", "build-std=std,panic_abort",
+    "-Z", "build-std-features=optimize_for_size",
+    "--config", 'profile.min-size.panic="immediate-abort"',
+]
+
+[target.x86_64-unknown-linux-min-size]
+rustflags = [
+    "-Cforce-unwind-tables=no",
+    "-Cstrip=symbols",
+    "-Clink-arg=-s",
+    "-Clink-arg=-Wl,--gc-sections",
+    "-Clink-arg=-Wl,--no-eh-frame-hdr",
+    "-Clink-arg=-Wl,--build-id=none",
+    "-Zlocation-detail=none",
+    "-Zfmt-debug=none",
+]
