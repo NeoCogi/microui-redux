@@ -1,4 +1,4 @@
-//! Routed input traversal and transient focus, hover, and capture lifecycle.
+//! Input target selection, dispatch, and transient focus, hover, and capture lifecycle.
 
 use super::*;
 

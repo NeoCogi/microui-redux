@@ -2,13 +2,13 @@
 
 use super::*;
 
+mod input_dispatcher;
 mod layout;
 mod paint;
-mod routing;
 mod update;
 
 #[cfg(test)]
-pub(crate) use routing::DispatchResult;
+pub(crate) use input_dispatcher::DispatchResult;
 
 use crate::input::InputSnapshot;
 use crate::render::DisplayList;
