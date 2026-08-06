@@ -41,9 +41,9 @@ use std::{
 
 use crate::render::RendererBackend;
 use crate::{
-    Button, ButtonParameters, ButtonState, CLOSED_FOLDER_16_ICON, Column, ColumnParameters, Context, FILE_16_ICON, ListItem, ListItemParameters, ListItemState,
-    Node, Policy, Recti, RootHandle, ScrollArea, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters,
-    StackState, Textbox, TextboxParameters, TextboxState, WidgetOption, WidgetStateHandle, WindowOption,
+    Button, ButtonParameters, ButtonState, Column, ColumnParameters, Context, IconId, ListItem, ListItemParameters, ListItemState, Node, Policy, Recti,
+    RootHandle, ScrollArea, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, Textbox,
+    TextboxParameters, TextboxState, ThemeIcons, WidgetOption, WidgetStateHandle, WindowOption,
 };
 use crate::ui_node::RuntimeNodeId;
 
@@ -172,6 +172,7 @@ pub(crate) struct FileDialogController {
     current_working_directory: String,
     folders: Vec<String>,
     files: Vec<String>,
+    icons: ThemeIcons,
     folder_items: Vec<WidgetStateHandle<ListItemState>>,
     file_items: Vec<WidgetStateHandle<ListItemState>>,
     folder_item_ids: Vec<RuntimeNodeId>,
@@ -213,8 +214,9 @@ impl FileDialogController {
     fn new<B: RendererBackend>(ctx: &mut Context<B>, id: FileDialogSessionId, status: Weak<RefCell<FileDialogStatus>>, request: FileDialogRequest) -> Self {
         let current_working_directory = request.initial_directory;
         let (folders, files) = Self::read_directory(Path::new(&current_working_directory));
-        let folder_rows = Self::make_folder_rows(&current_working_directory, &folders);
-        let file_rows = Self::make_file_rows(&files);
+        let icons = ctx.style().icons;
+        let folder_rows = Self::make_folder_rows(&current_working_directory, &folders, icons.closed_folder);
+        let file_rows = Self::make_file_rows(&files, icons.file);
 
         let (up_button, up_runtime) = Button::create(ButtonParameters::new("Up"));
         let up_node = Node::widget(up_runtime);
@@ -298,6 +300,7 @@ impl FileDialogController {
             current_working_directory,
             folders,
             files,
+            icons,
             folder_items: folder_rows.states,
             file_items: file_rows.states,
             folder_item_ids: folder_rows.ids,
@@ -345,7 +348,7 @@ impl FileDialogController {
         (folders, files)
     }
 
-    fn make_folder_rows(cwd: &str, folders: &[String]) -> DialogRows {
+    fn make_folder_rows(cwd: &str, folders: &[String], folder_icon: IconId) -> DialogRows {
         if folders.is_empty() {
             return DialogRows {
                 nodes: vec![Self::static_item("No folders")],
@@ -363,7 +366,7 @@ impl FileDialogController {
             } else {
                 Path::new(folder).file_name().and_then(|name| name.to_str()).unwrap_or(folder)
             };
-            let (state, runtime) = ListItem::create(ListItemParameters::with_icon(label, CLOSED_FOLDER_16_ICON));
+            let (state, runtime) = ListItem::create(ListItemParameters::with_icon(label, folder_icon));
             let node = Node::widget(runtime);
             ids.push(node.id());
             states.push(state);
@@ -372,7 +375,7 @@ impl FileDialogController {
         DialogRows { nodes, states, ids }
     }
 
-    fn make_file_rows(files: &[String]) -> DialogRows {
+    fn make_file_rows(files: &[String], file_icon: IconId) -> DialogRows {
         if files.is_empty() {
             return DialogRows {
                 nodes: vec![Self::static_item("No files")],
@@ -384,7 +387,7 @@ impl FileDialogController {
         let mut states = Vec::with_capacity(files.len());
         let mut ids = Vec::with_capacity(files.len());
         for file in files {
-            let (state, runtime) = ListItem::create(ListItemParameters::with_icon(file, FILE_16_ICON));
+            let (state, runtime) = ListItem::create(ListItemParameters::with_icon(file, file_icon));
             let node = Node::widget(runtime);
             ids.push(node.id());
             states.push(state);
@@ -395,8 +398,8 @@ impl FileDialogController {
 
     fn refresh_entries(&mut self) {
         let (folders, files) = Self::read_directory(Path::new(&self.current_working_directory));
-        let folder_rows = Self::make_folder_rows(&self.current_working_directory, &folders);
-        let file_rows = Self::make_file_rows(&files);
+        let folder_rows = Self::make_folder_rows(&self.current_working_directory, &folders, self.icons.closed_folder);
+        let file_rows = Self::make_file_rows(&files, self.icons.file);
 
         if let Err(rejected) = replace_stack_rows(&self.folder_rows, folder_rows.nodes) {
             panic!("file-dialog folder row container unavailable with {} replacement nodes", rejected.len());

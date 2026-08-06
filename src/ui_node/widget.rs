@@ -59,10 +59,25 @@ use std::rc::{Rc, Weak};
 use bitflags::bitflags;
 use rs_math3d::Dimensioni;
 
-use crate::atlas::{AtlasHandle, EXPAND_DOWN_ICON};
-use crate::style::Style;
+use crate::atlas::AtlasHandle;
+use crate::theme::Style;
 use super::UiInputEvent;
 pub use super::widget_context::{WidgetPaintCtx, WidgetUpdateCtx};
+
+bitflags! {
+    #[derive(Copy, Clone)]
+    /// Controls which widget states should draw a filled background.
+    pub struct WidgetFillOption : u32 {
+        /// Fill the background for the idle/normal state.
+        const NORMAL = 1;
+        /// Fill the background while hovered.
+        const HOVER = 2;
+        /// Fill the background while actively clicked.
+        const CLICK = 4;
+        /// Fill the background for every interaction state.
+        const ALL = Self::NORMAL.bits() | Self::HOVER.bits() | Self::CLICK.bits();
+    }
+}
 
 bitflags! {
     #[derive(Copy, Clone)]
@@ -339,7 +354,7 @@ impl Widget for WidgetOption {
         let padding = style.padding.max(0);
         let vertical_pad = max(1, padding / 2);
         let font_height = atlas.get_font_height(style.font) as i32;
-        let icon_height = atlas.get_icon_size(EXPAND_DOWN_ICON).height;
+        let icon_height = atlas.get_icon_size(style.icons.expand_down).height;
         let content = max(font_height, icon_height);
         let height = (content + vertical_pad * 2).max(0);
         let width = (padding * 2 + content).max(0);

@@ -51,7 +51,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! Pack small rectangles into a larger one. This is useful for creating texture atlases for the efficient GPU rendering.
+//! Packs small rectangles into a larger texture atlas.
 
 #![allow(dead_code)]
 
@@ -148,7 +148,7 @@ impl Packer {
         let height = std::cmp::max(0, config.height + config.rectangle_padding - 2 * config.border_padding);
 
         Packer {
-            config: config,
+            config,
             packer: DensePacker::new(width, height),
         }
     }
@@ -227,13 +227,9 @@ impl DensePacker {
         let width = std::cmp::max(0, width);
         let height = std::cmp::max(0, height);
 
-        let skylines = vec![Skyline { left: 0, y: 0, width: width }];
+        let skylines = vec![Skyline { left: 0, y: 0, width }];
 
-        DensePacker {
-            width: width,
-            height: height,
-            skylines: skylines,
-        }
+        DensePacker { width, height, skylines }
     }
 
     /// Get size that this packer was created with.
@@ -253,7 +249,7 @@ impl DensePacker {
         // Add a new skyline to fill the gap
         // The new skyline starts where the furthest one ends
         let left = self.skylines.last().unwrap().right();
-        self.skylines.push(Skyline { left: left, y: 0, width: width - left });
+        self.skylines.push(Skyline { left, y: 0, width: width - left });
     }
 
     /// Pack new rectangle. Returns position of the newly added rectangle. If there is not enough space returns `None`.

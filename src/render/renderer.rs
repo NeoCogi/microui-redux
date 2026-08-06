@@ -44,7 +44,7 @@ use super::{
 };
 use crate::{
     atlas::{AtlasHandle, FontId, IconId, WHITE_ICON},
-    style::{Color, TextureId},
+    theme::{Color, TextureId},
 };
 use rs_math3d::{Dimensioni, Recti, Vec2f, Vec2i};
 use std::collections::HashSet;

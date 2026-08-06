@@ -34,7 +34,8 @@ pub use sizing::{Policy, SizePolicy};
 mod widget;
 mod widget_context;
 pub use widget::{
-    FocusPolicy, Widget, WidgetBuilder, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    FocusPolicy, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner,
+    WidgetUpdateCtx,
 };
 pub(crate) use widget::{runtime_read_state, runtime_update_state};
 pub mod widgets;

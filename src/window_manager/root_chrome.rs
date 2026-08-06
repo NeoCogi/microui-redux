@@ -632,7 +632,7 @@ pub(super) fn record_root_overlay(display_list: &mut crate::render::DisplayList,
             painter.with_clip(text, |painter| painter.text(style.title_font, &state.name, pos, color));
         }
         if let Some(close) = geometry.close {
-            painter.icon(crate::CLOSE_ICON, close, style.colors[ControlColor::TitleText as usize]);
+            painter.icon(style.icons.close, close, style.colors[ControlColor::TitleText as usize]);
         }
     }
     if let Some(visual) = geometry

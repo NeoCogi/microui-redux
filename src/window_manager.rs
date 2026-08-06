@@ -50,24 +50,19 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Top-level retained UI context.
+//! Top-level retained UI context and root-window coordination.
 //!
 //! `Context` owns the high-level renderer, global input, window-manager state, and the published
 //! retained roots driven by each frame.
 use bitflags::bitflags;
-#[cfg(any(feature = "builder", feature = "png_source"))]
-use std::io::Cursor;
-
-#[cfg(any(feature = "builder", feature = "png_source"))]
-use png::{ColorType, Decoder};
 
 use crate::input::Input;
 use crate::{rect, Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId, UiRuntime};
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, DisplayList, FrameInfo, RenderError, Renderer, RendererBackend};
-use window_manager::WindowEntry;
+use roots::WindowEntry;
 mod input_api;
 mod root_chrome;
-mod window_manager;
+mod roots;
 
 pub use root_chrome::{RootHandle, RootMutationError, RootState};
 
@@ -173,7 +168,7 @@ impl<B: RendererBackend> Context<B> {
     pub fn new(backend: B) -> Self {
         // The backend supplies the atlas; the default style then binds semantic font roles from it.
         let renderer = Renderer::new(backend);
-        let style = Style::default().with_named_fonts(&renderer.atlas());
+        let style = Style::default().with_named_assets(&renderer.atlas());
         Self {
             renderer,
             display_list: DisplayList::new(),
@@ -333,8 +328,14 @@ impl<B: RendererBackend> Context<B> {
     pub fn set_style(&mut self, style: &Style) {
         let mut resolved = *style;
         resolved.bind_default_named_fonts(&self.renderer.atlas());
+        resolved.bind_default_named_icons(&self.renderer.atlas());
         self.style = resolved;
         self.invalidate_ui_commit();
+    }
+
+    /// Returns the resolved UI style currently used by this context.
+    pub fn style(&self) -> &Style {
+        &self.style
     }
 
     /// Returns the high-level renderer used for frame execution and resource management.
@@ -377,55 +378,13 @@ impl<B: RendererBackend> Context<B> {
             ImageSource::Raw { width, height, pixels } => self.try_load_image_rgba(width, height, pixels),
             #[cfg(any(feature = "builder", feature = "png_source"))]
             ImageSource::Png { bytes } => {
-                let (width, height, rgba) = Self::decode_png(bytes)?;
+                let (width, height, colors) = crate::image::load_image_bytes(ImageSource::Png { bytes }).map_err(|error| error.to_string())?;
+                let width = i32::try_from(width).map_err(|_| String::from("PNG width exceeds supported range"))?;
+                let height = i32::try_from(height).map_err(|_| String::from("PNG height exceeds supported range"))?;
+                let rgba: Vec<u8> = colors.into_iter().flat_map(|color| [color.x, color.y, color.z, color.w]).collect();
                 self.try_load_image_rgba(width, height, rgba.as_slice())
             }
         }
-    }
-
-    #[cfg(any(feature = "builder", feature = "png_source"))]
-    /// Decodes PNG bytes into RGBA pixels for renderer texture upload.
-    fn decode_png(bytes: &[u8]) -> Result<(i32, i32, Vec<u8>), String> {
-        let cursor = Cursor::new(bytes);
-        let decoder = Decoder::new(cursor);
-        let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
-        let buf_size = reader
-            .output_buffer_size()
-            .ok_or_else(|| "PNG decoder did not report output size".to_string())?;
-        let mut buf = vec![0; buf_size];
-        let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
-        let raw = &buf[..info.buffer_size()];
-        let width = i32::try_from(info.width).map_err(|_| String::from("PNG width exceeds supported range"))?;
-        let height = i32::try_from(info.height).map_err(|_| String::from("PNG height exceeds supported range"))?;
-        let mut rgba = Vec::with_capacity(crate::atlas::checked_rgba_byte_len(width, height)?);
-        match info.color_type {
-            ColorType::Rgba => rgba.extend_from_slice(raw),
-            ColorType::Rgb => {
-                // Expand RGB to opaque RGBA so the renderer texture upload has one format.
-                for chunk in raw.chunks(3) {
-                    rgba.extend_from_slice(chunk);
-                    rgba.push(0xFF);
-                }
-            }
-            ColorType::Grayscale => {
-                // Treat grayscale input as opaque luminance.
-                for &v in raw {
-                    rgba.extend_from_slice(&[v, v, v, 0xFF]);
-                }
-            }
-            ColorType::GrayscaleAlpha => {
-                // Preserve grayscale alpha while expanding luminance into RGB channels.
-                for chunk in raw.chunks(2) {
-                    let v = chunk[0];
-                    let a = chunk[1];
-                    rgba.extend_from_slice(&[v, v, v, a]);
-                }
-            }
-            _ => {
-                return Err("Unsupported PNG color type".into());
-            }
-        }
-        Ok((width, height, rgba))
     }
 }
 

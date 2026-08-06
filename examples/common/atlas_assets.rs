@@ -61,6 +61,28 @@ use microui_redux::atlas::builder;
 
 #[cfg(all(not(feature = "prebuilt-atlas"), not(feature = "external-atlas"), feature = "builder"))]
 pub fn atlas_config() -> builder::Config<'static> {
+    const ICONS: &[builder::IconAsset<'static>] = &[
+        builder::IconAsset { name: "close", path: "assets/CLOSE.png" },
+        builder::IconAsset { name: "expand", path: "assets/PLUS.png" },
+        builder::IconAsset {
+            name: "collapse",
+            path: "assets/MINUS.png",
+        },
+        builder::IconAsset { name: "check", path: "assets/CHECK.png" },
+        builder::IconAsset {
+            name: "expand_down",
+            path: "assets/EXPAND_DOWN.png",
+        },
+        builder::IconAsset {
+            name: "open_folder",
+            path: "assets/OPEN_FOLDER_16.png",
+        },
+        builder::IconAsset {
+            name: "closed_folder",
+            path: "assets/CLOSED_FOLDER_16.png",
+        },
+        builder::IconAsset { name: "file", path: "assets/FILE_16.png" },
+    ];
     const FONTS: &[builder::FontAsset<'static>] = &[
         builder::FontAsset {
             name: "body",
@@ -93,14 +115,7 @@ pub fn atlas_config() -> builder::Config<'static> {
         texture_height: 256,
         texture_width: 512,
         white_icon: String::from("assets/WHITE.png"),
-        close_icon: String::from("assets/CLOSE.png"),
-        expand_icon: String::from("assets/PLUS.png"),
-        collapse_icon: String::from("assets/MINUS.png"),
-        check_icon: String::from("assets/CHECK.png"),
-        expand_down_icon: String::from("assets/EXPAND_DOWN.png"),
-        open_folder_16_icon: String::from("assets/OPEN_FOLDER_16.png"),
-        closed_folder_16_icon: String::from("assets/CLOSED_FOLDER_16.png"),
-        file_16_icon: String::from("assets/FILE_16.png"),
+        icons: ICONS,
         default_font: String::from("assets/NORMAL.ttf"),
         default_font_size: 12,
         fonts: FONTS,

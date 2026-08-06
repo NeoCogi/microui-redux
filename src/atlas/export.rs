@@ -1,4 +1,4 @@
-//! Rust source generation for serialized atlases.
+//! Rust source export for serialized atlases.
 
 use super::*;
 #[cfg(feature = "png_source")]

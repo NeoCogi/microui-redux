@@ -356,6 +356,14 @@ creating the frame.
 ```rust
 use microui_redux::{atlas::builder, prelude::*};
 
+const ICONS: &[builder::IconAsset<'static>] = &[
+    builder::IconAsset { name: "close", path: "assets/CLOSE.png" },
+    builder::IconAsset { name: "expand", path: "assets/PLUS.png" },
+    builder::IconAsset { name: "collapse", path: "assets/MINUS.png" },
+    builder::IconAsset { name: "check", path: "assets/CHECK.png" },
+    builder::IconAsset { name: "expand_down", path: "assets/EXPAND_DOWN.png" },
+];
+
 const FONTS: &[builder::FontAsset<'static>] = &[
     builder::FontAsset {
         name: "body",
@@ -388,14 +396,7 @@ let config = builder::Config {
     texture_width: 512,
     texture_height: 256,
     white_icon: "assets/WHITE.png".into(),
-    close_icon: "assets/CLOSE.png".into(),
-    expand_icon: "assets/PLUS.png".into(),
-    collapse_icon: "assets/MINUS.png".into(),
-    check_icon: "assets/CHECK.png".into(),
-    expand_down_icon: "assets/EXPAND_DOWN.png".into(),
-    open_folder_16_icon: "assets/OPEN_FOLDER_16.png".into(),
-    closed_folder_16_icon: "assets/CLOSED_FOLDER_16.png".into(),
-    file_16_icon: "assets/FILE_16.png".into(),
+    icons: ICONS,
     default_font: "assets/NORMAL.ttf".into(),
     default_font_size: 12,
     fonts: FONTS,

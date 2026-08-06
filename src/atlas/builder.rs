@@ -1,7 +1,8 @@
 //! Build-time atlas construction helpers.
 
 use super::*;
-use super::rect_packer::{Config as PackerConfig, Packer};
+mod packer;
+use packer::{Config as PackerConfig, Packer};
 use crate::ImageSource;
 use fontdue::*;
 use std::{
@@ -30,6 +31,15 @@ pub struct FontAsset<'a> {
     pub size: usize,
 }
 
+#[derive(Clone)]
+/// Named bitmap icon included in a constructed atlas.
+pub struct IconAsset<'a> {
+    /// Stable icon key stored in the atlas icon table.
+    pub name: &'a str,
+    /// Path to the source PNG file.
+    pub path: &'a str,
+}
+
 /// Configuration for constructing an atlas from disk assets.
 #[cfg(feature = "builder")]
 pub struct Config<'a> {
@@ -39,22 +49,8 @@ pub struct Config<'a> {
     pub texture_height: usize,
     /// Path to the solid white icon.
     pub white_icon: String,
-    /// Path to the close icon.
-    pub close_icon: String,
-    /// Path to the expand icon.
-    pub expand_icon: String,
-    /// Path to the collapse icon.
-    pub collapse_icon: String,
-    /// Path to the checkbox icon.
-    pub check_icon: String,
-    /// Path to the combo box expand icon.
-    pub expand_down_icon: String,
-    /// Path to the open-folder icon.
-    pub open_folder_16_icon: String,
-    /// Path to the closed-folder icon.
-    pub closed_folder_16_icon: String,
-    /// Path to the file icon.
-    pub file_16_icon: String,
+    /// Named semantic or application icons packed after the white rendering tile.
+    pub icons: &'a [IconAsset<'a>],
     /// Legacy fallback font path used when [`Config::fonts`] is empty.
     pub default_font: String,
     /// Legacy fallback font size used when [`Config::fonts`] is empty.
@@ -90,15 +86,10 @@ impl Builder {
 
         let mut builder = Builder { atlas, packer: Packer::new(rp_config) };
 
-        builder.add_icon(&config.white_icon)?;
-        builder.add_icon(&config.close_icon)?;
-        builder.add_icon(&config.expand_icon)?;
-        builder.add_icon(&config.collapse_icon)?;
-        builder.add_icon(&config.check_icon)?;
-        builder.add_icon(&config.expand_down_icon)?;
-        builder.add_icon(&config.open_folder_16_icon)?;
-        builder.add_icon(&config.closed_folder_16_icon)?;
-        builder.add_icon(&config.file_16_icon)?;
+        builder.add_icon_named("white", &config.white_icon)?;
+        for icon in config.icons {
+            builder.add_icon_named(icon.name, icon.path)?;
+        }
         if config.fonts.is_empty() {
             if config.default_font.is_empty() {
                 return Err(Error::new(ErrorKind::Other, "Atlas config must provide either `fonts` or `default_font`"));
@@ -115,11 +106,20 @@ impl Builder {
 
     /// Adds an icon from the given image path and returns its [`IconId`].
     pub fn add_icon(&mut self, path: &str) -> Result<IconId> {
+        let name = Self::format_path(path);
+        self.add_icon_named(&name, path)
+    }
+
+    /// Adds an icon under a stable lookup key and returns its [`IconId`].
+    pub fn add_icon_named(&mut self, name: &str, path: &str) -> Result<IconId> {
+        if self.atlas.icons.iter().any(|(existing, _)| existing == name) {
+            return Err(Error::new(ErrorKind::Other, format!("Icon name '{}' already exists in the atlas", name)));
+        }
         let (width, height, pixels) = Self::load_icon(path)?;
         let rect = self.add_tile(width, height, pixels.as_slice())?;
         let id = self.atlas.icons.len();
         let icon = Icon { rect };
-        self.atlas.icons.push((Self::format_path(path), icon.clone()));
+        self.atlas.icons.push((name.to_string(), icon.clone()));
         Ok(IconId(id))
     }
 

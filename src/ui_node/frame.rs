@@ -1,5 +1,5 @@
 use crate::render::Painter;
-use crate::style::FrameBorder;
+use crate::theme::FrameBorder;
 use crate::{Color, Dimensioni, Recti, Style};
 
 /// Geometry derived from one authoritative outer allocation.

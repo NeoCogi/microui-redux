@@ -40,6 +40,15 @@ impl AtlasHandle {
             .find_map(|(idx, (font_name, _))| (font_name == name).then_some(FontId(idx)))
     }
 
+    /// Looks up an icon by its stored atlas name.
+    pub fn icon_id(&self, name: &str) -> Option<IconId> {
+        self.0
+            .icons
+            .iter()
+            .enumerate()
+            .find_map(|(idx, (icon_name, _))| (icon_name == name).then_some(IconId(idx)))
+    }
+
     /// Returns glyph metrics for the specified character, if available.
     pub fn get_char_entry(&self, font: FontId, c: char) -> Option<CharEntry> {
         self.0.fonts[font.0].1.entries.get(&c).cloned()

@@ -35,7 +35,7 @@ use super::{
 };
 use crate::{
     atlas::{FontId, IconId},
-    style::{Color, TextureId},
+    theme::{Color, TextureId},
 };
 use rs_math3d::{Recti, Vec2f, Vec2i, color4b};
 

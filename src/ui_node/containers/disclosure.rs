@@ -5,8 +5,8 @@ use std::{
 
 use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, COLLAPSE_ICON, ChildParticipation, Container, ControlColor, Dimensioni, EXPAND_ICON, Layout, MouseButton, Recti, Style, UiInputEvent, Widget,
-    WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetUpdateCtx,
+    AtlasHandle, ChildParticipation, Container, ControlColor, Dimensioni, Layout, MouseButton, Recti, Style, UiInputEvent, Widget, WidgetOption,
+    WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetUpdateCtx,
 };
 
 use super::{Children, Column, ColumnParameters, ColumnState, ContainerLayoutCtx, Node};
@@ -157,7 +157,7 @@ impl DisclosureHeader {
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
         let font_height = atlas.get_font_height(style.font) as i32;
-        let icon = atlas.get_icon_size(EXPAND_ICON);
+        let icon = atlas.get_icon_size(style.icons.expand);
         let text_width = if self.label.is_empty() {
             0
         } else {
@@ -224,7 +224,7 @@ impl Widget for DisclosureHeader {
         // Reserve a square icon cell from row height, then paint text in the remaining rectangle.
         let text_color = ctx.style().colors[ControlColor::Text as usize];
         ctx.draw_icon(
-            if expanded { COLLAPSE_ICON } else { EXPAND_ICON },
+            if expanded { ctx.style().icons.collapse } else { ctx.style().icons.expand },
             Recti::new(row.x, row.y, row.height, row.height),
             text_color,
         );

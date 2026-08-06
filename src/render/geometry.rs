@@ -30,7 +30,15 @@
 //! Stateless vertex construction, tessellation, bounds, translation, and final triangle clipping.
 
 use super::backend::Vertex;
-use crate::style::Color;
+use crate::theme::Color;
+
+/// Sentinel clip rectangle used when command recording starts without a root clip.
+pub(crate) static UNCLIPPED_RECT: Recti = Recti {
+    x: 0,
+    y: 0,
+    width: i32::MAX,
+    height: i32::MAX,
+};
 use rs_math3d::{Color4b, FloatVector, Recti, Vec2f, Vec2i, Vector, color4b};
 use std::ops::Range;
 

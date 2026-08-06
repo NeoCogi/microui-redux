@@ -1,4 +1,4 @@
-//! Window-manager root registry, cross-root policy, and persistent tree traversal.
+//! Root registry, cross-root policy, and persistent tree traversal.
 
 use super::*;
 use crate::{Node, RootHandle, RootMutationError, RootState, Vec2i, WidgetStateHandle};

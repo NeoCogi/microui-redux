@@ -53,7 +53,7 @@
 //! Public renderer integration types.
 
 use crate::atlas::AtlasHandle;
-use crate::style::{Color, TextureId};
+use crate::theme::{Color, TextureId};
 use rs_math3d::{Color4b, Dimensioni, Rect, Vec2f, color4b};
 use std::{
     collections::HashMap,

@@ -109,7 +109,7 @@ impl Checkbox {
     /// Measures the checkbox square plus optional label.
     fn preferred_size(&self, style: &Style, atlas: &AtlasHandle) -> Dimensioni {
         let padding = style.padding.max(0);
-        let check_icon = atlas.get_icon_size(CHECK_ICON);
+        let check_icon = atlas.get_icon_size(style.icons.check);
         let height = content_height(style, atlas, self.font, check_icon.height);
         let mut width = padding * 2 + height;
         if !self.label.is_empty() {
@@ -126,7 +126,7 @@ impl Checkbox {
         if checked {
             let color = ctx.style().colors[ControlColor::Text as usize];
             if let Some(box_content) = box_content {
-                ctx.draw_icon(CHECK_ICON, box_content, color);
+                ctx.draw_icon(ctx.style().icons.check, box_content, color);
             }
         }
         let text_rect = rect(bounds.x + box_rect.width, bounds.y, bounds.width - box_rect.width, bounds.height);

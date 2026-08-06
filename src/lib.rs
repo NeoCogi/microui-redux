@@ -164,12 +164,14 @@
 
 pub mod atlas;
 mod file_dialog;
+mod geometry;
+mod image;
 mod input;
 pub mod render;
-mod style;
 #[cfg(test)]
 mod test_support;
 mod text_layout;
+pub mod theme;
 mod ui_node;
 pub use ui_node::widgets;
 mod window_manager;
@@ -186,7 +188,7 @@ pub mod retained {
         ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Disclosure, DisclosureParameters,
         DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, GridState, Layout, Node, Policy, Row, RowParameters, RowState, ScrollArea,
         ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, UiInputEvent, Widget,
-        WidgetBuilder, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+        WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
     };
     pub use crate::window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
 }
@@ -201,22 +203,23 @@ pub mod prelude {
         IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON, load_image_bytes,
     };
     pub use crate::file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
-    pub use crate::input::{ControlColor, KeyCode, KeyMode, MouseButton, WidgetFillOption};
+    pub use crate::input::{KeyCode, KeyMode, MouseButton};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame};
     pub use crate::retained::{
         ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Context, ContextFrame,
         CustomRenderArgs, CustomRenderHandle, Disclosure, DisclosureParameters, DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan,
         GridState, Layout, Node, Policy, RootHandle, RootId, RootMutationError, RootState, Row, RowParameters, RowState, ScrollArea, ScrollAreaOption,
         ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, TextWrap, UiInputEvent, Widget, WidgetBuilder,
-        WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, WindowOption,
+        WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, WindowOption,
     };
-    pub use crate::style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
+    pub use crate::geometry::{expand_rect, rect, vec2};
+    pub use crate::theme::{Color, ControlColor, Font, FontChoice, FontRole, ImageSource, Style, TextureId, ThemeIcons, color};
     pub use crate::widgets::{
         Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch,
         ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom, CustomBuilder, CustomParameters,
         ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters, ListItemState, Number, NumberBuilder,
         NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaParameters, TextAreaState,
-        TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxParameters, TextboxState,
+        TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxParameters, TextboxState, Real,
     };
     pub use rs_math3d::{
         Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3,
@@ -230,20 +233,21 @@ pub use atlas::{
 };
 pub use window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
 pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
-pub use input::{ControlColor, KeyCode, KeyMode, MouseButton, WidgetFillOption};
+pub use input::{KeyCode, KeyMode, MouseButton};
 pub use text_layout::TextWrap;
-pub use style::{Color, Font, FontChoice, FontRole, ImageSource, Real, Style, TextureId, color, expand_rect, rect, vec2};
+pub use geometry::{expand_rect, rect, vec2};
+pub use theme::{Color, ControlColor, Font, FontChoice, FontRole, ImageSource, Style, TextureId, ThemeIcons, color};
 pub use ui_node::{
     ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Disclosure, DisclosureParameters,
     DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, GridState, Layout, Node, Policy, Row, RowParameters, RowState, ScrollArea,
     ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, UiInputEvent, Widget,
-    WidgetBuilder, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 pub use widgets::{
     Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch,
     ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom, CustomBuilder, CustomParameters,
     ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters, ListItemState, Number, NumberBuilder,
-    NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaParameters, TextAreaState,
+    NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaParameters, TextAreaState, Real,
     TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxParameters, TextboxState,
 };
 
@@ -253,5 +257,5 @@ pub(crate) use rs_math3d::{
     ortho4,
 };
 pub(crate) use std::{cmp::max, hash::Hash, rc::Rc};
-pub(crate) use style::UNCLIPPED_RECT;
+pub(crate) use render::geometry::UNCLIPPED_RECT;
 pub(crate) use ui_node::UiRuntime;

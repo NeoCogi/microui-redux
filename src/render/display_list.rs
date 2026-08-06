@@ -36,7 +36,7 @@ use super::{
     geometry::{SolidGeometry, SolidTriangle, SolidTriangleRange},
 };
 use crate::atlas::{FontId, IconId};
-use crate::style::{Color, TextureId};
+use crate::theme::{Color, TextureId};
 use rs_math3d::{Color4b, Recti, Vec2f, Vec2i};
 
 /// An owned sequence of rendering operations and their solid geometry.

@@ -1,12 +1,32 @@
-//! Image decoding and RGBA validation helpers for atlas sources.
+//! Image source descriptions, decoding, and RGBA validation.
 
-use super::*;
-use crate::ImageSource;
+use crate::{Color4b, color4b};
 #[cfg(any(feature = "builder", feature = "png_source"))]
 use png::{BitDepth, ColorType, Decoder, Transformations};
 #[cfg(any(feature = "builder", feature = "png_source"))]
 use std::io::Cursor;
 use std::io::{Error, ErrorKind};
+
+#[derive(Copy, Clone)]
+/// Describes image bytes that can be uploaded to a texture or decoded into an atlas.
+pub enum ImageSource<'a> {
+    /// Raw RGBA pixels laid out as width × height × 4 bytes.
+    Raw {
+        /// Width in pixels.
+        width: i32,
+        /// Height in pixels.
+        height: i32,
+        /// Pixel buffer in RGBA8888 format.
+        pixels: &'a [u8],
+    },
+    #[cfg(any(feature = "builder", feature = "png_source"))]
+    /// PNG-compressed byte slice (requires the `builder` or `png_source` feature).
+    /// Grayscale and RGB images are expanded to opaque RGBA (alpha = 255).
+    Png {
+        /// Compressed PNG payload.
+        bytes: &'a [u8],
+    },
+}
 
 /// Decodes image data into 32-bit pixels according to `source`.
 /// Grayscale and RGB PNG inputs are expanded to opaque RGBA (alpha = 255).

@@ -28,7 +28,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Texture atlas handles, baked icon/font metadata, and atlas construction helpers.
+//! Texture atlas handles, baked icon/font metadata, and construction helpers.
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
@@ -77,7 +77,7 @@ impl Debug for Font {
 /// Handle referencing a font stored in the atlas.
 pub struct FontId(usize);
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 /// Handle referencing a bitmap icon stored in the atlas.
 pub struct IconId(usize);
 
@@ -131,14 +131,8 @@ pub const CLOSED_FOLDER_16_ICON: IconId = IconId(7);
 /// Identifier of the file icon baked into the default atlas.
 pub const FILE_16_ICON: IconId = IconId(8);
 
-mod image;
-pub use image::load_image_bytes;
-#[cfg(any(feature = "builder", feature = "png_source"))]
-pub(crate) use image::checked_rgba_byte_len;
-pub(crate) use image::validate_rgba_buffer;
-
-#[cfg(feature = "builder")]
-mod rect_packer;
+pub use crate::image::{ImageSource, load_image_bytes};
+pub(crate) use crate::image::validate_rgba_buffer;
 
 #[cfg(feature = "builder")]
 /// Helpers for constructing atlas textures at build time.
@@ -148,7 +142,7 @@ mod source;
 pub use source::{AtlasSource, FontEntry, SourceFormat};
 
 #[cfg(feature = "save-to-rust")]
-mod codegen;
+mod export;
 mod runtime;
 
 #[cfg(test)]

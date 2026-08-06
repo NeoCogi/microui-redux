@@ -50,97 +50,16 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Visual primitives and lightweight geometry helpers used across the crate.
-
-use rs_math3d::{Dimensioni, Recti, Vec2i};
+//! UI style values and compatibility helpers used across the crate.
 
 use crate::atlas::{AtlasHandle, FontId};
-
-#[derive(Default, Copy, Clone)]
-#[repr(C)]
-/// Simple RGBA color stored with 8-bit components.
-pub struct Color {
-    /// Red channel.
-    pub r: u8,
-    /// Green channel.
-    pub g: u8,
-    /// Blue channel.
-    pub b: u8,
-    /// Alpha channel.
-    pub a: u8,
-}
+use super::{Color, FontChoice, FontRole, ThemeIcons};
 
 /// Style-resolved border appearance for outer and internal frames.
 #[derive(Copy, Clone)]
 pub(crate) struct FrameBorder {
     pub(crate) width: i32,
     pub(crate) color: Color,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
-/// Semantic font roles used by the built-in widgets and default style.
-pub enum FontRole {
-    /// Default body text used by most widgets.
-    #[default]
-    Body,
-    /// Compact supporting text.
-    Small,
-    /// Window titles and similar chrome text.
-    Title,
-    /// Larger display text.
-    Heading,
-    /// Monospace-style text.
-    Mono,
-}
-
-impl FontRole {
-    /// Returns the conventional atlas font name used by [`Style::bind_named_fonts`].
-    pub fn atlas_name(self) -> &'static str {
-        match self {
-            Self::Body => "body",
-            Self::Small => "small",
-            Self::Title => "title",
-            Self::Heading => "heading",
-            Self::Mono => "mono",
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-/// Selects either a semantic font role from [`Style`] or a specific [`FontId`].
-pub enum FontChoice {
-    /// Resolve through a [`FontRole`] stored on the style.
-    Role(FontRole),
-    /// Use the provided concrete font directly.
-    Id(FontId),
-}
-
-impl Default for FontChoice {
-    fn default() -> Self {
-        Self::Role(FontRole::Body)
-    }
-}
-
-impl From<FontRole> for FontChoice {
-    fn from(role: FontRole) -> Self {
-        Self::Role(role)
-    }
-}
-
-impl From<FontId> for FontChoice {
-    fn from(font: FontId) -> Self {
-        Self::Id(font)
-    }
-}
-
-/// Describes the interface the atlas uses to query font metadata.
-pub trait Font {
-    /// Returns the font's display name.
-    fn name(&self) -> &str;
-    /// Returns the base pixel size of the font.
-    fn get_size(&self) -> usize;
-    /// Returns the pixel width and height for a specific character.
-    fn get_char_size(&self, c: char) -> (usize, usize);
 }
 
 #[derive(Copy, Clone)]
@@ -156,6 +75,8 @@ pub struct Style {
     pub heading_font: FontId,
     /// Font used for monospace-style text.
     pub mono_font: FontId,
+    /// Semantic icons used by built-in widgets and chrome.
+    pub icons: ThemeIcons,
     /// Default width used by layouts when no preferred width is supplied.
     pub default_cell_width: i32,
     /// Inner padding applied to most widgets.
@@ -176,80 +97,6 @@ pub struct Style {
     pub colors: [Color; 14],
 }
 
-/// Floating-point type used by widgets and layout calculations.
-pub type Real = f32;
-
-/// Handle referencing an external texture managed by the renderer.
-///
-/// Equality and hashing include the renderer-issued numeric identifier and the immutable width and
-/// height carried by the handle. Renderer validation therefore accepts only the exact handle whose
-/// dimensions will be used for texture-coordinate projection.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct TextureId {
-    /// Backend-local texture identifier.
-    raw: u32,
-    /// Texture width in pixels.
-    width: i32,
-    /// Texture height in pixels.
-    height: i32,
-}
-
-impl TextureId {
-    /// Creates a texture id with known dimensions.
-    pub(crate) fn new(raw: u32, width: i32, height: i32) -> Self {
-        Self { raw, width, height }
-    }
-
-    /// Returns the raw numeric identifier stored inside the handle.
-    pub fn raw(self) -> u32 {
-        self.raw
-    }
-
-    /// Returns the texture width in pixels.
-    pub fn width(self) -> i32 {
-        self.width
-    }
-
-    /// Returns the texture height in pixels.
-    pub fn height(self) -> i32 {
-        self.height
-    }
-
-    /// Returns the texture dimensions in pixels.
-    pub fn size(self) -> Dimensioni {
-        Dimensioni::new(self.width, self.height)
-    }
-}
-
-#[derive(Copy, Clone)]
-/// Describes image bytes that can be uploaded to a texture.
-pub enum ImageSource<'a> {
-    /// Raw RGBA pixels laid out as width × height × 4 bytes.
-    Raw {
-        /// Width in pixels.
-        width: i32,
-        /// Height in pixels.
-        height: i32,
-        /// Pixel buffer in RGBA8888 format.
-        pixels: &'a [u8],
-    },
-    #[cfg(any(feature = "builder", feature = "png_source"))]
-    /// PNG-compressed byte slice (requires the `builder` or `png_source` feature).
-    /// Grayscale and RGB images are expanded to opaque RGBA (alpha = 255).
-    Png {
-        /// Compressed PNG payload.
-        bytes: &'a [u8],
-    },
-}
-
-/// Sentinel clip rectangle used when command recording starts without a root clip.
-pub(crate) static UNCLIPPED_RECT: Recti = Recti {
-    x: 0,
-    y: 0,
-    width: i32::MAX,
-    height: i32::MAX,
-};
-
 impl Default for Style {
     fn default() -> Self {
         Self {
@@ -258,6 +105,7 @@ impl Default for Style {
             title_font: FontId::default(),
             heading_font: FontId::default(),
             mono_font: FontId::default(),
+            icons: ThemeIcons::default(),
             default_cell_width: 68,
             padding: 5,
             spacing: 4,
@@ -283,23 +131,6 @@ impl Default for Style {
                 Color { r: 30, g: 30, b: 30, a: 255 },
             ],
         }
-    }
-}
-
-impl FontChoice {
-    /// Creates a semantic font selection.
-    pub fn role(role: FontRole) -> Self {
-        Self::Role(role)
-    }
-
-    /// Creates a concrete font selection.
-    pub fn id(font: FontId) -> Self {
-        Self::Id(font)
-    }
-
-    /// Resolves this choice against `style`.
-    pub fn resolve(self, style: &Style) -> FontId {
-        style.resolve_font_choice(self)
     }
 }
 
@@ -356,10 +187,29 @@ impl Style {
         }
     }
 
+    /// Binds default semantic icon roles from conventional atlas names.
+    ///
+    /// Explicit icon selections that differ from the default fixed IDs are preserved.
+    pub fn bind_default_named_icons(&mut self, atlas: &AtlasHandle) {
+        self.icons.bind_default_named(atlas);
+    }
+
     /// Returns a copy of the style with semantic font roles rebound from `atlas`.
     pub fn with_named_fonts(mut self, atlas: &AtlasHandle) -> Self {
         self.bind_named_fonts(atlas);
         self
+    }
+
+    /// Returns a copy with both semantic font and icon roles rebound from `atlas`.
+    pub fn with_named_assets(mut self, atlas: &AtlasHandle) -> Self {
+        self.bind_named_assets(atlas);
+        self
+    }
+
+    /// Binds semantic font and icon roles from their conventional atlas names.
+    pub fn bind_named_assets(&mut self, atlas: &AtlasHandle) {
+        self.bind_named_fonts(atlas);
+        self.icons.bind_named(atlas);
     }
 
     /// Binds semantic font roles from conventional atlas names when they exist.
@@ -383,48 +233,10 @@ impl Style {
     }
 }
 
-/// Convenience constructor for [`Vec2i`].
-pub fn vec2(x: i32, y: i32) -> Vec2i {
-    Vec2i { x, y }
-}
-
-/// Convenience constructor for [`Recti`].
-pub fn rect(x: i32, y: i32, w: i32, h: i32) -> Recti {
-    Recti { x, y, width: w, height: h }
-}
-
-/// Convenience constructor for [`Color`].
-pub fn color(r: u8, g: u8, b: u8, a: u8) -> Color {
-    Color { r, g, b, a }
-}
-
-/// Expands (or shrinks) a rectangle uniformly on all sides.
-pub fn expand_rect(r: Recti, n: i32) -> Recti {
-    rect(r.x - n, r.y - n, r.width + n * 2, r.height + n * 2)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::test_atlas_with_font_sizes as make_test_atlas;
-    use std::collections::HashSet;
-
-    #[test]
-    fn texture_id_identity_includes_immutable_dimensions() {
-        let texture = TextureId::new(7, 32, 16);
-        let same = TextureId::new(7, 32, 16);
-        let different_width = TextureId::new(7, 64, 16);
-        let different_height = TextureId::new(7, 32, 8);
-
-        assert_eq!(texture, same);
-        assert_ne!(texture, different_width);
-        assert_ne!(texture, different_height);
-
-        let textures = HashSet::from([texture]);
-        assert!(textures.contains(&same));
-        assert!(!textures.contains(&different_width));
-        assert!(!textures.contains(&different_height));
-    }
 
     #[test]
     fn font_choice_conversions_preserve_selected_font() {

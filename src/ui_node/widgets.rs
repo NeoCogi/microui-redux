@@ -56,6 +56,9 @@
 //! state, and its concrete retained runtime. Applications keep weak [`crate::WidgetStateHandle`]
 //! capabilities while the runtime remains the sole strong owner of state.
 
+/// Floating-point type used by numeric widgets and layout calculations.
+pub type Real = f32;
+
 use crate::*;
 
 mod button;

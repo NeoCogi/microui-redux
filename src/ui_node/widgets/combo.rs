@@ -175,7 +175,7 @@ impl Combo {
             } else {
                 text_size(style, atlas, self.font, state.label.as_str()).width
             };
-            let indicator = atlas.get_icon_size(EXPAND_DOWN_ICON);
+            let indicator = atlas.get_icon_size(style.icons.expand_down);
             let width = (padding * 3 + text_w + indicator.width).max(0);
             let height = content_height(style, atlas, self.font, indicator.height);
             Dimensioni::new(width, height)
@@ -198,7 +198,7 @@ impl Combo {
         let screen_header = ctx.screen_content_rect();
         ctx.draw_widget_fill(header, ControlColor::Button);
 
-        let indicator_size = ctx.atlas().get_icon_size(EXPAND_DOWN_ICON);
+        let indicator_size = ctx.atlas().get_icon_size(ctx.style().icons.expand_down);
         let indicator_x = header.x + header.width - indicator_size.width;
         let indicator_y = header.y + ((header.height - indicator_size.height) / 2).max(0);
         let indicator = rect(indicator_x, indicator_y, indicator_size.width, indicator_size.height);
@@ -215,7 +215,7 @@ impl Combo {
         let indicator_content = ctx.draw_widget_internal_frame(indicator, ControlColor::Button);
         let icon_color = ctx.style().colors[ControlColor::Text as usize];
         if let Some(indicator_content) = indicator_content {
-            ctx.draw_icon(EXPAND_DOWN_ICON, indicator_content, icon_color);
+            ctx.draw_icon(ctx.style().icons.expand_down, indicator_content, icon_color);
         }
     }
 }
