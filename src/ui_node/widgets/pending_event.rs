@@ -30,6 +30,7 @@
 
 /// Records one pending semantic event without wrapping at the counter boundary.
 pub(crate) fn record_pending_event(pending: &mut u32) {
+    // pending_event_count = previous_pending_event_count + 1.
     *pending = pending.saturating_add(1);
 }
 

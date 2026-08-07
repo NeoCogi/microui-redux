@@ -97,10 +97,12 @@ impl Axis {
         for (policy, preferred) in items {
             // Intrinsic size is independent of the current bound: Fixed forces its value, while
             // every flexible policy contributes the measured content preference.
+            // intrinsic_total = previous_intrinsic_total + policy_intrinsic_extent.
             intrinsic = intrinsic.saturating_add(policy.intrinsic_extent(preferred));
 
             // Bounded weight allocation needs two aggregate facts before any individual slot can
             // be resolved: space reserved by non-weight tracks and the total valid weight.
+            // reserved_total = previous_reserved_total + resolved_non_weight_extent.
             match policy {
                 SizePolicy::Auto => reserved = reserved.saturating_add(preferred.max(0)),
                 SizePolicy::Fixed(value) => reserved = reserved.saturating_add(value.max(0)),
@@ -118,6 +120,7 @@ impl Axis {
             // Without a remainder track, weights divide only the space left after Auto, Fixed,
             // and Fraction tracks. With a remainder track, weights use the complete reference and
             // Remainder consumes whatever is still available when its ordered turn is reached.
+            // weight_reference = available_extent - reserved_extent when no remainder exists.
             weight_reference: if has_remainder { available } else { available.saturating_sub(reserved) },
             used: 0,
         }
@@ -135,6 +138,9 @@ impl Axis {
             policy.intrinsic_extent(preferred)
         } else {
             // Resolve the parent-owned slot policy exactly once against the shared axis bound.
+            // fraction_extent = available_extent * clamp(fraction, 0, 1).
+            // weight_extent = weight_reference * item_weight / total_weight.
+            // remainder_extent = available_extent - used_extent - margin.
             match policy {
                 SizePolicy::Auto => preferred.max(0),
                 SizePolicy::Fixed(value) => value.max(0),
@@ -147,12 +153,14 @@ impl Axis {
 
         // Remainder observes this running total, so update it only after resolving the current
         // sibling and never include visual spacing in it.
+        // used_extent = previous_used_extent + current_advance.
         self.used = self.used.saturating_add(advance);
 
         // Node layout applies its own Fraction/Remainder policy to the offered rectangle. Rebuild
         // that pre-policy offer here while keeping `advance` as the already-resolved cursor step.
         let offered = match policy {
             SizePolicy::Fraction(_) if self.available > 0 => self.available,
+            // offered_extent = resolved_advance + margin.
             SizePolicy::Remainder(margin) if self.available > 0 => advance.saturating_add(margin.max(0)),
             _ => advance,
         };
@@ -164,7 +172,11 @@ impl Axis {
     /// Call this after replaying all bounded items through [`Self::next`]. Spacing is added here,
     /// rather than to `used`, so `Remainder` sees only space consumed by actual tracks.
     pub(super) fn extent(&self, count: usize, spacing: i32) -> i32 {
-        self.used.saturating_add(spacing.max(0).saturating_mul(count.saturating_sub(1) as i32))
+        // gap_count = item_count - 1; spacing_total = spacing * gap_count.
+        let gap_count = count.saturating_sub(1) as i32;
+        let spacing_total = spacing.max(0).saturating_mul(gap_count);
+        // extent = used_track_extent + spacing_total.
+        self.used.saturating_add(spacing_total)
     }
 
     /// Returns the unbounded preferred total plus the gaps between `count` siblings.
@@ -172,6 +184,10 @@ impl Axis {
     /// This value was completed by [`Self::new`], so an immutable unbounded measurement does not
     /// need to measure and replay its children a second time merely to populate `used`.
     pub(super) fn intrinsic_extent(&self, count: usize, spacing: i32) -> i32 {
-        self.intrinsic.saturating_add(spacing.max(0).saturating_mul(count.saturating_sub(1) as i32))
+        // gap_count = item_count - 1; spacing_total = spacing * gap_count.
+        let gap_count = count.saturating_sub(1) as i32;
+        let spacing_total = spacing.max(0).saturating_mul(gap_count);
+        // intrinsic_extent = intrinsic_track_extent + spacing_total.
+        self.intrinsic.saturating_add(spacing_total)
     }
 }

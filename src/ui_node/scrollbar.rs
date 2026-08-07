@@ -101,6 +101,7 @@ impl ScrollAxis {
     }
 
     fn translate(self, mut rect: Recti, amount: i32) -> Recti {
+        // translated_axis_origin = rectangle_axis_origin + amount.
         match self {
             Self::Vertical => rect.y = rect.y.saturating_add(amount),
             Self::Horizontal => rect.x = rect.x.saturating_add(amount),
@@ -134,14 +135,17 @@ impl ScrollbarGeometry {
 
         // Proportional length represents the visible fraction; the style minimum preserves usability.
         let proportional = if content_len > 0 {
+            // proportional_thumb_length = track_length * visible_length / content_length.
             track_len.saturating_mul(view_len) / content_len
         } else {
             track_len
         };
         let thumb_len = proportional.max(min_thumb_len.max(0)).min(track_len);
+        // thumb_travel = track_length - thumb_length.
         let thumb_travel = track_len.saturating_sub(thumb_len).max(0);
         // Map clamped content offset into thumb travel using the same integer ratio inverted by drag.
         let thumb_offset = if max_offset > 0 && thumb_travel > 0 {
+            // thumb_offset = clamped_content_offset * thumb_travel / maximum_content_offset.
             offset.clamp(0, max_offset).saturating_mul(thumb_travel) / max_offset
         } else {
             0
@@ -173,6 +177,7 @@ impl ScrollbarGeometry {
         if self.thumb_travel <= 0 || self.max_offset <= 0 {
             return 0;
         }
+        // content_delta = pointer_delta * maximum_content_offset / thumb_travel.
         self.axis.point(delta).saturating_mul(self.max_offset) / self.thumb_travel
     }
 
@@ -183,12 +188,11 @@ impl ScrollbarGeometry {
             return 0;
         }
         let thumb_len = self.axis.rect_len(self.thumb);
-        let centered = self
-            .axis
-            .point(pointer)
-            .saturating_sub(self.axis.origin(self.track))
-            .saturating_sub(thumb_len / 2)
-            .clamp(0, self.thumb_travel);
+        // track_pointer = pointer_axis_position - track_axis_origin.
+        let track_pointer = self.axis.point(pointer).saturating_sub(self.axis.origin(self.track));
+        // centered_thumb = clamp(track_pointer - thumb_length / 2, 0, thumb_travel).
+        let centered = track_pointer.saturating_sub(thumb_len / 2).clamp(0, self.thumb_travel);
+        // content_offset = centered_thumb * maximum_content_offset / thumb_travel.
         centered.saturating_mul(self.max_offset) / self.thumb_travel
     }
 }
@@ -199,10 +203,12 @@ pub(crate) fn scrollbar_base(axis: ScrollAxis, body: Recti, scrollbar_size: i32)
     let mut base = body;
     match axis {
         ScrollAxis::Vertical => {
+            // vertical_track_x = body_x + body_width.
             base.x = body.x.saturating_add(body.width);
             base.width = scrollbar_size;
         }
         ScrollAxis::Horizontal => {
+            // horizontal_track_y = body_y + body_height.
             base.y = body.y.saturating_add(body.height);
             base.height = scrollbar_size;
         }
@@ -212,6 +218,7 @@ pub(crate) fn scrollbar_base(axis: ScrollAxis, body: Recti, scrollbar_size: i32)
 
 /// Returns the largest scroll offset needed to reveal all content.
 pub(crate) fn scrollbar_max_scroll(content_len: i32, view_len: i32) -> i32 {
+    // maximum_scroll = max(content_length - visible_length, 0).
     content_len.saturating_sub(view_len).max(0)
 }
 
@@ -243,6 +250,7 @@ impl RetainedScrollbarState {
             content_len,
             min_thumb_len,
         });
+        // offset = clamp(requested_offset, 0, maximum_offset).
         self.offset = self.offset.clamp(0, self.max_offset());
     }
 
@@ -352,6 +360,7 @@ impl Widget for RetainedScrollbar {
                 Some(UiInputEvent::MouseDrag { delta, .. }) if ctx.active() => {
                     // Only the dispatcher-owned capture recipient is active. This continues beyond
                     // the track rectangle without retaining a second widget-local capture flag.
+                    // offset = clamp(previous_offset + drag_delta, 0, maximum_offset).
                     state.offset = state.offset.saturating_add(geometry.drag_delta(*delta)).clamp(0, state.max_offset());
                 }
                 _ => {}

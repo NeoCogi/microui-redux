@@ -209,7 +209,10 @@ fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut StackState, childr
         .max()
         .unwrap_or_default();
     let width = state.item_width.preferred_extent(preferred_width, rect.width);
-    let spacing_total = spacing.saturating_mul(count.saturating_sub(1) as i32);
+    // gap_count = child_count - 1; spacing_total = spacing * gap_count.
+    let gap_count = count.saturating_sub(1) as i32;
+    let spacing_total = spacing.saturating_mul(gap_count);
+    // track_height = max(container_height - spacing_total, 1).
     let available_height = rect.height.saturating_sub(spacing_total).max(1);
     // The scalar axis holds only shared allocation totals; individual heights are replayed below.
     let mut axis = stack_axis(state, children, ctx.style(), ctx.atlas(), width, available_height);
@@ -220,17 +223,21 @@ fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut StackState, childr
                 let preferred = stack_child_height(children, index, ctx.style(), ctx.atlas(), width);
                 let height = axis.next(state.item_height, preferred).advance;
                 let _ = ctx.layout_child(children, index, Recti::new(rect.x, y, width, height));
+                // next_y = current_y + child_height + spacing.
                 y = y.saturating_add(height).saturating_add(spacing);
             }
         }
         StackDirection::BottomToTop => {
             // Child zero is anchored at the bottom, followed by later children above it.
+            // bottom_y = container_y + container_height.
             let mut y = rect.y.saturating_add(rect.height);
             for index in 0..count {
                 let preferred = stack_child_height(children, index, ctx.style(), ctx.atlas(), width);
                 let height = axis.next(state.item_height, preferred).advance;
+                // child_y = previous_y - child_height.
                 y = y.saturating_sub(height);
                 let _ = ctx.layout_child(children, index, Recti::new(rect.x, y, width, height));
+                // next_y = child_y - spacing.
                 y = y.saturating_sub(spacing);
             }
         }
@@ -273,8 +280,11 @@ fn stack_size(state: &StackState, children: &Children, style: &Style, atlas: &At
         .max()
         .unwrap_or_default();
     let width = state.item_width.preferred_extent(preferred_width, available.width);
-    let spacing_total = spacing.saturating_mul(count.saturating_sub(1) as i32);
+    // gap_count = child_count - 1; spacing_total = spacing * gap_count.
+    let gap_count = count.saturating_sub(1) as i32;
+    let spacing_total = spacing.saturating_mul(gap_count);
     let available_height = if available.height > 0 {
+        // track_height = max(available_height - spacing_total, 1).
         available.height.saturating_sub(spacing_total).max(1)
     } else {
         0

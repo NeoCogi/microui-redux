@@ -151,7 +151,10 @@ pub(super) fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Chi
     let spacing = ctx.style().spacing.max(0);
     let count = children.len();
     // Spacing is outside track allocation, so children divide only the remaining height.
-    let spacing_total = spacing.saturating_mul(count.saturating_sub(1) as i32);
+    // gap_count = child_count - 1; spacing_total = spacing * gap_count.
+    let gap_count = count.saturating_sub(1) as i32;
+    let spacing_total = spacing.saturating_mul(gap_count);
+    // track_height = max(container_height - spacing_total, 1).
     let available_height = rect.height.saturating_sub(spacing_total).max(1);
 
     // First pass: summarize policies and preferred heights without retaining per-child data.
@@ -181,6 +184,7 @@ pub(super) fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Chi
         let slot = axis.next(policy.height, preferred);
         let child_rect = Recti::new(rect.x, y, rect.width, slot.offered);
         let _ = ctx.layout_child(children, index, child_rect);
+        // next_y = current_y + child_height + spacing.
         y = y.saturating_add(slot.advance).saturating_add(spacing);
     }
 }
@@ -196,8 +200,11 @@ pub(super) fn measure_column(children: &Children, style: &Style, atlas: &AtlasHa
     let count = children.len();
     let mut width = 0;
     // A positive bound is divided among tracks after spacing; zero stays the intrinsic marker.
-    let spacing_total = spacing.saturating_mul(count.saturating_sub(1) as i32);
+    // gap_count = child_count - 1; spacing_total = spacing * gap_count.
+    let gap_count = count.saturating_sub(1) as i32;
+    let spacing_total = spacing.saturating_mul(gap_count);
     let available_height = if available.height > 0 {
+        // track_height = max(available_height - spacing_total, 1).
         available.height.saturating_sub(spacing_total).max(1)
     } else {
         0

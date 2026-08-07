@@ -179,7 +179,10 @@ fn layout_row(ctx: &mut ContainerLayoutCtx<'_>, state: &mut RowState, children: 
     // parallel geometry collection survives this call.
     let count = children.len();
     let spacing = ctx.style().spacing.max(0);
-    let spacing_total = spacing.saturating_mul(count.saturating_sub(1) as i32);
+    // gap_count = child_count - 1; spacing_total = spacing * gap_count.
+    let gap_count = count.saturating_sub(1) as i32;
+    let spacing_total = spacing.saturating_mul(gap_count);
+    // track_width = max(container_width - spacing_total, 1).
     let available_width = rect.width.saturating_sub(spacing_total).max(1);
     // First resolve each width and measure content at that actual width. This is what keeps wrapped
     // child height consistent with the widths that layout will commit.
@@ -216,6 +219,7 @@ fn layout_row(ctx: &mut ContainerLayoutCtx<'_>, state: &mut RowState, children: 
             .width;
         let width = axis.next(policy, preferred).advance;
         let _ = ctx.layout_child(children, index, Recti::new(x, rect.y, width, height));
+        // next_x = current_x + child_width + spacing.
         x = x.saturating_add(width).saturating_add(spacing);
     }
 }
@@ -240,8 +244,11 @@ fn row_size(state: &RowState, children: &Children, style: &Style, atlas: &AtlasH
     // Mirror placement policy and return only aggregate preferred geometry.
     let count = children.len();
     let spacing = style.spacing.max(0);
-    let spacing_total = spacing.saturating_mul(count.saturating_sub(1) as i32);
+    // gap_count = child_count - 1; spacing_total = spacing * gap_count.
+    let gap_count = count.saturating_sub(1) as i32;
+    let spacing_total = spacing.saturating_mul(gap_count);
     let available_width = if available.width > 0 {
+        // track_width = max(available_width - spacing_total, 1).
         available.width.saturating_sub(spacing_total).max(1)
     } else {
         0

@@ -72,6 +72,7 @@ static NEXT_RUNTIME_NODE_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Returns the next representable raw identity without wrapping to a reused value.
 pub(super) const fn advance_runtime_node_id(current: u64) -> Option<u64> {
+    // next_node_id = current_node_id + 1.
     current.checked_add(1)
 }
 

@@ -157,6 +157,8 @@ impl SizePolicy {
     /// Sibling-aware weight sharing is handled by the private container-axis cursor. At this final
     /// node boundary, a valid positive `Weight` consumes the slot the parent already assigned it.
     pub(crate) fn allocated_extent(self, available: i32) -> i32 {
+        // fraction_extent = available_extent * clamp(fraction, 0, 1).
+        // remainder_extent = available_extent - max(margin, 0).
         match self {
             Self::Auto => available,
             Self::Fixed(value) => value,

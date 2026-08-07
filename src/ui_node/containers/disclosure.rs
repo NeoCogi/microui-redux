@@ -258,7 +258,9 @@ impl Widget for DisclosureHeader {
             Recti::new(row.x, row.y, row.height, row.height),
             text_color,
         );
+        // text_offset = row_height - padding.
         let offset = row.height.saturating_sub(ctx.style().padding);
+        // text_x = row_x + text_offset; text_width = row_width - text_offset.
         let text_rect = Recti::new(row.x.saturating_add(offset), row.y, row.width.saturating_sub(offset), row.height);
         ctx.draw_control_text_with_font(ctx.style().font, &self.label, text_rect, ControlColor::Text, self.opt);
     }
@@ -305,24 +307,26 @@ impl Layout for DisclosureLayout {
             }
             let indent = self.indent(style);
             let spacing = style.spacing.max(0);
-            let body_available = Dimensioni::new(
-                if available.width > 0 {
-                    available.width.saturating_sub(indent).max(1)
-                } else {
-                    0
-                },
-                if available.height > 0 {
-                    available.height.saturating_sub(header.height).saturating_sub(spacing).max(1)
-                } else {
-                    0
-                },
-            );
+            // body_width = max(available_width - indent, 1), preserving zero as unbounded.
+            let body_width = if available.width > 0 {
+                available.width.saturating_sub(indent).max(1)
+            } else {
+                0
+            };
+            // body_height = max(available_height - header_height - spacing, 1), preserving zero as unbounded.
+            let body_height = if available.height > 0 {
+                available.height.saturating_sub(header.height).saturating_sub(spacing).max(1)
+            } else {
+                0
+            };
+            let body_available = Dimensioni::new(body_width, body_height);
             // BODY is itself a Column node, which measures the application-provided descendants.
             let body = children.measure_child(Self::BODY, style, atlas, body_available).unwrap_or_default();
-            Dimensioni::new(
-                header.width.max(body.width.saturating_add(indent)),
-                header.height.saturating_add(spacing).saturating_add(body.height),
-            )
+            // preferred_width = max(header_width, body_width + indent).
+            let preferred_width = header.width.max(body.width.saturating_add(indent));
+            // preferred_height = header_height + spacing + body_height.
+            let preferred_height = header.height.saturating_add(spacing).saturating_add(body.height);
+            Dimensioni::new(preferred_width, preferred_height)
         })
     }
 
@@ -343,12 +347,13 @@ impl Layout for DisclosureLayout {
         if expanded {
             let indent = self.indent(ctx.style());
             let spacing = ctx.style().spacing.max(0);
-            let body = Recti::new(
-                rect.x.saturating_add(indent),
-                rect.y.saturating_add(header_height).saturating_add(spacing),
-                rect.width.saturating_sub(indent),
-                rect.height.saturating_sub(header_height).saturating_sub(spacing),
-            );
+            // body_origin = container_origin + (indent, header_height + spacing).
+            let body_x = rect.x.saturating_add(indent);
+            let body_y = rect.y.saturating_add(header_height).saturating_add(spacing);
+            // body_extent = container_extent - (indent, header_height + spacing).
+            let body_width = rect.width.saturating_sub(indent);
+            let body_height = rect.height.saturating_sub(header_height).saturating_sub(spacing);
+            let body = Recti::new(body_x, body_y, body_width, body_height);
             let _ = ctx.layout_child(children, Self::BODY, body);
         }
     }

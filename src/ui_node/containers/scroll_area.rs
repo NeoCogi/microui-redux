@@ -98,12 +98,18 @@ struct ScrollAreaGeometry {
 /// Insets a non-negative rectangle without allowing either axis to underflow.
 fn inset_rect(rect: Recti, amount: i32) -> Recti {
     let amount = amount.max(0);
-    Recti::new(
-        rect.x.saturating_add(amount.min(rect.width.max(0))),
-        rect.y.saturating_add(amount.min(rect.height.max(0))),
-        rect.width.saturating_sub(amount.saturating_mul(2)).max(0),
-        rect.height.saturating_sub(amount.saturating_mul(2)).max(0),
-    )
+    // inset_x/y = min(requested_inset, non_negative_axis_extent).
+    let inset_x = amount.min(rect.width.max(0));
+    let inset_y = amount.min(rect.height.max(0));
+    // inset_extent = leading_inset + trailing_inset = amount * 2.
+    let inset_extent = amount.saturating_mul(2);
+    // content_origin = rectangle_origin + clamped_inset.
+    let x = rect.x.saturating_add(inset_x);
+    let y = rect.y.saturating_add(inset_y);
+    // content_extent = max(rectangle_extent - inset_extent, 0).
+    let width = rect.width.saturating_sub(inset_extent).max(0);
+    let height = rect.height.saturating_sub(inset_extent).max(0);
+    Recti::new(x, y, width, height)
 }
 
 /// Application-facing state for the three-child ScrollArea composite.
@@ -210,6 +216,7 @@ impl ScrollAreaState {
         }
         let offset = self.offset();
         let maximum = self.max_offset();
+        // next_offset = clamp(previous_offset + wheel_delta, zero, maximum_offset).
         let next = Vec2i::new(
             offset.x.saturating_add(delta.x).clamp(0, maximum.x),
             offset.y.saturating_add(delta.y).clamp(0, maximum.y),
@@ -224,6 +231,7 @@ impl ScrollAreaState {
         }
         let offset = self.offset();
         let maximum = self.max_offset();
+        // next_offset = clamp(previous_offset + wheel_delta, zero, maximum_offset).
         self.set_offset(Vec2i::new(
             offset.x.saturating_add(delta.x).clamp(0, maximum.x),
             offset.y.saturating_add(delta.y).clamp(0, maximum.y),
@@ -392,6 +400,7 @@ fn layout_virtual_content(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Child
             .layout_child(children, index, Recti::new(0, y, offered_width, preferred_height))
             .unwrap_or_default();
         width = width.max(offered_width.max(size.width));
+        // next_y = current_y + child_height, followed by spacing when another child remains.
         y = y.saturating_add(size.height);
         if index + 1 < children.len() {
             y = y.saturating_add(spacing);
@@ -451,8 +460,10 @@ impl Layout for ScrollAreaLayout {
         // Measure application content through the virtual surface and add only the panel padding.
         // Scrollbars are responsive affordances and do not inflate intrinsic composite size.
         let padding = style.padding.max(0);
+        // inset = leading_padding + trailing_padding = padding * 2.
         let inset = padding.saturating_mul(2);
         let content_width = if available.width > 0 {
+            // content_width = max(available_width - inset, 1).
             available.width.saturating_sub(inset).max(1)
         } else {
             0
@@ -460,6 +471,7 @@ impl Layout for ScrollAreaLayout {
         let content = children
             .measure_child(Self::VIRTUAL_SURFACE, style, atlas, Dimensioni::new(content_width, 0))
             .unwrap_or_default();
+        // preferred_extent = content_extent + leading_padding + trailing_padding.
         Dimensioni::new(content.width.saturating_add(inset), content.height.saturating_add(inset))
     }
 
@@ -481,6 +493,7 @@ impl Layout for ScrollAreaLayout {
         for _ in 0..4 {
             let vertical_width = if has_vertical { bar_size.min(surface.width) } else { 0 };
             let horizontal_height = if has_horizontal { bar_size.min(surface.height) } else { 0 };
+            // body_extent = surface_extent - occupied_scrollbar_extent.
             let body = Recti::new(
                 0,
                 0,

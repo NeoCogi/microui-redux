@@ -237,7 +237,9 @@ impl TextArea {
             let text_w = lines.iter().map(|line| line.width).max().unwrap_or(0);
             let line_count = (lines.len() as i32).max(1);
             let line_height = atlas.get_font_height(font) as i32;
+            // preferred_width = text_width + left_padding + right_padding.
             let mut width = text_w.saturating_add(padding * 2).max(0);
+            // preferred_height = line_height * line_count + top_padding + bottom_padding.
             let mut height = line_height.saturating_mul(line_count).saturating_add(padding * 2).max(0);
             if avail.width > 0 {
                 width = width.min(avail.width.max(0));
@@ -571,6 +573,7 @@ fn textarea_update(
         let mouse_pos = content_mouse_pos;
         let local_x = mouse_pos.x - (layout.body.x + layout.padding) + state.scroll.x;
         let local_y = mouse_pos.y - (layout.body.y + layout.padding) + state.scroll.y;
+        // line_index = clamp(local_y / line_height, 0, line_count - 1).
         let line_idx = (local_y / layout.metrics.line_height).clamp(0, layout.lines.len().saturating_sub(1) as i32) as usize;
         cursor_pos = cursor_from_x(&layout.lines[line_idx], state.buf.as_str(), local_x, font, ctx.atlas());
         ensure_visible = true;

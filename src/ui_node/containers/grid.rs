@@ -498,6 +498,7 @@ fn layout_grid(state: &mut GridState, children: &mut Children, ctx: &mut Contain
 
     // Placement and both track vectors are now authoritative for this layout commit.
     for placement in state.items.placements.iter().copied() {
+        // child_origin = grid_origin + preceding_track_offset.
         let x = rect.x.saturating_add(track_offset(&layout.columns, placement.column, spacing));
         let y = rect.y.saturating_add(track_offset(&layout.rows, placement.row, spacing));
         let width = track_span(&layout.columns, placement.column, placement.column_span, spacing);
@@ -537,6 +538,7 @@ fn grid_dimensions(state: &GridState) -> (usize, usize) {
         .items
         .placements
         .iter()
+        // occupied_row_end = placement_row + row_span.
         .map(|placement| placement.row.saturating_add(placement.row_span))
         .max()
         .unwrap_or(0)
@@ -550,7 +552,11 @@ fn grid_dimensions(state: &GridState) -> (usize, usize) {
 /// Zero remains the unbounded-measurement marker; a positive bound remains positive after inset.
 fn available_tracks(available: i32, count: usize, spacing: i32) -> i32 {
     if available > 0 {
-        available.saturating_sub(spacing.max(0).saturating_mul(count.saturating_sub(1) as i32)).max(1)
+        // gap_count = track_count - 1; spacing_total = spacing * gap_count.
+        let gap_count = count.saturating_sub(1) as i32;
+        let spacing_total = spacing.max(0).saturating_mul(gap_count);
+        // track_extent = max(available_extent - spacing_total, 1).
+        available.saturating_sub(spacing_total).max(1)
     } else {
         0
     }
@@ -563,7 +569,9 @@ fn preferred_column(state: &GridState, children: &Children, index: usize, style:
 
     // Only children whose spans cover this column can increase its minimum.
     for placement in state.items.placements.iter().copied() {
-        if index < placement.column || index >= placement.column.saturating_add(placement.column_span) {
+        // column_end = first_column + column_span.
+        let column_end = placement.column.saturating_add(placement.column_span);
+        if index < placement.column || index >= column_end {
             continue;
         }
         let minimum = children
@@ -601,7 +609,9 @@ fn preferred_row(
     let mut preferred = track_policy(&state.row_tracks, index).intrinsic_extent(fallback);
     // Measure only children crossing this row, at the width of their complete column span.
     for placement in state.items.placements.iter().copied() {
-        if index < placement.row || index >= placement.row.saturating_add(placement.row_span) {
+        // row_end = first_row + row_span.
+        let row_end = placement.row.saturating_add(placement.row_span);
+        if index < placement.row || index >= row_end {
             continue;
         }
         let width = child_width(placement);
@@ -643,12 +653,15 @@ fn contribution_for_track(policies: &[SizePolicy], index: usize, start: usize, s
 
     // Establish how much of the child's minimum is already covered by base tracks and the spacing
     // internal to its span. `rank` identifies this track among only the flexible tracks.
+    // span_end = span_start + max(span, 1).
     let end = start.saturating_add(span.max(1));
+    // internal_gap_count = span - 1; initial_coverage starts with spacing * internal_gap_count.
     let mut initial = spacing.max(0).saturating_mul(span.saturating_sub(1) as i32);
     let mut flexible = 0_i32;
     let mut rank = 0_i32;
     for track in start..end {
         let track_policy = track_policy(policies, track);
+        // initial_coverage = previous_coverage + track_intrinsic_extent.
         initial = initial.saturating_add(track_policy.intrinsic_extent(fallback));
         if !matches!(track_policy, SizePolicy::Fixed(_)) {
             if track < index {
@@ -662,8 +675,10 @@ fn contribution_for_track(policies: &[SizePolicy], index: usize, start: usize, s
     }
 
     // Divide only the uncovered pixels. Earlier flexible tracks receive the indivisible remainder.
+    // deficit = max(child_minimum - initial_coverage, 0).
     let deficit = minimum.max(0).saturating_sub(initial);
     let increment = deficit / flexible + i32::from(rank < deficit % flexible);
+    // contributed_extent = policy_base_extent + allocated_deficit_increment.
     base.saturating_add(increment)
 }
 
@@ -692,6 +707,8 @@ fn resolved_column_span(
     );
     let mut width = 0_i32;
     // All preceding columns must be replayed because Remainder depends on ordered consumption.
+    // placement_end = first_column + column_span.
+    let placement_end = placement.column.saturating_add(placement.column_span);
     for index in 0..columns {
         let size = axis
             .next(
@@ -699,11 +716,16 @@ fn resolved_column_span(
                 preferred_column(state, children, index, style, atlas, spacing),
             )
             .advance;
-        if index >= placement.column && index < placement.column.saturating_add(placement.column_span) {
+        if index >= placement.column && index < placement_end {
+            // span_width = previous_span_width + resolved_track_width.
             width = width.saturating_add(size);
         }
     }
-    width.saturating_add(spacing.max(0).saturating_mul(placement.column_span.saturating_sub(1) as i32))
+    // internal_gap_count = column_span - 1; spacing_total = spacing * internal_gap_count.
+    let gap_count = placement.column_span.saturating_sub(1) as i32;
+    let spacing_total = spacing.max(0).saturating_mul(gap_count);
+    // complete_span_width = resolved_track_widths + internal_spacing.
+    width.saturating_add(spacing_total)
 }
 
 /// Fills the layout-phase column buffer with resolved widths.
@@ -765,21 +787,23 @@ fn track_policy(policies: &[SizePolicy], index: usize) -> SizePolicy {
 
 /// Sums a resolved track span including only the gaps internal to that span.
 fn track_span(tracks: &[i32], start: usize, span: usize, spacing: i32) -> i32 {
-    tracks
-        .iter()
-        .skip(start)
-        .take(span.max(1))
-        .fold(0_i32, |sum, size| sum.saturating_add(*size))
-        .saturating_add(spacing.max(0).saturating_mul(span.saturating_sub(1) as i32))
+    // track_total = sum(resolved_track_extents in the requested span).
+    let track_total = tracks.iter().skip(start).take(span.max(1)).fold(0_i32, |sum, size| sum.saturating_add(*size));
+    // internal_gap_count = span - 1; spacing_total = spacing * internal_gap_count.
+    let gap_count = span.saturating_sub(1) as i32;
+    let spacing_total = spacing.max(0).saturating_mul(gap_count);
+    // span_extent = track_total + spacing_total.
+    track_total.saturating_add(spacing_total)
 }
 
 /// Returns the offset preceding a track after earlier extents and their following gaps.
 fn track_offset(tracks: &[i32], count: usize, spacing: i32) -> i32 {
-    tracks
-        .iter()
-        .take(count)
-        .fold(0_i32, |sum, size| sum.saturating_add(*size))
-        .saturating_add(spacing.max(0).saturating_mul(count as i32))
+    // preceding_track_total = sum(resolved extents before the requested track).
+    let track_total = tracks.iter().take(count).fold(0_i32, |sum, size| sum.saturating_add(*size));
+    // preceding_spacing_total = spacing * preceding_track_count.
+    let spacing_total = spacing.max(0).saturating_mul(count as i32);
+    // track_offset = preceding_track_total + preceding_spacing_total.
+    track_total.saturating_add(spacing_total)
 }
 
 /// Concrete row-major placement of one child inside a Grid.
@@ -811,6 +835,7 @@ fn grid_placements_into(child_count: usize, columns: usize, spans: &[GridSpan], 
         let (row, column) = first_free_grid_cell(occupied, columns, search_row, search_column);
         let span = spans.get(index).copied().unwrap_or(GridSpan::ONE);
         // A span is intrinsically non-zero. Only the parent-dependent right-edge clamp remains.
+        // column_span = min(requested_span, max(column_count - start_column, 1)).
         let column_span = span.columns().min(columns.saturating_sub(column).max(1));
         let row_span = span.rows();
         mark_grid_occupied(occupied, columns, row, column, row_span, column_span);
@@ -823,6 +848,7 @@ fn grid_placements_into(child_count: usize, columns: usize, spans: &[GridSpan], 
         });
 
         search_row = row;
+        // next_search_column = placed_column + occupied_column_span.
         search_column = column.saturating_add(column_span);
         while search_column >= columns {
             search_column -= columns;
@@ -835,6 +861,7 @@ fn grid_placements_into(child_count: usize, columns: usize, spans: &[GridSpan], 
 fn first_free_grid_cell(occupied: &mut Vec<bool>, columns: usize, mut row: usize, mut column: usize) -> (usize, usize) {
     loop {
         // Grow by complete rows so `row * columns + column` remains a valid flat index.
+        // required_cells = (row + 1) * column_count.
         let required = row.saturating_add(1).saturating_mul(columns);
         if occupied.len() < required {
             occupied.resize(required, false);
@@ -853,13 +880,16 @@ fn first_free_grid_cell(occupied: &mut Vec<bool>, columns: usize, mut row: usize
 /// Marks every cell covered by one validated placement span.
 fn mark_grid_occupied(occupied: &mut Vec<bool>, columns: usize, row: usize, column: usize, row_span: usize, column_span: usize) {
     // Row spans may extend the current bitmap; column spans are clamped at the right Grid edge.
+    // end_row = start_row + max(row_span, 1); required_cells = end_row * column_count.
     let end_row = row.saturating_add(row_span.max(1));
     let required = end_row.saturating_mul(columns);
     if occupied.len() < required {
         occupied.resize(required, false);
     }
+    // end_column = min(start_column + max(column_span, 1), column_count).
+    let end_column = column.saturating_add(column_span.max(1)).min(columns);
     for y in row..end_row {
-        for x in column..column.saturating_add(column_span.max(1)).min(columns) {
+        for x in column..end_column {
             occupied[y * columns + x] = true;
         }
     }

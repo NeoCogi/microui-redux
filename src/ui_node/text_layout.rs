@@ -177,12 +177,14 @@ pub(crate) fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32)
     let baseline_center = rect.y + rect.height / 2;
     let min_top = rect.y + rect.height - line_height;
     let max_top = rect.y;
+    // text_top = clamp(centered_baseline - font_baseline, minimum_top, maximum_top).
     (baseline_center - baseline).clamp(min_top, max_top)
 }
 
 /// Computes the bounding size for a block of measured lines.
 pub(crate) fn text_block_size(lines: &[TextLine], line_height: i32) -> Dimensioni {
     let width = lines.iter().map(|line| line.width).max().unwrap_or(0).max(0);
+    // block_height = line_height * max(line_count, 1).
     let height = line_height.saturating_mul((lines.len() as i32).max(1)).max(0);
     Dimensioni::new(width, height)
 }

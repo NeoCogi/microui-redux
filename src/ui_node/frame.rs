@@ -61,9 +61,11 @@ pub(crate) fn frame_geometry(outer: Recti, framed: bool, style: &Style) -> Frame
 
 /// Removes a frame from a positive measurement bound while preserving the intrinsic `0` marker.
 pub(crate) fn content_available(available: Dimensioni, border_width: i32) -> Dimensioni {
+    // border_extent = leading_border_width + trailing_border_width = border_width * 2.
+    let border_extent = border_width.saturating_mul(2);
     Dimensioni::new(
-        inset_available(available.width, border_width.saturating_mul(2)),
-        inset_available(available.height, border_width.saturating_mul(2)),
+        inset_available(available.width, border_extent),
+        inset_available(available.height, border_extent),
     )
 }
 
@@ -106,10 +108,13 @@ fn paint_clipped_frame(painter: &mut Painter<'_>, outer: Recti, fill: Option<Col
 
     if border.color.a != 0 {
         let top = Recti::new(outer.x, outer.y, outer.width, width);
+        // bottom_y = outer_y + outer_height - border_width.
         let bottom_y = checked_add(outer.y, outer.height - width)?;
         let bottom = Recti::new(outer.x, bottom_y, outer.width, width);
+        // middle_y = outer_y + border_width.
         let middle_y = checked_add(outer.y, width)?;
         let left = Recti::new(outer.x, middle_y, width, content.height);
+        // right_x = outer_x + outer_width - border_width.
         let right_x = checked_add(outer.x, outer.width - width)?;
         let right = Recti::new(right_x, middle_y, width, content.height);
         painter.fill_rect(top, border.color);
@@ -126,21 +131,24 @@ fn paint_clipped_frame(painter: &mut Painter<'_>, outer: Recti, fill: Option<Col
 
 fn checked_inset(outer: Recti, width: i32) -> Option<Recti> {
     let width = width.max(0);
+    // border_extent = leading_border_width + trailing_border_width = width * 2.
     let twice = width.checked_mul(2)?;
     if twice >= outer.width || twice >= outer.height {
         return None;
     }
-    Some(Recti::new(
-        checked_add(outer.x, width)?,
-        checked_add(outer.y, width)?,
-        outer.width.checked_sub(twice)?,
-        outer.height.checked_sub(twice)?,
-    ))
+    // content_origin = outer_origin + border_width.
+    let x = checked_add(outer.x, width)?;
+    let y = checked_add(outer.y, width)?;
+    // content_extent = outer_extent - leading_border - trailing_border.
+    let content_width = outer.width.checked_sub(twice)?;
+    let content_height = outer.height.checked_sub(twice)?;
+    Some(Recti::new(x, y, content_width, content_height))
 }
 
 /// Removes a non-negative inset from a measurement axis without losing the `0 == unbounded` marker.
 fn inset_available(value: i32, inset: i32) -> i32 {
     // Positive bounds stay positive because downstream measurement reserves zero for unbounded.
+    // content_bound = max(available_bound - non_negative_inset, 1).
     if value > 0 { value.saturating_sub(inset.max(0)).max(1) } else { 0 }
 }
 
@@ -148,12 +156,15 @@ fn expand_positive_axis(value: i32, border_width: i32) -> i32 {
     if value <= 0 {
         value
     } else {
+        // border_outset = leading_border_width + trailing_border_width.
         let outset = i64::from(border_width.max(0)) * 2;
+        // outer_extent = content_extent + border_outset.
         i32::try_from(i64::from(value) + outset).expect("framed preferred size overflowed i32")
     }
 }
 
 fn checked_add(left: i32, right: i32) -> Option<i32> {
+    // sum = left + right, rejected when it is outside the i32 range.
     i32::try_from(i64::from(left) + i64::from(right)).ok()
 }
 

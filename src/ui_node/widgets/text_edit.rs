@@ -274,6 +274,7 @@ pub(crate) fn line_index_for_cursor(lines: &[TextLine], cursor: usize) -> usize 
             return idx;
         }
     }
+    // last_line_index = line_count - 1, remaining at zero for an empty list.
     lines.len().saturating_sub(1)
 }
 
@@ -332,6 +333,7 @@ pub(crate) fn cursor_from_text_x(buf: &str, target_x: i32, font: FontId, atlas: 
 
 /// Clamps a scroll offset against the current maximum scroll range.
 pub(crate) fn clamp_scroll(value: i32, max_value: i32) -> i32 {
+    // scroll_offset = clamp(requested_offset, 0, maximum_offset).
     if max_value <= 0 { 0 } else { value.clamp(0, max_value) }
 }
 
