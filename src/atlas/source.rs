@@ -64,6 +64,9 @@ pub struct AtlasSource<'a> {
     /// Pixel data matching [`AtlasSource::format`].
     pub pixels: &'a [u8],
     /// Icon lookup table.
+    ///
+    /// Entry zero must be an opaque white rendering tile. [`crate::render::Renderer`] samples that
+    /// entry, identified by [`crate::WHITE_ICON`], when drawing solid geometry.
     pub icons: &'a [(&'a str, Recti)],
     /// Fonts baked into the atlas.
     pub fonts: &'a [(&'a str, FontEntry<'a>)],

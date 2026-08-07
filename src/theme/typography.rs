@@ -106,13 +106,3 @@ impl FontChoice {
         style.resolve_font_choice(self)
     }
 }
-
-/// Describes the interface the atlas uses to query font metadata.
-pub trait Font {
-    /// Returns the font's display name.
-    fn name(&self) -> &str;
-    /// Returns the base pixel size of the font.
-    fn get_size(&self) -> usize;
-    /// Returns the pixel width and height for a specific character.
-    fn get_char_size(&self, c: char) -> (usize, usize);
-}

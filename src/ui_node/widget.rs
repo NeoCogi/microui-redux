@@ -72,7 +72,7 @@ bitflags! {
         const NORMAL = 1;
         /// Fill the background while hovered.
         const HOVER = 2;
-        /// Fill the background while actively clicked.
+        /// Fill the background while the widget owns focus.
         const CLICK = 4;
         /// Fill the background for every interaction state.
         const ALL = Self::NORMAL.bits() | Self::HOVER.bits() | Self::CLICK.bits();
@@ -85,11 +85,11 @@ bitflags! {
     pub struct WidgetOption : u32 {
         /// Gives the widget a Style-owned outer border and inset content rectangle.
         const FRAME = 512;
-        /// Keeps keyboard focus while the widget is held.
+        /// Keeps keyboard focus after release until routing moves it or the node becomes unavailable.
         const HOLD_FOCUS = 256;
         /// Consumes scroll input while the widget is hovered.
         const GRAB_SCROLL = 32;
-        /// Disables interaction for the widget.
+        /// Disables interaction with this widget's own surface; eligible descendants remain interactive.
         const NO_INTERACT = 4;
         /// Aligns the widget to the right side of the cell.
         const ALIGN_RIGHT = 2;
@@ -322,11 +322,11 @@ pub trait Widget {
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>);
     /// Records paint commands through paint-only capabilities.
     ///
-    /// Paint is observational with respect to semantic widget state. Implementations may maintain
-    /// private rendering-only caches, but must not mutate application state, topology, interaction,
-    /// or layout, and must not make behavior or future layout depend on paint having run. Mutating
-    /// retained UI through an independently captured state handle is a contract violation rather
-    /// than a deferred-next-frame operation.
+    /// Paint is observational with respect to application-authored semantic state, topology,
+    /// interaction, and committed layout. Implementations may maintain private rendering caches or
+    /// publish framework-owned, paint-derived read-only geometry for later application use, but
+    /// neither may alter the current commit. Mutating retained UI through an independently captured
+    /// state handle is a contract violation rather than a deferred-next-frame operation.
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>);
     /// Returns the effective widget options used by generic dispatch.
     ///

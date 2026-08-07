@@ -124,7 +124,7 @@ impl Layout for ColumnLayout {
 pub struct Column;
 
 impl Column {
-    /// Creates a state-owned column and returns its weak state capability plus completed node.
+    /// Creates a child-owning column and returns its weak state capability plus completed node.
     ///
     /// The child cell is allocated first because [`ColumnState`] needs a weak mutation capability
     /// for that exact collection. The layout retains the strong state allocation, while the

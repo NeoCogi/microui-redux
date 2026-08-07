@@ -33,7 +33,7 @@
 //! One node representation owns either a widget or a container; no parallel legacy tree or
 //! generated public identity path remains.
 //!
-//! Topology is assembled from unique owning nodes and concrete state-owned containers. Update and
+//! Topology is assembled from unique owning nodes and concrete child-owning containers. Update and
 //! paint visit a node before its eligible children in forward sibling order; pointer input visits
 //! eligible children first in reverse sibling order so the deepest, topmost node wins. Measurement
 //! and layout recurse only through a container's scoped child APIs.

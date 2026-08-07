@@ -30,7 +30,7 @@
 
 //! Button widget state and rendering.
 //!
-//! Buttons support text, semantic atlas icons, and external textures through one shared layout
+//! Buttons support text, arbitrary atlas icons, and external textures through one shared layout
 //! path.
 
 use super::*;
@@ -99,7 +99,7 @@ impl ButtonParameters {
         }
     }
 
-    /// Creates button parameters with a semantic atlas icon.
+    /// Creates button parameters with an atlas icon.
     pub fn with_icon(label: impl Into<String>, icon: IconId, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::Text { label: label.into(), icon: Some(icon) },

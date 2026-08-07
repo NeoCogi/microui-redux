@@ -284,7 +284,7 @@ impl GridItems {
     }
 }
 
-/// One-shot construction input for a state-owned [`Grid`].
+/// One-shot construction input for a child-owning [`Grid`].
 #[derive(Default)]
 pub struct GridParameters {
     children: Children,
@@ -450,7 +450,7 @@ impl Layout for GridLayoutPolicy {
     }
 }
 
-/// Convenience constructor namespace for state-owned Grids.
+/// Convenience constructor namespace for child-owning Grids.
 pub struct Grid;
 
 impl Grid {

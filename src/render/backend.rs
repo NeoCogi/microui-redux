@@ -321,6 +321,9 @@ pub trait RendererBackend: 'static {
         Self: 'a;
 
     /// Returns the atlas backing the UI renderer.
+    ///
+    /// The atlas must contain an opaque white rendering tile at [`crate::WHITE_ICON`] (icon index
+    /// zero), which the renderer samples for solid geometry.
     fn get_atlas(&self) -> AtlasHandle;
     /// Acquires and initializes one backend frame.
     fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError>;

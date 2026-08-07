@@ -165,8 +165,10 @@ pub struct Context<B: RendererBackend> {
 
 impl<B: RendererBackend> Context<B> {
     /// Creates a new UI context with unique ownership of the provided backend.
+    ///
+    /// The default style binds conventional semantic font and icon names from the backend atlas.
     pub fn new(backend: B) -> Self {
-        // The backend supplies the atlas; the default style then binds semantic font roles from it.
+        // The backend supplies the atlas; the default style then binds semantic assets from it.
         let renderer = Renderer::new(backend);
         let style = Style::default().with_named_assets(&renderer.atlas());
         Self {
@@ -321,10 +323,10 @@ impl<B: RendererBackend> Context<B> {
 
     /// Replaces the current UI style.
     ///
-    /// Unset/default font fields are rebound automatically from the current atlas when it exposes
-    /// the conventional `body` / `small` / `title` / `heading` / `mono` font names. Use
-    /// [`Style::with_named_fonts`] or [`Style::bind_named_fonts`] when you want to force all
-    /// semantic roles to those atlas bindings explicitly.
+    /// Unset/default font and icon fields are rebound automatically from the current atlas when it
+    /// exposes their conventional semantic names. Use [`Style::with_named_assets`] or
+    /// [`Style::bind_named_assets`] when you want to force all semantic roles to those atlas
+    /// bindings explicitly.
     pub fn set_style(&mut self, style: &Style) {
         let mut resolved = *style;
         resolved.bind_default_named_fonts(&self.renderer.atlas());
@@ -394,9 +396,11 @@ impl<B: RendererBackend> ContextFrame<'_, B> {
     /// Returns [`RenderError::UiUpdateRequired`] before paint or backend acquisition when no commit
     /// exists for these dimensions or when raw input is pending. This operation is paint-only: it
     /// does not route input, update semantic state, run layout, synthesize timers, or produce a
-    /// generic frame-result/resource-state object. Widget paint and custom-render callbacks must be
-    /// observational with respect to application state, topology, interaction, and layout; only
-    /// private rendering-cache mutation is permitted.
+    /// generic frame-result/resource-state object. Widget paint is observational with respect to
+    /// application-authored semantic state, topology, interaction, and committed layout. Built-in
+    /// widgets may publish framework-owned, paint-derived read-only geometry for later use or update
+    /// private rendering caches; custom-render callbacks may update callback-private rendering
+    /// caches only. Neither kind of cache can alter the current commit.
     pub fn render_ui(mut self) -> Result<(), RenderError> {
         let dimensions = self.info.dimensions();
         let commit_matches = self

@@ -107,8 +107,10 @@
 //!
 //! Update and paint traverse parent before children and siblings in forward order. Later work sees
 //! successful earlier cross-cell mutations, work already completed does not rerun, and each input
-//! transaction's final layout observes the resulting state and topology. Paint and custom-render
-//! callbacks are observational except for private rendering-only caches.
+//! transaction's final layout observes the resulting state and topology. Paint is observational
+//! with respect to application-authored semantic state and the committed layout. Built-in widgets
+//! may publish framework-owned, paint-derived read-only geometry for later use or update private
+//! rendering caches; custom-render callbacks may update callback-private rendering caches only.
 //!
 //! ```
 //! use microui_redux::prelude::*;
@@ -213,7 +215,7 @@ pub mod prelude {
         WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
-    pub use crate::theme::{Color, ControlColor, Font, FontChoice, FontRole, Style, ThemeIcons, color};
+    pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
     pub use crate::widgets::{
         Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch,
         ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom, CustomBuilder, CustomParameters,
@@ -237,7 +239,7 @@ pub use image::{ImageSource, load_image_bytes};
 pub use input::{KeyCode, KeyMode, MouseButton};
 pub use math::{expand_rect, rect, vec2};
 pub use render::TextureId;
-pub use theme::{Color, ControlColor, Font, FontChoice, FontRole, Style, ThemeIcons, color};
+pub use theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
 pub use ui_node::{
     ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Disclosure, DisclosureParameters,
     DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, GridState, Layout, Node, Policy, Row, RowParameters, RowState, ScrollArea,

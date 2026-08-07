@@ -87,12 +87,14 @@ pending input, or different frame dimensions returns `RenderError::UiUpdateRequi
 display-list execution, or backend acquisition. Input belongs to `update_ui`; by the time painting
 starts, widgets record only committed visual state.
 
-Widget paint and backend custom-render callbacks are observational with respect to application
-state, topology, interaction, and layout. They may maintain private rendering-only caches. A
-callback that captures a `WidgetStateHandle` and mutates retained UI during rendering violates the
-contract; the mutation is not scheduled as deferred work, and weak handles cannot invalidate the
-already selected commit. Perform semantic mutations before `update_ui` and create the frame only
-after that commit is complete.
+Widget paint is observational with respect to application-authored semantic state, topology,
+interaction, and committed layout. Built-in widgets may publish framework-owned, paint-derived
+read-only geometry for later application use, or maintain private rendering caches; neither may
+alter the current commit. Backend custom-render callbacks may maintain callback-private rendering
+caches only. A callback that captures a `WidgetStateHandle` and mutates retained UI during rendering
+violates the contract; the mutation is not scheduled as deferred work, and weak handles cannot
+invalidate the already selected commit. Perform semantic mutations before `update_ui` and create
+the frame only after that commit is complete.
 
 The crate-owned submission path consumes every operation in painter order and leaves its internal
 list empty for reuse, including validation or frame-acquisition failures.
@@ -106,7 +108,8 @@ normal atlas work is flushed immediately before each barrier.
 custom widget can draw without knowing its screen position or the concrete
 backend. `WidgetUpdateCtx` deliberately has no painter or display-list access,
 so visual ordering cannot depend on work recorded during update. A `Widget::paint` implementation
-may update only private rendering caches; it must not change semantic state or future layout:
+may update private rendering caches or publish framework-owned, paint-derived read-only geometry;
+it must not change application-authored semantic state or the current committed layout:
 
 ```rust
 use microui_redux::prelude::*;
@@ -279,10 +282,12 @@ vertices likewise append into renderer-owned scratch storage.
 
 ## Images and textures
 
-The atlas is immutable after construction and contains only fonts plus semantic
-icons addressed by `IconId`. General images are external textures owned through
-`Renderer` and addressed directly by `TextureId`; there is no image wrapper or
-atlas-slot path.
+The atlas is immutable after construction and contains fonts plus named bitmap
+icons addressed by `IconId`. A `ThemeIcons` binding selects the semantic icons
+used by built-in components, while applications may use other named icons.
+General images are external textures owned through `Renderer` and addressed
+directly by `TextureId`; `ImageSource` describes upload input, but there is no
+persistent image-resource wrapper or atlas-slot path.
 
 Image-bearing widgets accept `TextureId`. `WidgetFillOption` controls which
 interaction states draw the widget's filled background; use
@@ -308,8 +313,9 @@ fn upload_image<B: RendererBackend>(
 
 Use `Context::free_image` when the texture is no longer needed.
 `Context::load_image_from` accepts `ImageSource`, while
-`Context::load_image_rgba` is the panicking convenience form for already
-validated RGBA data.
+`Context::load_image_rgba` is the panicking convenience form: it validates the
+RGBA data and panics on invalid dimensions, invalid byte length, or backend
+upload failure.
 
 Low-level integrations use the equivalent renderer methods:
 
@@ -377,7 +383,9 @@ Renderer skips the callback when that intersection is empty; callbacks must not 
 in widget update.
 The first callback argument is `&mut B::Frame<'_>`, so backend-specific methods
 can be called without raw backend exposure or a second frame acquisition.
-Retained custom nodes store the returned `CustomRenderHandle<B>`.
+`Node::custom_render` checks the backend-typed `CustomRenderHandle<B>` and stores
+only its private backend-neutral registry key. Renderer preflight validates that
+key before acquiring a backend frame.
 
 ## Implementing a backend
 
@@ -430,6 +438,9 @@ impl RendererBackend for Backend {
 
 Backend rules:
 
+- `get_atlas` must return a non-empty atlas whose icon at `WHITE_ICON` (index
+  zero) is an opaque white rendering tile; the renderer samples it for solid
+  geometry.
 - `frame` acquires all fallible native frame resources and returns a value
   that exclusively borrows the backend.
 - `push_quad` and `push_triangle` receive final atlas-backed

@@ -42,7 +42,7 @@ use std::{
     path::Path,
 };
 
-/// Incrementally constructs an atlas by packing fonts and semantic icons.
+/// Incrementally constructs an atlas by packing fonts and named bitmap icons.
 pub struct Builder {
     /// Rectangle packer used to reserve atlas regions.
     packer: Packer,

@@ -68,8 +68,8 @@ rust-src --toolchain nightly`).
 
 ## Key Concepts
 - **Context**: owns the high-level `Renderer`, the only ordered input queue, and retained root windows. Applications enqueue through Context methods, call `update_ui(dimensions)` to drain input and commit layout, observe or mutate typed state, synchronize again if that mutation can affect layout, then call `frame(FrameInfo).render_ui()?` to paint and submit once.
-- **Container**: a public `Widget` subtrait for runtimes that own one authoritative opaque `Children` collection. Application-facing container state uses typed weak `WidgetStateHandle` values and safe indexed membership operations.
-- **Layout engine + flows**: parent containers assign child rectangles through scoped `ContainerLayoutCtx` services. Row, Grid, Column, Stack, Disclosure, and ScrollArea all own persistent children behind typed container state.
+- **Container**: the concrete retained owner of one layout policy and one authoritative opaque `Children` collection. An optional `ContainerSurface` widget supplies behavior for the container's own surface. Application-facing container state uses typed weak `WidgetStateHandle` values and safe indexed membership operations.
+- **Layout engine + flows**: parent containers assign child rectangles through scoped `ContainerLayoutCtx` services. Row, Grid, Column, Stack, Disclosure, and ScrollArea retain their children in the concrete container; typed state exposes configuration and weak topology mutation capabilities without owning mounted nodes.
 - **Widget**: a runtime UI element implementing `Widget` (for example `Button`, `Textbox`, or `Slider`) and uniquely owning its associated state allocation. `*Parameters` are one-shot initialization; `*State` holds mounted mutable values and events.
 - **Node**: the non-cloneable owner of one concrete widget or container runtime. A `Node` receives private process-unique identity when constructed and transfers exactly once into a root or opaque `Children` collection; attached nodes cannot be detached or reparented.
 - **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and `Renderer` executes it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](src/render/RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
@@ -240,8 +240,9 @@ cargo run --example backend-frame-cube --features example-wgpu
 The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate built-in state through typed `WidgetStateHandle` values, commit updates with `Context::update_ui(...)`, and paint with `Context::frame(FrameInfo).render_ui()?`.
 
 Root creation consumes one persistent application `Node` and returns a non-owning `RootHandle`.
-Roots cannot be replaced while retaining their identity: mutate descendants through a state-owned
-container, or destroy and recreate the root. Visibility is controlled with `set_root_visible`.
+Roots cannot be replaced while retaining their identity: mutate descendants through a container
+state's weak topology capability, or destroy and recreate the root. Visibility is controlled with
+`set_root_visible`.
 A visible dialog is modal: it stays above every window and popup, receives all eligible pointer,
 keyboard, text, focus, and capture routing, and blocks interaction with other roots until hidden or
 destroyed. Other roots remain visible and continue to be laid out and painted.
@@ -270,9 +271,10 @@ ctx.frame(info).render_ui()?;
 ```
 
 Retained trees are the supported public authoring path. Each non-cloneable `Node` owns one concrete
-widget or container runtime. Dynamic `ColumnState`, `DisclosureState`, and `GridState` values own
-opaque children; successful insertion transfers a node, while removal, clearing, or replacement
-drops the removed runtime owners. Grid placement belongs to `GridState`, not to generic nodes:
+widget or container runtime. The concrete `Container` owns its opaque children; dynamic
+`ColumnState`, `DisclosureState`, and `GridState` values expose weak capabilities for modifying that
+collection. Successful insertion transfers a node, while removal, clearing, or replacement drops
+the removed runtime owners. Grid placement belongs to `GridState`, not to generic nodes:
 plain nodes occupy one cell, while `GridItem::spanned(node, columns, rows)` supplies an explicit
 parent-child span that can later be changed with `GridState::set_span` without replacing the child.
 Built-in values, events, and commands are accessed through typed weak state handles. Disclosure
@@ -340,15 +342,17 @@ visitor borrow makes mutation of that same container return `None`, while anothe
 may change. There is no transaction snapshot or rollback, but every input transaction ends with a
 complete layout before the next event is routed.
 
-`Widget::paint` and registered custom-render callbacks are observational with respect to
-application state, topology, interaction, and layout. They may update private rendering-only
-caches, but mutating retained UI through an independently captured state handle during either
-callback violates the contract; it is not a deferred-next-frame update. Commit those changes before
-creating the frame.
+`Widget::paint` is observational with respect to application-authored semantic state, topology,
+interaction, and committed layout. A built-in widget may publish framework-owned, paint-derived
+read-only geometry for later application use—`ComboState::anchor`, for example—or update a private
+rendering cache, but neither can alter the current commit. Registered custom-render callbacks may
+update only callback-private rendering caches. Mutating retained UI through an independently
+captured state handle during either callback violates the contract; it is not a deferred-next-frame
+update. Commit semantic changes before creating the frame.
 
 ## Fonts and typography
 - Atlas building supports multiple baked fonts and sizes through `atlas::builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.
-- `Context::new(...)` binds the conventional atlas keys `body`, `small`, `title`, `heading`, and `mono` onto the default `Style`. `Context::set_style(...)` also rebinds any font fields that are still left at their default/unset values, so tweaking colors or spacing on top of `Style::default()` keeps the intended body/title sizes.
+- `Context::new(...)` binds the conventional atlas font keys `body`, `small`, `title`, `heading`, and `mono`, plus the built-in semantic icon keys, onto the default `Style`. `Context::set_style(...)` also rebinds font and icon fields that are still left at their default values, so tweaking colors or spacing on top of `Style::default()` preserves the atlas's semantic bindings.
 - Text-bearing widget Parameters expose `.font(FontChoice)`, so you can either select a semantic role (`FontRole::Heading.into()`) or a concrete baked font ID (`atlas.font_id("caption").unwrap().into()`).
 - Font sizes are selected by choosing another baked font variant, not by scaling one bitmap font at runtime.
 - `examples/demo-full` uses this directly: `NORMAL.ttf` for control/body text, `BOLD.ttf` for window titles, and `CONSOLE.ttf` for the log window’s input/output text.
@@ -362,6 +366,9 @@ const ICONS: &[builder::IconAsset<'static>] = &[
     builder::IconAsset { name: "collapse", path: "assets/MINUS.png" },
     builder::IconAsset { name: "check", path: "assets/CHECK.png" },
     builder::IconAsset { name: "expand_down", path: "assets/EXPAND_DOWN.png" },
+    builder::IconAsset { name: "open_folder", path: "assets/OPEN_FOLDER_16.png" },
+    builder::IconAsset { name: "closed_folder", path: "assets/CLOSED_FOLDER_16.png" },
+    builder::IconAsset { name: "file", path: "assets/FILE_16.png" },
 ];
 
 const FONTS: &[builder::FontAsset<'static>] = &[
@@ -378,7 +385,7 @@ const FONTS: &[builder::FontAsset<'static>] = &[
     builder::FontAsset {
         name: "title",
         path: "assets/BOLD.ttf",
-        size: 16,
+        size: 12,
     },
     builder::FontAsset {
         name: "heading",
@@ -388,7 +395,7 @@ const FONTS: &[builder::FontAsset<'static>] = &[
     builder::FontAsset {
         name: "mono",
         path: "assets/CONSOLE.ttf",
-        size: 12,
+        size: 14,
     },
 ];
 
@@ -411,9 +418,10 @@ If `fonts` is empty, `builder::Config` falls back to `default_font` + `default_f
 
 ## Cargo features
 - `builder` *(default)* – enables the runtime atlas builder and PNG decoding helpers used by the examples.
-- `png_source` – allows serialized atlases and `ImageSource::Png { .. }` uploads to stay compressed.
+- `png_source` – accepts PNG-compressed serialized atlases and `ImageSource::Png { .. }`; pixels are decoded to RGBA when loaded.
 - `save-to-rust` – enables `AtlasHandle::to_rust_files` to emit the current atlas as Rust code for embedding.
 - `prebuilt-atlas` – opt-in example atlas embedding; without it, examples build their atlas at runtime.
+- `external-atlas` – lets examples load `atlas.png` from disk with compiled atlas metadata instead of building or embedding its pixels.
 - `example-backend` – shared internal gate used by examples; pair it with exactly one concrete backend.
 - `example-glow` / `example-vulkan` / `example-wgpu` – concrete example backends; choose exactly one when running examples.
 

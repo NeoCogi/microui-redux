@@ -40,4 +40,4 @@ pub use icons::ThemeIcons;
 pub use palette::ControlColor;
 pub use style::Style;
 pub(crate) use style::FrameBorder;
-pub use typography::{Font, FontChoice, FontRole};
+pub use typography::{FontChoice, FontRole};

@@ -53,7 +53,7 @@ pub(crate) struct NodeRuntime {
     pub(crate) hovered: bool,
     /// This node currently owns focus.
     pub(crate) focused: bool,
-    /// Mouse was pressed on this node during the current frame.
+    /// Mouse was pressed on this node during the current input transaction.
     pub(crate) clicked: bool,
     /// Mouse is held down while this node owns focus.
     pub(crate) active: bool,

@@ -168,7 +168,7 @@ impl Layout for StackLayout {
 pub struct Stack;
 
 impl Stack {
-    /// Creates a state-owned stack and its weak application capability.
+    /// Creates a child-owning stack and its weak application capability.
     ///
     /// The container owns the nodes; typed state owns configuration plus a weak topology route.
     /// Dropping the returned node therefore expires every cloned state handle without requiring a

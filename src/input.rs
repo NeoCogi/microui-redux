@@ -76,7 +76,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Copy, Clone, Debug)]
-    /// Modifier key state tracked by the input system.
+    /// Modifier and editing-control key state tracked by the input system.
     pub struct KeyMode : u32 {
         /// Delete key held.
         const DELETE = 32;

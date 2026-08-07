@@ -385,7 +385,7 @@ fn create_container(parameters: DisclosureParameters) -> (WidgetStateHandle<Disc
 pub struct Disclosure;
 
 impl Disclosure {
-    /// Creates a state-owned disclosure and returns its weak state capability plus completed node.
+    /// Creates a child-owning disclosure and returns its weak state capability plus completed node.
     ///
     /// Construction is complete before the node is returned: callers never observe or manipulate
     /// the two structural children separately.

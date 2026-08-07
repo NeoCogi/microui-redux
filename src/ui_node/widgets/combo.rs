@@ -86,7 +86,7 @@ pub struct ComboState {
     open: bool,
     /// Label text for the currently selected item.
     label: String,
-    /// Last button rectangle used to place the popup.
+    /// Framework-owned popup anchor snapshot published by the latest paint.
     last_anchor: Recti,
     /// User-visible selection changes waiting to be consumed.
     pending_changes: u32,
@@ -97,7 +97,10 @@ pub struct ComboState {
 impl WidgetState for ComboState {}
 
 impl ComboState {
-    /// Returns the popup anchor computed during the latest combo draw.
+    /// Returns the popup anchor published by the latest completed combo paint.
+    ///
+    /// This geometry is intended for positioning the popup during a later update/commit; it does not
+    /// retroactively affect the frame that produced it.
     pub fn anchor(&self) -> Recti {
         self.last_anchor
     }
@@ -112,7 +115,7 @@ impl ComboState {
         &self.label
     }
 
-    /// Returns `true` when the combo popup should be open this frame.
+    /// Returns `true` while the combo popup should remain open.
     pub fn is_open(&self) -> bool {
         self.open
     }
@@ -222,7 +225,7 @@ impl Combo {
         })
     }
 
-    /// Paints the combo header and records the popup anchor below it.
+    /// Paints the combo header and publishes the read-only popup anchor below it.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let header = ctx.local_rect();
         let screen_header = ctx.screen_content_rect();

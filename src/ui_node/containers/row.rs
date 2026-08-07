@@ -149,7 +149,7 @@ impl Layout for RowLayout {
 pub struct Row;
 
 impl Row {
-    /// Creates a state-owned row and its weak application capability.
+    /// Creates a child-owning row and its weak application capability.
     ///
     /// Child ownership and row configuration deliberately have different owners: `Container`
     /// retains nodes, while `RowState` retains index-matched sizing policy and only a weak route to
