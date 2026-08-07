@@ -29,12 +29,10 @@
 //
 //! Local-coordinate recording into an owned display list.
 
-use super::{
-    display_list::DisplayList,
-    geometry::{bounds_for_line, bounds_for_points, positive_intersection, rect_has_area, rects_overlap, translate_rect},
-};
+use super::display_list::DisplayList;
 use crate::{
     atlas::{FontId, IconId},
+    math::RectExt,
     render::{Color, TextureId},
 };
 use rs_math3d::{Recti, Vec2f, Vec2i, color4b};
@@ -135,7 +133,8 @@ impl<'a> Painter<'a> {
     /// Returns the current effective clip translated into local coordinates.
     pub fn current_clip_rect(&self) -> Recti {
         // local_clip_origin = screen_clip_origin - painter_origin.
-        translate_rect(self.clip, Vec2i::new(self.origin.x.saturating_neg(), self.origin.y.saturating_neg()))
+        self.clip
+            .saturating_translated(Vec2i::new(self.origin.x.saturating_neg(), self.origin.y.saturating_neg()))
     }
 
     /// Records a semantic filled rectangle.
@@ -145,7 +144,7 @@ impl<'a> Painter<'a> {
 
     /// Records an inside-aligned rectangle outline with the requested integer width.
     pub fn stroke_rect(&mut self, rect: Recti, width: i32, color: Color) {
-        if !rect_has_area(rect) || color.a == 0 || width <= 0 {
+        if !rect.has_positive_area() || color.a == 0 || width <= 0 {
             return;
         }
         // border_extent = leading_border_width + trailing_border_width = width * 2.
@@ -173,7 +172,7 @@ impl<'a> Painter<'a> {
     ///
     /// Text measurement remains outside Painter; final glyph clipping is performed by Renderer.
     pub fn text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
-        if text.is_empty() || color.a == 0 || !rect_has_area(self.clip) {
+        if text.is_empty() || color.a == 0 || !self.clip.has_positive_area() {
             return;
         }
         self.list.push_text(self.clip, font, self.screen_pos(pos), color, text);
@@ -191,14 +190,14 @@ impl<'a> Painter<'a> {
 
     /// Tessellates and records one thick local line without clipping its generated triangles.
     pub fn stroke_line(&mut self, from: Vec2f, to: Vec2f, width: f32, color: Color) {
-        if color.a == 0 || !rect_has_area(self.clip) {
+        if color.a == 0 || !self.clip.has_positive_area() {
             return;
         }
 
-        let Some(local_bounds) = bounds_for_line(from, to, width) else {
+        let Some(local_bounds) = Recti::from_thick_line(from, to, width) else {
             return;
         };
-        if !rects_overlap(self.screen_rect(local_bounds), self.clip) {
+        if !self.screen_rect(local_bounds).overlaps(self.clip) {
             return;
         }
         let offset = Vec2f::new(self.origin.x as f32, self.origin.y as f32);
@@ -211,13 +210,13 @@ impl<'a> Painter<'a> {
     /// Convex polygons use a triangle fan; concave polygons use ear clipping. Degenerate,
     /// non-finite, and self-invalidating inputs safely emit no operation.
     pub fn fill_polygon(&mut self, points: &[Vec2f], color: Color) {
-        if points.len() < 3 || color.a == 0 || !rect_has_area(self.clip) {
+        if points.len() < 3 || color.a == 0 || !self.clip.has_positive_area() {
             return;
         }
-        let Some(local_bounds) = bounds_for_points(points) else {
+        let Some(local_bounds) = Recti::from_points(points) else {
             return;
         };
-        if !rects_overlap(self.screen_rect(local_bounds), self.clip) {
+        if !self.screen_rect(local_bounds).overlaps(self.clip) {
             return;
         }
 
@@ -231,7 +230,7 @@ impl<'a> Painter<'a> {
     /// public push/pop pair, or Drop-time restoration behavior.
     pub fn with_clip(&mut self, rect: Recti, paint: impl FnOnce(&mut Painter<'_>)) {
         let screen_clip = self.screen_rect(rect);
-        let effective = positive_intersection(self.clip, screen_clip).unwrap_or_else(|| {
+        let effective = self.clip.positive_intersection(screen_clip).unwrap_or_else(|| {
             // empty_origin = componentwise_max(parent_clip_origin, requested_clip_origin).
             Recti::new(self.clip.x.max(screen_clip.x), self.clip.y.max(screen_clip.y), 0, 0)
         });
@@ -252,16 +251,16 @@ impl<'a> Painter<'a> {
 
     /// Converts a local rectangle into screen space.
     fn screen_rect(&self, rect: Recti) -> Recti {
-        translate_rect(rect, self.origin)
+        rect.saturating_translated(self.origin)
     }
 
     /// Applies the common rectangle visibility policy and records one semantic rectangle operation.
     fn record_rect(&mut self, rect: Recti, color: Color, record: impl FnOnce(&mut DisplayList, Recti, Recti)) {
-        if !rect_has_area(rect) || color.a == 0 {
+        if !rect.has_positive_area() || color.a == 0 {
             return;
         }
         let screen_rect = self.screen_rect(rect);
-        if rects_overlap(screen_rect, self.clip) {
+        if screen_rect.overlaps(self.clip) {
             record(self.list, self.clip, screen_rect);
         }
     }

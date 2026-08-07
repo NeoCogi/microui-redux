@@ -41,6 +41,7 @@ mod update;
 pub(crate) use input_dispatcher::DispatchResult;
 
 use crate::input::InputSnapshot;
+use crate::math::RectExt;
 use crate::render::DisplayList;
 use crate::{Dimensioni, MouseButton, Recti, Style, UNCLIPPED_RECT, Vec2i};
 #[cfg(test)]
@@ -310,16 +311,6 @@ fn node_interaction_config(node: &Node) -> (WidgetOption, FocusPolicy) {
         opt |= WidgetOption::NO_INTERACT;
     }
     (opt, widget.focus_policy())
-}
-
-/// Converts a screen-space rectangle into coordinates relative to `origin`.
-fn rect_relative_to(rect: Recti, origin: Vec2i) -> Recti {
-    Recti::new(rect.x - origin.x, rect.y - origin.y, rect.width, rect.height)
-}
-
-/// Converts a local rectangle into screen coordinates relative to `origin`.
-fn translate_local_rect(rect: Recti, origin: Vec2i) -> Recti {
-    Recti::new(rect.x + origin.x, rect.y + origin.y, rect.width, rect.height)
 }
 
 #[cfg(test)]

@@ -40,10 +40,11 @@ use super::{
         RendererFrame, Vertex,
     },
     display_list::{DisplayList, DrawKind, DrawOp},
-    geometry::{ClipRect, SolidTriangle, positive_intersection, rect_has_area, textured_quad_from_uv},
+    geometry::{ClipRect, SolidTriangle, textured_quad_from_uv},
 };
 use crate::{
     atlas::{AtlasHandle, FontId, IconId, WHITE_ICON},
+    math::RectExt,
     render::{Color, TextureId},
 };
 use rs_math3d::{Dimensioni, Recti, Vec2f, Vec2i};
@@ -300,7 +301,7 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
 
     /// Executes one operation after resolving its final viewport clip.
     fn execute(&mut self, DrawOp { clip, kind }: DrawOp) {
-        let Some(clip) = positive_intersection(clip, self.viewport) else {
+        let Some(clip) = clip.positive_intersection(self.viewport) else {
             return;
         };
         match kind {
@@ -371,7 +372,7 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
 
     /// Flushes atlas work and invokes one visible custom callback in painter order.
     fn draw_custom(&mut self, renderer: CustomRenderKey, content_area: Recti, clip: Recti) {
-        let Some(view) = positive_intersection(clip, content_area) else {
+        let Some(view) = clip.positive_intersection(content_area) else {
             return;
         };
         let callback = self
@@ -400,10 +401,10 @@ fn submit_atlas_rect<F: RendererFrame>(frame: &mut F, atlas_dim: Dimensioni, dst
 
 /// Clips a textured destination and preserves projected source coordinates through final UVs.
 fn clipped_textured_quad(dst: Recti, src: Recti, texture_dim: Dimensioni, color: Color, clip: Recti) -> Option<[Vertex; 4]> {
-    if !rect_has_area(dst) || !rect_has_area(src) || texture_dim.width <= 0 || texture_dim.height <= 0 {
+    if !dst.has_positive_area() || !src.has_positive_area() || texture_dim.width <= 0 || texture_dim.height <= 0 {
         return None;
     }
-    let clipped = positive_intersection(dst, clip)?;
+    let clipped = dst.positive_intersection(clip)?;
 
     let dst_extent = Vec2f::new(dst.width as f32, dst.height as f32);
     let dst_x0 = i64::from(dst.x);

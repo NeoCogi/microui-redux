@@ -31,6 +31,7 @@
 //! Retained measurement, allocation, and child-content bounds.
 
 use super::*;
+use crate::math::RectExt;
 
 impl UiRuntime {
     /// Measures one already-borrowed node through the authoritative private node path.
@@ -128,15 +129,6 @@ impl UiRuntime {
     }
 }
 
-/// Returns the union of two rectangles.
-fn union_rect(a: Recti, b: Recti) -> Recti {
-    let min_x = a.x.min(b.x);
-    let min_y = a.y.min(b.y);
-    let max_x = (a.x + a.width).max(b.x + b.width);
-    let max_y = (a.y + a.height).max(b.y + b.height);
-    Recti::new(min_x, min_y, max_x - min_x, max_y - min_y)
-}
-
 /// Returns the rectangle occupied by a child and any overflow content it measured.
 fn child_content_rect(node: &Node) -> Recti {
     let allocation = node.state.layout.allocation;
@@ -152,11 +144,11 @@ fn child_content_rect(node: &Node) -> Recti {
 fn child_content_bounds_from_children(children: &Children) -> Option<Recti> {
     // Hidden children keep their last allocation for state continuity but cannot enlarge active
     // content bounds. Visible child overflow is folded without allocating a temporary collection.
-    let mut bounds = None;
+    let mut bounds: Option<Recti> = None;
     for child in children.iter().filter(|child| node_is_visible(child)) {
         let child_rect = child_content_rect(child);
         bounds = Some(match bounds {
-            Some(rect) => union_rect(rect, child_rect),
+            Some(rect) => rect.union(child_rect),
             None => child_rect,
         });
     }

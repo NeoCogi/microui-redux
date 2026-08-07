@@ -58,12 +58,12 @@ impl UiRuntime {
             crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, None, style.frame_border());
         }
         let child_transform = parent_transform.push(node.state.layout);
-        let local_clip = rect_relative_to(screen_clip, screen_origin);
+        let local_clip = screen_clip.relative_to(screen_origin);
         let content_clip = local_clip
             .intersect(&content_rect)
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
-        let screen_content_rect = translate_local_rect(content_rect, screen_origin);
-        let screen_content_clip = translate_local_rect(content_clip, screen_origin);
+        let screen_content_rect = content_rect.translated(screen_origin);
+        let screen_content_clip = content_clip.translated(screen_origin);
         {
             // Limit the mutable display-list borrow to this widget call before custom/child output.
             let mut widget_ctx = crate::WidgetPaintCtx::new_with_content_geometry(

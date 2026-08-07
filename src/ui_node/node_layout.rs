@@ -33,7 +33,7 @@
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::{Dimensioni, Recti, Vec2i};
+use crate::{Dimensioni, Recti, Vec2i, math::RectExt};
 
 /// Layout-authored participation of one retained child and its subtree.
 ///
@@ -181,7 +181,7 @@ impl Transform {
         // only after computing the node-local viewport, so scrolling translates descendants but
         // never translates the viewport that clips them.
         let node_origin = self.offset + Vec2i::new(layout.allocation.x, layout.allocation.y);
-        let screen_clip = translate_rect(layout.children.clip, node_origin);
+        let screen_clip = layout.children.clip.translated(node_origin);
         Self {
             offset: node_origin + layout.children.offset,
             clip: self.clip.intersect(&screen_clip).unwrap_or_default(),
@@ -191,11 +191,6 @@ impl Transform {
     /// Resolves a parent-local allocation into screen coordinates.
     pub(crate) fn resolve(self, allocation: Recti) -> Recti {
         // Allocations are parent-local; the inherited offset is the complete accumulated transform.
-        translate_rect(allocation, self.offset)
+        allocation.translated(self.offset)
     }
-}
-
-/// Translates a rectangle without changing its extent.
-fn translate_rect(rect: Recti, offset: Vec2i) -> Recti {
-    Recti::new(rect.x + offset.x, rect.y + offset.y, rect.width, rect.height)
 }

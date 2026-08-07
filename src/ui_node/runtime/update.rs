@@ -47,7 +47,7 @@ impl UiRuntime {
         let content_rect = frame_geometry.content_or_empty();
         let screen_clip = parent_transform.clip.intersect(&screen_rect).unwrap_or_default();
         let child_transform = parent_transform.push(node.state.layout);
-        let local_clip = rect_relative_to(screen_clip, screen_origin);
+        let local_clip = screen_clip.relative_to(screen_origin);
         let content_clip = local_clip
             .intersect(&content_rect)
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
@@ -67,8 +67,8 @@ impl UiRuntime {
             .take_routed_event(id)
             .map(|event| super::widget_context::localize_event(Vec2i::new(content_rect.x, content_rect.y), event));
         let accepts_pointer_input = self.accepts_pointer_input();
-        let screen_content_rect = translate_local_rect(content_rect, screen_origin);
-        let screen_content_clip = translate_local_rect(content_clip, screen_origin);
+        let screen_content_rect = content_rect.translated(screen_origin);
+        let screen_content_clip = content_clip.translated(screen_origin);
         let mut widget_ctx = crate::WidgetUpdateCtx::new_with_content_geometry(
             screen_content_rect,
             screen_content_clip,

@@ -30,7 +30,7 @@
 //! Stateless vertex construction, tessellation, bounds, translation, and final triangle clipping.
 
 use super::backend::Vertex;
-use crate::theme::Color;
+use crate::{math::RectExt, theme::Color};
 
 /// Sentinel clip rectangle used when command recording starts without a root clip.
 pub(crate) static UNCLIPPED_RECT: Recti = Recti {
@@ -39,7 +39,7 @@ pub(crate) static UNCLIPPED_RECT: Recti = Recti {
     width: i32::MAX,
     height: i32::MAX,
 };
-use rs_math3d::{Color4b, FloatVector, Recti, Vec2f, Vec2i, Vector, color4b};
+use rs_math3d::{Color4b, FloatVector, Recti, Vec2f, color4b};
 use std::ops::Range;
 
 /// Floating-point tolerance shared by tessellation and clipping predicates.
@@ -597,7 +597,7 @@ pub(crate) struct ClipRect {
 impl ClipRect {
     /// Creates a non-empty clipping rectangle and precomputes its four edge objects.
     pub(crate) fn new(rect: Recti) -> Option<Self> {
-        if !rect_has_area(rect) {
+        if !rect.has_positive_area() {
             return None;
         }
 
@@ -638,73 +638,6 @@ impl ClipRect {
 
         input.triangulate_into(output);
     }
-}
-
-/// Applies an integer translation without changing rectangle extents.
-pub(crate) fn translate_rect(rect: Recti, offset: Vec2i) -> Recti {
-    // translated_origin = rectangle_origin + offset.
-    Recti::new(rect.x.saturating_add(offset.x), rect.y.saturating_add(offset.y), rect.width, rect.height)
-}
-
-/// Returns whether an integer rectangle contains positive area.
-pub(super) fn rect_has_area(rect: Recti) -> bool {
-    rect.width > 0 && rect.height > 0
-}
-
-/// Returns the positive-area portion shared by two rectangles.
-///
-/// `Recti::intersect` treats touching edges as a zero-area intersection. Rendering treats that as
-/// empty, so this adapter applies the module's positive-area policy to the library operation.
-pub(super) fn positive_intersection(left: Recti, right: Recti) -> Option<Recti> {
-    if !rect_has_area(left) || !rect_has_area(right) {
-        return None;
-    }
-    left.intersect(&right).filter(|intersection| rect_has_area(*intersection))
-}
-
-/// Returns whether two positive-area integer rectangles overlap.
-pub(super) fn rects_overlap(left: Recti, right: Recti) -> bool {
-    positive_intersection(left, right).is_some()
-}
-
-/// Computes a conservative integer bounding rectangle for finite floating-point positions.
-pub(super) fn bounds_for_points(points: &[Vec2f]) -> Option<Recti> {
-    let first = *points.first()?;
-    if !point_is_finite(first) {
-        return None;
-    }
-
-    let mut min = first;
-    let mut max = first;
-    for point in points.iter().copied().skip(1) {
-        if !point_is_finite(point) {
-            return None;
-        }
-        min = Vec2f::min(&min, &point);
-        max = Vec2f::max(&max, &point);
-    }
-
-    let x0 = min.x.floor() as i32;
-    let y0 = min.y.floor() as i32;
-    let x1 = max.x.ceil() as i32;
-    let y1 = max.y.ceil() as i32;
-    // width = clamp(ceil(max_x) - floor(min_x), 0, i32::MAX).
-    let width = (i64::from(x1) - i64::from(x0)).clamp(0, i64::from(i32::MAX)) as i32;
-    // height = clamp(ceil(max_y) - floor(min_y), 0, i32::MAX).
-    let height = (i64::from(y1) - i64::from(y0)).clamp(0, i64::from(i32::MAX)) as i32;
-    Some(Recti::new(x0, y0, width, height))
-}
-
-/// Computes conservative bounds for one finite thick line.
-pub(super) fn bounds_for_line(from: Vec2f, to: Vec2f, width: f32) -> Option<Recti> {
-    if !width.is_finite() || width <= 0.0 || !point_is_finite(from) || !point_is_finite(to) {
-        return None;
-    }
-
-    let half_extent = Vec2f::new(width * 0.5, width * 0.5);
-    let min = Vec2f::min(&from, &to) - half_extent;
-    let max = Vec2f::max(&from, &to) + half_extent;
-    bounds_for_points(&[min, max])
 }
 
 /// Returns whether both point components are finite.
