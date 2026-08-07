@@ -136,3 +136,6 @@ fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Colo
 
     Ok((info.width as _, info.height as _, pixels))
 }
+
+#[cfg(test)]
+mod tests;

@@ -131,9 +131,6 @@ pub const CLOSED_FOLDER_16_ICON: IconId = IconId(7);
 /// Identifier of the file icon baked into the default atlas.
 pub const FILE_16_ICON: IconId = IconId(8);
 
-pub use crate::image::{ImageSource, load_image_bytes};
-pub(crate) use crate::image::validate_rgba_buffer;
-
 #[cfg(feature = "builder")]
 /// Helpers for constructing atlas textures at build time.
 pub mod builder;
@@ -144,6 +141,3 @@ pub use source::{AtlasSource, FontEntry, SourceFormat};
 #[cfg(feature = "save-to-rust")]
 mod export;
 mod runtime;
-
-#[cfg(test)]
-mod tests;

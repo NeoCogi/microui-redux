@@ -1,7 +1,7 @@
 //! Serializable atlas source metadata and decoding.
 
 use super::*;
-use crate::ImageSource;
+use crate::image::{ImageSource, load_image_bytes};
 use std::io::{Error, ErrorKind};
 
 /// Describes a font baked into an [`AtlasSource`].

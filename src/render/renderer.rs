@@ -44,7 +44,7 @@ use super::{
 };
 use crate::{
     atlas::{AtlasHandle, FontId, IconId, WHITE_ICON},
-    theme::{Color, TextureId},
+    render::{Color, TextureId},
 };
 use rs_math3d::{Dimensioni, Recti, Vec2f, Vec2i};
 use std::collections::HashSet;
@@ -233,7 +233,7 @@ impl<B: RendererBackend> Renderer<B> {
     /// }
     /// ```
     pub fn try_load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
-        crate::atlas::validate_rgba_buffer(width, height, pixels.len())?;
+        crate::image::validate_rgba_buffer(width, height, pixels.len())?;
         let next_texture_id = self.next_texture_id.checked_add(1).ok_or_else(|| String::from("Texture id space exhausted"))?;
         let id = TextureId::new(self.next_texture_id, width, height);
         self.backend.create_texture(id, width, height, pixels)?;

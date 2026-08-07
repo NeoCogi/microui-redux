@@ -5,8 +5,7 @@ mod palette;
 mod style;
 mod typography;
 
-pub use crate::render::{Color, TextureId, color};
-pub use crate::image::ImageSource;
+pub use crate::render::{Color, color};
 pub use icons::ThemeIcons;
 pub use palette::ControlColor;
 pub use style::Style;

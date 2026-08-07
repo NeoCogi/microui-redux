@@ -55,10 +55,10 @@
 use rs_math3d::{Recti, Vec2i};
 
 use crate::atlas::{AtlasHandle, FontId, IconId};
-use crate::render::{DisplayList, Painter};
+use crate::render::{DisplayList, Painter, TextureId};
 use crate::input::{KeyCode, KeyMode, MouseButton};
 use crate::WidgetOption;
-use crate::theme::{Color, ControlColor, Style, TextureId};
+use crate::theme::{Color, ControlColor, Style};
 use crate::ui_node::text_layout::control_text_position_with_font;
 
 use super::UiInputEvent;

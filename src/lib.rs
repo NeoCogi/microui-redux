@@ -164,7 +164,7 @@
 
 pub mod atlas;
 mod file_dialog;
-mod image;
+pub mod image;
 mod input;
 mod math;
 pub mod render;
@@ -199,11 +199,12 @@ pub mod retained {
 pub mod prelude {
     pub use crate::atlas::{
         AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry, FontId,
-        IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON, load_image_bytes,
+        IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
     };
     pub use crate::file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
+    pub use crate::image::{ImageSource, load_image_bytes};
     pub use crate::input::{KeyCode, KeyMode, MouseButton};
-    pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame};
+    pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureId};
     pub use crate::retained::{
         ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Context, ContextFrame,
         CustomRenderArgs, CustomRenderHandle, Disclosure, DisclosureParameters, DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan,
@@ -212,7 +213,7 @@ pub mod prelude {
         WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
-    pub use crate::theme::{Color, ControlColor, Font, FontChoice, FontRole, ImageSource, Style, TextureId, ThemeIcons, color};
+    pub use crate::theme::{Color, ControlColor, Font, FontChoice, FontRole, Style, ThemeIcons, color};
     pub use crate::widgets::{
         Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch,
         ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom, CustomBuilder, CustomParameters,
@@ -228,13 +229,15 @@ pub mod prelude {
 
 pub use atlas::{
     AtlasHandle, AtlasSource, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry,
-    FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON, load_image_bytes,
+    FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
 };
 pub use window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
 pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
+pub use image::{ImageSource, load_image_bytes};
 pub use input::{KeyCode, KeyMode, MouseButton};
 pub use math::{expand_rect, rect, vec2};
-pub use theme::{Color, ControlColor, Font, FontChoice, FontRole, ImageSource, Style, TextureId, ThemeIcons, color};
+pub use render::TextureId;
+pub use theme::{Color, ControlColor, Font, FontChoice, FontRole, Style, ThemeIcons, color};
 pub use ui_node::{
     ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Disclosure, DisclosureParameters,
     DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, GridState, Layout, Node, Policy, Row, RowParameters, RowState, ScrollArea,

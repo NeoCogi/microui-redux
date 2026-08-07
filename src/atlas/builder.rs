@@ -3,7 +3,7 @@
 use super::*;
 mod packer;
 use packer::{Config as PackerConfig, Packer};
-use crate::ImageSource;
+use crate::image::{ImageSource, load_image_bytes};
 use fontdue::*;
 use std::{
     collections::HashMap,
