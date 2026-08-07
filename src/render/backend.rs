@@ -103,6 +103,7 @@ impl Vertex {
     /// rounded back to the nearest byte. Clamping the amount prevents callers from extrapolating
     /// attributes beyond the supplied segment.
     pub(crate) fn lerp(left: Self, right: Self, amount: f32) -> Self {
+        // amount = clamp(requested_amount, 0, 1).
         let amount = amount.clamp(0.0, 1.0);
 
         Self {
@@ -119,6 +120,7 @@ impl Vertex {
 
     /// Interpolates one packed color channel and rounds it back into byte storage.
     fn lerp_channel(left: u8, right: u8, amount: f32) -> u8 {
+        // channel = left + (right - left) * amount, clamped to one byte.
         ((left as f32) + (right as f32 - left as f32) * amount).round().clamp(0.0, 255.0) as u8
     }
 }
@@ -427,6 +429,7 @@ impl<B: RendererBackend> CustomRenderRegistry<B> {
         let namespace = match self.namespace {
             Some(namespace) => namespace,
             None => {
+                // next_namespace = current_namespace + 1.
                 let raw = NEXT_CUSTOM_RENDER_NAMESPACE
                     .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| value.checked_add(1))
                     .map_err(|_| CustomRenderRegistryError::NamespaceExhausted)?;
@@ -435,6 +438,7 @@ impl<B: RendererBackend> CustomRenderRegistry<B> {
                 namespace
             }
         };
+        // next_slot = current_slot + 1.
         let slot = self.next_slot.checked_add(1).ok_or(CustomRenderRegistryError::SlotExhausted)?;
         self.next_slot = slot;
         let key = CustomRenderKey { namespace, slot };

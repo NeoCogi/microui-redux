@@ -278,6 +278,7 @@ impl SolidGeometry {
                 Vec2f::new(from.x - half, from.y + half),
             )
         } else {
+            // inverse_length = 1 / sqrt(delta_x^2 + delta_y^2).
             let inv_len = len_sq.sqrt().recip();
             let normal = Vec2f::new(-delta.y * inv_len, delta.x * inv_len) * (width * 0.5);
             (from + normal, to + normal, to - normal, from - normal)
@@ -290,7 +291,9 @@ impl SolidGeometry {
         self.polygon_boundary.clear();
         // The second pass appends a simplified boundary behind the copied input, so reserve both
         // spans up front and avoid a growth allocation halfway through tessellation.
-        self.polygon_boundary.reserve(points.len().saturating_mul(2));
+        // workspace_capacity = copied_point_count + simplified_point_count = point_count * 2.
+        let workspace_capacity = points.len().saturating_mul(2);
+        self.polygon_boundary.reserve(workspace_capacity);
         for point in points.iter().copied() {
             if !point_is_finite(point) {
                 self.polygon_boundary.clear();
@@ -445,6 +448,7 @@ impl ClipEdge {
         if delta.abs() <= GEOM_EPS {
             0.0
         } else {
+            // intersection_t = (boundary - segment_start) / segment_delta, clamped to the segment.
             ((self.boundary - start) / delta).clamp(0.0, 1.0)
         }
     }
@@ -568,7 +572,9 @@ impl TriangleClippingResult {
             return;
         }
 
-        for index in 1..self.len.saturating_sub(1) {
+        // exclusive_fan_end = vertex_count - 1, producing vertex_count - 2 triangles.
+        let exclusive_fan_end = self.len.saturating_sub(1);
+        for index in 1..exclusive_fan_end {
             let triangle = [self.vertices[0], self.vertices[index], self.vertices[index + 1]];
             let left = triangle[1].position() - triangle[0].position();
             let right = triangle[2].position() - triangle[0].position();
@@ -596,6 +602,7 @@ impl ClipRect {
         }
 
         let left = rect.x as f32;
+        // right = x + width; bottom = y + height.
         let right = rect.x.saturating_add(rect.width) as f32;
         let top = rect.y as f32;
         let bottom = rect.y.saturating_add(rect.height) as f32;
@@ -635,6 +642,7 @@ impl ClipRect {
 
 /// Applies an integer translation without changing rectangle extents.
 pub(crate) fn translate_rect(rect: Recti, offset: Vec2i) -> Recti {
+    // translated_origin = rectangle_origin + offset.
     Recti::new(rect.x.saturating_add(offset.x), rect.y.saturating_add(offset.y), rect.width, rect.height)
 }
 
@@ -680,12 +688,11 @@ pub(super) fn bounds_for_points(points: &[Vec2f]) -> Option<Recti> {
     let y0 = min.y.floor() as i32;
     let x1 = max.x.ceil() as i32;
     let y1 = max.y.ceil() as i32;
-    Some(Recti::new(
-        x0,
-        y0,
-        ((x1 as i64 - x0 as i64).max(0).min(i32::MAX as i64)) as i32,
-        ((y1 as i64 - y0 as i64).max(0).min(i32::MAX as i64)) as i32,
-    ))
+    // width = clamp(ceil(max_x) - floor(min_x), 0, i32::MAX).
+    let width = (i64::from(x1) - i64::from(x0)).clamp(0, i64::from(i32::MAX)) as i32;
+    // height = clamp(ceil(max_y) - floor(min_y), 0, i32::MAX).
+    let height = (i64::from(y1) - i64::from(y0)).clamp(0, i64::from(i32::MAX)) as i32;
+    Some(Recti::new(x0, y0, width, height))
 }
 
 /// Computes conservative bounds for one finite thick line.

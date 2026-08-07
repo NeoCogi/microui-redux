@@ -134,6 +134,7 @@ impl<'a> Painter<'a> {
 
     /// Returns the current effective clip translated into local coordinates.
     pub fn current_clip_rect(&self) -> Recti {
+        // local_clip_origin = screen_clip_origin - painter_origin.
         translate_rect(self.clip, Vec2i::new(self.origin.x.saturating_neg(), self.origin.y.saturating_neg()))
     }
 
@@ -147,27 +148,25 @@ impl<'a> Painter<'a> {
         if !rect_has_area(rect) || color.a == 0 || width <= 0 {
             return;
         }
-        if width.saturating_mul(2) >= rect.width || width.saturating_mul(2) >= rect.height {
+        // border_extent = leading_border_width + trailing_border_width = width * 2.
+        let border_extent = width.saturating_mul(2);
+        if border_extent >= rect.width || border_extent >= rect.height {
             self.fill_rect(rect, color);
             return;
         }
 
-        let middle_height = rect.height.saturating_sub(width.saturating_mul(2));
+        // middle_height = rectangle_height - top_border - bottom_border.
+        let middle_height = rect.height.saturating_sub(border_extent);
+        // bottom_y = rectangle_y + rectangle_height - border_width.
+        let bottom_y = rect.y.saturating_add(rect.height).saturating_sub(width);
+        // middle_y = rectangle_y + border_width.
+        let middle_y = rect.y.saturating_add(width);
+        // right_x = rectangle_x + rectangle_width - border_width.
+        let right_x = rect.x.saturating_add(rect.width).saturating_sub(width);
         self.fill_rect(Recti::new(rect.x, rect.y, rect.width, width), color);
-        self.fill_rect(
-            Recti::new(rect.x, rect.y.saturating_add(rect.height).saturating_sub(width), rect.width, width),
-            color,
-        );
-        self.fill_rect(Recti::new(rect.x, rect.y.saturating_add(width), width, middle_height), color);
-        self.fill_rect(
-            Recti::new(
-                rect.x.saturating_add(rect.width).saturating_sub(width),
-                rect.y.saturating_add(width),
-                width,
-                middle_height,
-            ),
-            color,
-        );
+        self.fill_rect(Recti::new(rect.x, bottom_y, rect.width, width), color);
+        self.fill_rect(Recti::new(rect.x, middle_y, width, middle_height), color);
+        self.fill_rect(Recti::new(right_x, middle_y, width, middle_height), color);
     }
 
     /// Records one UTF-8 text run at a local position.
@@ -232,8 +231,10 @@ impl<'a> Painter<'a> {
     /// public push/pop pair, or Drop-time restoration behavior.
     pub fn with_clip(&mut self, rect: Recti, paint: impl FnOnce(&mut Painter<'_>)) {
         let screen_clip = self.screen_rect(rect);
-        let effective =
-            positive_intersection(self.clip, screen_clip).unwrap_or_else(|| Recti::new(self.clip.x.max(screen_clip.x), self.clip.y.max(screen_clip.y), 0, 0));
+        let effective = positive_intersection(self.clip, screen_clip).unwrap_or_else(|| {
+            // empty_origin = componentwise_max(parent_clip_origin, requested_clip_origin).
+            Recti::new(self.clip.x.max(screen_clip.x), self.clip.y.max(screen_clip.y), 0, 0)
+        });
         let mut child = Painter {
             list: &mut *self.list,
             origin: self.origin,
@@ -245,6 +246,7 @@ impl<'a> Painter<'a> {
 
     /// Converts a local integer position into screen space.
     fn screen_pos(&self, pos: Vec2i) -> Vec2i {
+        // screen_position = local_position + painter_origin.
         Vec2i::new(pos.x.saturating_add(self.origin.x), pos.y.saturating_add(self.origin.y))
     }
 

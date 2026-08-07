@@ -133,7 +133,9 @@ impl<B: RendererBackend> Renderer<B> {
         let white_icon_rect = atlas.get_icon_rect(WHITE_ICON);
         let white_icon_min = Vec2f::new(white_icon_rect.x as f32, white_icon_rect.y as f32);
         let white_icon_extent = Vec2f::new(white_icon_rect.width as f32, white_icon_rect.height as f32);
+        // atlas_extent = max(actual_extent, 1) on each axis, keeping UV division non-zero.
         let atlas_extent = Vec2f::new(atlas_dim.width.max(1) as f32, atlas_dim.height.max(1) as f32);
+        // white_uv = (white_icon_origin + white_icon_extent / 2) / atlas_extent.
         let white_uv = (white_icon_min + white_icon_extent * 0.5) / atlas_extent;
         Self {
             backend,
@@ -234,6 +236,7 @@ impl<B: RendererBackend> Renderer<B> {
     /// ```
     pub fn try_load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
         crate::image::validate_rgba_buffer(width, height, pixels.len())?;
+        // next_texture_id = current_texture_id + 1.
         let next_texture_id = self.next_texture_id.checked_add(1).ok_or_else(|| String::from("Texture id space exhausted"))?;
         let id = TextureId::new(self.next_texture_id, width, height);
         self.backend.create_texture(id, width, height, pixels)?;
@@ -410,12 +413,14 @@ fn clipped_textured_quad(dst: Recti, src: Recti, texture_dim: Dimensioni, color:
         (i64::from(clipped.x) + i64::from(clipped.width) - dst_x0) as f32,
         (i64::from(clipped.y) + i64::from(clipped.height) - dst_y0) as f32,
     );
+    // t = clipped_destination_offset / complete_destination_extent.
     let t_min = clipped_offset_min / dst_extent;
     let t_max = clipped_offset_max / dst_extent;
 
     let src_min = Vec2f::new(src.x as f32, src.y as f32);
     let src_extent = Vec2f::new(src.width as f32, src.height as f32);
     let texture_extent = Vec2f::new(texture_dim.width as f32, texture_dim.height as f32);
+    // uv = (source_origin + destination_fraction * source_extent) / texture_extent.
     let uv_min = (src_min + t_min * src_extent) / texture_extent;
     let uv_max = (src_min + t_max * src_extent) / texture_extent;
 
