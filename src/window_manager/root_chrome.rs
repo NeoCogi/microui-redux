@@ -211,6 +211,7 @@ impl RootState {
 }
 
 fn record_pending(pending: &mut u32) {
+    // pending_event_count = previous_pending_event_count + 1.
     *pending = pending.saturating_add(1);
 }
 
@@ -313,11 +314,13 @@ impl Widget for RootChromeSurface {
                     UiInputEvent::MouseDrag { delta, .. } if ctx.active() => match state.interaction {
                         RootInteraction::Moving => {
                             // Movement changes origin only; programmed size remains authoritative.
+                            // next_origin = previous_origin + pointer_delta.
                             state.rect.x = state.rect.x.saturating_add(delta.x);
                             state.rect.y = state.rect.y.saturating_add(delta.y);
                         }
                         RootInteraction::Resizing => {
                             // Chrome minimum prevents title/body geometry from becoming invalid.
+                            // next_extent = max(previous_extent + pointer_delta, minimum_extent).
                             state.rect.width = state.rect.width.saturating_add(delta.x).max(state.geometry.minimum_outer.width);
                             state.rect.height = state.rect.height.saturating_add(delta.y).max(state.geometry.minimum_outer.height);
                         }
@@ -376,9 +379,12 @@ impl Layout for RootChromeLayout {
             )
         });
         // Convert the outer measurement bound into remaining application-content space.
+        // chrome_occupancy = outer_extent - body_extent.
+        let horizontal_chrome = outer.width.saturating_sub(shell.body.width);
+        let vertical_chrome = outer.height.saturating_sub(shell.body.height);
         let child_available = Dimensioni::new(
-            inset_available(available.width, outer.width.saturating_sub(shell.body.width)),
-            inset_available(available.height, outer.height.saturating_sub(shell.body.height)),
+            inset_available(available.width, horizontal_chrome),
+            inset_available(available.height, vertical_chrome),
         );
         let policy = children.child_policy(0).unwrap_or_else(crate::Policy::auto);
         let child = children
@@ -556,46 +562,52 @@ pub(super) fn root_chrome_geometry(
     } else {
         0
     };
+    // border_extent = leading_border_width + trailing_border_width = border_width * 2.
     let border_extent = border.checked_mul(2).expect("root chrome frame extent overflowed i32");
+    // padding_extent = leading_padding + trailing_padding = padding * 2.
+    let padding_extent = padding.saturating_mul(2);
     let auto_width = options.intersects(WindowOption::AUTO_WIDTH);
     let auto_height = options.intersects(WindowOption::AUTO_HEIGHT);
     let mut minimum_width: i32 = if auto_width { 1 } else { 96 };
     let mut minimum_height: i32 = if auto_height { 1 } else { 64 };
     if !options.intersects(WindowOption::NO_TITLE) {
         let close_width = if options.intersects(WindowOption::NO_CLOSE) { 0 } else { title_height };
-        minimum_width = minimum_width.max(
-            atlas
-                .get_text_size(style.title_font, name)
-                .width
-                .saturating_add(close_width)
-                .saturating_add(padding.saturating_mul(2)),
-        );
+        // title_minimum_width = text_width + close_button_width + left_and_right_padding.
+        let title_minimum_width = atlas
+            .get_text_size(style.title_font, name)
+            .width
+            .saturating_add(close_width)
+            .saturating_add(padding_extent);
+        minimum_width = minimum_width.max(title_minimum_width);
         minimum_height = minimum_height.max(if auto_height {
             title_height
         } else {
-            title_height.saturating_add(padding.saturating_mul(2))
+            // title_minimum_height = title_height + top_and_bottom_padding.
+            title_height.saturating_add(padding_extent)
         });
     }
+    // minimum_outer_extent = minimum_client_extent + frame_border_extent.
     let minimum_outer = Dimensioni::new(
         minimum_width.checked_add(border_extent).expect("root chrome minimum width overflowed i32"),
         minimum_height.checked_add(border_extent).expect("root chrome minimum height overflowed i32"),
     );
     let title_extent = if options.intersects(WindowOption::NO_TITLE) { 0 } else { title_height };
-    let intrinsic_outer = Dimensioni::new(
-        child_intrinsic
-            .width
-            .saturating_add(padding.saturating_mul(2))
-            .checked_add(border_extent)
-            .expect("root chrome intrinsic width overflowed i32")
-            .max(minimum_outer.width),
-        child_intrinsic
-            .height
-            .saturating_add(padding.saturating_mul(2))
-            .saturating_add(title_extent)
-            .checked_add(border_extent)
-            .expect("root chrome intrinsic height overflowed i32")
-            .max(minimum_outer.height),
-    );
+    // intrinsic_width = child_width + horizontal_padding + frame_border_extent.
+    let intrinsic_width = child_intrinsic
+        .width
+        .saturating_add(padding_extent)
+        .checked_add(border_extent)
+        .expect("root chrome intrinsic width overflowed i32")
+        .max(minimum_outer.width);
+    // intrinsic_height = child_height + vertical_padding + title_extent + frame_border_extent.
+    let intrinsic_height = child_intrinsic
+        .height
+        .saturating_add(padding_extent)
+        .saturating_add(title_extent)
+        .checked_add(border_extent)
+        .expect("root chrome intrinsic height overflowed i32")
+        .max(minimum_outer.height);
+    let intrinsic_outer = Dimensioni::new(intrinsic_width, intrinsic_height);
 
     let client = crate::ui_node::frame::frame_geometry(outer, options.intersects(WindowOption::FRAME), style).content_or_empty();
     let title =
@@ -603,11 +615,14 @@ pub(super) fn root_chrome_geometry(
     let close = title.and_then(|title| {
         (!options.intersects(WindowOption::NO_CLOSE)).then(|| {
             let width = title.height.min(title.width.max(0));
-            Recti::new(title.x.saturating_add(title.width).saturating_sub(width), title.y, width, title.height)
+            // close_x = title_x + title_width - close_width.
+            let x = title.x.saturating_add(title.width).saturating_sub(width);
+            Recti::new(x, title.y, width, title.height)
         })
     });
     let mut body = client;
     if let Some(title) = title {
+        // body_y = client_y + title_height; body_height = client_height - title_height.
         body.y = body.y.saturating_add(title.height);
         body.height = body.height.saturating_sub(title.height).max(0);
     }
@@ -616,12 +631,10 @@ pub(super) fn root_chrome_geometry(
     body.height = body.height.max(0);
     let resize = (!options.intersects(WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE)).then(|| {
         let size = style.scrollbar_size.max(0);
-        Recti::new(
-            client.x.saturating_add(client.width).saturating_sub(size),
-            client.y.saturating_add(client.height).saturating_sub(size),
-            size.min(client.width.max(0)),
-            size.min(client.height.max(0)),
-        )
+        // resize_origin = client_far_edge - resize_grip_extent.
+        let x = client.x.saturating_add(client.width).saturating_sub(size);
+        let y = client.y.saturating_add(client.height).saturating_sub(size);
+        Recti::new(x, y, size.min(client.width.max(0)), size.min(client.height.max(0)))
     });
     RootChromeGeometry {
         client,
@@ -637,14 +650,16 @@ pub(super) fn root_chrome_geometry(
 /// Removes root-chrome occupancy from a positive measurement bound while preserving intrinsic zero.
 fn inset_available(value: i32, inset: i32) -> i32 {
     // A positive remainder stays positive because zero requests unconstrained child measurement.
+    // content_bound = max(available_bound - non_negative_chrome_inset, 1).
     if value > 0 { value.saturating_sub(inset.max(0)).max(1) } else { 0 }
 }
 
 fn root_titlebar_height(style: &Style, atlas: &AtlasHandle) -> i32 {
     let font_height = atlas.get_font_height(style.title_font) as i32;
-    style
-        .title_height
-        .max(font_height.saturating_add((style.padding.max(0) / 2).max(1).saturating_mul(2)))
+    let vertical_padding = (style.padding.max(0) / 2).max(1);
+    // text_height = font_height + top_padding + bottom_padding.
+    let text_height = font_height.saturating_add(vertical_padding.saturating_mul(2));
+    style.title_height.max(text_height)
 }
 
 pub(super) fn record_root_overlay(display_list: &mut crate::render::DisplayList, viewport: Recti, state: &RootState, style: &Style, atlas: &AtlasHandle) {
@@ -654,6 +669,7 @@ pub(super) fn record_root_overlay(display_list: &mut crate::render::DisplayList,
         painter.fill_rect(title, style.colors[ControlColor::TitleBG as usize]);
         let mut text = title;
         if let Some(close) = geometry.close {
+            // text_width = close_button_x - title_x.
             text.width = close.x.saturating_sub(title.x).max(0);
         }
         if text.width > 0 && text.height > 0 {

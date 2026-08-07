@@ -89,6 +89,7 @@ impl<B: RendererBackend> Context<B> {
         let root = Node::container(root);
         // Hidden roots remain registered but sit outside visible z-order until explicitly shown.
         let z_index = if visible {
+            // next_z_index = previous_z_index + 1.
             self.last_zindex = self.last_zindex.saturating_add(1);
             self.last_zindex
         } else {
@@ -110,6 +111,7 @@ impl<B: RendererBackend> Context<B> {
     fn next_root_id(&mut self) -> RootId {
         // Return the current value, then reserve the next without wrapping to a reused identifier.
         let id = RootId::from_raw(self.next_root_id);
+        // next_root_id = current_root_id + 1.
         self.next_root_id = self.next_root_id.checked_add(1).expect("retained root id counter overflowed");
         id
     }
@@ -289,6 +291,7 @@ impl<B: RendererBackend> Context<B> {
 
     /// Assigns a fresh z-index without applying modal policy.
     fn raise_root_index(&mut self, index: usize) {
+        // next_z_index = previous_z_index + 1.
         self.last_zindex = self.last_zindex.saturating_add(1);
         self.roots[index].z_index = self.last_zindex;
     }
