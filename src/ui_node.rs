@@ -31,6 +31,8 @@ pub use input::UiInputEvent;
 mod scrollbar;
 mod sizing;
 pub use sizing::{Policy, SizePolicy};
+pub(crate) mod text_layout;
+pub use text_layout::TextWrap;
 mod widget;
 mod widget_context;
 pub use widget::{

@@ -164,13 +164,12 @@
 
 pub mod atlas;
 mod file_dialog;
-mod geometry;
 mod image;
 mod input;
+mod math;
 pub mod render;
 #[cfg(test)]
 mod test_support;
-mod text_layout;
 pub mod theme;
 mod ui_node;
 pub use ui_node::widgets;
@@ -183,12 +182,12 @@ mod window_manager;
 pub mod retained {
     pub use crate::file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
-    pub use crate::text_layout::TextWrap;
     pub use crate::ui_node::{
         ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Disclosure, DisclosureParameters,
         DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, GridState, Layout, Node, Policy, Row, RowParameters, RowState, ScrollArea,
         ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, UiInputEvent, Widget,
-        WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+        TextWrap, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner,
+        WidgetUpdateCtx,
     };
     pub use crate::window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
 }
@@ -212,7 +211,7 @@ pub mod prelude {
         ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, TextWrap, UiInputEvent, Widget, WidgetBuilder,
         WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, WindowOption,
     };
-    pub use crate::geometry::{expand_rect, rect, vec2};
+    pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{Color, ControlColor, Font, FontChoice, FontRole, ImageSource, Style, TextureId, ThemeIcons, color};
     pub use crate::widgets::{
         Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch,
@@ -234,13 +233,12 @@ pub use atlas::{
 pub use window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
 pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
 pub use input::{KeyCode, KeyMode, MouseButton};
-pub use text_layout::TextWrap;
-pub use geometry::{expand_rect, rect, vec2};
+pub use math::{expand_rect, rect, vec2};
 pub use theme::{Color, ControlColor, Font, FontChoice, FontRole, ImageSource, Style, TextureId, ThemeIcons, color};
 pub use ui_node::{
     ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Disclosure, DisclosureParameters,
     DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, GridState, Layout, Node, Policy, Row, RowParameters, RowState, ScrollArea,
-    ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, UiInputEvent, Widget,
+    ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, TextWrap, UiInputEvent, Widget,
     WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 pub use widgets::{

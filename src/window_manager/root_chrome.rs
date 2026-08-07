@@ -628,7 +628,7 @@ pub(super) fn record_root_overlay(display_list: &mut crate::render::DisplayList,
         }
         if text.width > 0 && text.height > 0 {
             let color = style.colors[ControlColor::TitleText as usize];
-            let pos = crate::text_layout::control_text_position_with_font(style, atlas, style.title_font, &state.name, text, WidgetOption::NONE);
+            let pos = crate::ui_node::text_layout::control_text_position_with_font(style, atlas, style.title_font, &state.name, text, WidgetOption::NONE);
             painter.with_clip(text, |painter| painter.text(style.title_font, &state.name, pos, color));
         }
         if let Some(close) = geometry.close {

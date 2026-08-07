@@ -59,7 +59,7 @@ use crate::render::{DisplayList, Painter};
 use crate::input::{KeyCode, KeyMode, MouseButton};
 use crate::WidgetOption;
 use crate::theme::{Color, ControlColor, Style, TextureId};
-use crate::text_layout::control_text_position_with_font;
+use crate::ui_node::text_layout::control_text_position_with_font;
 
 use super::UiInputEvent;
 

@@ -58,7 +58,7 @@ use crate::ui_node::scrollbar::{ScrollAxis, ScrollbarGeometry, scrollbar_base, s
 use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::*;
 use std::{cell::RefCell, rc::Rc};
-use crate::text_layout::{build_text_lines, TextLine};
+use crate::ui_node::text_layout::{TextLine, build_text_lines};
 
 use super::text_edit::{
     apply_text_input, caret_rect, clamp_cursor_boundary, clamp_scroll, cursor_from_x, cursor_x_in_line, font_line_metrics, line_index_for_cursor,

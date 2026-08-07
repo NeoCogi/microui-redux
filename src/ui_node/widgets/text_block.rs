@@ -55,7 +55,7 @@
 //! Text blocks render static or application-mutated text while participating in the same
 //! measurement and paint pipeline as interactive controls.
 
-use crate::text_layout::{baseline_aligned_top, build_display_text_lines, text_block_size};
+use crate::ui_node::text_layout::{baseline_aligned_top, build_display_text_lines, text_block_size};
 use crate::ui_node::runtime_read_state;
 use crate::*;
 use std::{cell::RefCell, rc::Rc};

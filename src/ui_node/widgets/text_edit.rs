@@ -54,7 +54,7 @@
 //!
 //! The helpers in this file keep cursor indices on valid byte boundaries, apply keyboard/text
 //! input, and translate pointer positions into cursor locations.
-use crate::text_layout::TextLine;
+use crate::ui_node::text_layout::TextLine;
 use crate::{rect, AtlasHandle, FontId, KeyCode, KeyMode, Recti};
 
 /// Determines what pressing return means for the active editor.
