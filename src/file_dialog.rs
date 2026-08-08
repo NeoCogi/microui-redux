@@ -363,6 +363,7 @@ impl FileDialogController {
     }
 
     fn connect_row_events(&mut self) {
+        self.event_session.prune_expired_connections();
         for (item, directory) in self.folder_items.iter().zip(&self.folders) {
             let directory = directory.clone();
             self.event_session

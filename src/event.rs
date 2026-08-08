@@ -263,10 +263,6 @@ impl<Message: 'static> Session<Message> {
         S: WidgetState,
         E: 'static,
     {
-        // Dynamic retained subtrees can replace event-owning widgets. Discard their dead weak
-        // connections before adding the replacement endpoints so long-lived sessions do not
-        // accumulate one connection record per topology refresh.
-        self.connections.retain(Connection::is_alive);
         let id = next_connection_id();
         let weak_inbox = Rc::downgrade(&self.inbox);
         let map = Rc::new(map);
@@ -300,6 +296,16 @@ impl<Message: 'static> Session<Message> {
             })),
         });
         Ok(())
+    }
+
+    /// Removes connections whose event-owning widgets have left the retained tree.
+    ///
+    /// Call this once after replacing a dynamic subtree and before connecting its replacement
+    /// endpoints. Cleanup is an explicit topology boundary so connecting a batch of `n` live
+    /// widgets remains O(n), rather than rescanning all preceding connections for every widget.
+    /// Active connections and already queued messages are preserved.
+    pub fn prune_expired_connections(&mut self) {
+        self.connections.retain(Connection::is_alive);
     }
 
     /// Enqueues an application-authored message for the next dispatch boundary.
@@ -428,5 +434,33 @@ mod tests {
 
         let mut replacement = Session::new();
         assert_eq!(replacement.connect(event, Message::Changed), Ok(()));
+    }
+
+    #[test]
+    fn expired_connections_are_pruned_at_an_explicit_topology_boundary() {
+        let expired_owner = Rc::new(RefCell::new(TestWidgetState { changed: WidgetEventPort::new() }));
+        let expired_event = WidgetEvent::new(WidgetStateHandle::new(&expired_owner), changed);
+        let live_owner = Rc::new(RefCell::new(TestWidgetState { changed: WidgetEventPort::new() }));
+        let live_event = WidgetEvent::new(WidgetStateHandle::new(&live_owner), changed);
+        let mut session = Session::new();
+
+        session.connect(expired_event, Message::Changed).unwrap();
+        drop(expired_owner);
+        session.connect(live_event, Message::Changed).unwrap();
+
+        assert_eq!(session.connections.len(), 2, "connect must not rescan existing connections");
+        session.prune_expired_connections();
+        assert_eq!(session.connections.len(), 1);
+
+        live_owner.borrow_mut().changed.emit(7);
+        let mut state = State::default();
+        let mut subscribers = Subscribers::new();
+        subscribers.subscribe(|state: &mut State, message, _| {
+            if let Message::Changed(value) = message {
+                state.values.push(*value);
+            }
+        });
+        assert!(session.dispatch(&mut state, &mut subscribers));
+        assert_eq!(state.values, [7]);
     }
 }
