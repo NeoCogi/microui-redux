@@ -37,37 +37,38 @@
 //! application-specific conversion and dispatch.
 //!
 //! ```text
-//! retained widget                                            application
-//! ┌──────────────────────────────┐              ┌────────────────────────────┐
-//! │ WidgetState S                │              │ Session<Message>           │
-//! │ ├─ semantic state            │              │ ├─ FIFO Inbox<Message>     │
-//! │ └─ WidgetEventPort<E>        │              │ └─ Connection records      │
-//! │      └─ WidgetEventTarget<E> ├── Weak ─────►│                            │
-//! └──────────────────────────────┘              └─────────────┬──────────────┘
-//!              ▲                                             │ dispatch
-//!              │ weak state capability                       ▼
-//!      WidgetEventHandle<S, E>                  Subscribers<State, Message>
+//! retained tree                                             application
+//! ┌─────────────────────────────────┐          ┌────────────────────────────┐
+//! │ concrete widget W               │          │ Session<Message>           │
+//! │ ├─ semantic WidgetState S       │          │ ├─ FIFO Inbox<Message>     │
+//! │ └─ Rc<WidgetEventPort<E>>       │          │ └─ Connection records      │
+//! │      └─ WidgetEventTarget<E> ───┼─ Weak ──►│                            │
+//! └──────────────┬──────────────────┘          └─────────────┬──────────────┘
+//!                │ implements                               │ dispatch
+//!                ▼                                          ▼
+//!        TypedWidget<E>                         Subscribers<State, Message>
+//!                │
+//!                └─ WidgetEventHandle<E> (Weak port capability)
 //! ```
 //!
 //! ## Widget side
 //!
 //! A widget author defines an owned native payload such as `SliderChanged` and explicitly
-//! implements [`WidgetEvent`] for it. The widget's [`WidgetState`] owns a private
-//! [`WidgetEventPort<E>`](WidgetEventPort) alongside its semantic state. User input updates that
-//! state and calls `port.emit(event)` only for user-originated semantic changes; programmatic state
-//! setters remain silent.
+//! implements [`WidgetEvent`] for it. The concrete widget runtime owns a private
+//! [`WidgetEventPort<E>`](WidgetEventPort) alongside, but separate from, its semantic state. User
+//! input updates state and calls `port.emit(event)` only for user-originated semantic changes;
+//! ordinary programmatic state setters remain silent.
 //!
-//! Applications never receive the port itself. A widget-specific method on
-//! [`WidgetStateHandle<S>`](WidgetStateHandle) returns a [`WidgetEventHandle<S, E>`]. The handle
-//! contains a weak state capability and a function pointer selecting the correct port inside `S`.
-//! It therefore identifies an event without keeping the widget mounted or exposing its state
-//! allocation.
+//! The runtime implements [`TypedWidget<E>`], possibly once for each distinct native event type.
+//! Applications capture a [`WidgetEventHandle<E>`] from the concrete runtime before moving it into
+//! a type-erased [`crate::Node`]. The handle contains only a weak pointer to the selected port. It
+//! neither borrows semantic state nor keeps the widget mounted.
 //!
 //! ## Connecting a widget to an application
 //!
 //! [`Session::connect`] consumes an event handle and an application adapter `Fn(E) -> Message`.
-//! Checked access to `S` installs one [`WidgetEventTarget<E>`](WidgetEventTarget) in the selected
-//! port. A port accepts exactly one target; application fan-out happens later through
+//! Upgrading the handle installs one [`WidgetEventTarget<E>`](WidgetEventTarget) directly in the
+//! selected port. A port accepts exactly one target; application fan-out happens later through
 //! [`Subscribers`] after every native payload has become the session's one `Message` type.
 //!
 //! The target boxes the connection-specific closure once because its concrete closure type depends
@@ -77,7 +78,7 @@
 //!
 //! The session separately stores an erased [`Connection`] record containing widget liveness and
 //! disconnection behavior. This lets one `Session<Message>` own connections to heterogeneous
-//! widget state and event types without making the retained runtime generic over `Message`.
+//! widget and event types without making the retained runtime generic over `Message`.
 //!
 //! ## Event and dispatch flow
 //!
@@ -85,7 +86,7 @@
 //! raw input
 //!    │
 //!    ▼
-//! retained widget update mutates S
+//! retained widget update mutates S and constructs E
 //!    │
 //!    ▼
 //! WidgetEventPort<E>::emit(E)
@@ -113,8 +114,10 @@
 //!
 //! ## Ownership and cleanup
 //!
-//! Session owns the inbox and every [`Connection`]; widget targets and temporary [`Emit`] values
-//! hold weak inbox references, so widgets and callbacks cannot keep a dropped session alive.
+//! The concrete widget is the sole strong owner of each port. Event handles and session connection
+//! records hold weak port references, so neither can retain a removed widget. Session owns the
+//! inbox and every [`Connection`]; widget targets and temporary [`Emit`] values hold weak inbox
+//! references, so widgets and callbacks cannot keep a dropped session alive.
 //! Dropping a session drops its connection records, which remove matching targets from live ports.
 //! Dropping a widget destroys its port immediately but leaves an expired weak connection record in
 //! the session. Dynamic-tree owners call [`Session::prune_expired_connections`] once per topology
@@ -127,7 +130,7 @@ use std::fmt;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::{WidgetState, WidgetStateHandle};
+use crate::Widget;
 
 /// Maximum number of application messages dispatched from one raw-input transaction, including
 /// messages recursively emitted by subscribers.
@@ -152,6 +155,15 @@ fn next_connection_id() -> u64 {
 /// preserving each payload's concrete type through [`Session::connect`].
 pub trait WidgetEvent: 'static {}
 
+/// A concrete retained widget that owns one typed native event source.
+///
+/// A widget may implement this trait more than once with different `E` types. Applications obtain
+/// each weak event capability before moving the concrete widget into a type-erased [`crate::Node`].
+pub trait TypedWidget<E: WidgetEvent>: Widget {
+    /// Returns a weak capability for this widget's `E` event source.
+    fn event(&self) -> WidgetEventHandle<E>;
+}
+
 /// Type-erased delivery behavior installed in one native event port.
 ///
 /// The wrapper makes the [`WidgetEvent`] constraint local and explicit. Only the callback's concrete
@@ -162,8 +174,8 @@ struct WidgetEventTarget<E: WidgetEvent> {
 
 impl<E: WidgetEvent> WidgetEventTarget<E> {
     fn new(callback: impl Fn(E) + 'static) -> Self {
-        // Box the connection-specific adapter once so the widget state does not become generic over
-        // the application's closure type.
+        // Box the connection-specific adapter once so the concrete widget does not become generic
+        // over the application's closure type.
         Self { callback: Box::new(callback) }
     }
 
@@ -177,42 +189,44 @@ impl<E: WidgetEvent> WidgetEventTarget<E> {
 /// One widget-owned, native event output.
 ///
 /// This type is framework-facing. Applications obtain a weak [`WidgetEventHandle`] capability from
-/// a widget's state handle instead of accessing the port itself.
+/// the concrete widget's [`TypedWidget`] implementation instead of accessing the port itself.
 pub(crate) struct WidgetEventPort<E: WidgetEvent> {
-    target: Option<(u64, WidgetEventTarget<E>)>,
+    target: RefCell<Option<(u64, WidgetEventTarget<E>)>>,
 }
 
 impl<E: WidgetEvent> WidgetEventPort<E> {
     pub(crate) fn new() -> Self {
         // A widget starts detached; Session::connect installs the only permitted target later.
-        Self { target: None }
+        Self { target: RefCell::new(None) }
     }
 
     /// Sends one native widget event into its connected session, when present.
     pub(crate) fn emit(&self, event: E) {
         // The target owns the E -> Message adapter. With no target, the event is intentionally
         // discarded instead of being buffered in the widget or exposed through polling state.
-        if let Some((_, target)) = &self.target {
+        if let Some((_, target)) = &*self.target.borrow() {
             target.emit(event);
         }
     }
 
-    fn connect(&mut self, id: u64, target: WidgetEventTarget<E>) -> bool {
+    fn connect(&self, id: u64, target: WidgetEventTarget<E>) -> bool {
         // A native port is point-to-point. Application-level multicast happens after conversion to
         // Message, so installing a second session target would make ownership and ordering unclear.
-        if self.target.is_some() {
+        let mut current = self.target.borrow_mut();
+        if current.is_some() {
             return false;
         }
         // Store the identity beside the callback so only its owning Connection can remove it.
-        self.target = Some((id, target));
+        *current = Some((id, target));
         true
     }
 
-    fn disconnect(&mut self, id: u64) {
+    fn disconnect(&self, id: u64) {
         // Ignore stale disconnect requests. In particular, an older Connection must not clear a
         // target that was installed later with a different process-wide identity.
-        if self.target.as_ref().is_some_and(|(target_id, _)| *target_id == id) {
-            self.target = None;
+        let mut current = self.target.borrow_mut();
+        if current.as_ref().is_some_and(|(target_id, _)| *target_id == id) {
+            *current = None;
         }
     }
 }
@@ -224,40 +238,58 @@ impl<E: WidgetEvent> Default for WidgetEventPort<E> {
     }
 }
 
-/// Weak, typed capability identifying one native event produced by a retained widget.
-///
-/// Widget-specific extension methods construct these values from a [`WidgetStateHandle`]. Holding
-/// one does not keep the widget or its state alive.
-pub struct WidgetEventHandle<S: WidgetState, E: WidgetEvent> {
-    state: WidgetStateHandle<S>,
-    port: for<'a> fn(&'a mut S) -> &'a mut WidgetEventPort<E>,
+/// Weak framework capability used when a semantic state operation must publish through a port
+/// whose strong ownership remains with the concrete widget runtime.
+pub(crate) struct WidgetEventEmitter<E: WidgetEvent> {
+    port: Weak<WidgetEventPort<E>>,
 }
 
-impl<S: WidgetState, E: WidgetEvent> WidgetEventHandle<S, E> {
-    pub(crate) fn new(state: WidgetStateHandle<S>, port: for<'a> fn(&'a mut S) -> &'a mut WidgetEventPort<E>) -> Self {
-        // The weak state handle locates the widget without extending its retained lifetime. The
-        // function pointer selects this event's concrete port after checked state access succeeds.
-        Self { state, port }
+impl<E: WidgetEvent> WidgetEventEmitter<E> {
+    pub(crate) fn new(port: &Rc<WidgetEventPort<E>>) -> Self {
+        // State may borrow this capability, but only the concrete widget keeps the port alive.
+        Self { port: Rc::downgrade(port) }
     }
-}
 
-impl<S: WidgetState, E: WidgetEvent> Clone for WidgetEventHandle<S, E> {
-    fn clone(&self) -> Self {
-        // Cloning duplicates only a weak capability and a function pointer; it never clones S or
-        // keeps the owning widget mounted.
-        Self {
-            state: self.state.clone(),
-            port: self.port,
+    pub(crate) fn emit(&self, event: E) {
+        // An expired widget has no observable event stream, so emission becomes a no-op.
+        if let Some(port) = self.port.upgrade() {
+            port.emit(event);
         }
     }
 }
 
-impl<S: WidgetState, E: WidgetEvent> fmt::Debug for WidgetEventHandle<S, E> {
+/// Weak, typed capability identifying one native event source owned by a retained widget.
+///
+/// Holding or cloning this value does not keep the widget or its event port alive.
+pub struct WidgetEventHandle<E: WidgetEvent> {
+    port: Weak<WidgetEventPort<E>>,
+}
+
+impl<E: WidgetEvent> WidgetEventHandle<E> {
+    pub(crate) fn new(port: &Rc<WidgetEventPort<E>>) -> Self {
+        // The concrete widget remains the sole strong owner of its event source.
+        Self { port: Rc::downgrade(port) }
+    }
+
+    /// Returns whether the concrete widget still owns this event source.
+    pub fn is_alive(&self) -> bool {
+        // strong_count does not upgrade or borrow the port and therefore cannot affect lifetime.
+        self.port.strong_count() != 0
+    }
+}
+
+impl<E: WidgetEvent> Clone for WidgetEventHandle<E> {
+    fn clone(&self) -> Self {
+        // Cloning duplicates only a Weak pointer and never keeps the owning widget mounted.
+        Self { port: self.port.clone() }
+    }
+}
+
+impl<E: WidgetEvent> fmt::Debug for WidgetEventHandle<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Do not borrow or reveal widget state while formatting. Liveness is the only useful,
-        // non-invasive diagnostic available through this capability.
+        // Liveness is the only useful diagnostic exposed by an otherwise opaque capability.
         f.debug_struct("WidgetEventHandle")
-            .field("alive", &self.state.is_alive())
+            .field("alive", &(self.port.strong_count() != 0))
             .finish_non_exhaustive()
     }
 }
@@ -267,8 +299,6 @@ impl<S: WidgetState, E: WidgetEvent> fmt::Debug for WidgetEventHandle<S, E> {
 pub enum ConnectError {
     /// The widget has already been removed from the retained tree.
     WidgetExpired,
-    /// The widget state is currently borrowed by application or retained runtime code.
-    WidgetBorrowed,
     /// This native event already feeds a session. Multicast occurs after conversion to `Message`.
     AlreadyConnected,
 }
@@ -278,7 +308,6 @@ impl fmt::Display for ConnectError {
         // Keep user-facing text centralized and stable while Debug continues to expose variants.
         f.write_str(match self {
             Self::WidgetExpired => "widget event owner has expired",
-            Self::WidgetBorrowed => "widget event owner is currently borrowed",
             Self::AlreadyConnected => "widget event is already connected to a session",
         })
     }
@@ -403,21 +432,16 @@ impl<Message: 'static> Session<Message> {
     ///
     /// Exactly one session may be connected to a widget event; fan-out belongs in [`Subscribers`]
     /// after the event has become an application `Message`.
-    pub fn connect<S, E>(&mut self, event: WidgetEventHandle<S, E>, map: impl Fn(E) -> Message + 'static) -> Result<(), ConnectError>
-    where
-        S: WidgetState,
-        E: WidgetEvent,
-    {
+    pub fn connect<E: WidgetEvent>(&mut self, event: WidgetEventHandle<E>, map: impl Fn(E) -> Message + 'static) -> Result<(), ConnectError> {
         // Allocate the identity before installing the target because both the port and its later
         // disconnection closure must agree on the same value.
         let id = next_connection_id();
         // A weak queue reference prevents the widget -> target -> inbox path from keeping Session
-        // alive. If a best-effort disconnect cannot reach the widget, the leftover target cannot
-        // deliver messages and disappears when the widget itself is dropped.
+        // alive.
         let weak_inbox = Rc::downgrade(&self.inbox);
         let target = WidgetEventTarget::new(move |native_event: E| {
-            // Session may already be gone if disconnection was blocked by an active widget borrow.
-            // In that case the native event has no application destination and is discarded.
+            // Session may already be gone if a target is invoked during teardown. In that case the
+            // native event has no application destination and is discarded.
             let Some(inbox) = weak_inbox.upgrade() else {
                 return;
             };
@@ -428,35 +452,27 @@ impl<Message: 'static> Session<Message> {
             inbox.borrow_mut().pending.push_back(message);
         });
 
-        // Checked access distinguishes an unavailable widget from an occupied native event port.
-        // The target moves into the port only when this closure runs successfully.
-        let connected = event.state.try_update(|state| (event.port)(state).connect(id, target));
-        let Some(connected) = connected else {
-            // try_update intentionally combines expiration and borrow conflict. A separate liveness
-            // check refines the public error without attempting another state borrow.
-            return Err(if event.state.is_alive() {
-                ConnectError::WidgetBorrowed
-            } else {
-                ConnectError::WidgetExpired
-            });
+        // Upgrade the widget-owned port without borrowing semantic widget state. Expiration now has
+        // one unambiguous cause: the concrete widget has been removed.
+        let Some(port) = event.port.upgrade() else {
+            return Err(ConnectError::WidgetExpired);
         };
-        if !connected {
-            // The state was accessible, but the point-to-point port already owns another target.
+        if !port.connect(id, target) {
+            // The port is live, but its point-to-point slot already owns another target.
             return Err(ConnectError::AlreadyConnected);
         }
 
-        // Each erased closure needs its own weak state capability. One supports liveness pruning;
-        // the other reaches the typed port when this Connection is eventually dropped.
-        let state = event.state.clone();
-        let owner = event.state.clone();
-        let port = event.port;
+        // Session records only weak port references; the concrete widget remains the sole owner.
+        let owner = Rc::downgrade(&port);
+        let disconnect = Rc::downgrade(&port);
         // Record cleanup only after installation succeeds, keeping the Vec and widget port in sync.
         self.connections.push(Connection {
-            is_alive: Box::new(move || owner.is_alive()),
+            is_alive: Box::new(move || owner.strong_count() != 0),
             disconnect: Some(Box::new(move || {
-                // Disconnection is best-effort because Drop cannot report a temporary borrow
-                // conflict. A surviving target holds only a dead Weak inbox and emits nothing.
-                let _ = state.try_update(|state| port(state).disconnect(id));
+                // A live widget can be disconnected without borrowing its semantic state.
+                if let Some(port) = disconnect.upgrade() {
+                    port.disconnect(id);
+                }
             })),
         });
         Ok(())
@@ -470,7 +486,7 @@ impl<Message: 'static> Session<Message> {
     /// Active connections and already queued messages are preserved.
     pub fn prune_expired_connections(&mut self) {
         // retain examines each existing weak owner once. Removing an expired record runs its Drop
-        // implementation; the disconnect attempt then becomes a no-op because the state is gone.
+        // implementation; the disconnect attempt then becomes a no-op because the port is gone.
         self.connections.retain(Connection::is_alive);
     }
 
@@ -527,7 +543,7 @@ struct Connection {
 
 impl Connection {
     fn is_alive(&self) -> bool {
-        // The closure recovers the concrete WidgetStateHandle type hidden by Connection.
+        // The closure recovers the concrete typed port hidden by this heterogeneous record.
         (self.is_alive)()
     }
 }
@@ -547,11 +563,6 @@ impl Drop for Connection {
 mod tests {
     use super::*;
 
-    struct TestWidgetState {
-        changed: WidgetEventPort<i32>,
-    }
-
-    impl WidgetState for TestWidgetState {}
     impl WidgetEvent for i32 {}
 
     #[derive(Debug, Eq, PartialEq)]
@@ -565,18 +576,11 @@ mod tests {
         values: Vec<i32>,
     }
 
-    fn changed(state: &mut TestWidgetState) -> &mut WidgetEventPort<i32> {
-        // Tests pass this ordinary function pointer through WidgetEventHandle to select the native
-        // port.
-        &mut state.changed
-    }
-
     #[test]
     fn native_widget_events_map_to_typed_messages_and_cascade_fifo() {
-        // Arrange one retained-like strong state owner and expose only its weak event capability.
-        let owner = Rc::new(RefCell::new(TestWidgetState { changed: WidgetEventPort::new() }));
-        let handle = WidgetStateHandle::new(&owner);
-        let event = WidgetEventHandle::new(handle, changed);
+        // Arrange one runtime-owned native port and expose only its weak event capability.
+        let owner = Rc::new(WidgetEventPort::new());
+        let event = WidgetEventHandle::new(&owner);
         let mut session = Session::new();
         // Count adapter calls independently so the test can distinguish mapping time from subscriber
         // dispatch time.
@@ -601,8 +605,8 @@ mod tests {
         });
 
         // Act: native emission maps immediately, but no subscriber receives either message yet.
-        owner.borrow_mut().changed.emit(3);
-        owner.borrow_mut().changed.emit(4);
+        owner.emit(3);
+        owner.emit(4);
         assert_eq!(mapping_calls.get(), 2, "event adapters must construct messages synchronously");
         let mut state = State::default();
         assert!(state.values.is_empty(), "subscribers must remain deferred until dispatch");
@@ -615,9 +619,8 @@ mod tests {
     #[test]
     fn dropping_session_disconnects_widget_event() {
         // Arrange one port connected to an initial Session.
-        let owner = Rc::new(RefCell::new(TestWidgetState { changed: WidgetEventPort::new() }));
-        let handle = WidgetStateHandle::new(&owner);
-        let event = WidgetEventHandle::new(handle, changed);
+        let owner = Rc::new(WidgetEventPort::new());
+        let event = WidgetEventHandle::new(&owner);
         let mut session = Session::new();
         session.connect(event.clone(), Message::Changed).unwrap();
 
@@ -632,10 +635,10 @@ mod tests {
     #[test]
     fn expired_connections_are_pruned_at_an_explicit_topology_boundary() {
         // Arrange one widget that will leave the tree and one that will remain live.
-        let expired_owner = Rc::new(RefCell::new(TestWidgetState { changed: WidgetEventPort::new() }));
-        let expired_event = WidgetEventHandle::new(WidgetStateHandle::new(&expired_owner), changed);
-        let live_owner = Rc::new(RefCell::new(TestWidgetState { changed: WidgetEventPort::new() }));
-        let live_event = WidgetEventHandle::new(WidgetStateHandle::new(&live_owner), changed);
+        let expired_owner = Rc::new(WidgetEventPort::new());
+        let expired_event = WidgetEventHandle::new(&expired_owner);
+        let live_owner = Rc::new(WidgetEventPort::new());
+        let live_event = WidgetEventHandle::new(&live_owner);
         let mut session = Session::new();
 
         // Connecting the replacement must be O(1), so the stale record intentionally remains until
@@ -650,7 +653,7 @@ mod tests {
         assert_eq!(session.connections.len(), 1);
 
         // Prove that retaining the live record also leaves its installed target operational.
-        live_owner.borrow_mut().changed.emit(7);
+        live_owner.emit(7);
         let mut state = State::default();
         let mut subscribers = Subscribers::new();
         subscribers.subscribe(|state: &mut State, message, _| {

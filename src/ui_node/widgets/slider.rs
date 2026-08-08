@@ -123,8 +123,6 @@ pub struct SliderState {
     high: Real,
     /// Inline numeric editing state.
     edit: NumberEditState,
-    /// Session connection for user-originated value changes.
-    changed_event: crate::event::WidgetEventPort<SliderChanged>,
 }
 
 /// Value snapshot emitted after a user-originated slider change.
@@ -135,13 +133,6 @@ pub struct SliderChanged {
 }
 
 impl crate::WidgetEvent for SliderChanged {}
-
-impl WidgetStateHandle<SliderState> {
-    /// Returns the native event endpoint emitted after every user-originated value change.
-    pub fn changed(&self) -> crate::WidgetEventHandle<SliderState, SliderChanged> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
-    }
-}
 
 impl WidgetState for SliderState {}
 
@@ -174,6 +165,8 @@ pub struct Slider {
     opt: WidgetOption,
     /// Persistent state allocation.
     state: Rc<RefCell<SliderState>>,
+    /// Runtime-owned source for user-originated value changes.
+    changed_event: Rc<crate::event::WidgetEventPort<SliderChanged>>,
 }
 
 impl Slider {
@@ -182,6 +175,11 @@ impl Slider {
         let widget = SliderBuilder::create_widget(parameters);
         let state = widget.state_handle();
         (state, widget)
+    }
+
+    /// Returns the native event endpoint emitted after every user-originated value change.
+    pub fn changed(&self) -> crate::WidgetEventHandle<SliderChanged> {
+        <Self as crate::TypedWidget<SliderChanged>>::event(self)
     }
 
     /// Measures the slider track plus formatted value label.
@@ -196,11 +194,11 @@ impl Slider {
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let base = ctx.local_rect();
         let font = ctx.style().resolve_font_choice(self.font);
-        runtime_update_state(&self.state, "Slider::update", |state| {
+        let changed = runtime_update_state(&self.state, "Slider::update", |state| {
             let last = state.value;
             let mut v = last;
             if number_textbox_update(ctx, input, &mut state.edit, self.precision, font, &mut v) {
-                return;
+                return None;
             }
             if let Some(UiInputEvent::Scroll { delta, .. }) = input {
                 let range = state.high - state.low;
@@ -242,10 +240,11 @@ impl Slider {
             }
             v = clamp_slider_value(v, state.low, state.high);
             state.value = v;
-            if last != v {
-                state.changed_event.emit(SliderChanged { value: v });
-            }
-        })
+            (last != v).then_some(SliderChanged { value: v })
+        });
+        if let Some(event) = changed {
+            self.changed_event.emit(event);
+        }
     }
 
     /// Paints either the inline numeric editor or the slider track/thumb/value label.
@@ -272,6 +271,12 @@ impl Slider {
             let label = number_label(state.value, self.precision);
             ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
         });
+    }
+}
+
+impl crate::TypedWidget<SliderChanged> for Slider {
+    fn event(&self) -> crate::WidgetEventHandle<SliderChanged> {
+        crate::WidgetEventHandle::new(&self.changed_event)
     }
 }
 
@@ -343,7 +348,6 @@ impl WidgetBuilder for SliderBuilder {
             low: parameters.low,
             high: parameters.high,
             edit: NumberEditState::default(),
-            changed_event: crate::event::WidgetEventPort::new(),
         }));
         Slider {
             step: parameters.step,
@@ -351,6 +355,7 @@ impl WidgetBuilder for SliderBuilder {
             font: parameters.font,
             opt: parameters.opt,
             state,
+            changed_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }
 }
@@ -421,17 +426,17 @@ mod tests {
         assert!((actual - expected).abs() < 1.0e-5, "expected {expected}, got {actual}");
     }
 
-    fn slider_session(state: &WidgetStateHandle<SliderState>) -> (crate::Session<Real>, crate::Subscribers<Vec<Real>, Real>) {
+    fn slider_session(slider: &Slider) -> (crate::Session<Real>, crate::Subscribers<Vec<Real>, Real>) {
         let mut session = crate::Session::new();
-        session.connect(state.changed(), |event| event.value).unwrap();
+        session.connect(slider.changed(), |event| event.value).unwrap();
         let mut subscribers = crate::Subscribers::new();
         subscribers.subscribe(|values: &mut Vec<Real>, value: &Real, _| values.push(*value));
         (session, subscribers)
     }
 
-    fn number_session(state: &WidgetStateHandle<NumberState>) -> (crate::Session<Real>, crate::Subscribers<Vec<Real>, Real>) {
+    fn number_session(number: &Number) -> (crate::Session<Real>, crate::Subscribers<Vec<Real>, Real>) {
         let mut session = crate::Session::new();
-        session.connect(state.changed(), |event| event.value).unwrap();
+        session.connect(number.changed(), |event| event.value).unwrap();
         let mut subscribers = crate::Subscribers::new();
         subscribers.subscribe(|values: &mut Vec<Real>, value: &Real, _| values.push(*value));
         (session, subscribers)
@@ -474,7 +479,7 @@ mod tests {
     #[test]
     fn slider_wheel_snaps_fractional_step_from_lower_bound() {
         let (state, mut slider) = Slider::create(SliderParameters::with_opt(1.15, 1.0, 2.0, 0.2, 2, WidgetOption::FRAME));
-        let (mut session, mut subscribers) = slider_session(&state);
+        let (mut session, mut subscribers) = slider_session(&slider);
         run_slider_once(&mut slider, rect(0, 0, 100, 20), Vec::new(), true, false, false, Some(vec2(0, 1)));
 
         assert_real_close(state.try_read(SliderState::value).unwrap(), 1.4);
@@ -532,7 +537,7 @@ mod tests {
     #[test]
     fn number_drag_records_a_typed_change_and_programmatic_setter_is_silent() {
         let (state, mut number) = Number::create(NumberParameters::new(0.0, 2.0, 0));
-        let (mut session, mut subscribers) = number_session(&state);
+        let (mut session, mut subscribers) = number_session(&number);
         let mut values = Vec::new();
         state.try_update(|state| state.set_value(4.0)).unwrap();
         assert!(!session.dispatch(&mut values, &mut subscribers));
@@ -552,8 +557,8 @@ mod tests {
 
     #[test]
     fn slider_programmatic_setter_is_silent() {
-        let (state, _slider) = Slider::create(SliderParameters::new(0.0, -5.0, 5.0));
-        let (mut session, mut subscribers) = slider_session(&state);
+        let (state, slider) = Slider::create(SliderParameters::new(0.0, -5.0, 5.0));
+        let (mut session, mut subscribers) = slider_session(&slider);
         state.try_update(|state| state.set_value(4.0)).unwrap();
         assert_eq!(state.try_read(SliderState::value), Some(4.0));
         assert!(!session.dispatch(&mut Vec::new(), &mut subscribers));

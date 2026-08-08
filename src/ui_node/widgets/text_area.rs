@@ -123,10 +123,6 @@ pub struct TextAreaState {
     scroll: Vec2i,
     /// Requests a runtime-only vertical-cursor preference reset.
     reset_preferred_x: bool,
-    /// Session connection for user-originated text changes.
-    changed_event: crate::event::WidgetEventPort<TextAreaChanged>,
-    /// Session connection for user submissions.
-    submitted_event: crate::event::WidgetEventPort<TextAreaSubmitted>,
 }
 
 /// Snapshot emitted after a user-originated text-area value change.
@@ -148,18 +144,6 @@ pub struct TextAreaSubmitted {
 }
 
 impl crate::WidgetEvent for TextAreaSubmitted {}
-
-impl WidgetStateHandle<TextAreaState> {
-    /// Returns the native event endpoint emitted after every user-originated text change.
-    pub fn changed(&self) -> crate::WidgetEventHandle<TextAreaState, TextAreaChanged> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
-    }
-
-    /// Returns the native event endpoint emitted whenever the user submits the current text.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<TextAreaState, TextAreaSubmitted> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
-    }
-}
 
 impl WidgetState for TextAreaState {}
 
@@ -235,6 +219,10 @@ pub struct TextArea {
     interaction: TextAreaInteraction,
     /// Persistent state allocation.
     state: Rc<RefCell<TextAreaState>>,
+    /// Runtime-owned source for user-originated text changes.
+    changed_event: Rc<crate::event::WidgetEventPort<TextAreaChanged>>,
+    /// Runtime-owned source for user submissions.
+    submitted_event: Rc<crate::event::WidgetEventPort<TextAreaSubmitted>>,
 }
 
 impl TextArea {
@@ -243,6 +231,16 @@ impl TextArea {
         let widget = TextAreaBuilder::create_widget(parameters);
         let state = widget.state_handle();
         (state, widget)
+    }
+
+    /// Returns the native event endpoint emitted after every user-originated text change.
+    pub fn changed(&self) -> crate::WidgetEventHandle<TextAreaChanged> {
+        <Self as crate::TypedWidget<TextAreaChanged>>::event(self)
+    }
+
+    /// Returns the native event endpoint emitted whenever the user submits the current text.
+    pub fn submitted(&self) -> crate::WidgetEventHandle<TextAreaSubmitted> {
+        <Self as crate::TypedWidget<TextAreaSubmitted>>::event(self)
     }
 
     /// Measures the text area content, respecting wrapping and available constraints.
@@ -279,7 +277,7 @@ impl TextArea {
         let old_preferred_x = self.interaction.preferred_x;
         let old_dragging_y = self.interaction.dragging_y;
         let old_dragging_x = self.interaction.dragging_x;
-        runtime_update_state(&self.state, "TextArea::update", |state| {
+        let (changed_event, submitted_event) = runtime_update_state(&self.state, "TextArea::update", |state| {
             let old_buf = state.buf.clone();
             let old_cursor = state.cursor;
             let old_scroll = state.scroll;
@@ -288,15 +286,11 @@ impl TextArea {
                 state.reset_preferred_x = false;
             }
             let outcome = textarea_update(ctx, input, state, &mut self.interaction, self.wrap, font);
-            if outcome.changed {
-                state.changed_event.emit(TextAreaChanged {
-                    text: state.buf.clone(),
-                    cursor: state.cursor,
-                });
-            }
-            if outcome.submitted {
-                state.submitted_event.emit(TextAreaSubmitted { text: state.buf.clone() });
-            }
+            let changed_event = outcome.changed.then(|| TextAreaChanged {
+                text: state.buf.clone(),
+                cursor: state.cursor,
+            });
+            let submitted_event = outcome.submitted.then(|| TextAreaSubmitted { text: state.buf.clone() });
             let changed = state.buf != old_buf
                 || state.cursor != old_cursor
                 || state.scroll.x != old_scroll.x
@@ -305,7 +299,14 @@ impl TextArea {
                 || self.interaction.dragging_y != old_dragging_y
                 || self.interaction.dragging_x != old_dragging_x;
             let _ = (ctx.focused(), changed);
-        })
+            (changed_event, submitted_event)
+        });
+        if let Some(event) = changed_event {
+            self.changed_event.emit(event);
+        }
+        if let Some(event) = submitted_event {
+            self.submitted_event.emit(event);
+        }
     }
 
     /// Paints the multiline editor and scrollbars.
@@ -314,6 +315,18 @@ impl TextArea {
         runtime_read_state(&self.state, "TextArea::paint", |state| {
             textarea_paint(ctx, state, self.wrap, font);
         });
+    }
+}
+
+impl crate::TypedWidget<TextAreaChanged> for TextArea {
+    fn event(&self) -> crate::WidgetEventHandle<TextAreaChanged> {
+        crate::WidgetEventHandle::new(&self.changed_event)
+    }
+}
+
+impl crate::TypedWidget<TextAreaSubmitted> for TextArea {
+    fn event(&self) -> crate::WidgetEventHandle<TextAreaSubmitted> {
+        crate::WidgetEventHandle::new(&self.submitted_event)
     }
 }
 
@@ -770,9 +783,9 @@ impl WidgetBuilder for TextAreaBuilder {
                 cursor,
                 scroll: vec2(0, 0),
                 reset_preferred_x: false,
-                changed_event: crate::event::WidgetEventPort::new(),
-                submitted_event: crate::event::WidgetEventPort::new(),
             })),
+            changed_event: Rc::new(crate::event::WidgetEventPort::new()),
+            submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }
 }
@@ -788,10 +801,12 @@ mod tests {
         Submitted(String),
     }
 
-    fn text_session(state: &WidgetStateHandle<TextAreaState>) -> (crate::Session<Message>, crate::Subscribers<Vec<Message>, Message>) {
+    fn text_session(text_area: &TextArea) -> (crate::Session<Message>, crate::Subscribers<Vec<Message>, Message>) {
         let mut session = crate::Session::new();
-        session.connect(state.changed(), |event| Message::Changed(event.text, event.cursor)).unwrap();
-        session.connect(state.submitted(), |event| Message::Submitted(event.text)).unwrap();
+        session
+            .connect(text_area.changed(), |event| Message::Changed(event.text, event.cursor))
+            .unwrap();
+        session.connect(text_area.submitted(), |event| Message::Submitted(event.text)).unwrap();
         let mut subscribers = crate::Subscribers::new();
         subscribers.subscribe(|messages: &mut Vec<Message>, message: &Message, _| {
             messages.push(match message {
@@ -823,8 +838,8 @@ mod tests {
 
     #[test]
     fn text_area_dispatches_independent_change_and_submission_events() {
-        let (state, mut text_area) = TextArea::create(TextAreaParameters::new(""));
-        let (mut session, mut subscribers) = text_session(&state);
+        let (_state, mut text_area) = TextArea::create(TextAreaParameters::new(""));
+        let (mut session, mut subscribers) = text_session(&text_area);
         update_text_area(
             &mut text_area,
             vec![
@@ -840,8 +855,8 @@ mod tests {
 
     #[test]
     fn programmatic_text_cursor_and_scroll_setters_are_silent() {
-        let (state, _text_area) = TextArea::create(TextAreaParameters::new("initial"));
-        let (mut session, mut subscribers) = text_session(&state);
+        let (state, text_area) = TextArea::create(TextAreaParameters::new("initial"));
+        let (mut session, mut subscribers) = text_session(&text_area);
         state
             .try_update(|state| {
                 state.set_text("replacement");

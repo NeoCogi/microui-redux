@@ -70,7 +70,7 @@ rust-src --toolchain nightly`).
 - **Context**: owns the high-level `Renderer`, the only ordered input queue, and retained root windows. Applications enqueue through Context methods, call `update_ui(dimensions)` to drain input and commit layout, observe or mutate typed state, synchronize again if that mutation can affect layout, then call `frame(FrameInfo).render_ui()?` to paint and submit once.
 - **Container**: the concrete retained owner of one layout policy and one authoritative opaque `Children` collection. An optional `ContainerSurface` widget supplies behavior for the container's own surface. Application-facing container state uses typed weak `WidgetStateHandle` values and safe indexed membership operations.
 - **Layout engine + flows**: parent containers assign child rectangles through scoped `ContainerLayoutCtx` services. Row, Grid, Column, Stack, Disclosure, and ScrollArea retain their children in the concrete container; typed state exposes configuration and weak topology mutation capabilities without owning mounted nodes.
-- **Widget**: a runtime UI element implementing `Widget` (for example `Button`, `Textbox`, or `Slider`) and uniquely owning its associated state allocation. `*Parameters` are one-shot initialization; `*State` holds mounted mutable values and events.
+- **Widget**: a runtime UI element implementing `Widget` (for example `Button`, `Textbox`, or `Slider`) and uniquely owning its associated state allocation and native event ports. `*Parameters` are one-shot initialization; `*State` holds mounted semantic values.
 - **Node**: the non-cloneable owner of one concrete widget or container runtime. A `Node` receives private process-unique identity when constructed and transfers exactly once into a root or opaque `Children` collection; attached nodes cannot be detached or reparented.
 - **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and `Renderer` executes it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](src/render/RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
 - **Typography**: atlases can bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while text-bearing `*Parameters` select a per-widget font with `.font(...)`.
@@ -257,7 +257,8 @@ struct Model {
     submitted_names: Vec<String>,
 }
 
-let (name_state, name_runtime) = Textbox::create(TextboxParameters::new(""));
+let (_name_state, name_runtime) = Textbox::create(TextboxParameters::new(""));
+let name_submitted = name_runtime.submitted();
 let (_, label_runtime) = TextBlock::create(TextBlockParameters::new("Name"));
 let (_, tree) = Row::create(RowParameters::new(
     [SizePolicy::Fixed(120), SizePolicy::Remainder(0)],
@@ -269,7 +270,7 @@ let _root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
 let dimensions = Dimensioni::new(800, 600);
 let info = FrameInfo::try_new(dimensions, color(20, 22, 26, 255))?;
 let mut session = Session::new();
-session.connect(name_state.submitted(), |event| Message::NameSubmitted(event.text))?;
+session.connect(name_submitted, |event| Message::NameSubmitted(event.text))?;
 let mut subscribers = Subscribers::new();
 subscribers.subscribe(|model: &mut Model, message: &Message, _| match message {
     Message::NameSubmitted(name) => model.submitted_names.push(name.clone()),
@@ -286,18 +287,20 @@ collection. Successful insertion transfers a node, while removal, clearing, or r
 the removed runtime owners. Grid placement belongs to `GridState`, not to generic nodes:
 plain nodes occupy one cell, while `GridItem::spanned(node, columns, rows)` supplies an explicit
 parent-child span that can later be changed with `GridState::set_span` without replacing the child.
-Built-in values, events, and commands are accessed through typed weak state handles. Disclosure
-headers and tree rows use `DisclosureParameters::{header, tree}` and no longer have a separate
-widget `Node` or `NodeStateValue` API.
+Built-in semantic values and commands are accessed through typed weak state handles. Native event
+endpoints are captured from the concrete widget runtime before it moves into `Node`; the runtime
+implements `TypedWidget<E>` and the resulting `WidgetEventHandle<E>` is a weak capability for its
+event port. Disclosure headers and tree rows use `DisclosureParameters::{header, tree}` and no
+longer have a separate widget `Node` or `NodeStateValue` API.
 
 ### Retained node identity
 
 Each owning `Node` receives a private, process-unique runtime identity before mounting. Moving a
 node, applying consuming `with_policy`, wrapping it in an unmounted `GridItem`, and inserting it
 into `Children` or `GridState` preserve that identity; applications cannot read or construct it.
-There is no public node ID or result lookup path. Widgets expose typed event endpoints through their
-weak state handles, while root chrome exposes its rectangle, visibility, active mode, and typed
-change/submission endpoints through `RootHandle::state()`.
+There is no public node ID or result lookup path. Concrete widgets expose typed event endpoints
+before node erasure, while root chrome exposes its rectangle, visibility, and active mode through
+`RootHandle::state()` and its typed endpoints through `RootHandle::{changed, submitted}`.
 
 Registered roots can be configured with `Context::set_root_options(...)` and `WindowOption` to
 control window chrome. Root overflow does not scroll implicitly; construct a `ScrollArea` with
@@ -467,13 +470,13 @@ Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`,
     - [x] Registered roots are traversed by `ContextFrame::render_ui`; visibility and options are controlled with `set_root_visible` and `set_root_options`, while destruction is explicit.
     - [x] The old callback-based per-frame root submission path was removed from the supported API.
 - [x] Replaced public interaction lookup with typed retained state.
-    - [x] The former builder-generated public identity path was removed in favor of private runtime identity and typed state events.
+    - [x] The former builder-generated public identity path was removed in favor of private runtime identity and typed widget events.
     - [x] `RootHandle` exposes checked root state while widget/container constructors return typed weak state handles.
     - [x] Root windows, scroll areas, and window chrome persist without tree reconstruction.
 - [x] Split retained widget execution into explicit `measure`, `update`, and `paint` phases.
     - [x] Layout records geometry first; update records control state and typed events; paint records commands from updated widget state.
     - [x] Custom-render nodes receive content and clip geometry through `CustomRenderArgs`, while widget input remains in the update phase.
-    - [x] Built-in widgets and examples consume events directly from their typed state.
+    - [x] Built-in widgets and examples capture events directly from concrete typed widget runtimes.
 - [x] Reworked retained layout, scroll areas, and root chrome.
     - [x] `SizePolicy::Weight` now uses sibling share ratios, and `SizePolicy::Fraction` covers explicit proportional sizing.
     - [x] `ScrollAreaState` is the retained nested-scroll and membership API; old synthetic scrollbar nodes were removed.
@@ -498,7 +501,7 @@ Version `0.6.0` introduced retained `WidgetTree` authoring on top of the older p
 - [x] `Context::window`, `Context::dialog`, and `Context::popup` accepted retained trees instead of UI-building closures.
 - [x] `WidgetTreeBuilder` introduced reusable widget/layout hierarchies with widgets, panels, headers/tree nodes, row/grid/column/stack groups, and custom-render leaves.
 - [x] Widgets reported intrinsic sizes through `measure` and updated persistent state through the retained traversal.
-    - [x] Interaction observation later moved from generic frame results to typed widget-state events.
+    - [x] Interaction observation later moved from generic frame results to typed widget-owned events.
 - [x] The widget paint context gained widget-local custom painting for rectangles, text/icons/images, line strokes, polygon fills, and scoped clips.
 - [x] Runtime atlas building and offline/prebuilt atlas export gained shared multi-font configuration.
 - [x] Version `0.6.1` switched demos to runtime atlas construction by default and made prebuilt atlas embedding opt-in.

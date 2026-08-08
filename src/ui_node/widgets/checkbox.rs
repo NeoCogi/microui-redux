@@ -83,8 +83,6 @@ impl CheckboxParameters {
 pub struct CheckboxState {
     /// Current checked value.
     checked: bool,
-    /// Session connection for user-originated value changes.
-    changed_event: crate::event::WidgetEventPort<CheckboxChanged>,
 }
 
 impl WidgetState for CheckboxState {}
@@ -120,13 +118,6 @@ pub struct CheckboxChanged {
 
 impl crate::WidgetEvent for CheckboxChanged {}
 
-impl WidgetStateHandle<CheckboxState> {
-    /// Returns the native event endpoint emitted after every user-originated value change.
-    pub fn changed(&self) -> crate::WidgetEventHandle<CheckboxState, CheckboxChanged> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
-    }
-}
-
 /// Concrete checkbox runtime and sole strong owner of its application state.
 pub struct Checkbox {
     /// Label displayed beside the checkbox square.
@@ -137,6 +128,8 @@ pub struct Checkbox {
     opt: WidgetOption,
     /// Persistent state allocation owned for exactly this runtime's lifetime.
     state: Rc<RefCell<CheckboxState>>,
+    /// Runtime-owned source for user-originated value changes.
+    changed_event: Rc<crate::event::WidgetEventPort<CheckboxChanged>>,
 }
 
 impl Checkbox {
@@ -145,6 +138,11 @@ impl Checkbox {
         let widget = CheckboxBuilder::create_widget(parameters);
         let state = widget.state_handle();
         (state, widget)
+    }
+
+    /// Returns the native event endpoint emitted after every user-originated value change.
+    pub fn changed(&self) -> crate::WidgetEventHandle<CheckboxChanged> {
+        <Self as crate::TypedWidget<CheckboxChanged>>::event(self)
     }
 
     /// Measures the checkbox square plus optional label.
@@ -192,16 +190,22 @@ impl Widget for Checkbox {
             return;
         }
 
-        runtime_update_state(&self.state, "Checkbox::update", |state| {
+        let checked = runtime_update_state(&self.state, "Checkbox::update", |state| {
             state.checked = !state.checked;
-            let checked = state.checked;
-            state.changed_event.emit(CheckboxChanged { checked });
+            state.checked
         });
+        self.changed_event.emit(CheckboxChanged { checked });
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let checked = runtime_read_state(&self.state, "Checkbox::paint", CheckboxState::checked);
         self.paint_widget(checked, ctx);
+    }
+}
+
+impl crate::TypedWidget<CheckboxChanged> for Checkbox {
+    fn event(&self) -> crate::WidgetEventHandle<CheckboxChanged> {
+        crate::WidgetEventHandle::new(&self.changed_event)
     }
 }
 
@@ -225,10 +229,8 @@ impl WidgetBuilder for CheckboxBuilder {
             label: parameters.label,
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(CheckboxState {
-                checked: parameters.checked,
-                changed_event: crate::event::WidgetEventPort::new(),
-            })),
+            state: Rc::new(RefCell::new(CheckboxState { checked: parameters.checked })),
+            changed_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }
 }

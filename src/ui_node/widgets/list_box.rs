@@ -31,7 +31,6 @@
 //! Retained list-box widget.
 
 use super::*;
-use crate::ui_node::runtime_update_state;
 use std::{cell::RefCell, rc::Rc};
 
 /// One-shot construction input for a [`ListBox`].
@@ -77,23 +76,13 @@ impl ListBoxParameters {
 }
 
 /// Application-facing persistent list-box state.
-pub struct ListBoxState {
-    /// Session connection for user submissions.
-    submitted_event: crate::event::WidgetEventPort<ListBoxSubmitted>,
-}
+pub struct ListBoxState;
 
 /// Semantic payload emitted when the user submits a list box.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct ListBoxSubmitted;
 
 impl crate::WidgetEvent for ListBoxSubmitted {}
-
-impl WidgetStateHandle<ListBoxState> {
-    /// Returns the native event endpoint emitted once for every user submission.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<ListBoxState, ListBoxSubmitted> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
-    }
-}
 
 impl WidgetState for ListBoxState {}
 
@@ -109,6 +98,8 @@ pub struct ListBox {
     opt: WidgetOption,
     /// Persistent state allocation.
     state: Rc<RefCell<ListBoxState>>,
+    /// Runtime-owned source for user submissions.
+    submitted_event: Rc<crate::event::WidgetEventPort<ListBoxSubmitted>>,
 }
 
 impl ListBox {
@@ -117,6 +108,11 @@ impl ListBox {
         let widget = ListBoxBuilder::create_widget(parameters);
         let state = widget.state_handle();
         (state, widget)
+    }
+
+    /// Returns the native event endpoint emitted once for every user submission.
+    pub fn submitted(&self) -> crate::WidgetEventHandle<ListBoxSubmitted> {
+        <Self as crate::TypedWidget<ListBoxSubmitted>>::event(self)
     }
 
     /// Measures list-box inline label and optional image.
@@ -157,13 +153,17 @@ impl Widget for ListBox {
         if !ctx.clicked() {
             return;
         }
-        runtime_update_state(&self.state, "ListBox::update", |state| {
-            state.submitted_event.emit(ListBoxSubmitted);
-        });
+        self.submitted_event.emit(ListBoxSubmitted);
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(ctx);
+    }
+}
+
+impl crate::TypedWidget<ListBoxSubmitted> for ListBox {
+    fn event(&self) -> crate::WidgetEventHandle<ListBoxSubmitted> {
+        crate::WidgetEventHandle::new(&self.submitted_event)
     }
 }
 
@@ -188,9 +188,8 @@ impl WidgetBuilder for ListBoxBuilder {
             image: parameters.image,
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(ListBoxState {
-                submitted_event: crate::event::WidgetEventPort::new(),
-            })),
+            state: Rc::new(RefCell::new(ListBoxState)),
+            submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }
 }

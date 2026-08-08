@@ -54,6 +54,8 @@ use super::RootId;
 pub struct RootHandle {
     id: RootId,
     state: WidgetStateHandle<RootState>,
+    changed: crate::WidgetEventHandle<RootChanged>,
+    submitted: crate::WidgetEventHandle<RootSubmitted>,
 }
 
 impl RootHandle {
@@ -62,9 +64,19 @@ impl RootHandle {
         self.id
     }
 
-    /// Returns the weak checked capability for current chrome state and pending root events.
+    /// Returns the weak checked capability for current chrome state.
     pub fn state(&self) -> &WidgetStateHandle<RootState> {
         &self.state
+    }
+
+    /// Returns the native event endpoint emitted after each user-driven move or resize.
+    pub fn changed(&self) -> crate::WidgetEventHandle<RootChanged> {
+        self.changed.clone()
+    }
+
+    /// Returns the native event endpoint emitted for close and outside-popup submissions.
+    pub fn submitted(&self) -> crate::WidgetEventHandle<RootSubmitted> {
+        self.submitted.clone()
     }
 }
 
@@ -96,23 +108,21 @@ pub struct RootState {
     rect: Recti,
     visible: bool,
     interaction: RootInteraction,
-    changed_event: crate::event::WidgetEventPort<RootChanged>,
-    submitted_event: crate::event::WidgetEventPort<RootSubmitted>,
+    submitted_emitter: crate::event::WidgetEventEmitter<RootSubmitted>,
     geometry: RootChromeGeometry,
 }
 
 impl WidgetState for RootState {}
 
 impl RootState {
-    fn new(name: String, options: WindowOption, rect: Recti, visible: bool) -> Self {
+    fn new(name: String, options: WindowOption, rect: Recti, visible: bool, submitted_emitter: crate::event::WidgetEventEmitter<RootSubmitted>) -> Self {
         Self {
             name,
             options,
             rect,
             visible,
             interaction: RootInteraction::None,
-            changed_event: crate::event::WidgetEventPort::new(),
-            submitted_event: crate::event::WidgetEventPort::new(),
+            submitted_emitter,
             geometry: RootChromeGeometry::default(),
         }
     }
@@ -195,7 +205,7 @@ impl RootState {
 
     pub(super) fn dismiss_popup(&mut self) {
         self.set_visible_silent(false);
-        self.submitted_event.emit(RootSubmitted::PopupDismissed);
+        self.submitted_emitter.emit(RootSubmitted::PopupDismissed);
     }
 }
 
@@ -219,18 +229,6 @@ pub enum RootSubmitted {
 
 impl crate::WidgetEvent for RootSubmitted {}
 
-impl WidgetStateHandle<RootState> {
-    /// Returns the native event endpoint emitted after each user-driven move or resize.
-    pub fn changed(&self) -> crate::WidgetEventHandle<RootState, RootChanged> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
-    }
-
-    /// Returns the native event endpoint emitted for close and outside-popup submissions.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<RootState, RootSubmitted> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
-    }
-}
-
 pub(super) struct RootChromeParameters {
     pub(super) name: String,
     pub(super) options: WindowOption,
@@ -239,8 +237,17 @@ pub(super) struct RootChromeParameters {
     pub(super) content: Node,
 }
 
-/// Builds the private root container and returns the weak state capability registered by Context.
-pub(super) fn create_root_chrome(parameters: RootChromeParameters) -> (WidgetStateHandle<RootState>, Container) {
+/// Builds the private root container and returns its weak state and event capabilities.
+pub(super) fn create_root_chrome(
+    parameters: RootChromeParameters,
+) -> (
+    WidgetStateHandle<RootState>,
+    crate::WidgetEventHandle<RootChanged>,
+    crate::WidgetEventHandle<RootSubmitted>,
+    Container,
+) {
+    let changed_event = Rc::new(crate::event::WidgetEventPort::new());
+    let submitted_event = Rc::new(crate::event::WidgetEventPort::new());
     // Allocate application-visible root state once. RootChromeLayout retains the strong owner;
     // RootHandle and all window-manager references remain weak checked capabilities.
     let state = Rc::new(RefCell::new(RootState::new(
@@ -248,6 +255,7 @@ pub(super) fn create_root_chrome(parameters: RootChromeParameters) -> (WidgetSta
         parameters.options,
         parameters.rect,
         parameters.visible,
+        crate::event::WidgetEventEmitter::new(&submitted_event),
     )));
     // Capture the public handle before moving state ownership into the private root layout.
     let handle = WidgetStateHandle::new(&state);
@@ -255,11 +263,15 @@ pub(super) fn create_root_chrome(parameters: RootChromeParameters) -> (WidgetSta
     // Chrome interaction and paint use weak access so RootChromeLayout remains the sole state owner.
     let surface = RootChromeSurface {
         state: Rc::downgrade(&state),
+        changed_event,
+        submitted_event,
         opt: WidgetOption::NONE,
     };
+    let changed = surface.changed();
+    let submitted = surface.submitted();
     // Root chrome is one ordinary Container: one application child, one Layout, one surface Widget.
     let container = Container::new(layout, WidgetOption::NONE, [parameters.content]).with_surface(surface);
-    (handle, container)
+    (handle, changed, submitted, container)
 }
 
 /// Geometry-only root policy over the single application child.
@@ -270,7 +282,31 @@ pub(super) struct RootChromeLayout {
 /// Wheel-independent widget behavior installed on the root's own chrome surface.
 struct RootChromeSurface {
     state: Weak<RefCell<RootState>>,
+    changed_event: Rc<crate::event::WidgetEventPort<RootChanged>>,
+    submitted_event: Rc<crate::event::WidgetEventPort<RootSubmitted>>,
     opt: WidgetOption,
+}
+
+impl RootChromeSurface {
+    fn changed(&self) -> crate::WidgetEventHandle<RootChanged> {
+        <Self as crate::TypedWidget<RootChanged>>::event(self)
+    }
+
+    fn submitted(&self) -> crate::WidgetEventHandle<RootSubmitted> {
+        <Self as crate::TypedWidget<RootSubmitted>>::event(self)
+    }
+}
+
+impl crate::TypedWidget<RootChanged> for RootChromeSurface {
+    fn event(&self) -> crate::WidgetEventHandle<RootChanged> {
+        crate::WidgetEventHandle::new(&self.changed_event)
+    }
+}
+
+impl crate::TypedWidget<RootSubmitted> for RootChromeSurface {
+    fn event(&self) -> crate::WidgetEventHandle<RootSubmitted> {
+        crate::WidgetEventHandle::new(&self.submitted_event)
+    }
 }
 
 impl Widget for RootChromeSurface {
@@ -297,7 +333,7 @@ impl Widget for RootChromeSurface {
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         // The dispatcher already selected this surface and localized pointer coordinates to root.
         let Some(state) = self.state.upgrade() else { return };
-        runtime_update_state(&state, "RootChromeSurface::update", |state| {
+        let (changed, submitted) = runtime_update_state(&state, "RootChromeSurface::update", |state| {
             // Compare against the initial rectangle once so any move/resize records one occurrence.
             let initial = state.rect;
             if !ctx.active() {
@@ -311,7 +347,7 @@ impl Widget for RootChromeSurface {
                     UiInputEvent::MouseDown { pos, button } if button.intersects(MouseButton::LEFT) => match state.geometry.hit_test(*pos) {
                         Some(RootChromePart::Close) => {
                             state.set_visible_silent(false);
-                            state.submitted_event.emit(RootSubmitted::Close);
+                            return (None, Some(RootSubmitted::Close));
                         }
                         Some(RootChromePart::Resize) => state.interaction = RootInteraction::Resizing,
                         Some(RootChromePart::Title) => state.interaction = RootInteraction::Moving,
@@ -336,10 +372,16 @@ impl Widget for RootChromeSurface {
                     _ => {}
                 }
             }
-            if (state.rect.x, state.rect.y, state.rect.width, state.rect.height) != (initial.x, initial.y, initial.width, initial.height) {
-                state.changed_event.emit(RootChanged { rect: state.rect });
-            }
+            let changed = ((state.rect.x, state.rect.y, state.rect.width, state.rect.height) != (initial.x, initial.y, initial.width, initial.height))
+                .then_some(RootChanged { rect: state.rect });
+            (changed, None)
         });
+        if let Some(event) = changed {
+            self.changed_event.emit(event);
+        }
+        if let Some(event) = submitted {
+            self.submitted_event.emit(event);
+        }
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -464,14 +506,19 @@ mod capture_tests {
 
     #[test]
     fn root_chrome_inactive_update_clears_a_stale_local_mode() {
+        let changed_event = Rc::new(crate::event::WidgetEventPort::new());
+        let submitted_event = Rc::new(crate::event::WidgetEventPort::new());
         let state = Rc::new(RefCell::new(RootState::new(
             "root".to_owned(),
             WindowOption::FRAME,
             Recti::new(10, 20, 100, 80),
             true,
+            crate::event::WidgetEventEmitter::new(&submitted_event),
         )));
         let mut surface = RootChromeSurface {
             state: Rc::downgrade(&state),
+            changed_event,
+            submitted_event,
             opt: WidgetOption::NONE,
         };
         let style = Style::default();
@@ -502,7 +549,7 @@ mod capture_tests {
     #[test]
     fn root_chrome_runtime_is_the_only_persistent_strong_state_owner() {
         let content = Node::widget(Custom::create(CustomParameters::new("content")));
-        let (state, container) = create_root_chrome(RootChromeParameters {
+        let (state, changed, submitted, container) = create_root_chrome(RootChromeParameters {
             name: "root".to_owned(),
             options: WindowOption::FRAME,
             rect: Recti::new(10, 20, 100, 80),
@@ -516,6 +563,8 @@ mod capture_tests {
         assert!(consumer.is_alive(), "weak handle lifetime is independent of other weak clones");
         drop(container);
         assert!(!consumer.is_alive());
+        assert!(!changed.is_alive());
+        assert!(!submitted.is_alive());
     }
 }
 
@@ -697,6 +746,11 @@ pub(super) fn record_root_overlay(display_list: &mut crate::render::DisplayList,
     }
 }
 
-pub(super) fn root_handle(id: RootId, state: WidgetStateHandle<RootState>) -> RootHandle {
-    RootHandle { id, state }
+pub(super) fn root_handle(
+    id: RootId,
+    state: WidgetStateHandle<RootState>,
+    changed: crate::WidgetEventHandle<RootChanged>,
+    submitted: crate::WidgetEventHandle<RootSubmitted>,
+) -> RootHandle {
+    RootHandle { id, state, changed, submitted }
 }

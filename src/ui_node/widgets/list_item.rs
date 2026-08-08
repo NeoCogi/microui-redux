@@ -33,7 +33,7 @@
 //! `ListItem` represents one selectable row in a retained list.
 
 use super::*;
-use crate::ui_node::{runtime_read_state, runtime_update_state};
+use crate::ui_node::runtime_read_state;
 use std::{cell::RefCell, rc::Rc};
 
 /// One-shot construction input for a [`ListItem`].
@@ -102,8 +102,6 @@ impl ListItemParameters {
 pub struct ListItemState {
     /// Mutable label displayed for the item.
     label: String,
-    /// Session connection for user submissions.
-    submitted_event: crate::event::WidgetEventPort<ListItemSubmitted>,
 }
 
 /// Snapshot emitted when the user submits a list item.
@@ -114,13 +112,6 @@ pub struct ListItemSubmitted {
 }
 
 impl crate::WidgetEvent for ListItemSubmitted {}
-
-impl WidgetStateHandle<ListItemState> {
-    /// Returns the native event endpoint emitted once for every user submission.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<ListItemState, ListItemSubmitted> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
-    }
-}
 
 impl WidgetState for ListItemState {}
 
@@ -146,6 +137,8 @@ pub struct ListItem {
     opt: WidgetOption,
     /// Persistent state allocation.
     state: Rc<RefCell<ListItemState>>,
+    /// Runtime-owned source for user submissions.
+    submitted_event: Rc<crate::event::WidgetEventPort<ListItemSubmitted>>,
 }
 
 impl ListItem {
@@ -154,6 +147,11 @@ impl ListItem {
         let widget = ListItemBuilder::create_widget(parameters);
         let state = widget.state_handle();
         (state, widget)
+    }
+
+    /// Returns the native event endpoint emitted once for every user submission.
+    pub fn submitted(&self) -> crate::WidgetEventHandle<ListItemSubmitted> {
+        <Self as crate::TypedWidget<ListItemSubmitted>>::event(self)
     }
 
     /// Measures the row label and optional icon.
@@ -227,13 +225,18 @@ impl Widget for ListItem {
         if !ctx.clicked() {
             return;
         }
-        runtime_update_state(&self.state, "ListItem::update", |state| {
-            state.submitted_event.emit(ListItemSubmitted { label: state.label.clone() });
-        });
+        let label = runtime_read_state(&self.state, "ListItem::update", |state| state.label.clone());
+        self.submitted_event.emit(ListItemSubmitted { label });
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(ctx);
+    }
+}
+
+impl crate::TypedWidget<ListItemSubmitted> for ListItem {
+    fn event(&self) -> crate::WidgetEventHandle<ListItemSubmitted> {
+        crate::WidgetEventHandle::new(&self.submitted_event)
     }
 }
 
@@ -257,10 +260,8 @@ impl WidgetBuilder for ListItemBuilder {
             icon: parameters.icon,
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(ListItemState {
-                label: parameters.label,
-                submitted_event: crate::event::WidgetEventPort::new(),
-            })),
+            state: Rc::new(RefCell::new(ListItemState { label: parameters.label })),
+            submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }
 }

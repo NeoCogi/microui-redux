@@ -64,14 +64,15 @@ enum Action {
 
 struct CalcButton {
     action: Action,
-    state: WidgetStateHandle<ButtonState>,
+    submitted: WidgetEventHandle<ButtonSubmitted>,
     widget: Option<Button>,
 }
 
 impl CalcButton {
     fn new(label: &str, action: Action) -> Self {
-        let (state, runtime) = Button::create(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
-        Self { action, state, widget: Some(runtime) }
+        let (_, runtime) = Button::create(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
+        let submitted = runtime.submitted();
+        Self { action, submitted, widget: Some(runtime) }
     }
 }
 
@@ -380,7 +381,7 @@ fn main() {
             for button in &state.buttons {
                 let action = button.action;
                 session
-                    .connect(button.state.submitted(), move |_| Message::Apply(action))
+                    .connect(button.submitted.clone(), move |_| Message::Apply(action))
                     .expect("calculator button should be alive and unconnected");
             }
             subscribers.subscribe(|state: &mut State, message: &Message, _emit| match message {

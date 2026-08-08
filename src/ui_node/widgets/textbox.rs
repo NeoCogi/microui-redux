@@ -104,10 +104,6 @@ pub struct TextboxState {
     buf: String,
     /// Current UTF-8 byte cursor.
     cursor: usize,
-    /// Session connection for user-originated text changes.
-    changed_event: crate::event::WidgetEventPort<TextboxChanged>,
-    /// Session connection for user submissions.
-    submitted_event: crate::event::WidgetEventPort<TextboxSubmitted>,
 }
 
 impl WidgetState for TextboxState {}
@@ -166,18 +162,6 @@ pub struct TextboxSubmitted {
 
 impl crate::WidgetEvent for TextboxSubmitted {}
 
-impl WidgetStateHandle<TextboxState> {
-    /// Returns the native event endpoint emitted after every user-originated text change.
-    pub fn changed(&self) -> crate::WidgetEventHandle<TextboxState, TextboxChanged> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
-    }
-
-    /// Returns the native event endpoint emitted whenever the user submits the current text.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<TextboxState, TextboxSubmitted> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
-    }
-}
-
 /// Concrete textbox runtime and sole strong owner of its application state.
 pub struct Textbox {
     /// Initialization-only font.
@@ -186,6 +170,10 @@ pub struct Textbox {
     opt: WidgetOption,
     /// Persistent state allocation.
     state: Rc<RefCell<TextboxState>>,
+    /// Runtime-owned source for user-originated text changes.
+    changed_event: Rc<crate::event::WidgetEventPort<TextboxChanged>>,
+    /// Runtime-owned source for user submissions.
+    submitted_event: Rc<crate::event::WidgetEventPort<TextboxSubmitted>>,
 }
 
 impl Textbox {
@@ -194,6 +182,16 @@ impl Textbox {
         let widget = TextboxBuilder::create_widget(parameters);
         let state = widget.state_handle();
         (state, widget)
+    }
+
+    /// Returns the native event endpoint emitted after every user-originated text change.
+    pub fn changed(&self) -> crate::WidgetEventHandle<TextboxChanged> {
+        <Self as crate::TypedWidget<TextboxChanged>>::event(self)
+    }
+
+    /// Returns the native event endpoint emitted whenever the user submits the current text.
+    pub fn submitted(&self) -> crate::WidgetEventHandle<TextboxSubmitted> {
+        <Self as crate::TypedWidget<TextboxSubmitted>>::event(self)
     }
 
     /// Measures a single-line editor, bounded by available width when supplied.
@@ -220,18 +218,21 @@ impl Textbox {
     /// Applies input and cursor movement for this textbox.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let font = ctx.style().resolve_font_choice(self.font);
-        runtime_update_state(&self.state, "Textbox::update", |state| {
+        let (changed, submitted) = runtime_update_state(&self.state, "Textbox::update", |state| {
             let outcome = textbox_update(ctx, input, &mut state.buf, &mut state.cursor, self.opt, font);
-            if outcome.changed {
-                state.changed_event.emit(TextboxChanged {
-                    text: state.buf.clone(),
-                    cursor: state.cursor,
-                });
-            }
-            if outcome.submitted {
-                state.submitted_event.emit(TextboxSubmitted { text: state.buf.clone() });
-            }
+            let changed = outcome.changed.then(|| TextboxChanged {
+                text: state.buf.clone(),
+                cursor: state.cursor,
+            });
+            let submitted = outcome.submitted.then(|| TextboxSubmitted { text: state.buf.clone() });
+            (changed, submitted)
         });
+        if let Some(event) = changed {
+            self.changed_event.emit(event);
+        }
+        if let Some(event) = submitted {
+            self.submitted_event.emit(event);
+        }
     }
 
     /// Paints the textbox frame, text, and caret.
@@ -240,6 +241,18 @@ impl Textbox {
         runtime_read_state(&self.state, "Textbox::paint", |state| {
             textbox_paint(ctx, state.buf.as_str(), state.cursor, self.opt, font);
         });
+    }
+}
+
+impl crate::TypedWidget<TextboxChanged> for Textbox {
+    fn event(&self) -> crate::WidgetEventHandle<TextboxChanged> {
+        crate::WidgetEventHandle::new(&self.changed_event)
+    }
+}
+
+impl crate::TypedWidget<TextboxSubmitted> for Textbox {
+    fn event(&self) -> crate::WidgetEventHandle<TextboxSubmitted> {
+        crate::WidgetEventHandle::new(&self.submitted_event)
     }
 }
 
@@ -426,12 +439,9 @@ impl WidgetBuilder for TextboxBuilder {
         Textbox {
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(TextboxState {
-                buf: parameters.buf,
-                cursor,
-                changed_event: crate::event::WidgetEventPort::new(),
-                submitted_event: crate::event::WidgetEventPort::new(),
-            })),
+            state: Rc::new(RefCell::new(TextboxState { buf: parameters.buf, cursor })),
+            changed_event: Rc::new(crate::event::WidgetEventPort::new()),
+            submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }
 }
@@ -447,10 +457,10 @@ mod tests {
         Submitted(String),
     }
 
-    fn text_session(state: &WidgetStateHandle<TextboxState>) -> (crate::Session<Message>, crate::Subscribers<Vec<Message>, Message>) {
+    fn text_session(textbox: &Textbox) -> (crate::Session<Message>, crate::Subscribers<Vec<Message>, Message>) {
         let mut session = crate::Session::new();
-        session.connect(state.changed(), |event| Message::Changed(event.text, event.cursor)).unwrap();
-        session.connect(state.submitted(), |event| Message::Submitted(event.text)).unwrap();
+        session.connect(textbox.changed(), |event| Message::Changed(event.text, event.cursor)).unwrap();
+        session.connect(textbox.submitted(), |event| Message::Submitted(event.text)).unwrap();
         let mut subscribers = crate::Subscribers::new();
         subscribers.subscribe(|messages: &mut Vec<Message>, message: &Message, _| {
             messages.push(match message {
@@ -496,7 +506,7 @@ mod tests {
     #[test]
     fn text_events_dispatch_complete_snapshots_in_update_order() {
         let (state, mut textbox) = Textbox::create(TextboxParameters::new(""));
-        let (mut session, mut subscribers) = text_session(&state);
+        let (mut session, mut subscribers) = text_session(&textbox);
 
         update_textbox(
             &mut textbox,
@@ -525,8 +535,8 @@ mod tests {
 
     #[test]
     fn programmatic_text_and_cursor_setters_are_silent() {
-        let (state, _textbox) = Textbox::create(TextboxParameters::new("initial"));
-        let (mut session, mut subscribers) = text_session(&state);
+        let (state, textbox) = Textbox::create(TextboxParameters::new("initial"));
+        let (mut session, mut subscribers) = text_session(&textbox);
         state
             .try_update(|state| {
                 state.set_text("replacement");

@@ -32,10 +32,11 @@ use super::*;
 
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
-    color, rect, AtlasHandle, Button, ButtonParameters, ButtonState, Column, ColumnParameters, ColumnState, Custom, CustomParameters, Dimensioni, Disclosure,
-    DisclosureParameters, DisclosureState, Grid, GridParameters, KeyMode, MouseButton, Node, Policy, Row, RowParameters, ScrollArea, ScrollAreaOption,
-    ListItem, ListItemParameters, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style, Textbox, TextboxChanged, TextboxParameters,
-    UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Column, ColumnParameters, ColumnState, Custom,
+    CustomParameters, Dimensioni, Disclosure, DisclosureParameters, DisclosureState, Grid, GridParameters, KeyMode, MouseButton, Node, Policy, Row,
+    RowParameters, ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style,
+    Textbox, TextboxChanged, TextboxParameters, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner,
+    WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use crate::ui_node::{runtime_read_state, runtime_update_state};
@@ -56,7 +57,7 @@ fn frame_info(dimensions: Dimensioni) -> FrameInfo {
     FrameInfo::try_new(dimensions, color(0, 0, 0, 255)).unwrap()
 }
 
-fn event_counter<S: WidgetState, E: crate::WidgetEvent>(event: crate::WidgetEventHandle<S, E>) -> (crate::Session<()>, crate::Subscribers<usize, ()>) {
+fn event_counter<E: crate::WidgetEvent>(event: crate::WidgetEventHandle<E>) -> (crate::Session<()>, crate::Subscribers<usize, ()>) {
     let mut session = crate::Session::new();
     session.connect(event, |_| ()).unwrap();
     let mut subscribers = crate::Subscribers::new();
@@ -485,7 +486,7 @@ fn every_event_layout_commit_updates_hit_geometry_for_the_next_queued_event() {
 #[test]
 fn disclosure_update_commits_child_geometry_before_the_next_queued_press() {
     let (button, child) = button_content("child");
-    let (mut session, mut subscribers) = event_counter(button.submitted());
+    let (mut session, mut subscribers) = event_counter(button);
     let mut submissions = 0;
     let (disclosure, node) = Disclosure::create(DisclosureParameters::header("section", false, [child]));
     let mut ctx = context();
@@ -765,22 +766,23 @@ fn traversal_reaching_state_borrowed_by_an_access_closure_reports_the_runtime_di
 
     // A shared access closure is likewise incompatible when the routed update needs to mutate the
     // same cell, even though the synchronization layout's shared reads are allowed by RefCell.
-    let (button, button_node) = button_content("button");
-    let button_id = button_node.id();
-    let mut button_ctx = context();
-    let button_root = button_ctx.create_window("button", rect(0, 0, 140, 100), button_node);
-    button_ctx
-        .set_root_options(button_root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let (checkbox, checkbox_widget) = Checkbox::create(CheckboxParameters::new("checkbox", false));
+    let checkbox_node = Node::widget(checkbox_widget);
+    let checkbox_id = checkbox_node.id();
+    let mut checkbox_ctx = context();
+    let checkbox_root = checkbox_ctx.create_window("checkbox", rect(0, 0, 140, 100), checkbox_node);
+    checkbox_ctx
+        .set_root_options(checkbox_root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
-    button_ctx.update_ui(dimensions);
-    let button_rect = button_ctx.debug_root_node_rect(button_root.id(), button_id).unwrap();
-    button_ctx.mousedown(button_rect.x + 1, button_rect.y + 1, MouseButton::LEFT);
+    checkbox_ctx.update_ui(dimensions);
+    let checkbox_rect = checkbox_ctx.debug_root_node_rect(checkbox_root.id(), checkbox_id).unwrap();
+    checkbox_ctx.mousedown(checkbox_rect.x + 1, checkbox_rect.y + 1, MouseButton::LEFT);
     let read_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        button.try_read(|_| button_ctx.update_ui(dimensions));
+        checkbox.try_read(|_| checkbox_ctx.update_ui(dimensions));
     }))
-    .expect_err("Button::update must diagnose the active shared ButtonState borrow");
+    .expect_err("Checkbox::update must diagnose the active shared CheckboxState borrow");
     let read_message = panic_message(read_panic.as_ref());
-    assert!(read_message.contains("retained widget state invariant violated during Button::update"));
+    assert!(read_message.contains("retained widget state invariant violated during Checkbox::update"));
 }
 
 fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
@@ -791,9 +793,10 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
         .unwrap_or("non-string panic payload")
 }
 
-fn button_content(label: &str) -> (WidgetStateHandle<ButtonState>, Node) {
-    let (state, widget) = Button::create(ButtonParameters::new(label));
-    (state, Node::widget(widget))
+fn button_content(label: &str) -> (crate::WidgetEventHandle<ButtonSubmitted>, Node) {
+    let (_, widget) = Button::create(ButtonParameters::new(label));
+    let submitted = widget.submitted();
+    (submitted, Node::widget(widget))
 }
 
 #[test]
@@ -808,10 +811,12 @@ fn widget_handle_events_map_into_one_typed_session_without_state_polling() {
         SecondSubmitted,
     }
 
-    let (first_state, first_widget) = Button::create(ButtonParameters::new("first"));
+    let (_, first_widget) = Button::create(ButtonParameters::new("first"));
+    let first_submitted = first_widget.submitted();
     let first = Node::widget(first_widget);
     let first_id = first.id();
-    let (second_state, second_widget) = Button::create(ButtonParameters::new("second"));
+    let (_, second_widget) = Button::create(ButtonParameters::new("second"));
+    let second_submitted = second_widget.submitted();
     let second = Node::widget(second_widget);
     let second_id = second.id();
     let (_, content) = Row::create(RowParameters::new(
@@ -829,8 +834,8 @@ fn widget_handle_events_map_into_one_typed_session_without_state_polling() {
     let second_rect = ctx.debug_root_node_rect(root.id(), second_id).unwrap();
 
     let mut session = crate::Session::new();
-    session.connect(first_state.submitted(), |_| Message::FirstSubmitted).unwrap();
-    session.connect(second_state.submitted(), |_| Message::SecondSubmitted).unwrap();
+    session.connect(first_submitted, |_| Message::FirstSubmitted).unwrap();
+    session.connect(second_submitted, |_| Message::SecondSubmitted).unwrap();
     let mut subscribers = crate::Subscribers::new();
     subscribers.subscribe(|model: &mut Model, message: &Message, _emit| match message {
         Message::FirstSubmitted => model.submissions.push("first"),
@@ -859,7 +864,8 @@ fn textbox_handle_event_maps_a_complete_snapshot_into_the_session() {
         Changed(TextboxChanged),
     }
 
-    let (textbox_state, widget) = Textbox::create(TextboxParameters::new(""));
+    let (_, widget) = Textbox::create(TextboxParameters::new(""));
+    let changed = widget.changed();
     let node = Node::widget(widget);
     let node_id = node.id();
     let mut ctx = context();
@@ -871,7 +877,7 @@ fn textbox_handle_event_maps_a_complete_snapshot_into_the_session() {
     let textbox_rect = ctx.debug_root_node_rect(root.id(), node_id).unwrap();
 
     let mut session = crate::Session::new();
-    session.connect(textbox_state.changed(), Message::Changed).unwrap();
+    session.connect(changed, Message::Changed).unwrap();
     let mut subscribers = crate::Subscribers::new();
     subscribers.subscribe(|model: &mut Model, message: &Message, _emit| match message {
         Message::Changed(event) => model.changes.push((event.text.clone(), event.cursor)),
@@ -1056,7 +1062,7 @@ fn showing_a_popup_atomically_hides_the_previous_one() {
     let mut ctx = context();
     let first = ctx.create_popup("first", empty_content());
     let second = ctx.create_popup("second", empty_content());
-    let (mut session, mut subscribers) = event_counter(first.state().submitted());
+    let (mut session, mut subscribers) = event_counter(first.submitted());
     let mut submissions = 0;
 
     ctx.set_root_visible(first.id(), true).unwrap();
@@ -1078,7 +1084,7 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     ctx.set_root_visible(popup.id(), true).unwrap();
     ctx.set_root_rect(popup.id(), rect(20, 20, 80, 60)).unwrap();
     let mut event_session = crate::Session::new();
-    event_session.connect(popup.state().submitted(), |event| event).unwrap();
+    event_session.connect(popup.submitted(), |event| event).unwrap();
     let mut subscribers = crate::Subscribers::new();
     subscribers.subscribe(|events: &mut Vec<RootSubmitted>, event: &RootSubmitted, _| events.push(*event));
     let mut submissions = Vec::new();
@@ -1099,7 +1105,7 @@ fn outside_popup_press_hides_and_records_typed_submission() {
 fn outside_popup_press_dismisses_then_routes_once_to_the_revealed_root() {
     let mut ctx = context();
     let (button, content) = button_content("behind");
-    let (mut session, mut subscribers) = event_counter(button.submitted());
+    let (mut session, mut subscribers) = event_counter(button);
     let mut submissions = 0;
     let window = ctx.create_window("window", rect(0, 0, 180, 120), content);
     ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -1261,13 +1267,13 @@ fn pointer_captured_root_remains_the_keyboard_and_text_input_root() {
 fn visible_dialog_is_the_sole_pointer_root_and_remains_frontmost() {
     let mut ctx = context();
     let (behind_button, behind_content) = button_content("behind");
-    let (mut behind_session, mut behind_subscribers) = event_counter(behind_button.submitted());
+    let (mut behind_session, mut behind_subscribers) = event_counter(behind_button);
     let mut behind_submissions = 0;
     let window = ctx.create_window("window", rect(0, 0, 100, 80), behind_content);
     ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let (dialog_button, dialog_content) = button_content("dialog");
-    let (mut dialog_session, mut dialog_subscribers) = event_counter(dialog_button.submitted());
+    let (mut dialog_session, mut dialog_subscribers) = event_counter(dialog_button);
     let mut dialog_submissions = 0;
     let dialog = ctx.create_dialog("dialog", rect(120, 100, 100, 80), dialog_content);
     ctx.set_root_options(dialog.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -1307,7 +1313,7 @@ fn visible_dialog_is_the_sole_pointer_root_and_remains_frontmost() {
 fn active_dialog_keeps_a_visible_popup_below_and_input_blocked() {
     let mut ctx = context();
     let (popup_button, popup_content) = button_content("popup");
-    let (mut session, mut subscribers) = event_counter(popup_button.submitted());
+    let (mut session, mut subscribers) = event_counter(popup_button);
     let mut submissions = 0;
     let popup = ctx.create_popup("popup", popup_content);
     ctx.set_root_options(popup.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -1490,11 +1496,11 @@ fn title_drag_and_close_record_typed_root_events() {
     let root = ctx.create_window("window", rect(30, 30, 140, 100), empty_content());
     let mut session = crate::Session::new();
     session
-        .connect(root.state().changed(), |event| {
+        .connect(root.changed(), |event| {
             Event::Changed(event.rect.x, event.rect.y, event.rect.width, event.rect.height)
         })
         .unwrap();
-    session.connect(root.state().submitted(), Event::Submitted).unwrap();
+    session.connect(root.submitted(), Event::Submitted).unwrap();
     let mut subscribers = crate::Subscribers::new();
     subscribers.subscribe(|events: &mut Vec<Event>, event: &Event, _| events.push(*event));
     let mut events = Vec::new();
@@ -1766,8 +1772,8 @@ fn body_input_falls_through_chrome_to_the_application_node() {
     let mut ctx = context();
     let (button, content) = button_content("button");
     let root = ctx.create_window("window", rect(20, 20, 140, 100), content);
-    let (mut button_session, mut button_subscribers) = event_counter(button.submitted());
-    let (mut root_session, mut root_subscribers) = event_counter(root.state().submitted());
+    let (mut button_session, mut button_subscribers) = event_counter(button);
+    let (mut root_session, mut root_subscribers) = event_counter(root.submitted());
     let mut button_submissions = 0;
     let mut root_submissions = 0;
     ctx.update_and_render_ui();

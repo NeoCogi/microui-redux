@@ -986,8 +986,10 @@ fn static_label(text: impl Into<String>) -> ListItem {
     retained_leaf::<ListItemBuilder>(ListItemParameters::with_opt(text, WidgetOption::NO_INTERACT))
 }
 
-fn centered_button(label: impl Into<String>) -> (WidgetStateHandle<ButtonState>, Button) {
-    stateful_leaf::<ButtonBuilder>(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER))
+fn centered_button(label: impl Into<String>) -> (WidgetEventHandle<ButtonSubmitted>, Button) {
+    let button = ButtonBuilder::create_widget(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
+    let submitted = button.submitted();
+    (submitted, button)
 }
 
 fn set_slider_value(state: &WidgetStateHandle<SliderState>, value: Real) {
@@ -1052,12 +1054,18 @@ enum Message {
 struct State {
     bg: [Real; 3],
     bg_slider_states: [WidgetStateHandle<SliderState>; 3],
+    bg_slider_changed: [WidgetEventHandle<SliderChanged>; 3],
     style_color_slider_states: [WidgetStateHandle<SliderState>; 56],
+    style_color_slider_changed: [WidgetEventHandle<SliderChanged>; 56],
     style_value_slider_states: [WidgetStateHandle<SliderState>; 5],
+    style_value_slider_changed: [WidgetEventHandle<SliderChanged>; 5],
     logbuf: Rc<RefCell<String>>,
     submit_buf_state: WidgetStateHandle<TextboxState>,
+    submit_buf_submitted: WidgetEventHandle<TextboxSubmitted>,
     combo_typed_state: WidgetStateHandle<ComboState>,
+    combo_submitted: WidgetEventHandle<ComboSubmitted>,
     combo_item_states: [WidgetStateHandle<ListItemState>; 4],
+    combo_item_submitted: [WidgetEventHandle<ListItemSubmitted>; 4],
     style_color_swatch_states: [WidgetStateHandle<ColorSwatchState>; 14],
     window_info_value_states: [WidgetStateHandle<ListItemState>; 3],
     style: Style,
@@ -1070,13 +1078,13 @@ struct State {
     fps: f32,
     last_frame: Instant,
 
-    submit_button_state: WidgetStateHandle<ButtonState>,
+    submit_button_submitted: WidgetEventHandle<ButtonSubmitted>,
     log_text_state: WidgetStateHandle<TextBlockState>,
-    test_button_states: [WidgetStateHandle<ButtonState>; 6],
-    tree_button_states: [WidgetStateHandle<ButtonState>; 6],
-    popup_button_states: [WidgetStateHandle<ButtonState>; 2],
-    stack_direction_button_states: [WidgetStateHandle<ButtonState>; 6],
-    weight_button_states: [WidgetStateHandle<ButtonState>; 9],
+    test_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 6],
+    tree_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 6],
+    popup_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 2],
+    stack_direction_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 6],
+    weight_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 9],
     open_popup: bool,
     open_dialog: bool,
     combo_open: bool,
@@ -1200,6 +1208,7 @@ impl State {
             ))
         });
         let style_color_slider_states = style_color_slider_pairs.each_ref().map(|(state, _)| state.clone());
+        let style_color_slider_changed = style_color_slider_pairs.each_ref().map(|(_, runtime)| runtime.changed());
         let style_color_sliders = style_color_slider_pairs.map(|(_, runtime)| runtime);
         let style_color_swatch_pairs = std::array::from_fn(|_| stateful_leaf::<ColorSwatchBuilder>(ColorSwatchParameters::new(color(0, 0, 0, 0xFF))));
         let style_color_swatch_states = style_color_swatch_pairs.each_ref().map(|(state, _)| state.clone());
@@ -1247,6 +1256,7 @@ impl State {
             )),
         ];
         let style_value_slider_states = style_value_slider_pairs.each_ref().map(|(state, _)| state.clone());
+        let style_value_slider_changed = style_value_slider_pairs.each_ref().map(|(_, runtime)| runtime.changed());
         let style_value_sliders = style_value_slider_pairs.map(|(_, runtime)| runtime);
         let bg_slider_pairs = std::array::from_fn(|_| {
             stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
@@ -1259,6 +1269,7 @@ impl State {
             ))
         });
         let bg_slider_states = bg_slider_pairs.each_ref().map(|(state, _)| state.clone());
+        let bg_slider_changed = bg_slider_pairs.each_ref().map(|(_, runtime)| runtime.changed());
         let bg_sliders = bg_slider_pairs.map(|(_, runtime)| runtime);
         let text_area = retained_leaf::<TextAreaBuilder>(
             TextAreaParameters::new(
@@ -1267,6 +1278,7 @@ impl State {
             .wrap(TextWrap::Word),
         );
         let (submit_buf_state, submit_buf) = stateful_leaf::<TextboxBuilder>(TextboxParameters::new("").font(FontRole::Mono.into()));
+        let submit_buf_submitted = submit_buf.submitted();
         let (log_text_state, log_text) = stateful_leaf::<TextBlockBuilder>(TextBlockParameters::new("").font(FontRole::Mono.into()));
         let typography_heading = retained_leaf::<TextBlockBuilder>(TextBlockParameters::new("NORMAL.ttf at 18px").font(FontRole::Heading.into()));
         let typography_body = retained_leaf::<TextBlockBuilder>(
@@ -1326,7 +1338,8 @@ impl State {
         let _suzanne_root = ctx.create_window("Suzanne Window", rect(220, 220, 300, 300), suzanne_node);
         let _stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), stack_direction_node);
         let _weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), weight_node);
-        let (combo_typed_state, combo_state) = stateful_leaf::<ComboBuilder>(ComboParameters::new());
+        let (combo_typed_state, combo_runtime) = stateful_leaf::<ComboBuilder>(ComboParameters::new());
+        let combo_submitted = combo_runtime.submitted();
         let combo_item_pairs = [
             stateful_leaf::<ListItemBuilder>(ListItemParameters::new("Apple")),
             stateful_leaf::<ListItemBuilder>(ListItemParameters::new("Banana")),
@@ -1334,11 +1347,12 @@ impl State {
             stateful_leaf::<ListItemBuilder>(ListItemParameters::new("Date")),
         ];
         let combo_item_states = combo_item_pairs.each_ref().map(|(state, _)| state.clone());
+        let combo_item_submitted = combo_item_pairs.each_ref().map(|(_, runtime)| runtime.submitted());
         let combo_items = combo_item_pairs.map(|(_, runtime)| runtime);
         let window_info_value_pairs = std::array::from_fn(|_| stateful_leaf::<ListItemBuilder>(ListItemParameters::with_opt("", WidgetOption::NO_INTERACT)));
         let window_info_value_states = window_info_value_pairs.each_ref().map(|(state, _)| state.clone());
         let window_info_values = window_info_value_pairs.map(|(_, runtime)| runtime);
-        let (submit_button_state, submit_button) = centered_button("Submit");
+        let (submit_button_submitted, submit_button) = centered_button("Submit");
         let typography_button = centered_button("Control Preview").1;
         let test_button_pairs = [
             centered_button("Button 1"),
@@ -1348,7 +1362,7 @@ impl State {
             centered_button("Button 4"),
             centered_button("Dialog"),
         ];
-        let test_button_states = test_button_pairs.each_ref().map(|(state, _)| state.clone());
+        let test_button_submitted = test_button_pairs.each_ref().map(|(submitted, _)| submitted.clone());
         let test_buttons = test_button_pairs.map(|(_, runtime)| runtime);
         let tree_button_pairs = [
             centered_button("Button 1"),
@@ -1358,10 +1372,10 @@ impl State {
             centered_button("Button 5"),
             centered_button("Button 6"),
         ];
-        let tree_button_states = tree_button_pairs.each_ref().map(|(state, _)| state.clone());
+        let tree_button_submitted = tree_button_pairs.each_ref().map(|(submitted, _)| submitted.clone());
         let tree_buttons = tree_button_pairs.map(|(_, runtime)| runtime);
         let popup_button_pairs = [centered_button("Hello"), centered_button("World")];
-        let popup_button_states = popup_button_pairs.each_ref().map(|(state, _)| state.clone());
+        let popup_button_submitted = popup_button_pairs.each_ref().map(|(submitted, _)| submitted.clone());
         let popup_buttons = popup_button_pairs.map(|(_, runtime)| runtime);
         let stack_direction_button_pairs = [
             centered_button("Call 1"),
@@ -1371,7 +1385,7 @@ impl State {
             centered_button("Call 2"),
             centered_button("Call 3"),
         ];
-        let stack_direction_button_states = stack_direction_button_pairs.each_ref().map(|(state, _)| state.clone());
+        let stack_direction_button_submitted = stack_direction_button_pairs.each_ref().map(|(submitted, _)| submitted.clone());
         let stack_direction_buttons = stack_direction_button_pairs.map(|(_, runtime)| runtime);
         let weight_button_pairs = [
             centered_button("w1"),
@@ -1384,7 +1398,7 @@ impl State {
             centered_button("g5"),
             centered_button("g6"),
         ];
-        let weight_button_states = weight_button_pairs.each_ref().map(|(state, _)| state.clone());
+        let weight_button_submitted = weight_button_pairs.each_ref().map(|(submitted, _)| submitted.clone());
         let weight_buttons = weight_button_pairs.map(|(_, runtime)| runtime);
         let (background_swatch_state, background_swatch) = stateful_leaf::<ColorSwatchBuilder>(ColorSwatchParameters::new(color(90, 95, 100, 0xFF)));
         let runtimes = DemoRuntimes {
@@ -1393,7 +1407,7 @@ impl State {
             style_value_sliders,
             submit_buf,
             text_area,
-            combo: combo_state,
+            combo: combo_runtime,
             combo_items,
             style_color_labels: [
                 static_label("text"),
@@ -1458,12 +1472,18 @@ impl State {
         let mut state = Self {
             bg: [90.0, 95.0, 100.0],
             bg_slider_states,
+            bg_slider_changed,
             style_color_slider_states,
+            style_color_slider_changed,
             style_value_slider_states,
+            style_value_slider_changed,
             logbuf: Rc::new(RefCell::new(String::new())),
             submit_buf_state,
+            submit_buf_submitted,
             combo_typed_state,
+            combo_submitted,
             combo_item_states,
+            combo_item_submitted,
             style_color_swatch_states,
             window_info_value_states,
             style,
@@ -1473,13 +1493,13 @@ impl State {
             dialog_session: None,
             fps: 0.0,
             last_frame: Instant::now(),
-            submit_button_state,
+            submit_button_submitted,
             log_text_state,
-            test_button_states,
-            tree_button_states,
-            popup_button_states,
-            stack_direction_button_states,
-            weight_button_states,
+            test_button_submitted,
+            tree_button_submitted,
+            popup_button_submitted,
+            stack_direction_button_submitted,
+            weight_button_submitted,
             open_popup: false,
             open_dialog: false,
             combo_open: false,
@@ -1493,30 +1513,30 @@ impl State {
     }
 
     fn connect_events(&self, session: &mut Session<Message>, subscribers: &mut Subscribers<Self, Message>) {
-        for (index, slider) in self.bg_slider_states.iter().enumerate() {
+        for (index, changed) in self.bg_slider_changed.iter().enumerate() {
             session
-                .connect(slider.changed(), move |event| Message::BackgroundChanged(index, event.value))
+                .connect(changed.clone(), move |event| Message::BackgroundChanged(index, event.value))
                 .unwrap();
         }
-        for (index, slider) in self.style_color_slider_states.iter().enumerate() {
+        for (index, changed) in self.style_color_slider_changed.iter().enumerate() {
             session
-                .connect(slider.changed(), move |event| Message::StyleColorChanged(index, event.value))
+                .connect(changed.clone(), move |event| Message::StyleColorChanged(index, event.value))
                 .unwrap();
         }
-        for (index, slider) in self.style_value_slider_states.iter().enumerate() {
+        for (index, changed) in self.style_value_slider_changed.iter().enumerate() {
             session
-                .connect(slider.changed(), move |event| Message::StyleValueChanged(index, event.value))
+                .connect(changed.clone(), move |event| Message::StyleValueChanged(index, event.value))
                 .unwrap();
         }
 
         session
-            .connect(self.submit_buf_state.submitted(), |event| Message::SubmitText(event.text))
+            .connect(self.submit_buf_submitted.clone(), |event| Message::SubmitText(event.text))
             .unwrap();
-        session.connect(self.submit_button_state.submitted(), |_| Message::SubmitButton).unwrap();
-        for (index, button) in self.test_button_states.iter().enumerate() {
-            session.connect(button.submitted(), move |_| Message::TestButton(index)).unwrap();
+        session.connect(self.submit_button_submitted.clone(), |_| Message::SubmitButton).unwrap();
+        for (index, submitted) in self.test_button_submitted.iter().enumerate() {
+            session.connect(submitted.clone(), move |_| Message::TestButton(index)).unwrap();
         }
-        for (button, message) in self.tree_button_states.iter().zip([
+        for (submitted, message) in self.tree_button_submitted.iter().zip([
             "Pressed button 1",
             "Pressed button 2",
             "Pressed button 3",
@@ -1524,18 +1544,16 @@ impl State {
             "Pressed button 5",
             "Pressed button 6",
         ]) {
-            session.connect(button.submitted(), move |_| Message::TreeButton(message)).unwrap();
+            session.connect(submitted.clone(), move |_| Message::TreeButton(message)).unwrap();
         }
-        session
-            .connect(self.combo_typed_state.submitted(), |event| Message::ComboOpen(event.open))
-            .unwrap();
-        for (index, item) in self.combo_item_states.iter().enumerate() {
-            session.connect(item.submitted(), move |_| Message::ComboItem(index)).unwrap();
+        session.connect(self.combo_submitted.clone(), |event| Message::ComboOpen(event.open)).unwrap();
+        for (index, submitted) in self.combo_item_submitted.iter().enumerate() {
+            session.connect(submitted.clone(), move |_| Message::ComboItem(index)).unwrap();
         }
-        for (button, message) in self.popup_button_states.iter().zip(["Hello", "World"]) {
-            session.connect(button.submitted(), move |_| Message::PopupButton(message)).unwrap();
+        for (submitted, message) in self.popup_button_submitted.iter().zip(["Hello", "World"]) {
+            session.connect(submitted.clone(), move |_| Message::PopupButton(message)).unwrap();
         }
-        for (button, message) in self.stack_direction_button_states.iter().zip([
+        for (submitted, message) in self.stack_direction_button_submitted.iter().zip([
             "Top->Bottom: call 1",
             "Top->Bottom: call 2",
             "Top->Bottom: call 3",
@@ -1543,9 +1561,9 @@ impl State {
             "Bottom->Top: call 2",
             "Bottom->Top: call 3",
         ]) {
-            session.connect(button.submitted(), move |_| Message::StackDirectionButton(message)).unwrap();
+            session.connect(submitted.clone(), move |_| Message::StackDirectionButton(message)).unwrap();
         }
-        for (button, message) in self.weight_button_states.iter().zip([
+        for (submitted, message) in self.weight_button_submitted.iter().zip([
             "Weight row: 1",
             "Weight row: 2",
             "Weight row: 3",
@@ -1556,7 +1574,7 @@ impl State {
             "Weight grid: 5",
             "Weight grid: 6",
         ]) {
-            session.connect(button.submitted(), move |_| Message::WeightButton(message)).unwrap();
+            session.connect(submitted.clone(), move |_| Message::WeightButton(message)).unwrap();
         }
 
         subscribers.subscribe(|state, message, _| state.handle_message(message));

@@ -78,7 +78,7 @@ impl<B: RendererBackend> Context<B> {
         // Allocate lifecycle identity before construction; IDs are never derived from node identity.
         let id = self.next_root_id();
         // Root chrome returns one concrete Container and the weak state handle Context registers.
-        let (root_state, root) = create_root_chrome(RootChromeParameters {
+        let (root_state, changed, submitted, root) = create_root_chrome(RootChromeParameters {
             name: name.to_owned(),
             options,
             rect,
@@ -105,7 +105,7 @@ impl<B: RendererBackend> Context<B> {
         });
         // New topology requires a layout commit before rendering or pointer routing.
         self.invalidate_ui_commit();
-        root_handle(id, root_state)
+        root_handle(id, root_state, changed, submitted)
     }
 
     fn next_root_id(&mut self) -> RootId {

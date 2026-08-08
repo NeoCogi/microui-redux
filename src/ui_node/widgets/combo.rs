@@ -87,10 +87,8 @@ pub struct ComboState {
     label: String,
     /// Framework-owned popup anchor snapshot published by the latest paint.
     last_anchor: Recti,
-    /// Session connection for selection changes.
-    changed_event: crate::event::WidgetEventPort<ComboChanged>,
-    /// Session connection for header submissions.
-    submitted_event: crate::event::WidgetEventPort<ComboSubmitted>,
+    /// Weak publisher used by selection commands; the concrete Combo owns the event port.
+    changed_emitter: crate::event::WidgetEventEmitter<ComboChanged>,
 }
 
 impl WidgetState for ComboState {}
@@ -180,14 +178,14 @@ impl ComboState {
         if self.selected == previous_selected && self.label == previous_label {
             return;
         }
-        self.changed_event.emit(ComboChanged {
+        self.changed_emitter.emit(ComboChanged {
             selected: self.selected,
             label: self.label.clone(),
         });
     }
 
     fn emit_changed(&mut self) {
-        self.changed_event.emit(ComboChanged {
+        self.changed_emitter.emit(ComboChanged {
             selected: self.selected,
             label: self.label.clone(),
         });
@@ -214,18 +212,6 @@ pub struct ComboSubmitted {
 
 impl crate::WidgetEvent for ComboSubmitted {}
 
-impl WidgetStateHandle<ComboState> {
-    /// Returns the native event endpoint emitted after every selection change.
-    pub fn changed(&self) -> crate::WidgetEventHandle<ComboState, ComboChanged> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
-    }
-
-    /// Returns the native event endpoint emitted whenever the user submits the combo header.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<ComboState, ComboSubmitted> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
-    }
-}
-
 /// Concrete combo runtime and sole strong owner of its application state.
 pub struct Combo {
     /// Initialization-only font.
@@ -234,6 +220,10 @@ pub struct Combo {
     opt: WidgetOption,
     /// Persistent state allocation.
     state: Rc<RefCell<ComboState>>,
+    /// Runtime-owned source for selection changes.
+    changed_event: Rc<crate::event::WidgetEventPort<ComboChanged>>,
+    /// Runtime-owned source for header submissions.
+    submitted_event: Rc<crate::event::WidgetEventPort<ComboSubmitted>>,
 }
 
 impl Combo {
@@ -242,6 +232,16 @@ impl Combo {
         let widget = ComboBuilder::create_widget(parameters);
         let state = widget.state_handle();
         (state, widget)
+    }
+
+    /// Returns the native event endpoint emitted after every selection change.
+    pub fn changed(&self) -> crate::WidgetEventHandle<ComboChanged> {
+        <Self as crate::TypedWidget<ComboChanged>>::event(self)
+    }
+
+    /// Returns the native event endpoint emitted whenever the user submits the combo header.
+    pub fn submitted(&self) -> crate::WidgetEventHandle<ComboSubmitted> {
+        <Self as crate::TypedWidget<ComboSubmitted>>::event(self)
     }
 
     /// Measures the combo header label plus dropdown indicator.
@@ -262,12 +262,17 @@ impl Combo {
 
     /// Updates popup open state and records header submissions.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>) {
-        runtime_update_state(&self.state, "Combo::update", |state| {
+        let submitted = runtime_update_state(&self.state, "Combo::update", |state| {
             if ctx.clicked() {
                 state.open = !state.open;
-                state.submitted_event.emit(ComboSubmitted { open: state.open });
+                Some(ComboSubmitted { open: state.open })
+            } else {
+                None
             }
-        })
+        });
+        if let Some(event) = submitted {
+            self.submitted_event.emit(event);
+        }
     }
 
     /// Paints the combo header and publishes the read-only popup anchor below it.
@@ -295,6 +300,18 @@ impl Combo {
         if let Some(indicator_content) = indicator_content {
             ctx.draw_icon(ctx.style().icons.expand_down, indicator_content, icon_color);
         }
+    }
+}
+
+impl crate::TypedWidget<ComboChanged> for Combo {
+    fn event(&self) -> crate::WidgetEventHandle<ComboChanged> {
+        crate::WidgetEventHandle::new(&self.changed_event)
+    }
+}
+
+impl crate::TypedWidget<ComboSubmitted> for Combo {
+    fn event(&self) -> crate::WidgetEventHandle<ComboSubmitted> {
+        crate::WidgetEventHandle::new(&self.submitted_event)
     }
 }
 
@@ -332,6 +349,7 @@ impl WidgetBuilder for ComboBuilder {
     type W = Combo;
 
     fn create_widget(parameters: Self::Parameters) -> Self::W {
+        let changed_event = Rc::new(crate::event::WidgetEventPort::new());
         Combo {
             font: parameters.font,
             opt: parameters.opt,
@@ -340,9 +358,10 @@ impl WidgetBuilder for ComboBuilder {
                 open: false,
                 label: String::new(),
                 last_anchor: Recti::default(),
-                changed_event: crate::event::WidgetEventPort::new(),
-                submitted_event: crate::event::WidgetEventPort::new(),
+                changed_emitter: crate::event::WidgetEventEmitter::new(&changed_event),
             })),
+            changed_event,
+            submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }
 }

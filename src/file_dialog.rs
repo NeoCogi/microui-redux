@@ -42,9 +42,9 @@ use std::{
 
 use crate::render::RendererBackend;
 use crate::{
-    Button, ButtonParameters, ButtonState, Column, ColumnParameters, Context, IconId, ListItem, ListItemParameters, ListItemState, Node, Policy, Recti,
+    Button, ButtonParameters, ButtonSubmitted, Column, ColumnParameters, Context, IconId, ListItem, ListItemParameters, ListItemSubmitted, Node, Policy, Recti,
     RootHandle, ScrollArea, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, Session, SizePolicy, Stack, StackDirection, StackParameters, StackState,
-    Subscribers, Textbox, TextboxParameters, TextboxState, ThemeIcons, WidgetOption, WidgetStateHandle, WindowOption,
+    Subscribers, Textbox, TextboxParameters, TextboxState, TextboxSubmitted, ThemeIcons, WidgetEventHandle, WidgetOption, WidgetStateHandle, WindowOption,
 };
 use crate::ui_node::RuntimeNodeId;
 
@@ -157,7 +157,7 @@ impl FileDialogSession {
 
 struct DialogRows {
     nodes: Vec<Node>,
-    states: Vec<WidgetStateHandle<ListItemState>>,
+    submitted: Vec<WidgetEventHandle<ListItemSubmitted>>,
     ids: Vec<RuntimeNodeId>,
 }
 
@@ -185,8 +185,8 @@ pub(crate) struct FileDialogController {
     folders: Vec<String>,
     files: Vec<String>,
     icons: ThemeIcons,
-    folder_items: Vec<WidgetStateHandle<ListItemState>>,
-    file_items: Vec<WidgetStateHandle<ListItemState>>,
+    folder_items: Vec<WidgetEventHandle<ListItemSubmitted>>,
+    file_items: Vec<WidgetEventHandle<ListItemSubmitted>>,
     folder_item_ids: Vec<RuntimeNodeId>,
     file_item_ids: Vec<RuntimeNodeId>,
     folder_rows: WidgetStateHandle<StackState>,
@@ -196,12 +196,13 @@ pub(crate) struct FileDialogController {
     #[cfg_attr(not(test), allow(dead_code))]
     file_scroll: WidgetStateHandle<ScrollAreaState>,
     path_box: WidgetStateHandle<TextboxState>,
+    path_box_submitted: WidgetEventHandle<TextboxSubmitted>,
     file_name_box: WidgetStateHandle<TextboxState>,
-    up_button: WidgetStateHandle<ButtonState>,
-    home_button: WidgetStateHandle<ButtonState>,
-    go_button: WidgetStateHandle<ButtonState>,
-    ok_button: WidgetStateHandle<ButtonState>,
-    cancel_button: WidgetStateHandle<ButtonState>,
+    up_button: WidgetEventHandle<ButtonSubmitted>,
+    home_button: WidgetEventHandle<ButtonSubmitted>,
+    go_button: WidgetEventHandle<ButtonSubmitted>,
+    ok_button: WidgetEventHandle<ButtonSubmitted>,
+    cancel_button: WidgetEventHandle<ButtonSubmitted>,
     event_session: Session<FileDialogMessage>,
     event_subscribers: Subscribers<VecDeque<FileDialogMessage>, FileDialogMessage>,
     pending_events: VecDeque<FileDialogMessage>,
@@ -233,14 +234,18 @@ impl FileDialogController {
         let folder_rows = Self::make_folder_rows(&current_working_directory, &folders, icons.closed_folder);
         let file_rows = Self::make_file_rows(&files, icons.file);
 
-        let (up_button, up_runtime) = Button::create(ButtonParameters::new("Up"));
+        let (_, up_runtime) = Button::create(ButtonParameters::new("Up"));
+        let up_button = up_runtime.submitted();
         let up_node = Node::widget(up_runtime);
         let up_button_id = up_node.id();
-        let (home_button, home_runtime) = Button::create(ButtonParameters::new("Home"));
+        let (_, home_runtime) = Button::create(ButtonParameters::new("Home"));
+        let home_button = home_runtime.submitted();
         let home_node = Node::widget(home_runtime);
         let (path_box, path_runtime) = Textbox::create(TextboxParameters::new(current_working_directory.clone()));
+        let path_box_submitted = path_runtime.submitted();
         let path_node = Node::widget(path_runtime);
-        let (go_button, go_runtime) = Button::create(ButtonParameters::new("Go"));
+        let (_, go_runtime) = Button::create(ButtonParameters::new("Go"));
+        let go_button = go_runtime.submitted();
         let go_node = Node::widget(go_runtime);
 
         let (folder_rows_state, folder_rows_node) = Stack::create(StackParameters::new(
@@ -273,10 +278,12 @@ impl FileDialogController {
 
         let (file_name_box, file_name_runtime) = Textbox::create(TextboxParameters::new(""));
         let file_name_node = Node::widget(file_name_runtime);
-        let (cancel_button, cancel_runtime) = Button::create(ButtonParameters::new("Cancel"));
+        let (_, cancel_runtime) = Button::create(ButtonParameters::new("Cancel"));
+        let cancel_button = cancel_runtime.submitted();
         let cancel_node = Node::widget(cancel_runtime);
         let cancel_button_id = cancel_node.id();
-        let (ok_button, ok_runtime) = Button::create(ButtonParameters::new("Open"));
+        let (_, ok_runtime) = Button::create(ButtonParameters::new("Open"));
+        let ok_button = ok_runtime.submitted();
         let ok_node = Node::widget(ok_runtime);
         let ok_button_id = ok_node.id();
 
@@ -316,8 +323,8 @@ impl FileDialogController {
             folders,
             files,
             icons,
-            folder_items: folder_rows.states,
-            file_items: file_rows.states,
+            folder_items: folder_rows.submitted,
+            file_items: file_rows.submitted,
             folder_item_ids: folder_rows.ids,
             file_item_ids: file_rows.ids,
             folder_rows: folder_rows_state,
@@ -325,6 +332,7 @@ impl FileDialogController {
             folder_scroll,
             file_scroll,
             path_box,
+            path_box_submitted,
             file_name_box,
             up_button,
             home_button,
@@ -345,21 +353,17 @@ impl FileDialogController {
     }
 
     fn connect_static_events(&mut self) {
-        self.event_session.connect(self.up_button.submitted(), |_| FileDialogMessage::Up).unwrap();
-        self.event_session.connect(self.home_button.submitted(), |_| FileDialogMessage::Home).unwrap();
+        self.event_session.connect(self.up_button.clone(), |_| FileDialogMessage::Up).unwrap();
+        self.event_session.connect(self.home_button.clone(), |_| FileDialogMessage::Home).unwrap();
         self.event_session
-            .connect(self.path_box.submitted(), |event| FileDialogMessage::NavigatePath(event.text))
+            .connect(self.path_box_submitted.clone(), |event| FileDialogMessage::NavigatePath(event.text))
             .unwrap();
         self.event_session
-            .connect(self.go_button.submitted(), |_| FileDialogMessage::NavigatePathBox)
+            .connect(self.go_button.clone(), |_| FileDialogMessage::NavigatePathBox)
             .unwrap();
-        self.event_session.connect(self.ok_button.submitted(), |_| FileDialogMessage::Accept).unwrap();
-        self.event_session
-            .connect(self.cancel_button.submitted(), |_| FileDialogMessage::Cancel)
-            .unwrap();
-        self.event_session
-            .connect(self.root.state().submitted(), |_| FileDialogMessage::Cancel)
-            .unwrap();
+        self.event_session.connect(self.ok_button.clone(), |_| FileDialogMessage::Accept).unwrap();
+        self.event_session.connect(self.cancel_button.clone(), |_| FileDialogMessage::Cancel).unwrap();
+        self.event_session.connect(self.root.submitted(), |_| FileDialogMessage::Cancel).unwrap();
     }
 
     fn connect_row_events(&mut self) {
@@ -367,12 +371,12 @@ impl FileDialogController {
         for (item, directory) in self.folder_items.iter().zip(&self.folders) {
             let directory = directory.clone();
             self.event_session
-                .connect(item.submitted(), move |_| FileDialogMessage::NavigatePath(directory.clone()))
+                .connect(item.clone(), move |_| FileDialogMessage::NavigatePath(directory.clone()))
                 .unwrap();
         }
         for item in &self.file_items {
             self.event_session
-                .connect(item.submitted(), |event| FileDialogMessage::SelectFile(event.label))
+                .connect(item.clone(), |event| FileDialogMessage::SelectFile(event.label))
                 .unwrap();
         }
     }
@@ -407,13 +411,13 @@ impl FileDialogController {
         if folders.is_empty() {
             return DialogRows {
                 nodes: vec![Self::static_item("No folders")],
-                states: Vec::new(),
+                submitted: Vec::new(),
                 ids: Vec::new(),
             };
         }
         let parent = Path::new(cwd).parent().map(|path| path.to_string_lossy().into_owned());
         let mut nodes = Vec::with_capacity(folders.len());
-        let mut states = Vec::with_capacity(folders.len());
+        let mut submitted = Vec::with_capacity(folders.len());
         let mut ids = Vec::with_capacity(folders.len());
         for folder in folders {
             let label = if parent.as_deref() == Some(folder.as_str()) {
@@ -421,34 +425,34 @@ impl FileDialogController {
             } else {
                 Path::new(folder).file_name().and_then(|name| name.to_str()).unwrap_or(folder)
             };
-            let (state, runtime) = ListItem::create(ListItemParameters::with_icon(label, folder_icon));
+            let (_, runtime) = ListItem::create(ListItemParameters::with_icon(label, folder_icon));
+            submitted.push(runtime.submitted());
             let node = Node::widget(runtime);
             ids.push(node.id());
-            states.push(state);
             nodes.push(node);
         }
-        DialogRows { nodes, states, ids }
+        DialogRows { nodes, submitted, ids }
     }
 
     fn make_file_rows(files: &[String], file_icon: IconId) -> DialogRows {
         if files.is_empty() {
             return DialogRows {
                 nodes: vec![Self::static_item("No files")],
-                states: Vec::new(),
+                submitted: Vec::new(),
                 ids: Vec::new(),
             };
         }
         let mut nodes = Vec::with_capacity(files.len());
-        let mut states = Vec::with_capacity(files.len());
+        let mut submitted = Vec::with_capacity(files.len());
         let mut ids = Vec::with_capacity(files.len());
         for file in files {
-            let (state, runtime) = ListItem::create(ListItemParameters::with_icon(file, file_icon));
+            let (_, runtime) = ListItem::create(ListItemParameters::with_icon(file, file_icon));
+            submitted.push(runtime.submitted());
             let node = Node::widget(runtime);
             ids.push(node.id());
-            states.push(state);
             nodes.push(node);
         }
-        DialogRows { nodes, states, ids }
+        DialogRows { nodes, submitted, ids }
     }
 
     fn refresh_entries(&mut self) {
@@ -465,8 +469,8 @@ impl FileDialogController {
 
         self.folders = folders;
         self.files = files;
-        self.folder_items = folder_rows.states;
-        self.file_items = file_rows.states;
+        self.folder_items = folder_rows.submitted;
+        self.file_items = file_rows.submitted;
         self.folder_item_ids = folder_rows.ids;
         self.file_item_ids = file_rows.ids;
         self.connect_row_events();
@@ -706,9 +710,9 @@ mod tests {
     #[test]
     fn pending_file_dialog_blocks_pointer_input_to_underlying_windows() {
         let mut ctx = context();
-        let (behind, button) = Button::create(ButtonParameters::new("behind"));
+        let (_, button) = Button::create(ButtonParameters::new("behind"));
         let mut event_session = crate::Session::new();
-        event_session.connect(behind.submitted(), |_| ()).unwrap();
+        event_session.connect(button.submitted(), |_| ()).unwrap();
         let mut subscribers = crate::Subscribers::new();
         subscribers.subscribe(|count: &mut usize, _: &(), _| *count += 1);
         let mut submissions = 0;

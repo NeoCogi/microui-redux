@@ -129,8 +129,9 @@ impl FocusPolicy {
 
 /// Marker trait for application-facing state retained by a widget runtime.
 ///
-/// State contains values, events, and commands that remain meaningful after construction. It does
-/// not implement widget measurement, update, or painting; those phases belong to [`Widget`].
+/// State contains semantic values and commands that remain meaningful after construction. Native
+/// event ports belong to the concrete runtime and are exposed through [`crate::TypedWidget`]; state
+/// does not implement measurement, update, or painting, which remain [`Widget`] phases.
 pub trait WidgetState: 'static {}
 
 impl WidgetState for () {}

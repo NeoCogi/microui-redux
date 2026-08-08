@@ -34,7 +34,6 @@
 //! path.
 
 use super::*;
-use crate::ui_node::runtime_update_state;
 use std::{cell::RefCell, rc::Rc};
 
 #[derive(Clone)]
@@ -136,10 +135,7 @@ impl ButtonParameters {
 }
 
 /// Application-facing persistent button state.
-pub struct ButtonState {
-    /// Session connection for user submissions.
-    submitted_event: crate::event::WidgetEventPort<ButtonSubmitted>,
-}
+pub struct ButtonState;
 
 impl WidgetState for ButtonState {}
 
@@ -148,13 +144,6 @@ impl WidgetState for ButtonState {}
 pub struct ButtonSubmitted;
 
 impl crate::WidgetEvent for ButtonSubmitted {}
-
-impl WidgetStateHandle<ButtonState> {
-    /// Returns the native event endpoint emitted once for every user submission.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<ButtonState, ButtonSubmitted> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
-    }
-}
 
 /// Concrete button runtime and sole strong owner of its application state.
 pub struct Button {
@@ -168,6 +157,8 @@ pub struct Button {
     fill: WidgetFillOption,
     /// Persistent state allocation.
     state: Rc<RefCell<ButtonState>>,
+    /// Runtime-owned source for user submissions.
+    submitted_event: Rc<crate::event::WidgetEventPort<ButtonSubmitted>>,
 }
 
 impl Button {
@@ -176,6 +167,11 @@ impl Button {
         let widget = ButtonBuilder::create_widget(parameters);
         let state = widget.state_handle();
         (state, widget)
+    }
+
+    /// Returns the native event endpoint emitted once for every user submission.
+    pub fn submitted(&self) -> crate::WidgetEventHandle<ButtonSubmitted> {
+        <Self as crate::TypedWidget<ButtonSubmitted>>::event(self)
     }
 
     /// Measures the label and optional visual content.
@@ -263,13 +259,17 @@ impl Widget for Button {
         if !ctx.clicked() {
             return;
         }
-        runtime_update_state(&self.state, "Button::update", |state| {
-            state.submitted_event.emit(ButtonSubmitted);
-        });
+        self.submitted_event.emit(ButtonSubmitted);
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(ctx);
+    }
+}
+
+impl crate::TypedWidget<ButtonSubmitted> for Button {
+    fn event(&self) -> crate::WidgetEventHandle<ButtonSubmitted> {
+        crate::WidgetEventHandle::new(&self.submitted_event)
     }
 }
 
@@ -294,9 +294,8 @@ impl WidgetBuilder for ButtonBuilder {
             font: parameters.font,
             opt: parameters.opt,
             fill: parameters.fill,
-            state: Rc::new(RefCell::new(ButtonState {
-                submitted_event: crate::event::WidgetEventPort::new(),
-            })),
+            state: Rc::new(RefCell::new(ButtonState)),
+            submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }
 }

@@ -88,8 +88,6 @@ pub struct NumberState {
     value: Real,
     /// Text editing state for shift-click numeric entry.
     edit: NumberEditState,
-    /// Session connection for user-originated value changes.
-    changed_event: crate::event::WidgetEventPort<NumberChanged>,
 }
 
 /// Value snapshot emitted after a user-originated number change.
@@ -100,13 +98,6 @@ pub struct NumberChanged {
 }
 
 impl crate::WidgetEvent for NumberChanged {}
-
-impl WidgetStateHandle<NumberState> {
-    /// Returns the native event endpoint emitted after every user-originated value change.
-    pub fn changed(&self) -> crate::WidgetEventHandle<NumberState, NumberChanged> {
-        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
-    }
-}
 
 impl WidgetState for NumberState {}
 
@@ -139,6 +130,8 @@ pub struct Number {
     opt: WidgetOption,
     /// Persistent state allocation.
     state: Rc<RefCell<NumberState>>,
+    /// Runtime-owned source for user-originated value changes.
+    changed_event: Rc<crate::event::WidgetEventPort<NumberChanged>>,
 }
 
 impl Number {
@@ -147,6 +140,11 @@ impl Number {
         let widget = NumberBuilder::create_widget(parameters);
         let state = widget.state_handle();
         (state, widget)
+    }
+
+    /// Returns the native event endpoint emitted after every user-originated value change.
+    pub fn changed(&self) -> crate::WidgetEventHandle<NumberChanged> {
+        <Self as crate::TypedWidget<NumberChanged>>::event(self)
     }
 
     /// Measures the formatted number label.
@@ -159,7 +157,7 @@ impl Number {
     /// Updates number value from shift-click text entry or horizontal drag.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let font = ctx.style().resolve_font_choice(self.font);
-        runtime_update_state(&self.state, "Number::update", |state| {
+        let changed = runtime_update_state(&self.state, "Number::update", |state| {
             let last = state.value;
             if !number_textbox_update(ctx, input, &mut state.edit, self.precision, font, &mut state.value) {
                 if ctx.focused()
@@ -173,10 +171,11 @@ impl Number {
             } else {
                 state.set_value(state.value);
             }
-            if state.value != last {
-                state.changed_event.emit(NumberChanged { value: state.value });
-            }
-        })
+            (state.value != last).then_some(NumberChanged { value: state.value })
+        });
+        if let Some(event) = changed {
+            self.changed_event.emit(event);
+        }
     }
 
     /// Paints either the inline numeric editor or the formatted value.
@@ -193,6 +192,12 @@ impl Number {
             let label = number_label(state.value, self.precision);
             ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
         });
+    }
+}
+
+impl crate::TypedWidget<NumberChanged> for Number {
+    fn event(&self) -> crate::WidgetEventHandle<NumberChanged> {
+        crate::WidgetEventHandle::new(&self.changed_event)
     }
 }
 
@@ -243,7 +248,6 @@ impl WidgetBuilder for NumberBuilder {
         let state = Rc::new(RefCell::new(NumberState {
             value: if parameters.value.is_finite() { parameters.value } else { 0.0 },
             edit: NumberEditState::default(),
-            changed_event: crate::event::WidgetEventPort::new(),
         }));
         Number {
             step: parameters.step,
@@ -251,6 +255,7 @@ impl WidgetBuilder for NumberBuilder {
             font: parameters.font,
             opt: parameters.opt,
             state,
+            changed_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }
 }
