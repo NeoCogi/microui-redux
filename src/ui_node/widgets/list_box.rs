@@ -86,10 +86,12 @@ pub struct ListBoxState {
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct ListBoxSubmitted;
 
+impl crate::WidgetEvent for ListBoxSubmitted {}
+
 impl WidgetStateHandle<ListBoxState> {
     /// Returns the native event endpoint emitted once for every user submission.
-    pub fn submitted(&self) -> crate::WidgetEvent<ListBoxState, ListBoxSubmitted> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
+    pub fn submitted(&self) -> crate::WidgetEventHandle<ListBoxState, ListBoxSubmitted> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
     }
 }
 

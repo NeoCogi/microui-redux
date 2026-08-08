@@ -147,10 +147,12 @@ impl WidgetState for ButtonState {}
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct ButtonSubmitted;
 
+impl crate::WidgetEvent for ButtonSubmitted {}
+
 impl WidgetStateHandle<ButtonState> {
     /// Returns the native event endpoint emitted once for every user submission.
-    pub fn submitted(&self) -> crate::WidgetEvent<ButtonState, ButtonSubmitted> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
+    pub fn submitted(&self) -> crate::WidgetEventHandle<ButtonState, ButtonSubmitted> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
     }
 }
 

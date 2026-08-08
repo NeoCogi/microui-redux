@@ -99,10 +99,12 @@ pub struct NumberChanged {
     pub value: Real,
 }
 
+impl crate::WidgetEvent for NumberChanged {}
+
 impl WidgetStateHandle<NumberState> {
     /// Returns the native event endpoint emitted after every user-originated value change.
-    pub fn changed(&self) -> crate::WidgetEvent<NumberState, NumberChanged> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    pub fn changed(&self) -> crate::WidgetEventHandle<NumberState, NumberChanged> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
     }
 }
 

@@ -56,7 +56,7 @@ fn frame_info(dimensions: Dimensioni) -> FrameInfo {
     FrameInfo::try_new(dimensions, color(0, 0, 0, 255)).unwrap()
 }
 
-fn event_counter<S: WidgetState, E: 'static>(event: crate::WidgetEvent<S, E>) -> (crate::Session<()>, crate::Subscribers<usize, ()>) {
+fn event_counter<S: WidgetState, E: crate::WidgetEvent>(event: crate::WidgetEventHandle<S, E>) -> (crate::Session<()>, crate::Subscribers<usize, ()>) {
     let mut session = crate::Session::new();
     session.connect(event, |_| ()).unwrap();
     let mut subscribers = crate::Subscribers::new();

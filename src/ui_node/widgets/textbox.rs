@@ -155,6 +155,8 @@ pub struct TextboxChanged {
     pub cursor: usize,
 }
 
+impl crate::WidgetEvent for TextboxChanged {}
+
 /// Snapshot emitted when the user submits a textbox value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextboxSubmitted {
@@ -162,15 +164,17 @@ pub struct TextboxSubmitted {
     pub text: String,
 }
 
+impl crate::WidgetEvent for TextboxSubmitted {}
+
 impl WidgetStateHandle<TextboxState> {
     /// Returns the native event endpoint emitted after every user-originated text change.
-    pub fn changed(&self) -> crate::WidgetEvent<TextboxState, TextboxChanged> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    pub fn changed(&self) -> crate::WidgetEventHandle<TextboxState, TextboxChanged> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
     }
 
     /// Returns the native event endpoint emitted whenever the user submits the current text.
-    pub fn submitted(&self) -> crate::WidgetEvent<TextboxState, TextboxSubmitted> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
+    pub fn submitted(&self) -> crate::WidgetEventHandle<TextboxState, TextboxSubmitted> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
     }
 }
 

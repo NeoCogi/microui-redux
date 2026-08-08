@@ -203,6 +203,8 @@ pub struct ComboChanged {
     pub label: String,
 }
 
+impl crate::WidgetEvent for ComboChanged {}
+
 /// Popup-state snapshot emitted when the user submits the combo header.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct ComboSubmitted {
@@ -210,15 +212,17 @@ pub struct ComboSubmitted {
     pub open: bool,
 }
 
+impl crate::WidgetEvent for ComboSubmitted {}
+
 impl WidgetStateHandle<ComboState> {
     /// Returns the native event endpoint emitted after every selection change.
-    pub fn changed(&self) -> crate::WidgetEvent<ComboState, ComboChanged> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    pub fn changed(&self) -> crate::WidgetEventHandle<ComboState, ComboChanged> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
     }
 
     /// Returns the native event endpoint emitted whenever the user submits the combo header.
-    pub fn submitted(&self) -> crate::WidgetEvent<ComboState, ComboSubmitted> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
+    pub fn submitted(&self) -> crate::WidgetEventHandle<ComboState, ComboSubmitted> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
     }
 }
 

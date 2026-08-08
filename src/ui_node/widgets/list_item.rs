@@ -113,10 +113,12 @@ pub struct ListItemSubmitted {
     pub label: String,
 }
 
+impl crate::WidgetEvent for ListItemSubmitted {}
+
 impl WidgetStateHandle<ListItemState> {
     /// Returns the native event endpoint emitted once for every user submission.
-    pub fn submitted(&self) -> crate::WidgetEvent<ListItemState, ListItemSubmitted> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
+    pub fn submitted(&self) -> crate::WidgetEventHandle<ListItemState, ListItemSubmitted> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
     }
 }
 

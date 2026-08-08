@@ -138,6 +138,8 @@ pub struct TextAreaChanged {
     pub cursor: usize,
 }
 
+impl crate::WidgetEvent for TextAreaChanged {}
+
 /// Snapshot emitted when the user submits a text-area value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextAreaSubmitted {
@@ -145,15 +147,17 @@ pub struct TextAreaSubmitted {
     pub text: String,
 }
 
+impl crate::WidgetEvent for TextAreaSubmitted {}
+
 impl WidgetStateHandle<TextAreaState> {
     /// Returns the native event endpoint emitted after every user-originated text change.
-    pub fn changed(&self) -> crate::WidgetEvent<TextAreaState, TextAreaChanged> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    pub fn changed(&self) -> crate::WidgetEventHandle<TextAreaState, TextAreaChanged> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
     }
 
     /// Returns the native event endpoint emitted whenever the user submits the current text.
-    pub fn submitted(&self) -> crate::WidgetEvent<TextAreaState, TextAreaSubmitted> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
+    pub fn submitted(&self) -> crate::WidgetEventHandle<TextAreaState, TextAreaSubmitted> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
     }
 }
 

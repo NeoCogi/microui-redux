@@ -206,6 +206,8 @@ pub struct RootChanged {
     pub rect: Recti,
 }
 
+impl crate::WidgetEvent for RootChanged {}
+
 /// Reason emitted when a root is submitted by its chrome or popup policy.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum RootSubmitted {
@@ -215,15 +217,17 @@ pub enum RootSubmitted {
     PopupDismissed,
 }
 
+impl crate::WidgetEvent for RootSubmitted {}
+
 impl WidgetStateHandle<RootState> {
     /// Returns the native event endpoint emitted after each user-driven move or resize.
-    pub fn changed(&self) -> crate::WidgetEvent<RootState, RootChanged> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    pub fn changed(&self) -> crate::WidgetEventHandle<RootState, RootChanged> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
     }
 
     /// Returns the native event endpoint emitted for close and outside-popup submissions.
-    pub fn submitted(&self) -> crate::WidgetEvent<RootState, RootSubmitted> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
+    pub fn submitted(&self) -> crate::WidgetEventHandle<RootState, RootSubmitted> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.submitted_event)
     }
 }
 

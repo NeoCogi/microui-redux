@@ -118,10 +118,12 @@ pub struct CheckboxChanged {
     pub checked: bool,
 }
 
+impl crate::WidgetEvent for CheckboxChanged {}
+
 impl WidgetStateHandle<CheckboxState> {
     /// Returns the native event endpoint emitted after every user-originated value change.
-    pub fn changed(&self) -> crate::WidgetEvent<CheckboxState, CheckboxChanged> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    pub fn changed(&self) -> crate::WidgetEventHandle<CheckboxState, CheckboxChanged> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
     }
 }
 

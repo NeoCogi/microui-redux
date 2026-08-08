@@ -134,10 +134,12 @@ pub struct SliderChanged {
     pub value: Real,
 }
 
+impl crate::WidgetEvent for SliderChanged {}
+
 impl WidgetStateHandle<SliderState> {
     /// Returns the native event endpoint emitted after every user-originated value change.
-    pub fn changed(&self) -> crate::WidgetEvent<SliderState, SliderChanged> {
-        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    pub fn changed(&self) -> crate::WidgetEventHandle<SliderState, SliderChanged> {
+        crate::WidgetEventHandle::new(self.clone(), |state| &mut state.changed_event)
     }
 }
 
