@@ -81,8 +81,8 @@ mod textbox;
 use control::{content_height, inline_content_size, layout_inline_content, layout_scaled_visual_content, scaled_visual_content_size, text_size, widget_fill_color};
 pub(crate) use pending_event::{record_pending_event, take_pending_event};
 
-pub use button::{Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState};
-pub use checkbox::{Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState};
+pub use button::{Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, ButtonSubmitted};
+pub use checkbox::{Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters, CheckboxState};
 pub use color_swatch::{ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState};
 pub use combo::{Combo, ComboBuilder, ComboParameters, ComboState};
 pub use custom::{Custom, CustomBuilder, CustomParameters};
@@ -92,7 +92,7 @@ pub use number::{Number, NumberBuilder, NumberParameters, NumberState};
 pub use slider::{Slider, SliderBuilder, SliderParameters, SliderState};
 pub use text_area::{TextArea, TextAreaBuilder, TextAreaParameters, TextAreaState};
 pub use text_block::{TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState};
-pub use textbox::{Textbox, TextboxBuilder, TextboxParameters, TextboxState};
+pub use textbox::{Textbox, TextboxBuilder, TextboxChanged, TextboxParameters, TextboxState, TextboxSubmitted};
 
 #[cfg(test)]
 mod tests;

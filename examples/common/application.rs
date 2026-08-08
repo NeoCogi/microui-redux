@@ -35,7 +35,7 @@ use crate::*;
 use common::*;
 use microui_redux::{
     self as microui,
-    prelude::{AtlasHandle, Dimensioni, FrameInfo},
+    prelude::{AtlasHandle, Dimensioni, FrameInfo, Session, Subscribers},
 };
 
 #[cfg(feature = "example-glow")]
@@ -115,7 +115,34 @@ impl<S> Application<S> {
     }
 
     /// Runs the SDL event loop, forwarding input into microui and invoking the user frame callback.
+    #[allow(dead_code)] // Each example selects either polling or subscriber-driven updates.
     pub fn event_loop<F: Fn(&mut MicroUI, &mut S, Dimensioni)>(&mut self, f: F) {
+        self.event_loop_with_update(|ctx, _state, dimensions| ctx.update_ui(dimensions), f);
+    }
+
+    /// Runs the SDL loop with one application-typed semantic message session.
+    #[allow(dead_code)] // Each example selects either polling or subscriber-driven updates.
+    pub fn event_loop_session<Message, Setup, F>(&mut self, setup: Setup, f: F)
+    where
+        Message: 'static,
+        Setup: FnOnce(&S, &mut Session<Message>, &mut Subscribers<S, Message>),
+        F: Fn(&mut MicroUI, &mut S, Dimensioni),
+    {
+        let mut session = Session::new();
+        let mut subscribers = Subscribers::new();
+        setup(&self.state, &mut session, &mut subscribers);
+        self.event_loop_with_update(
+            move |ctx, state, dimensions| ctx.update_ui_session(dimensions, &mut session, state, &mut subscribers),
+            f,
+        );
+    }
+
+    /// Shared SDL driver parameterized by the first retained update performed each frame.
+    fn event_loop_with_update<Update, F>(&mut self, mut update: Update, f: F)
+    where
+        Update: FnMut(&mut MicroUI, &mut S, Dimensioni),
+        F: Fn(&mut MicroUI, &mut S, Dimensioni),
+    {
         #[cfg(feature = "example-glow")]
         self.window.gl_make_current(&self.backend.gl_ctx).unwrap();
 
@@ -203,7 +230,7 @@ impl<S> Application<S> {
             if let Ok(info) = FrameInfo::try_new(dimensions, color(0x7F, 0x7F, 0x7F, 255)) {
                 // First commit queued host input so application polling observes this frame's
                 // completed widget and Context-owned dialog actions.
-                self.ctx.update_ui(dimensions);
+                update(&mut self.ctx, &mut self.state, dimensions);
                 f(&mut self.ctx, &mut self.state, dimensions);
                 // Application mutations can affect retained state and layout, so synchronize once
                 // more before the paint-only frame is submitted.

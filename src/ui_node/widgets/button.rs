@@ -140,6 +140,8 @@ impl ButtonParameters {
 pub struct ButtonState {
     /// User submissions waiting to be consumed.
     pending_submissions: u32,
+    /// Session connection for user submissions.
+    submitted_event: crate::event::WidgetEventPort<ButtonSubmitted>,
 }
 
 impl WidgetState for ButtonState {}
@@ -148,6 +150,17 @@ impl ButtonState {
     /// Consumes one pending user submission.
     pub fn take_submitted(&mut self) -> bool {
         take_pending_event(&mut self.pending_submissions)
+    }
+}
+
+/// Semantic payload emitted when the user submits a button.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct ButtonSubmitted;
+
+impl WidgetStateHandle<ButtonState> {
+    /// Returns the native event endpoint emitted once for every user submission.
+    pub fn submitted(&self) -> crate::WidgetEvent<ButtonState, ButtonSubmitted> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
     }
 }
 
@@ -260,6 +273,7 @@ impl Widget for Button {
         }
         runtime_update_state(&self.state, "Button::update", |state| {
             record_pending_event(&mut state.pending_submissions);
+            state.submitted_event.emit(ButtonSubmitted);
         });
     }
 
@@ -289,7 +303,10 @@ impl WidgetBuilder for ButtonBuilder {
             font: parameters.font,
             opt: parameters.opt,
             fill: parameters.fill,
-            state: Rc::new(RefCell::new(ButtonState { pending_submissions: 0 })),
+            state: Rc::new(RefCell::new(ButtonState {
+                pending_submissions: 0,
+                submitted_event: crate::event::WidgetEventPort::new(),
+            })),
         }
     }
 }

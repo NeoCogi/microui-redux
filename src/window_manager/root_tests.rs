@@ -34,8 +34,8 @@ use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, reco
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonState, Column, ColumnParameters, ColumnState, Custom, CustomParameters, Dimensioni, Disclosure,
     DisclosureParameters, DisclosureState, Grid, GridParameters, KeyMode, MouseButton, Node, Policy, Row, RowParameters, ScrollArea, ScrollAreaOption,
-    ListItem, ListItemParameters, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style, UiInputEvent, Widget, WidgetOption,
-    WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    ListItem, ListItemParameters, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style, Textbox, TextboxChanged, TextboxParameters,
+    UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use crate::ui_node::{runtime_read_state, runtime_update_state};
@@ -783,6 +783,115 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
 fn button_content(label: &str) -> (WidgetStateHandle<ButtonState>, Node) {
     let (state, widget) = Button::create(ButtonParameters::new(label));
     (state, Node::widget(widget))
+}
+
+#[test]
+fn widget_handle_events_map_into_one_typed_session_without_state_polling() {
+    #[derive(Default)]
+    struct Model {
+        submissions: Vec<&'static str>,
+    }
+
+    enum Message {
+        FirstSubmitted,
+        SecondSubmitted,
+    }
+
+    let (first_state, first_widget) = Button::create(ButtonParameters::new("first"));
+    let first = Node::widget(first_widget);
+    let first_id = first.id();
+    let (second_state, second_widget) = Button::create(ButtonParameters::new("second"));
+    let second = Node::widget(second_widget);
+    let second_id = second.id();
+    let (_, content) = Row::create(RowParameters::new(
+        [SizePolicy::Fixed(60), SizePolicy::Fixed(60)],
+        SizePolicy::Auto,
+        [first, second],
+    ));
+    let mut ctx = context();
+    let root = ctx.create_window("signal", rect(0, 0, 140, 100), content);
+    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+    let first_rect = ctx.debug_root_node_rect(root.id(), first_id).unwrap();
+    let second_rect = ctx.debug_root_node_rect(root.id(), second_id).unwrap();
+
+    let mut session = crate::Session::new();
+    session.connect(first_state.submitted(), |_| Message::FirstSubmitted).unwrap();
+    session.connect(second_state.submitted(), |_| Message::SecondSubmitted).unwrap();
+    let mut subscribers = crate::Subscribers::new();
+    subscribers.subscribe(|model: &mut Model, message: &Message, _emit| match message {
+        Message::FirstSubmitted => model.submissions.push("first"),
+        Message::SecondSubmitted => model.submissions.push("second"),
+    });
+    let mut model = Model::default();
+
+    ctx.mousedown(first_rect.x + 1, first_rect.y + 1, MouseButton::LEFT);
+    ctx.mouseup(first_rect.x + 1, first_rect.y + 1, MouseButton::LEFT);
+    ctx.mousedown(second_rect.x + 1, second_rect.y + 1, MouseButton::LEFT);
+    ctx.mouseup(second_rect.x + 1, second_rect.y + 1, MouseButton::LEFT);
+    ctx.mousedown(first_rect.x + 1, first_rect.y + 1, MouseButton::LEFT);
+    ctx.update_ui_session(dimensions, &mut session, &mut model, &mut subscribers);
+
+    assert_eq!(model.submissions, ["first", "second", "first"]);
+}
+
+#[test]
+fn textbox_handle_event_maps_a_complete_snapshot_into_the_session() {
+    #[derive(Default)]
+    struct Model {
+        changes: Vec<(String, usize)>,
+    }
+
+    enum Message {
+        Changed(TextboxChanged),
+    }
+
+    let (textbox_state, widget) = Textbox::create(TextboxParameters::new(""));
+    let node = Node::widget(widget);
+    let node_id = node.id();
+    let mut ctx = context();
+    let root = ctx.create_window("textbox signal", rect(0, 0, 140, 100), node);
+    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+    let textbox_rect = ctx.debug_root_node_rect(root.id(), node_id).unwrap();
+
+    let mut session = crate::Session::new();
+    session.connect(textbox_state.changed(), Message::Changed).unwrap();
+    let mut subscribers = crate::Subscribers::new();
+    subscribers.subscribe(|model: &mut Model, message: &Message, _emit| match message {
+        Message::Changed(event) => model.changes.push((event.text.clone(), event.cursor)),
+    });
+    let mut model = Model::default();
+
+    ctx.mousedown(textbox_rect.x + 1, textbox_rect.y + 1, MouseButton::LEFT);
+    ctx.text("é");
+    ctx.update_ui_session(dimensions, &mut session, &mut model, &mut subscribers);
+
+    assert_eq!(model.changes, [(String::from("é"), "é".len())]);
+}
+
+#[test]
+fn session_dispatches_application_messages_without_raw_input() {
+    enum Message {
+        Increment,
+    }
+
+    let mut ctx = context();
+    let mut session = crate::Session::new();
+    session.emit(Message::Increment);
+    let mut subscribers = crate::Subscribers::new();
+    subscribers.subscribe(|count: &mut usize, message: &Message, _emit| match message {
+        Message::Increment => *count += 1,
+    });
+    let mut count = 0;
+
+    ctx.update_ui_session(Dimensioni::new(320, 240), &mut session, &mut count, &mut subscribers);
+
+    assert_eq!(count, 1);
 }
 
 #[test]

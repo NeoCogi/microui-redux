@@ -108,6 +108,10 @@ pub struct TextboxState {
     pending_changes: u32,
     /// User submissions waiting to be consumed.
     pending_submissions: u32,
+    /// Session connection for user-originated text changes.
+    changed_event: crate::event::WidgetEventPort<TextboxChanged>,
+    /// Session connection for user submissions.
+    submitted_event: crate::event::WidgetEventPort<TextboxSubmitted>,
 }
 
 impl WidgetState for TextboxState {}
@@ -153,6 +157,34 @@ impl TextboxState {
     /// Consumes one pending user submission.
     pub fn take_submitted(&mut self) -> bool {
         crate::widgets::take_pending_event(&mut self.pending_submissions)
+    }
+}
+
+/// Snapshot emitted after a user-originated textbox value change.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TextboxChanged {
+    /// Complete text value after applying the triggering input event.
+    pub text: String,
+    /// UTF-8 byte cursor after applying the triggering input event.
+    pub cursor: usize,
+}
+
+/// Snapshot emitted when the user submits a textbox value.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TextboxSubmitted {
+    /// Complete text value at submission time.
+    pub text: String,
+}
+
+impl WidgetStateHandle<TextboxState> {
+    /// Returns the native event endpoint emitted after every user-originated text change.
+    pub fn changed(&self) -> crate::WidgetEvent<TextboxState, TextboxChanged> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    }
+
+    /// Returns the native event endpoint emitted whenever the user submits the current text.
+    pub fn submitted(&self) -> crate::WidgetEvent<TextboxState, TextboxSubmitted> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
     }
 }
 
@@ -202,11 +234,16 @@ impl Textbox {
             let outcome = textbox_update(ctx, input, &mut state.buf, &mut state.cursor, self.opt, font);
             if outcome.changed {
                 crate::widgets::record_pending_event(&mut state.pending_changes);
+                state.changed_event.emit(TextboxChanged {
+                    text: state.buf.clone(),
+                    cursor: state.cursor,
+                });
             }
             if outcome.submitted {
                 crate::widgets::record_pending_event(&mut state.pending_submissions);
+                state.submitted_event.emit(TextboxSubmitted { text: state.buf.clone() });
             }
-        })
+        });
     }
 
     /// Paints the textbox frame, text, and caret.
@@ -406,6 +443,8 @@ impl WidgetBuilder for TextboxBuilder {
                 cursor,
                 pending_changes: 0,
                 pending_submissions: 0,
+                changed_event: crate::event::WidgetEventPort::new(),
+                submitted_event: crate::event::WidgetEventPort::new(),
             })),
         }
     }

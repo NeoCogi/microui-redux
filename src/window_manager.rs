@@ -266,6 +266,32 @@ impl<B: RendererBackend> Context<B> {
         self.ui_commit = Some(dimensions);
     }
 
+    /// Drains input while dispatching one application-typed semantic message session.
+    ///
+    /// Each raw input event is routed and applied by one complete eligible-tree update. Native
+    /// widget events connected through [`crate::Session::connect`] are then mapped to `Message` and
+    /// delivered synchronously in FIFO order, after retained state borrows have ended and before
+    /// the matching layout commit. Subscriber changes made through independent state handles
+    /// therefore affect geometry used to route the next queued raw event.
+    ///
+    /// Subscriber callbacks receive `state` and may enqueue further messages through
+    /// [`crate::Emit`]. They cannot access this mutably borrowed Context, preventing a nested update
+    /// or paint traversal. Application-authored messages queued before this call are dispatched
+    /// after the initial synchronization layout and before routing the first raw event.
+    #[track_caller]
+    pub fn update_ui_session<State, Message: 'static>(
+        &mut self,
+        dimensions: Dimensioni,
+        session: &mut crate::Session<Message>,
+        state: &mut State,
+        subscribers: &mut crate::Subscribers<State, Message>,
+    ) {
+        assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui_session dimensions must be positive");
+        self.ui_commit = None;
+        self.update_window_manager_with(dimensions, || session.dispatch(state, subscribers));
+        self.ui_commit = Some(dimensions);
+    }
+
     /// Invalidates any layout commit known to have been affected through a Context API.
     pub(super) fn invalidate_ui_commit(&mut self) {
         self.ui_commit = None;

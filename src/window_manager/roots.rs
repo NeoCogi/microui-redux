@@ -346,6 +346,11 @@ impl<B: RendererBackend> Context<B> {
 
     /// Performs one synchronization layout, then one full update/layout pair per queued event.
     pub(super) fn update_window_manager(&mut self, dimensions: Dimensioni) {
+        self.update_window_manager_with(dimensions, || false);
+    }
+
+    /// Performs the retained update while exposing each safe application-message boundary.
+    pub(super) fn update_window_manager_with(&mut self, dimensions: Dimensioni, mut after_event: impl FnMut() -> bool) {
         let atlas = self.renderer.atlas();
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
 
@@ -355,6 +360,11 @@ impl<B: RendererBackend> Context<B> {
             entry.tree.runtime.begin_update();
         }
         self.layout_window_manager(viewport, &atlas);
+        // Application-authored messages may already be waiting without a raw input event. If they
+        // mutate retained state, commit that state before routing the first queued event.
+        if after_event() {
+            self.layout_window_manager(viewport, &atlas);
+        }
 
         loop {
             let event = self.input.pop_event();
@@ -365,6 +375,10 @@ impl<B: RendererBackend> Context<B> {
             // after the complete cross-root update and before the matching layout commit.
             self.process_file_dialogs();
             self.reconcile_closed_modal();
+            // Application subscribers run only after the complete cross-root update has released
+            // retained borrows. Their state/topology changes are therefore safe and become visible
+            // to the layout immediately below, before routing the next raw input event.
+            after_event();
             self.layout_window_manager(viewport, &atlas);
         }
     }

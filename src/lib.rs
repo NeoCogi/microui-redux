@@ -165,6 +165,7 @@
 //! [`render`].
 
 pub mod atlas;
+mod event;
 mod file_dialog;
 pub mod image;
 mod input;
@@ -182,6 +183,7 @@ mod window_manager;
 /// This module groups the stable retained concepts used by application code without exposing
 /// low-level renderer details or manual container drawing helpers through default imports.
 pub mod retained {
+    pub use crate::event::{ConnectError, Emit, Session, Subscribers, SubscriptionId, WidgetEvent};
     pub use crate::file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
     pub use crate::ui_node::{
@@ -199,6 +201,7 @@ pub mod retained {
 /// The prelude intentionally favors retained authoring, widget state, style/input/image types, and
 /// renderer integration. Low-level backend and Renderer types live under [`render`].
 pub mod prelude {
+    pub use crate::event::{ConnectError, Emit, Session, Subscribers, SubscriptionId, WidgetEvent};
     pub use crate::atlas::{
         AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry, FontId,
         IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
@@ -217,11 +220,12 @@ pub mod prelude {
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
     pub use crate::widgets::{
-        Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch,
-        ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom, CustomBuilder, CustomParameters,
-        ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters, ListItemState, Number, NumberBuilder,
-        NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaParameters, TextAreaState,
-        TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxParameters, TextboxState, Real,
+        Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters,
+        CheckboxState, ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom,
+        CustomBuilder, CustomParameters, ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters,
+        ListItemState, Number, NumberBuilder, NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder,
+        TextAreaParameters, TextAreaState, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxChanged,
+        TextboxParameters, TextboxState, TextboxSubmitted, Real,
     };
     pub use rs_math3d::{
         Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3,
@@ -234,6 +238,7 @@ pub use atlas::{
     FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
 };
 pub use window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
+pub use event::{ConnectError, Emit, Session, Subscribers, SubscriptionId, WidgetEvent};
 pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
 pub use image::{ImageSource, load_image_bytes};
 pub use input::{KeyCode, KeyMode, MouseButton};
@@ -247,11 +252,12 @@ pub use ui_node::{
     WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
 };
 pub use widgets::{
-    Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, Checkbox, CheckboxBuilder, CheckboxParameters, CheckboxState, ColorSwatch,
-    ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom, CustomBuilder, CustomParameters,
-    ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters, ListItemState, Number, NumberBuilder,
-    NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaParameters, TextAreaState, Real,
-    TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxParameters, TextboxState,
+    Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters,
+    CheckboxState, ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom,
+    CustomBuilder, CustomParameters, ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters, ListItemState,
+    Number, NumberBuilder, NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaParameters,
+    TextAreaState, Real, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxChanged, TextboxParameters,
+    TextboxState, TextboxSubmitted,
 };
 
 #[allow(unused_imports)]

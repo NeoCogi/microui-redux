@@ -75,6 +75,11 @@ impl CalcButton {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Message {
+    Apply(Action),
+}
+
 struct Calculator {
     display: String,
     accumulator: Option<f64>,
@@ -370,17 +375,24 @@ fn main() {
     })
     .unwrap();
 
-    fw.event_loop(|ctx, state, dim| {
-        ctx.set_root_rect(state.root.id(), rect(0, 0, dim.width, dim.height))
-            .expect("calculator root should remain registered");
-        let _ = state
-            .display
-            .try_update_with(state.calculator.display_text().to_owned(), |display, text| display.set_text(text));
-
-        for button in &state.buttons {
-            if button.state.try_update(ButtonState::take_submitted).unwrap_or(false) {
-                state.calculator.apply(button.action);
+    fw.event_loop_session(
+        |state, session, subscribers| {
+            for button in &state.buttons {
+                let action = button.action;
+                session
+                    .connect(button.state.submitted(), move |_| Message::Apply(action))
+                    .expect("calculator button should be alive and unconnected");
             }
-        }
-    });
+            subscribers.subscribe(|state: &mut State, message: &Message, _emit| match message {
+                Message::Apply(action) => state.calculator.apply(*action),
+            });
+        },
+        |ctx, state, dim| {
+            ctx.set_root_rect(state.root.id(), rect(0, 0, dim.width, dim.height))
+                .expect("calculator root should remain registered");
+            let _ = state
+                .display
+                .try_update_with(state.calculator.display_text().to_owned(), |display, text| display.set_text(text));
+        },
+    );
 }
