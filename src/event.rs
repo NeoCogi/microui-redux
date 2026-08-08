@@ -29,12 +29,97 @@
 
 //! Application-typed sessions and widget-native event connections.
 //!
-//! The retained runtime remains independent of an application's message vocabulary. A concrete
-//! widget defines native payloads implementing [`WidgetEvent`], owns matching [`WidgetEventPort`]
-//! values in its state, and exposes weak [`WidgetEventHandle`] capabilities through its
-//! [`crate::WidgetStateHandle`]. [`Session::connect`] maps those native events into one application
-//! `Message` type as they are emitted. Subscriber callbacks run only after a complete retained
-//! update releases its state borrows.
+//! # Architecture
+//!
+//! This module is the boundary between widget-defined events and an application's message model.
+//! The retained tree and UI runtime do not know the application's `Message` type. A concrete widget
+//! knows only its own native event payloads, while [`Session<Message>`](Session) performs the
+//! application-specific conversion and dispatch.
+//!
+//! ```text
+//! retained widget                                            application
+//! ┌──────────────────────────────┐              ┌────────────────────────────┐
+//! │ WidgetState S                │              │ Session<Message>           │
+//! │ ├─ semantic state            │              │ ├─ FIFO Inbox<Message>     │
+//! │ └─ WidgetEventPort<E>        │              │ └─ Connection records      │
+//! │      └─ WidgetEventTarget<E> ├── Weak ─────►│                            │
+//! └──────────────────────────────┘              └─────────────┬──────────────┘
+//!              ▲                                             │ dispatch
+//!              │ weak state capability                       ▼
+//!      WidgetEventHandle<S, E>                  Subscribers<State, Message>
+//! ```
+//!
+//! ## Widget side
+//!
+//! A widget author defines an owned native payload such as `SliderChanged` and explicitly
+//! implements [`WidgetEvent`] for it. The widget's [`WidgetState`] owns a private
+//! [`WidgetEventPort<E>`](WidgetEventPort) alongside its semantic state. User input updates that
+//! state and calls `port.emit(event)` only for user-originated semantic changes; programmatic state
+//! setters remain silent.
+//!
+//! Applications never receive the port itself. A widget-specific method on
+//! [`WidgetStateHandle<S>`](WidgetStateHandle) returns a [`WidgetEventHandle<S, E>`]. The handle
+//! contains a weak state capability and a function pointer selecting the correct port inside `S`.
+//! It therefore identifies an event without keeping the widget mounted or exposing its state
+//! allocation.
+//!
+//! ## Connecting a widget to an application
+//!
+//! [`Session::connect`] consumes an event handle and an application adapter `Fn(E) -> Message`.
+//! Checked access to `S` installs one [`WidgetEventTarget<E>`](WidgetEventTarget) in the selected
+//! port. A port accepts exactly one target; application fan-out happens later through
+//! [`Subscribers`] after every native payload has become the session's one `Message` type.
+//!
+//! The target boxes the connection-specific closure once because its concrete closure type depends
+//! on the application. It retains `E` statically, captures the adapter, and holds only a weak
+//! reference to the session inbox. No event value is converted through `Any`, and no downcast is
+//! used.
+//!
+//! The session separately stores an erased [`Connection`] record containing widget liveness and
+//! disconnection behavior. This lets one `Session<Message>` own connections to heterogeneous
+//! widget state and event types without making the retained runtime generic over `Message`.
+//!
+//! ## Event and dispatch flow
+//!
+//! ```text
+//! raw input
+//!    │
+//!    ▼
+//! retained widget update mutates S
+//!    │
+//!    ▼
+//! WidgetEventPort<E>::emit(E)
+//!    │
+//!    ├─ adapter constructs Message synchronously
+//!    └─ Message is appended to the session FIFO
+//!          │
+//!          │ complete retained update releases all state borrows
+//!          ▼
+//! Session::dispatch
+//!    │
+//!    └─ each subscriber receives (&mut State, &Message, &mut Emit<Message>)
+//! ```
+//!
+//! The `Fn(E) -> Message` adapter runs while the emitting widget may still be mutably borrowed. It
+//! is therefore a construction-only adapter: widget access and application effects belong in a
+//! subscriber. [`crate::Context::update_ui_session`] invokes dispatch only after the complete
+//! retained update has released widget borrows and before committing the layout used for the next
+//! queued raw event.
+//!
+//! Widget events, [`Session::emit`], and subscriber cascades all append to the same
+//! [`VecDeque<Message>`](VecDeque). Dispatch removes from the front, subscribers run in registration
+//! order, and [`Emit::emit`] appends cascades at the back. This provides one FIFO order across every
+//! message source. A cascade limit terminates accidental subscriber feedback loops.
+//!
+//! ## Ownership and cleanup
+//!
+//! Session owns the inbox and every [`Connection`]; widget targets and temporary [`Emit`] values
+//! hold weak inbox references, so widgets and callbacks cannot keep a dropped session alive.
+//! Dropping a session drops its connection records, which remove matching targets from live ports.
+//! Dropping a widget destroys its port immediately but leaves an expired weak connection record in
+//! the session. Dynamic-tree owners call [`Session::prune_expired_connections`] once per topology
+//! replacement batch, avoiding the quadratic cost of scanning all prior connections inside every
+//! `connect` call.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -72,17 +157,18 @@ pub trait WidgetEvent: 'static {}
 /// The wrapper makes the [`WidgetEvent`] constraint local and explicit. Only the callback's concrete
 /// implementation type is erased; its input remains the statically known native event `E`.
 struct WidgetEventTarget<E: WidgetEvent> {
-    callback: Box<dyn FnMut(E)>,
+    callback: Box<dyn Fn(E)>,
 }
 
 impl<E: WidgetEvent> WidgetEventTarget<E> {
-    fn new(callback: impl FnMut(E) + 'static) -> Self {
+    fn new(callback: impl Fn(E) + 'static) -> Self {
         // Box the connection-specific adapter once so the widget state does not become generic over
         // the application's closure type.
         Self { callback: Box::new(callback) }
     }
 
-    fn emit(&mut self, event: E) {
+    fn emit(&self, event: E) {
+        // Delivery needs no mutable callback state: queue mutation happens through Inbox's RefCell.
         // Forward the concrete native event without erasing its value or performing a downcast.
         (self.callback)(event);
     }
@@ -103,10 +189,10 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
     }
 
     /// Sends one native widget event into its connected session, when present.
-    pub(crate) fn emit(&mut self, event: E) {
+    pub(crate) fn emit(&self, event: E) {
         // The target owns the E -> Message adapter. With no target, the event is intentionally
         // discarded instead of being buffered in the widget or exposed through polling state.
-        if let Some((_, target)) = &mut self.target {
+        if let Some((_, target)) = &self.target {
             target.emit(event);
         }
     }
