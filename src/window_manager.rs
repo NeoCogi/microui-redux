@@ -269,10 +269,10 @@ impl<B: RendererBackend> Context<B> {
     /// Drains input while dispatching one application-typed semantic message session.
     ///
     /// Each raw input event is routed and applied by one complete eligible-tree update. Native
-    /// widget events connected through [`crate::Session::connect`] are then mapped to `Message` and
-    /// delivered synchronously in FIFO order, after retained state borrows have ended and before
-    /// the matching layout commit. Subscriber changes made through independent state handles
-    /// therefore affect geometry used to route the next queued raw event.
+    /// widget events connected through [`crate::Session::connect`] are mapped to `Message` as they
+    /// are emitted. The messages are delivered synchronously in FIFO order after retained state
+    /// borrows have ended and before the matching layout commit. Subscriber changes made through
+    /// independent state handles therefore affect geometry used to route the next queued raw event.
     ///
     /// Subscriber callbacks receive `state` and may enqueue further messages through
     /// [`crate::Emit`]. They cannot access this mutably borrowed Context, preventing a nested update

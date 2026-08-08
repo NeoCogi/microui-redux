@@ -32,8 +32,8 @@
 //! The retained runtime remains independent of an application's message vocabulary. A concrete
 //! widget owns native [`WidgetEventPort`] values in its state and exposes typed [`WidgetEvent`]
 //! capabilities through its [`crate::WidgetStateHandle`]. [`Session::connect`] maps those native
-//! events into one application `Message` type. Mapping and subscriber callbacks run only after a
-//! complete retained update releases its state borrows.
+//! events into one application `Message` type as they are emitted. Subscriber callbacks run only
+//! after a complete retained update releases its state borrows.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -151,18 +151,8 @@ impl fmt::Display for ConnectError {
 
 impl std::error::Error for ConnectError {}
 
-/// A message waiting at the session boundary.
-///
-/// Widget-to-message mapping is deferred so application closures never execute inside a retained
-/// widget update. The erased behavior still returns the session's statically known `Message`; no
-/// event payload is erased and no downcast exists in this pipeline.
-enum Pending<Message> {
-    Message(Message),
-    Map(Box<dyn FnOnce() -> Message>),
-}
-
 struct Inbox<Message> {
-    pending: VecDeque<Pending<Message>>,
+    pending: VecDeque<Message>,
 }
 
 impl<Message> Default for Inbox<Message> {
@@ -184,7 +174,7 @@ impl<Message> Emit<Message> {
         let Some(inbox) = self.inbox.upgrade() else {
             return false;
         };
-        inbox.borrow_mut().pending.push_back(Pending::Message(message));
+        inbox.borrow_mut().pending.push_back(message);
         true
     }
 }
@@ -255,9 +245,13 @@ impl<Message: 'static> Session<Message> {
 
     /// Connects one widget-native event to this session's application message stream.
     ///
-    /// The `map` closure runs after the complete retained update, immediately before subscribers
-    /// observe its result. Exactly one session may be connected to a widget event; fan-out belongs
-    /// in [`Subscribers`] after the event has become an application `Message`.
+    /// The `map` closure runs synchronously when the native event is emitted, while the event-owning
+    /// widget state may still be mutably borrowed. It must only construct a `Message` from the event
+    /// and captured values; widget access and application effects belong in a [`Subscribers`]
+    /// callback, which runs after retained state borrows have ended.
+    ///
+    /// Exactly one session may be connected to a widget event; fan-out belongs in [`Subscribers`]
+    /// after the event has become an application `Message`.
     pub fn connect<S, E>(&mut self, event: WidgetEvent<S, E>, map: impl Fn(E) -> Message + 'static) -> Result<(), ConnectError>
     where
         S: WidgetState,
@@ -265,13 +259,12 @@ impl<Message: 'static> Session<Message> {
     {
         let id = next_connection_id();
         let weak_inbox = Rc::downgrade(&self.inbox);
-        let map = Rc::new(map);
         let target = Box::new(move |native_event: E| {
             let Some(inbox) = weak_inbox.upgrade() else {
                 return;
             };
-            let map = Rc::clone(&map);
-            inbox.borrow_mut().pending.push_back(Pending::Map(Box::new(move || map(native_event))));
+            let message = map(native_event);
+            inbox.borrow_mut().pending.push_back(message);
         });
 
         let connected = event.state.try_update(|state| (event.port)(state).connect(id, target));
@@ -310,19 +303,15 @@ impl<Message: 'static> Session<Message> {
 
     /// Enqueues an application-authored message for the next dispatch boundary.
     pub fn emit(&mut self, message: Message) {
-        self.inbox.borrow_mut().pending.push_back(Pending::Message(message));
+        self.inbox.borrow_mut().pending.push_back(message);
     }
 
     /// Dispatches queued messages and subscriber-emitted cascades in FIFO order.
     pub(crate) fn dispatch<State>(&mut self, state: &mut State, subscribers: &mut Subscribers<State, Message>) -> bool {
         let mut dispatched = 0usize;
         loop {
-            let pending = self.inbox.borrow_mut().pending.pop_front();
-            let Some(pending) = pending else { break };
-            let message = match pending {
-                Pending::Message(message) => message,
-                Pending::Map(map) => map(),
-            };
+            let message = self.inbox.borrow_mut().pending.pop_front();
+            let Some(message) = message else { break };
             dispatched += 1;
             assert!(
                 dispatched <= MAX_CASCADE_MESSAGES,
@@ -415,12 +404,12 @@ mod tests {
 
         owner.borrow_mut().changed.emit(3);
         owner.borrow_mut().changed.emit(4);
-        assert_eq!(mapping_calls.get(), 0, "application mapping must not run inside widget event emission");
+        assert_eq!(mapping_calls.get(), 2, "event adapters must construct messages synchronously");
         let mut state = State::default();
+        assert!(state.values.is_empty(), "subscribers must remain deferred until dispatch");
         session.dispatch(&mut state, &mut subscribers);
 
         assert_eq!(state.values, [3, 4, 13, 14]);
-        assert_eq!(mapping_calls.get(), 2);
     }
 
     #[test]
