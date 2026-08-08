@@ -127,6 +127,38 @@ pub struct TextAreaState {
     pending_changes: u32,
     /// User submissions waiting to be consumed.
     pending_submissions: u32,
+    /// Session connection for user-originated text changes.
+    changed_event: crate::event::WidgetEventPort<TextAreaChanged>,
+    /// Session connection for user submissions.
+    submitted_event: crate::event::WidgetEventPort<TextAreaSubmitted>,
+}
+
+/// Snapshot emitted after a user-originated text-area value change.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TextAreaChanged {
+    /// Complete text value after applying the triggering input event.
+    pub text: String,
+    /// UTF-8 byte cursor after applying the triggering input event.
+    pub cursor: usize,
+}
+
+/// Snapshot emitted when the user submits a text-area value.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TextAreaSubmitted {
+    /// Complete text value at submission time.
+    pub text: String,
+}
+
+impl WidgetStateHandle<TextAreaState> {
+    /// Returns the native event endpoint emitted after every user-originated text change.
+    pub fn changed(&self) -> crate::WidgetEvent<TextAreaState, TextAreaChanged> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    }
+
+    /// Returns the native event endpoint emitted whenever the user submits the current text.
+    pub fn submitted(&self) -> crate::WidgetEvent<TextAreaState, TextAreaSubmitted> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
+    }
 }
 
 impl WidgetState for TextAreaState {}
@@ -268,9 +300,14 @@ impl TextArea {
             let outcome = textarea_update(ctx, input, state, &mut self.interaction, self.wrap, font);
             if outcome.changed {
                 crate::widgets::record_pending_event(&mut state.pending_changes);
+                state.changed_event.emit(TextAreaChanged {
+                    text: state.buf.clone(),
+                    cursor: state.cursor,
+                });
             }
             if outcome.submitted {
                 crate::widgets::record_pending_event(&mut state.pending_submissions);
+                state.submitted_event.emit(TextAreaSubmitted { text: state.buf.clone() });
             }
             let changed = state.buf != old_buf
                 || state.cursor != old_cursor
@@ -747,6 +784,8 @@ impl WidgetBuilder for TextAreaBuilder {
                 reset_preferred_x: false,
                 pending_changes: 0,
                 pending_submissions: 0,
+                changed_event: crate::event::WidgetEventPort::new(),
+                submitted_event: crate::event::WidgetEventPort::new(),
             })),
         }
     }

@@ -105,6 +105,22 @@ pub struct ListItemState {
     label: String,
     /// User submissions waiting to be consumed.
     pending_submissions: u32,
+    /// Session connection for user submissions.
+    submitted_event: crate::event::WidgetEventPort<ListItemSubmitted>,
+}
+
+/// Snapshot emitted when the user submits a list item.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ListItemSubmitted {
+    /// Item label at submission time.
+    pub label: String,
+}
+
+impl WidgetStateHandle<ListItemState> {
+    /// Returns the native event endpoint emitted once for every user submission.
+    pub fn submitted(&self) -> crate::WidgetEvent<ListItemState, ListItemSubmitted> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
+    }
 }
 
 impl WidgetState for ListItemState {}
@@ -219,6 +235,7 @@ impl Widget for ListItem {
         }
         runtime_update_state(&self.state, "ListItem::update", |state| {
             record_pending_event(&mut state.pending_submissions);
+            state.submitted_event.emit(ListItemSubmitted { label: state.label.clone() });
         });
     }
 
@@ -250,6 +267,7 @@ impl WidgetBuilder for ListItemBuilder {
             state: Rc::new(RefCell::new(ListItemState {
                 label: parameters.label,
                 pending_submissions: 0,
+                submitted_event: crate::event::WidgetEventPort::new(),
             })),
         }
     }

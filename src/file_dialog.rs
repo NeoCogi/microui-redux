@@ -35,6 +35,7 @@
 
 use std::{
     cell::RefCell,
+    collections::VecDeque,
     path::Path,
     rc::{Rc, Weak},
 };
@@ -42,8 +43,8 @@ use std::{
 use crate::render::RendererBackend;
 use crate::{
     Button, ButtonParameters, ButtonState, Column, ColumnParameters, Context, IconId, ListItem, ListItemParameters, ListItemState, Node, Policy, Recti,
-    RootHandle, ScrollArea, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, Textbox,
-    TextboxParameters, TextboxState, ThemeIcons, WidgetOption, WidgetStateHandle, WindowOption,
+    RootHandle, ScrollArea, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, Session, SizePolicy, Stack, StackDirection, StackParameters, StackState,
+    Subscribers, Textbox, TextboxParameters, TextboxState, ThemeIcons, WidgetOption, WidgetStateHandle, WindowOption,
 };
 use crate::ui_node::RuntimeNodeId;
 
@@ -165,6 +166,17 @@ enum ControllerDisposition {
     Remove,
 }
 
+#[derive(Clone)]
+enum FileDialogMessage {
+    Up,
+    Home,
+    NavigatePath(String),
+    NavigatePathBox,
+    SelectFile(String),
+    Accept,
+    Cancel,
+}
+
 pub(crate) struct FileDialogController {
     id: FileDialogSessionId,
     status: Weak<RefCell<FileDialogStatus>>,
@@ -190,6 +202,9 @@ pub(crate) struct FileDialogController {
     go_button: WidgetStateHandle<ButtonState>,
     ok_button: WidgetStateHandle<ButtonState>,
     cancel_button: WidgetStateHandle<ButtonState>,
+    event_session: Session<FileDialogMessage>,
+    event_subscribers: Subscribers<VecDeque<FileDialogMessage>, FileDialogMessage>,
+    pending_events: VecDeque<FileDialogMessage>,
     #[cfg_attr(not(test), allow(dead_code))]
     up_button_id: RuntimeNodeId,
     #[cfg_attr(not(test), allow(dead_code))]
@@ -293,7 +308,7 @@ impl FileDialogController {
             .expect("new file-dialog root must accept options");
         ctx.set_root_visible(root.id(), true).expect("new file-dialog root must become visible");
 
-        Self {
+        let mut controller = Self {
             id,
             status,
             root,
@@ -316,9 +331,48 @@ impl FileDialogController {
             go_button,
             ok_button,
             cancel_button,
+            event_session: Session::new(),
+            event_subscribers: Subscribers::new(),
+            pending_events: VecDeque::new(),
             up_button_id,
             ok_button_id,
             cancel_button_id,
+        };
+        controller.event_subscribers.subscribe(|pending, message, _| pending.push_back(message.clone()));
+        controller.connect_static_events();
+        controller.connect_row_events();
+        controller
+    }
+
+    fn connect_static_events(&mut self) {
+        self.event_session.connect(self.up_button.submitted(), |_| FileDialogMessage::Up).unwrap();
+        self.event_session.connect(self.home_button.submitted(), |_| FileDialogMessage::Home).unwrap();
+        self.event_session
+            .connect(self.path_box.submitted(), |event| FileDialogMessage::NavigatePath(event.text))
+            .unwrap();
+        self.event_session
+            .connect(self.go_button.submitted(), |_| FileDialogMessage::NavigatePathBox)
+            .unwrap();
+        self.event_session.connect(self.ok_button.submitted(), |_| FileDialogMessage::Accept).unwrap();
+        self.event_session
+            .connect(self.cancel_button.submitted(), |_| FileDialogMessage::Cancel)
+            .unwrap();
+        self.event_session
+            .connect(self.root.state().submitted(), |_| FileDialogMessage::Cancel)
+            .unwrap();
+    }
+
+    fn connect_row_events(&mut self) {
+        for (item, directory) in self.folder_items.iter().zip(&self.folders) {
+            let directory = directory.clone();
+            self.event_session
+                .connect(item.submitted(), move |_| FileDialogMessage::NavigatePath(directory.clone()))
+                .unwrap();
+        }
+        for item in &self.file_items {
+            self.event_session
+                .connect(item.submitted(), |event| FileDialogMessage::SelectFile(event.label))
+                .unwrap();
         }
     }
 
@@ -414,6 +468,7 @@ impl FileDialogController {
         self.file_items = file_rows.states;
         self.folder_item_ids = folder_rows.ids;
         self.file_item_ids = file_rows.ids;
+        self.connect_row_events();
     }
 
     fn navigate_to(&mut self, directory: String) -> bool {
@@ -451,62 +506,7 @@ impl FileDialogController {
             .or_else(|| std::env::var("USERPROFILE").ok().filter(|home| !home.is_empty()))
     }
 
-    fn apply_navigation_actions(&mut self) -> bool {
-        if self.up_button.try_update(ButtonState::take_submitted).unwrap_or(false)
-            && let Some(parent) = Path::new(&self.current_working_directory).parent()
-        {
-            return self.navigate_to(parent.to_string_lossy().into_owned());
-        }
-        if self.home_button.try_update(ButtonState::take_submitted).unwrap_or(false)
-            && let Some(home) = Self::home_dir()
-            && Path::new(&home).is_dir()
-        {
-            return self.navigate_to(home);
-        }
-        let path_submitted = self.path_box.try_update(TextboxState::take_submitted).unwrap_or(false);
-        let go_submitted = self.go_button.try_update(ButtonState::take_submitted).unwrap_or(false);
-        if path_submitted || go_submitted {
-            let input = self.path_box.try_read(|state| state.text().to_owned()).unwrap_or_default();
-            if let Some(path) = self.resolve_directory_path(&input) {
-                return self.navigate_to(path);
-            }
-        }
-        false
-    }
-
-    fn apply_folder_actions(&mut self) -> bool {
-        let directory = self.folder_items.iter().enumerate().find_map(|(index, state)| {
-            state
-                .try_update(ListItemState::take_submitted)
-                .unwrap_or(false)
-                .then(|| self.folders.get(index).cloned())
-                .flatten()
-        });
-        directory.is_some_and(|directory| self.navigate_to(directory))
-    }
-
-    fn apply_file_actions(&mut self) {
-        let selected = self.file_items.iter().enumerate().find_map(|(index, state)| {
-            state
-                .try_update(ListItemState::take_submitted)
-                .unwrap_or(false)
-                .then(|| self.files.get(index).cloned())
-                .flatten()
-        });
-        if let Some(selected) = selected {
-            self.file_name_box
-                .try_update_with(selected, |state, name| state.set_text(name))
-                .expect("file-dialog filename box must remain mounted");
-        }
-    }
-
-    fn completion_action(&mut self) -> Option<FileDialogStatus> {
-        if self.cancel_button.try_update(ButtonState::take_submitted).unwrap_or(false) {
-            return Some(FileDialogStatus::Cancelled);
-        }
-        if !self.ok_button.try_update(ButtonState::take_submitted).unwrap_or(false) {
-            return None;
-        }
+    fn accepted_status(&self) -> Option<FileDialogStatus> {
         let typed_name = self.file_name_box.try_read(|state| state.text().trim().to_owned()).unwrap_or_default();
         if typed_name.is_empty() {
             return None;
@@ -525,6 +525,50 @@ impl FileDialogController {
         Some(FileDialogStatus::Accepted(FileDialogResult { file_name, file_path }))
     }
 
+    fn apply_event(&mut self, event: FileDialogMessage) -> Option<FileDialogStatus> {
+        match event {
+            FileDialogMessage::Up => {
+                let parent = Path::new(&self.current_working_directory)
+                    .parent()
+                    .map(|path| path.to_string_lossy().into_owned());
+                if parent.is_some_and(|parent| self.navigate_to(parent)) {
+                    self.refresh_entries();
+                }
+            }
+            FileDialogMessage::Home => {
+                if let Some(home) = Self::home_dir()
+                    && Path::new(&home).is_dir()
+                    && self.navigate_to(home)
+                {
+                    self.refresh_entries();
+                }
+            }
+            FileDialogMessage::NavigatePath(input) => {
+                if let Some(path) = self.resolve_directory_path(&input)
+                    && self.navigate_to(path)
+                {
+                    self.refresh_entries();
+                }
+            }
+            FileDialogMessage::NavigatePathBox => {
+                let input = self.path_box.try_read(|state| state.text().to_owned()).unwrap_or_default();
+                if let Some(path) = self.resolve_directory_path(&input)
+                    && self.navigate_to(path)
+                {
+                    self.refresh_entries();
+                }
+            }
+            FileDialogMessage::SelectFile(selected) => {
+                self.file_name_box
+                    .try_update_with(selected, |state, name| state.set_text(name))
+                    .expect("file-dialog filename box must remain mounted");
+            }
+            FileDialogMessage::Accept => return self.accepted_status(),
+            FileDialogMessage::Cancel => return Some(FileDialogStatus::Cancelled),
+        }
+        None
+    }
+
     fn process(&mut self) -> ControllerDisposition {
         let Some(status) = self.status.upgrade() else {
             return ControllerDisposition::Remove;
@@ -532,21 +576,17 @@ impl FileDialogController {
         if !matches!(*status.borrow(), FileDialogStatus::Pending) {
             return ControllerDisposition::Remove;
         }
-
-        let root_closed = self.root.state().try_update(crate::RootState::take_submitted).unwrap_or(true);
-        if root_closed {
+        if !self.root.state().is_alive() {
             *status.borrow_mut() = FileDialogStatus::Cancelled;
             return ControllerDisposition::Remove;
         }
 
-        let refresh = self.apply_navigation_actions() || self.apply_folder_actions();
-        self.apply_file_actions();
-        if let Some(completion) = self.completion_action() {
-            *status.borrow_mut() = completion;
-            return ControllerDisposition::Remove;
-        }
-        if refresh {
-            self.refresh_entries();
+        self.event_session.dispatch(&mut self.pending_events, &mut self.event_subscribers);
+        while let Some(event) = self.pending_events.pop_front() {
+            if let Some(completion) = self.apply_event(event) {
+                *status.borrow_mut() = completion;
+                return ControllerDisposition::Remove;
+            }
         }
         ControllerDisposition::Pending
     }

@@ -87,10 +87,9 @@ pub(super) enum RootInteraction {
 /// Application-facing state retained by a window, dialog, or popup root.
 ///
 /// Queries report current chrome values, including programmatic changes made through
-/// [`crate::Context`]. `take_changed` and `take_submitted` are counted, state-local events: each
-/// successful call consumes exactly one pending occurrence. Hiding is persistent state and does
-/// not destroy the owned application node. Root content itself cannot be replaced; mutate typed
-/// descendant/container state or destroy and recreate the root instead.
+/// [`crate::Context`]. Hiding is persistent state and does not destroy the owned application node.
+/// Root content itself cannot be replaced; mutate typed descendant/container state or destroy and
+/// recreate the root instead.
 pub struct RootState {
     name: String,
     options: WindowOption,
@@ -99,6 +98,8 @@ pub struct RootState {
     interaction: RootInteraction,
     pending_changes: u32,
     pending_submissions: u32,
+    changed_event: crate::event::WidgetEventPort<RootChanged>,
+    submitted_event: crate::event::WidgetEventPort<RootSubmitted>,
     geometry: RootChromeGeometry,
 }
 
@@ -114,6 +115,8 @@ impl RootState {
             interaction: RootInteraction::None,
             pending_changes: 0,
             pending_submissions: 0,
+            changed_event: crate::event::WidgetEventPort::new(),
+            submitted_event: crate::event::WidgetEventPort::new(),
             geometry: RootChromeGeometry::default(),
         }
     }
@@ -207,6 +210,35 @@ impl RootState {
     pub(super) fn dismiss_popup(&mut self) {
         self.set_visible_silent(false);
         record_pending(&mut self.pending_submissions);
+        self.submitted_event.emit(RootSubmitted::PopupDismissed);
+    }
+}
+
+/// Geometry snapshot emitted after a user-driven root move or resize.
+#[derive(Copy, Clone, Debug)]
+pub struct RootChanged {
+    /// Authoritative outer rectangle after applying the interaction.
+    pub rect: Recti,
+}
+
+/// Reason emitted when a root is submitted by its chrome or popup policy.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum RootSubmitted {
+    /// The user submitted the root's close affordance.
+    Close,
+    /// The user dismissed a popup by interacting outside it.
+    PopupDismissed,
+}
+
+impl WidgetStateHandle<RootState> {
+    /// Returns the native event endpoint emitted after each user-driven move or resize.
+    pub fn changed(&self) -> crate::WidgetEvent<RootState, RootChanged> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    }
+
+    /// Returns the native event endpoint emitted for close and outside-popup submissions.
+    pub fn submitted(&self) -> crate::WidgetEvent<RootState, RootSubmitted> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
     }
 }
 
@@ -305,6 +337,7 @@ impl Widget for RootChromeSurface {
                         Some(RootChromePart::Close) => {
                             state.set_visible_silent(false);
                             record_pending(&mut state.pending_submissions);
+                            state.submitted_event.emit(RootSubmitted::Close);
                         }
                         Some(RootChromePart::Resize) => state.interaction = RootInteraction::Resizing,
                         Some(RootChromePart::Title) => state.interaction = RootInteraction::Moving,
@@ -331,6 +364,7 @@ impl Widget for RootChromeSurface {
             }
             if (state.rect.x, state.rect.y, state.rect.width, state.rect.height) != (initial.x, initial.y, initial.width, initial.height) {
                 record_pending(&mut state.pending_changes);
+                state.changed_event.emit(RootChanged { rect: state.rect });
             }
         });
     }

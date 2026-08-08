@@ -90,6 +90,22 @@ pub struct NumberState {
     edit: NumberEditState,
     /// User value changes waiting to be consumed.
     pending_changes: u32,
+    /// Session connection for user-originated value changes.
+    changed_event: crate::event::WidgetEventPort<NumberChanged>,
+}
+
+/// Value snapshot emitted after a user-originated number change.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct NumberChanged {
+    /// Number value after applying the triggering input event.
+    pub value: Real,
+}
+
+impl WidgetStateHandle<NumberState> {
+    /// Returns the native event endpoint emitted after every user-originated value change.
+    pub fn changed(&self) -> crate::WidgetEvent<NumberState, NumberChanged> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    }
 }
 
 impl WidgetState for NumberState {}
@@ -164,6 +180,7 @@ impl Number {
             }
             if state.value != last {
                 crate::widgets::record_pending_event(&mut state.pending_changes);
+                state.changed_event.emit(NumberChanged { value: state.value });
             }
         })
     }
@@ -233,6 +250,7 @@ impl WidgetBuilder for NumberBuilder {
             value: if parameters.value.is_finite() { parameters.value } else { 0.0 },
             edit: NumberEditState::default(),
             pending_changes: 0,
+            changed_event: crate::event::WidgetEventPort::new(),
         }));
         Number {
             step: parameters.step,

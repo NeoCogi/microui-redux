@@ -36,8 +36,9 @@ context.update_ui_session(
 );
 ```
 
-`examples/calculator.rs` uses this API for all twenty buttons. Its frame callback only synchronizes
-the root rectangle and display text; it never polls `ButtonState::take_submitted`.
+`examples/calculator.rs` uses this API for all twenty buttons. `examples/demo-full.rs` maps its
+buttons, list items, combo header, text submission, and sliders into one application message enum.
+Their frame callbacks synchronize presentation but never consume pending widget counters.
 
 ## Boundary between the retained tree and the application
 
@@ -65,12 +66,22 @@ Subscribers<State, Message>      application state and message
 
 ## Event endpoints on state handles
 
-The current representative controls expose:
+The retained controls expose:
 
 - `WidgetStateHandle<ButtonState>::submitted()`
 - `WidgetStateHandle<CheckboxState>::changed()`
 - `WidgetStateHandle<TextboxState>::changed()`
 - `WidgetStateHandle<TextboxState>::submitted()`
+- `WidgetStateHandle<TextAreaState>::changed()`
+- `WidgetStateHandle<TextAreaState>::submitted()`
+- `WidgetStateHandle<SliderState>::changed()`
+- `WidgetStateHandle<NumberState>::changed()`
+- `WidgetStateHandle<ComboState>::changed()`
+- `WidgetStateHandle<ComboState>::submitted()`
+- `WidgetStateHandle<ListBoxState>::submitted()`
+- `WidgetStateHandle<ListItemState>::submitted()`
+- `WidgetStateHandle<RootState>::changed()`
+- `WidgetStateHandle<RootState>::submitted()`
 
 The endpoint is weak: it does not retain a removed widget. `Session::connect` installs one mapping
 for that endpoint and the session disconnects it when dropped. One widget event connects to one
@@ -91,9 +102,12 @@ post-traversal boundary.
 
 ## Current experiment scope
 
-- Legacy pending counters remain temporarily so polling and session APIs can be compared.
-- Button, checkbox, and textbox are migrated; other semantic controls still use their existing
-  state APIs.
+- Every retained semantic event producer has a typed endpoint. The file dialog and both interactive
+  examples consume typed sessions rather than polling widget state.
+- Legacy pending counters remain temporarily as a source-compatibility layer. They are no longer
+  consumed by framework or example code and can be deleted independently.
+- Long-lived sessions prune weak connections whose widgets were removed, which lets dynamic
+  subtrees such as file-dialog directory rows reconnect without retaining stale state.
 - A deferred widget event currently allocates one boxed `FnOnce() -> Message`. This preserves the
   non-reentrant boundary without erasing event data. A later implementation could use a
   session-owned slab if measurements justify removing that allocation.

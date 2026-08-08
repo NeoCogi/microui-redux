@@ -92,6 +92,10 @@ pub struct ComboState {
     pending_changes: u32,
     /// User header submissions waiting to be consumed.
     pending_submissions: u32,
+    /// Session connection for selection changes.
+    changed_event: crate::event::WidgetEventPort<ComboChanged>,
+    /// Session connection for header submissions.
+    submitted_event: crate::event::WidgetEventPort<ComboSubmitted>,
 }
 
 impl WidgetState for ComboState {}
@@ -132,33 +136,39 @@ impl ComboState {
 
     /// Updates the cached label and clamps the selected index to the provided items.
     pub fn update_items<S: AsRef<str>>(&mut self, items: &[S]) {
+        let previous_selected = self.selected;
         if items.is_empty() {
-            if self.selected != 0 {
-                self.selected = 0;
-                record_pending_event(&mut self.pending_changes);
-            }
+            self.selected = 0;
             self.label.clear();
+            if self.selected != previous_selected {
+                self.emit_changed();
+            }
             return;
         }
 
         if self.selected >= items.len() {
             // Clamp stale selections after the backing item list changes.
             self.selected = items.len() - 1;
-            record_pending_event(&mut self.pending_changes);
         }
 
         self.label.clear();
         if let Some(label) = items.get(self.selected) {
             self.label.push_str(label.as_ref());
         }
+        if self.selected != previous_selected {
+            self.emit_changed();
+        }
     }
 
     /// Applies a submitted popup item selection and closes the popup.
     pub fn select<S: AsRef<str>>(&mut self, index: usize, items: &[S]) -> Option<String> {
+        let previous_selected = self.selected;
+        let previous_label = self.label.clone();
         if items.is_empty() {
             self.selected = 0;
             self.label.clear();
             self.close_popup();
+            self.emit_change_if_needed(previous_selected, &previous_label);
             return None;
         }
 
@@ -167,7 +177,26 @@ impl ComboState {
         self.label.push_str(items[self.selected].as_ref());
         let selected_label = self.label.clone();
         self.close_popup();
+        self.emit_change_if_needed(previous_selected, &previous_label);
         Some(selected_label)
+    }
+
+    fn emit_change_if_needed(&mut self, previous_selected: usize, previous_label: &str) {
+        if self.selected == previous_selected && self.label == previous_label {
+            return;
+        }
+        self.changed_event.emit(ComboChanged {
+            selected: self.selected,
+            label: self.label.clone(),
+        });
+    }
+
+    fn emit_changed(&mut self) {
+        record_pending_event(&mut self.pending_changes);
+        self.changed_event.emit(ComboChanged {
+            selected: self.selected,
+            label: self.label.clone(),
+        });
     }
 
     /// Consumes one pending user-visible selection change.
@@ -178,6 +207,34 @@ impl ComboState {
     /// Consumes one pending header submission.
     pub fn take_submitted(&mut self) -> bool {
         take_pending_event(&mut self.pending_submissions)
+    }
+}
+
+/// Selection snapshot emitted after a combo's selected value changes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComboChanged {
+    /// Selected item index after applying the change.
+    pub selected: usize,
+    /// Selected item label after applying the change.
+    pub label: String,
+}
+
+/// Popup-state snapshot emitted when the user submits the combo header.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct ComboSubmitted {
+    /// Whether the triggering header submission left the popup open.
+    pub open: bool,
+}
+
+impl WidgetStateHandle<ComboState> {
+    /// Returns the native event endpoint emitted after every selection change.
+    pub fn changed(&self) -> crate::WidgetEvent<ComboState, ComboChanged> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    }
+
+    /// Returns the native event endpoint emitted whenever the user submits the combo header.
+    pub fn submitted(&self) -> crate::WidgetEvent<ComboState, ComboSubmitted> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
     }
 }
 
@@ -221,6 +278,7 @@ impl Combo {
             if ctx.clicked() {
                 state.open = !state.open;
                 record_pending_event(&mut state.pending_submissions);
+                state.submitted_event.emit(ComboSubmitted { open: state.open });
             }
         })
     }
@@ -297,6 +355,8 @@ impl WidgetBuilder for ComboBuilder {
                 last_anchor: Recti::default(),
                 pending_changes: 0,
                 pending_submissions: 0,
+                changed_event: crate::event::WidgetEventPort::new(),
+                submitted_event: crate::event::WidgetEventPort::new(),
             })),
         }
     }

@@ -263,6 +263,10 @@ impl<Message: 'static> Session<Message> {
         S: WidgetState,
         E: 'static,
     {
+        // Dynamic retained subtrees can replace event-owning widgets. Discard their dead weak
+        // connections before adding the replacement endpoints so long-lived sessions do not
+        // accumulate one connection record per topology refresh.
+        self.connections.retain(Connection::is_alive);
         let id = next_connection_id();
         let weak_inbox = Rc::downgrade(&self.inbox);
         let map = Rc::new(map);
@@ -287,8 +291,10 @@ impl<Message: 'static> Session<Message> {
         }
 
         let state = event.state.clone();
+        let owner = event.state.clone();
         let port = event.port;
         self.connections.push(Connection {
+            is_alive: Box::new(move || owner.is_alive()),
             disconnect: Some(Box::new(move || {
                 let _ = state.try_update(|state| port(state).disconnect(id));
             })),
@@ -334,7 +340,14 @@ impl<Message: 'static> Default for Session<Message> {
 /// Session-owned disconnection behavior. Only behavior is dynamically dispatched; widget event
 /// and application message values remain statically typed.
 struct Connection {
+    is_alive: Box<dyn Fn() -> bool>,
     disconnect: Option<Box<dyn FnOnce()>>,
+}
+
+impl Connection {
+    fn is_alive(&self) -> bool {
+        (self.is_alive)()
+    }
 }
 
 impl Drop for Connection {

@@ -996,14 +996,6 @@ fn set_slider_value(state: &WidgetStateHandle<SliderState>, value: Real) {
     state.try_update(|slider| slider.set_value(value)).expect("slider state unavailable");
 }
 
-fn slider_value(state: &WidgetStateHandle<SliderState>) -> Real {
-    state.try_read(SliderState::value).expect("slider state unavailable")
-}
-
-fn take_button_submission(state: &WidgetStateHandle<ButtonState>) -> bool {
-    state.try_update(ButtonState::take_submitted).expect("button state unavailable")
-}
-
 struct DemoRuntimes {
     bg_sliders: [Slider; 3],
     style_color_sliders: [Slider; 56],
@@ -1044,6 +1036,21 @@ struct DemoRuntimes {
     background_swatch: ColorSwatch,
 }
 
+enum Message {
+    BackgroundChanged(usize, Real),
+    StyleColorChanged(usize, Real),
+    StyleValueChanged(usize, Real),
+    SubmitText(String),
+    SubmitButton,
+    TestButton(usize),
+    TreeButton(&'static str),
+    ComboOpen(bool),
+    ComboItem(usize),
+    PopupButton(&'static str),
+    StackDirectionButton(&'static str),
+    WeightButton(&'static str),
+}
+
 struct State {
     bg: [Real; 3],
     bg_slider_states: [WidgetStateHandle<SliderState>; 3],
@@ -1073,6 +1080,8 @@ struct State {
     stack_direction_button_states: [WidgetStateHandle<ButtonState>; 6],
     weight_button_states: [WidgetStateHandle<ButtonState>; 9],
     open_popup: bool,
+    open_dialog: bool,
+    combo_open: bool,
     triangle_data: Rc<RefCell<TriangleState>>,
     background_swatch_state: WidgetStateHandle<ColorSwatchState>,
 }
@@ -1474,6 +1483,8 @@ impl State {
             stack_direction_button_states,
             weight_button_states,
             open_popup: false,
+            open_dialog: false,
+            combo_open: false,
             triangle_data,
             background_swatch_state,
         };
@@ -1481,6 +1492,148 @@ impl State {
         state.sync_style_controls_from_style();
         state.build_root_contents(runtimes, root_contents);
         state
+    }
+
+    fn connect_events(&self, session: &mut Session<Message>, subscribers: &mut Subscribers<Self, Message>) {
+        for (index, slider) in self.bg_slider_states.iter().enumerate() {
+            session
+                .connect(slider.changed(), move |event| Message::BackgroundChanged(index, event.value))
+                .unwrap();
+        }
+        for (index, slider) in self.style_color_slider_states.iter().enumerate() {
+            session
+                .connect(slider.changed(), move |event| Message::StyleColorChanged(index, event.value))
+                .unwrap();
+        }
+        for (index, slider) in self.style_value_slider_states.iter().enumerate() {
+            session
+                .connect(slider.changed(), move |event| Message::StyleValueChanged(index, event.value))
+                .unwrap();
+        }
+
+        session
+            .connect(self.submit_buf_state.submitted(), |event| Message::SubmitText(event.text))
+            .unwrap();
+        session.connect(self.submit_button_state.submitted(), |_| Message::SubmitButton).unwrap();
+        for (index, button) in self.test_button_states.iter().enumerate() {
+            session.connect(button.submitted(), move |_| Message::TestButton(index)).unwrap();
+        }
+        for (button, message) in self.tree_button_states.iter().zip([
+            "Pressed button 1",
+            "Pressed button 2",
+            "Pressed button 3",
+            "Pressed button 4",
+            "Pressed button 5",
+            "Pressed button 6",
+        ]) {
+            session.connect(button.submitted(), move |_| Message::TreeButton(message)).unwrap();
+        }
+        session
+            .connect(self.combo_typed_state.submitted(), |event| Message::ComboOpen(event.open))
+            .unwrap();
+        for (index, item) in self.combo_item_states.iter().enumerate() {
+            session.connect(item.submitted(), move |_| Message::ComboItem(index)).unwrap();
+        }
+        for (button, message) in self.popup_button_states.iter().zip(["Hello", "World"]) {
+            session.connect(button.submitted(), move |_| Message::PopupButton(message)).unwrap();
+        }
+        for (button, message) in self.stack_direction_button_states.iter().zip([
+            "Top->Bottom: call 1",
+            "Top->Bottom: call 2",
+            "Top->Bottom: call 3",
+            "Bottom->Top: call 1",
+            "Bottom->Top: call 2",
+            "Bottom->Top: call 3",
+        ]) {
+            session.connect(button.submitted(), move |_| Message::StackDirectionButton(message)).unwrap();
+        }
+        for (button, message) in self.weight_button_states.iter().zip([
+            "Weight row: 1",
+            "Weight row: 2",
+            "Weight row: 3",
+            "Weight grid: 1",
+            "Weight grid: 2",
+            "Weight grid: 3",
+            "Weight grid: 4",
+            "Weight grid: 5",
+            "Weight grid: 6",
+        ]) {
+            session.connect(button.submitted(), move |_| Message::WeightButton(message)).unwrap();
+        }
+
+        subscribers.subscribe(|state, message, _| state.handle_message(message));
+    }
+
+    fn handle_message(&mut self, message: &Message) {
+        match message {
+            Message::BackgroundChanged(index, value) => {
+                self.bg[*index] = *value;
+                self.sync_background_swatch();
+            }
+            Message::StyleColorChanged(index, value) => {
+                let color = &mut self.style.colors[*index / 4];
+                let value = *value as u8;
+                match *index % 4 {
+                    0 => color.r = value,
+                    1 => color.g = value,
+                    2 => color.b = value,
+                    _ => color.a = value,
+                }
+            }
+            Message::StyleValueChanged(index, value) => match index {
+                0 => self.style.padding = *value as i32,
+                1 => self.style.spacing = *value as i32,
+                2 => self.style.title_height = *value as i32,
+                3 => self.style.thumb_size = *value as i32,
+                4 => self.style.scrollbar_size = *value as i32,
+                _ => unreachable!("style value slider index is bounded by construction"),
+            },
+            Message::SubmitText(text) => self.submit_log(text.clone()),
+            Message::SubmitButton => {
+                let text = self
+                    .submit_buf_state
+                    .try_read(|submit_buf| submit_buf.text().to_owned())
+                    .expect("submit textbox state unavailable");
+                self.submit_log(text);
+            }
+            Message::TestButton(index) => match index {
+                0 => self.write_log("Pressed button 1"),
+                1 => self.write_log("Pressed button 2"),
+                2 => self.write_log("Pressed button 3"),
+                3 => self.open_popup = true,
+                4 => self.write_log("Pressed button 4"),
+                5 if self.dialog_session.is_none() && !self.open_dialog => {
+                    self.open_dialog = true;
+                    self.write_log("Open dialog!");
+                }
+                5 => {}
+                _ => unreachable!("test button index is bounded by construction"),
+            },
+            Message::TreeButton(message) | Message::PopupButton(message) | Message::StackDirectionButton(message) | Message::WeightButton(message) => {
+                self.write_log(message)
+            }
+            Message::ComboOpen(open) => self.combo_open = *open,
+            Message::ComboItem(index) => {
+                let labels: Vec<String> = self
+                    .combo_item_states
+                    .iter()
+                    .map(|item| item.try_read(|item| item.label().to_owned()).expect("combo item state unavailable"))
+                    .collect();
+                let selected = self
+                    .combo_typed_state
+                    .try_update(|combo| combo.select(*index, &labels))
+                    .expect("combo state unavailable");
+                self.combo_open = false;
+                if let Some(label) = selected {
+                    self.write_log(format!("Selected: {label}").as_str());
+                }
+            }
+        }
+    }
+
+    fn submit_log(&mut self, text: String) {
+        self.write_log(text.as_str());
+        self.submit_buf_state.try_update(TextboxState::clear).expect("submit textbox state unavailable");
     }
 
     fn sync_background_controls_from_bg(&mut self) {
@@ -1951,20 +2104,9 @@ impl State {
     }
 
     fn style_window(&mut self, ctx: &mut Context<SelectedBackend>) {
-        for (color, sliders) in self.style.colors.iter_mut().zip(self.style_color_slider_states.chunks_exact(4)) {
-            color.r = slider_value(&sliders[0]) as u8;
-            color.g = slider_value(&sliders[1]) as u8;
-            color.b = slider_value(&sliders[2]) as u8;
-            color.a = slider_value(&sliders[3]) as u8;
-        }
         for (swatch, color) in self.style_color_swatch_states.iter().zip(self.style.colors.iter()) {
             swatch.try_update(|swatch| swatch.set_fill(*color)).expect("style swatch state unavailable");
         }
-        self.style.padding = slider_value(&self.style_value_slider_states[0]) as i32;
-        self.style.spacing = slider_value(&self.style_value_slider_states[1]) as i32;
-        self.style.title_height = slider_value(&self.style_value_slider_states[2]) as i32;
-        self.style.thumb_size = slider_value(&self.style_value_slider_states[3]) as i32;
-        self.style.scrollbar_size = slider_value(&self.style_value_slider_states[4]) as i32;
         ctx.set_style(&self.style);
     }
 
@@ -1973,20 +2115,6 @@ impl State {
         self.log_text_state
             .try_update_with(text, |log_text, text| log_text.set_text(text))
             .expect("log text state unavailable");
-
-        let submit_buf_out = self
-            .submit_buf_state
-            .try_update(TextboxState::take_submitted)
-            .expect("submit textbox state unavailable");
-        let submit_btn_out = take_button_submission(&self.submit_button_state);
-        if submit_buf_out || submit_btn_out {
-            let buf = self
-                .submit_buf_state
-                .try_read(|submit_buf| submit_buf.text().to_owned())
-                .expect("submit textbox state unavailable");
-            self.write_log(buf.as_str());
-            self.submit_buf_state.try_update(TextboxState::clear).expect("submit textbox state unavailable");
-        }
     }
 
     fn typography_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
@@ -1999,50 +2127,9 @@ impl State {
 
     fn falloff_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
 
-    fn stack_direction_window(&mut self, _ctx: &mut Context<SelectedBackend>) {
-        let mut logs: Vec<&'static str> = Vec::new();
-        let messages = [
-            "Top->Bottom: call 1",
-            "Top->Bottom: call 2",
-            "Top->Bottom: call 3",
-            "Bottom->Top: call 1",
-            "Bottom->Top: call 2",
-            "Bottom->Top: call 3",
-        ];
-        for (button, message) in self.stack_direction_button_states.iter().zip(messages) {
-            if take_button_submission(button) {
-                logs.push(message);
-            }
-        }
+    fn stack_direction_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
 
-        for msg in logs {
-            self.write_log(msg);
-        }
-    }
-
-    fn weight_window(&mut self, _ctx: &mut Context<SelectedBackend>) {
-        let mut logs: Vec<&'static str> = Vec::new();
-        let messages = [
-            "Weight row: 1",
-            "Weight row: 2",
-            "Weight row: 3",
-            "Weight grid: 1",
-            "Weight grid: 2",
-            "Weight grid: 3",
-            "Weight grid: 4",
-            "Weight grid: 5",
-            "Weight grid: 6",
-        ];
-        for (button, message) in self.weight_button_states.iter().zip(messages) {
-            if take_button_submission(button) {
-                logs.push(message);
-            }
-        }
-
-        for msg in logs {
-            self.write_log(msg);
-        }
-    }
+    fn weight_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
 
     fn test_window(&mut self, ctx: &mut Context<SelectedBackend>) {
         {
@@ -2072,81 +2159,14 @@ impl State {
             .try_update(|combo| combo.update_items(&combo_labels))
             .expect("combo state unavailable");
 
-        let mut button_logs: Vec<&'static str> = Vec::new();
-        let mut tree_logs: Vec<&'static str> = Vec::new();
         let combo_anchor = self.combo_typed_state.try_read(ComboState::anchor).expect("combo state unavailable");
-        let button_messages = [
-            Some("Pressed button 1"),
-            Some("Pressed button 2"),
-            Some("Pressed button 3"),
-            None,
-            Some("Pressed button 4"),
-            None,
-        ];
-        for (index, (button, message)) in self.test_button_states.iter().zip(button_messages).enumerate() {
-            if take_button_submission(button) {
-                match index {
-                    3 => self.open_popup = true,
-                    5 => {
-                        if self.dialog_session.is_none() {
-                            self.dialog_session = Some(ctx.open_file_dialog(FileDialogRequest::default()));
-                            button_logs.push("Open dialog!");
-                        }
-                    }
-                    _ => {
-                        if let Some(message) = message {
-                            button_logs.push(message);
-                        }
-                    }
-                }
-            }
-        }
-        let tree_messages = [
-            "Pressed button 1",
-            "Pressed button 2",
-            "Pressed button 3",
-            "Pressed button 4",
-            "Pressed button 5",
-            "Pressed button 6",
-        ];
-        for (button, message) in self.tree_button_states.iter().zip(tree_messages) {
-            if take_button_submission(button) {
-                tree_logs.push(message);
-            }
-        }
-        self.bg[0] = slider_value(&self.bg_slider_states[0]);
-        self.bg[1] = slider_value(&self.bg_slider_states[1]);
-        self.bg[2] = slider_value(&self.bg_slider_states[2]);
-        self.sync_background_swatch();
-        for msg in button_logs {
-            self.write_log(msg);
-        }
-        for msg in tree_logs {
-            self.write_log(msg);
-        }
-
-        let mut combo_log = None;
-        for (idx, item) in self.combo_item_states.iter().enumerate() {
-            if item.try_update(ListItemState::take_submitted).expect("combo item state unavailable") {
-                combo_log = self
-                    .combo_typed_state
-                    .try_update(|combo| combo.select(idx, &combo_labels))
-                    .expect("combo state unavailable");
-                break;
-            }
-        }
-        if self.combo_typed_state.try_read(ComboState::is_open).expect("combo state unavailable") {
+        if self.combo_open {
             ctx.set_root_visible(self.combo_popup_root.id(), true).expect("combo popup root must exist");
             ctx.set_root_rect(self.combo_popup_root.id(), combo_anchor)
                 .expect("combo popup root must exist");
         } else {
             ctx.set_root_visible(self.combo_popup_root.id(), false).expect("combo popup root must exist");
         }
-        if let Some(label) = combo_log {
-            let msg = format!("Selected: {label}");
-            self.write_log(msg.as_str());
-        }
-
         if self.open_popup {
             let popup_width = (self.style.default_cell_width + self.style.padding.max(0) * 2).max(80);
             ctx.set_root_visible(self.popup_root.id(), true).expect("test popup root must exist");
@@ -2154,15 +2174,9 @@ impl State {
                 .expect("test popup root must exist");
             self.open_popup = false;
         }
-
-        let mut popup_logs: Vec<&'static str> = Vec::new();
-        for (button, message) in self.popup_button_states.iter().zip(["Hello", "World"]) {
-            if take_button_submission(button) {
-                popup_logs.push(message);
-            }
-        }
-        for msg in popup_logs {
-            self.write_log(msg);
+        if self.open_dialog {
+            self.dialog_session = Some(ctx.open_file_dialog(FileDialogRequest::default()));
+            self.open_dialog = false;
         }
     }
 
@@ -2237,9 +2251,10 @@ fn main() {
 
     let mut app = Application::new(atlas, |backend: BackendInitContext, ctx| State::new(backend, ctx)).unwrap();
 
-    app.event_loop(|ctx, state, _dimensions| {
-        state.process_frame(ctx);
-    });
+    app.event_loop_session(
+        |state, session, subscribers| state.connect_events(session, subscribers),
+        |ctx, state, _dimensions| state.process_frame(ctx),
+    );
 }
 
 fn area_from_args(args: &CustomRenderArgs) -> CustomRenderArea {

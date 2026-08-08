@@ -64,7 +64,7 @@ mod input_api;
 mod root_chrome;
 mod roots;
 
-pub use root_chrome::{RootHandle, RootMutationError, RootState};
+pub use root_chrome::{RootChanged, RootHandle, RootMutationError, RootState, RootSubmitted};
 
 bitflags! {
     #[derive(Copy, Clone)]

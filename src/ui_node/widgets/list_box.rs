@@ -81,6 +81,19 @@ impl ListBoxParameters {
 pub struct ListBoxState {
     /// User submissions waiting to be consumed.
     pending_submissions: u32,
+    /// Session connection for user submissions.
+    submitted_event: crate::event::WidgetEventPort<ListBoxSubmitted>,
+}
+
+/// Semantic payload emitted when the user submits a list box.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct ListBoxSubmitted;
+
+impl WidgetStateHandle<ListBoxState> {
+    /// Returns the native event endpoint emitted once for every user submission.
+    pub fn submitted(&self) -> crate::WidgetEvent<ListBoxState, ListBoxSubmitted> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
+    }
 }
 
 impl WidgetState for ListBoxState {}
@@ -154,6 +167,7 @@ impl Widget for ListBox {
         }
         runtime_update_state(&self.state, "ListBox::update", |state| {
             record_pending_event(&mut state.pending_submissions);
+            state.submitted_event.emit(ListBoxSubmitted);
         });
     }
 
@@ -183,7 +197,10 @@ impl WidgetBuilder for ListBoxBuilder {
             image: parameters.image,
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(ListBoxState { pending_submissions: 0 })),
+            state: Rc::new(RefCell::new(ListBoxState {
+                pending_submissions: 0,
+                submitted_event: crate::event::WidgetEventPort::new(),
+            })),
         }
     }
 }

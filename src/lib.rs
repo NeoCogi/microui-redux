@@ -193,7 +193,7 @@ pub mod retained {
         TextWrap, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner,
         WidgetUpdateCtx,
     };
-    pub use crate::window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
+    pub use crate::window_manager::{Context, ContextFrame, RootChanged, RootHandle, RootId, RootMutationError, RootState, RootSubmitted, WindowOption};
 }
 
 /// Common imports for retained UI applications.
@@ -213,19 +213,21 @@ pub mod prelude {
     pub use crate::retained::{
         ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Context, ContextFrame,
         CustomRenderArgs, CustomRenderHandle, Disclosure, DisclosureParameters, DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan,
-        GridState, Layout, Node, Policy, RootHandle, RootId, RootMutationError, RootState, Row, RowParameters, RowState, ScrollArea, ScrollAreaOption,
-        ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, TextWrap, UiInputEvent, Widget, WidgetBuilder,
-        WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx, WindowOption,
+        GridState, Layout, Node, Policy, RootChanged, RootHandle, RootId, RootMutationError, RootState, RootSubmitted, Row, RowParameters, RowState,
+        ScrollArea, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, TextWrap,
+        UiInputEvent, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
+        WidgetStateOwner, WidgetUpdateCtx, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
     pub use crate::widgets::{
         Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters,
-        CheckboxState, ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom,
-        CustomBuilder, CustomParameters, ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters,
-        ListItemState, Number, NumberBuilder, NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder,
-        TextAreaParameters, TextAreaState, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxChanged,
-        TextboxParameters, TextboxState, TextboxSubmitted, Real,
+        CheckboxState, ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboChanged, ComboParameters,
+        ComboState, ComboSubmitted, Custom, CustomBuilder, CustomParameters, ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListBoxSubmitted,
+        ListItem, ListItemBuilder, ListItemParameters, ListItemState, ListItemSubmitted, Number, NumberBuilder, NumberChanged, NumberParameters, NumberState,
+        Slider, SliderBuilder, SliderChanged, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaChanged, TextAreaParameters, TextAreaState,
+        TextAreaSubmitted, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxChanged, TextboxParameters,
+        TextboxState, TextboxSubmitted, Real,
     };
     pub use rs_math3d::{
         Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3,
@@ -237,7 +239,7 @@ pub use atlas::{
     AtlasHandle, AtlasSource, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry,
     FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
 };
-pub use window_manager::{Context, ContextFrame, RootHandle, RootId, RootMutationError, RootState, WindowOption};
+pub use window_manager::{Context, ContextFrame, RootChanged, RootHandle, RootId, RootMutationError, RootState, RootSubmitted, WindowOption};
 pub use event::{ConnectError, Emit, Session, Subscribers, SubscriptionId, WidgetEvent};
 pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
 pub use image::{ImageSource, load_image_bytes};
@@ -253,10 +255,11 @@ pub use ui_node::{
 };
 pub use widgets::{
     Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters,
-    CheckboxState, ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboParameters, ComboState, Custom,
-    CustomBuilder, CustomParameters, ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListItem, ListItemBuilder, ListItemParameters, ListItemState,
-    Number, NumberBuilder, NumberParameters, NumberState, Slider, SliderBuilder, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaParameters,
-    TextAreaState, Real, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxChanged, TextboxParameters,
+    CheckboxState, ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboChanged, ComboParameters, ComboState,
+    ComboSubmitted, Custom, CustomBuilder, CustomParameters, ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListBoxSubmitted, ListItem,
+    ListItemBuilder, ListItemParameters, ListItemState, ListItemSubmitted, Number, NumberBuilder, NumberChanged, NumberParameters, NumberState, Slider,
+    SliderBuilder, SliderChanged, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaChanged, TextAreaParameters, TextAreaState,
+    TextAreaSubmitted, Real, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxChanged, TextboxParameters,
     TextboxState, TextboxSubmitted,
 };
 

@@ -125,6 +125,22 @@ pub struct SliderState {
     edit: NumberEditState,
     /// User value changes waiting to be consumed.
     pending_changes: u32,
+    /// Session connection for user-originated value changes.
+    changed_event: crate::event::WidgetEventPort<SliderChanged>,
+}
+
+/// Value snapshot emitted after a user-originated slider change.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct SliderChanged {
+    /// Slider value after applying the triggering input event.
+    pub value: Real,
+}
+
+impl WidgetStateHandle<SliderState> {
+    /// Returns the native event endpoint emitted after every user-originated value change.
+    pub fn changed(&self) -> crate::WidgetEvent<SliderState, SliderChanged> {
+        crate::WidgetEvent::new(self.clone(), |state| &mut state.changed_event)
+    }
 }
 
 impl WidgetState for SliderState {}
@@ -233,6 +249,7 @@ impl Slider {
             state.value = v;
             if last != v {
                 crate::widgets::record_pending_event(&mut state.pending_changes);
+                state.changed_event.emit(SliderChanged { value: v });
             }
         })
     }
@@ -333,6 +350,7 @@ impl WidgetBuilder for SliderBuilder {
             high: parameters.high,
             edit: NumberEditState::default(),
             pending_changes: 0,
+            changed_event: crate::event::WidgetEventPort::new(),
         }));
         Slider {
             step: parameters.step,
