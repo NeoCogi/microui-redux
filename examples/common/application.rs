@@ -50,7 +50,7 @@ use crate::common::wgpu_renderer;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 #[cfg(feature = "example-glow")]
-use sdl2::video::{GLContext, GLProfile};
+use sdl2::video::{GLContext, GLProfile, SwapInterval};
 use sdl2::video::Window;
 use sdl2::{Sdl, VideoSubsystem};
 
@@ -144,7 +144,13 @@ impl<S> Application<S> {
         F: Fn(&mut MicroUI, &mut S, Dimensioni),
     {
         #[cfg(feature = "example-glow")]
-        self.window.gl_make_current(&self.backend.gl_ctx).unwrap();
+        {
+            self.window.gl_make_current(&self.backend.gl_ctx).unwrap();
+            // The shared runner otherwise renders without a scheduling boundary on drivers whose
+            // default swap interval is immediate. That can starve SDL event delivery in debug
+            // examples and make an already-queued click appear delayed.
+            let _ = self._sdl_vid.gl_set_swap_interval(SwapInterval::VSync);
+        }
 
         let mut event_pump = self.sdl_ctx.event_pump().unwrap();
         'running: loop {
@@ -184,11 +190,26 @@ impl<S> Application<S> {
             }
             // SDL events are translated into the narrower microui input vocabulary here. This
             // keeps the rest of the demo code backend-agnostic.
+            let mut pending_mouse_move = None;
             for event in event_pump.poll_iter() {
+                // SDL can produce many consecutive motion samples between rendered frames. The
+                // retained Context intentionally commits every event independently, so forwarding
+                // all of those samples creates a queue of full update/layout transactions ahead
+                // of a later click. Preserve the last position and flush it before any non-motion
+                // event, keeping observable ordering while bounding motion work per host batch.
+                let event = match event {
+                    Event::MouseMotion { x, y, .. } => {
+                        pending_mouse_move = Some((x, y));
+                        continue;
+                    }
+                    event => event,
+                };
+                if let Some((x, y)) = pending_mouse_move.take() {
+                    self.ctx.mousemove(x, y);
+                }
                 match event {
                     Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
                     Event::Window { win_event: WindowEvent::Close, .. } => break 'running,
-                    Event::MouseMotion { x, y, .. } => self.ctx.mousemove(x, y),
                     Event::MouseWheel { x, y, .. } => self.ctx.scroll(x * -30, y * -30),
                     Event::MouseButtonDown { x, y, mouse_btn, .. } => {
                         let mb = map_mouse_button(mouse_btn);
@@ -224,6 +245,9 @@ impl<S> Application<S> {
 
                     _ => {}
                 }
+            }
+            if let Some((x, y)) = pending_mouse_move {
+                self.ctx.mousemove(x, y);
             }
 
             let dimensions = Dimensioni::new(width as i32, height as i32);
