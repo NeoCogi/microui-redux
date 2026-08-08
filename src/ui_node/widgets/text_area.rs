@@ -123,10 +123,6 @@ pub struct TextAreaState {
     scroll: Vec2i,
     /// Requests a runtime-only vertical-cursor preference reset.
     reset_preferred_x: bool,
-    /// User text changes waiting to be consumed.
-    pending_changes: u32,
-    /// User submissions waiting to be consumed.
-    pending_submissions: u32,
     /// Session connection for user-originated text changes.
     changed_event: crate::event::WidgetEventPort<TextAreaChanged>,
     /// Session connection for user submissions.
@@ -210,16 +206,6 @@ impl TextAreaState {
     pub fn set_scroll(&mut self, scroll: Vec2i) {
         self.scroll = vec2(scroll.x.max(0), scroll.y.max(0));
     }
-
-    /// Consumes one pending user text change.
-    pub fn take_changed(&mut self) -> bool {
-        crate::widgets::take_pending_event(&mut self.pending_changes)
-    }
-
-    /// Consumes one pending user submission.
-    pub fn take_submitted(&mut self) -> bool {
-        crate::widgets::take_pending_event(&mut self.pending_submissions)
-    }
 }
 
 /// Runtime-only text-area editing state.
@@ -299,14 +285,12 @@ impl TextArea {
             }
             let outcome = textarea_update(ctx, input, state, &mut self.interaction, self.wrap, font);
             if outcome.changed {
-                crate::widgets::record_pending_event(&mut state.pending_changes);
                 state.changed_event.emit(TextAreaChanged {
                     text: state.buf.clone(),
                     cursor: state.cursor,
                 });
             }
             if outcome.submitted {
-                crate::widgets::record_pending_event(&mut state.pending_submissions);
                 state.submitted_event.emit(TextAreaSubmitted { text: state.buf.clone() });
             }
             let changed = state.buf != old_buf
@@ -782,8 +766,6 @@ impl WidgetBuilder for TextAreaBuilder {
                 cursor,
                 scroll: vec2(0, 0),
                 reset_preferred_x: false,
-                pending_changes: 0,
-                pending_submissions: 0,
                 changed_event: crate::event::WidgetEventPort::new(),
                 submitted_event: crate::event::WidgetEventPort::new(),
             })),
@@ -795,6 +777,26 @@ impl WidgetBuilder for TextAreaBuilder {
 mod tests {
     use super::*;
     use crate::test_support::test_atlas;
+
+    #[derive(Debug, Eq, PartialEq)]
+    enum Message {
+        Changed(String, usize),
+        Submitted(String),
+    }
+
+    fn text_session(state: &WidgetStateHandle<TextAreaState>) -> (crate::Session<Message>, crate::Subscribers<Vec<Message>, Message>) {
+        let mut session = crate::Session::new();
+        session.connect(state.changed(), |event| Message::Changed(event.text, event.cursor)).unwrap();
+        session.connect(state.submitted(), |event| Message::Submitted(event.text)).unwrap();
+        let mut subscribers = crate::Subscribers::new();
+        subscribers.subscribe(|messages: &mut Vec<Message>, message: &Message, _| {
+            messages.push(match message {
+                Message::Changed(text, cursor) => Message::Changed(text.clone(), *cursor),
+                Message::Submitted(text) => Message::Submitted(text.clone()),
+            });
+        });
+        (session, subscribers)
+    }
 
     fn update_text_area(text_area: &mut TextArea, input: Vec<UiInputEvent>) {
         let atlas = test_atlas();
@@ -816,8 +818,9 @@ mod tests {
     }
 
     #[test]
-    fn text_area_records_independent_change_and_submission_events() {
+    fn text_area_dispatches_independent_change_and_submission_events() {
         let (state, mut text_area) = TextArea::create(TextAreaParameters::new(""));
+        let (mut session, mut subscribers) = text_session(&state);
         update_text_area(
             &mut text_area,
             vec![
@@ -826,15 +829,15 @@ mod tests {
                 UiInputEvent::KeyDown { key: KeyMode::RETURN },
             ],
         );
-        assert_eq!(state.try_update(TextAreaState::take_changed), Some(true));
-        assert_eq!(state.try_update(TextAreaState::take_changed), Some(false));
-        assert_eq!(state.try_update(TextAreaState::take_submitted), Some(true));
-        assert_eq!(state.try_update(TextAreaState::take_submitted), Some(false));
+        let mut messages = Vec::new();
+        assert!(session.dispatch(&mut messages, &mut subscribers));
+        assert_eq!(messages, [Message::Changed("line".to_owned(), 4), Message::Submitted("line".to_owned())]);
     }
 
     #[test]
     fn programmatic_text_cursor_and_scroll_setters_are_silent() {
         let (state, _text_area) = TextArea::create(TextAreaParameters::new("initial"));
+        let (mut session, mut subscribers) = text_session(&state);
         state
             .try_update(|state| {
                 state.set_text("replacement");
@@ -844,7 +847,6 @@ mod tests {
                 state.clear();
             })
             .unwrap();
-        assert_eq!(state.try_update(TextAreaState::take_changed), Some(false));
-        assert_eq!(state.try_update(TextAreaState::take_submitted), Some(false));
+        assert!(!session.dispatch(&mut Vec::new(), &mut subscribers));
     }
 }

@@ -83,8 +83,6 @@ impl CheckboxParameters {
 pub struct CheckboxState {
     /// Current checked value.
     checked: bool,
-    /// User-originated value changes waiting to be consumed.
-    pending_changes: u32,
     /// Session connection for user-originated value changes.
     changed_event: crate::event::WidgetEventPort<CheckboxChanged>,
 }
@@ -110,11 +108,6 @@ impl CheckboxState {
     /// Returns the current checked value.
     pub const fn checked(&self) -> bool {
         self.checked
-    }
-
-    /// Consumes one pending user-originated value change.
-    pub fn take_changed(&mut self) -> bool {
-        crate::widgets::take_pending_event(&mut self.pending_changes)
     }
 }
 
@@ -199,7 +192,6 @@ impl Widget for Checkbox {
 
         runtime_update_state(&self.state, "Checkbox::update", |state| {
             state.checked = !state.checked;
-            crate::widgets::record_pending_event(&mut state.pending_changes);
             let checked = state.checked;
             state.changed_event.emit(CheckboxChanged { checked });
         });
@@ -233,7 +225,6 @@ impl WidgetBuilder for CheckboxBuilder {
             opt: parameters.opt,
             state: Rc::new(RefCell::new(CheckboxState {
                 checked: parameters.checked,
-                pending_changes: 0,
                 changed_event: crate::event::WidgetEventPort::new(),
             })),
         }

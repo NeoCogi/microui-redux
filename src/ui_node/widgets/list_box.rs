@@ -32,7 +32,6 @@
 
 use super::*;
 use crate::ui_node::runtime_update_state;
-use crate::widgets::{record_pending_event, take_pending_event};
 use std::{cell::RefCell, rc::Rc};
 
 /// One-shot construction input for a [`ListBox`].
@@ -79,8 +78,6 @@ impl ListBoxParameters {
 
 /// Application-facing persistent list-box state.
 pub struct ListBoxState {
-    /// User submissions waiting to be consumed.
-    pending_submissions: u32,
     /// Session connection for user submissions.
     submitted_event: crate::event::WidgetEventPort<ListBoxSubmitted>,
 }
@@ -97,13 +94,6 @@ impl WidgetStateHandle<ListBoxState> {
 }
 
 impl WidgetState for ListBoxState {}
-
-impl ListBoxState {
-    /// Consumes one pending user submission.
-    pub fn take_submitted(&mut self) -> bool {
-        take_pending_event(&mut self.pending_submissions)
-    }
-}
 
 /// Concrete list-box runtime and sole strong owner of its application state.
 pub struct ListBox {
@@ -166,7 +156,6 @@ impl Widget for ListBox {
             return;
         }
         runtime_update_state(&self.state, "ListBox::update", |state| {
-            record_pending_event(&mut state.pending_submissions);
             state.submitted_event.emit(ListBoxSubmitted);
         });
     }
@@ -198,7 +187,6 @@ impl WidgetBuilder for ListBoxBuilder {
             font: parameters.font,
             opt: parameters.opt,
             state: Rc::new(RefCell::new(ListBoxState {
-                pending_submissions: 0,
                 submitted_event: crate::event::WidgetEventPort::new(),
             })),
         }

@@ -38,7 +38,7 @@ context.update_ui_session(
 
 `examples/calculator.rs` uses this API for all twenty buttons. `examples/demo-full.rs` maps its
 buttons, list items, combo header, text submission, and sliders into one application message enum.
-Their frame callbacks synchronize presentation but never consume pending widget counters.
+Their frame callbacks synchronize presentation but never poll widget state for events.
 
 ## Boundary between the retained tree and the application
 
@@ -104,8 +104,6 @@ post-traversal boundary.
 
 - Every retained semantic event producer has a typed endpoint. The file dialog and both interactive
   examples consume typed sessions rather than polling widget state.
-- Legacy pending counters remain temporarily as a source-compatibility layer. They are no longer
-  consumed by framework or example code and can be deleted independently.
 - Long-lived sessions prune weak connections whose widgets were removed, which lets dynamic
   subtrees such as file-dialog directory rows reconnect without retaining stale state.
 - A deferred widget event currently allocates one boxed `FnOnce() -> Message`. This preserves the

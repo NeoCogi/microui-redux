@@ -71,7 +71,6 @@ mod list_box;
 mod list_item;
 mod number;
 mod numeric_edit;
-mod pending_event;
 mod slider;
 mod text_area;
 mod text_block;
@@ -79,7 +78,6 @@ mod text_edit;
 mod textbox;
 
 use control::{content_height, inline_content_size, layout_inline_content, layout_scaled_visual_content, scaled_visual_content_size, text_size, widget_fill_color};
-pub(crate) use pending_event::{record_pending_event, take_pending_event};
 
 pub use button::{Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, ButtonSubmitted};
 pub use checkbox::{Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters, CheckboxState};

@@ -88,8 +88,6 @@ pub struct NumberState {
     value: Real,
     /// Text editing state for shift-click numeric entry.
     edit: NumberEditState,
-    /// User value changes waiting to be consumed.
-    pending_changes: u32,
     /// Session connection for user-originated value changes.
     changed_event: crate::event::WidgetEventPort<NumberChanged>,
 }
@@ -124,11 +122,6 @@ impl NumberState {
     /// Returns whether the inline numeric editor is active.
     pub fn is_editing(&self) -> bool {
         self.edit.editing
-    }
-
-    /// Consumes one pending user-originated value change.
-    pub fn take_changed(&mut self) -> bool {
-        crate::widgets::take_pending_event(&mut self.pending_changes)
     }
 }
 
@@ -179,7 +172,6 @@ impl Number {
                 state.set_value(state.value);
             }
             if state.value != last {
-                crate::widgets::record_pending_event(&mut state.pending_changes);
                 state.changed_event.emit(NumberChanged { value: state.value });
             }
         })
@@ -249,7 +241,6 @@ impl WidgetBuilder for NumberBuilder {
         let state = Rc::new(RefCell::new(NumberState {
             value: if parameters.value.is_finite() { parameters.value } else { 0.0 },
             edit: NumberEditState::default(),
-            pending_changes: 0,
             changed_event: crate::event::WidgetEventPort::new(),
         }));
         Number {

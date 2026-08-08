@@ -77,7 +77,7 @@
 //! capabilities, not node identities or strong mounted-state owners.
 //!
 //! Construction is split deliberately: a concrete `*Parameters` value is one-shot initialization,
-//! a concrete `*State` value contains mounted mutable values and counted events, and the concrete
+//! a concrete `*State` value contains mounted mutable values and native event endpoints, and the concrete
 //! runtime implements [`Widget`] plus [`WidgetStateOwner`]. Ordinary leaf constructors return
 //! `(WidgetStateHandle<State>, Runtime)`; ordinary container constructors return
 //! `(WidgetStateHandle<State>, Node)`. [`widgets::Custom::create`] is the fixed exception because

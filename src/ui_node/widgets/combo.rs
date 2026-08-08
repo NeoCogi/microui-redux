@@ -35,7 +35,6 @@
 
 use super::*;
 use crate::ui_node::{runtime_read_state, runtime_update_state};
-use crate::widgets::{record_pending_event, take_pending_event};
 use std::{cell::RefCell, rc::Rc};
 
 /// One-shot construction input for a [`Combo`].
@@ -88,10 +87,6 @@ pub struct ComboState {
     label: String,
     /// Framework-owned popup anchor snapshot published by the latest paint.
     last_anchor: Recti,
-    /// User-visible selection changes waiting to be consumed.
-    pending_changes: u32,
-    /// User header submissions waiting to be consumed.
-    pending_submissions: u32,
     /// Session connection for selection changes.
     changed_event: crate::event::WidgetEventPort<ComboChanged>,
     /// Session connection for header submissions.
@@ -192,21 +187,10 @@ impl ComboState {
     }
 
     fn emit_changed(&mut self) {
-        record_pending_event(&mut self.pending_changes);
         self.changed_event.emit(ComboChanged {
             selected: self.selected,
             label: self.label.clone(),
         });
-    }
-
-    /// Consumes one pending user-visible selection change.
-    pub fn take_changed(&mut self) -> bool {
-        take_pending_event(&mut self.pending_changes)
-    }
-
-    /// Consumes one pending header submission.
-    pub fn take_submitted(&mut self) -> bool {
-        take_pending_event(&mut self.pending_submissions)
     }
 }
 
@@ -277,7 +261,6 @@ impl Combo {
         runtime_update_state(&self.state, "Combo::update", |state| {
             if ctx.clicked() {
                 state.open = !state.open;
-                record_pending_event(&mut state.pending_submissions);
                 state.submitted_event.emit(ComboSubmitted { open: state.open });
             }
         })
@@ -353,8 +336,6 @@ impl WidgetBuilder for ComboBuilder {
                 open: false,
                 label: String::new(),
                 last_anchor: Recti::default(),
-                pending_changes: 0,
-                pending_submissions: 0,
                 changed_event: crate::event::WidgetEventPort::new(),
                 submitted_event: crate::event::WidgetEventPort::new(),
             })),

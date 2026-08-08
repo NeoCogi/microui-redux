@@ -648,7 +648,7 @@ impl<B: RendererBackend> Context<B> {
 mod tests {
     use super::*;
     use crate::test_support::{AllocationMeasurement, NoopRenderer, test_atlas};
-    use crate::{Button, ButtonParameters, ButtonState, Dimensioni, MouseButton, Node, Vec2i, WindowOption, rect};
+    use crate::{Button, ButtonParameters, Dimensioni, MouseButton, Node, Vec2i, WindowOption, rect};
     use std::{
         fs,
         time::{Instant, SystemTime, UNIX_EPOCH},
@@ -706,6 +706,11 @@ mod tests {
     fn pending_file_dialog_blocks_pointer_input_to_underlying_windows() {
         let mut ctx = context();
         let (behind, button) = Button::create(ButtonParameters::new("behind"));
+        let mut event_session = crate::Session::new();
+        event_session.connect(behind.submitted(), |_| ()).unwrap();
+        let mut subscribers = crate::Subscribers::new();
+        subscribers.subscribe(|count: &mut usize, _: &(), _| *count += 1);
+        let mut submissions = 0;
         let window = ctx.create_window("window", rect(0, 0, 100, 80), Node::widget(button));
         ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
@@ -718,7 +723,8 @@ mod tests {
         ctx.mouseup(10, 10, MouseButton::LEFT);
         ctx.update_and_render_ui();
 
-        assert_eq!(behind.try_update(ButtonState::take_submitted), Some(false));
+        assert!(!event_session.dispatch(&mut submissions, &mut subscribers));
+        assert_eq!(submissions, 0);
         assert_eq!(session.status(), FileDialogStatus::Pending);
         assert!(ctx.debug_root_zindex(dialog).unwrap() > ctx.debug_root_zindex(window.id()).unwrap());
     }

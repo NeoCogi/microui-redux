@@ -96,8 +96,6 @@ pub struct RootState {
     rect: Recti,
     visible: bool,
     interaction: RootInteraction,
-    pending_changes: u32,
-    pending_submissions: u32,
     changed_event: crate::event::WidgetEventPort<RootChanged>,
     submitted_event: crate::event::WidgetEventPort<RootSubmitted>,
     geometry: RootChromeGeometry,
@@ -113,8 +111,6 @@ impl RootState {
             rect,
             visible,
             interaction: RootInteraction::None,
-            pending_changes: 0,
-            pending_submissions: 0,
             changed_event: crate::event::WidgetEventPort::new(),
             submitted_event: crate::event::WidgetEventPort::new(),
             geometry: RootChromeGeometry::default(),
@@ -165,16 +161,6 @@ impl RootState {
         self.interaction == RootInteraction::Resizing
     }
 
-    /// Consumes one pending user-driven move or resize occurrence.
-    pub fn take_changed(&mut self) -> bool {
-        take_pending(&mut self.pending_changes)
-    }
-
-    /// Consumes one pending close or outside-popup submission occurrence.
-    pub fn take_submitted(&mut self) -> bool {
-        take_pending(&mut self.pending_submissions)
-    }
-
     pub(super) fn set_rect_silent(&mut self, rect: Recti) {
         self.rect = rect;
     }
@@ -209,7 +195,6 @@ impl RootState {
 
     pub(super) fn dismiss_popup(&mut self) {
         self.set_visible_silent(false);
-        record_pending(&mut self.pending_submissions);
         self.submitted_event.emit(RootSubmitted::PopupDismissed);
     }
 }
@@ -239,20 +224,6 @@ impl WidgetStateHandle<RootState> {
     /// Returns the native event endpoint emitted for close and outside-popup submissions.
     pub fn submitted(&self) -> crate::WidgetEvent<RootState, RootSubmitted> {
         crate::WidgetEvent::new(self.clone(), |state| &mut state.submitted_event)
-    }
-}
-
-fn record_pending(pending: &mut u32) {
-    // pending_event_count = previous_pending_event_count + 1.
-    *pending = pending.saturating_add(1);
-}
-
-fn take_pending(pending: &mut u32) -> bool {
-    if *pending == 0 {
-        false
-    } else {
-        *pending -= 1;
-        true
     }
 }
 
@@ -336,7 +307,6 @@ impl Widget for RootChromeSurface {
                     UiInputEvent::MouseDown { pos, button } if button.intersects(MouseButton::LEFT) => match state.geometry.hit_test(*pos) {
                         Some(RootChromePart::Close) => {
                             state.set_visible_silent(false);
-                            record_pending(&mut state.pending_submissions);
                             state.submitted_event.emit(RootSubmitted::Close);
                         }
                         Some(RootChromePart::Resize) => state.interaction = RootInteraction::Resizing,
@@ -363,7 +333,6 @@ impl Widget for RootChromeSurface {
                 }
             }
             if (state.rect.x, state.rect.y, state.rect.width, state.rect.height) != (initial.x, initial.y, initial.width, initial.height) {
-                record_pending(&mut state.pending_changes);
                 state.changed_event.emit(RootChanged { rect: state.rect });
             }
         });

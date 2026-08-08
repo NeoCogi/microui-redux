@@ -248,6 +248,15 @@ keyboard, text, focus, and capture routing, and blocks interaction with other ro
 destroyed. Other roots remain visible and continue to be laid out and painted.
 
 ```rust
+enum Message {
+    NameSubmitted(String),
+}
+
+#[derive(Default)]
+struct Model {
+    submitted_names: Vec<String>,
+}
+
 let (name_state, name_runtime) = Textbox::create(TextboxParameters::new(""));
 let (_, label_runtime) = TextBlock::create(TextBlockParameters::new("Name"));
 let (_, tree) = Row::create(RowParameters::new(
@@ -259,14 +268,14 @@ let (_, tree) = Row::create(RowParameters::new(
 let _root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
 let dimensions = Dimensioni::new(800, 600);
 let info = FrameInfo::try_new(dimensions, color(20, 22, 26, 255))?;
-ctx.update_ui(dimensions);
-
-if name_state.try_update(TextboxState::take_submitted).unwrap_or(false) {
-    // react to the textbox submission here
-}
-
-// If the reaction changed layout-affecting widget/container state, synchronize once more.
-// ctx.update_ui(dimensions);
+let mut session = Session::new();
+session.connect(name_state.submitted(), |event| Message::NameSubmitted(event.text))?;
+let mut subscribers = Subscribers::new();
+subscribers.subscribe(|model: &mut Model, message: &Message, _| match message {
+    Message::NameSubmitted(name) => model.submitted_names.push(name.clone()),
+});
+let mut model = Model::default();
+ctx.update_ui_session(dimensions, &mut session, &mut model, &mut subscribers);
 ctx.frame(info).render_ui()?;
 ```
 
@@ -286,9 +295,9 @@ widget `Node` or `NodeStateValue` API.
 Each owning `Node` receives a private, process-unique runtime identity before mounting. Moving a
 node, applying consuming `with_policy`, wrapping it in an unmounted `GridItem`, and inserting it
 into `Children` or `GridState` preserve that identity; applications cannot read or construct it.
-There is no public node ID or result lookup path. Widgets record consumable events in their typed
-state, and root chrome exposes its rectangle, visibility, active mode, and pending events through
-`RootHandle::state()`.
+There is no public node ID or result lookup path. Widgets expose typed event endpoints through their
+weak state handles, while root chrome exposes its rectangle, visibility, active mode, and typed
+change/submission endpoints through `RootHandle::state()`.
 
 Registered roots can be configured with `Context::set_root_options(...)` and `WindowOption` to
 control window chrome. Root overflow does not scroll implicitly; construct a `ScrollArea` with

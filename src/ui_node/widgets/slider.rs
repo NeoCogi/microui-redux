@@ -123,8 +123,6 @@ pub struct SliderState {
     high: Real,
     /// Inline numeric editing state.
     edit: NumberEditState,
-    /// User value changes waiting to be consumed.
-    pending_changes: u32,
     /// Session connection for user-originated value changes.
     changed_event: crate::event::WidgetEventPort<SliderChanged>,
 }
@@ -159,11 +157,6 @@ impl SliderState {
     /// Returns whether the inline numeric editor is active.
     pub fn is_editing(&self) -> bool {
         self.edit.editing
-    }
-
-    /// Consumes one pending user-originated value change.
-    pub fn take_changed(&mut self) -> bool {
-        crate::widgets::take_pending_event(&mut self.pending_changes)
     }
 }
 
@@ -248,7 +241,6 @@ impl Slider {
             v = clamp_slider_value(v, state.low, state.high);
             state.value = v;
             if last != v {
-                crate::widgets::record_pending_event(&mut state.pending_changes);
                 state.changed_event.emit(SliderChanged { value: v });
             }
         })
@@ -349,7 +341,6 @@ impl WidgetBuilder for SliderBuilder {
             low: parameters.low,
             high: parameters.high,
             edit: NumberEditState::default(),
-            pending_changes: 0,
             changed_event: crate::event::WidgetEventPort::new(),
         }));
         Slider {
@@ -428,6 +419,22 @@ mod tests {
         assert!((actual - expected).abs() < 1.0e-5, "expected {expected}, got {actual}");
     }
 
+    fn slider_session(state: &WidgetStateHandle<SliderState>) -> (crate::Session<Real>, crate::Subscribers<Vec<Real>, Real>) {
+        let mut session = crate::Session::new();
+        session.connect(state.changed(), |event| event.value).unwrap();
+        let mut subscribers = crate::Subscribers::new();
+        subscribers.subscribe(|values: &mut Vec<Real>, value: &Real, _| values.push(*value));
+        (session, subscribers)
+    }
+
+    fn number_session(state: &WidgetStateHandle<NumberState>) -> (crate::Session<Real>, crate::Subscribers<Vec<Real>, Real>) {
+        let mut session = crate::Session::new();
+        session.connect(state.changed(), |event| event.value).unwrap();
+        let mut subscribers = crate::Subscribers::new();
+        subscribers.subscribe(|values: &mut Vec<Real>, value: &Real, _| values.push(*value));
+        (session, subscribers)
+    }
+
     #[test]
     fn slider_zero_range_keeps_value() {
         let atlas = make_test_atlas();
@@ -460,17 +467,18 @@ mod tests {
 
         assert_eq!(state.try_read(|state| state.value().is_finite()), Some(true));
         assert_eq!(state.try_read(SliderState::value), Some(5.0));
-        assert_eq!(state.try_update(SliderState::take_changed), Some(false));
     }
 
     #[test]
     fn slider_wheel_snaps_fractional_step_from_lower_bound() {
         let (state, mut slider) = Slider::create(SliderParameters::with_opt(1.15, 1.0, 2.0, 0.2, 2, WidgetOption::FRAME));
+        let (mut session, mut subscribers) = slider_session(&state);
         run_slider_once(&mut slider, rect(0, 0, 100, 20), Vec::new(), true, false, false, Some(vec2(0, 1)));
 
         assert_real_close(state.try_read(SliderState::value).unwrap(), 1.4);
-        assert_eq!(state.try_update(SliderState::take_changed), Some(true));
-        assert_eq!(state.try_update(SliderState::take_changed), Some(false));
+        let mut values = Vec::new();
+        assert!(session.dispatch(&mut values, &mut subscribers));
+        assert_eq!(values, [1.4]);
     }
 
     #[test]
@@ -484,7 +492,6 @@ mod tests {
         run_slider_once(&mut slider, rect(0, 0, 100, 20), input, true, true, true, None);
 
         assert_real_close(state.try_read(SliderState::value).unwrap(), 13.25);
-        assert_eq!(state.try_update(SliderState::take_changed), Some(true));
     }
 
     #[test]
@@ -518,14 +525,15 @@ mod tests {
         slider.update(&mut ctx, Some(&event));
 
         assert_eq!(state.try_read(SliderState::value), Some(50.0));
-        assert_eq!(state.try_update(SliderState::take_changed), Some(true));
     }
 
     #[test]
     fn number_drag_records_a_typed_change_and_programmatic_setter_is_silent() {
         let (state, mut number) = Number::create(NumberParameters::new(0.0, 2.0, 0));
+        let (mut session, mut subscribers) = number_session(&state);
+        let mut values = Vec::new();
         state.try_update(|state| state.set_value(4.0)).unwrap();
-        assert_eq!(state.try_update(NumberState::take_changed), Some(false));
+        assert!(!session.dispatch(&mut values, &mut subscribers));
 
         run_number_once(
             &mut number,
@@ -536,15 +544,16 @@ mod tests {
             }],
         );
         assert_eq!(state.try_read(NumberState::value), Some(10.0));
-        assert_eq!(state.try_update(NumberState::take_changed), Some(true));
-        assert_eq!(state.try_update(NumberState::take_changed), Some(false));
+        assert!(session.dispatch(&mut values, &mut subscribers));
+        assert_eq!(values, [10.0]);
     }
 
     #[test]
     fn slider_programmatic_setter_is_silent() {
         let (state, _slider) = Slider::create(SliderParameters::new(0.0, -5.0, 5.0));
+        let (mut session, mut subscribers) = slider_session(&state);
         state.try_update(|state| state.set_value(4.0)).unwrap();
         assert_eq!(state.try_read(SliderState::value), Some(4.0));
-        assert_eq!(state.try_update(SliderState::take_changed), Some(false));
+        assert!(!session.dispatch(&mut Vec::new(), &mut subscribers));
     }
 }

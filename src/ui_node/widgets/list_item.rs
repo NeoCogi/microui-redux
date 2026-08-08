@@ -34,7 +34,6 @@
 
 use super::*;
 use crate::ui_node::{runtime_read_state, runtime_update_state};
-use crate::widgets::{record_pending_event, take_pending_event};
 use std::{cell::RefCell, rc::Rc};
 
 /// One-shot construction input for a [`ListItem`].
@@ -103,8 +102,6 @@ impl ListItemParameters {
 pub struct ListItemState {
     /// Mutable label displayed for the item.
     label: String,
-    /// User submissions waiting to be consumed.
-    pending_submissions: u32,
     /// Session connection for user submissions.
     submitted_event: crate::event::WidgetEventPort<ListItemSubmitted>,
 }
@@ -134,11 +131,6 @@ impl ListItemState {
     /// Replaces the label without recording a user submission.
     pub fn set_label(&mut self, label: impl Into<String>) {
         self.label = label.into();
-    }
-
-    /// Consumes one pending user submission.
-    pub fn take_submitted(&mut self) -> bool {
-        take_pending_event(&mut self.pending_submissions)
     }
 }
 
@@ -234,7 +226,6 @@ impl Widget for ListItem {
             return;
         }
         runtime_update_state(&self.state, "ListItem::update", |state| {
-            record_pending_event(&mut state.pending_submissions);
             state.submitted_event.emit(ListItemSubmitted { label: state.label.clone() });
         });
     }
@@ -266,7 +257,6 @@ impl WidgetBuilder for ListItemBuilder {
             opt: parameters.opt,
             state: Rc::new(RefCell::new(ListItemState {
                 label: parameters.label,
-                pending_submissions: 0,
                 submitted_event: crate::event::WidgetEventPort::new(),
             })),
         }

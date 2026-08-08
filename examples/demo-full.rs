@@ -73,8 +73,6 @@ use common::glow_renderer::GLRenderer as SelectedBackend;
 use common::vulkan_renderer::VulkanRenderer as SelectedBackend;
 #[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
 use common::wgpu_renderer::WgpuRenderer as SelectedBackend;
-#[cfg(feature = "builder")]
-use microui_redux::atlas::builder;
 use microui_redux::{prelude::*, render::Vertex};
 use std::{cell::RefCell, f32::consts::PI, fs, path::PathBuf, rc::Rc, time::Instant};
 
@@ -2244,11 +2242,6 @@ fn upload_noise_texture(ctx: &mut Context<SelectedBackend>, width: i32, height: 
 
 fn main() {
     let atlas = atlas_assets::load_atlas();
-    // #[cfg(feature = "builder")]
-    // {
-    //     builder::Builder::save_png_image(atlas.clone(), "atlas.png").unwrap();
-    // }
-
     let mut app = Application::new(atlas, |backend: BackendInitContext, ctx| State::new(backend, ctx)).unwrap();
 
     app.event_loop_session(

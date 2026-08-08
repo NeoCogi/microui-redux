@@ -206,13 +206,41 @@ fn convenience_constructors_store_explicit_outer_frame_policy() {
     );
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum ClickMessage {
+    Checkbox(bool),
+    Button,
+    Item(String),
+    ListBox,
+    Combo(bool),
+}
+
 #[test]
-fn typed_click_events_accumulate_and_consume_one_occurrence_at_a_time() {
+fn typed_click_events_dispatch_every_occurrence_in_order() {
     let (checkbox_state, mut checkbox) = Checkbox::create(CheckboxParameters::new("check", false));
     let (button_state, mut button) = Button::create(ButtonParameters::new("button"));
     let (item_state, mut item) = ListItem::create(ListItemParameters::new("item"));
     let (list_state, mut list) = ListBox::create(ListBoxParameters::new("list", None));
     let (combo_state, mut combo) = Combo::create(ComboParameters::new());
+
+    let mut session = crate::Session::new();
+    session
+        .connect(checkbox_state.changed(), |event| ClickMessage::Checkbox(event.checked))
+        .unwrap();
+    session.connect(button_state.submitted(), |_| ClickMessage::Button).unwrap();
+    session.connect(item_state.submitted(), |event| ClickMessage::Item(event.label)).unwrap();
+    session.connect(list_state.submitted(), |_| ClickMessage::ListBox).unwrap();
+    session.connect(combo_state.submitted(), |event| ClickMessage::Combo(event.open)).unwrap();
+    let mut subscribers = crate::Subscribers::new();
+    subscribers.subscribe(|events: &mut Vec<ClickMessage>, event: &ClickMessage, _| {
+        events.push(match event {
+            ClickMessage::Checkbox(value) => ClickMessage::Checkbox(*value),
+            ClickMessage::Button => ClickMessage::Button,
+            ClickMessage::Item(label) => ClickMessage::Item(label.clone()),
+            ClickMessage::ListBox => ClickMessage::ListBox,
+            ClickMessage::Combo(open) => ClickMessage::Combo(*open),
+        });
+    });
 
     for _ in 0..2 {
         run_click(&mut checkbox);
@@ -222,29 +250,35 @@ fn typed_click_events_accumulate_and_consume_one_occurrence_at_a_time() {
         run_click(&mut combo);
     }
 
-    for _ in 0..2 {
-        assert_eq!(checkbox_state.try_update(CheckboxState::take_changed), Some(true));
-    }
-    assert_eq!(checkbox_state.try_update(CheckboxState::take_changed), Some(false));
-
-    assert_eq!(button_state.try_update(ButtonState::take_submitted), Some(true));
-    assert_eq!(button_state.try_update(ButtonState::take_submitted), Some(true));
-    assert_eq!(button_state.try_update(ButtonState::take_submitted), Some(false));
-    assert_eq!(item_state.try_update(ListItemState::take_submitted), Some(true));
-    assert_eq!(item_state.try_update(ListItemState::take_submitted), Some(true));
-    assert_eq!(item_state.try_update(ListItemState::take_submitted), Some(false));
-    assert_eq!(list_state.try_update(ListBoxState::take_submitted), Some(true));
-    assert_eq!(list_state.try_update(ListBoxState::take_submitted), Some(true));
-    assert_eq!(list_state.try_update(ListBoxState::take_submitted), Some(false));
-    assert_eq!(combo_state.try_update(ComboState::take_submitted), Some(true));
-    assert_eq!(combo_state.try_update(ComboState::take_submitted), Some(true));
-    assert_eq!(combo_state.try_update(ComboState::take_submitted), Some(false));
+    let mut events = Vec::new();
+    assert!(session.dispatch(&mut events, &mut subscribers));
+    assert_eq!(
+        events,
+        [
+            ClickMessage::Checkbox(true),
+            ClickMessage::Button,
+            ClickMessage::Item("item".to_owned()),
+            ClickMessage::ListBox,
+            ClickMessage::Combo(true),
+            ClickMessage::Checkbox(false),
+            ClickMessage::Button,
+            ClickMessage::Item("item".to_owned()),
+            ClickMessage::ListBox,
+            ClickMessage::Combo(false),
+        ]
+    );
 }
 
 #[test]
-fn combo_programmatic_operations_are_silent_except_item_clamping() {
+fn combo_selection_and_item_clamping_emit_only_value_changes() {
     let (state, _runtime) = Combo::create(ComboParameters::new());
     let labels = ["zero", "one", "two"];
+
+    let mut session = crate::Session::new();
+    session.connect(state.changed(), |event| (event.selected, event.label)).unwrap();
+    let mut subscribers = crate::Subscribers::new();
+    subscribers.subscribe(|events: &mut Vec<(usize, String)>, event: &(usize, String), _| events.push(event.clone()));
+    let mut events = Vec::new();
 
     state
         .try_update(|combo| {
@@ -253,21 +287,27 @@ fn combo_programmatic_operations_are_silent_except_item_clamping() {
             assert_eq!(combo.select(2, &labels).as_deref(), Some("two"));
         })
         .unwrap();
-    assert_eq!(state.try_update(ComboState::take_changed), Some(false));
-    assert_eq!(state.try_update(ComboState::take_submitted), Some(false));
+    assert!(session.dispatch(&mut events, &mut subscribers));
+    assert_eq!(events, [(2, "two".to_owned())]);
 
     state.try_update(|combo| combo.update_items(&labels[..1])).unwrap();
     assert_eq!(state.try_read(ComboState::selected), Some(0));
-    assert_eq!(state.try_update(ComboState::take_changed), Some(true));
-    assert_eq!(state.try_update(ComboState::take_changed), Some(false));
+    assert!(session.dispatch(&mut events, &mut subscribers));
+    assert_eq!(events, [(2, "two".to_owned()), (0, "zero".to_owned())]);
 
     state.try_update(|combo| combo.update_items(&labels[..1])).unwrap();
-    assert_eq!(state.try_update(ComboState::take_changed), Some(false));
+    assert!(!session.dispatch(&mut events, &mut subscribers));
 }
 
 #[test]
 fn checkbox_and_list_item_programmatic_setters_are_silent() {
     let (checkbox, _checkbox_runtime) = Checkbox::create(CheckboxParameters::new("check", false));
+    let (item, _item_runtime) = ListItem::create(ListItemParameters::new("before"));
+    let mut session = crate::Session::new();
+    session.connect(checkbox.changed(), |_| ()).unwrap();
+    session.connect(item.submitted(), |_| ()).unwrap();
+    let mut subscribers = crate::Subscribers::<(), ()>::new();
+
     checkbox
         .try_update(|state| {
             state.check();
@@ -275,20 +315,8 @@ fn checkbox_and_list_item_programmatic_setters_are_silent() {
             state.set_checked(true);
         })
         .unwrap();
-    assert_eq!(checkbox.try_update(CheckboxState::take_changed), Some(false));
-
-    let (item, _item_runtime) = ListItem::create(ListItemParameters::new("before"));
     item.try_update(|state| state.set_label("after")).unwrap();
-    assert_eq!(item.try_update(ListItemState::take_submitted), Some(false));
-}
-
-#[test]
-fn pending_event_counters_saturate_without_wrapping() {
-    let mut pending = u32::MAX;
-    crate::widgets::record_pending_event(&mut pending);
-    assert_eq!(pending, u32::MAX);
-    assert!(crate::widgets::take_pending_event(&mut pending));
-    assert_eq!(pending, u32::MAX - 1);
+    assert!(!session.dispatch(&mut (), &mut subscribers));
 }
 
 #[test]

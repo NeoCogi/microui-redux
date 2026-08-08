@@ -104,10 +104,6 @@ pub struct TextboxState {
     buf: String,
     /// Current UTF-8 byte cursor.
     cursor: usize,
-    /// User text changes waiting to be consumed.
-    pending_changes: u32,
-    /// User submissions waiting to be consumed.
-    pending_submissions: u32,
     /// Session connection for user-originated text changes.
     changed_event: crate::event::WidgetEventPort<TextboxChanged>,
     /// Session connection for user submissions.
@@ -147,16 +143,6 @@ impl TextboxState {
     /// Moves the cursor to the end of the current text.
     pub fn move_cursor_to_end(&mut self) {
         self.cursor = self.buf.len();
-    }
-
-    /// Consumes one pending user text change.
-    pub fn take_changed(&mut self) -> bool {
-        crate::widgets::take_pending_event(&mut self.pending_changes)
-    }
-
-    /// Consumes one pending user submission.
-    pub fn take_submitted(&mut self) -> bool {
-        crate::widgets::take_pending_event(&mut self.pending_submissions)
     }
 }
 
@@ -233,14 +219,12 @@ impl Textbox {
         runtime_update_state(&self.state, "Textbox::update", |state| {
             let outcome = textbox_update(ctx, input, &mut state.buf, &mut state.cursor, self.opt, font);
             if outcome.changed {
-                crate::widgets::record_pending_event(&mut state.pending_changes);
                 state.changed_event.emit(TextboxChanged {
                     text: state.buf.clone(),
                     cursor: state.cursor,
                 });
             }
             if outcome.submitted {
-                crate::widgets::record_pending_event(&mut state.pending_submissions);
                 state.submitted_event.emit(TextboxSubmitted { text: state.buf.clone() });
             }
         });
@@ -441,8 +425,6 @@ impl WidgetBuilder for TextboxBuilder {
             state: Rc::new(RefCell::new(TextboxState {
                 buf: parameters.buf,
                 cursor,
-                pending_changes: 0,
-                pending_submissions: 0,
                 changed_event: crate::event::WidgetEventPort::new(),
                 submitted_event: crate::event::WidgetEventPort::new(),
             })),
@@ -454,6 +436,26 @@ impl WidgetBuilder for TextboxBuilder {
 mod tests {
     use super::*;
     use crate::test_support::test_atlas;
+
+    #[derive(Debug, Eq, PartialEq)]
+    enum Message {
+        Changed(String, usize),
+        Submitted(String),
+    }
+
+    fn text_session(state: &WidgetStateHandle<TextboxState>) -> (crate::Session<Message>, crate::Subscribers<Vec<Message>, Message>) {
+        let mut session = crate::Session::new();
+        session.connect(state.changed(), |event| Message::Changed(event.text, event.cursor)).unwrap();
+        session.connect(state.submitted(), |event| Message::Submitted(event.text)).unwrap();
+        let mut subscribers = crate::Subscribers::new();
+        subscribers.subscribe(|messages: &mut Vec<Message>, message: &Message, _| {
+            messages.push(match message {
+                Message::Changed(text, cursor) => Message::Changed(text.clone(), *cursor),
+                Message::Submitted(text) => Message::Submitted(text.clone()),
+            });
+        });
+        (session, subscribers)
+    }
 
     fn update_textbox(textbox: &mut Textbox, focused: bool, input: Vec<UiInputEvent>) {
         let atlas = test_atlas();
@@ -488,8 +490,9 @@ mod tests {
     }
 
     #[test]
-    fn text_events_record_once_per_update_and_accumulate_across_updates() {
+    fn text_events_dispatch_complete_snapshots_in_update_order() {
         let (state, mut textbox) = Textbox::create(TextboxParameters::new(""));
+        let (mut session, mut subscribers) = text_session(&state);
 
         update_textbox(
             &mut textbox,
@@ -503,17 +506,23 @@ mod tests {
         update_textbox(&mut textbox, true, vec![UiInputEvent::Text { text: "e".into() }]);
 
         assert_eq!(state.try_read(|state| state.text().to_owned()).as_deref(), Some("abcde"));
-        assert_eq!(state.try_update(TextboxState::take_changed), Some(true));
-        assert_eq!(state.try_update(TextboxState::take_changed), Some(true));
-        assert_eq!(state.try_update(TextboxState::take_changed), Some(true));
-        assert_eq!(state.try_update(TextboxState::take_changed), Some(false));
-        assert_eq!(state.try_update(TextboxState::take_submitted), Some(true));
-        assert_eq!(state.try_update(TextboxState::take_submitted), Some(false));
+        let mut messages = Vec::new();
+        assert!(session.dispatch(&mut messages, &mut subscribers));
+        assert_eq!(
+            messages,
+            [
+                Message::Changed("ab".to_owned(), 2),
+                Message::Changed("abcd".to_owned(), 4),
+                Message::Submitted("abcd".to_owned()),
+                Message::Changed("abcde".to_owned(), 5),
+            ]
+        );
     }
 
     #[test]
     fn programmatic_text_and_cursor_setters_are_silent() {
         let (state, _textbox) = Textbox::create(TextboxParameters::new("initial"));
+        let (mut session, mut subscribers) = text_session(&state);
         state
             .try_update(|state| {
                 state.set_text("replacement");
@@ -522,7 +531,6 @@ mod tests {
                 state.clear();
             })
             .unwrap();
-        assert_eq!(state.try_update(TextboxState::take_changed), Some(false));
-        assert_eq!(state.try_update(TextboxState::take_submitted), Some(false));
+        assert!(!session.dispatch(&mut Vec::new(), &mut subscribers));
     }
 }

@@ -35,7 +35,6 @@
 
 use super::*;
 use crate::ui_node::runtime_update_state;
-use crate::widgets::{record_pending_event, take_pending_event};
 use std::{cell::RefCell, rc::Rc};
 
 #[derive(Clone)]
@@ -138,20 +137,11 @@ impl ButtonParameters {
 
 /// Application-facing persistent button state.
 pub struct ButtonState {
-    /// User submissions waiting to be consumed.
-    pending_submissions: u32,
     /// Session connection for user submissions.
     submitted_event: crate::event::WidgetEventPort<ButtonSubmitted>,
 }
 
 impl WidgetState for ButtonState {}
-
-impl ButtonState {
-    /// Consumes one pending user submission.
-    pub fn take_submitted(&mut self) -> bool {
-        take_pending_event(&mut self.pending_submissions)
-    }
-}
 
 /// Semantic payload emitted when the user submits a button.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -272,7 +262,6 @@ impl Widget for Button {
             return;
         }
         runtime_update_state(&self.state, "Button::update", |state| {
-            record_pending_event(&mut state.pending_submissions);
             state.submitted_event.emit(ButtonSubmitted);
         });
     }
@@ -304,7 +293,6 @@ impl WidgetBuilder for ButtonBuilder {
             opt: parameters.opt,
             fill: parameters.fill,
             state: Rc::new(RefCell::new(ButtonState {
-                pending_submissions: 0,
                 submitted_event: crate::event::WidgetEventPort::new(),
             })),
         }
