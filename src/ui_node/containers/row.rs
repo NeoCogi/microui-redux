@@ -32,14 +32,17 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::ui_node::sizing::SizePolicy;
 use crate::ui_node::children::ChildrenHandle;
-use crate::{AtlasHandle, Container, Dimensioni, Layout, Recti, Style, WidgetOption, WidgetParameters, WidgetState, WidgetStateHandle};
+use crate::{
+    AtlasHandle, Container, ContainerWidget, Dimensioni, Recti, Style, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
+    WidgetUpdateCtx,
+};
 
 use super::{Axis, Children, ContainerLayoutCtx, Node};
 
 /// One-shot construction input for a horizontal row.
 ///
 /// The initial children, index-matched width tracks, and shared item height are copied into
-/// [`RowState`] and remain mutable there after mounting.
+/// [`Row`] and remain mutable there after mounting.
 pub struct RowParameters {
     children: Children,
     widths: Vec<SizePolicy>,
@@ -63,16 +66,14 @@ impl RowParameters {
 ///
 /// This is the sole mounted authority for ordered membership, index-matched width tracks, and the
 /// shared item-height policy. Missing width entries use [`SizePolicy::Auto`].
-pub struct RowState {
+pub struct Row {
     /// Weak topology access kept separate from index-matched row configuration.
     children: ChildrenHandle,
     widths: Vec<SizePolicy>,
     item_height: SizePolicy,
 }
 
-impl WidgetState for RowState {}
-
-impl RowState {
+impl Row {
     /// Returns the number of owned children.
     pub fn len(&self) -> Option<usize> {
         self.children.len()
@@ -122,56 +123,44 @@ impl RowState {
     pub fn set_item_height(&mut self, height: SizePolicy) {
         self.item_height = height;
     }
-}
-
-/// Geometry-only policy for a horizontal row.
-pub struct RowLayout {
-    state: Rc<RefCell<RowState>>,
-}
-
-impl Layout for RowLayout {
-    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-        // Track policies are mutable application state, so read them through one checked borrow
-        // while the child collection remains independently read-only.
-        crate::ui_node::runtime_read_state(&self.state, "Row::measure", |state| row_size(state, children, style, atlas, available))
-    }
-
-    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        // One checked mutable state borrow covers policy resolution and every child placement.
-        crate::ui_node::runtime_update_state(&self.state, "Row::place", |state| layout_row(ctx, state, children, rect));
-    }
-}
-
-/// Convenience constructor namespace for horizontal rows.
-pub struct Row;
-
-impl Row {
-    /// Creates a child-owning row and its weak application capability.
-    ///
-    /// Child ownership and row configuration deliberately have different owners: `Container`
-    /// retains nodes, while `RowState` retains index-matched sizing policy and only a weak route to
-    /// topology mutation. An application state handle therefore cannot own a mounted subtree.
-    pub fn create(parameters: RowParameters) -> (WidgetStateHandle<RowState>, Node) {
-        // Allocate the final collection before deriving the state's weak topology capability.
+    /// Creates a child-owning row and its weak typed widget handle.
+    pub fn create(parameters: RowParameters) -> (TypedWidgetHandle<Self>, Node) {
         let children = Rc::new(RefCell::new(parameters.children));
-        let state = Rc::new(RefCell::new(RowState {
+        let widget = Self {
             children: ChildrenHandle::new(&children),
             widths: parameters.widths,
             item_height: parameters.item_height,
-        }));
-        // Capture the weak handle before moving the sole strong state owner into RowLayout.
-        let handle = WidgetStateHandle::new(&state);
-        // Transfer the authoritative child cell and layout into the completed branch node.
-        let container = Container::from_shared(children, RowLayout { state }, WidgetOption::NONE);
+        };
+        let (handle, container) = Container::from_shared(children, widget);
         (handle, Node::container(container))
     }
+}
+
+impl ContainerWidget for Row {
+    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        row_size(self, children, style, atlas, available)
+    }
+
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        layout_row(ctx, self, children, rect);
+    }
+}
+
+impl Widget for Row {
+    fn widget_opt(&self) -> &WidgetOption {
+        &WidgetOption::NO_INTERACT
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
+
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
 /// Resolves shared row height and commits children from left to right.
 ///
 /// Width tracks are replayed because the shared height must be known before any child is placed;
 /// replaying them avoids allocating a temporary width collection on every layout frame.
-fn layout_row(ctx: &mut ContainerLayoutCtx<'_>, state: &mut RowState, children: &mut Children, rect: Recti) {
+fn layout_row(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Row, children: &mut Children, rect: Recti) {
     // Resolve horizontal slots and vertical preference from one state snapshot. No child borrow or
     // parallel geometry collection survives this call.
     let count = children.len();
@@ -222,7 +211,7 @@ fn layout_row(ctx: &mut ContainerLayoutCtx<'_>, state: &mut RowState, children: 
 }
 
 /// Builds the scalar width cursor from child preferences and index-matched Row track policies.
-fn row_axis(state: &RowState, children: &Children, style: &Style, atlas: &AtlasHandle, available_width: i32) -> Axis {
+fn row_axis(state: &Row, children: &Children, style: &Style, atlas: &AtlasHandle, available_width: i32) -> Axis {
     // Axis stores scalar allocation totals only; individual widths are replayed when needed.
     Axis::new(
         available_width,
@@ -237,7 +226,7 @@ fn row_axis(state: &RowState, children: &Children, style: &Style, atlas: &AtlasH
 ///
 /// Children are remeasured at their resolved widths to obtain a correct shared height for wrapped
 /// content. Placement policy remains parent-owned and is not folded into child content measurement.
-fn row_size(state: &RowState, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+fn row_size(state: &Row, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
     // Mirror placement policy and return only aggregate preferred geometry.
     let count = children.len();
     let spacing = style.spacing.max(0);
@@ -281,11 +270,11 @@ mod tests {
     use crate::{Custom, CustomParameters};
 
     #[test]
-    fn row_state_owns_topology_and_mutable_track_configuration() {
+    fn row_widget_exposes_topology_and_mutable_track_configuration() {
         let first = Custom::create(CustomParameters::new("first"));
         let (first_state, first) = Node::typed_widget(first);
         let (row, node) = Row::create(RowParameters::new([SizePolicy::Auto], SizePolicy::Auto, [first]));
-        assert_eq!(row.try_read(RowState::len), Some(Some(1)));
+        assert_eq!(row.try_read(Row::len), Some(Some(1)));
 
         row.try_update(|state| {
             state.set_widths([SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)]);
@@ -297,8 +286,8 @@ mod tests {
             row.try_read(|state| state.widths().to_vec()),
             Some(vec![SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)])
         );
-        assert_eq!(row.try_read(RowState::item_height), Some(SizePolicy::Fixed(24)));
-        assert_eq!(row.try_read(RowState::len), Some(Some(2)));
+        assert_eq!(row.try_read(Row::item_height), Some(SizePolicy::Fixed(24)));
+        assert_eq!(row.try_read(Row::len), Some(Some(2)));
 
         assert_eq!(row.try_update(|state| state.remove_drop(0)), Some(Some(true)));
         assert!(!first_state.is_alive());
@@ -316,7 +305,7 @@ mod tests {
         .into_iter()
         .collect();
         let topology = Rc::new(RefCell::new(Children::new()));
-        let state = RowState {
+        let state = Row {
             children: ChildrenHandle::new(&topology),
             widths: vec![SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)],
             item_height: SizePolicy::Auto,

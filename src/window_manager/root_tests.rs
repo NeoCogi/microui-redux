@@ -32,13 +32,12 @@ use super::*;
 
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
-    color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Column, ColumnParameters, ColumnState, Custom,
-    CustomParameters, Dimensioni, Disclosure, DisclosureParameters, DisclosureState, Grid, GridParameters, KeyMode, MouseButton, Node, Policy, Row,
-    RowParameters, ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style,
-    Textbox, TextboxChanged, TextboxParameters, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetUpdateCtx,
+    color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Column, ColumnParameters, Custom, CustomParameters,
+    Dimensioni, Disclosure, DisclosureParameters, Grid, GridParameters, KeyMode, MouseButton, Node, Policy, Row, RowParameters, ScrollArea, ScrollAreaOption,
+    ListItem, ListItemParameters, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style, Textbox, TextboxChanged, TextboxParameters,
+    TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
-use crate::ui_node::{runtime_read_state, runtime_update_state};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -64,22 +63,30 @@ fn event_counter<E: crate::WidgetEvent>(event: crate::WidgetEventHandle<E>) -> (
     (session, subscribers)
 }
 
-#[derive(Default)]
-struct OrderedProbeState {
+struct OrderedProbe {
     events: Vec<&'static str>,
     held_buttons: Vec<u32>,
     held_keys: Vec<u32>,
-    measures: usize,
+    measures: Cell<usize>,
     updates: usize,
     paints: usize,
     hovered: bool,
+    opt: WidgetOption,
 }
 
-impl WidgetState for OrderedProbeState {}
-
-struct OrderedProbe {
-    state: Rc<RefCell<OrderedProbeState>>,
-    opt: WidgetOption,
+impl OrderedProbe {
+    fn create(opt: WidgetOption) -> (TypedWidgetHandle<Self>, Node) {
+        Node::typed_widget(Self {
+            events: Vec::new(),
+            held_buttons: Vec::new(),
+            held_keys: Vec::new(),
+            measures: Cell::new(0),
+            updates: 0,
+            paints: 0,
+            hovered: false,
+            opt,
+        })
+    }
 }
 
 impl Widget for OrderedProbe {
@@ -87,19 +94,13 @@ impl Widget for OrderedProbe {
         &self.opt
     }
 
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        self.state.borrow_mut().measures += 1;
-        Dimensioni::new(80, 60)
-    }
-
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, event: Option<&UiInputEvent>) {
-        let mut state = self.state.borrow_mut();
-        state.updates += 1;
-        state.held_buttons.push(ctx.mouse_buttons().bits());
-        state.held_keys.push(ctx.key_modes().bits());
-        state.hovered = ctx.hovered();
+        self.updates += 1;
+        self.held_buttons.push(ctx.mouse_buttons().bits());
+        self.held_keys.push(ctx.key_modes().bits());
+        self.hovered = ctx.hovered();
         if let Some(event) = event {
-            state.events.push(match event {
+            self.events.push(match event {
                 UiInputEvent::MouseMove { .. } => "move",
                 UiInputEvent::MouseDrag { .. } => "drag",
                 UiInputEvent::MouseDown { .. } => "down",
@@ -115,34 +116,37 @@ impl Widget for OrderedProbe {
     }
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {
-        self.state.borrow_mut().paints += 1;
+        self.paints += 1;
     }
 }
 
-struct CommitProbeState {
+impl crate::LeafWidget for OrderedProbe {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        self.measures.set(self.measures.get() + 1);
+        Dimensioni::new(80, 60)
+    }
+}
+
+struct CommitProbe {
     intrinsic_height: i32,
     grow_to: Option<i32>,
     presses: usize,
-}
-
-impl WidgetState for CommitProbeState {}
-
-struct CommitProbe {
-    state: Rc<RefCell<CommitProbeState>>,
     painted_rects: Rc<RefCell<Vec<Recti>>>,
     opt: WidgetOption,
 }
 
 impl CommitProbe {
-    fn new(intrinsic_height: i32, grow_to: Option<i32>) -> (WidgetStateHandle<CommitProbeState>, Self, Rc<RefCell<Vec<Recti>>>) {
+    fn new(intrinsic_height: i32, grow_to: Option<i32>) -> (TypedWidgetHandle<Self>, Node, Rc<RefCell<Vec<Recti>>>) {
         let painted_rects = Rc::new(RefCell::new(Vec::new()));
         let probe = Self {
-            state: Rc::new(RefCell::new(CommitProbeState { intrinsic_height, grow_to, presses: 0 })),
+            intrinsic_height,
+            grow_to,
+            presses: 0,
             painted_rects: painted_rects.clone(),
             opt: WidgetOption::NONE,
         };
-        let state = WidgetStateHandle::new(&probe.state);
-        (state, probe, painted_rects)
+        let (handle, node) = Node::typed_widget(probe);
+        (handle, node, painted_rects)
     }
 }
 
@@ -151,19 +155,13 @@ impl Widget for CommitProbe {
         &self.opt
     }
 
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        runtime_read_state(&self.state, "CommitProbe::measure", |state| Dimensioni::new(40, state.intrinsic_height))
-    }
-
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, event: Option<&UiInputEvent>) {
-        runtime_update_state(&self.state, "CommitProbe::update", |state| {
-            if let Some(grow_to) = state.grow_to.take() {
-                state.intrinsic_height = grow_to;
-            }
-            if matches!(event, Some(UiInputEvent::MouseDown { .. })) {
-                state.presses += 1;
-            }
-        });
+        if let Some(grow_to) = self.grow_to.take() {
+            self.intrinsic_height = grow_to;
+        }
+        if matches!(event, Some(UiInputEvent::MouseDown { .. })) {
+            self.presses += 1;
+        }
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -172,32 +170,28 @@ impl Widget for CommitProbe {
     }
 }
 
-#[derive(Default)]
-struct SiblingMutationState {
-    value: i32,
-    observed_during_update: Vec<i32>,
+impl crate::LeafWidget for CommitProbe {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(40, self.intrinsic_height)
+    }
 }
 
-impl WidgetState for SiblingMutationState {}
-
 struct SiblingMutationProbe {
-    state: Rc<RefCell<SiblingMutationState>>,
-    target: Option<(WidgetStateHandle<SiblingMutationState>, i32)>,
+    value: i32,
+    observed_during_update: Vec<i32>,
+    target: Option<(TypedWidgetHandle<SiblingMutationProbe>, i32)>,
     opt: WidgetOption,
 }
 
 impl SiblingMutationProbe {
-    fn new(value: i32, target: Option<(WidgetStateHandle<SiblingMutationState>, i32)>) -> (WidgetStateHandle<SiblingMutationState>, Self) {
+    fn new(value: i32, target: Option<(TypedWidgetHandle<SiblingMutationProbe>, i32)>) -> (TypedWidgetHandle<Self>, Node) {
         let probe = Self {
-            state: Rc::new(RefCell::new(SiblingMutationState {
-                value,
-                observed_during_update: Vec::new(),
-            })),
+            value,
+            observed_during_update: Vec::new(),
             target,
             opt: WidgetOption::NONE,
         };
-        let state = WidgetStateHandle::new(&probe.state);
-        (state, probe)
+        Node::typed_widget(probe)
     }
 }
 
@@ -206,22 +200,22 @@ impl Widget for SiblingMutationProbe {
         &self.opt
     }
 
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        Dimensioni::new(20, 10)
-    }
-
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _event: Option<&UiInputEvent>) {
         if let Some((target, value)) = &self.target {
             target
                 .try_update(|state| state.value = *value)
                 .expect("the sibling target must not be borrowed yet or anymore");
         }
-        runtime_update_state(&self.state, "SiblingMutationProbe::update", |state| {
-            state.observed_during_update.push(state.value);
-        });
+        self.observed_during_update.push(self.value);
     }
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+impl crate::LeafWidget for SiblingMutationProbe {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(20, 10)
+    }
 }
 
 struct CountedProbe {
@@ -240,10 +234,6 @@ impl Widget for CountedProbe {
         &self.opt
     }
 
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        Dimensioni::new(20, 10)
-    }
-
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _event: Option<&UiInputEvent>) {
         self.updates.set(self.updates.get() + 1);
     }
@@ -251,18 +241,17 @@ impl Widget for CountedProbe {
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
-#[derive(Default)]
-struct TopologyMutationState {
-    same_container_blocked: bool,
-    other_container_changed: bool,
+impl crate::LeafWidget for CountedProbe {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(20, 10)
+    }
 }
 
-impl WidgetState for TopologyMutationState {}
-
 struct TopologyMutator {
-    state: Rc<RefCell<TopologyMutationState>>,
-    same_container: Rc<RefCell<Option<WidgetStateHandle<ColumnState>>>>,
-    other_container: WidgetStateHandle<ColumnState>,
+    same_container_blocked: bool,
+    other_container_changed: bool,
+    same_container: Rc<RefCell<Option<TypedWidgetHandle<Column>>>>,
+    other_container: TypedWidgetHandle<Column>,
     candidate: Option<Node>,
     opt: WidgetOption,
 }
@@ -270,10 +259,6 @@ struct TopologyMutator {
 impl Widget for TopologyMutator {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        Dimensioni::new(20, 10)
     }
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _event: Option<&UiInputEvent>) {
@@ -292,24 +277,24 @@ impl Widget for TopologyMutator {
                 false
             }
         };
-        runtime_update_state(&self.state, "TopologyMutator::update", |state| {
-            state.same_container_blocked = same_container_blocked;
-            state.other_container_changed = other_container_changed;
-        });
+        self.same_container_blocked = same_container_blocked;
+        self.other_container_changed = other_container_changed;
     }
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
+impl crate::LeafWidget for TopologyMutator {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(20, 10)
+    }
+}
+
 #[test]
 fn routed_recipient_gets_one_event_while_every_node_still_updates_in_fifo_order() {
-    let state = Rc::new(RefCell::new(OrderedProbeState::default()));
-    let probe = OrderedProbe {
-        state: state.clone(),
-        opt: WidgetOption::NONE,
-    };
+    let (state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
-    let root = ctx.create_window("window", rect(10, 10, 100, 80), Node::widget(probe));
+    let root = ctx.create_window("window", rect(10, 10, 100, 80), probe);
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
 
@@ -321,31 +306,34 @@ fn routed_recipient_gets_one_event_while_every_node_still_updates_in_fifo_order(
     ctx.mouseup(20, 20, MouseButton::LEFT);
     ctx.update_ui(Dimensioni::new(320, 240));
 
-    let state = state.borrow();
-    assert_eq!(state.updates, 6);
-    assert_eq!(state.events, ["move", "down", "key-down", "text", "key-up", "up"]);
-    assert_eq!(
-        state.held_buttons,
-        [
-            MouseButton::NONE.bits(),
-            MouseButton::LEFT.bits(),
-            MouseButton::LEFT.bits(),
-            MouseButton::LEFT.bits(),
-            MouseButton::LEFT.bits(),
-            MouseButton::NONE.bits(),
-        ]
-    );
-    assert_eq!(
-        state.held_keys,
-        [
-            KeyMode::NONE.bits(),
-            KeyMode::NONE.bits(),
-            KeyMode::SHIFT.bits(),
-            KeyMode::SHIFT.bits(),
-            KeyMode::NONE.bits(),
-            KeyMode::NONE.bits(),
-        ]
-    );
+    state
+        .try_read(|state| {
+            assert_eq!(state.updates, 6);
+            assert_eq!(state.events, ["move", "down", "key-down", "text", "key-up", "up"]);
+            assert_eq!(
+                state.held_buttons,
+                [
+                    MouseButton::NONE.bits(),
+                    MouseButton::LEFT.bits(),
+                    MouseButton::LEFT.bits(),
+                    MouseButton::LEFT.bits(),
+                    MouseButton::LEFT.bits(),
+                    MouseButton::NONE.bits(),
+                ]
+            );
+            assert_eq!(
+                state.held_keys,
+                [
+                    KeyMode::NONE.bits(),
+                    KeyMode::NONE.bits(),
+                    KeyMode::SHIFT.bits(),
+                    KeyMode::SHIFT.bits(),
+                    KeyMode::NONE.bits(),
+                    KeyMode::NONE.bits(),
+                ]
+            );
+        })
+        .unwrap();
     let metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
     assert_eq!(metrics.updates, 12, "chrome receives None for each event while the probe receives Some");
 }
@@ -434,7 +422,7 @@ fn every_event_layout_commit_updates_hit_geometry_for_the_next_queued_event() {
     ctx.mousedown(close.x + close.width / 2 + shift.x, close.y + close.height / 2 + shift.y, MouseButton::LEFT);
     ctx.update_ui(dimensions);
 
-    assert_eq!(root.state().try_read(RootState::is_visible), Some(false));
+    assert_eq!(root.widget().try_read(RootChrome::is_visible), Some(false));
 }
 
 #[test]
@@ -455,7 +443,7 @@ fn disclosure_update_commits_child_geometry_before_the_next_queued_press() {
     ctx.mousedown(10, 28, MouseButton::LEFT);
     ctx.update_ui(dimensions);
 
-    assert_eq!(disclosure.try_read(DisclosureState::is_expanded), Some(true));
+    assert_eq!(disclosure.try_read(Disclosure::is_expanded), Some(true));
     assert!(session.dispatch(&mut submissions, &mut subscribers));
     assert_eq!(submissions, 1);
 }
@@ -465,12 +453,7 @@ fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_remova
     let (backend, log) = recording_backend(test_atlas());
     let mut ctx = Context::new_test(backend, Dimensioni::new(320, 240));
 
-    let probe = OrderedProbe {
-        state: Rc::new(RefCell::new(OrderedProbeState::default())),
-        opt: WidgetOption::HOLD_FOCUS,
-    };
-    let probe_state = WidgetStateHandle::new(&probe.state);
-    let probe_node = Node::widget(probe);
+    let (probe_state, probe_node) = OrderedProbe::create(WidgetOption::HOLD_FOCUS);
     let probe_id = probe_node.id();
 
     let custom = ctx
@@ -491,17 +474,17 @@ fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_remova
     ctx.mouseup(probe_rect.x + 2, probe_rect.y + 2, MouseButton::LEFT);
     ctx.update_and_render_ui();
     let visible_counts = probe_state
-        .try_read(|state| (state.measures, state.updates, state.paints, state.events.clone()))
+        .try_read(|state| (state.measures.get(), state.updates, state.paints, state.events.clone()))
         .unwrap();
     assert_eq!(visible_counts.3, ["down", "up"]);
 
-    disclosure.try_update(DisclosureState::collapse).unwrap();
+    disclosure.try_update(Disclosure::collapse).unwrap();
     log.clear();
     ctx.mousemove(probe_rect.x + 2, probe_rect.y + 2);
     ctx.update_and_render_ui();
 
     assert_eq!(
-        probe_state.try_read(|state| (state.measures, state.updates, state.paints)),
+        probe_state.try_read(|state| (state.measures.get(), state.updates, state.paints)),
         Some((visible_counts.0, visible_counts.1, visible_counts.2)),
         "collapsed descendants must skip measure, update, and paint"
     );
@@ -513,7 +496,7 @@ fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_remova
     );
     assert!(probe_state.is_alive() && custom_state.is_alive(), "collapse must retain descendant ownership");
 
-    disclosure.try_update(DisclosureState::expand).unwrap();
+    disclosure.try_update(Disclosure::expand).unwrap();
     log.clear();
     ctx.text("focus must not return");
     ctx.update_and_render_ui();
@@ -524,7 +507,7 @@ fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_remova
             .any(|event| matches!(event, RenderEvent::Marker(name) if name == "disclosure custom child"))
     );
 
-    disclosure.try_update(DisclosureState::clear).unwrap();
+    disclosure.try_update(Disclosure::clear).unwrap();
     assert!(!probe_state.is_alive() && !custom_state.is_alive(), "removal must drop descendant runtimes");
 }
 
@@ -564,10 +547,8 @@ fn nested_scroll_bubbles_at_the_inner_boundary_and_moves_only_the_outer_area() {
 #[test]
 fn intrinsic_mutation_is_laid_out_before_the_next_event_and_painted_from_that_commit() {
     let (growing_state, growing, growing_paints) = CommitProbe::new(10, Some(30));
-    let growing = Node::widget(growing);
     let growing_id = growing.id();
     let (target_state, target, _) = CommitProbe::new(10, None);
-    let target = Node::widget(target);
     let target_id = target.id();
     let (_, content) = Column::create(ColumnParameters::new([growing, target]));
     let mut ctx = context();
@@ -606,12 +587,7 @@ fn sibling_mutation_observes_parent_first_forward_traversal_without_reruns() {
     let (earlier_state, earlier) = SiblingMutationProbe::new(0, Some((later_state.clone(), 11)));
     let (already_updated_state, already_updated) = SiblingMutationProbe::new(0, None);
     let (_late_mutator_state, late_mutator) = SiblingMutationProbe::new(0, Some((already_updated_state.clone(), 22)));
-    let (_, content) = Column::create(ColumnParameters::new([
-        Node::widget(earlier),
-        Node::widget(later),
-        Node::widget(already_updated),
-        Node::widget(late_mutator),
-    ]));
+    let (_, content) = Column::create(ColumnParameters::new([earlier, later, already_updated, late_mutator]));
     let mut ctx = context();
     let root = ctx.create_window("window", rect(0, 0, 140, 100), content);
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -637,14 +613,15 @@ fn topology_mutation_is_blocked_for_the_active_container_and_visible_in_a_later_
     let (other_container, other_node) = Column::create(ColumnParameters::default());
     let same_container = Rc::new(RefCell::new(None));
     let mutator = TopologyMutator {
-        state: Rc::new(RefCell::new(TopologyMutationState::default())),
+        same_container_blocked: false,
+        other_container_changed: false,
         same_container: same_container.clone(),
         other_container: other_container.clone(),
         candidate: Some(candidate),
         opt: WidgetOption::NONE,
     };
-    let mutator_state = WidgetStateHandle::new(&mutator.state);
-    let (outer_container, content) = Column::create(ColumnParameters::new([Node::widget(mutator), other_node]));
+    let (mutator_state, mutator) = Node::typed_widget(mutator);
+    let (outer_container, content) = Column::create(ColumnParameters::new([mutator, other_node]));
     *same_container.borrow_mut() = Some(outer_container.clone());
     let mut ctx = context();
     let root = ctx.create_window("window", rect(0, 0, 140, 100), content);
@@ -658,15 +635,15 @@ fn topology_mutation_is_blocked_for_the_active_container_and_visible_in_a_later_
         mutator_state.try_read(|state| (state.same_container_blocked, state.other_container_changed)),
         Some((true, true))
     );
-    assert_eq!(outer_container.try_read(ColumnState::len), Some(Some(2)));
-    assert_eq!(other_container.try_read(ColumnState::len), Some(Some(1)));
+    assert_eq!(outer_container.try_read(Column::len), Some(Some(2)));
+    assert_eq!(other_container.try_read(Column::len), Some(Some(1)));
     assert_eq!(inserted_updates.get(), 1, "the newly inserted later descendant participates in the same update");
 }
 
 #[test]
 fn programmatic_topology_mutation_needs_only_an_empty_queue_layout_commit() {
     let (_, first, _) = CommitProbe::new(10, None);
-    let (column, content) = Column::create(ColumnParameters::new([Node::widget(first)]));
+    let (column, content) = Column::create(ColumnParameters::new([first]));
     let mut ctx = context();
     let root = ctx.create_window("window", rect(0, 0, 140, 100), content);
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -675,7 +652,6 @@ fn programmatic_topology_mutation_needs_only_an_empty_queue_layout_commit() {
     ctx.update_ui(dimensions);
 
     let (_, appended, _) = CommitProbe::new(18, None);
-    let appended = Node::widget(appended);
     let appended_id = appended.id();
     assert!(
         column.try_update_with(appended, |state, node| state.push(node)).is_ok(),
@@ -691,7 +667,7 @@ fn programmatic_topology_mutation_needs_only_an_empty_queue_layout_commit() {
 }
 
 #[test]
-fn traversal_reaching_state_borrowed_by_an_access_closure_reports_the_runtime_diagnostic() {
+fn traversal_reaching_widget_borrowed_by_an_access_closure_reports_the_runtime_diagnostic() {
     let (text, widget) = crate::TextBlock::create(crate::TextBlockParameters::new("borrowed"));
     let mut ctx = context();
     let root = ctx.create_window("window", rect(0, 0, 140, 100), widget);
@@ -862,20 +838,20 @@ fn session_dispatches_application_messages_without_raw_input() {
 }
 
 #[test]
-fn creation_returns_typed_persistent_root_state() {
+fn creation_returns_typed_persistent_root_widget() {
     let mut ctx = context();
     let root = ctx.create_window("window", rect(20, 30, 120, 90), empty_content());
 
-    assert!(root.state().is_alive());
-    assert_eq!(root.state().try_read(|state| state.name().to_owned()), Some("window".to_owned()));
+    assert!(root.widget().is_alive());
+    assert_eq!(root.widget().try_read(|state| state.name().to_owned()), Some("window".to_owned()));
     assert_eq!(
-        root.state().try_read(|state| {
+        root.widget().try_read(|state| {
             let rect = state.rect();
             (rect.x, rect.y, rect.width, rect.height)
         }),
         Some((20, 30, 120, 90))
     );
-    assert_eq!(root.state().try_read(RootState::is_visible), Some(true));
+    assert_eq!(root.widget().try_read(RootChrome::is_visible), Some(true));
     assert_eq!(ctx.debug_root_node_count(root.id()), Some(2));
 }
 
@@ -913,12 +889,12 @@ fn hide_and_show_preserve_root_and_descendant_state() {
 
     ctx.set_root_visible(root.id(), false).unwrap();
     ctx.update_and_render_ui();
-    assert_eq!(root.state().try_read(RootState::is_visible), Some(false));
+    assert_eq!(root.widget().try_read(RootChrome::is_visible), Some(false));
     assert!(button.is_alive());
 
     ctx.set_root_visible(root.id(), true).unwrap();
     ctx.update_and_render_ui();
-    assert_eq!(root.state().try_read(RootState::is_visible), Some(true));
+    assert_eq!(root.widget().try_read(RootChrome::is_visible), Some(true));
     assert!(button.is_alive());
 }
 
@@ -933,7 +909,7 @@ fn destroy_expires_handles_and_ids_are_never_reused() {
     assert!(!ctx.destroy_root(destroyed_id));
     assert!(!ctx.bring_root_to_front(destroyed_id));
     assert_eq!(ctx.set_root_rect(destroyed_id, rect(1, 2, 3, 4)), Err(RootMutationError::UnknownRoot));
-    assert!(!root.state().is_alive());
+    assert!(!root.widget().is_alive());
     assert!(!button.is_alive());
 
     let replacement = ctx.create_window("second", rect(0, 0, 100, 80), empty_content());
@@ -945,7 +921,7 @@ fn active_state_upgrade_does_not_keep_destroyed_root_topology_alive() {
     let mut ctx = context();
     let (child, content) = button_content("child");
     let root = ctx.create_window("window", rect(0, 0, 100, 80), content);
-    let state = root.state().clone();
+    let state = root.widget().clone();
 
     state
         .try_update(|_| {
@@ -960,12 +936,12 @@ fn active_state_upgrade_does_not_keep_destroyed_root_topology_alive() {
 }
 
 #[test]
-fn same_state_setter_conflict_is_checked() {
+fn same_widget_setter_conflict_is_checked() {
     let mut ctx = context();
     let root = ctx.create_window("window", rect(0, 0, 100, 80), empty_content());
     let mut conflict = None;
 
-    root.state()
+    root.widget()
         .try_update(|_| conflict = Some(ctx.set_root_rect(root.id(), rect(10, 10, 100, 80))))
         .unwrap();
 
@@ -980,11 +956,11 @@ fn popup_switch_is_atomic_when_the_visible_popup_state_is_borrowed() {
     ctx.set_root_visible(first.id(), true).unwrap();
     let mut result = None;
 
-    first.state().try_update(|_| result = Some(ctx.set_root_visible(second.id(), true))).unwrap();
+    first.widget().try_update(|_| result = Some(ctx.set_root_visible(second.id(), true))).unwrap();
 
     assert_eq!(result, Some(Err(RootMutationError::Borrowed)));
-    assert_eq!(first.state().try_read(RootState::is_visible), Some(true));
-    assert_eq!(second.state().try_read(RootState::is_visible), Some(false));
+    assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(second.widget().try_read(RootChrome::is_visible), Some(false));
 }
 
 #[test]
@@ -1002,9 +978,9 @@ fn dynamic_container_root_changes_descendants_without_replacing_the_root() {
     assert!(button.is_alive());
     assert_eq!(ctx.debug_root_node_count(root_id), Some(3));
 
-    assert_eq!(column.try_update(|column: &mut ColumnState| column.remove_drop(0)), Some(Some(true)));
+    assert_eq!(column.try_update(|column: &mut Column| column.remove_drop(0)), Some(Some(true)));
     assert!(!button.is_alive());
-    assert!(root.state().is_alive());
+    assert!(root.widget().is_alive());
 }
 
 #[test]
@@ -1016,11 +992,11 @@ fn showing_a_popup_atomically_hides_the_previous_one() {
     let mut submissions = 0;
 
     ctx.set_root_visible(first.id(), true).unwrap();
-    assert_eq!(first.state().try_read(RootState::is_visible), Some(true));
+    assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(true));
     ctx.set_root_visible(second.id(), true).unwrap();
 
-    assert_eq!(first.state().try_read(RootState::is_visible), Some(false));
-    assert_eq!(second.state().try_read(RootState::is_visible), Some(true));
+    assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(second.widget().try_read(RootChrome::is_visible), Some(true));
     assert!(!session.dispatch(&mut submissions, &mut subscribers));
     assert_eq!(submissions, 0);
 }
@@ -1043,7 +1019,7 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     ctx.mousedown(200, 180, MouseButton::LEFT);
     ctx.update_and_render_ui();
 
-    assert_eq!(popup.state().try_read(RootState::is_visible), Some(false));
+    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
     assert!(event_session.dispatch(&mut submissions, &mut subscribers));
     assert_eq!(submissions, [RootSubmitted::PopupDismissed]);
     ctx.set_root_visible(popup.id(), true).unwrap();
@@ -1070,7 +1046,7 @@ fn outside_popup_press_dismisses_then_routes_once_to_the_revealed_root() {
     ctx.mousedown(15, 15, MouseButton::LEFT);
     ctx.update_ui(Dimensioni::new(320, 240));
 
-    assert_eq!(popup.state().try_read(RootState::is_visible), Some(false));
+    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
     assert!(session.dispatch(&mut submissions, &mut subscribers));
     assert_eq!(submissions, 1);
 }
@@ -1128,14 +1104,10 @@ fn fronting_changes_only_cross_root_z_order() {
 
 #[test]
 fn blank_root_press_confines_drag_to_the_pressed_root() {
-    let probe = OrderedProbe {
-        state: Rc::new(RefCell::new(OrderedProbeState::default())),
-        opt: WidgetOption::NONE,
-    };
-    let probe_state = WidgetStateHandle::new(&probe.state);
+    let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
     let first = ctx.create_window("first", rect(0, 0, 100, 80), empty_content());
-    let second = ctx.create_window("second", rect(160, 120, 100, 80), Node::widget(probe).with_policy(Policy::fill()));
+    let second = ctx.create_window("second", rect(160, 120, 100, 80), probe.with_policy(Policy::fill()));
     for root in [first.id(), second.id()] {
         ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
@@ -1158,14 +1130,10 @@ fn blank_root_press_confines_drag_to_the_pressed_root() {
 
 #[test]
 fn active_root_confines_scroll_while_hover_and_press_remain_hit_routed() {
-    let probe = OrderedProbe {
-        state: Rc::new(RefCell::new(OrderedProbeState::default())),
-        opt: WidgetOption::GRAB_SCROLL,
-    };
-    let probe_state = WidgetStateHandle::new(&probe.state);
+    let (probe_state, probe) = OrderedProbe::create(WidgetOption::GRAB_SCROLL);
     let mut ctx = context();
     let first = ctx.create_window("first", rect(0, 0, 100, 80), empty_content());
-    let second = ctx.create_window("second", rect(160, 120, 100, 80), Node::widget(probe).with_policy(Policy::fill()));
+    let second = ctx.create_window("second", rect(160, 120, 100, 80), probe.with_policy(Policy::fill()));
     for root in [first.id(), second.id()] {
         ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
@@ -1191,13 +1159,9 @@ fn active_root_confines_scroll_while_hover_and_press_remain_hit_routed() {
 
 #[test]
 fn pointer_captured_root_remains_the_keyboard_and_text_input_root() {
-    let probe = OrderedProbe {
-        state: Rc::new(RefCell::new(OrderedProbeState::default())),
-        opt: WidgetOption::NONE,
-    };
-    let probe_state = WidgetStateHandle::new(&probe.state);
+    let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
-    let first = ctx.create_window("first", rect(0, 0, 100, 80), Node::widget(probe).with_policy(Policy::fill()));
+    let first = ctx.create_window("first", rect(0, 0, 100, 80), probe.with_policy(Policy::fill()));
     let second = ctx.create_window("second", rect(160, 120, 100, 80), empty_content());
     ctx.update_and_render_ui();
 
@@ -1295,13 +1259,9 @@ fn active_dialog_keeps_a_visible_popup_below_and_input_blocked() {
 
 #[test]
 fn modal_activation_clears_underlying_focus_and_blocks_keyboard_input() {
-    let state = Rc::new(RefCell::new(OrderedProbeState::default()));
-    let probe = OrderedProbe {
-        state: state.clone(),
-        opt: WidgetOption::HOLD_FOCUS,
-    };
+    let (state, probe) = OrderedProbe::create(WidgetOption::HOLD_FOCUS);
     let mut ctx = context();
-    let window = ctx.create_window("window", rect(0, 0, 100, 80), Node::widget(probe));
+    let window = ctx.create_window("window", rect(0, 0, 100, 80), probe);
     ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let dialog = ctx.create_dialog("dialog", rect(120, 100, 100, 80), empty_content());
@@ -1311,26 +1271,26 @@ fn modal_activation_clears_underlying_focus_and_blocks_keyboard_input() {
     ctx.mousedown(10, 10, MouseButton::LEFT);
     ctx.mouseup(10, 10, MouseButton::LEFT);
     ctx.update_ui(Dimensioni::new(320, 240));
-    assert_eq!(state.borrow().events, ["down", "up"]);
+    assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
 
     ctx.set_root_visible(dialog.id(), true).unwrap();
-    let updates_before_modal_input = state.borrow().updates;
+    let updates_before_modal_input = state.try_read(|state| state.updates).unwrap();
     ctx.keydown(KeyMode::SHIFT);
     ctx.text("blocked");
     ctx.keyup(KeyMode::SHIFT);
     ctx.update_ui(Dimensioni::new(320, 240));
-    assert_eq!(state.borrow().updates, updates_before_modal_input);
-    assert_eq!(state.borrow().events, ["down", "up"]);
+    assert_eq!(state.try_read(|state| state.updates), Some(updates_before_modal_input));
+    assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
 
     ctx.set_root_visible(dialog.id(), false).unwrap();
     ctx.text("still unfocused");
     ctx.update_ui(Dimensioni::new(320, 240));
-    assert_eq!(state.borrow().events, ["down", "up"]);
+    assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
 
     ctx.mousedown(10, 10, MouseButton::LEFT);
     ctx.text("accepted");
     ctx.update_ui(Dimensioni::new(320, 240));
-    assert_eq!(state.borrow().events, ["down", "up", "down", "text"]);
+    assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up", "down", "text"]));
 }
 
 #[test]
@@ -1344,17 +1304,17 @@ fn showing_a_dialog_revokes_underlying_chrome_capture() {
     ctx.mousedown(title.x + 2, title.y + 2, MouseButton::LEFT);
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_has_pointer_capture(window.id()), Some(true));
-    assert_eq!(window.state().try_read(RootState::is_moving), Some(true));
-    let before = window.state().try_read(RootState::rect).unwrap();
+    assert_eq!(window.widget().try_read(RootChrome::is_moving), Some(true));
+    let before = window.widget().try_read(RootChrome::rect).unwrap();
 
     ctx.set_root_visible(dialog.id(), true).unwrap();
     assert_eq!(ctx.debug_root_has_pointer_capture(window.id()), Some(false));
-    assert_eq!(window.state().try_read(RootState::is_active), Some(false));
+    assert_eq!(window.widget().try_read(RootChrome::is_active), Some(false));
     ctx.mousemove(title.x + 20, title.y + 20);
     ctx.mouseup(title.x + 20, title.y + 20, MouseButton::LEFT);
     ctx.update_and_render_ui();
     assert_eq!(
-        window.state().try_read(|state| {
+        window.widget().try_read(|state| {
             let rect = state.rect();
             (rect.x, rect.y, rect.width, rect.height)
         }),
@@ -1382,7 +1342,7 @@ fn hiding_or_destroying_the_active_dialog_restores_the_previous_modal_dialog() {
     let close = ctx.debug_root_chrome(second.id()).unwrap().1.unwrap();
     ctx.mousedown(close.x + close.width / 2, close.y + close.height / 2, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(second.state().try_read(RootState::is_visible), Some(false));
+    assert_eq!(second.widget().try_read(RootChrome::is_visible), Some(false));
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
 
     ctx.set_root_visible(second.id(), true).unwrap();
@@ -1393,7 +1353,7 @@ fn hiding_or_destroying_the_active_dialog_restores_the_previous_modal_dialog() {
 }
 
 #[test]
-fn fronting_remains_state_borrow_independent_and_does_not_replace_the_active_modal() {
+fn fronting_remains_widget_borrow_independent_and_does_not_replace_the_active_modal() {
     let mut ctx = context();
     let first = ctx.create_dialog("first", rect(20, 20, 120, 90), empty_content());
     let middle = ctx.create_dialog("middle", rect(30, 30, 120, 90), empty_content());
@@ -1402,7 +1362,7 @@ fn fronting_remains_state_borrow_independent_and_does_not_replace_the_active_mod
     ctx.set_root_visible(middle.id(), true).unwrap();
     ctx.set_root_visible(second.id(), true).unwrap();
 
-    first.state().try_update(|_| assert!(ctx.bring_root_to_front(first.id()))).unwrap();
+    first.widget().try_update(|_| assert!(ctx.bring_root_to_front(first.id()))).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(second.id()));
     assert!(ctx.debug_root_zindex(second.id()).unwrap() > ctx.debug_root_zindex(first.id()).unwrap());
 
@@ -1410,7 +1370,7 @@ fn fronting_remains_state_borrow_independent_and_does_not_replace_the_active_mod
     assert_eq!(ctx.debug_modal_root(), Some(middle.id()));
     ctx.set_root_visible(second.id(), true).unwrap();
 
-    second.state().try_update(|_| assert!(ctx.bring_root_to_front(second.id()))).unwrap();
+    second.widget().try_update(|_| assert!(ctx.bring_root_to_front(second.id()))).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(second.id()));
 }
 
@@ -1423,14 +1383,14 @@ fn modal_restoration_keeps_hiding_and_destruction_independent_of_other_root_borr
     ctx.set_root_visible(first.id(), true).unwrap();
     ctx.set_root_visible(second.id(), true).unwrap();
 
-    first.state().try_update(|_| ctx.set_root_visible(second.id(), false).unwrap()).unwrap();
+    first.widget().try_update(|_| ctx.set_root_visible(second.id(), false).unwrap()).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
 
     ctx.set_root_visible(second.id(), true).unwrap();
-    first.state().try_update(|_| assert!(ctx.destroy_root(second.id()))).unwrap();
+    first.widget().try_update(|_| assert!(ctx.destroy_root(second.id()))).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
 
-    first.state().try_update(|_| assert!(ctx.destroy_root(window.id()))).unwrap();
+    first.widget().try_update(|_| assert!(ctx.destroy_root(window.id()))).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
 }
 
@@ -1462,7 +1422,7 @@ fn title_drag_and_close_record_typed_root_events() {
 
     ctx.mousedown(drag_x, drag_y, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(root.state().try_read(RootState::is_moving), Some(true));
+    assert_eq!(root.widget().try_read(RootChrome::is_moving), Some(true));
     assert!(!session.dispatch(&mut events, &mut subscribers));
 
     ctx.mousemove(drag_x + 10, drag_y + 8);
@@ -1472,27 +1432,23 @@ fn title_drag_and_close_record_typed_root_events() {
 
     ctx.mouseup(drag_x + 10, drag_y + 8, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(root.state().try_read(RootState::is_active), Some(false));
+    assert_eq!(root.widget().try_read(RootChrome::is_active), Some(false));
 
     let close = ctx.debug_root_chrome(root.id()).unwrap().1.unwrap();
     let close_x = close.x + close.width / 2;
     let close_y = close.y + close.height / 2;
     ctx.mousedown(close_x, close_y, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(root.state().try_read(RootState::is_visible), Some(false));
+    assert_eq!(root.widget().try_read(RootChrome::is_visible), Some(false));
     assert!(session.dispatch(&mut events, &mut subscribers));
     assert_eq!(events, [Event::Changed(40, 38, 140, 100), Event::Submitted(RootSubmitted::Close)]);
 }
 
 #[test]
 fn resize_overlay_preempts_content_where_the_grip_overlaps_the_root_body() {
-    let probe = OrderedProbe {
-        state: Rc::new(RefCell::new(OrderedProbeState::default())),
-        opt: WidgetOption::NONE,
-    };
-    let probe_state = WidgetStateHandle::new(&probe.state);
+    let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
-    let root = ctx.create_window("window", rect(30, 30, 140, 100), Node::widget(probe).with_policy(Policy::fill()));
+    let root = ctx.create_window("window", rect(30, 30, 140, 100), probe.with_policy(Policy::fill()));
     ctx.update_and_render_ui();
 
     let resize = ctx.debug_root_chrome(root.id()).unwrap().2.unwrap();
@@ -1511,30 +1467,26 @@ fn resize_overlay_preempts_content_where_the_grip_overlaps_the_root_body() {
     ctx.update_and_render_ui();
     assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(Vec::new()));
 
-    let before = root.state().try_read(RootState::rect).unwrap();
+    let before = root.widget().try_read(RootChrome::rect).unwrap();
     ctx.mousedown(press.x, press.y, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(root.state().try_read(RootState::is_resizing), Some(true));
+    assert_eq!(root.widget().try_read(RootChrome::is_resizing), Some(true));
     assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(Vec::new()));
 
     ctx.mousemove(press.x + 12, press.y + 8);
     ctx.mouseup(press.x + 12, press.y + 8, MouseButton::LEFT);
     ctx.update_and_render_ui();
     assert_eq!(
-        root.state().try_read(|state| (state.rect().width, state.rect().height)),
+        root.widget().try_read(|state| (state.rect().width, state.rect().height)),
         Some((before.width + 12, before.height + 8))
     );
 }
 
 #[test]
 fn content_capture_remains_exclusive_while_dragging_across_root_chrome() {
-    let probe = OrderedProbe {
-        state: Rc::new(RefCell::new(OrderedProbeState::default())),
-        opt: WidgetOption::NONE,
-    };
-    let probe_state = WidgetStateHandle::new(&probe.state);
+    let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
-    let root = ctx.create_window("window", rect(30, 30, 140, 100), Node::widget(probe).with_policy(Policy::fill()));
+    let root = ctx.create_window("window", rect(30, 30, 140, 100), probe.with_policy(Policy::fill()));
     ctx.update_and_render_ui();
 
     let body = ctx.debug_root_body(root.id()).unwrap();
@@ -1553,7 +1505,7 @@ fn content_capture_remains_exclusive_while_dragging_across_root_chrome() {
     ctx.update_and_render_ui();
     assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["down", "drag"]));
     assert_eq!(probe_state.try_read(|state| state.hovered), Some(true));
-    assert_eq!(root.state().try_read(RootState::is_resizing), Some(false));
+    assert_eq!(root.widget().try_read(RootChrome::is_resizing), Some(false));
 
     ctx.mouseup(over_chrome.x, over_chrome.y, MouseButton::LEFT);
     ctx.update_and_render_ui();
@@ -1571,16 +1523,16 @@ fn hiding_and_showing_root_does_not_restore_chrome_capture() {
     ctx.mousedown(title.x + 2, title.y + 2, MouseButton::LEFT);
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(true));
-    assert_eq!(root.state().try_read(RootState::is_moving), Some(true));
+    assert_eq!(root.widget().try_read(RootChrome::is_moving), Some(true));
 
     ctx.set_root_visible(root.id(), false).unwrap();
     assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(false));
-    assert_eq!(root.state().try_read(RootState::is_active), Some(false));
+    assert_eq!(root.widget().try_read(RootChrome::is_active), Some(false));
 
     ctx.set_root_visible(root.id(), true).unwrap();
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(false));
-    assert_eq!(root.state().try_read(RootState::is_active), Some(false));
+    assert_eq!(root.widget().try_read(RootChrome::is_active), Some(false));
 }
 
 #[test]
@@ -1593,7 +1545,7 @@ fn chrome_geometry_exposes_one_body_and_auto_size_tracks_content() {
 
     let body = ctx.debug_root_body(root.id()).unwrap();
     let content = ctx.debug_root_content_size(root.id()).unwrap();
-    let outer = root.state().try_read(RootState::rect).unwrap();
+    let outer = root.widget().try_read(RootChrome::rect).unwrap();
     assert!(body.width > 0 && body.height > 0);
     assert!(content.width > 0 && content.height > 0);
     assert!(outer.width >= body.width && outer.height >= body.height);
@@ -1629,7 +1581,7 @@ fn auto_height_preserves_popup_width_and_stretches_stack_items() {
 
     ctx.update_and_render_ui();
 
-    let outer = root.state().try_read(RootState::rect).unwrap();
+    let outer = root.widget().try_read(RootChrome::rect).unwrap();
     let body = ctx.debug_root_body(root.id()).unwrap();
     assert_eq!(outer.x, anchor.x);
     assert_eq!(outer.y, anchor.y);
@@ -1657,7 +1609,7 @@ fn auto_width_preserves_programmed_height() {
 
     ctx.update_and_render_ui();
 
-    let outer = root.state().try_read(RootState::rect).unwrap();
+    let outer = root.widget().try_read(RootChrome::rect).unwrap();
     assert!(outer.width > programmed.width, "AUTO_WIDTH must derive width from content");
     assert_eq!(outer.height, programmed.height, "AUTO_WIDTH must retain the programmed height");
 }
@@ -1709,7 +1661,7 @@ fn auto_size_ignores_the_previous_rect_for_flexible_row_grid_and_stack_tracks() 
 
     ctx.update_and_render_ui();
 
-    let outer = root.state().try_read(RootState::rect).unwrap();
+    let outer = root.widget().try_read(RootChrome::rect).unwrap();
     assert!(
         outer.width < 1_000 && outer.height < 1_000,
         "AUTO_SIZE must derive both axes from content: {outer:?}"

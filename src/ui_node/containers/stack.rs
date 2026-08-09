@@ -32,7 +32,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::ui_node::sizing::SizePolicy;
 use crate::ui_node::children::ChildrenHandle;
-use crate::{AtlasHandle, Container, Dimensioni, Layout, Recti, Style, WidgetOption, WidgetParameters, WidgetState, WidgetStateHandle};
+use crate::{
+    AtlasHandle, Container, ContainerWidget, Dimensioni, Recti, Style, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
+    WidgetUpdateCtx,
+};
 
 use super::{Axis, Children, ContainerLayoutCtx, Node};
 
@@ -77,7 +80,7 @@ impl StackParameters {
 ///
 /// This is the sole mounted authority for ordered membership, shared item width/height policies,
 /// and traversal direction.
-pub struct StackState {
+pub struct Stack {
     /// Weak access to topology owned by the enclosing retained container.
     children: ChildrenHandle,
     item_width: SizePolicy,
@@ -85,9 +88,7 @@ pub struct StackState {
     direction: StackDirection,
 }
 
-impl WidgetState for StackState {}
-
-impl StackState {
+impl Stack {
     /// Returns the number of owned children.
     pub fn len(&self) -> Option<usize> {
         self.children.len()
@@ -145,55 +146,45 @@ impl StackState {
     pub fn set_direction(&mut self, direction: StackDirection) {
         self.direction = direction;
     }
-}
-
-/// Geometry-only policy for a directional stack.
-pub struct StackLayout {
-    state: Rc<RefCell<StackState>>,
-}
-
-impl Layout for StackLayout {
-    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-        // Shared item policies and direction live in typed state; borrow them for this measurement.
-        crate::ui_node::runtime_read_state(&self.state, "Stack::measure", |state| stack_size(state, children, style, atlas, available))
-    }
-
-    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        // One checked state borrow covers policy resolution and every indexed child placement.
-        crate::ui_node::runtime_update_state(&self.state, "Stack::place", |state| layout_stack(ctx, state, children, rect));
-    }
-}
-
-/// Convenience constructor namespace for directional stacks.
-pub struct Stack;
-
-impl Stack {
-    /// Creates a child-owning stack and its weak application capability.
-    ///
-    /// The container owns the nodes; typed state owns configuration plus a weak topology route.
-    /// Dropping the returned node therefore expires every cloned state handle without requiring a
-    /// separate owner wrapper.
-    pub fn create(parameters: StackParameters) -> (WidgetStateHandle<StackState>, Node) {
-        // Establish the final child allocation before creating its weak mutation capability.
+    /// Creates a child-owning stack and its weak typed widget handle.
+    pub fn create(parameters: StackParameters) -> (TypedWidgetHandle<Self>, Node) {
         let children = Rc::new(RefCell::new(parameters.children));
-        let state = Rc::new(RefCell::new(StackState {
+        let widget = Self {
             children: ChildrenHandle::new(&children),
             item_width: parameters.item_width,
             item_height: parameters.item_height,
             direction: parameters.direction,
-        }));
-        // Capture a weak application handle, then retain the strong state reference in StackLayout.
-        let handle = WidgetStateHandle::new(&state);
-        let container = Container::from_shared(children, StackLayout { state }, WidgetOption::NONE);
+        };
+        let (handle, container) = Container::from_shared(children, widget);
         (handle, Node::container(container))
     }
+}
+
+impl ContainerWidget for Stack {
+    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        stack_size(self, children, style, atlas, available)
+    }
+
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        layout_stack(ctx, self, children, rect);
+    }
+}
+
+impl Widget for Stack {
+    fn widget_opt(&self) -> &WidgetOption {
+        &WidgetOption::NO_INTERACT
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
+
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
 /// Commits a vertical Stack in its configured traversal direction.
 ///
 /// Stack differs from Column by applying one shared width policy and one shared height policy to
 /// every child. Direction changes placement order only; sizing remains index-stable.
-fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut StackState, children: &mut Children, rect: Recti) {
+fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Stack, children: &mut Children, rect: Recti) {
     // Direction changes traversal order only. Width and height remain index-stable, so changing
     // direction never remaps policies to different children.
     let count = children.len();
@@ -258,7 +249,7 @@ fn stack_child_height(children: &Children, index: usize, style: &Style, atlas: &
 }
 
 /// Builds the scalar vertical cursor for all Stack children at one resolved item width.
-fn stack_axis(state: &StackState, children: &Children, style: &Style, atlas: &AtlasHandle, width: i32, available_height: i32) -> Axis {
+fn stack_axis(state: &Stack, children: &Children, style: &Style, atlas: &AtlasHandle, width: i32, available_height: i32) -> Axis {
     // Every child uses the same policy but contributes its own width-constrained preference.
     Axis::new(
         available_height,
@@ -267,7 +258,7 @@ fn stack_axis(state: &StackState, children: &Children, style: &Style, atlas: &At
 }
 
 /// Measures the preferred Stack extent without mutating or retaining sizing results.
-fn stack_size(state: &StackState, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+fn stack_size(state: &Stack, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
     // Aggregate the same shared policies used by placement without retaining per-child geometry.
     let count = children.len();
     if count == 0 {
@@ -320,9 +311,9 @@ mod tests {
                 state.set_item_height(SizePolicy::Fixed(28));
             })
             .unwrap();
-        assert_eq!(stack.try_read(StackState::direction), Some(StackDirection::BottomToTop));
-        assert_eq!(stack.try_read(StackState::item_width), Some(SizePolicy::Remainder(0)));
-        assert_eq!(stack.try_read(StackState::item_height), Some(SizePolicy::Fixed(28)));
+        assert_eq!(stack.try_read(Stack::direction), Some(StackDirection::BottomToTop));
+        assert_eq!(stack.try_read(Stack::item_width), Some(SizePolicy::Remainder(0)));
+        assert_eq!(stack.try_read(Stack::item_height), Some(SizePolicy::Fixed(28)));
         drop(node);
         assert!(!stack.is_alive());
     }

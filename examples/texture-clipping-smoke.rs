@@ -181,10 +181,6 @@ impl Widget for TextureClippingProbe {
         &self.options
     }
 
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        Dimensioni::new(64, 64)
-    }
-
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _events: Option<&UiInputEvent>) {}
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -196,6 +192,12 @@ impl Widget for TextureClippingProbe {
             painter.image(self.texture, rect(6, 9, 16, 12), white);
         });
         painter.icon(WHITE_ICON, rect(30, 0, 4, 4), white);
+    }
+}
+
+impl LeafWidget for TextureClippingProbe {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(64, 64)
     }
 }
 

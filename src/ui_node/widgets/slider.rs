@@ -76,6 +76,12 @@ pub struct SliderParameters {
     pub opt: WidgetOption,
 }
 
+impl crate::LeafWidget for Slider {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+}
+
 impl WidgetParameters for SliderParameters {}
 
 impl SliderParameters {
@@ -304,10 +310,6 @@ fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
 impl Widget for Slider {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {

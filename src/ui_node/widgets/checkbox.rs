@@ -53,6 +53,12 @@ pub struct CheckboxParameters {
     pub opt: WidgetOption,
 }
 
+impl crate::LeafWidget for Checkbox {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        self.preferred_size(style, atlas)
+    }
+}
+
 impl WidgetParameters for CheckboxParameters {}
 
 impl CheckboxParameters {
@@ -194,10 +200,6 @@ impl crate::TypedWidgetHandle<Checkbox> {
 impl Widget for Checkbox {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        self.preferred_size(style, atlas)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {

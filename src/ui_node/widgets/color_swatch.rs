@@ -44,6 +44,12 @@ pub struct ColorSwatchParameters {
     pub opt: WidgetOption,
 }
 
+impl crate::LeafWidget for ColorSwatch {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+}
+
 impl WidgetParameters for ColorSwatchParameters {}
 
 impl ColorSwatchParameters {
@@ -158,10 +164,6 @@ impl TypedWidgetHandle<ColorSwatch> {
 impl Widget for ColorSwatch {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
     }
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}

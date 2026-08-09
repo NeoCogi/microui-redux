@@ -6,7 +6,7 @@ application message type.
 
 ## Application API
 
-Widgets expose native event endpoints through their existing state handles. The application maps
+Widgets expose native event endpoints through their typed widget handles. The application maps
 those events into its own message enum once:
 
 ```rust
@@ -46,9 +46,9 @@ Their frame callbacks synchronize presentation but never poll widget state for e
 raw input
     -> UiRuntime routes one native event
     -> Widget::update mutates widget-local state
-    -> WidgetEventPort<E> queues a deferred E -> Message mapping
-    -> complete retained update releases all state borrows
-    -> Session<Message> evaluates mappings in FIFO order
+    -> WidgetEventPort<E> maps E and queues Message
+    -> complete retained update releases all widget borrows
+    -> Session<Message> drains messages in FIFO order
     -> Subscribers<State, Message> observe each message
     -> subscribers may enqueue more Message values
     -> layout commits before routing the next raw event
@@ -58,30 +58,30 @@ The types at each layer are intentionally different:
 
 ```text
 UiRuntime / Node / Widget        no application type parameter
-WidgetStateHandle<State>         concrete widget state only
+TypedWidgetHandle<Widget>        weak access to one concrete widget
 WidgetEvent<State, Event>        concrete native widget event
 Session<Message>                 application message vocabulary
 Subscribers<State, Message>      application state and message
 ```
 
-## Event endpoints on state handles
+## Event endpoints on typed widget handles
 
 The retained controls expose:
 
-- `WidgetStateHandle<ButtonState>::submitted()`
-- `WidgetStateHandle<CheckboxState>::changed()`
-- `WidgetStateHandle<TextboxState>::changed()`
-- `WidgetStateHandle<TextboxState>::submitted()`
-- `WidgetStateHandle<TextAreaState>::changed()`
-- `WidgetStateHandle<TextAreaState>::submitted()`
-- `WidgetStateHandle<SliderState>::changed()`
-- `WidgetStateHandle<NumberState>::changed()`
-- `WidgetStateHandle<ComboState>::changed()`
-- `WidgetStateHandle<ComboState>::submitted()`
-- `WidgetStateHandle<ListBoxState>::submitted()`
-- `WidgetStateHandle<ListItemState>::submitted()`
-- `WidgetStateHandle<RootState>::changed()`
-- `WidgetStateHandle<RootState>::submitted()`
+- `TypedWidgetHandle<Button>::submitted()`
+- `TypedWidgetHandle<Checkbox>::changed()`
+- `TypedWidgetHandle<Textbox>::changed()`
+- `TypedWidgetHandle<Textbox>::submitted()`
+- `TypedWidgetHandle<TextArea>::changed()`
+- `TypedWidgetHandle<TextArea>::submitted()`
+- `TypedWidgetHandle<Slider>::changed()`
+- `TypedWidgetHandle<Number>::changed()`
+- `TypedWidgetHandle<Combo>::changed()`
+- `TypedWidgetHandle<Combo>::submitted()`
+- `TypedWidgetHandle<ListBox>::submitted()`
+- `TypedWidgetHandle<ListItem>::submitted()`
+- `TypedWidgetHandle<RootChrome>::changed()`
+- `TypedWidgetHandle<RootChrome>::submitted()`
 
 The endpoint is weak: it does not retain a removed widget. `Session::connect` installs one mapping
 for that endpoint and the session disconnects it when dropped. One widget event connects to one
@@ -91,14 +91,13 @@ statically known type.
 ## No erased payloads
 
 There is no `Any`, downcast, opaque signal identity, or heterogeneous payload map. A widget event
-connection stores typed behavior `FnMut(Event)`, and the session's deferred mapping is
-`FnOnce() -> Message`. Dynamic dispatch is used for callbacks, but every value crossing the
-boundary remains compiler-checked.
+connection stores typed behavior `Fn(Event)`: it constructs a concrete `Message` and appends that
+message directly to the session inbox. Dynamic dispatch is used for the adapter callback, but every
+value crossing the boundary remains compiler-checked.
 
-Mappings are deliberately deferred. Invoking `event -> Message` inside `Widget::update` would let
-an application closure run while a retained state cell is mutably borrowed. Instead the widget
-only appends a typed deferred mapping; both that mapping and every subscriber run at the safe
-post-traversal boundary.
+The adapter runs during `Widget::update`, so it must remain construction-only and must not perform
+application effects or access the emitting widget. Subscriber callbacks run later at the safe
+post-traversal boundary after retained widget borrows have ended.
 
 ## Current experiment scope
 
@@ -106,8 +105,7 @@ post-traversal boundary.
   examples consume typed sessions rather than polling widget state.
 - Long-lived sessions prune weak connections whose widgets were removed, which lets dynamic
   subtrees such as file-dialog directory rows reconnect without retaining stale state.
-- A deferred widget event currently allocates one boxed `FnOnce() -> Message`. This preserves the
-  non-reentrant boundary without erasing event data. A later implementation could use a
-  session-owned slab if measurements justify removing that allocation.
+- Each connection allocates its boxed `Fn(Event) -> Message` adapter once. Emission queues only the
+  resulting `Message`; it does not allocate or enqueue a per-event closure.
 - The application message enum can be divided into component enums and lifted with ordinary Rust
   variant constructors such as `Message::Calculator`.

@@ -59,15 +59,6 @@ use rs_math3d::{Recti, Vec2f, Vec2i, color4b};
 ///         &self.options
 ///     }
 ///
-///     fn measure(
-///         &self,
-///         _style: &Style,
-///         _atlas: &AtlasHandle,
-///         _available: Dimensioni,
-///     ) -> Dimensioni {
-///         Dimensioni::new(48, 24)
-///     }
-///
 ///     fn update(
 ///         &mut self,
 ///         _ctx: &mut WidgetUpdateCtx<'_>,
@@ -88,6 +79,17 @@ use rs_math3d::{Recti, Vec2f, Vec2i, color4b};
 ///                 color(110, 190, 255, 255),
 ///             );
 ///         });
+///     }
+/// }
+///
+/// impl LeafWidget for Swatch {
+///     fn measure(
+///         &self,
+///         _style: &Style,
+///         _atlas: &AtlasHandle,
+///         _available: Dimensioni,
+///     ) -> Dimensioni {
+///         Dimensioni::new(48, 24)
 ///     }
 /// }
 /// ```

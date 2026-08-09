@@ -64,7 +64,7 @@ mod input_api;
 mod root_chrome;
 mod roots;
 
-pub use root_chrome::{RootChanged, RootHandle, RootMutationError, RootState, RootSubmitted};
+pub use root_chrome::{RootChanged, RootHandle, RootMutationError, RootChrome, RootSubmitted};
 
 bitflags! {
     #[derive(Copy, Clone)]
@@ -208,7 +208,7 @@ impl<B: RendererBackend> Context<B> {
 /// Exclusively owned logical UI frame.
 ///
 /// This value borrows `Context` to serialize paint/submission, but it does not lock independent
-/// [`crate::WidgetStateHandle`] or [`RootHandle::state`] access. Mutating layout-affecting state after the
+/// [`crate::TypedWidgetHandle`] or [`RootHandle::widget`] access. Mutating layout-affecting state after the
 /// last update commit makes that commit semantically stale; drop the unsubmitted frame and call
 /// [`Context::update_ui`] again before painting. No separate Context token exists.
 ///
@@ -252,9 +252,9 @@ impl<B: RendererBackend> Context<B> {
     /// timer synthesis, painting, or backend submission.
     ///
     /// Context-owned input, style, and root mutations invalidate a prior commit automatically.
-    /// Mutations made through weak widget/container state handles cannot notify Context; callers
+    /// Mutations made through weak typed widget handles cannot notify Context; callers
     /// must invoke this method after those mutations, including when the input queue is empty.
-    /// Callers must finish every state-access closure first. A closure retains its state-cell borrow;
+    /// Callers must finish every typed-access closure first. A closure retains its widget-cell borrow;
     /// if this traversal reaches that cell and requests an incompatible borrow, built-in runtimes
     /// panic with the retained-state invariant diagnostic rather than skipping work or committing
     /// stale state.
@@ -272,7 +272,7 @@ impl<B: RendererBackend> Context<B> {
     /// widget events connected through [`crate::Session::connect`] are mapped to `Message` as they
     /// are emitted. The messages are delivered synchronously in FIFO order after retained state
     /// borrows have ended and before the matching layout commit. Subscriber changes made through
-    /// independent state handles therefore affect geometry used to route the next queued raw event.
+    /// independent typed widget handles therefore affect geometry used to route the next queued raw event.
     ///
     /// Subscriber callbacks receive `state` and may enqueue further messages through
     /// [`crate::Emit`]. They cannot access this mutably borrowed Context, preventing a nested update
@@ -301,7 +301,7 @@ impl<B: RendererBackend> Context<B> {
     ///
     /// The callback is observational with respect to retained application state, topology,
     /// interaction, and layout. It may mutate callback-private rendering caches, but using a
-    /// captured [`WidgetStateHandle`](crate::WidgetStateHandle) to mutate retained UI during frame
+    /// captured [`TypedWidgetHandle`](crate::TypedWidgetHandle) to mutate retained UI during frame
     /// execution is a contract violation rather than a deferred-next-frame update.
     ///
     /// A callback written for another backend frame type cannot be registered:

@@ -76,6 +76,12 @@ pub struct TextAreaParameters {
     pub opt: WidgetOption,
 }
 
+impl crate::LeafWidget for TextArea {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+}
+
 impl WidgetParameters for TextAreaParameters {}
 
 impl TextAreaParameters {
@@ -761,10 +767,6 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &TextArea, font: FontId) 
 impl Widget for TextArea {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {

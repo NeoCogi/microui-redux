@@ -45,6 +45,12 @@ pub struct CustomParameters {
     pub opt: WidgetOption,
 }
 
+impl crate::LeafWidget for Custom {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+}
+
 impl WidgetParameters for CustomParameters {}
 
 impl CustomParameters {
@@ -84,7 +90,7 @@ pub struct Custom {
 }
 
 impl Custom {
-    /// Constructs the unique runtime without exposing a meaningless unit-state handle.
+    /// Constructs the unique runtime without exposing a meaningless unit-widget handle.
     pub fn create(parameters: CustomParameters) -> Self {
         CustomBuilder::create_widget(parameters)
     }
@@ -106,10 +112,6 @@ impl Custom {
 impl Widget for Custom {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
     }
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}

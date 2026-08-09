@@ -73,16 +73,17 @@
 //! `microui-redux` provides a GUI toolkit inspired by [rxi/microui](https://github.com/rxi/microui).
 //! The crate uses unique owning [`Node`] values as its public UI authoring input. Each
 //! [`Context`] root consumes one persistent node and remains its sole owner until explicit
-//! destruction. Leaf nodes retain widgets as erased `Rc<RefCell<dyn Widget>>` owners, while
-//! applications and coordinating composites may retain typed weak [`TypedWidgetHandle`] views of
-//! the same allocation. A handle never keeps a removed widget alive.
+//! destruction. Leaf nodes retain erased `Rc<RefCell<dyn LeafWidget>>` owners; containers separately
+//! retain an erased concrete [`ContainerWidget`] and their authoritative child collection.
+//! Applications and coordinating composites may keep typed weak [`TypedWidgetHandle`] views of
+//! either concrete allocation. A handle never keeps a removed widget alive.
 //!
 //! A concrete `*Parameters` value is one-shot initialization. Semantic values, interaction state,
 //! event ports, and [`Widget`] phases live in one concrete widget object rather than a parallel
-//! `*State` allocation. Built-in leaf constructors return `(TypedWidgetHandle<Widget>, Node)`;
-//! callers that need no typed access can mount any custom widget with [`Node::widget`]. Container
-//! constructors still return their topology/configuration handles because layout and child
-//! ownership are composite concerns rather than leaf widget state.
+//! `*State` allocation. Built-in leaf and container constructors both return
+//! `(TypedWidgetHandle<ConcreteWidget>, Node)`; callers that need no typed leaf access can mount a
+//! custom widget with [`Node::widget`]. A concrete container holds only weak topology capabilities;
+//! the generic [`Container`] remains the sole strong owner of its heterogeneous children.
 //!
 //! # Update and paint boundary
 //!
@@ -187,13 +188,12 @@ pub mod retained {
     pub use crate::file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
     pub use crate::ui_node::{
-        ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Disclosure, DisclosureParameters,
-        DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, GridState, Layout, Node, Policy, Row, RowParameters, RowState, ScrollArea,
-        ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, UiInputEvent, Widget,
-        TextWrap, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
-        WidgetUpdateCtx,
+        ChildParticipation, Children, Column, ColumnParameters, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters, FocusPolicy,
+        Grid, GridItem, GridParameters, GridSpan, LeafWidget, Node, Policy, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy,
+        Stack, StackDirection, StackParameters, UiInputEvent, Widget, TextWrap, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption,
+        WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
     };
-    pub use crate::window_manager::{Context, ContextFrame, RootChanged, RootHandle, RootId, RootMutationError, RootState, RootSubmitted, WindowOption};
+    pub use crate::window_manager::{Context, ContextFrame, RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
 }
 
 /// Common imports for retained UI applications.
@@ -211,12 +211,11 @@ pub mod prelude {
     pub use crate::input::{KeyCode, KeyMode, MouseButton};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureId};
     pub use crate::retained::{
-        ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Context, ContextFrame,
-        CustomRenderArgs, CustomRenderHandle, Disclosure, DisclosureParameters, DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan,
-        GridState, Layout, Node, Policy, RootChanged, RootHandle, RootId, RootMutationError, RootState, RootSubmitted, Row, RowParameters, RowState,
-        ScrollArea, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, TextWrap,
-        UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState,
-        WidgetStateHandle, WidgetUpdateCtx, WindowOption,
+        ChildParticipation, Children, Column, ColumnParameters, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, CustomRenderArgs,
+        CustomRenderHandle, Disclosure, DisclosureParameters, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, Node, Policy, RootChanged, RootHandle,
+        RootId, RootMutationError, RootChrome, RootSubmitted, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy, Stack,
+        LeafWidget, StackDirection, StackParameters, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption,
+        WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
@@ -238,7 +237,7 @@ pub use atlas::{
     AtlasHandle, AtlasSource, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry,
     FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
 };
-pub use window_manager::{Context, ContextFrame, RootChanged, RootHandle, RootId, RootMutationError, RootState, RootSubmitted, WindowOption};
+pub use window_manager::{Context, ContextFrame, RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
 pub use event::{ConnectError, Emit, Session, Subscribers, SubscriptionId, TypedWidget, WidgetEvent, WidgetEventHandle};
 pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
 pub use image::{ImageSource, load_image_bytes};
@@ -247,10 +246,10 @@ pub use math::{expand_rect, rect, vec2};
 pub use render::TextureId;
 pub use theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
 pub use ui_node::{
-    ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Disclosure, DisclosureParameters,
-    DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, GridState, Layout, Node, Policy, Row, RowParameters, RowState, ScrollArea,
-    ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, TextWrap, UiInputEvent, Widget,
-    TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetUpdateCtx,
+    ChildParticipation, Children, Column, ColumnParameters, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters, FocusPolicy,
+    Grid, GridItem, GridParameters, GridSpan, LeafWidget, Node, Policy, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy,
+    Stack, StackDirection, StackParameters, TextWrap, UiInputEvent, Widget, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx,
+    WidgetParameters, WidgetUpdateCtx,
 };
 pub use widgets::{
     Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters, ColorSwatch,

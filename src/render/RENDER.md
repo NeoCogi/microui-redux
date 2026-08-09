@@ -91,7 +91,7 @@ Widget paint is observational with respect to application-authored semantic stat
 interaction, and committed layout. Built-in widgets may publish framework-owned, paint-derived
 read-only geometry for later application use, or maintain private rendering caches; neither may
 alter the current commit. Backend custom-render callbacks may maintain callback-private rendering
-caches only. A callback that captures a `WidgetStateHandle` and mutates retained UI during rendering
+caches only. A callback that captures a `TypedWidgetHandle` and mutates retained UI during rendering
 violates the contract; the mutation is not scheduled as deferred work, and weak handles cannot
 invalidate the already selected commit. Perform semantic mutations before `update_ui` and create
 the frame only after that commit is complete.
@@ -124,15 +124,6 @@ impl Widget for PaintedSwatch {
         &self.options
     }
 
-    fn measure(
-        &self,
-        _style: &Style,
-        _atlas: &AtlasHandle,
-        _available: Dimensioni,
-    ) -> Dimensioni {
-        Dimensioni::new(96, 48)
-    }
-
     fn update(
         &mut self,
         _ctx: &mut WidgetUpdateCtx<'_>,
@@ -162,6 +153,17 @@ impl Widget for PaintedSwatch {
                 );
             },
         );
+    }
+}
+
+impl LeafWidget for PaintedSwatch {
+    fn measure(
+        &self,
+        _style: &Style,
+        _atlas: &AtlasHandle,
+        _available: Dimensioni,
+    ) -> Dimensioni {
+        Dimensioni::new(96, 48)
     }
 }
 ```

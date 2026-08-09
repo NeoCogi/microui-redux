@@ -62,6 +62,12 @@ pub enum ButtonContent {
     },
 }
 
+impl crate::LeafWidget for Button {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+}
+
 /// One-shot construction input for a [`Button`].
 pub struct ButtonParameters {
     /// Content rendered inside the button.
@@ -248,10 +254,6 @@ impl crate::TypedWidgetHandle<Button> {
 impl Widget for Button {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {

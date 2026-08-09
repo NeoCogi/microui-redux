@@ -47,6 +47,12 @@ pub struct ListItemParameters {
     pub opt: WidgetOption,
 }
 
+impl crate::LeafWidget for ListItem {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+}
+
 impl WidgetParameters for ListItemParameters {}
 
 impl ListItemParameters {
@@ -216,10 +222,6 @@ impl TypedWidgetHandle<ListItem> {
 impl Widget for ListItem {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {

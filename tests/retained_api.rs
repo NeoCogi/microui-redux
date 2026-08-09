@@ -28,10 +28,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-};
+use std::cell::Cell;
 
 use microui_redux::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
 use microui_redux::retained::*;
@@ -126,47 +123,51 @@ fn every_builtin_container_returns_a_typed_handle_and_completed_node() {
     assert!(!disclosure.is_alive());
 }
 
-struct ExternalState {
+struct ExternalContainer {
     measure_calls: Cell<usize>,
     layout_calls: Cell<usize>,
     observed_policy: Cell<Option<Policy>>,
+    options: WidgetOption,
 }
 
-impl WidgetState for ExternalState {}
-
-struct ExternalLayout {
-    state: Rc<RefCell<ExternalState>>,
-}
-
-impl Layout for ExternalLayout {
+impl ContainerWidget for ExternalContainer {
     fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-        let state = self.state.try_borrow().expect("external state must not be reentered");
-        state.measure_calls.set(state.measure_calls.get() + 1);
-        state.observed_policy.set(children.child_policy(0));
+        self.measure_calls.set(self.measure_calls.get() + 1);
+        self.observed_policy.set(children.child_policy(0));
         children.measure_child(0, style, atlas, available).unwrap_or_else(|| Dimensioni::new(20, 20))
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        let state = self.state.try_borrow().expect("external state must not be reentered");
-        state.layout_calls.set(state.layout_calls.get() + 1);
+        self.layout_calls.set(self.layout_calls.get() + 1);
         assert!(ctx.child_policy(children, usize::MAX).is_none());
         assert!(ctx.layout_child(children, usize::MAX, rect).is_none());
-        state.observed_policy.set(ctx.child_policy(children, 0));
+        self.observed_policy.set(ctx.child_policy(children, 0));
         if !children.is_empty() {
             let _ = ctx.layout_child(children, 0, rect);
         }
     }
 }
 
-fn external_container(children: impl IntoIterator<Item = Node>) -> (WidgetStateHandle<ExternalState>, Container) {
-    let state = Rc::new(RefCell::new(ExternalState {
-        measure_calls: Cell::new(0),
-        layout_calls: Cell::new(0),
-        observed_policy: Cell::new(None),
-    }));
-    let handle = WidgetStateHandle::new(&state);
-    let container = Container::new(ExternalLayout { state }, WidgetOption::NONE, children);
-    (handle, container)
+impl Widget for ExternalContainer {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.options
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
+
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+fn external_container(children: impl IntoIterator<Item = Node>) -> (TypedWidgetHandle<ExternalContainer>, Container) {
+    Container::new(
+        ExternalContainer {
+            measure_calls: Cell::new(0),
+            layout_calls: Cell::new(0),
+            observed_policy: Cell::new(None),
+            options: WidgetOption::NO_INTERACT,
+        },
+        children,
+    )
 }
 
 struct ExternalLeaf {
@@ -184,12 +185,14 @@ impl Widget for ExternalLeaf {
         &self.options
     }
 
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+impl LeafWidget for ExternalLeaf {
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
         Dimensioni::new(12, 9)
     }
-
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
-    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
 #[test]
@@ -224,10 +227,10 @@ fn root_creation_and_lifecycle_need_no_projection_or_generated_node_identity() {
     let root = ctx.create_window("root", rect(10, 20, 100, 80), content);
     let id = root.id();
 
-    assert_eq!(root.state().try_read(|state| state.is_visible()), Some(true));
+    assert_eq!(root.widget().try_read(|widget| widget.is_visible()), Some(true));
     ctx.set_root_visible(id, false).unwrap();
-    assert_eq!(root.state().try_read(|state| state.is_visible()), Some(false));
+    assert_eq!(root.widget().try_read(|widget| widget.is_visible()), Some(false));
     assert!(ctx.destroy_root(id));
-    assert!(!root.state().is_alive());
+    assert!(!root.widget().is_alive());
     assert_eq!(ctx.set_root_rect(id, rect(0, 0, 1, 1)), Err(RootMutationError::UnknownRoot));
 }

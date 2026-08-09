@@ -91,10 +91,6 @@ impl Widget for RetainedPaint {
         &self.opt
     }
 
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        Dimensioni::new(96, 48)
-    }
-
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -112,6 +108,12 @@ impl Widget for RetainedPaint {
                 color(255, 202, 72, 255),
             );
         });
+    }
+}
+
+impl LeafWidget for RetainedPaint {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        Dimensioni::new(96, 48)
     }
 }
 

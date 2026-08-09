@@ -70,6 +70,12 @@ pub struct TextBlockParameters {
     pub opt: WidgetOption,
 }
 
+impl crate::LeafWidget for TextBlock {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+}
+
 impl WidgetParameters for TextBlockParameters {}
 
 impl TextBlockParameters {
@@ -194,10 +200,6 @@ impl TypedWidgetHandle<TextBlock> {
 impl Widget for TextBlock {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
     }
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}

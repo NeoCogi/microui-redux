@@ -44,6 +44,12 @@ pub struct ComboParameters {
     pub opt: WidgetOption,
 }
 
+impl crate::LeafWidget for Combo {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+}
+
 impl WidgetParameters for ComboParameters {}
 
 impl ComboParameters {
@@ -352,10 +358,6 @@ impl crate::TypedWidget<ComboSubmitted> for Combo {
 impl Widget for Combo {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {

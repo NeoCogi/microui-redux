@@ -30,16 +30,12 @@
 
 //! Persistent retained root state and the private chrome container.
 
-use std::{
-    cell::RefCell,
-    rc::{Rc, Weak},
-};
+use std::rc::Rc;
 
 use crate::render::Painter;
-use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, Children, Container, ContainerLayoutCtx, ContainerSurface, ControlColor, Dimensioni, FocusPolicy, Layout, MouseButton, Node, Recti, Style,
-    UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetUpdateCtx, WindowOption,
+    AtlasHandle, Children, Container, ContainerLayoutCtx, ContainerWidget, ControlColor, Dimensioni, FocusPolicy, MouseButton, Node, Recti, Style,
+    TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, WindowOption,
 };
 
 use super::RootId;
@@ -49,11 +45,11 @@ use super::RootId;
 /// The [`crate::Context`] remains the sole owner of the root and its complete tree. Cloning or
 /// dropping this handle cannot extend or shorten that lifetime. Hiding the root preserves its
 /// runtime and state; [`crate::Context::destroy_root`] permanently unregisters it, drops the tree,
-/// and causes the weak state capability to expire once active access closures finish.
+/// and causes the weak typed widget capability to expire once active access closures finish.
 #[derive(Clone)]
 pub struct RootHandle {
     id: RootId,
-    state: WidgetStateHandle<RootState>,
+    widget: TypedWidgetHandle<RootChrome>,
     changed: crate::WidgetEventHandle<RootChanged>,
     submitted: crate::WidgetEventHandle<RootSubmitted>,
 }
@@ -64,9 +60,9 @@ impl RootHandle {
         self.id
     }
 
-    /// Returns the weak checked capability for current chrome state.
-    pub fn state(&self) -> &WidgetStateHandle<RootState> {
-        &self.state
+    /// Returns the weak typed handle for the concrete root-chrome widget.
+    pub fn widget(&self) -> &TypedWidgetHandle<RootChrome> {
+        &self.widget
     }
 
     /// Returns the native event endpoint emitted after each user-driven move or resize.
@@ -85,7 +81,7 @@ impl RootHandle {
 pub enum RootMutationError {
     /// The identifier does not name a currently registered root.
     UnknownRoot,
-    /// The root state is already borrowed by an active state-access closure.
+    /// The root widget is already borrowed by an active typed-access closure.
     Borrowed,
 }
 
@@ -96,34 +92,43 @@ pub(super) enum RootInteraction {
     Resizing,
 }
 
-/// Application-facing state retained by a window, dialog, or popup root.
+/// Concrete container widget retained by a window, dialog, or popup root.
 ///
 /// Queries report current chrome values, including programmatic changes made through
 /// [`crate::Context`]. Hiding is persistent state and does not destroy the owned application node.
-/// Root content itself cannot be replaced; mutate typed descendant/container state or destroy and
+/// Root content itself cannot be replaced; mutate typed descendant/container widgets or destroy and
 /// recreate the root instead.
-pub struct RootState {
+pub struct RootChrome {
     name: String,
     options: WindowOption,
     rect: Recti,
     visible: bool,
     interaction: RootInteraction,
-    submitted_emitter: crate::event::WidgetEventEmitter<RootSubmitted>,
+    changed_event: Rc<crate::event::WidgetEventPort<RootChanged>>,
+    submitted_event: Rc<crate::event::WidgetEventPort<RootSubmitted>>,
     geometry: RootChromeGeometry,
+    opt: WidgetOption,
 }
 
-impl WidgetState for RootState {}
-
-impl RootState {
-    fn new(name: String, options: WindowOption, rect: Recti, visible: bool, submitted_emitter: crate::event::WidgetEventEmitter<RootSubmitted>) -> Self {
+impl RootChrome {
+    fn new(
+        name: String,
+        options: WindowOption,
+        rect: Recti,
+        visible: bool,
+        changed_event: Rc<crate::event::WidgetEventPort<RootChanged>>,
+        submitted_event: Rc<crate::event::WidgetEventPort<RootSubmitted>>,
+    ) -> Self {
         Self {
             name,
             options,
             rect,
             visible,
             interaction: RootInteraction::None,
-            submitted_emitter,
+            changed_event,
+            submitted_event,
             geometry: RootChromeGeometry::default(),
+            opt: WidgetOption::NONE,
         }
     }
 
@@ -198,14 +203,14 @@ impl RootState {
 
     /// Clears private chrome interaction after window-manager policy revokes runtime capture.
     pub(super) fn clear_interaction_silent(&mut self) {
-        // RootState exposes its active mode publicly, so the window manager updates it atomically
+        // RootChrome exposes its active mode publicly, so the window manager updates it atomically
         // with cross-root capture policy instead of waiting for a later widget traversal.
         self.interaction = RootInteraction::None;
     }
 
     pub(super) fn dismiss_popup(&mut self) {
         self.set_visible_silent(false);
-        self.submitted_emitter.emit(RootSubmitted::PopupDismissed);
+        self.submitted_event.emit(RootSubmitted::PopupDismissed);
     }
 }
 
@@ -237,145 +242,86 @@ pub(super) struct RootChromeParameters {
     pub(super) content: Node,
 }
 
-/// Builds the private root container and returns its weak state and event capabilities.
+/// Builds the private root container and returns its weak widget and event capabilities.
 pub(super) fn create_root_chrome(
     parameters: RootChromeParameters,
 ) -> (
-    WidgetStateHandle<RootState>,
+    TypedWidgetHandle<RootChrome>,
     crate::WidgetEventHandle<RootChanged>,
     crate::WidgetEventHandle<RootSubmitted>,
     Container,
 ) {
     let changed_event = Rc::new(crate::event::WidgetEventPort::new());
     let submitted_event = Rc::new(crate::event::WidgetEventPort::new());
-    // Allocate application-visible root state once. RootChromeLayout retains the strong owner;
-    // RootHandle and all window-manager references remain weak checked capabilities.
-    let state = Rc::new(RefCell::new(RootState::new(
+    let widget = RootChrome::new(
         parameters.name,
         parameters.options,
         parameters.rect,
         parameters.visible,
-        crate::event::WidgetEventEmitter::new(&submitted_event),
-    )));
-    // Capture the public handle before moving state ownership into the private root layout.
-    let handle = WidgetStateHandle::new(&state);
-    let layout = RootChromeLayout { state: state.clone() };
-    // Chrome interaction and paint use weak access so RootChromeLayout remains the sole state owner.
-    let surface = RootChromeSurface {
-        state: Rc::downgrade(&state),
-        changed_event,
-        submitted_event,
-        opt: WidgetOption::NONE,
-    };
-    let changed = surface.changed();
-    let submitted = surface.submitted();
-    // Root chrome is one ordinary Container: one application child, one Layout, one surface Widget.
-    let container = Container::new(layout, WidgetOption::NONE, [parameters.content]).with_surface(surface);
+        changed_event.clone(),
+        submitted_event.clone(),
+    );
+    let changed = crate::WidgetEventHandle::new(&changed_event);
+    let submitted = crate::WidgetEventHandle::new(&submitted_event);
+    let (handle, container) = Container::new(widget, [parameters.content]);
     (handle, changed, submitted, container)
 }
 
-/// Geometry-only root policy over the single application child.
-pub(super) struct RootChromeLayout {
-    state: Rc<RefCell<RootState>>,
-}
-
-/// Wheel-independent widget behavior installed on the root's own chrome surface.
-struct RootChromeSurface {
-    state: Weak<RefCell<RootState>>,
-    changed_event: Rc<crate::event::WidgetEventPort<RootChanged>>,
-    submitted_event: Rc<crate::event::WidgetEventPort<RootSubmitted>>,
-    opt: WidgetOption,
-}
-
-impl RootChromeSurface {
-    fn changed(&self) -> crate::WidgetEventHandle<RootChanged> {
-        <Self as crate::TypedWidget<RootChanged>>::event(self)
-    }
-
-    fn submitted(&self) -> crate::WidgetEventHandle<RootSubmitted> {
-        <Self as crate::TypedWidget<RootSubmitted>>::event(self)
-    }
-}
-
-impl crate::TypedWidget<RootChanged> for RootChromeSurface {
+impl crate::TypedWidget<RootChanged> for RootChrome {
     fn event(&self) -> crate::WidgetEventHandle<RootChanged> {
         crate::WidgetEventHandle::new(&self.changed_event)
     }
 }
 
-impl crate::TypedWidget<RootSubmitted> for RootChromeSurface {
+impl crate::TypedWidget<RootSubmitted> for RootChrome {
     fn event(&self) -> crate::WidgetEventHandle<RootSubmitted> {
         crate::WidgetEventHandle::new(&self.submitted_event)
     }
 }
 
-impl Widget for RootChromeSurface {
+impl Widget for RootChrome {
     fn widget_opt(&self) -> &WidgetOption {
         // Root chrome uses dynamic effective options below; this is its static baseline.
         &self.opt
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
-        // Hidden or destroyed roots cannot become pointer targets even if stale geometry remains.
-        let Some(state) = self.state.upgrade() else {
-            return self.opt | WidgetOption::NO_INTERACT;
-        };
-        runtime_read_state(&state, "RootChromeSurface::options", |state| {
-            if state.visible { self.opt } else { self.opt | WidgetOption::NO_INTERACT }
-        })
-    }
-
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        // RootChromeLayout owns the preference because it alone can inspect the application child.
-        Dimensioni::default()
+        if self.visible { self.opt } else { self.opt | WidgetOption::NO_INTERACT }
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        // The dispatcher already selected this surface and localized pointer coordinates to root.
-        let Some(state) = self.state.upgrade() else { return };
-        let (changed, submitted) = runtime_update_state(&state, "RootChromeSurface::update", |state| {
-            // Compare against the initial rectangle once so any move/resize records one occurrence.
-            let initial = state.rect;
-            if !ctx.active() {
-                // Runtime capture is authoritative. Reconcile a stale local mode here after normal
-                // release, cross-root transfer, modal exclusion, or a prior visibility gate.
-                state.interaction = RootInteraction::None;
+        let initial = self.rect;
+        if !ctx.active() {
+            self.interaction = RootInteraction::None;
+        }
+        let mut submitted = None;
+        if let Some(event) = input {
+            match event {
+                UiInputEvent::MouseDown { pos, button } if button.intersects(MouseButton::LEFT) => match self.geometry.hit_test(*pos) {
+                    Some(RootChromePart::Close) => {
+                        self.set_visible_silent(false);
+                        submitted = Some(RootSubmitted::Close);
+                    }
+                    Some(RootChromePart::Resize) => self.interaction = RootInteraction::Resizing,
+                    Some(RootChromePart::Title) => self.interaction = RootInteraction::Moving,
+                    None => self.interaction = RootInteraction::None,
+                },
+                UiInputEvent::MouseDrag { delta, .. } if ctx.active() => match self.interaction {
+                    RootInteraction::Moving => {
+                        self.rect.x = self.rect.x.saturating_add(delta.x);
+                        self.rect.y = self.rect.y.saturating_add(delta.y);
+                    }
+                    RootInteraction::Resizing => {
+                        self.rect.width = self.rect.width.saturating_add(delta.x).max(self.geometry.minimum_outer.width);
+                        self.rect.height = self.rect.height.saturating_add(delta.y).max(self.geometry.minimum_outer.height);
+                    }
+                    RootInteraction::None => {}
+                },
+                _ => {}
             }
-            if let Some(event) = input {
-                // Hit classification uses the single geometry snapshot committed by latest layout.
-                match event {
-                    UiInputEvent::MouseDown { pos, button } if button.intersects(MouseButton::LEFT) => match state.geometry.hit_test(*pos) {
-                        Some(RootChromePart::Close) => {
-                            state.set_visible_silent(false);
-                            return (None, Some(RootSubmitted::Close));
-                        }
-                        Some(RootChromePart::Resize) => state.interaction = RootInteraction::Resizing,
-                        Some(RootChromePart::Title) => state.interaction = RootInteraction::Moving,
-                        // A fresh press always replaces any mode retained from an earlier update.
-                        None => state.interaction = RootInteraction::None,
-                    },
-                    UiInputEvent::MouseDrag { delta, .. } if ctx.active() => match state.interaction {
-                        RootInteraction::Moving => {
-                            // Movement changes origin only; programmed size remains authoritative.
-                            // next_origin = previous_origin + pointer_delta.
-                            state.rect.x = state.rect.x.saturating_add(delta.x);
-                            state.rect.y = state.rect.y.saturating_add(delta.y);
-                        }
-                        RootInteraction::Resizing => {
-                            // Chrome minimum prevents title/body geometry from becoming invalid.
-                            // next_extent = max(previous_extent + pointer_delta, minimum_extent).
-                            state.rect.width = state.rect.width.saturating_add(delta.x).max(state.geometry.minimum_outer.width);
-                            state.rect.height = state.rect.height.saturating_add(delta.y).max(state.geometry.minimum_outer.height);
-                        }
-                        RootInteraction::None => {}
-                    },
-                    _ => {}
-                }
-            }
-            let changed = ((state.rect.x, state.rect.y, state.rect.width, state.rect.height) != (initial.x, initial.y, initial.width, initial.height))
-                .then_some(RootChanged { rect: state.rect });
-            (changed, None)
-        });
+        }
+        let changed = ((self.rect.x, self.rect.y, self.rect.width, self.rect.height) != (initial.x, initial.y, initial.width, initial.height))
+            .then_some(RootChanged { rect: self.rect });
         if let Some(event) = changed {
             self.changed_event.emit(event);
         }
@@ -385,17 +331,12 @@ impl Widget for RootChromeSurface {
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        // Paint panel/frame beneath application content. Title text and affordances are submitted as
-        // a post-tree overlay because they occupy the topmost root paint layer.
-        let Some(state) = self.state.upgrade() else { return };
-        runtime_read_state(&state, "RootChromeSurface::paint", |state| {
-            let outer = ctx.local_rect();
-            if state.options.intersects(WindowOption::FRAME) {
-                let _ = ctx.draw_internal_frame(outer, ControlColor::WindowBG);
-            } else {
-                ctx.draw_rect(outer, ctx.style().colors[ControlColor::WindowBG as usize]);
-            }
-        });
+        let outer = ctx.local_rect();
+        if self.options.intersects(WindowOption::FRAME) {
+            let _ = ctx.draw_internal_frame(outer, ControlColor::WindowBG);
+        } else {
+            ctx.draw_rect(outer, ctx.style().colors[ControlColor::WindowBG as usize]);
+        }
     }
 
     fn focus_policy(&self) -> FocusPolicy {
@@ -403,30 +344,17 @@ impl Widget for RootChromeSurface {
     }
 }
 
-impl ContainerSurface for RootChromeSurface {
-    /// Accepts pointer events only over committed post-tree chrome geometry.
+impl ContainerWidget for RootChrome {
     fn accepts_event(&self, event: &UiInputEvent) -> bool {
-        // Captured drag and release events bypass this geometric query in the dispatcher. Keeping
-        // that rule out of RootState prevents stale widget-local modes from influencing routing.
-        let Some(state) = self.state.upgrade() else { return false };
-        runtime_read_state(&state, "RootChromeSurface::accepts_event", |state| {
-            event_position(event).is_some_and(|position| state.geometry.hit_test(position).is_some()) && !matches!(event, UiInputEvent::Scroll { .. })
-        })
+        event_position(event).is_some_and(|position| self.geometry.hit_test(position).is_some()) && !matches!(event, UiInputEvent::Scroll { .. })
     }
-}
 
-impl Layout for RootChromeLayout {
     fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
         // Resolve chrome-only minimum/insets first, then measure the one application child inside
         // that body. Auto-size and placement therefore share root_chrome_geometry.
-        let (outer, shell) = runtime_read_state(&self.state, "RootChromeLayout::measure_shell", |state| {
-            let minimum = root_chrome_geometry(Recti::default(), Dimensioni::default(), &state.name, state.options, style, atlas).minimum_outer;
-            let outer = Recti::new(0, 0, available.width.max(minimum.width), available.height.max(minimum.height));
-            (
-                outer,
-                root_chrome_geometry(outer, Dimensioni::default(), &state.name, state.options, style, atlas),
-            )
-        });
+        let minimum = root_chrome_geometry(Recti::default(), Dimensioni::default(), &self.name, self.options, style, atlas).minimum_outer;
+        let outer = Recti::new(0, 0, available.width.max(minimum.width), available.height.max(minimum.height));
+        let shell = root_chrome_geometry(outer, Dimensioni::default(), &self.name, self.options, style, atlas);
         // Convert the outer measurement bound into remaining application-content space.
         // chrome_occupancy = outer_extent - body_extent.
         let horizontal_chrome = outer.width.saturating_sub(shell.body.width);
@@ -452,16 +380,12 @@ impl Layout for RootChromeLayout {
             policy.height.preferred_extent(child.height, child_available.height),
         );
         // Rebuild geometry with measured content and expose only its intrinsic outer extent.
-        runtime_read_state(&self.state, "RootChromeLayout::measure_result", |state| {
-            root_chrome_geometry(Recti::default(), child, &state.name, state.options, style, atlas).intrinsic_outer
-        })
+        root_chrome_geometry(Recti::default(), child, &self.name, self.options, style, atlas).intrinsic_outer
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
         // Provisional shell geometry supplies the exact measurement constraint for the child.
-        let shell = runtime_read_state(&self.state, "RootChromeLayout::shell", |state| {
-            root_chrome_geometry(rect, Dimensioni::default(), &state.name, state.options, ctx.style(), ctx.atlas())
-        });
+        let shell = root_chrome_geometry(rect, Dimensioni::default(), &self.name, self.options, ctx.style(), ctx.atlas());
         let policy = children.child_policy(0).unwrap_or_else(crate::Policy::auto);
         let child = children
             .measure_child(
@@ -475,10 +399,8 @@ impl Layout for RootChromeLayout {
             )
             .unwrap_or_default();
         // Commit one snapshot used by layout, hit testing, surface paint, and overlay paint.
-        let body = runtime_update_state(&self.state, "RootChromeLayout::commit", |state| {
-            state.geometry = root_chrome_geometry(rect, child, &state.name, state.options, ctx.style(), ctx.atlas());
-            state.geometry.body
-        });
+        self.geometry = root_chrome_geometry(rect, child, &self.name, self.options, ctx.style(), ctx.atlas());
+        let body = self.geometry.body;
         // The single child is application content and is clipped to the committed body.
         let _ = ctx.layout_child(children, 0, body);
         ctx.set_children_viewport(body, Vec2i::default());
@@ -508,19 +430,14 @@ mod capture_tests {
     fn root_chrome_inactive_update_clears_a_stale_local_mode() {
         let changed_event = Rc::new(crate::event::WidgetEventPort::new());
         let submitted_event = Rc::new(crate::event::WidgetEventPort::new());
-        let state = Rc::new(RefCell::new(RootState::new(
+        let mut state = RootChrome::new(
             "root".to_owned(),
             WindowOption::FRAME,
             Recti::new(10, 20, 100, 80),
             true,
-            crate::event::WidgetEventEmitter::new(&submitted_event),
-        )));
-        let mut surface = RootChromeSurface {
-            state: Rc::downgrade(&state),
             changed_event,
             submitted_event,
-            opt: WidgetOption::NONE,
-        };
+        );
         let style = Style::default();
         let atlas = test_atlas();
         let bounds = Recti::new(0, 0, 100, 80);
@@ -541,13 +458,13 @@ mod capture_tests {
 
         // Simulate state left by a surface that was gated while capture was invalidated. Its next
         // ordered update receives the authoritative inactive snapshot and clears the private mode.
-        state.borrow_mut().interaction = RootInteraction::Moving;
-        surface.update(&mut ctx, None);
-        assert!(!state.borrow().is_active());
+        state.interaction = RootInteraction::Moving;
+        state.update(&mut ctx, None);
+        assert!(!state.is_active());
     }
 
     #[test]
-    fn root_chrome_runtime_is_the_only_persistent_strong_state_owner() {
+    fn root_chrome_runtime_is_the_only_persistent_strong_widget_owner() {
         let content = Node::widget(Custom::create(CustomParameters::new("content")));
         let (state, changed, submitted, container) = create_root_chrome(RootChromeParameters {
             name: "root".to_owned(),
@@ -718,7 +635,7 @@ fn root_titlebar_height(style: &Style, atlas: &AtlasHandle) -> i32 {
     style.title_height.max(text_height)
 }
 
-pub(super) fn record_root_overlay(display_list: &mut crate::render::DisplayList, viewport: Recti, state: &RootState, style: &Style, atlas: &AtlasHandle) {
+pub(super) fn record_root_overlay(display_list: &mut crate::render::DisplayList, viewport: Recti, state: &RootChrome, style: &Style, atlas: &AtlasHandle) {
     let geometry = root_chrome_geometry(state.rect, Dimensioni::default(), &state.name, state.options, style, atlas);
     let mut painter = Painter::screen_space(display_list, viewport);
     if let Some(title) = geometry.title {
@@ -748,9 +665,9 @@ pub(super) fn record_root_overlay(display_list: &mut crate::render::DisplayList,
 
 pub(super) fn root_handle(
     id: RootId,
-    state: WidgetStateHandle<RootState>,
+    widget: TypedWidgetHandle<RootChrome>,
     changed: crate::WidgetEventHandle<RootChanged>,
     submitted: crate::WidgetEventHandle<RootSubmitted>,
 ) -> RootHandle {
-    RootHandle { id, state, changed, submitted }
+    RootHandle { id, widget, changed, submitted }
 }

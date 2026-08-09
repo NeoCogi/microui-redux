@@ -49,6 +49,12 @@ pub struct NumberParameters {
     pub opt: WidgetOption,
 }
 
+impl crate::LeafWidget for Number {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, avail)
+    }
+}
+
 impl WidgetParameters for NumberParameters {}
 
 impl NumberParameters {
@@ -208,10 +214,6 @@ impl crate::TypedWidget<NumberChanged> for Number {
 impl Widget for Number {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {

@@ -31,12 +31,12 @@
 //! Cross-phase runtime characterization.
 
 use std::cell::{Cell, RefCell};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use super::*;
 use crate::test_support::test_atlas;
 use crate::ui_node::children::ChildrenHandle;
-use crate::{ChildParticipation, Children, ContainerSurface, Layout, Widget, WidgetPaintCtx, WidgetState, WidgetUpdateCtx};
+use crate::{ChildParticipation, Children, ContainerWidget, TypedWidgetHandle, Widget, WidgetPaintCtx, WidgetUpdateCtx};
 use crate::input::Input;
 
 #[derive(Default)]
@@ -75,11 +75,6 @@ impl Widget for Probe {
         &self.opt
     }
 
-    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        self.counts.measures.set(self.counts.measures.get() + 1);
-        Dimensioni::new(17, 13)
-    }
-
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         self.counts.updates.set(self.counts.updates.get() + 1);
         self.counts.routed_events.set(self.counts.routed_events.get() + usize::from(input.is_some()));
@@ -93,6 +88,13 @@ impl Widget for Probe {
     }
 }
 
+impl crate::LeafWidget for Probe {
+    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        self.counts.measures.set(self.counts.measures.get() + 1);
+        Dimensioni::new(17, 13)
+    }
+}
+
 struct HoldFocusProbe {
     opt: WidgetOption,
 }
@@ -100,10 +102,6 @@ struct HoldFocusProbe {
 impl Widget for HoldFocusProbe {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        Dimensioni::new(20, 20)
     }
 
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
@@ -115,45 +113,36 @@ impl Widget for HoldFocusProbe {
     }
 }
 
-struct TraversalState {
+impl crate::LeafWidget for HoldFocusProbe {
+    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(20, 20)
+    }
+}
+
+struct TraversalContainer {
     children: ChildrenHandle,
     visible: bool,
-}
-
-impl WidgetState for TraversalState {}
-
-struct TraversalLayout {
-    state: Rc<RefCell<TraversalState>>,
-}
-
-struct TraversalSurface {
-    state: Weak<RefCell<TraversalState>>,
     hide_during_update: bool,
     log: Rc<RefCell<Vec<String>>>,
     opt: WidgetOption,
 }
 
-struct TraversalContainer;
-
 impl TraversalContainer {
-    fn new(children: impl IntoIterator<Item = Node>, hide_during_update: bool, log: Rc<RefCell<Vec<String>>>) -> (Container, Rc<RefCell<TraversalState>>) {
+    fn new(children: impl IntoIterator<Item = Node>, hide_during_update: bool, log: Rc<RefCell<Vec<String>>>) -> (Container, TypedWidgetHandle<Self>) {
         let children = Rc::new(RefCell::new(children.into_iter().collect()));
-        let state = Rc::new(RefCell::new(TraversalState {
+        let widget = TraversalContainer {
             children: ChildrenHandle::new(&children),
             visible: true,
-        }));
-        let container = Container::from_shared(children, TraversalLayout { state: state.clone() }, WidgetOption::NONE);
-        let surface = TraversalSurface {
-            state: Rc::downgrade(&state),
             hide_during_update,
             log,
             opt: WidgetOption::NONE,
         };
-        (container.with_surface(surface), state)
+        let (handle, container) = Container::from_shared(children, widget);
+        (container, handle)
     }
 }
 
-impl Layout for TraversalLayout {
+impl ContainerWidget for TraversalContainer {
     fn measure(&self, children: &Children, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
         (0..children.len())
             .filter_map(|index| children.measure_child(index, style, atlas, available))
@@ -163,7 +152,7 @@ impl Layout for TraversalLayout {
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        let visible = self.state.try_borrow().expect("traversal state must be available during layout").visible;
+        let visible = self.visible;
         for index in 0..children.len() {
             let participation = if visible { ChildParticipation::Active } else { ChildParticipation::Hidden };
             let _ = ctx.set_child_participation(children, index, participation);
@@ -174,21 +163,15 @@ impl Layout for TraversalLayout {
     }
 }
 
-impl Widget for TraversalSurface {
+impl Widget for TraversalContainer {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
     }
 
-    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        Dimensioni::default()
-    }
-
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
         self.log.borrow_mut().push("container:update".to_owned());
-        if self.hide_during_update
-            && let Some(state) = self.state.upgrade()
-        {
-            state.try_borrow_mut().expect("traversal state must be available during update").visible = false;
+        if self.hide_during_update {
+            self.visible = false;
         }
     }
 
@@ -197,44 +180,27 @@ impl Widget for TraversalSurface {
     }
 }
 
-impl ContainerSurface for TraversalSurface {}
-
-struct CaptureState {
+struct CaptureContainer {
     active: bool,
     drags: usize,
     saw_capture_during_drag: bool,
-}
-
-impl WidgetState for CaptureState {}
-
-struct CaptureLayout {
-    _state: Rc<RefCell<CaptureState>>,
-}
-
-struct CaptureSurface {
-    state: Weak<RefCell<CaptureState>>,
     opt: WidgetOption,
 }
 
-struct CaptureContainer;
-
 impl CaptureContainer {
-    fn new() -> (Container, Rc<RefCell<CaptureState>>) {
-        let state = Rc::new(RefCell::new(CaptureState {
+    fn new() -> (Container, TypedWidgetHandle<Self>) {
+        let widget = CaptureContainer {
             active: false,
             drags: 0,
             saw_capture_during_drag: false,
-        }));
-        let layout = CaptureLayout { _state: state.clone() };
-        let surface = CaptureSurface {
-            state: Rc::downgrade(&state),
             opt: WidgetOption::NONE,
         };
-        (Container::new(layout, WidgetOption::NONE, []).with_surface(surface), state)
+        let (handle, container) = Container::new(widget, []);
+        (container, handle)
     }
 }
 
-impl Layout for CaptureLayout {
+impl ContainerWidget for CaptureContainer {
     fn measure(&self, _children: &Children, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
         Dimensioni::new(20, 20)
     }
@@ -244,26 +210,20 @@ impl Layout for CaptureLayout {
     }
 }
 
-impl Widget for CaptureSurface {
+impl Widget for CaptureContainer {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
     }
 
-    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        Dimensioni::default()
-    }
-
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        let state = self.state.upgrade().expect("capture state must outlive its surface");
-        let mut state = state.try_borrow_mut().expect("capture state must be available during update");
         // Mirror the public contract: reconcile private drag state from runtime-owned activity on
         // every update, including an eventless update after capture invalidation.
-        state.active = ctx.active();
+        self.active = ctx.active();
         if let Some(event) = input {
             match event {
                 UiInputEvent::MouseDrag { .. } if ctx.active() => {
-                    state.saw_capture_during_drag = ctx.focused();
-                    state.drags += 1;
+                    self.saw_capture_during_drag = ctx.focused();
+                    self.drags += 1;
                 }
                 _ => {}
             }
@@ -277,10 +237,8 @@ impl Widget for CaptureSurface {
     }
 }
 
-impl ContainerSurface for CaptureSurface {}
-
 struct CrossSubtreeRemover {
-    target: Rc<RefCell<TraversalState>>,
+    target: TypedWidgetHandle<TraversalContainer>,
     removed: bool,
     opt: WidgetOption,
 }
@@ -290,23 +248,22 @@ impl Widget for CrossSubtreeRemover {
         &self.opt
     }
 
-    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        Dimensioni::new(10, 10)
-    }
-
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
         if !self.removed {
             self.target
-                .try_borrow_mut()
-                .expect("cross-subtree target state must be independently available")
-                .children
-                .try_clear()
-                .expect("target topology must be available during sibling update");
+                .try_update(|target| target.children.try_clear().expect("target topology must be available during sibling update"))
+                .expect("cross-subtree target widget must be independently available");
             self.removed = true;
         }
     }
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+impl crate::LeafWidget for CrossSubtreeRemover {
+    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        Dimensioni::new(10, 10)
+    }
 }
 
 fn layout_root(runtime: &mut UiRuntime, root: &mut Node, style: &Style, atlas: crate::AtlasHandle) {
@@ -603,7 +560,7 @@ fn captured_container_receives_direct_drag_while_capture_is_active() {
     assert_eq!(runtime.capture, Some(id));
     assert_eq!(runtime.hover, Some(id));
     runtime.update_tree_root(&mut root, &style, atlas.clone(), down_state);
-    assert!(state.borrow().active);
+    assert_eq!(state.try_read(|state| state.active), Some(true));
 
     input.mousemove(200, 180);
     let (drag, drag_state) = next_input(&mut input);
@@ -616,15 +573,15 @@ fn captured_container_receives_direct_drag_while_capture_is_active() {
 
     runtime.update_tree_root(&mut root, &style, atlas, drag_state);
     assert_eq!(runtime.capture, Some(id));
-    assert!(state.borrow().active);
-    assert!(state.borrow().saw_capture_during_drag);
-    assert_eq!(state.borrow().drags, 1);
+    assert_eq!(state.try_read(|state| state.active), Some(true));
+    assert_eq!(state.try_read(|state| state.saw_capture_during_drag), Some(true));
+    assert_eq!(state.try_read(|state| state.drags), Some(1));
 }
 
 #[test]
 fn routing_time_release_exposes_inactive_state_during_that_event_update() {
     let (container, state) = CaptureContainer::new();
-    state.borrow_mut().active = true;
+    state.try_update(|state| state.active = true).unwrap();
     let mut root = Node::container(container);
     let id = root.id();
     let mut runtime = UiRuntime::new();
@@ -646,16 +603,20 @@ fn routing_time_release_exposes_inactive_state_during_that_event_update() {
         Some(true)
     );
     assert_eq!(runtime.capture, None);
-    assert!(state.borrow().active, "local state changes only during the ordered update traversal");
+    assert_eq!(
+        state.try_read(|state| state.active),
+        Some(true),
+        "local state changes only during the ordered update traversal"
+    );
 
     runtime.update_tree_root(&mut root, &style, atlas, release_state);
-    assert!(!state.borrow().active);
+    assert_eq!(state.try_read(|state| state.active), Some(false));
 }
 
 #[test]
 fn a_new_press_after_release_starts_a_distinct_capture_event() {
     let (container, state) = CaptureContainer::new();
-    state.borrow_mut().active = true;
+    state.try_update(|state| state.active = true).unwrap();
     let mut root = Node::container(container);
     let id = root.id();
     let mut runtime = UiRuntime::new();
@@ -678,7 +639,7 @@ fn a_new_press_after_release_starts_a_distinct_capture_event() {
     );
     runtime.update_tree_root(&mut root, &style, atlas.clone(), release_state);
     assert_eq!(runtime.capture, None);
-    assert!(!state.borrow().active);
+    assert_eq!(state.try_read(|state| state.active), Some(false));
 
     let mut down_input = Input::default();
     down_input.mousedown(20, 30, MouseButton::LEFT);
@@ -692,14 +653,14 @@ fn a_new_press_after_release_starts_a_distinct_capture_event() {
 
     runtime.update_tree_root(&mut root, &style, atlas, down_state);
     assert_eq!(runtime.capture, Some(id));
-    assert!(state.borrow().active);
+    assert_eq!(state.try_read(|state| state.active), Some(true));
 }
 
 #[test]
 fn ancestor_gate_clears_targets_and_next_active_update_reconciles_local_mode() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (captured, capture_state) = CaptureContainer::new();
-    capture_state.borrow_mut().active = true;
+    capture_state.try_update(|state| state.active = true).unwrap();
     let captured = Node::container(captured);
     let captured_id = captured.id();
     let (gate, gate_state) = TraversalContainer::new([captured], false, log);
@@ -720,24 +681,32 @@ fn ancestor_gate_clears_targets_and_next_active_update_reconciles_local_mode() {
         },
     );
 
-    gate_state.borrow_mut().visible = false;
+    gate_state.try_update(|state| state.visible = false).unwrap();
     layout_root(&mut runtime, &mut root, &style, test_atlas());
     assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
     assert!(runtime.take_routed_event(captured_id).is_none());
-    assert!(capture_state.borrow().active, "a gated widget is not mutated outside ordered update");
+    assert_eq!(
+        capture_state.try_read(|state| state.active),
+        Some(true),
+        "a gated widget is not mutated outside ordered update"
+    );
 
-    gate_state.borrow_mut().visible = true;
+    gate_state.try_update(|state| state.visible = true).unwrap();
     layout_root(&mut runtime, &mut root, &style, test_atlas());
     assert_eq!(runtime.capture, None, "expansion must not restore old capture");
     runtime.update_tree_root(&mut root, &style, test_atlas(), empty_input());
-    assert!(!capture_state.borrow().active, "expansion must not restore old local mode");
+    assert_eq!(
+        capture_state.try_read(|state| state.active),
+        Some(false),
+        "expansion must not restore old local mode"
+    );
 }
 
 #[test]
 fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (removed, removed_state) = CaptureContainer::new();
-    removed_state.borrow_mut().active = true;
+    removed_state.try_update(|state| state.active = true).unwrap();
     let removed = Node::container(removed);
     let removed_id = removed.id();
     let (replacement, replacement_state) = CaptureContainer::new();
@@ -761,17 +730,14 @@ fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() 
         },
     );
 
-    assert!(parent_state.borrow_mut().children.try_replace([replacement]).is_ok());
+    assert_eq!(parent_state.try_update(|state| state.children.try_replace([replacement]).is_ok()), Some(true));
     layout_root(&mut runtime, &mut root, &style, test_atlas());
 
     assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
     assert!(runtime.take_routed_event(removed_id).is_none());
     assert!(runtime.take_routed_event(replacement_id).is_none());
-    assert!(
-        removed_state.borrow().active,
-        "removed runtimes are dropped rather than mutated through a callback"
-    );
-    assert!(!replacement_state.borrow().active);
+    assert!(!removed_state.is_alive(), "removed runtimes are dropped instead of receiving a callback");
+    assert_eq!(replacement_state.try_read(|state| state.active), Some(false));
 
     let mut drag_input = Input::default();
     drag_input.mousedown(20, 30, MouseButton::LEFT);
@@ -806,7 +772,7 @@ fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() 
 fn cross_subtree_removal_during_update_sanitizes_before_later_delivery() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (captured, captured_state) = CaptureContainer::new();
-    captured_state.borrow_mut().active = true;
+    captured_state.try_update(|state| state.active = true).unwrap();
     let captured = Node::container(captured);
     let captured_id = captured.id();
     let (target_parent, target_state) = TraversalContainer::new([captured], false, log.clone());
@@ -838,5 +804,9 @@ fn cross_subtree_removal_during_update_sanitizes_before_later_delivery() {
 
     assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
     assert!(runtime.take_routed_event(captured_id).is_none());
-    assert!(captured_state.borrow().active, "removed runtime must not receive out-of-band mutation");
+    assert_eq!(
+        captured_state.try_read(|state| state.active),
+        None,
+        "removed runtime must expire without out-of-band mutation"
+    );
 }

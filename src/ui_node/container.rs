@@ -30,118 +30,78 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{Dimensioni, Recti, Style, UiInputEvent, Vec2i, Widget, WidgetOption};
+use crate::{Dimensioni, Recti, Style, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption};
 
 use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime};
 
-/// Interactive behavior installed on a [`Container`]'s own surface.
+/// Complete behavior of one retained branch widget.
 ///
-/// Ordinary leaf widgets need only [`Widget`]. A container surface has the additional ability to
-/// decline a dispatcher-selected event so that it can bubble through structural ancestors. The
-/// dispatcher still owns target selection, generic option checks, focus, and pointer capture.
-pub trait ContainerSurface: Widget {
-    /// Returns whether this surface supports one already-selected event.
+/// The concrete widget owns semantic, interaction, and layout policy while [`Container`] owns the
+/// heterogeneous child collection separately. Runtime calls never retain the widget borrow while
+/// recursively visiting descendants.
+pub trait ContainerWidget: Widget {
+    /// Measures preferred content from the authoritative child collection.
+    fn measure(&self, children: &Children, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni;
+
+    /// Places retained children and commits descendant viewport/content geometry.
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti);
+
+    /// Returns whether this container accepts an already-selected event.
     ///
-    /// Returning `false` does not expose a covered sibling; it permits only ancestor bubbling.
-    /// Captured drag and release delivery bypass this query because capture identity is already an
-    /// authoritative runtime decision. Generic scroll eligibility remains derived from
-    /// [`WidgetOption::GRAB_SCROLL`] before this surface-specific query is considered.
+    /// Returning `false` permits ancestor bubbling but never exposes a covered sibling.
     fn accepts_event(&self, _event: &UiInputEvent) -> bool {
-        // Most surfaces support every event admitted by generic dispatcher options. Specialized
-        // surfaces override only when committed local state narrows that set further.
         true
     }
 }
 
-/// Geometry policy installed in a retained [`Container`].
+/// Retained owner for one erased typed branch widget and an opaque ordered child collection.
 ///
-/// A layout can measure the owner's children and commit their rectangles, viewport, logical
-/// content extent, and participation. It receives no update, paint, focus, capture, event, or
-/// topology-routing capability; those remain widget and dispatcher responsibilities.
-pub trait Layout: 'static {
-    /// Measures the preferred content extent for the current child collection.
-    fn measure(&self, children: &Children, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni;
-
-    /// Places retained children inside the container's local content rectangle.
-    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti);
-}
-
-/// Concrete retained owner for one geometry policy and an opaque ordered child collection.
-///
-/// This is the only strong owner of its direct [`Node`](crate::Node) values. Its boxed layout can
-/// borrow children only during measure or placement. An optional ordinary widget supplies behavior
-/// for the container's own surface; it never receives child access.
+/// This is the only strong owner of its direct [`Node`](crate::Node) values. The concrete widget is
+/// independently allocated so runtime phases can borrow it only for the current operation and
+/// release it before recursive child traversal.
 pub struct Container {
     /// One authoritative shared cell for mounted descendants.
     children: Rc<RefCell<Children>>,
-    /// Dynamic geometry policy for the authoritative collection.
-    layout: Box<dyn Layout>,
-    /// Static options for a container with no installed surface widget.
-    opt: WidgetOption,
-    /// Optional interactive or painted behavior for this container's own surface.
-    surface: Option<Box<dyn ContainerSurface>>,
+    /// Sole persistent strong owner of the concrete typed container widget.
+    widget: Rc<RefCell<dyn ContainerWidget>>,
 }
 
 impl Container {
-    /// Creates an unmounted owner from one layout and initial child sequence.
-    ///
-    /// This is the complete public construction path. The iterator is consumed exactly once, the
-    /// resulting collection becomes private, and the concrete layout is boxed at the point where
-    /// heterogeneous containers enter [`crate::Node`]. A container without a surface is geometry
-    /// only and therefore receives `NO_INTERACT` automatically.
-    pub fn new<L>(layout: L, opt: WidgetOption, children: impl IntoIterator<Item = super::Node>) -> Self
+    /// Creates an unmounted typed branch widget and its weak concrete handle.
+    pub fn new<W>(widget: W, children: impl IntoIterator<Item = super::Node>) -> (TypedWidgetHandle<W>, Self)
     where
-        L: Layout,
+        W: ContainerWidget + 'static,
     {
-        // Collect once at the ownership boundary; no strong collection handle leaves this value.
-        Self {
-            children: Rc::new(RefCell::new(children.into_iter().collect())),
-            // Only the Layout value is dynamically dispatched; Container itself stays concrete.
-            layout: Box::new(layout),
-            // Geometry-only containers must be transparent to pointer target selection.
-            opt: opt | WidgetOption::NO_INTERACT,
-            surface: None,
-        }
+        Self::from_shared(Rc::new(RefCell::new(children.into_iter().collect())), widget)
     }
 
-    /// Creates a container around child storage already prepared by a built-in constructor.
-    ///
-    /// Built-in mutable state needs a weak [`super::children::ChildrenHandle`] pointing at the same
-    /// allocation the container will own. Those constructors create the cell, derive the weak
-    /// capability, and then move the sole persistent strong reference here. Keeping this function
-    /// crate-private prevents downstream code from creating a second child owner.
-    pub(crate) fn from_shared<L>(children: Rc<RefCell<Children>>, layout: L, opt: WidgetOption) -> Self
+    /// Creates a typed branch around child storage prepared by a built-in constructor.
+    pub(crate) fn from_shared<W>(children: Rc<RefCell<Children>>, widget: W) -> (TypedWidgetHandle<W>, Self)
     where
-        L: Layout,
+        W: ContainerWidget + 'static,
     {
-        // The caller has already collected children and installed any weak typed-state capability.
-        Self {
-            children,
-            layout: Box::new(layout),
-            opt: opt | WidgetOption::NO_INTERACT,
-            surface: None,
-        }
+        let widget = Rc::new(RefCell::new(widget));
+        Self::from_shared_owner(children, widget)
     }
 
-    /// Installs ordinary widget behavior on this container's own surface.
-    ///
-    /// Surface behavior is optional and independent of layout: it can paint or receive routed
-    /// input, but it has no access to the child collection. This keeps interaction composition from
-    /// becoming a second container interface. A type with ordinary surface behavior can opt into
-    /// this role with an empty [`ContainerSurface`] implementation; state-dependent event filters
-    /// override [`ContainerSurface::accepts_event`].
-    pub fn with_surface<S: ContainerSurface + 'static>(mut self, surface: S) -> Self {
-        // Descendants remain child-first during hit testing. The dispatcher reaches this surface
-        // only after it has selected the container's geometry or bubbled from a selected child.
-        self.surface = Some(Box::new(surface));
-        self
+    /// Adopts a concrete widget allocation prepared for internal weak composition links.
+    pub(crate) fn from_shared_owner<W>(children: Rc<RefCell<Children>>, widget: Rc<RefCell<W>>) -> (TypedWidgetHandle<W>, Self)
+    where
+        W: ContainerWidget + 'static,
+    {
+        let handle = TypedWidgetHandle::new(&widget);
+        let widget: Rc<RefCell<dyn ContainerWidget>> = widget;
+        (handle, Self { children, widget })
     }
 
     /// Returns whether the installed surface supports one dispatcher-selected event.
     pub(crate) fn accepts_event(&self, event: &UiInputEvent) -> bool {
         // A geometry-only container has no event-receiving surface. An installed surface owns only
         // its additional state-dependent filter; generic option policy remains in the dispatcher.
-        self.surface.as_ref().is_some_and(|surface| surface.accepts_event(event))
+        self.widget
+            .try_borrow()
+            .unwrap_or_else(|_| typed_container_borrow_conflict())
+            .accepts_event(event)
     }
 
     /// Runs one immutable framework traversal without exposing child storage publicly.
@@ -169,63 +129,64 @@ impl Container {
 
     /// Invokes the geometry policy for one placement pass.
     pub(crate) fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
-        // Layout receives the authoritative collection only for this call. A typed state mutation
+        // The widget receives the authoritative collection only for this call. A typed mutation
         // attempted against the same container while this borrow is active is rejected cleanly by
         // ChildrenHandle rather than invalidating indices during placement.
         let mut children = self
             .children
             .try_borrow_mut()
             .unwrap_or_else(|_| panic!("retained child invariant violated: collection is already borrowed during layout"));
-        self.layout.place(ctx, &mut children, rect);
-    }
-}
-
-impl Widget for Container {
-    fn widget_opt(&self) -> &WidgetOption {
-        // Surface options are authoritative when behavior exists; otherwise use the inert fallback.
-        self.surface.as_ref().map_or(&self.opt, |surface| surface.widget_opt())
+        self.widget
+            .try_borrow_mut()
+            .unwrap_or_else(|_| typed_container_borrow_conflict())
+            .place(ctx, &mut children, rect);
     }
 
-    fn measure(&self, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
-        // Measurement is read-only and delegates exclusively to Layout. Surface widgets cannot
-        // introduce a competing size calculation for the same container.
+    /// Resolves frame width and measures content under one typed-runtime borrow.
+    pub(crate) fn measure_content_with_frame(&self, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> (i32, Dimensioni) {
         let children = self
             .children
             .try_borrow()
             .unwrap_or_else(|_| panic!("retained child invariant violated: collection is mutably borrowed during measurement"));
-        self.layout.measure(&children, style, atlas, available)
+        let widget = self.widget.try_borrow().unwrap_or_else(|_| typed_container_borrow_conflict());
+        let border_width = if widget.effective_widget_opt().intersects(WidgetOption::FRAME) {
+            style.frame_border().width.max(0)
+        } else {
+            0
+        };
+        let measured = ContainerWidget::measure(&*widget, &children, style, atlas, super::frame::content_available(available, border_width));
+        (border_width, measured)
     }
 
-    fn update(&mut self, ctx: &mut crate::WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        // A geometry-only container has no local update work; descendants are traversed separately
-        // by UiRuntime after this method returns.
-        if let Some(surface) = &mut self.surface {
-            // The dispatcher has already selected and localized this one event.
-            surface.update(ctx, input);
-        }
+    /// Returns the concrete widget's effective options.
+    pub(crate) fn effective_widget_opt(&self) -> WidgetOption {
+        self.widget
+            .try_borrow()
+            .unwrap_or_else(|_| typed_container_borrow_conflict())
+            .effective_widget_opt()
     }
 
-    fn paint(&mut self, ctx: &mut crate::WidgetPaintCtx<'_>) {
-        // Paint the local surface before the runtime paints children in forward sibling order.
-        if let Some(surface) = &mut self.surface {
-            surface.paint(ctx);
-        }
+    /// Runs one common widget query against the concrete container object.
+    pub(crate) fn with_widget<R>(&self, f: impl FnOnce(&dyn Widget) -> R) -> R {
+        let widget = self.widget.try_borrow().unwrap_or_else(|_| typed_container_borrow_conflict());
+        f(&*widget)
     }
 
-    fn effective_widget_opt(&self) -> WidgetOption {
-        // Dynamic surface options (for example scroll enablement) override the static fallback.
-        self.surface.as_ref().map_or(self.opt, |surface| surface.effective_widget_opt())
-    }
-
-    fn focus_policy(&self) -> crate::FocusPolicy {
-        // Preserve ordinary Widget defaults for inert containers and delegate richer behavior.
-        self.surface
-            .as_ref()
-            .map_or_else(|| crate::FocusPolicy::from_widget_options(self.opt), |surface| surface.focus_policy())
+    /// Runs one common mutable widget phase against the concrete container object.
+    pub(crate) fn with_widget_mut<R>(&mut self, f: impl FnOnce(&mut dyn Widget) -> R) -> R {
+        let mut widget = self.widget.try_borrow_mut().unwrap_or_else(|_| typed_container_borrow_conflict());
+        f(&mut *widget)
     }
 }
 
-/// Framework-scoped geometry services available to one active [`Layout`] call.
+/// Reports application access that overlaps a typed container runtime phase.
+#[cold]
+#[inline(never)]
+fn typed_container_borrow_conflict() -> ! {
+    panic!("retained widget invariant violated: a typed access closure must finish before runtime traversal")
+}
+
+/// Framework-scoped geometry services available to one active [`ContainerWidget::place`] call.
 ///
 /// The context measures or places indexed children and commits derived viewport/participation
 /// results. It never lends a node or permits topology mutation.
@@ -324,7 +285,17 @@ mod tests {
     /// Minimal policy proving that concrete ownership needs geometry only.
     struct GeometryOnly;
 
-    impl Layout for GeometryOnly {
+    impl Widget for GeometryOnly {
+        fn widget_opt(&self) -> &WidgetOption {
+            &WidgetOption::NO_INTERACT
+        }
+
+        fn update(&mut self, _ctx: &mut crate::WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
+
+        fn paint(&mut self, _ctx: &mut crate::WidgetPaintCtx<'_>) {}
+    }
+
+    impl ContainerWidget for GeometryOnly {
         fn measure(&self, children: &Children, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
             Dimensioni::new(children.len() as i32, 1)
         }
@@ -338,10 +309,10 @@ mod tests {
     }
 
     #[test]
-    fn concrete_container_owns_one_collection_beside_its_layout() {
+    fn concrete_container_owns_one_collection_beside_its_widget() {
         let children = Rc::new(RefCell::new([text_node("first")].into_iter().collect()));
         let handle = crate::ui_node::children::ChildrenHandle::new(&children);
-        let owner = Container::from_shared(children, GeometryOnly, WidgetOption::NONE);
+        let (_, owner) = Container::from_shared(children, GeometryOnly);
 
         assert_eq!(owner.with_children(Children::len), 1);
         owner.with_children_mut(|children| children.push(text_node("second")));

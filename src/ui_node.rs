@@ -41,12 +41,11 @@
 //! Each node retains an allocation in its parent's child coordinates plus a node-local child
 //! offset and clip. Recursive passes carry one stack-only [`Transform`]. Resolved outer rectangles
 //! and outer clips remain runtime stack locals; phase contexts expose node-local content geometry.
-//! Common widget phases dispatch once through the [`crate::Widget`] owned by each private
-//! `NodeKind` variant. Traversal branches to [`Container`] only for layout, routed input,
-//! descendant visibility, and scoped child visitation. Container update and paint run before the
-//! visibility gate is checked. Each concrete container borrows its directly owned state for the
-//! current runtime method, and each child borrow remains scoped to one opaque visitor call before
-//! recursion continues.
+//! Common phases dispatch through the concrete [`crate::Widget`] owned by each private `NodeKind`
+//! variant. A branch stores that object as `Rc<RefCell<dyn ContainerWidget>>` beside—not around—its
+//! child cell. Container update, layout, and paint borrow the concrete object only for the current
+//! method and release it before recursive child traversal; each child borrow likewise remains
+//! scoped to one opaque visitor call.
 //!
 //! # Source layout
 //!
@@ -66,10 +65,8 @@ pub use text_layout::TextWrap;
 mod widget;
 mod widget_context;
 pub use widget::{
-    FocusPolicy, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
-    WidgetUpdateCtx,
+    FocusPolicy, LeafWidget, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
-pub(crate) use widget::{runtime_read_state, runtime_update_state};
 pub mod widgets;
 
 mod children;
@@ -85,10 +82,10 @@ pub(crate) use runtime::UiRuntime;
 #[cfg(test)]
 pub(crate) use runtime::RuntimeMetrics;
 mod container;
-pub use container::{Container, ContainerLayoutCtx, ContainerSurface, Layout};
+pub use container::{Container, ContainerLayoutCtx, ContainerWidget};
 mod containers;
 pub use containers::{
-    Column, ColumnParameters, ColumnState, Disclosure, DisclosureParameters, DisclosureState, Grid, GridItem, GridParameters, GridSpan, GridState, Row,
-    RowParameters, RowState, ScrollArea, ScrollAreaParameters, ScrollAreaState, Stack, StackDirection, StackParameters, StackState,
+    Column, ColumnParameters, Disclosure, DisclosureParameters, Grid, GridItem, GridParameters, GridSpan, Row, RowParameters, ScrollArea, ScrollAreaParameters,
+    Stack, StackDirection, StackParameters,
 };
 pub use containers::ScrollAreaOption;

@@ -43,8 +43,8 @@ use std::{
 use crate::render::RendererBackend;
 use crate::{
     Button, ButtonParameters, ButtonSubmitted, Column, ColumnParameters, Context, IconId, ListItem, ListItemParameters, ListItemSubmitted, Node, Policy, Recti,
-    RootHandle, ScrollArea, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, Session, SizePolicy, Stack, StackDirection, StackParameters, StackState,
-    Subscribers, Textbox, TextboxParameters, TextboxSubmitted, ThemeIcons, TypedWidgetHandle, WidgetEventHandle, WidgetOption, WidgetStateHandle, WindowOption,
+    RootHandle, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Session, SizePolicy, Stack, StackDirection, StackParameters, Subscribers, Textbox,
+    TextboxParameters, TextboxSubmitted, ThemeIcons, TypedWidgetHandle, WidgetEventHandle, WidgetOption, WindowOption,
 };
 use crate::ui_node::RuntimeNodeId;
 
@@ -189,12 +189,12 @@ pub(crate) struct FileDialogController {
     file_items: Vec<WidgetEventHandle<ListItemSubmitted>>,
     folder_item_ids: Vec<RuntimeNodeId>,
     file_item_ids: Vec<RuntimeNodeId>,
-    folder_rows: WidgetStateHandle<StackState>,
-    file_rows: WidgetStateHandle<StackState>,
+    folder_rows: TypedWidgetHandle<Stack>,
+    file_rows: TypedWidgetHandle<Stack>,
     #[cfg_attr(not(test), allow(dead_code))]
-    folder_scroll: WidgetStateHandle<ScrollAreaState>,
+    folder_scroll: TypedWidgetHandle<ScrollArea>,
     #[cfg_attr(not(test), allow(dead_code))]
-    file_scroll: WidgetStateHandle<ScrollAreaState>,
+    file_scroll: TypedWidgetHandle<ScrollArea>,
     path_box: TypedWidgetHandle<Textbox>,
     path_box_submitted: WidgetEventHandle<TextboxSubmitted>,
     file_name_box: TypedWidgetHandle<Textbox>,
@@ -572,7 +572,7 @@ impl FileDialogController {
         if !matches!(*status.borrow(), FileDialogStatus::Pending) {
             return ControllerDisposition::Remove;
         }
-        if !self.root.state().is_alive() {
+        if !self.root.widget().is_alive() {
             *status.borrow_mut() = FileDialogStatus::Cancelled;
             return ControllerDisposition::Remove;
         }
@@ -593,7 +593,7 @@ impl FileDialogController {
 }
 
 #[allow(clippy::result_large_err)]
-fn replace_stack_rows(handle: &WidgetStateHandle<StackState>, nodes: Vec<Node>) -> Result<(), Vec<Node>> {
+fn replace_stack_rows(handle: &TypedWidgetHandle<Stack>, nodes: Vec<Node>) -> Result<(), Vec<Node>> {
     // Flatten state-cell and child-owner availability while preserving every replacement node.
     handle.try_update_with(nodes, |state, nodes| state.replace(nodes))?
 }
@@ -743,7 +743,7 @@ mod tests {
         let body_before = ctx.debug_root_body(root).unwrap();
         let trailing_gap = body_before.y + body_before.height - (open_before.y + open_before.height);
         assert!(trailing_gap >= 0 && trailing_gap < toolbar_before.height);
-        let mut resized = controller(&ctx, &session).root.state().try_read(crate::RootState::rect).unwrap();
+        let mut resized = controller(&ctx, &session).root.widget().try_read(crate::RootChrome::rect).unwrap();
         resized.height += 80;
         ctx.set_root_rect(root, resized).unwrap();
         ctx.update_and_render_ui();
@@ -815,19 +815,19 @@ mod tests {
         let mut ctx = context();
         let session = ctx.open_file_dialog(FileDialogRequest::default());
         ctx.update_and_render_ui();
-        let (root, open, cancel, root_state) = {
+        let (root, open, cancel, root_widget) = {
             let dialog = controller(&ctx, &session);
-            (dialog.root.id(), dialog.ok_button_id, dialog.cancel_button_id, dialog.root.state().clone())
+            (dialog.root.id(), dialog.ok_button_id, dialog.cancel_button_id, dialog.root.widget().clone())
         };
         click_node(&mut ctx, root, open, false);
         assert_eq!(session.status(), FileDialogStatus::Pending);
-        assert!(root_state.is_alive());
+        assert!(root_widget.is_alive());
 
         ctx.mouseup(0, 0, MouseButton::LEFT);
         ctx.update_and_render_ui();
         click_node(&mut ctx, root, cancel, false);
         assert_eq!(session.status(), FileDialogStatus::Cancelled);
-        assert!(!root_state.is_alive());
+        assert!(!root_widget.is_alive());
     }
 
     #[test]
@@ -835,9 +835,9 @@ mod tests {
         let mut ctx = context();
         let session = ctx.open_file_dialog(FileDialogRequest::default());
         ctx.update_and_render_ui();
-        let (root, root_state) = {
+        let (root, root_widget) = {
             let dialog = controller(&ctx, &session);
-            (dialog.root.id(), dialog.root.state().clone())
+            (dialog.root.id(), dialog.root.widget().clone())
         };
         let close = ctx.debug_root_chrome(root).unwrap().1.expect("dialog should have a close button");
         let x = close.x + close.width / 2;
@@ -846,7 +846,7 @@ mod tests {
         ctx.mousedown(x, y, MouseButton::LEFT);
         ctx.update_and_render_ui();
         assert_eq!(session.status(), FileDialogStatus::Cancelled);
-        assert!(!root_state.is_alive());
+        assert!(!root_widget.is_alive());
     }
 
     #[test]
@@ -886,24 +886,24 @@ mod tests {
         let mut owner = context();
         let mut foreign = context();
         let session = owner.open_file_dialog(FileDialogRequest::default());
-        let root_state = controller(&owner, &session).root.state().clone();
+        let root_widget = controller(&owner, &session).root.widget().clone();
         assert!(!foreign.cancel_file_dialog(&session));
         assert!(owner.cancel_file_dialog(&session));
         assert!(!owner.cancel_file_dialog(&session));
         assert_eq!(session.status(), FileDialogStatus::Cancelled);
         assert_eq!(session.status(), FileDialogStatus::Cancelled);
-        assert!(!root_state.is_alive());
+        assert!(!root_widget.is_alive());
     }
 
     #[test]
     fn dropping_pending_session_removes_root_on_next_update() {
         let mut ctx = context();
         let session = ctx.open_file_dialog(FileDialogRequest::default());
-        let root_state = controller(&ctx, &session).root.state().clone();
+        let root_widget = controller(&ctx, &session).root.widget().clone();
         drop(session);
-        assert!(root_state.is_alive());
+        assert!(root_widget.is_alive());
         ctx.update_ui(Dimensioni::new(900, 700));
-        assert!(!root_state.is_alive());
+        assert!(!root_widget.is_alive());
         assert!(ctx.file_dialogs.is_empty());
     }
 

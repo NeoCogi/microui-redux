@@ -31,7 +31,7 @@
 //! Root registry, cross-root policy, and persistent tree traversal.
 
 use super::*;
-use crate::{Node, RootHandle, RootMutationError, RootState, Vec2i, WidgetStateHandle};
+use crate::{Node, RootHandle, RootMutationError, RootChrome, TypedWidgetHandle, Vec2i};
 
 use super::root_chrome::{create_root_chrome, record_root_overlay, root_handle, RootChromeParameters};
 #[cfg(test)]
@@ -55,7 +55,7 @@ pub(super) struct WindowEntry {
     pub(super) id: RootId,
     pub(super) kind: WindowKind,
     pub(super) z_index: i32,
-    pub(super) root_state: WidgetStateHandle<RootState>,
+    pub(super) root_widget: TypedWidgetHandle<RootChrome>,
     pub(super) tree: WidgetTree,
 }
 
@@ -63,12 +63,12 @@ impl WindowEntry {
     /// Clears runtime interaction identities and the application-visible root chrome mode.
     fn clear_transient_targets(&mut self) {
         // Generic descendant widgets reconcile private modes from their next inactive update.
-        // RootState is different because callers can observe `is_active` immediately after a
+        // RootChrome is different because callers can observe `is_active` immediately after a
         // window-manager operation, so its mode changes in the same ownership transaction.
         self.tree.runtime.clear_transient_targets();
-        self.root_state
-            .try_update(RootState::clear_interaction_silent)
-            .expect("registered root state unavailable while clearing transient targets");
+        self.root_widget
+            .try_update(RootChrome::clear_interaction_silent)
+            .expect("registered root widget unavailable while clearing transient targets");
     }
 }
 
@@ -77,8 +77,8 @@ impl<B: RendererBackend> Context<B> {
     fn register_root(&mut self, kind: WindowKind, name: &str, rect: Recti, content: Node, options: WindowOption, visible: bool) -> RootHandle {
         // Allocate lifecycle identity before construction; IDs are never derived from node identity.
         let id = self.next_root_id();
-        // Root chrome returns one concrete Container and the weak state handle Context registers.
-        let (root_state, changed, submitted, root) = create_root_chrome(RootChromeParameters {
+        // Root chrome returns one concrete Container and the weak typed widget handle Context registers.
+        let (root_widget, changed, submitted, root) = create_root_chrome(RootChromeParameters {
             name: name.to_owned(),
             options,
             rect,
@@ -95,17 +95,17 @@ impl<B: RendererBackend> Context<B> {
         } else {
             -1
         };
-        // Context is the sole tree owner; the entry's state handle cannot retain the root.
+        // Context is the sole tree owner; the entry's typed widget handle cannot retain the root.
         self.roots.push(WindowEntry {
             id,
             kind,
             z_index,
-            root_state: root_state.clone(),
+            root_widget: root_widget.clone(),
             tree: WidgetTree { root, runtime: UiRuntime::new() },
         });
         // New topology requires a layout commit before rendering or pointer routing.
         self.invalidate_ui_commit();
-        root_handle(id, root_state, changed, submitted)
+        root_handle(id, root_widget, changed, submitted)
     }
 
     fn next_root_id(&mut self) -> RootId {
@@ -143,22 +143,25 @@ impl<B: RendererBackend> Context<B> {
 
     /// Replaces a root rectangle silently while retaining any compatible captured chrome mode.
     pub fn set_root_rect(&mut self, root: RootId, rect: Recti) -> Result<(), RootMutationError> {
-        self.update_root_state(root, |state| state.set_rect_silent(rect))
+        self.update_root_widget(root, |state| state.set_rect_silent(rect))
     }
 
     /// Replaces a root size silently without changing its origin.
     pub fn set_root_size(&mut self, root: RootId, size: Dimensioni) -> Result<(), RootMutationError> {
-        self.update_root_state(root, |state| state.set_size_silent(size))
+        self.update_root_widget(root, |state| state.set_size_silent(size))
     }
 
     /// Replaces root chrome options silently.
     pub fn set_root_options(&mut self, root: RootId, options: WindowOption) -> Result<(), RootMutationError> {
         let index = self.root_index(root)?;
-        let was_active = self.roots[index].root_state.try_read(RootState::is_active).ok_or(RootMutationError::Borrowed)?;
-        self.update_root_state(root, |state| state.set_options_silent(options))?;
+        let was_active = self.roots[index]
+            .root_widget
+            .try_read(RootChrome::is_active)
+            .ok_or(RootMutationError::Borrowed)?;
+        self.update_root_widget(root, |state| state.set_options_silent(options))?;
         let active = self.roots[index]
-            .root_state
-            .try_read(RootState::is_active)
+            .root_widget
+            .try_read(RootChrome::is_active)
             .unwrap_or_else(|| self.root_access_failure(index));
         if was_active && !active {
             self.roots[index].clear_transient_targets();
@@ -166,7 +169,7 @@ impl<B: RendererBackend> Context<B> {
         Ok(())
     }
 
-    /// Shows or hides a retained root, preserving its tree and typed state.
+    /// Shows or hides a retained root, preserving its tree and concrete widget state.
     ///
     /// Showing a dialog pushes it onto the modal stack. Hiding the active dialog restores the
     /// previous visible dialog, if any; otherwise ordinary cross-root routing resumes.
@@ -182,14 +185,14 @@ impl<B: RendererBackend> Context<B> {
                 if index == target || entry.kind != WindowKind::Popup {
                     continue;
                 }
-                if entry.root_state.try_read(RootState::is_visible).ok_or(RootMutationError::Borrowed)? {
+                if entry.root_widget.try_read(RootChrome::is_visible).ok_or(RootMutationError::Borrowed)? {
                     other = Some(index);
                     break;
                 }
             }
             if let Some(other) = other {
-                let old = self.roots[other].root_state.clone();
-                let new = self.roots[target].root_state.clone();
+                let old = self.roots[other].root_widget.clone();
+                let new = self.roots[target].root_widget.clone();
                 let changed = old.try_update(|old_state| {
                     new.try_update(|new_state| {
                         old_state.set_visible_silent(false);
@@ -203,7 +206,7 @@ impl<B: RendererBackend> Context<B> {
                     Some(false) | None => return Err(RootMutationError::Borrowed),
                 }
             } else {
-                self.update_root_state(root, |state| {
+                self.update_root_widget(root, |state| {
                     if !state.is_visible() {
                         state.set_rect_silent(rect(mouse.x, mouse.y, 1, 1));
                     }
@@ -211,7 +214,7 @@ impl<B: RendererBackend> Context<B> {
                 })?;
             }
         } else {
-            self.update_root_state(root, |state| state.set_visible_silent(visible))?;
+            self.update_root_widget(root, |state| state.set_visible_silent(visible))?;
         }
 
         if visible {
@@ -252,7 +255,7 @@ impl<B: RendererBackend> Context<B> {
     /// otherwise ordinary cross-root routing resumes.
     ///
     /// There is intentionally no root-content replacement operation. Destroy and recreate a root
-    /// to install a different root owner, or mutate descendants through their container state.
+    /// to install a different root owner, or mutate descendants through their typed widget handles.
     pub fn destroy_root(&mut self, root: RootId) -> bool {
         let Some(index) = self.roots.iter().position(|entry| entry.id == root) else {
             return false;
@@ -270,23 +273,23 @@ impl<B: RendererBackend> Context<B> {
         self.roots.iter().position(|entry| entry.id == root).ok_or(RootMutationError::UnknownRoot)
     }
 
-    fn update_root_state(&mut self, root: RootId, update: impl FnOnce(&mut RootState)) -> Result<(), RootMutationError> {
+    fn update_root_widget(&mut self, root: RootId, update: impl FnOnce(&mut RootChrome)) -> Result<(), RootMutationError> {
         let index = self.root_index(root)?;
-        if self.roots[index].root_state.try_update(update).is_some() {
+        if self.roots[index].root_widget.try_update(update).is_some() {
             self.invalidate_ui_commit();
             Ok(())
-        } else if self.roots[index].root_state.is_alive() {
+        } else if self.roots[index].root_widget.is_alive() {
             Err(RootMutationError::Borrowed)
         } else {
-            panic!("registered root lost its persistent RootState owner")
+            panic!("registered root lost its persistent RootChrome owner")
         }
     }
 
     fn root_access_failure(&self, index: usize) -> ! {
-        if self.roots[index].root_state.is_alive() {
-            panic!("registered root state is unexpectedly borrowed during traversal")
+        if self.roots[index].root_widget.is_alive() {
+            panic!("registered root widget is unexpectedly borrowed during traversal")
         }
-        panic!("registered root lost its persistent RootState owner")
+        panic!("registered root lost its persistent RootChrome owner")
     }
 
     /// Assigns a fresh z-index without applying modal policy.
@@ -336,8 +339,8 @@ impl<B: RendererBackend> Context<B> {
         let Some(root) = self.modal_stack.last().copied() else { return };
         let index = self.root_index(root).expect("modal root must remain registered");
         let visible = self.roots[index]
-            .root_state
-            .try_read(RootState::is_visible)
+            .root_widget
+            .try_read(RootChrome::is_visible)
             .unwrap_or_else(|| self.root_access_failure(index));
         if !visible {
             self.remove_modal(root);
@@ -389,7 +392,7 @@ impl<B: RendererBackend> Context<B> {
 
         for index in 0..self.roots.len() {
             let (visible, options, rect) = self.roots[index]
-                .root_state
+                .root_widget
                 .try_read(|state| (state.is_visible(), state.options(), state.rect()))
                 .unwrap_or_else(|| self.root_access_failure(index));
             let auto_width = options.intersects(WindowOption::AUTO_WIDTH);
@@ -408,7 +411,7 @@ impl<B: RendererBackend> Context<B> {
                     if auto_height { size.height } else { rect.height },
                 );
                 self.roots[index]
-                    .root_state
+                    .root_widget
                     .try_update(|state| state.set_size_silent(size))
                     .unwrap_or_else(|| self.root_access_failure(index));
             }
@@ -416,7 +419,7 @@ impl<B: RendererBackend> Context<B> {
 
         for entry in &mut self.roots {
             let (visible, rect) = entry
-                .root_state
+                .root_widget
                 .try_read(|state| (state.is_visible(), state.rect()))
                 .expect("registered root state unavailable during frame");
             if !visible {
@@ -462,8 +465,8 @@ impl<B: RendererBackend> Context<B> {
         let modal_root = self.modal_stack.last().copied();
         for entry in &mut self.roots {
             let visible = entry
-                .root_state
-                .try_read(RootState::is_visible)
+                .root_widget
+                .try_read(RootChrome::is_visible)
                 .expect("registered root state unavailable before input update");
             if visible && modal_root.is_none_or(|modal| modal == entry.id) {
                 entry.tree.runtime.begin_input_event(pointer_root == Some(entry.id), event);
@@ -500,7 +503,7 @@ impl<B: RendererBackend> Context<B> {
                     // Root chrome is a window-manager overlay, not a customizable container hit
                     // surface. Resolve it here before generic allocation-based tree targeting.
                     let root_chrome_hit = entry
-                        .root_state
+                        .root_widget
                         .try_read(|state| event.position().is_some_and(|pos| state.pointer_hits_chrome(pos)))
                         .expect("registered root state unavailable during pointer targeting");
                     let transform = entry.tree.runtime.root_transform();
@@ -529,8 +532,8 @@ impl<B: RendererBackend> Context<B> {
         let modal_root = self.modal_stack.last().copied();
         for entry in &mut self.roots {
             let visible = entry
-                .root_state
-                .try_read(RootState::is_visible)
+                .root_widget
+                .try_read(RootChrome::is_visible)
                 .expect("registered root state unavailable during input update");
             if !visible || modal_root.is_some_and(|modal| modal != entry.id) {
                 entry.clear_transient_targets();
@@ -539,8 +542,8 @@ impl<B: RendererBackend> Context<B> {
             entry.tree.runtime.update_tree_root(&mut entry.tree.root, &self.style, atlas.clone(), input);
 
             let visible = entry
-                .root_state
-                .try_read(RootState::is_visible)
+                .root_widget
+                .try_read(RootChrome::is_visible)
                 .expect("registered root state unavailable after root update");
             if !visible {
                 entry.clear_transient_targets();
@@ -556,8 +559,8 @@ impl<B: RendererBackend> Context<B> {
         self.roots.sort_by_key(|entry| entry.z_index);
         for entry in &mut self.roots {
             let visible = entry
-                .root_state
-                .try_read(RootState::is_visible)
+                .root_widget
+                .try_read(RootChrome::is_visible)
                 .expect("registered root state unavailable during paint");
             if !visible {
                 continue;
@@ -567,7 +570,7 @@ impl<B: RendererBackend> Context<B> {
                 .runtime
                 .paint_tree_root(&mut entry.tree.root, &mut self.display_list, &self.style, atlas.clone());
             entry
-                .root_state
+                .root_widget
                 .try_read(|state| record_root_overlay(&mut self.display_list, viewport, state, &self.style, &atlas))
                 .expect("registered root state unavailable during overlay paint");
         }
@@ -579,15 +582,15 @@ impl<B: RendererBackend> Context<B> {
                 return None;
             }
             entry
-                .root_state
+                .root_widget
                 .try_read(|state| state.is_visible() && !state.rect().contains(&mouse))
                 .unwrap_or_else(|| self.root_access_failure(index))
                 .then_some(index)
         });
         if let Some(index) = popup {
             self.roots[index]
-                .root_state
-                .try_update(RootState::dismiss_popup)
+                .root_widget
+                .try_update(RootChrome::dismiss_popup)
                 .unwrap_or_else(|| self.root_access_failure(index));
             self.roots[index].clear_transient_targets();
         }
@@ -599,7 +602,7 @@ impl<B: RendererBackend> Context<B> {
             .enumerate()
             .filter(|(index, _)| {
                 self.roots[*index]
-                    .root_state
+                    .root_widget
                     .try_read(|state| state.is_visible() && state.rect().contains(&point))
                     .unwrap_or_else(|| self.root_access_failure(*index))
             })
@@ -613,8 +616,8 @@ impl<B: RendererBackend> Context<B> {
             .enumerate()
             .filter(|(index, _)| {
                 self.roots[*index]
-                    .root_state
-                    .try_read(RootState::is_visible)
+                    .root_widget
+                    .try_read(RootChrome::is_visible)
                     .unwrap_or_else(|| self.root_access_failure(*index))
             })
             .max_by_key(|(_, entry)| entry.z_index)
@@ -628,7 +631,7 @@ impl<B: RendererBackend> Context<B> {
         };
         let index = self.root_index(modal).expect("modal root must remain registered");
         self.roots[index]
-            .root_state
+            .root_widget
             .try_read(|state| (state.is_visible() && state.rect().contains(&point)).then_some(modal))
             .unwrap_or_else(|| self.root_access_failure(index))
     }
@@ -666,7 +669,7 @@ impl<B: RendererBackend> Context<B> {
             .enumerate()
             .filter_map(|(index, entry)| {
                 entry
-                    .root_state
+                    .root_widget
                     .try_read(|state| state.is_visible().then(|| (entry.z_index, state.name().to_owned())))
                     .unwrap_or_else(|| self.root_access_failure(index))
             })
@@ -688,7 +691,7 @@ impl<B: RendererBackend> Context<B> {
     #[cfg(test)]
     pub(crate) fn debug_root_body(&self, root: RootId) -> Option<Recti> {
         let entry = self.roots.iter().find(|entry| entry.id == root)?;
-        entry.root_state.try_read(|state| {
+        entry.root_widget.try_read(|state| {
             root_chrome_geometry(
                 state.rect(),
                 Dimensioni::default(),
@@ -737,7 +740,7 @@ impl<B: RendererBackend> Context<B> {
     #[cfg(test)]
     pub(crate) fn debug_root_chrome(&self, root: RootId) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
         let entry = self.roots.iter().find(|entry| entry.id == root)?;
-        entry.root_state.try_read(|state| {
+        entry.root_widget.try_read(|state| {
             let geometry = root_chrome_geometry(
                 state.rect(),
                 Dimensioni::default(),

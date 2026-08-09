@@ -133,10 +133,6 @@ impl Widget for PainterDemo {
         &self.opt
     }
 
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        Dimensioni::new(240, 200)
-    }
-
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let bounds = ctx.local_rect();
         let local_width = bounds.width.max(0) as f32;
@@ -241,6 +237,12 @@ impl Widget for PainterDemo {
                 g.fill_polygon(sweep.as_slice(), color(90, 220, 180, 190));
             });
         }
+    }
+}
+
+impl LeafWidget for PainterDemo {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        Dimensioni::new(240, 200)
     }
 }
 
@@ -537,10 +539,6 @@ impl Widget for FalloffEditor {
         &self.opt
     }
 
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        Dimensioni::new(300, 220)
-    }
-
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let bounds = ctx.local_rect();
         let graph = Self::graph_rect(bounds);
@@ -703,6 +701,12 @@ impl Widget for FalloffEditor {
     }
 }
 
+impl LeafWidget for FalloffEditor {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        Dimensioni::new(300, 220)
+    }
+}
+
 struct SuzanneData {
     view_3d: View3D,
     mesh: MeshBuffers,
@@ -736,10 +740,6 @@ impl WidgetBuilder for SuzanneWidgetBuilder {
 impl Widget for SuzanneWidget {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
-    }
-
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        Dimensioni::new(80, 24)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
@@ -813,6 +813,12 @@ impl Widget for SuzanneWidget {
     }
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+impl LeafWidget for SuzanneWidget {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        Dimensioni::new(80, 24)
+    }
 }
 
 fn stateful_leaf<B: WidgetBuilder>(parameters: B::Parameters) -> (TypedWidgetHandle<B::W>, Node) {
@@ -891,7 +897,7 @@ impl DemoNodes {
     fn custom_render<B, W>(&mut self, widget: W, renderer: CustomRenderHandle<B>)
     where
         B: RendererBackend,
-        W: Widget + 'static,
+        W: LeafWidget + 'static,
     {
         self.push(Node::custom_render(widget, renderer));
     }
@@ -901,13 +907,13 @@ impl DemoNodes {
         self.push(node);
     }
 
-    fn header(&mut self, label: impl Into<String>, expanded: bool, f: impl FnOnce(&mut Self)) -> WidgetStateHandle<DisclosureState> {
+    fn header(&mut self, label: impl Into<String>, expanded: bool, f: impl FnOnce(&mut Self)) -> TypedWidgetHandle<Disclosure> {
         let (state, node) = Disclosure::create(DisclosureParameters::header(label, expanded, Self::children(f)));
         self.push(node);
         state
     }
 
-    fn tree_node(&mut self, label: impl Into<String>, expanded: bool, f: impl FnOnce(&mut Self)) -> WidgetStateHandle<DisclosureState> {
+    fn tree_node(&mut self, label: impl Into<String>, expanded: bool, f: impl FnOnce(&mut Self)) -> TypedWidgetHandle<Disclosure> {
         let (state, node) = Disclosure::create(DisclosureParameters::tree(label, expanded, Self::children(f)));
         self.push(node);
         state
@@ -929,7 +935,7 @@ impl DemoNodes {
         self.push(node);
     }
 
-    fn stack(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: impl FnOnce(&mut Self)) -> WidgetStateHandle<StackState> {
+    fn stack(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: impl FnOnce(&mut Self)) -> TypedWidgetHandle<Stack> {
         let (state, node) = Stack::create(StackParameters::new(width, height, direction, Self::children(f)));
         self.push(node);
         state
@@ -953,26 +959,26 @@ impl DemoNode<'_> {
 }
 
 struct DemoRootContents {
-    style: WidgetStateHandle<ColumnState>,
-    log: WidgetStateHandle<ColumnState>,
-    typography: WidgetStateHandle<ColumnState>,
-    triangle: WidgetStateHandle<ColumnState>,
-    painter: WidgetStateHandle<ColumnState>,
-    falloff: WidgetStateHandle<ColumnState>,
-    suzanne: WidgetStateHandle<ColumnState>,
-    stack_direction: WidgetStateHandle<ColumnState>,
-    weight: WidgetStateHandle<ColumnState>,
-    demo: WidgetStateHandle<ColumnState>,
-    combo: WidgetStateHandle<ColumnState>,
-    popup: WidgetStateHandle<ColumnState>,
+    style: TypedWidgetHandle<Column>,
+    log: TypedWidgetHandle<Column>,
+    typography: TypedWidgetHandle<Column>,
+    triangle: TypedWidgetHandle<Column>,
+    painter: TypedWidgetHandle<Column>,
+    falloff: TypedWidgetHandle<Column>,
+    suzanne: TypedWidgetHandle<Column>,
+    stack_direction: TypedWidgetHandle<Column>,
+    weight: TypedWidgetHandle<Column>,
+    demo: TypedWidgetHandle<Column>,
+    combo: TypedWidgetHandle<Column>,
+    popup: TypedWidgetHandle<Column>,
 }
 
-fn root_content() -> (WidgetStateHandle<ColumnState>, Node) {
+fn root_content() -> (TypedWidgetHandle<Column>, Node) {
     Column::create(ColumnParameters::default())
 }
 
-fn replace_root_content(root: &WidgetStateHandle<ColumnState>, nodes: Vec<Node>, name: &str) {
-    if !matches!(root.try_update_with(nodes, ColumnState::replace), Ok(Ok(()))) {
+fn replace_root_content(root: &TypedWidgetHandle<Column>, nodes: Vec<Node>, name: &str) {
+    if !matches!(root.try_update_with(nodes, Column::replace), Ok(Ok(()))) {
         panic!("{name} root content state unavailable");
     }
 }
@@ -2148,7 +2154,7 @@ impl State {
 
     fn test_window(&mut self, ctx: &mut Context<SelectedBackend>) {
         {
-            let mut win = self.demo_root.state().try_read(RootState::rect).unwrap_or_else(|| rect(40, 40, 300, 450));
+            let mut win = self.demo_root.widget().try_read(RootChrome::rect).unwrap_or_else(|| rect(40, 40, 300, 450));
             win.width = win.width.max(240);
             win.height = win.height.max(300);
             ctx.set_root_rect(self.demo_root.id(), win).expect("demo root must exist");

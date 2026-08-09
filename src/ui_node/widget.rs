@@ -127,16 +127,6 @@ impl FocusPolicy {
     }
 }
 
-/// Marker trait for application-facing state shared by a retained composite.
-///
-/// Ordinary leaf widgets keep semantic values directly in their concrete [`Widget`] type and expose
-/// them through [`TypedWidgetHandle`]. This separate state abstraction remains useful where several
-/// erased runtime parts coordinate through one allocation, such as container layout and surface
-/// objects or window-manager root state.
-pub trait WidgetState: 'static {}
-
-impl WidgetState for () {}
-
 /// Marker trait for one-shot widget construction input.
 ///
 /// Parameters seed and configure one concrete runtime. Values that applications mutate after
@@ -146,9 +136,9 @@ pub trait WidgetParameters: 'static {}
 /// Cloneable, non-owning typed access to one concrete retained widget.
 ///
 /// A [`crate::Node`] owns the only persistent strong reference after construction. Containers and
-/// the runtime retain that widget through an erased `Rc<RefCell<dyn Widget>>`, while application
-/// code and coordinating widgets may keep this typed weak view. Removing the node therefore makes
-/// every typed handle expire instead of keeping an invisible widget alive.
+/// the runtime retains that widget through an erased leaf or container trait object, while
+/// application code and coordinating widgets may keep this typed weak view. Removing the node
+/// therefore makes every typed handle expire instead of keeping an invisible widget alive.
 pub struct TypedWidgetHandle<W: Widget + 'static> {
     widget: Weak<RefCell<W>>,
 }
@@ -201,159 +191,31 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
     }
 }
 
-/// A cloneable, non-owning capability for checked access to concrete widget state.
-///
-/// A retained composite is the persistent owner. Consequently, cloning this handle never keeps
-/// removed state alive and does not require `T: Clone`. Dropping every handle likewise has no effect
-/// on the mounted runtime.
-///
-/// Access closures must finish before an update, layout, or paint traversal can reach the same
-/// state. Same-cell reentrancy fails without invoking the inner closure; access to an independent
-/// state cell may be nested. A [`crate::ContextFrame`] does not lock these handles and there is no
-/// Context access token. If state that can affect layout changes after the last
-/// [`crate::Context::update_ui`] commit, cancel any unsubmitted frame and commit again before
-/// painting.
-///
-/// Because a handle and its owning Context are independent Rust values, the compiler permits an
-/// application to capture that Context inside an access closure. Calling `update_ui` or
-/// `render_ui` there is unsupported: the handle retains its `RefCell` borrow until the closure
-/// returns, and a built-in runtime panics with the retained-state invariant diagnostic if nested
-/// traversal reaches that cell and requests an incompatible borrow. The active state borrow is the
-/// guard; no separate Context-wide traversal flag exists.
-///
-/// ```text
-/// state.try_update(|state| {
-///     state.change_layout();
-///     context.update_ui(dimensions); // unsupported nested traversal
-/// });
-///
-/// state.try_update(|state| state.change_layout());
-/// context.update_ui(dimensions);     // supported after the borrow ends
-/// ```
-pub struct WidgetStateHandle<T: WidgetState> {
-    /// Weak access to the state allocation retained by the composite runtime.
-    cell: Weak<RefCell<T>>,
-}
-
-impl<T: WidgetState> Clone for WidgetStateHandle<T> {
-    fn clone(&self) -> Self {
-        Self { cell: self.cell.clone() }
-    }
-}
-
-impl<T: WidgetState> WidgetStateHandle<T> {
-    /// Creates a weak state capability for a composite runtime's private shared allocation.
-    ///
-    /// This borrows the strong owner only long enough to downgrade it and never exposes that owner
-    /// through the resulting handle. The supplied `Rc<RefCell<T>>` must be the same private
-    /// allocation shared by the composite's runtime parts, and that composite must remain its only
-    /// persistent strong owner. Applications ordinarily receive handles from built-in `create`
-    /// constructors instead of calling this method.
-    pub fn new(owner: &Rc<RefCell<T>>) -> Self {
-        Self { cell: Rc::downgrade(owner) }
-    }
-
-    /// Reports whether the state allocation still has a strong owner or active access upgrade.
-    ///
-    /// This check does not borrow the state contents.
-    pub fn is_alive(&self) -> bool {
-        self.cell.upgrade().is_some()
-    }
-
-    /// Runs `f` with checked shared access, or returns `None` when state is unavailable.
-    ///
-    /// Call [`is_alive`](Self::is_alive) after a failure only when the application needs to
-    /// distinguish an expired owner from a temporary same-cell borrow conflict.
-    pub fn try_read<R>(&self, f: impl FnOnce(&T) -> R) -> Option<R> {
-        let owner = self.cell.upgrade()?;
-        let state = owner.try_borrow().ok()?;
-        Some(f(&state))
-    }
-
-    /// Runs `f` with checked exclusive access, or returns `None` when state is unavailable.
-    ///
-    /// The closure is not invoked on failure.
-    pub fn try_update<R>(&self, f: impl FnOnce(&mut T) -> R) -> Option<R> {
-        let owner = self.cell.upgrade()?;
-        let mut state = owner.try_borrow_mut().ok()?;
-        Some(f(&mut state))
-    }
-
-    /// Runs an exclusive update while preserving `input` if access fails before `f` starts.
-    ///
-    /// Use this operation when `input` transfers ownership, such as a still-unmounted
-    /// [`crate::Node`]. Both an expired state owner and a same-cell borrow conflict return the exact
-    /// input value unchanged.
-    pub fn try_update_with<I, R>(&self, input: I, f: impl FnOnce(&mut T, I) -> R) -> Result<R, I> {
-        let owner = match self.cell.upgrade() {
-            Some(owner) => owner,
-            None => return Err(input),
-        };
-        let mut state = match owner.try_borrow_mut() {
-            Ok(state) => state,
-            Err(_) => return Err(input),
-        };
-        Ok(f(&mut state, input))
-    }
-}
-
 /// Associates one-shot construction parameters with one concrete widget runtime.
 pub trait WidgetBuilder: Sized + 'static {
     /// One-shot input consumed during construction.
     type Parameters: WidgetParameters;
     /// Concrete runtime created by this builder.
-    type W: Widget + 'static;
+    type W: LeafWidget + 'static;
 
     /// Consumes parameters and creates the concrete widget before it is mounted and erased.
     fn create_widget(parameters: Self::Parameters) -> Self::W;
 }
 
-/// Reads associated state during retained runtime dispatch or reports an invariant violation.
-pub(crate) fn runtime_read_state<T: WidgetState, R>(state: &Rc<RefCell<T>>, phase: &'static str, f: impl FnOnce(&T) -> R) -> R {
-    // Runtime traversal treats a conflicting application borrow as a phase-contract violation. It
-    // cannot skip a node without making layout/update/paint state depend on incidental borrowing.
-    let state = state.try_borrow().unwrap_or_else(|_| {
-        panic!(
-            "retained widget state invariant violated during {phase}: associated state is already borrowed; application state-access closures must finish before retained update, layout, or paint traversal"
-        )
-    });
-    // Keep the checked borrow alive for the complete callback and release it before traversal moves on.
-    f(&state)
-}
-
-/// Updates associated state during retained runtime dispatch or reports an invariant violation.
-pub(crate) fn runtime_update_state<T: WidgetState, R>(state: &Rc<RefCell<T>>, phase: &'static str, f: impl FnOnce(&mut T) -> R) -> R {
-    // Mutable runtime access uses the same explicit diagnostic as read access and never queues work
-    // for a later frame, which would make ordering invisible to the caller.
-    let mut state = state.try_borrow_mut().unwrap_or_else(|_| {
-        panic!(
-            "retained widget state invariant violated during {phase}: associated state is already borrowed; application state-access closures must finish before retained update, layout, or paint traversal"
-        )
-    });
-    // Scope the mutable borrow to this phase callback so independent state cells remain accessible.
-    f(&mut state)
-}
-
 /// Common retained runtime phase contract implemented by concrete widgets.
 ///
-/// Widgets participate in three retained execution phases:
-/// 1. `measure`, which reports intrinsic size for an explicit layout commit.
-/// 2. `update`, which applies exactly one routed event (or `None`) and mutates widget-local state.
-/// 3. `paint`, which records paint commands for already committed widget state.
+/// Widgets participate in the retained update and paint phases. Geometry is deliberately split by
+/// node kind: [`LeafWidget`] measures intrinsic content, while [`crate::ContainerWidget`] measures
+/// and places an authoritative child collection. A branch therefore has no meaningless leaf
+/// measurement implementation.
 ///
 /// The runtime routes an event before running that event's complete update traversal, then commits
 /// layout before considering the next queued event. [`Widget::focus_policy`] is the sole focus
 /// policy query. Event-kind filtering belongs to the dispatcher for ordinary widgets and to
-/// [`crate::ContainerSurface`] for an overloaded container surface.
+/// [`crate::ContainerWidget`] for an overloaded container surface.
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
-    /// Returns this widget's preferred content size; node placement policy is applied later.
-    ///
-    /// A positive `avail` component is available for wrapping or other responsive content. A
-    /// non-positive component requests the unconstrained preferred size on that axis. Returned
-    /// components are clamped to zero; an empty container may therefore prefer zero space.
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
     /// Updates retained widget state for exactly one normalized input event.
     ///
     /// Pointer positions in `input` are relative to the widget's derived content rectangle, using
@@ -371,7 +233,7 @@ pub trait Widget {
     /// interaction, and committed layout. Implementations may maintain private rendering caches or
     /// publish framework-owned, paint-derived read-only geometry for later application use, but
     /// neither may alter the current commit. Mutating retained UI through an independently captured
-    /// state handle is a contract violation rather than a deferred-next-frame operation.
+    /// typed widget handle is a contract violation rather than a deferred-next-frame operation.
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>);
     /// Returns the effective widget options used by generic dispatch.
     ///
@@ -389,11 +251,26 @@ pub trait Widget {
     }
 }
 
+/// Intrinsic geometry contract for a retained leaf widget.
+///
+/// A positive `avail` component is available for wrapping or other responsive content. A
+/// non-positive component requests the unconstrained preferred size on that axis. Returned
+/// components are clamped to zero before the node's frame and parent placement policy are applied.
+pub trait LeafWidget: Widget {
+    /// Returns this leaf's preferred content size.
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
+}
+
 impl Widget for WidgetOption {
     fn widget_opt(&self) -> &WidgetOption {
         self
     }
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
 
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+impl LeafWidget for WidgetOption {
     fn measure(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         // Internal placeholder widgets reserve enough room for text or an expand icon.
         let padding = style.padding.max(0);
@@ -405,14 +282,10 @@ impl Widget for WidgetOption {
         let width = (padding * 2 + content).max(0);
         Dimensioni::new(width, height)
     }
-
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
-
-    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
 #[cfg(test)]
-mod state_ownership_tests {
+mod widget_ownership_tests {
     use std::{cell::Cell, rc::Rc};
 
     use super::*;
@@ -424,18 +297,8 @@ mod state_ownership_tests {
 
     impl WidgetParameters for TestParameters {}
 
-    struct TestState {
-        value: usize,
-    }
-
-    impl WidgetState for TestState {}
-
-    struct NonCloneState;
-
-    impl WidgetState for NonCloneState {}
-
     struct TestWidget {
-        state: Rc<RefCell<TestState>>,
+        value: usize,
         opt: WidgetOption,
     }
 
@@ -444,16 +307,18 @@ mod state_ownership_tests {
             &self.opt
         }
 
-        fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-            Dimensioni::new(1, 1)
-        }
-
         fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
-            runtime_update_state(&self.state, "TestWidget::update", |state| state.value += 1);
+            self.value += 1;
         }
 
         fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {
-            runtime_read_state(&self.state, "TestWidget::paint", |state| state.value);
+            let _ = self.value;
+        }
+    }
+
+    impl LeafWidget for TestWidget {
+        fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+            Dimensioni::new(1, 1)
         }
     }
 
@@ -465,48 +330,7 @@ mod state_ownership_tests {
 
         fn create_widget(parameters: Self::Parameters) -> Self::W {
             TestWidget {
-                state: Rc::new(RefCell::new(TestState { value: parameters.value })),
-                opt: WidgetOption::NONE,
-            }
-        }
-    }
-
-    struct UnitParameters;
-
-    impl WidgetParameters for UnitParameters {}
-
-    struct UnitWidget {
-        state: Rc<RefCell<()>>,
-        opt: WidgetOption,
-    }
-
-    impl Widget for UnitWidget {
-        fn widget_opt(&self) -> &WidgetOption {
-            &self.opt
-        }
-
-        fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-            runtime_read_state(&self.state, "UnitWidget::measure", |_| Dimensioni::new(1, 1))
-        }
-
-        fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
-            runtime_update_state(&self.state, "UnitWidget::update", |_| ());
-        }
-
-        fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {
-            runtime_read_state(&self.state, "UnitWidget::paint", |_| ());
-        }
-    }
-
-    struct UnitBuilder;
-
-    impl WidgetBuilder for UnitBuilder {
-        type Parameters = UnitParameters;
-        type W = UnitWidget;
-
-        fn create_widget(_parameters: Self::Parameters) -> Self::W {
-            UnitWidget {
-                state: Rc::new(RefCell::new(())),
+                value: parameters.value,
                 opt: WidgetOption::NONE,
             }
         }
@@ -515,25 +339,23 @@ mod state_ownership_tests {
     #[test]
     fn runtime_retains_one_strong_owner_and_exposes_only_weak_handles() {
         let widget = TestBuilder::create_widget(TestParameters { value: 7 });
-        let state = WidgetStateHandle::new(&widget.state);
+        let (state, node) = crate::Node::typed_widget(widget);
 
-        assert_eq!(Rc::strong_count(&widget.state), 1);
         assert_eq!(state.try_read(|state| state.value), Some(7));
-        assert_eq!(state.try_update(|state| state.value + 1), Some(8));
+        assert_eq!(state.try_update(|state| state.value += 1), Some(()));
 
         let clone = state.clone();
-        assert_eq!(Rc::strong_count(&widget.state), 1);
-        assert_eq!(clone.try_read(|state| state.value), Some(7));
+        assert_eq!(clone.try_read(|state| state.value), Some(8));
 
-        drop(widget);
+        drop(node);
         assert!(!state.is_alive());
         assert_eq!(state.try_read(|_| ()), None);
     }
 
     #[test]
-    fn checked_state_handle_reads_and_updates_allocate_nothing() {
+    fn checked_widget_handle_reads_and_updates_allocate_nothing() {
         let widget = TestBuilder::create_widget(TestParameters { value: 0 });
-        let state = WidgetStateHandle::new(&widget.state);
+        let (state, _node) = crate::Node::typed_widget(widget);
 
         // Warm the checked upgrade and borrow paths before isolating their steady-state cost.
         state.try_read(|state| state.value).unwrap();
@@ -548,30 +370,27 @@ mod state_ownership_tests {
 
         assert_eq!(allocations.events, 0, "checked state access allocated {} bytes", allocations.bytes);
         assert_eq!(state.try_read(|state| state.value), Some(1_001));
-        assert_eq!(Rc::strong_count(&widget.state), 1);
     }
 
     #[test]
-    fn handle_clone_does_not_require_clone_state() {
-        fn clone_handle(handle: &WidgetStateHandle<NonCloneState>) -> WidgetStateHandle<NonCloneState> {
+    fn handle_clone_does_not_require_clone_widget() {
+        fn clone_handle(handle: &TypedWidgetHandle<TestWidget>) -> TypedWidgetHandle<TestWidget> {
             handle.clone()
         }
 
-        let owner = Rc::new(RefCell::new(NonCloneState));
-        let handle = WidgetStateHandle::new(&owner);
+        let (handle, _node) = crate::Node::typed_widget(TestBuilder::create_widget(TestParameters { value: 0 }));
         let clone = clone_handle(&handle);
 
         assert!(clone.is_alive());
-        assert_eq!(Rc::strong_count(&owner), 1);
     }
 
     #[test]
     fn same_cell_conflicts_are_unavailable_and_cross_cell_access_succeeds() {
         let first_widget = TestBuilder::create_widget(TestParameters { value: 1 });
         let second_widget = TestBuilder::create_widget(TestParameters { value: 2 });
-        let first = WidgetStateHandle::new(&first_widget.state);
+        let (first, _first_node) = crate::Node::typed_widget(first_widget);
         let first_clone = first.clone();
-        let second = WidgetStateHandle::new(&second_widget.state);
+        let (second, _second_node) = crate::Node::typed_widget(second_widget);
 
         first
             .try_update(|first_state| {
@@ -588,8 +407,8 @@ mod state_ownership_tests {
     #[test]
     fn active_access_keeps_state_alive_until_its_closure_returns() {
         let widget = TestBuilder::create_widget(TestParameters { value: 4 });
-        let state = WidgetStateHandle::new(&widget.state);
-        let widget = RefCell::new(Some(widget));
+        let (state, node) = crate::Node::typed_widget(widget);
+        let widget = RefCell::new(Some(node));
 
         state
             .try_read(|_| {
@@ -601,8 +420,8 @@ mod state_ownership_tests {
         assert!(!state.is_alive());
 
         let widget = TestBuilder::create_widget(TestParameters { value: 5 });
-        let state = WidgetStateHandle::new(&widget.state);
-        let widget = RefCell::new(Some(widget));
+        let (state, node) = crate::Node::typed_widget(widget);
+        let widget = RefCell::new(Some(node));
         state
             .try_update(|_| {
                 drop(widget.borrow_mut().take());
@@ -613,9 +432,9 @@ mod state_ownership_tests {
     }
 
     #[test]
-    fn update_with_preserves_input_when_state_access_is_unavailable() {
+    fn update_with_preserves_input_when_widget_access_is_unavailable() {
         let widget = TestBuilder::create_widget(TestParameters { value: 0 });
-        let state = WidgetStateHandle::new(&widget.state);
+        let (state, node) = crate::Node::typed_widget(widget);
         let closure_called = Rc::new(Cell::new(false));
 
         let conflicted_input = state
@@ -640,7 +459,7 @@ mod state_ownership_tests {
             .unwrap();
         assert_eq!(committed, "committed");
 
-        drop(widget);
+        drop(node);
         let expired_input = state
             .try_update_with(String::from("expired"), |_, _| {
                 closure_called.set(true);
@@ -652,13 +471,12 @@ mod state_ownership_tests {
     }
 
     #[test]
-    fn discarded_unit_handle_does_not_change_runtime_state_ownership() {
-        let widget = UnitBuilder::create_widget(UnitParameters);
-        let state = WidgetStateHandle::new(&widget.state);
-        assert_eq!(Rc::strong_count(&widget.state), 1);
-
-        drop(state);
-        assert_eq!(Rc::strong_count(&widget.state), 1);
-        runtime_read_state(&widget.state, "UnitWidget::test", |_| ());
+    fn discarded_handle_does_not_change_runtime_widget_ownership() {
+        let (handle, node) = crate::Node::typed_widget(TestBuilder::create_widget(TestParameters { value: 9 }));
+        let observer = handle.clone();
+        drop(handle);
+        assert_eq!(observer.try_read(|widget| widget.value), Some(9));
+        drop(node);
+        assert!(!observer.is_alive());
     }
 }

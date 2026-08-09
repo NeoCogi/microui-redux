@@ -32,7 +32,7 @@ use crate::render::{CustomRenderHandle, CustomRenderKey, RendererBackend};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::{Dimensioni, TypedWidgetHandle, Widget};
+use crate::{Dimensioni, LeafWidget, TypedWidgetHandle, Widget};
 
 use super::{ChildParticipation, Children, Container, NodeLayout, RuntimeNodeId};
 
@@ -106,17 +106,17 @@ pub struct Node {
 
 impl Node {
     /// Creates a leaf node without retaining a typed application handle.
-    pub fn widget<W: Widget + 'static>(widget: W) -> Self {
+    pub fn widget<W: LeafWidget + 'static>(widget: W) -> Self {
         Self::mount_widget(widget, None).1
     }
 
     /// Creates a leaf and a weak typed handle to the same retained widget allocation.
-    pub fn typed_widget<W: Widget + 'static>(widget: W) -> (TypedWidgetHandle<W>, Self) {
+    pub fn typed_widget<W: LeafWidget + 'static>(widget: W) -> (TypedWidgetHandle<W>, Self) {
         Self::mount_widget(widget, None)
     }
 
     /// Creates a framework-internal leaf without returning a typed application handle.
-    pub(crate) fn widget_internal<W: Widget + 'static>(widget: W) -> Self {
+    pub(crate) fn widget_internal<W: LeafWidget + 'static>(widget: W) -> Self {
         Self::widget(widget)
     }
 
@@ -127,7 +127,7 @@ impl Node {
     pub fn custom_render<B, W>(widget: W, renderer: CustomRenderHandle<B>) -> Self
     where
         B: RendererBackend,
-        W: Widget + 'static,
+        W: LeafWidget + 'static,
     {
         Self::mount_widget(widget, Some(renderer.key)).1
     }
@@ -136,17 +136,17 @@ impl Node {
     pub fn typed_custom_render<B, W>(widget: W, renderer: CustomRenderHandle<B>) -> (TypedWidgetHandle<W>, Self)
     where
         B: RendererBackend,
-        W: Widget + 'static,
+        W: LeafWidget + 'static,
     {
         Self::mount_widget(widget, Some(renderer.key))
     }
 
-    fn mount_widget<W: Widget + 'static>(widget: W, custom_render: Option<crate::render::CustomRenderKey>) -> (TypedWidgetHandle<W>, Self) {
+    fn mount_widget<W: LeafWidget + 'static>(widget: W, custom_render: Option<crate::render::CustomRenderKey>) -> (TypedWidgetHandle<W>, Self) {
         // Allocate once while the concrete type is known, then erase only the strong reference
         // retained by the node. Both references therefore address the same RefCell allocation.
         let widget = Rc::new(RefCell::new(widget));
         let handle = TypedWidgetHandle::new(&widget);
-        let widget: Rc<RefCell<dyn Widget>> = widget;
+        let widget: Rc<RefCell<dyn LeafWidget>> = widget;
         let node = Self::from_kind(NodeKind::Widget(WidgetNode::new(widget, custom_render)));
         (handle, node)
     }
@@ -196,13 +196,16 @@ impl Node {
         // Resolve frame policy and preferred size under one scoped widget borrow. Measurement is a
         // dominant retained-layout path, so reacquiring the same RefCell merely to read options is
         // both redundant and measurably expensive for large leaf trees.
-        let (border_width, measured_content) = self.data.with_widget(|widget| {
-            let framed = widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME);
-            let border_width = if framed { style.frame_border().width.max(0) } else { 0 };
-            // Both leaves and containers expose one Widget measurement entry point through NodeKind.
-            let measured_content = widget.measure(style, atlas, crate::ui_node::frame::content_available(available, border_width));
-            (border_width, measured_content)
-        });
+        let (border_width, measured_content) = match &self.data {
+            NodeKind::Widget(node) => {
+                let widget = node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict());
+                let framed = widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME);
+                let border_width = if framed { style.frame_border().width.max(0) } else { 0 };
+                let measured_content = widget.measure(style, atlas, crate::ui_node::frame::content_available(available, border_width));
+                (border_width, measured_content)
+            }
+            NodeKind::Container(container) => container.measure_content_with_frame(style, atlas, available),
+        };
         // Widgets cannot return negative geometry. Node placement policy is intentionally absent:
         // the parent applies it later when allocating this preferred outer size.
         let preferred_content = Dimensioni::new(measured_content.width.max(0), measured_content.height.max(0));
@@ -271,14 +274,14 @@ impl Node {
 /// Thin retained leaf owner for one erased widget and optional custom-render metadata.
 pub(crate) struct WidgetNode {
     /// Sole persistent strong widget owner, erased without changing its allocation.
-    pub(crate) widget: Rc<RefCell<dyn Widget>>,
+    pub(crate) widget: Rc<RefCell<dyn LeafWidget>>,
     /// Optional custom backend render callback for custom-render leaves.
     custom_render: Option<CustomRenderKey>,
 }
 
 impl WidgetNode {
     /// Erases one concrete runtime at the retained leaf boundary.
-    pub(crate) fn new(widget: Rc<RefCell<dyn Widget>>, custom_render: Option<CustomRenderKey>) -> Self {
+    pub(crate) fn new(widget: Rc<RefCell<dyn LeafWidget>>, custom_render: Option<CustomRenderKey>) -> Self {
         Self { widget, custom_render }
     }
 
@@ -304,7 +307,7 @@ impl NodeKind {
                 let widget = node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict());
                 f(&*widget)
             }
-            Self::Container(container) => f(container),
+            Self::Container(container) => container.with_widget(f),
         }
     }
 
@@ -315,7 +318,7 @@ impl NodeKind {
                 let mut widget = node.widget.try_borrow_mut().unwrap_or_else(|_| widget_borrow_conflict());
                 f(&mut *widget)
             }
-            Self::Container(container) => f(container),
+            Self::Container(container) => container.with_widget_mut(f),
         }
     }
 }
@@ -408,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn ownership_moving_state_access_returns_the_same_unmounted_node_on_failure() {
+    fn ownership_moving_widget_access_returns_the_same_unmounted_node_on_failure() {
         let (column_state, column_node) = crate::Column::create(crate::ColumnParameters::default());
         let (_, candidate) = text_node("candidate");
         let candidate_id = candidate.state.id.0.get();

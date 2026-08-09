@@ -325,14 +325,6 @@ impl Widget for RetainedScrollbar {
         }
     }
 
-    fn measure(&self, style: &crate::Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        let thickness = style.scrollbar_size.max(0);
-        match self.axis {
-            ScrollAxis::Horizontal => Dimensioni::new(0, thickness),
-            ScrollAxis::Vertical => Dimensioni::new(thickness, 0),
-        }
-    }
-
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         // Resolve one geometry snapshot for the complete event so hit testing and delta mapping use
         // identical track/thumb/range values.
@@ -365,6 +357,16 @@ impl Widget for RetainedScrollbar {
 
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::DragCapture
+    }
+}
+
+impl crate::LeafWidget for RetainedScrollbar {
+    fn measure(&self, style: &crate::Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        let thickness = style.scrollbar_size.max(0);
+        match self.axis {
+            ScrollAxis::Horizontal => Dimensioni::new(0, thickness),
+            ScrollAxis::Vertical => Dimensioni::new(thickness, 0),
+        }
     }
 }
 

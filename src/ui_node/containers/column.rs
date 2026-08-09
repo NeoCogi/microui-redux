@@ -31,7 +31,10 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::ui_node::children::ChildrenHandle;
-use crate::{AtlasHandle, Container, Dimensioni, Layout, Recti, Style, WidgetOption, WidgetParameters, WidgetState, WidgetStateHandle};
+use crate::{
+    AtlasHandle, Container, ContainerWidget, Dimensioni, Recti, Style, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
+    WidgetUpdateCtx,
+};
 
 use super::{Axis, Children, ContainerLayoutCtx, Node};
 
@@ -55,14 +58,12 @@ impl ColumnParameters {
 /// Child ownership is private. The inherent methods commit unique nodes or drop existing owners;
 /// none can detach an attached node or lend the complete collection. Ordered membership is the
 /// Column's complete mounted configuration; spacing remains Style-owned.
-pub struct ColumnState {
+pub struct Column {
     /// Weak topology capability; the concrete container remains the only strong child owner.
     children: ChildrenHandle,
 }
 
-impl WidgetState for ColumnState {}
-
-impl ColumnState {
+impl Column {
     /// Returns the number of owned child nodes.
     pub fn len(&self) -> Option<usize> {
         self.children.len()
@@ -101,14 +102,16 @@ impl ColumnState {
     {
         self.children.try_replace(nodes)
     }
+    /// Creates a child-owning column and its weak typed widget handle.
+    pub fn create(parameters: ColumnParameters) -> (TypedWidgetHandle<Self>, Node) {
+        let children = Rc::new(RefCell::new(parameters.children));
+        let widget = Self { children: ChildrenHandle::new(&children) };
+        let (handle, container) = Container::from_shared(children, widget);
+        (handle, Node::container(container))
+    }
 }
 
-/// Geometry-only policy for a vertical column.
-pub struct ColumnLayout {
-    _state: Rc<RefCell<ColumnState>>,
-}
-
-impl Layout for ColumnLayout {
+impl ContainerWidget for Column {
     fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
         // Column geometry depends only on the authoritative child sequence and shared Style.
         measure_column(children, style, atlas, available)
@@ -120,26 +123,14 @@ impl Layout for ColumnLayout {
     }
 }
 
-/// Convenience constructor namespace for vertical columns.
-pub struct Column;
-
-impl Column {
-    /// Creates a child-owning column and returns its weak state capability plus completed node.
-    ///
-    /// The child cell is allocated first because [`ColumnState`] needs a weak mutation capability
-    /// for that exact collection. The layout retains the strong state allocation, while the
-    /// completed [`Container`] becomes the only persistent strong owner of the children.
-    pub fn create(parameters: ColumnParameters) -> (WidgetStateHandle<ColumnState>, Node) {
-        // Prepare the single child allocation shared by traversal and weak typed-state mutation.
-        let children = Rc::new(RefCell::new(parameters.children));
-        // State owns no nodes; its handle expires as soon as the enclosing layout is dropped.
-        let state = Rc::new(RefCell::new(ColumnState { children: ChildrenHandle::new(&children) }));
-        // Capture the public weak handle before moving the strong state owner into the layout.
-        let handle = WidgetStateHandle::new(&state);
-        // Move child and state ownership into one concrete Container, then finish the owning Node.
-        let container = Container::from_shared(children, ColumnLayout { _state: state }, WidgetOption::NONE);
-        (handle, Node::container(container))
+impl Widget for Column {
+    fn widget_opt(&self) -> &WidgetOption {
+        &WidgetOption::NO_INTERACT
     }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
+
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
 /// Resolves and commits a top-to-bottom child layout inside `rect`.

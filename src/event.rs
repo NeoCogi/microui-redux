@@ -238,26 +238,6 @@ impl<E: WidgetEvent> Default for WidgetEventPort<E> {
     }
 }
 
-/// Weak framework capability used when a semantic state operation must publish through a port
-/// whose strong ownership remains with the concrete widget runtime.
-pub(crate) struct WidgetEventEmitter<E: WidgetEvent> {
-    port: Weak<WidgetEventPort<E>>,
-}
-
-impl<E: WidgetEvent> WidgetEventEmitter<E> {
-    pub(crate) fn new(port: &Rc<WidgetEventPort<E>>) -> Self {
-        // State may borrow this capability, but only the concrete widget keeps the port alive.
-        Self { port: Rc::downgrade(port) }
-    }
-
-    pub(crate) fn emit(&self, event: E) {
-        // An expired widget has no observable event stream, so emission becomes a no-op.
-        if let Some(port) = self.port.upgrade() {
-            port.emit(event);
-        }
-    }
-}
-
 /// Weak, typed capability identifying one native event source owned by a retained widget.
 ///
 /// Holding or cloning this value does not keep the widget or its event port alive.

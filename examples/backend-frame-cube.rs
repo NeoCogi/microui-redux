@@ -100,14 +100,16 @@ impl Widget for CubeWidget {
         &self.opt
     }
 
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        Dimensioni::new(300, 300)
-    }
-
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {
         // The custom-render callback is the paint path for this node.
+    }
+}
+
+impl LeafWidget for CubeWidget {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        Dimensioni::new(300, 300)
     }
 }
 
